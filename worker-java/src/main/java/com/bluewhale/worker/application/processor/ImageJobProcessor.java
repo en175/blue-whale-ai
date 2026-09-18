@@ -402,6 +402,7 @@ public class ImageJobProcessor implements JobProcessor {
                     stored.storageKey(),
                     stored.mime(),
                     stored.size(),
+                    stored.md5(),
                     width,
                     height,
                     null, // duration
@@ -462,7 +463,7 @@ public class ImageJobProcessor implements JobProcessor {
     private StoredImage persistProviderImageFromUrl(String sourceUrl, String userId) {
         // 降级模式：TOS 未配置 → 直存 URL（generation-worker.ts:752-761）
         if (tosService == null) {
-            return new StoredImage(sourceUrl, null, null, null, null, null);
+            return new StoredImage(sourceUrl, null, null, null, null, null, null);
         }
 
         // fetch 字节（generation-worker.ts:765-776）
@@ -528,7 +529,7 @@ public class ImageJobProcessor implements JobProcessor {
         try {
             TosMediaStorage.UploadResult uploaded = tosService.uploadImageBytes(content, mime, userId);
             return new StoredImage(uploaded.url(), uploaded.storageKey(),
-                    mime, (long) content.length, width, height);
+                    mime, (long) content.length, uploaded.md5(), width, height);
         } catch (Exception e) {
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "生成结果转存失败: " + e.getMessage());
@@ -592,6 +593,6 @@ public class ImageJobProcessor implements JobProcessor {
     /** 转存结果（对齐 TS persistProviderMedia 返回形状）。 */
     record StoredImage(
             String url, String storageKey, String mime,
-            Long size, Integer width, Integer height
+            Long size, String md5, Integer width, Integer height
     ) {}
 }

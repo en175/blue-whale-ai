@@ -174,6 +174,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
                             stored.storageKey(),
                             stored.mime(),
                             stored.size(),
+                            stored.md5(),
                             extractResult.duration()
                     )
             );

@@ -191,6 +191,7 @@ public class AudioJobProcessor implements JobProcessor {
                 stored.storageKey(),
                 stored.mime(),
                 stored.size(),
+                stored.md5(),
                 null, // width
                 null, // height
                 audio.duration() != null ? (int) Math.round(audio.duration() * 1000) : null,
@@ -293,11 +294,11 @@ public class AudioJobProcessor implements JobProcessor {
             // 上传到 TOS
             TosMediaStorage.UploadResult uploaded = tosService.uploadBytes(data, "audio/mpeg");
             return new StoredMedia(uploaded.url(), uploaded.storageKey(),
-                    "audio/mpeg", (long) data.length);
+                    "audio/mpeg", (long) data.length, uploaded.md5());
         }
         // URL 回退（generation-worker.ts:752-761）——仅当 data 为空
         if (url != null && !url.isEmpty()) {
-            return new StoredMedia(url, null, null, null);
+            return new StoredMedia(url, null, null, null, null);
         }
         throw new AudioProviderError(GenerationError.ERROR_NO_RESULT, "生成服务未返回音频结果");
     }
@@ -349,5 +350,5 @@ public class AudioJobProcessor implements JobProcessor {
     record AudioRefsResult(boolean ok, List<Map<String, String>> refs, String message) {}
 
     /** 转存结果。 */
-    record StoredMedia(String url, String storageKey, String mime, Long size) {}
+    record StoredMedia(String url, String storageKey, String mime, Long size, String md5) {}
 }

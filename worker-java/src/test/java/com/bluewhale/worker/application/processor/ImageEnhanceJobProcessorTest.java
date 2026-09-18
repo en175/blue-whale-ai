@@ -307,7 +307,7 @@ class ImageEnhanceJobProcessorTest {
                 .thenReturn(new NewApiMediaKitClient.EnhanceResult(resultUrl));
         when(tosService.uploadImageBytes(any(), eq("image/png"), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/enhanced.png", "uploads/9/image/enhanced.png", "image/png", PNG_1X1.length));
+                        "https://tos/enhanced.png", "uploads/9/image/enhanced.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
@@ -341,7 +341,7 @@ class ImageEnhanceJobProcessorTest {
                 .thenReturn(new NewApiMediaKitClient.EnhanceResult(resultUrl));
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length));
+                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
@@ -364,7 +364,7 @@ class ImageEnhanceJobProcessorTest {
                 .thenReturn(new NewApiMediaKitClient.EnhanceResult(resultUrl));
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length));
+                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
@@ -402,7 +402,7 @@ class ImageEnhanceJobProcessorTest {
                 .thenReturn(new NewApiMediaKitClient.EnhanceResult(resultUrl));
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length));
+                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEnhanceResult(any())).thenReturn(false);
 
         processor.handle("100");

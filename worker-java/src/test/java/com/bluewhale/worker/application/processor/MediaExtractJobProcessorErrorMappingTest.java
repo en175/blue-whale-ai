@@ -267,7 +267,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         when(ffmpeg.extract(anyString(), anyString(), any()))
                 .thenReturn(new FfmpegExtractor.ExtractResult(12.5));
         when(tosService.upload(any(), anyString()))
-                .thenReturn(new TosMediaStorage.UploadResult("https://example.com/a.mp3", "audios/a.mp3", "audio/mpeg", 1024L));
+                .thenReturn(new TosMediaStorage.UploadResult("https://example.com/a.mp3", "audios/a.mp3", "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
 
         processor.handle("100");

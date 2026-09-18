@@ -414,3 +414,66 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
+
+describe("AssetRepo md5 传递（IKGS73）", () => {
+  const MD5 = "0123456789abcdef0123456789abcdef";
+
+  it("findOwnedSource 把源行 md5 带出来（复制才有东西可带）", async () => {
+    const row = {
+      type: "image",
+      storage_key: "uploads/9/image/x.png",
+      url: "https://bucket.tos.test/uploads/9/image/x.png",
+      mime: "image/png",
+      size: BigInt(10),
+      width: 1,
+      height: 1,
+      duration_ms: null,
+      source: "generated",
+      md5: MD5,
+    };
+    const prisma = { assets: { findFirst: vi.fn().mockResolvedValue(row) } };
+    const repo = createAssetRepo(prisma as never);
+
+    await expect(repo.findOwnedSource("1", "9")).resolves.toEqual(
+      expect.objectContaining({ md5: MD5 }),
+    );
+  });
+
+  it("insertCopy 把 md5 原样写进副本行 —— 不丢，也不重算", async () => {
+    // 为什么要这条：生成产物好不容易有了 md5，一复制丢掉的话，去重收益被复制抹掉，
+    // 而「复制后 md5 为空」是个不会报错、只会静默失效的状态。
+    const created = {
+      id: BigInt(42),
+      type: "image",
+      storage_key: "uploads/9/image/x.png",
+      url: "https://bucket.tos.test/uploads/9/image/x.png",
+      mime: "image/png",
+      size: BigInt(10),
+      width: 1,
+      height: 1,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date(),
+      generation_job_id: null,
+    };
+    const create = vi.fn().mockResolvedValue(created);
+    const prisma = { assets: { create } };
+    const repo = createAssetRepo(prisma as never);
+
+    await repo.insertCopy("55", "9", {
+      type: "image",
+      storage_key: "uploads/9/image/x.png",
+      url: "https://bucket.tos.test/uploads/9/image/x.png",
+      mime: "image/png",
+      size: BigInt(10),
+      width: 1,
+      height: 1,
+      source: "generated",
+      md5: MD5,
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ md5: MD5 }),
+    });
+  });
+});

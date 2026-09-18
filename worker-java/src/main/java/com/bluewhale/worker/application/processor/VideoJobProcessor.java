@@ -360,7 +360,10 @@ public class VideoJobProcessor implements JobProcessor {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
         } else {
             // TOS 未配置 → 降级直存 URL（与 image 同构）
-            stored = new StoredVideo(observation.url(), null, null, null);
+            // IKGS73：这条路上我们**没有字节**（只有供应商 URL），所以 md5 传 null——
+            // 这是本单显式接受的边界（工单「明确不做」里的 B 类）。要补它得把整段视频
+            // 拉下来算哈希（上限 200MB），不在这单的取舍内。
+            stored = new StoredVideo(observation.url(), null, null, null, null);
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
@@ -377,7 +380,7 @@ public class VideoJobProcessor implements JobProcessor {
         boolean published = stateMachine.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
-                stored.url(), stored.storageKey(), stored.mime(), stored.size(),
+                stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                 width, height, duration);
         if (published) {
             log.info("[video] 发布成功 jobId={}", claim.id());

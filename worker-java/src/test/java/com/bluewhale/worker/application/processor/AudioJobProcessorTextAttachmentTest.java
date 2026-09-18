@@ -59,7 +59,7 @@ class AudioJobProcessorTextAttachmentTest {
                 .thenReturn(new NewApiAudioClient.AudioResult(
                         new byte[]{1, 2, 3}, null, "audio/mpeg", null, "req-1"));
         when(tosService.uploadBytes(any(), eq("audio/mpeg")))
-                .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L));
+                .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.createAsset(any())).thenReturn("a1");
         when(stateMachine.completeJob(eq("100"), anyList(), anyString(), anyLong()))
                 .thenReturn(true);
