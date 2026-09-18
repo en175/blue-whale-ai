@@ -3,7 +3,6 @@ package com.bluewhale.worker.config;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
@@ -16,16 +15,15 @@ import java.nio.charset.StandardCharsets;
  * 数据源配置（契约 §8 / ADR-0084：环境变量名与 TS worker 同名）。
  * <p>
  * 解析 DATABASE_URL（格式：mysql://user:pass@host:port/db）为 JDBC URL，
- * 保持与 TS 侧相同的环境变量名（灰度期一套部署 env 喂两个栈）。
+ * 保持与 TS 侧相同的环境变量名（契约 §8）。
  * <p>
- * 条件创建：仅当 media_extract 启用时创建真实数据源。
- * 未启用时由 {@link StubDataSourceConfig} 提供空实现，应用可安全拉起 /ready。
+ * 无条件创建真实数据源：启动即要求 DATABASE_URL 齐备，缺配置直接抛错终止启动
+ * （ADR-0084 修正六：缺配置即失败，取代原「未启用时退化为空实现」的安全拉起形态）。
  */
 @Configuration
 public class DataSourceConfig {
 
     @Bean
-    @Conditional(TagsEnabledConditions.AnyTagsEnabled.class)
     public DataSource dataSource() {
         String databaseUrl = System.getenv("DATABASE_URL");
         if (databaseUrl == null || databaseUrl.isBlank()) {

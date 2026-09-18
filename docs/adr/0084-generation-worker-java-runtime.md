@@ -1,6 +1,6 @@
 # ADR-0084：generation-worker 迁移为独立 Java 薄执行器服务
 
-- **状态**：Accepted（含**修正一**：同日决策反转，薄执行器 → 直连 DB，见决策 2）
+- **状态**：Accepted（含**修正一**：同日决策反转，薄执行器 → 直连 DB，见决策 2；含**修正六**：退役标签开关与命名对齐，见文末）
 - **日期**：2026-09-10
 - **决策者**：lixq（经 `/grilling` 会话共同得出）
 - **取代**：[ADR-0068](0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) 中 `generation-worker` 运行时为 Node.js LTS 的条款。ADR-0068「Worker 进程隔离」「专用计算组件不得带回第二套领域规则」条款**继续有效**，并被本决策升级为硬约束。
@@ -39,3 +39,40 @@ grilling 会话钉实的事实（如实记录，防止后来者误读为技术�
 - 成本：Java 人力约 1–1.5 人月（状态机移植 + 金标套件替代原端点工作量，净量级不变）；日历 6–10 周（含灰度对账）；**双实现漂移税由假设变为事实**——当年 Java worker 退役的病根回来了，唯一防线是金标套件 + 契约 §3 + 双跑对账。
 - 已知风险（本 ADR 不解决，均已登记）：① 主 API 仍是 AI 生成 TS，维护预案缺口未闭合；② IKC9EJ 类 claim/settle 接缝语义漂移，防线从「端点封装」降级为「金标测试」；③ 火山流水线对 Java 镜像的构建部署支持待子单验证，不通则落点回炉；④ schema 变更权威在 Prisma migration，改表须联动检查 worker-java MyBatis-Plus mapper；⑤ Java 连接池与 Prisma 同库共存，租约/池参数上线前压测定档；⑥ 刀②③④ 被 IKEF1K 排期 gate。
 - 成立前提：本决策的可控性承诺成立与否，取决于每个 PR 是否被逐行 review。若 review 制度失守，应重开本 ADR，而非默认延续。
+
+## 修正六（2026-09-18，`/grilling` 会话）：退役标签开关与命名对齐
+
+> 序号延续契约文档的修正序列（修正二～五落在契约，本项同时修订 ADR 与契约）。
+
+**触发**：迁移收口后复盘发现，「按 tag 灰度开关」这套机制的存在理由已经消失，而它的默认值（空 = 什么都不消费）反而制造了一个静默故障形态。决策者判定「启动还得配环境变量」不符合逻辑，据此重开决策。
+
+**已钉实的事实**（如实记录，防止后来者误读为技术必然）：
+
+- `worker-java` 的消费者**已经是逐 tag 独立的**：每个 tag 一个 consumer group、一个 `Semaphore(concurrency)`、一条 receive 线程、一个 dispatch 线程池（`AbstractGenerationConsumer.java:70,94-101,145`）。因此重试队列/死信、并发度、扩缩容粒度**都不是 topic 或开关给的**——它们在 group 层已经独立。
+- `WORKER_ENABLED_TAGS` 为空时，6 个 consumer bean 整只不装配、DataSource 退化为 Stub，而 `/ready` 仍返回 `{"status":"ready"}`（`ReadyController.java:23-29`）。**「这个实例什么都不消费」没有任何报警途径**，只能靠人去读 `/ready` 的 `enabledTags` 数组。
+- 四刀迁移的代码侧已完成；TS worker 应用已在 `release/2026.09.15` 整目录删除（`1312c474`，PR !636）。双跑对账的原语**从一开始就是「停一开一」**，而非两侧同时消费。
+- **没有任何文档、提交或工单记录过生产环境停止 TS worker 容器这件事**。其历史部署形态是宿主机上一个 `restart: unless-stopped` 的 compose 容器（定义于 `docs/deploy/generation-worker-prod.md`，该文件 2026-08-11 已被删除且无替代）；负责退役清理与 runbook 更新的工单 IKELHC 至今 open、零评论。
+- topic 名 `generation-video` 实际承载全部 6 类任务；tag `step` 与任务类型不同名。
+
+**决策**
+
+1. **退役 `WORKER_ENABLED_TAGS` 本体**：删除 6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`application.yml` 中的映射、`Dockerfile` 中的 `ENV WORKER_ENABLED_TAGS=""`、`ReadyController` 的 `enabledTags` 字段；consumer / processor / 客户端 bean 全部无条件装配。**服务启动即消费全部 tag**。
+2. **默认语义从「安全拉起」翻转为「缺配置即失败」**：启动即要求 MQ（`ROCKETMQ_ENDPOINTS`）、DB（`DATABASE_URL`）、上游网关（`NEW_API_BASE_URL`）、TOS（`VOLC_*`）四套配置齐备，缺任一项由 bean 装配抛出并终止启动。取代原「空 tags → 不连 MQ 不连 DB，只起 `/ready`」的形态——该形态把「忘记配置」与「故意只探活」压成同一个状态，是本次修复的核心动因。一处例外保留：`TosVideoMediaRelay.fromEnv()` 在 TOS 缺失时仍返回 null 降级直存 URL（视频路径的既有宽容口径），但 `TosMediaStorage` 的构造期硬失败已足以让缺 TOS 在启动期暴露。
+3. **命名对齐**：topic `generation-video` → `generation-task`；tag `step` → `video`。生产侧（`backend/libs/shared/generation/queue.constants.ts`、`video-queue.ts` 的 `ROCKETMQ_TAG ?? "step"` 兜底）与消费侧（`worker-java` 的 `VideoConsumer.TAG`、`VideoJobProcessor`、`RocketMqConfig` 的 `rocketmq.tag` 默认值）**必须在同一次发布内原子切换**：中间态不报错，只是消息无人消费。
+4. **退役 `WORKER_GROUP_SUFFIX`**：group 名回到 `generation-<type>-worker`。位点绑定在 `(group, topic)` 上，topic 更名后新 topic 的位点本就从零开始，故本次是唯一的零重放风险窗口；错过此后每次改 group 名都需处理位点。**前置**：确认旧 TS worker 容器已停——否则 Java 与 TS 落入同名 group，消息被分流给旧进程。
+5. **topic 粒度保持单 topic，不按任务类型拆分**。理由：隔离已在 consumer group 层取得（见上文事实）；拆 topic 只增益「位点重置、配额、按类积压可观测」这三项运维隔离，对资源隔离无贡献——真实共享点是同一个 JVM 的堆与 CPU，解它需要按类拆部署，拆 topic 不改变这一点。
+6. **同步修订**：契约文档 §1 的 topic / tag / consumer group 表、`worker-java/README.md` 的环境变量与运行手册。
+7. **上线前置项（运维）**：部署新 worker 的同一步里确认旧 TS worker 容器已停。工单 IKELHC 应承担此项并补齐 runbook。
+
+**被否决的备选**
+
+- **每种任务一个独立 topic**：隔离不在 topic 层——每个 tag 已有独立 consumer group，重试/死信/并发/扩缩容均已独立；拆 topic 不新增任何隔离能力，只是给已经独立的消费者再套一层壳。
+- **按消费形态拆 3 个 topic**（长驻留 / 本地 CPU / 上游短请求）：认同其可观测性收益，但决策者判定当前意义不大，暂不做。
+- **保留开关但反转默认值**（空 = 全量，填了 = 只跑这些）：能同时满足「启动零配置」与「按类拆部署」两条，但决策者判定按类部署的需求尚不存在，不值得为一个假设保留一整套装配分支。
+- **保留默认全关、只把 `/ready` 改为非 ready**：只是把一个静默失败换成另一个静默失败。
+
+**后果**
+
+- 正向：启动零配置；漏配从「静默空转」变为「启动期响亮失败」；topic / tag 命名与语义一致；整套灰度机制（开关 + group 后缀 + Stub 兜底）退场。
+- 成本与风险：失去「按类拆部署」的代码入口，未来恢复需重新发布；改名要求生产侧与消费侧同批发布，中间态的消息由 recovery 兜底（`RECOVERY_MAX_AGE_MINUTES` 默认 120，即最长 2 小时延迟）；旧 topic 中未消费的消息被孤立至保留期过期；`worker-java` 的部署门槛提高为「MQ + DB + TOS 三套配置齐备」。
+- **既有风险 ③（火山流水线对 Java 镜像的构建部署支持）与 ⑥（刀②③④ 被 IKEF1K gate）在本修正后仍未闭合**；TS 容器下线无任何记录，登记为新风险 ⑧。

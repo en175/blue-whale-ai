@@ -15,7 +15,6 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMappe
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;
@@ -59,7 +58,6 @@ import java.util.LinkedHashSet;
  * 修正一：cost_reservations 结算不在实现范围（settle-ops.ts:228 整块省略）。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.ImageEnabledCondition.class)
 public class ImageJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(ImageJobProcessor.class);

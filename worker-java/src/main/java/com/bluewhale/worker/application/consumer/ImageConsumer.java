@@ -7,7 +7,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  * 图片消费者（rocketmq-image.consumer.ts 移植）。
  * <p>
  * tag = "image"，digitGuard = true（图片/音频做纯数字守卫，与 TS :147-169 一致）。
- * consumer group = "generation-image-worker" + groupSuffix。
+ * consumer group = "generation-image-worker"。
  * <p>
  * 与 TS 行为完全一致：
  * <ul>

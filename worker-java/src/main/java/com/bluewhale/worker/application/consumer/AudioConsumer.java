@@ -7,7 +7,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  * 音频消费者（rocketmq-audio.consumer.ts 移植）。
  * <p>
  * tag = "audio"，digitGuard = true（音频/图片做纯数字守卫）。
- * consumer group = "generation-audio-worker" + groupSuffix。
+ * consumer group = "generation-audio-worker"。
  * <p>
  * 与 TS 行为完全一致：
  * <ul>

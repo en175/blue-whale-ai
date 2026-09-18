@@ -2,14 +2,14 @@ import { Producer } from "rocketmq-client-nodejs";
 
 import {
   AUDIO_GENERATION_TAG,
+  GENERATION_TASK_QUEUE,
   IMAGE_ENHANCE_TAG,
   IMAGE_ERASE_TAG,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
-  VIDEO_GENERATION_QUEUE,
 } from "./queue.constants.js";
 
-/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
+/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=video）+ RocketMqMediaExtractConsumer（tag=media_extract）
  *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
  *  + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
  *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
@@ -44,8 +44,8 @@ export function loadRocketMqConfig(
     endpoints: env.ROCKETMQ_ENDPOINTS ?? "",
     sslEnabled: env.ROCKETMQ_SSL_ENABLED === "true",
     ...(accessKey && accessSecret ? { accessKey, accessSecret } : {}),
-    topic: env.ROCKETMQ_TOPIC ?? VIDEO_GENERATION_QUEUE,
-    tag: env.ROCKETMQ_TAG ?? "step",
+    topic: env.ROCKETMQ_TOPIC ?? GENERATION_TASK_QUEUE,
+    tag: env.ROCKETMQ_TAG ?? "video",
   };
 }
 
@@ -119,7 +119,7 @@ export async function enqueueVideoGenerationJob(
   }).enqueue(jobId, options);
 }
 
-/** 媒体提取（视频→音频）job 入队（IKARDY）：复用视频 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
+/** 媒体提取（视频→音频）job 入队（IKARDY）：复用生成任务 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
 export async function enqueueMediaExtractJob(
   jobId: string,
   options?: { delayMs?: number },
@@ -132,7 +132,7 @@ export async function enqueueMediaExtractJob(
   }).enqueue(jobId, options);
 }
 
-/** 图片生成 job 入队（IKBGKA）：复用视频 topic/queue，用独立 tag「image」区分任务类型。 */
+/** 图片生成 job 入队（IKBGKA）：复用生成任务 topic/queue，用独立 tag「image」区分任务类型。 */
 export async function enqueueImageGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
@@ -145,7 +145,7 @@ export async function enqueueImageGenerationJob(
   }).enqueue(jobId, options);
 }
 
-/** 音频生成 job 入队（IKCR78）：复用视频 topic/queue，用独立 tag「audio」区分任务类型。 */
+/** 音频生成 job 入队（IKCR78）：复用生成任务 topic/queue，用独立 tag「audio」区分任务类型。 */
 export async function enqueueAudioGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
@@ -158,7 +158,7 @@ export async function enqueueAudioGenerationJob(
   }).enqueue(jobId, options);
 }
 
-/** 高清放大 job 入队（IKGM99，契约 §14.1）：复用视频 topic/queue，用独立 tag「image_enhance」区分任务类型。 */
+/** 高清放大 job 入队（IKGM99，契约 §14.1）：复用生成任务 topic/queue，用独立 tag「image_enhance」区分任务类型。 */
 export async function enqueueImageEnhanceJob(
   jobId: string,
   options?: { delayMs?: number },
@@ -171,7 +171,7 @@ export async function enqueueImageEnhanceJob(
   }).enqueue(jobId, options);
 }
 
-/** 图片擦除 job 入队（IKGOT4，契约 §15）：复用视频 topic/queue，用独立 tag「image_erase」区分任务类型。 */
+/** 图片擦除 job 入队（IKGOT4，契约 §15）：复用生成任务 topic/queue，用独立 tag「image_erase」区分任务类型。 */
 export async function enqueueImageEraseJob(
   jobId: string,
   options?: { delayMs?: number },

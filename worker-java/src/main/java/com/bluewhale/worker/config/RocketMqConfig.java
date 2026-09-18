@@ -26,15 +26,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 /**
- * RocketMQ 5 客户端配置 + media_extract consumer bean。
+ * RocketMQ 5 客户端配置 + 6 个 consumer bean + 6 个 recovery producer bean。
  * <p>
- * 条件创建：仅当 worker.enabled-tags 包含 media_extract 时才建 consumer。
- * 空 enabled-tags → 不连 MQ → 应用安全拉起 /ready（契约：无 MQ env 也能 boot）。
+ * 全部 bean 无条件装配：服务启动即消费全部 tag（ADR-0084 修正六）。
+ * 缺 {@code ROCKETMQ_ENDPOINTS} 时 bean 装配直接抛错并终止启动——取代原
+ * 「空 enabled-tags → 不连 MQ → 安全拉起 /ready」的形态。
  */
 @Configuration
 public class RocketMqConfig {
@@ -56,19 +56,18 @@ public class RocketMqConfig {
             endpoints = endpoints == null ? "" : endpoints;
             accessKey = accessKey == null ? "" : accessKey;
             secretKey = secretKey == null ? "" : secretKey;
-            topic = topic == null || topic.isBlank() ? "generation-video" : topic;
+            topic = topic == null || topic.isBlank() ? "generation-task" : topic;
         }
     }
 
     /**
-     * media_extract consumer（条件：enabled-tags 含 media_extract）。
+     * media_extract consumer。
      * <p>
-     * consumer group = "generation-extract-worker" + groupSuffix（契约 §1）。
+     * consumer group = "generation-extract-worker"（契约 §1）。
      * tag = "media_extract"（queue.constants.ts:8）。
      * digitGuard = false（extract 不做纯数字守卫：与 TS rocketmq-extract.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(MediaExtractEnabledCondition.class)
     public MediaExtractConsumer mediaExtractConsumer(
             MediaExtractJobProcessor processor,
             WorkerProperties workerProps,
@@ -76,7 +75,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -93,7 +92,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-extract-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-extract-worker";
         int concurrency = workerProps.concurrency().mediaExtract();
 
         return new MediaExtractConsumer(
@@ -106,14 +105,13 @@ public class RocketMqConfig {
     }
 
     /**
-     * audio consumer（条件：enabled-tags 含 audio）。
+     * audio consumer。
      * <p>
-     * consumer group = "generation-audio-worker" + groupSuffix（契约 §1）。
+     * consumer group = "generation-audio-worker"（契约 §1）。
      * tag = "audio"（queue.constants.ts:2）。
      * digitGuard = true（音频/图片做纯数字守卫，与 TS rocketmq-audio.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(AudioEnabledCondition.class)
     public AudioConsumer audioConsumer(
             AudioJobProcessor processor,
             WorkerProperties workerProps,
@@ -121,7 +119,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -137,7 +135,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-audio-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-audio-worker";
         int concurrency = workerProps.concurrency().audio();
 
         return new AudioConsumer(
@@ -150,14 +148,13 @@ public class RocketMqConfig {
     }
 
     /**
-     * image consumer（条件：enabled-tags 含 image）。
+     * image consumer。
      * <p>
-     * consumer group = "generation-image-worker" + groupSuffix（契约 §1）。
+     * consumer group = "generation-image-worker"（契约 §1）。
      * tag = "image"（queue.constants.ts:5）。
      * digitGuard = true（图片/音频做纯数字守卫，与 TS rocketmq-image.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(ImageEnabledCondition.class)
     public ImageConsumer imageConsumer(
             ImageJobProcessor processor,
             WorkerProperties workerProps,
@@ -165,7 +162,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -181,7 +178,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-image-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-image-worker";
         int concurrency = workerProps.concurrency().image();
 
         return new ImageConsumer(
@@ -194,14 +191,13 @@ public class RocketMqConfig {
     }
 
     /**
-     * image_enhance（高清放大）consumer（条件：enabled-tags 含 image_enhance；契约 §14 / IKGM9D）。
+     * image_enhance（高清放大）consumer（契约 §14 / IKGM9D）。
      * <p>
-     * consumer group = "generation-image-enhance-worker" + groupSuffix（契约 §14.1 冻结值）。
-     * tag = "image_enhance"（复用 topic generation-video）。
+     * consumer group = "generation-image-enhance-worker"（契约 §14.1 冻结值）。
+     * tag = "image_enhance"（复用 topic generation-task）。
      * digitGuard = true（generation_jobs.id 恒纯数字）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(ImageEnhanceEnabledCondition.class)
     public ImageEnhanceConsumer imageEnhanceConsumer(
             ImageEnhanceJobProcessor processor,
             WorkerProperties workerProps,
@@ -209,7 +205,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -225,7 +221,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-image-enhance-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-image-enhance-worker";
         int concurrency = workerProps.concurrency().imageEnhance();
 
         return new ImageEnhanceConsumer(
@@ -238,14 +234,13 @@ public class RocketMqConfig {
     }
 
     /**
-     * image_erase（图片擦除）consumer（条件：enabled-tags 含 image_erase；契约 §15 / IKGOT6）。
+     * image_erase（图片擦除）consumer（契约 §15 / IKGOT6）。
      * <p>
-     * consumer group = "generation-image-erase-worker" + groupSuffix（契约 §15.1 冻结值）。
-     * tag = "image_erase"（复用 topic generation-video）。
+     * consumer group = "generation-image-erase-worker"（契约 §15.1 冻结值）。
+     * tag = "image_erase"（复用 topic generation-task）。
      * digitGuard = true（generation_jobs.id 恒纯数字）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(ImageEraseEnabledCondition.class)
     public ImageEraseConsumer imageEraseConsumer(
             ImageEraseJobProcessor processor,
             WorkerProperties workerProps,
@@ -253,7 +248,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -269,7 +264,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-image-erase-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-image-erase-worker";
         int concurrency = workerProps.concurrency().imageErase();
 
         return new ImageEraseConsumer(
@@ -284,20 +279,16 @@ public class RocketMqConfig {
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
-     * MQ 生产者（条件：enabled-tags 含 step）。
+     * MQ 生产者。
      * <p>
      * 视频 processor 自投延迟消息（scheduleNext 5s）到同一 topic/tag。
      * producer 无 consumer group（video-queue.ts:79-98）。
      */
     @Bean(destroyMethod = "close")
-    @Conditional(VideoEnabledCondition.class)
-    public GenerationMessageProducer generationMessageProducer(
-            WorkerProperties workerProps,
-            Environment env
-    ) {
+    public GenerationMessageProducer generationMessageProducer(Environment env) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -313,44 +304,38 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String tag = env.getProperty("rocketmq.tag", "step");
+        String tag = env.getProperty("rocketmq.tag", "video");
         return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
     }
 
-    // ========== recovery 生产者（IKF3AT）：tag 与可消费 tag 同源（@Conditional），
-    // 未启用的 tag 不建生产者 → RecoveryService 侧 getIfAvailable()=null 直接跳过 = 灰度开关。
+    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，六类全部无条件装配。
 
-    /** recovery 重投 image（条件：enabled-tags 含 image）。 */
+    /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
-    @Conditional(ImageEnabledCondition.class)
     public GenerationMessageProducer imageRecoveryProducer(Environment env) {
         return createProducerForTag(env, "image");
     }
 
-    /** recovery 重投 audio（条件：enabled-tags 含 audio）。 */
+    /** recovery 重投 audio。 */
     @Bean(destroyMethod = "close")
-    @Conditional(AudioEnabledCondition.class)
     public GenerationMessageProducer audioRecoveryProducer(Environment env) {
         return createProducerForTag(env, "audio");
     }
 
-    /** recovery 重投 media_extract（条件：enabled-tags 含 media_extract）。 */
+    /** recovery 重投 media_extract。 */
     @Bean(destroyMethod = "close")
-    @Conditional(MediaExtractEnabledCondition.class)
     public GenerationMessageProducer mediaExtractRecoveryProducer(Environment env) {
         return createProducerForTag(env, "media_extract");
     }
 
-    /** recovery 重投 image_enhance（条件：enabled-tags 含 image_enhance；契约 §14 / IKGM9D）。 */
+    /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */
     @Bean(destroyMethod = "close")
-    @Conditional(ImageEnhanceEnabledCondition.class)
     public GenerationMessageProducer imageEnhanceRecoveryProducer(Environment env) {
         return createProducerForTag(env, "image_enhance");
     }
 
-    /** recovery 重投 image_erase（条件：enabled-tags 含 image_erase；契约 §15 / IKGOT6）。 */
+    /** recovery 重投 image_erase（契约 §15 / IKGOT6）。 */
     @Bean(destroyMethod = "close")
-    @Conditional(ImageEraseEnabledCondition.class)
     public GenerationMessageProducer imageEraseRecoveryProducer(Environment env) {
         return createProducerForTag(env, "image_erase");
     }
@@ -359,7 +344,7 @@ public class RocketMqConfig {
     private GenerationMessageProducer createProducerForTag(Environment env, String tag) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -379,10 +364,9 @@ public class RocketMqConfig {
     }
 
     /**
-     * new-api 视频客户端（条件：enabled-tags 含 step）。
+     * new-api 视频客户端。
      */
     @Bean
-    @Conditional(VideoEnabledCondition.class)
     public NewApiVideoClient newApiVideoClient(Environment env) {
         String baseUrl = env.getProperty("NEW_API_BASE_URL",
                 env.getProperty("new-api.base-url", ""));
@@ -390,24 +374,22 @@ public class RocketMqConfig {
     }
 
     /**
-     * 视频媒体转存（条件：enabled-tags 含 step）。
+     * 视频媒体转存。
      * TOS 未配置 → null（VideoJobProcessor 降级直存 URL）。
      */
     @Bean
-    @Conditional(VideoEnabledCondition.class)
     public TosVideoMediaRelay tosVideoMediaRelay() {
         return TosVideoMediaRelay.fromEnv();
     }
 
     /**
-     * 视频消费者（条件：enabled-tags 含 step）。
+     * 视频消费者。
      * <p>
-     * consumer group = "generation-video-worker" + groupSuffix（契约 §1）。
-     * tag = "step"（queue.constants.ts:11）。
+     * consumer group = "generation-video-worker"（契约 §1）。
+     * tag = "video"（queue.constants.ts:11）。
      * 顺序消费（无 Semaphore，rocketmq-video.consumer.ts:60-74 for-await each）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
-    @Conditional(VideoEnabledCondition.class)
     public VideoConsumer videoConsumer(
             VideoJobProcessor processor,
             WorkerProperties workerProps,
@@ -415,7 +397,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -431,7 +413,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-video-worker" + workerProps.groupSuffix();
+        String consumerGroup = "generation-video-worker";
 
         return new VideoConsumer(
                 processor,

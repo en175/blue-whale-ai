@@ -23,7 +23,7 @@ public final class ImageEraseContract {
     private ImageEraseContract() {
     }
 
-    /** MQ tag（= generation_jobs.type = JobType.IMAGE_ERASE；复用 topic generation-video）。 */
+    /** MQ tag（= generation_jobs.type = JobType.IMAGE_ERASE；复用 topic generation-task）。 */
     public static final String TAG = "image_erase";
 
     /** 任务来源值：唯一创建入口是画布图片卡工具条「擦除」，claim SQL 的 source 白名单仅含本值。 */

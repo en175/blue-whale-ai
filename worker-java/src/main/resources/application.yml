@@ -15,11 +15,6 @@ spring:
         size: 4
 
 worker:
-  # 逗号分隔列表；留空 = 不消费任何 tag（安全拉起默认值）。
-  # 一刀切换 = TS 侧停该 tag + 此列表加该 tag；反向即回滚。
-  enabled-tags: ${WORKER_ENABLED_TAGS:}
-  # consumer group 后缀：同一 tag 同一时刻只允许一侧（TS / Java）在消费
-  group-suffix: ${WORKER_GROUP_SUFFIX:-java}
   concurrency:
     image: ${IMAGE_CONCURRENCY:20}
     audio: ${AUDIO_CONCURRENCY:5}
@@ -33,7 +28,7 @@ rocketmq:
   access-key: ${ROCKETMQ_ACCESS_KEY:}
   secret-key: ${ROCKETMQ_SECRET_KEY:}
   ssl-enabled: ${ROCKETMQ_SSL_ENABLED:false}
-  topic: ${ROCKETMQ_TOPIC:generation-video}
+  topic: ${ROCKETMQ_TOPIC:generation-task}
 
 logging:
   level:

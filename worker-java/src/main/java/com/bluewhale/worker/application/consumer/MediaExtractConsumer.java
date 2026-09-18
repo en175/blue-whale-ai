@@ -7,7 +7,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  * media_extract 消费者（rocketmq-extract.consumer.ts 移植）。
  * <p>
  * tag = "media_extract"，digitGuard = false（extract 不做纯数字守卫）。
- * consumer group = "generation-extract-worker" + groupSuffix。
+ * consumer group = "generation-extract-worker"。
  * <p>
  * 与 TS 行为完全一致：
  * <ul>

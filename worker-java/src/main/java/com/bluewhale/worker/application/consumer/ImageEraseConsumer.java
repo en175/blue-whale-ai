@@ -7,8 +7,8 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
 /**
  * image_erase（图片擦除）消费者（契约 §15 / IKGOT6；以 imageEnhance/mediaExtract 接线为模板）。
  * <p>
- * tag = "image_erase"（复用 topic generation-video，契约 §15.1）。
- * consumer group = "generation-image-erase-worker" + groupSuffix（契约 §15.1 冻结值）。
+ * tag = "image_erase"（复用 topic generation-task，契约 §15.1）。
+ * consumer group = "generation-image-erase-worker"（契约 §15.1 冻结值）。
  * digitGuard = true（generation_jobs.id 恒纯数字，与 image/imageEnhance 守卫一致）。
  * <p>
  * 与既有消费者行为一致（AbstractGenerationConsumer 模板）：
