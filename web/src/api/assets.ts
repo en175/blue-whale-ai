@@ -231,6 +231,11 @@ export interface UploadCompleteParams {
   duration?: number;
   /** 文件 MD5（32 位小写 hex），落库供下次上传 md5 查重复用 */
   md5?: string;
+  /** 真人人像库导入：绑定素材库 id（Asset- 前缀） */
+  materialId?: string;
+  /** IKGOTB 资产来源标记：'mask_erase' = 擦除遮罩中间素材（用户资产列表不可见，值与
+   *  @lib/contracts/image-erase 的 IMAGE_ERASE_MASK_ASSET_SOURCE 同源）；缺省 uploaded。 */
+  source?: 'mask_erase';
 }
 
 /** POST /api/agent/assets/uploads/complete 返回 */
@@ -277,6 +282,7 @@ export function dedupUpload(params: {
   size: number;
   md5: string;
   project_id?: string;
+  materialId?: string;
 }) {
   return apiRequest<DedupData>('/api/agent/assets/uploads/dedup', {
     method: 'POST',

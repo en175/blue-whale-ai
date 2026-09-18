@@ -65,6 +65,8 @@ export const ERROR_IMAGE_GENERATION_FAILED = "image_generation_failed";
 export const ERROR_AUDIO_GENERATION_FAILED = "audio_generation_failed";
 /** IKGM8U：高清放大（image_enhance）执行兜底失败码（契约 §14，无 worker 级重试）。 */
 export const ERROR_IMAGE_ENHANCE_FAILED = "image_enhance_failed";
+/** IKGOT3：图片擦除（image_erase）执行兜底失败码（契约 §15，无 worker 级重试）。 */
+export const ERROR_IMAGE_ERASE_FAILED = "image_erase_failed";
 /** IKGOQR：智能扩图（image_outpaint）执行兜底失败码（规格 docs/specs/2026-09-18-image-outpaint-mediakit.md，无 worker 级重试）。 */
 export const ERROR_IMAGE_OUTPAINT_FAILED = "image_outpaint_failed";
 
@@ -134,7 +136,9 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_INVALID_REFERENCE_MEDIA]: 1036,
   [ERROR_OUTPUT_COUNT_MISMATCH]: 1037,
   [ERROR_IMAGE_ENHANCE_FAILED]: 1039,
-  [ERROR_IMAGE_OUTPAINT_FAILED]: 1040,
+  [ERROR_IMAGE_ERASE_FAILED]: 1040,
+  // IKGOQR 注：1040 已由 IKGOT3 擦除占用（!730 先入 release），扩图兜底码取下一空号 1041。
+  [ERROR_IMAGE_OUTPAINT_FAILED]: 1041,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -284,6 +288,23 @@ export const ASSET_ERROR_SPECS = {
     status: 503,
     message: "对象存储未配置",
   },
+  /**
+   * IKGQWR：上传时引用的素材库素材此刻不能关联（ADR-0093 决策 3）。
+   *
+   * **一个码 + 两条 msg**，与生成门（ADR-0087 决策 6）同款口径：
+   *   - 终局（素材未通过 / 上游已不存在）→ `MATERIAL_NOT_APPROVED_MESSAGE`（本 spec 的默认 message）
+   *   - 暂时故障（上游不可达、鉴权、限流、5xx）→ `MATERIAL_STATUS_UNAVAILABLE_MESSAGE`，调用点覆写
+   * 前端按 `msg` 分流：前者引导重走合规校验，后者给重试入口。
+   *
+   * 为什么不拆成两个码：拆了前端就要维护两套分流规则，而生成门那边已经按同一形状定了
+   * （三种情况同一个 `data.code`，按 msg 区分）。两条闸门的形状必须一致，否则同一个用户
+   * 在上传口和生成口拿到的是两套话术。
+   */
+  ASSET_MATERIAL_UNAVAILABLE: {
+    code: 2013,
+    status: 400,
+    message: "该素材未审核通过，不能用于视频生成",
+  },
 } as const satisfies Record<string, ErrorCodeSpec>;
 
 export type AssetErrorName = keyof typeof ASSET_ERROR_SPECS;
@@ -395,7 +416,8 @@ export const ERROR_CODES: Record<number, string> = {
   1036: "参考视频不符合要求（格式/大小/时长/像素），请更换后重试", // invalid_reference_media
   1037: "生成数量与预期不符，请重新生成", // output_count_mismatch
   1039: "高清放大失败，请重试", // image_enhance_failed
-  1040: "扩图失败，请重试", // image_outpaint_failed
+  1040: "图片擦除失败，请重试", // image_erase_failed
+  1041: "扩图失败，请重试", // image_outpaint_failed
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

@@ -132,4 +132,17 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
     // 只有高清来源边时目标无任何参考
     expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
   });
+
+  it('擦除来源边（IKGOTB origin=image-erase）同样跳过推导：源图不占参考位、不参与 @ 编号', () => {
+    const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
+    const edges = [
+      // 擦除结果卡 d1 的来源边：纯视觉「结果卡由该图擦除而来」，推导跳过
+      { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'image-erase' } },
+      { id: 'e2', source: 'm2', target: 'd1' },
+    ] as Edge[];
+    expect(imageMediaRefsOf('d1', edges, nodes)).toEqual([
+      { nodeId: 'm2', url: 'http://img/m2.png', name: '图m2', assetId: 'a2' },
+    ]);
+    expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
+  });
 });

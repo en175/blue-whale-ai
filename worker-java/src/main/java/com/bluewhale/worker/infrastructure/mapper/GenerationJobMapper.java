@@ -682,6 +682,12 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 List.of("image_enhance"), limit, maxAgeMinutes);
     }
 
+    /** 图片擦除到点/孤儿（契约 §15）：套 source 白名单（与 claim 同源，单源 image_erase）。 */
+    default List<Long> listDueImageEraseJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_erase",
+                List.of("image_erase"), limit, maxAgeMinutes);
+    }
+
     /** 智能扩图到点/孤儿（IKGOQW）：套 source 白名单（与 claim 同源，单源 image_outpaint）。 */
     default List<Long> listDueImageOutpaintJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_outpaint",

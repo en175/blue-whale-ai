@@ -4,16 +4,30 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
+import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
 import { IMAGE_OUTPAINT_EDGE_ORIGIN } from './imageOutpaint';
 
-/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 input_asset_ids。
- *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。 */
+/** 纯视觉来源边标记集合（edge.data.origin）：这些边表达「目标卡由来源卡衍生而来」，
+ *  是来源记录而非生成参考输入——参考推导跳过，源图不占参考位、不参与 @ 编号与媒体索引
+ *  （高清放大 IKGOTB 前只有 image-enhance，IKGOTB 加入擦除 image-erase，IKGOR6 加入扩图 image-outpaint，口径同 mediaExtract 来源边）。 */
+const PURE_VISUAL_EDGE_ORIGINS: ReadonlySet<string> = new Set([
+  IMAGE_ENHANCE_EDGE_ORIGIN,
+  IMAGE_ERASE_EDGE_ORIGIN,
+  IMAGE_OUTPAINT_EDGE_ORIGIN,
+]);
+
+/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 references[].asset_id。
+ *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。
+ *  planNodeId（IKG99G）：该参考由生成卡（promptSource）经后端方案同步建素材边带入，
+ *  值为来源生成卡 id（edge.data.inputSources.planNodeIds[0]，且 manual=false）。
+ *  展示层据此过滤——生成卡作为整体附件，内部素材不拆项进 Dock 参考栏；参数推导仍全量。 */
 export interface ImageMediaRef {
   nodeId: string;
   url: string;
   name: string;
   assetId: string;
   textNodeId?: string;
+  planNodeId?: string;
   mediaType?: 'image' | 'video' | 'audio';
 }
 
@@ -94,9 +108,8 @@ export function imageMediaRefsOf(
   const seenAssetIds = new Set<string>();
   for (const edge of edges) {
     if (edge.target !== targetNodeId) continue;
-    // 高清/扩图来源边（IKGM9F / IKGOR6）是纯视觉来源表达，不作参考输入：源图不占参考位、不参与 @ 编号
-    const edgeOrigin = (edge.data as { origin?: string } | undefined)?.origin;
-    if (edgeOrigin === IMAGE_ENHANCE_EDGE_ORIGIN || edgeOrigin === IMAGE_OUTPAINT_EDGE_ORIGIN) continue;
+    // 纯视觉来源边（高清/擦除/扩图）不作参考输入：源图不占参考位、不参与 @ 编号
+    if (PURE_VISUAL_EDGE_ORIGINS.has((edge.data as { origin?: string } | undefined)?.origin ?? '')) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     if (imageRefSourceError(source) !== null) continue;
@@ -104,11 +117,17 @@ export function imageMediaRefsOf(
     const assetId = readAssetId(data)!;
     if (seenAssetIds.has(assetId)) continue;
     seenAssetIds.add(assetId);
+    // IKG99G：标记生成卡经后端方案同步建素材边带入的参考（manual=false 且 planNodeIds 非空）
+    const inputSources = (edge.data as { inputSources?: { manual?: boolean; planNodeIds?: string[] } } | undefined)?.inputSources;
+    const planNodeId = inputSources && inputSources.manual === false && Array.isArray(inputSources.planNodeIds) && inputSources.planNodeIds.length > 0
+      ? inputSources.planNodeIds[0]
+      : undefined;
     refs.push({
       nodeId: source.id,
       url: data.src as string,
       name: cardNameOfNode(source)!,
       assetId,
+      planNodeId,
     });
   }
   return refs;

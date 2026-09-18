@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -19,7 +20,6 @@ import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay.StoredVideo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -65,7 +65,6 @@ import java.util.regex.Pattern;
  * 修正三：ARK provider 不移植——new-api 网关是唯一 provider。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.VideoEnabledCondition.class)
 public class VideoJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VideoJobProcessor.class);
@@ -147,7 +146,7 @@ public class VideoJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "step";
+        return GenerationMqRoute.VIDEO.tag();
     }
 
     /**
@@ -360,7 +359,11 @@ public class VideoJobProcessor implements JobProcessor {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
         } else {
             // TOS 未配置 → 降级直存 URL（与 image 同构）
-            stored = new StoredVideo(observation.url(), null, null, null);
+            // IKGS73：这条路上我们**没有字节**（只有供应商 URL），所以 md5 传 null——
+            // 这是本单显式接受的边界（工单「明确不做」里的 B 类）。要补它得把整段视频
+            // 拉下来算哈希（上限 200MB），不在这单的取舍内。
+            log.warn("[video] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            stored = new StoredVideo(observation.url(), null, null, null, null);
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
@@ -377,7 +380,7 @@ public class VideoJobProcessor implements JobProcessor {
         boolean published = stateMachine.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
-                stored.url(), stored.storageKey(), stored.mime(), stored.size(),
+                stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                 width, height, duration);
         if (published) {
             log.info("[video] 发布成功 jobId={}", claim.id());
@@ -427,18 +430,15 @@ public class VideoJobProcessor implements JobProcessor {
         // prompt（:571-586）
         String basePrompt = strOrEmpty(input, "prompt");
         if (basePrompt.isEmpty()) basePrompt = strOrEmpty(input, "prompt_text");
-        // IKDLQG（IKFCXC 补齐组合）：目标驱动视频任务的快照携带 text_attachments（接纳时冻结的
-        // 当次正文），提交时按契约确定性组合；存量任务无该字段，prompt 逐字节不变。
+        // 方案快照仍供下方组装 videoReferences（首尾帧/参考素材），但不再提供正文。
         Map<?, ?> plan = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
-        if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("providerPrompt") instanceof String text) || text.isBlank() || !(plan.get("videoReferences") instanceof List<?>))) {
+        if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("videoReferences") instanceof List<?>))) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频方案快照无效");
         }
-        // IKFA1P：正文含文本标签时接纳侧冻结编号清单最终正文（composed_prompt），优先消费；
-        // 优先级链与 TS video-job-runner 一致：providerPrompt > composed_prompt > 附件组合。
-        String composedPrompt = input.get("composed_prompt") instanceof String cp && !cp.isBlank() ? cp : null;
-        String prompt = plan != null ? (String) plan.get("providerPrompt")
-                : composedPrompt != null ? composedPrompt
-                : TextAttachmentPrompts.composeTextAttachmentPrompt(TextAttachmentPrompts.textAttachments(input), basePrompt);
+        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
+        // （&asset_id& → @图片N）与附件拼装，执行与重试不得重新拼接覆盖它。
+        // 原 providerPrompt > composed_prompt > 附件组合三级优先链全部退役。
+        String prompt = basePrompt;
 
         // model（:587-592）
         String model = strOrEmpty(input, "model_id");

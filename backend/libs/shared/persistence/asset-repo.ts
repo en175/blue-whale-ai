@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 
 /** Asset 读路径 repo（Prisma-backed），复用部署的 assets 表。
  *  对齐 Java AssetService.listAssets：只读分页列表。
@@ -64,8 +65,14 @@ export interface AssetInternal {
   duration_seconds: number | null;
 }
 
-/** 跨项目复制时从源行拷贝的字段集合（对齐 Java AssetCopyService 逐字段 set）。
- *  部署表 assets 无 content_sha256 / source_asset_id / generation_job_id 列，故不携带。 */
+/**
+ * 「读源资产元数据」的窄投影：`findOwnedSource` 的返回形状。
+ *
+ * 消费方（IKGT70 时核实）：`image_enhance` / `image_erase` 查源图、`shared-assets` 的媒体校验
+ * （经 `shared-asset-source.port`）、`agent-assets` 的单资产查询。
+ *
+ * 部署表 assets 无 content_sha256 / source_asset_id / generation_job_id 列，故不携带。
+ */
 export interface AssetSourceFields {
   type: string;
   storage_key: string | null;
@@ -126,7 +133,8 @@ export interface AssetRepo {
     assetId: string,
     userId: string,
   ): Promise<AssetInternal | null>;
-  /** 取当前用户拥有的正常源资产（跨项目复制用）；不存在/不归属/非正常 → null。 */
+  /** 取当前用户拥有的正常源资产。消费方：`image_enhance` / `image_erase` 查源图、
+   *  `shared-assets` 媒体校验、`agent-assets` 单资产查询。不存在/不归属/非正常 → null。 */
   findOwnedSource(
     sourceAssetId: string,
     userId: string,
@@ -134,12 +142,6 @@ export interface AssetRepo {
   /** 取当前用户自己的单个资产详情（画布/资产库弹窗用）；不存在/不归属/已删 → null。
    *  比列表多带 `prompt`（IKFSSO），见 `AssetDetailView`。 */
   findOwnedById(assetId: string, userId: string): Promise<AssetDetailView | null>;
-  /** 在目标项目落下资产副本行（与源共享 storage_key 物理对象），返回新副本视图。 */
-  insertCopy(
-    projectId: string,
-    userId: string,
-    source: AssetSourceFields,
-  ): Promise<AssetView>;
   createPendingUpload(input: {
     userId: string;
     type: "image" | "video";
@@ -159,6 +161,22 @@ export interface AssetRepo {
   ): Promise<PendingUploadAsset | null>;
   /** IKCNLS：上传 md5 去重——查该用户未删 normal 资产里 md5 相同的最新一条。命中返回资产；无则 null。 */
   findOwnedByMd5(userId: string, md5: string): Promise<PendingUploadAsset | null>;
+  /** 按素材库 id 查该用户未删 normal 本地资产（真人人像库导入复用）。 */
+  findOwnedByMaterialId(userId: string, materialId: string): Promise<PendingUploadAsset | null>;
+  /** IKGQWR：把本地资产绑到素材库素材，**两列一起写**（ADR-0093 决策 5）。
+   *
+   *  语义是**覆盖**：同一个 `material_id` 只允许一条本地行持有（`uq_asset_material_id` 全库
+   *  唯一），谁最后上传谁持有。覆盖是**双向**的——必须先把旧主摘下来再写新值，只做后半步会撞
+   *  P2002 报 500（崩溃路径，不是策略分歧）。
+   *
+   *  `materialGroupId` 允许为 null：上游与本地表都拿不到组 id 时仍要放行关联，代价是删组旁路
+   *  （`clearMaterialGroupLink`）漏掉这一行——比因为一个附属列拒绝用户上传划算。 */
+  bindMaterialId(input: {
+    userId: string;
+    assetId: string;
+    materialId: string;
+    materialGroupId: string | null;
+  }): Promise<boolean>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -171,6 +189,12 @@ export interface AssetRepo {
     height?: number;
     duration?: number;
     md5?: string;
+    materialId?: string;
+    /** IKGQWR：与 `materialId` 成对写入（ADR-0093 决策 2）。 */
+    materialGroupId?: string | null;
+    /** IKGOTB：资产来源（uploaded / mask_erase 擦除遮罩中间素材）。缺省 uploaded；
+     *  归一在上传链路（handleCompleteAsset 白名单），仓库层原样落库。 */
+    source?: string;
   }): Promise<PendingUploadAsset>;
   /** IKDJNZ：素材库素材创建成功后，把原始素材与素材库素材绑定（一对多覆盖写）。
    *  校验 asset 归属当前用户；material_id 唯一索引兜底一张素材只关联一个素材库素材。 */
@@ -206,6 +230,27 @@ export function assetDurationSeconds(
   durationMs: number | null | undefined,
 ): number | null {
   return durationMs == null ? null : durationMs / 1000;
+}
+
+/** Prisma 唯一约束冲突（P2002）。覆盖写与建行两条路径都要认它。 */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "P2002";
+}
+
+/**
+ * 区分「已解析好的资产」与「Prisma 原始行」。
+ *
+ * `createUploadedAsset` 的 P2002 兜底分支（!726）会直接返回 `toUploadAsset` 的结果，于是
+ * `await $transaction(...)` 的类型是两者的联合——两者的 `id` 一个是 `string` 一个是 `bigint`。
+ * 内联写 `"id" in row && typeof row.id === "string"` 在这个联合上收不窄，因此用类型谓词把它
+ * 显式表达出来。见 `createUploadedAsset` 末尾的注释。
+ */
+function isPendingUploadAsset(row: unknown): row is PendingUploadAsset {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof (row as { id?: unknown }).id === "string"
+  );
 }
 
 function toUploadAsset(row: {
@@ -548,6 +593,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         user_id: BigInt(userId),
         is_delete: false,
         ...(filter.type ? { type: filter.type } : {}),
+        // IKGOTB：擦除遮罩中间素材（source=mask_erase）不在用户资产列表可见——
+        // 常量单源在契约 image-erase.ts，web 涂抹遮罩上传与后端列表排除同源。
+        NOT: { source: IMAGE_ERASE_MASK_ASSET_SOURCE },
       };
       const [total, rows] = await Promise.all([
         prisma.assets.count({ where }),
@@ -617,47 +665,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         height: row.height,
         duration_ms: row.duration_ms,
         source: row.source,
-      };
-    },
-    async insertCopy(projectId, userId, source) {
-      const row = await prisma.assets.create({
-        data: {
-          project_id: BigInt(projectId),
-          user_id: BigInt(userId),
-          type: source.type,
-          storage_key: source.storage_key,
-          url: source.url,
-          mime: source.mime,
-          size: source.size,
-          width: source.width,
-          height: source.height,
-          duration_ms: source.duration_ms ?? null,
-          source: source.source,
-          status: "normal",
-        },
-      });
-      return {
-        id: row.id.toString(),
-        type: row.type,
-        url: row.url,
-        width: row.width,
-        height: row.height,
-        duration: assetDurationSeconds(row.duration_ms),
-        source: row.source ?? null,
-        created_at: row.gmt_create?.toISOString() ?? null,
-        size: row.size == null ? null : Number(row.size),
-        generation_job_id:
-          row.generation_job_id == null ? null : row.generation_job_id.toString(),
-        project_id: row.project_id == null ? null : row.project_id.toString(),
-        mime: row.mime ?? null,
-        model: null,
-        // IKEXX8：跨项目复制出的新 asset 无素材库关联（未关联为 null）。
-        material_id: row.material_id ?? null,
-        material_group_id: row.material_group_id ?? null,
-        // 新副本没关联素材库 → 无校验状态。此处刻意不走 resolveMaterialStatuses：
-        // 刚创建的行不可能有状态（且没绑定就无从查），多一次往返没有意义。
-        material_status: null,
-        material_status_checked_at: null,
       };
     },
     async createPendingUpload(input) {
@@ -735,15 +742,107 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           md5,
           status: "normal",
           is_delete: false,
+          // IKGOTB：遮罩中间素材不参与 md5 去重命中——用户手动上传与遮罩同字节的图时，
+          // 命中 mask_erase 资产会让「刚上传的图」在资产列表不可见（该来源被列表排除）。
+          NOT: { source: IMAGE_ERASE_MASK_ASSET_SOURCE },
         },
         orderBy: { id: "desc" },
         select: uploadAssetSelect,
       });
       return row ? toUploadAsset(row) : null;
     },
+    async findOwnedByMaterialId(userId, materialId) {
+      const row = await prisma.assets.findFirst({
+        where: {
+          user_id: BigInt(userId),
+          material_id: materialId,
+          status: "normal",
+          is_delete: false,
+        },
+        select: uploadAssetSelect,
+      });
+      return row ? toUploadAsset(row) : null;
+    },
+    async bindMaterialId({ userId, assetId, materialId, materialGroupId }) {
+      const uid = BigInt(userId);
+      const owned = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: uid,
+          is_delete: false,
+        },
+        select: { id: true, material_id: true, material_group_id: true },
+      });
+      if (!owned) return false;
+      // 已经是它、组也对得上 → 幂等返回，省一次写。
+      if (
+        owned.material_id === materialId &&
+        owned.material_group_id === materialGroupId
+      ) {
+        return true;
+      }
+      // IKGQWR（ADR-0093 决策 5）：覆盖写，双向。两步必须同事务。
+      const apply = () =>
+        prisma.$transaction(async (tx) => {
+          // ① 先把旧主摘下来。`uq_asset_material_id` 是全库唯一（单列），不先清就撞 P2002 → 500。
+          await tx.assets.updateMany({
+            where: {
+              material_id: materialId,
+              user_id: uid,
+              id: { not: owned.id },
+            },
+            data: {
+              material_id: null,
+              material_group_id: null,
+              version: { increment: 1 },
+              gmt_modified: new Date(),
+            },
+          });
+          // ② 再写到本行，两列一起。
+          await tx.assets.update({
+            where: { id: owned.id },
+            data: {
+              material_id: materialId,
+              material_group_id: materialGroupId,
+              version: { increment: 1 },
+              gmt_modified: new Date(),
+            },
+          });
+        });
+
+      try {
+        await apply();
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        // 并发改嫁同一张素材时的一次性重试。
+        //
+        // 两个请求各自把**不同的**本地资产改嫁到同一个 `material_id`：后手的事务里 ① 在对手
+        // 提交之前就执行完了，什么也没清到；随后 ② 撞上对手刚写下的那一行 → P2002。
+        // 此刻对手已经提交，重跑一次 ① 就能把它清掉（新事务开新快照，看得见已提交的行），
+        // ② 随之成功。收敛且幂等，不需要循环——三方以上同时改嫁同一张素材不构成真实场景。
+        await apply();
+      }
+      return true;
+    },
     async createUploadedAsset(input) {
       // IKCNLP（方案C）：上传落库时若归属具体项目（project_id != 0）则自动建 project_asset 关联。
       const row = await prisma.$transaction(async (tx) => {
+        // IKGQWR（ADR-0093 决策 5）：新行要占 `uq_asset_material_id` 这个全库唯一键，先把旧主
+        // 摘下来，否则 create 直接撞 P2002。与 bindMaterialId 同一套覆盖语义。
+        if (input.materialId) {
+          await tx.assets.updateMany({
+            where: {
+              material_id: input.materialId,
+              user_id: BigInt(input.userId),
+            },
+            data: {
+              material_id: null,
+              material_group_id: null,
+              version: { increment: 1 },
+              gmt_modified: new Date(),
+            },
+          });
+        }
         const created = await tx.assets.create({
           data: {
             user_id: BigInt(input.userId),
@@ -759,7 +858,12 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
               ? {}
               : { duration_ms: Math.round(input.duration * 1000) }),
             ...(input.md5 ? { md5: input.md5 } : {}),
-            source: "uploaded",
+            ...(input.materialId ? { material_id: input.materialId } : {}),
+            // IKGQWR：组 id 与素材 id 成对写入；拿不到组 id 时留 NULL（见接口注释）。
+            ...(input.materialGroupId
+              ? { material_group_id: input.materialGroupId }
+              : {}),
+            source: input.source ?? "uploaded",
             status: "normal",
           },
           select: uploadAssetSelect,
@@ -783,7 +887,28 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           });
         }
         return created;
+      }).catch(async (error: unknown) => {
+        // 同一素材库 id 已被其它本地行占用：回读那条代表行，避免导入失败
+        if (isUniqueViolation(error) && input.materialId) {
+          const existing = await prisma.assets.findFirst({
+            where: {
+              user_id: BigInt(input.userId),
+              material_id: input.materialId,
+              status: "normal",
+              is_delete: false,
+            },
+            select: uploadAssetSelect,
+          });
+          const reused = existing ? toUploadAsset(existing) : null;
+          if (reused) return reused;
+        }
+        throw error;
       });
+      // !726 引入的 P2002 兜底分支返回的是一条已解析好的资产（`PendingUploadAsset`），与事务正常
+      // 返回的 Prisma 行构成联合类型。原来那句内联守卫 `"id" in row && typeof row.id === "string"`
+      // 在这个联合上收不窄，`tsc -b` 一直报 TS2345（连带接口实现报 TS2719）——release/2026.09.15
+      // 上是红的。换成显式类型谓词，两处一起消掉。
+      if (isPendingUploadAsset(row)) return row;
       const asset = toUploadAsset(row);
       if (!asset) throw new Error("Committed upload is missing storage_key");
       return asset;

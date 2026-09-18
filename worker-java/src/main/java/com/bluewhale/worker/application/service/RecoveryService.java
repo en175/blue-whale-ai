@@ -1,6 +1,6 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.config.WorkerProperties;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.slf4j.Logger;
@@ -24,9 +24,10 @@ import java.util.List;
  * {@code is_delete=false} + 创建在 {@code RECOVERY_MAX_AGE_MINUTES}（默认 120 分钟）内
  * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。
  * <p>
- * 开关语义（灰度）：只对 {@code WORKER_ENABLED_TAGS} 内的 tag 重投——生产者 bean 本身带
- * {@code @Conditional}，未启用 tag 时 {@code getIfAvailable()=null} 即跳过；TS 侧同时运行 recovery
- * 时重复投递无害（契约 §7：claim-by-id CAS + null-claim ack 幂等）。
+ * 重投覆盖全部六类 tag：六个 recovery producer bean 无条件装配（ADR-0084 修正六），
+ * 因此正常情况下每类的 {@code getIfAvailable()} 都拿得到生产者；{@code reenqueue} 仍保留
+ * 生产者缺失即跳过的判断，但那只作防御，不再对应任何开关语义。
+ * TS 侧同时运行 recovery 时重复投递无害（契约 §7：claim-by-id CAS + null-claim ack 幂等）。
  * <p>
  * 与 TS 的两处刻意差异：① 窗口 24h→2h（用户 2026-09-11 指示，避免复活陈旧 job）；
  * ② 不移植 {@code resetStalledImageJobs}——TS 侧该函数无活调用方（死代码），
@@ -49,11 +50,9 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> audioProducer;
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
+    private final ObjectProvider<GenerationMessageProducer> imageEraseProducer;
     private final ObjectProvider<GenerationMessageProducer> imageOutpaintProducer;
-    private final WorkerProperties workerProps;
     private final int maxAgeMinutes;
-    /** 空 tags 提示只打一次（避免安全拉起形态下每 60s 刷屏）。 */
-    private boolean emptyTagsLogged;
 
     public RecoveryService(
             GenerationJobMapper jobMapper,
@@ -67,9 +66,10 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> mediaExtractProducer,
             @Qualifier("imageEnhanceRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> imageEnhanceProducer,
+            @Qualifier("imageEraseRecoveryProducer")
+            ObjectProvider<GenerationMessageProducer> imageEraseProducer,
             @Qualifier("imageOutpaintRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> imageOutpaintProducer,
-            WorkerProperties workerProps,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
         this.jobMapper = jobMapper;
@@ -78,8 +78,8 @@ public class RecoveryService {
         this.audioProducer = audioProducer;
         this.mediaExtractProducer = mediaExtractProducer;
         this.imageEnhanceProducer = imageEnhanceProducer;
+        this.imageEraseProducer = imageEraseProducer;
         this.imageOutpaintProducer = imageOutpaintProducer;
-        this.workerProps = workerProps;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -95,45 +95,38 @@ public class RecoveryService {
             fixedDelayString = "${GENERATION_RECOVERY_INTERVAL_MS:60000}"
     )
     public void recover() {
-        // 安全拉起形态（WORKER_ENABLED_TAGS 为空）：DataSource 是 stub（不连库），
-        // 此时扫库必抛异常 → 每 60s 错误刷屏。直接短路，保持「空 tags = 只起 /ready」的部署语义。
-        if (workerProps.enabledTags().isEmpty()) {
-            if (!emptyTagsLogged) {
-                emptyTagsLogged = true;
-                log.info("recovery 跳过：WORKER_ENABLED_TAGS 为空（安全拉起形态，不连库不扫库）");
-            }
-            return;
-        }
         try {
-            reenqueue("video", videoProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.VIDEO, videoProducer.getIfAvailable(),
                     jobMapper.listDueVideoJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image", imageProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE, imageProducer.getIfAvailable(),
                     jobMapper.listDueImageJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("media_extract", mediaExtractProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.MEDIA_EXTRACT, mediaExtractProducer.getIfAvailable(),
                     jobMapper.listDueMediaExtractJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("audio", audioProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.AUDIO, audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image_enhance", imageEnhanceProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),
                     jobMapper.listDueImageEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image_outpaint", imageOutpaintProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE_ERASE, imageEraseProducer.getIfAvailable(),
+                    jobMapper.listDueImageEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
+            reenqueue(GenerationMqRoute.IMAGE_OUTPAINT, imageOutpaintProducer.getIfAvailable(),
                     jobMapper.listDueImageOutpaintJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
         }
     }
 
-    /** 单 tag 重投：生产者缺失（tag 未启用）即跳过——灰度开关在此闭环。 */
-    private void reenqueue(String tag, GenerationMessageProducer producer, List<Long> jobIds) {
+    /** 单 tag 重投：生产者缺失即跳过（防御性判断，正常装配下六类生产者恒在）。 */
+    private void reenqueue(GenerationMqRoute route, GenerationMessageProducer producer, List<Long> jobIds) {
         if (producer == null) {
             return;
         }
         for (Long jobId : jobIds) {
             try {
-                log.info("recovery re-enqueue stuck {} job {}", tag, jobId);
+                log.info("recovery re-enqueue stuck {} job {}", route.tag(), jobId);
                 producer.enqueue(String.valueOf(jobId), REENQUEUE_DELAY_MS);
             } catch (Exception e) {
                 // 与 TS 同款：单条失败只记错，本轮后续继续、下轮扫描再试。
-                log.error("recovery enqueue {} job {} failed: {}", tag, jobId, e.getMessage(), e);
+                log.error("recovery enqueue {} job {} failed: {}", route.tag(), jobId, e.getMessage(), e);
             }
         }
     }

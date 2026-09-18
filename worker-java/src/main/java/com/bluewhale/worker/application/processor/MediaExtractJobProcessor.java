@@ -4,6 +4,7 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 
 import com.bluewhale.worker.infrastructure.media.FfmpegExtractor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -13,7 +14,6 @@ import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -46,7 +46,6 @@ import java.util.UUID;
  * 0=排队，1-20=下载，21-90=提取，91-99=上传，100=完成。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.MediaExtractEnabledCondition.class)
 public class MediaExtractJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(MediaExtractJobProcessor.class);
@@ -83,7 +82,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "media_extract";
+        return GenerationMqRoute.MEDIA_EXTRACT.tag();
     }
 
     /**
@@ -174,6 +173,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
                             stored.storageKey(),
                             stored.mime(),
                             stored.size(),
+                            stored.md5(),
                             extractResult.duration()
                     )
             );

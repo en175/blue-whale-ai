@@ -5,10 +5,10 @@ import com.bluewhale.worker.domain.entity.ImageOutpaintContract;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
- * image_outpaint（智能扩图）消费者（IKGOQW；以 ImageEnhanceConsumer 接线为模板）。
+ * image_outpaint（智能扩图）消费者（IKGOQW；以 imageEnhance/imageErase 接线为模板）。
  * <p>
- * tag = "image_outpaint"（复用 topic generation-video）。
- * consumer group = "generation-image-outpaint-worker" + groupSuffix。
+ * tag = {@link ImageOutpaintContract#TAG}（转发 {@code GenerationMqRoute.IMAGE_OUTPAINT}）。
+ * consumer group = "generation-image-outpaint-worker"（冻结值）。
  * digitGuard = true（generation_jobs.id 恒纯数字，与 image/audio/enhance 守卫一致）。
  * <p>
  * 与既有消费者行为一致（AbstractGenerationConsumer 模板）：

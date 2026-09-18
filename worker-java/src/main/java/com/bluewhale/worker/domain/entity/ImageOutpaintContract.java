@@ -60,7 +60,7 @@ public final class ImageOutpaintContract {
     /** 扩展比例上限（含）：0.4（原图短边的 40%，前端拖框同口径钳制）。 */
     public static final double EXPAND_RATIO_MAX = 0.4d;
 
-    // ========== 错误码（数值 1040 见 error-codes.ts ERROR_IMAGE_OUTPAINT_FAILED） ==========
+    // ========== 错误码（数值 1041 见 error-codes.ts ERROR_IMAGE_OUTPAINT_FAILED；1040 已由 IKGOT3 擦除占用） ==========
 
     /** 执行兜底失败码：调用失败 / 超时 / 供应商错误统一归并，无 worker 级自动重试。 */
     public static final String ERROR_IMAGE_OUTPAINT_FAILED = "image_outpaint_failed";

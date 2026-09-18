@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -15,7 +16,6 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMappe
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;
@@ -59,7 +59,6 @@ import java.util.LinkedHashSet;
  * 修正一：cost_reservations 结算不在实现范围（settle-ops.ts:228 整块省略）。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.ImageEnabledCondition.class)
 public class ImageJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(ImageJobProcessor.class);
@@ -103,7 +102,7 @@ public class ImageJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "image";
+        return GenerationMqRoute.IMAGE.tag();
     }
 
     /**
@@ -180,17 +179,16 @@ public class ImageJobProcessor implements JobProcessor {
      */
     private void processClaimedImageJob(ClaimedJobDto job) {
         Map<String, Object> input = job.input();
-        Map<?, ?> planSnapshot = null;
-        if (input.containsKey("prompt_plan_snapshot")) {
-            if (!(input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot)
-                    || !(snapshot.get("providerPrompt") instanceof String text) || text.isBlank()
-                    || !(snapshot.get("images") instanceof List<?>)) {
-                failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "方案输入快照无效");
-                return;
-            }
-            planSnapshot = snapshot;
+        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
+        // （&asset_id& → @图片N）。方案快照仍然要用：下方按它的 images 解析参考素材，
+        // 只是不再提供正文（providerPrompt 已退役）。
+        Map<?, ?> planSnapshot = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
+        if (input.containsKey("prompt_plan_snapshot")
+                && (planSnapshot == null || !(planSnapshot.get("images") instanceof List<?>))) {
+            failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "方案输入快照无效");
+            return;
         }
-        String prompt = planSnapshot == null ? strOrEmpty(input, "prompt") : (String) planSnapshot.get("providerPrompt");
+        String prompt = strOrEmpty(input, "prompt");
         String modelId = strOrEmpty(input, "model_id");
 
         // 1. 校验输入（generation-worker.ts:295-305）
@@ -403,6 +401,7 @@ public class ImageJobProcessor implements JobProcessor {
                     stored.storageKey(),
                     stored.mime(),
                     stored.size(),
+                    stored.md5(),
                     width,
                     height,
                     null, // duration
@@ -463,7 +462,9 @@ public class ImageJobProcessor implements JobProcessor {
     private StoredImage persistProviderImageFromUrl(String sourceUrl, String userId) {
         // 降级模式：TOS 未配置 → 直存 URL（generation-worker.ts:752-761）
         if (tosService == null) {
-            return new StoredImage(sourceUrl, null, null, null, null, null);
+            // IKGS73：降级直存 URL，手上没字节 → assets.md5 留空。
+            log.warn("[image] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            return new StoredImage(sourceUrl, null, null, null, null, null, null);
         }
 
         // fetch 字节（generation-worker.ts:765-776）
@@ -529,7 +530,7 @@ public class ImageJobProcessor implements JobProcessor {
         try {
             TosMediaStorage.UploadResult uploaded = tosService.uploadImageBytes(content, mime, userId);
             return new StoredImage(uploaded.url(), uploaded.storageKey(),
-                    mime, (long) content.length, width, height);
+                    mime, (long) content.length, uploaded.md5(), width, height);
         } catch (Exception e) {
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "生成结果转存失败: " + e.getMessage());
@@ -593,6 +594,6 @@ public class ImageJobProcessor implements JobProcessor {
     /** 转存结果（对齐 TS persistProviderMedia 返回形状）。 */
     record StoredImage(
             String url, String storageKey, String mime,
-            Long size, Integer width, Integer height
+            Long size, String md5, Integer width, Integer height
     ) {}
 }

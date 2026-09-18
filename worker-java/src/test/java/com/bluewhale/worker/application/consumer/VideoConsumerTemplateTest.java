@@ -18,7 +18,7 @@ import static org.mockito.Mockito.*;
  * <p>
  * 验证 VideoConsumer 的 SEQUENTIAL 派发行为（rocketmq-video.consumer.ts:76-101）：
  * <ul>
- *   <li>tag = "step"</li>
+ *   <li>tag = "video"</li>
  *   <li>digitGuard = false（视频不做纯数字守卫）</li>
  *   <li>毒丸 ack / handler 成功 ack / handler 抛错不 ack</li>
  * </ul>
@@ -37,9 +37,9 @@ class VideoConsumerTemplateTest {
     }
 
     @Test
-    @DisplayName("tag = step")
-    void tagIsStep() {
-        assertThat(VideoConsumer.TAG).isEqualTo("step");
+    @DisplayName("tag = video")
+    void tagIsVideo() {
+        assertThat(VideoConsumer.TAG).isEqualTo("video");
     }
 
     @Test

@@ -56,7 +56,6 @@ import java.util.Set;
  * 同步接口秒级返回无中间进度带。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.ImageOutpaintEnabledCondition.class)
 public class ImageOutpaintJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(ImageOutpaintJobProcessor.class);
@@ -221,6 +220,8 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
                 stored.storageKey(),
                 stored.mime(),
                 stored.size(),
+                // IKGS73：产物字节的 md5（与其余生成类型同源，来自 TOS 上传出口）
+                stored.md5(),
                 width,
                 height));
         if (!published) {

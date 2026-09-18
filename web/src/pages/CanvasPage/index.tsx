@@ -4,7 +4,7 @@
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
-import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
+import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -20,6 +20,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
+import { appliedPlanAssetIds, dropReversedTextIndexEdges, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
@@ -61,6 +62,24 @@ import {
   type ImageEnhancePanelParams,
 } from './imageEnhance';
 import {
+  IMAGE_ERASE_EDGE_ORIGIN,
+  maskHasPaintArea,
+  type ImageEraseIdentity,
+  type ImageEraseInput,
+} from './imageErase';
+import {
+  applyMaskOp,
+  canRedoMaskEdit,
+  canUndoMaskEdit,
+  EMPTY_MASK_EDIT,
+  redoMaskEdit,
+  undoMaskEdit,
+  type MaskCoordinateSpace,
+  type MaskEditState,
+  type MaskOp,
+  type MaskPoint,
+} from './eraseMask';
+import {
   IMAGE_OUTPAINT_EDGE_ORIGIN,
   ZERO_EXPANDS,
   buildImageOutpaintInput,
@@ -74,6 +93,7 @@ import {
   type SourceRect,
 } from './imageOutpaint';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
+import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
 import OutpaintDialog from './components/OutpaintDialog';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
@@ -83,7 +103,7 @@ import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './c
 import ImageDialog, { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
-import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
+import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -123,6 +143,7 @@ import {
   fetchJobStatus,
   createMediaExtraction,
   createImageEnhancement,
+  createImageErase,
   createImageOutpaint,
   readJobFailText,
   type ImageJobParameters,
@@ -141,7 +162,8 @@ import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
-import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
+import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
+import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
   canConnectSourcesToGen,
@@ -314,6 +336,21 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
+  /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
+   *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
+   *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
+  const [eraseTargetNodeId, setEraseTargetNodeId] = useState<string | null>(null);
+  const [eraseTool, setEraseTool] = useState<EraseTool>('brush');
+  const [eraseBrushRadius, setEraseBrushRadius] = useState(20);
+  const [eraseMaskState, setEraseMaskState] = useState<MaskEditState>(EMPTY_MASK_EDIT);
+  /** 拖拽进行中的活笔（显示坐标，pointerup 才经 applyMaskOp 固化；null=无拖拽） */
+  const [eraseLiveOp, setEraseLiveOp] = useState<MaskOp | null>(null);
+  /** 活笔最新值（pointerup 回调读，避免闭包陈旧） */
+  const eraseLiveOpRef = useRef<MaskOp | null>(null);
+  /** 拖拽收集的折线点（画笔/橡皮共用） */
+  const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
+  /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
+  const [eraseSubmitting, setEraseSubmitting] = useState(false);
   /* ---------- 扩图模式会话（IKGOQX）：管理模式参考持续选取会话 ----------
    * 会话 = 源图卡 id + 四方向扩展量；纯界面交互态不持久化（刷新即退出，无残留）。
    * 四种退出（面板 X / Esc / 点其他卡 / 点画布空白）共用统一退出函数，均不留痕迹
@@ -401,6 +438,24 @@ export default function CanvasPage() {
     historyRef.current?.pushAddEdges([edge]);
     // 同步写入 ref，发送前落盘才能读到本轮新建的连线
     const next = [...edgesRef.current, edge];
+    edgesRef.current = next;
+    setEdges(next);
+  };
+
+  /** 生成卡连到草稿：只建「生成卡 → 产物」，把方案 bindings 写在这条边上，避免走后端 referencePrompt 再给被引用图连产物。 */
+  const connectPlanToDraft = (planNodeId: string, targetId: string) => {
+    const node = textNodesRef.current.find((n) => n.id === planNodeId);
+    const mentions = promptMentionSchema.array().safeParse(node?.data.promptMentions ?? []);
+    const marker = node && mentions.success && validPromptMentions(extractTextNodeText(node.data), mentions.data)
+      ? { promptReference: { bindings: promptBindingList(mentions.data) } }
+      : undefined;
+    addCanvasEdge(planNodeId, targetId, undefined, marker);
+    if (!marker) return;
+    const next = edgesRef.current.map((edge) => (
+      edge.source === planNodeId && edge.target === targetId
+        ? { ...edge, data: { ...edge.data, ...marker } }
+        : edge
+    ));
     edgesRef.current = next;
     setEdges(next);
   };
@@ -529,7 +584,7 @@ export default function CanvasPage() {
     if (targetKind) {
       if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
-        void referencePlanRef.current(source, target);
+        connectPlanToDraft(source, target);
         return true;
       }
       if (!validateImageRefConnect(source, target)) return false;
@@ -942,6 +997,61 @@ export default function CanvasPage() {
         dialogWidth: 320,
       })
     : null;
+  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。发送条复用 computeFollowAnchor
+   *  （恒锚节点下方）；工具条在节点上方，手动换算（工具条高约 42 + 间距 10）。 */
+  const eraseSourceNode = eraseTargetNodeId
+    ? mediaNodes.find((n) => n.id === eraseTargetNodeId) ?? null
+    : null;
+  const eraseToolbarAnchor = (() => {
+    if (!eraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(eraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = eraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = eraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    return {
+      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
+      top: Math.round(Math.max(8, screenTop - 52)),
+    };
+  })();
+  const eraseSendBarAnchor = eraseSourceNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: eraseSourceNode.position.x,
+        nodeY: eraseSourceNode.position.y,
+        nodeWidth: nodeBoxOf(eraseSourceNode).width,
+        nodeHeight: nodeBoxOf(eraseSourceNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 240,
+      })
+    : null;
+  /** 擦除遮罩坐标空间（显示尺寸 × 源图自然分辨率）：显示尺寸与 MediaNode 内容区同源
+   *  （mediaContentBox 保持源图宽高比）；自然分辨率缺失（存量图未实测）时为 null，涂抹发送禁用。 */
+  const eraseDisplayBox = (() => {
+    if (!eraseSourceNode) return null;
+    const d = (eraseSourceNode.data ?? {}) as Record<string, unknown>;
+    return mediaContentBox({
+      mediaType: 'image',
+      width: typeof d.width === 'number' ? d.width : undefined,
+      height: typeof d.height === 'number' ? d.height : undefined,
+    });
+  })();
+  const eraseMaskSpace = (() => {
+    if (!eraseSourceNode || !eraseDisplayBox) return null;
+    const d = (eraseSourceNode.data ?? {}) as Record<string, unknown>;
+    if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
+    return {
+      displayWidth: eraseDisplayBox.width,
+      displayHeight: eraseDisplayBox.height,
+      naturalWidth: d.width,
+      naturalHeight: d.height,
+    } satisfies MaskCoordinateSpace;
+  })();
+  /** 存在有效涂区（最终并集非空：涂了又被橡皮全擦掉不算）：涂抹发送门 */
+  const eraseHasPaint = eraseDisplayBox
+    ? maskHasPaintArea(eraseMaskState.ops, eraseDisplayBox.width, eraseDisplayBox.height)
+    : eraseMaskState.ops.some((op) => !op.erase);
   /* ---------- 扩图模式派生量（IKGOQX） ---------- */
   /** 源图卡与内容区矩形（扩展框与面板的锚定基准；内容区 = 节点左上角 + 标题偏移 + 内容盒） */
   const outpaintSourceNode = outpaintSessionActive
@@ -1238,6 +1348,7 @@ export default function CanvasPage() {
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
+          onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -2045,6 +2156,7 @@ export default function CanvasPage() {
     genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
     outpaintImage: (_id: string) => {},
+    eraseImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2622,6 +2734,11 @@ export default function CanvasPage() {
    *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
+    // 擦除编辑态（IKGOTB 四退出之一）：点画布空白退出并丢弃未发送遮罩
+    if (eraseTargetNodeId) {
+      exitEraseEditing();
+      return;
+    }
     // IKGOQX 扩图模式：点画布空白退出（不留痕迹）
     if (outpaintSessionActive) {
       endOutpaintSession();
@@ -2657,6 +2774,11 @@ export default function CanvasPage() {
       return !m || m.selected !== false;
     });
     const soloId = candidates.length === 1 ? candidates[0]!.id : null;
+    // 擦除编辑态（IKGOTB 四退出之一）：单选其他卡或多选时退出并丢弃未发送遮罩
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
+      exitEraseEditing();
+    }
     const syncPanelVisible = (
       boundId: string | null,
       setShow: (visible: boolean) => void,
@@ -2732,10 +2854,10 @@ export default function CanvasPage() {
   }, [anyGenPanelOpen]);
 
   /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
-   * （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
-   * （复用 isEditableKeyboardTarget）→ 其余情况关闭五面板。 */
+   *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
+   *  （复用 isEditableKeyboardTarget）→ 擦除编辑态退出（IKGOTB，未发送丢弃遮罩）→ 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
@@ -2747,12 +2869,16 @@ export default function CanvasPage() {
         resetPickState();
         return;
       }
+      if (eraseTargetNodeId) {
+        exitEraseEditing();
+        return;
+      }
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, eraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -3024,6 +3150,14 @@ export default function CanvasPage() {
     }
   }, [enhanceDraftId, mediaNodes]);
 
+  /** 擦除编辑态绑定清理（IKGOT7/IKGOTB）：目标源图卡被删除时退出编辑态并丢弃遮罩，防工具条悬挂 */
+  useEffect(() => {
+    if (!eraseTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === eraseTargetNodeId)) exitEraseEditing();
+    // exitEraseEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eraseTargetNodeId, mediaNodes]);
+
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
     if (imagePickSession === undefined) return;
@@ -3248,12 +3382,13 @@ export default function CanvasPage() {
   };
 
   /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
-   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），回调不可覆盖 */
+   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），nodeId 指定节点 id
+   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖 */
   const createImageDraftCard = (
     position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown> },
+    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string },
   ): string => {
-    const nodeId = newNodeId('media-draft');
+    const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -3281,6 +3416,7 @@ export default function CanvasPage() {
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
+        onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3389,6 +3525,12 @@ export default function CanvasPage() {
         if (kind === 'image' && imageRefSourceError(source)) return;
         if (kind === 'audio' && audioRefSourceError(source)) return;
         addCanvasEdge(id, targetId, kind === 'video' ? 'reference' : undefined);
+        return;
+      }
+      // 生成卡连入草稿：只拉「生成卡 → 产物」，不把被引用图再连到产物
+      const sourceData = source.data as Record<string, unknown> | undefined;
+      if (source.type === 'textNode' && sourceData?.promptSource && (kind === 'image' || kind === 'video')) {
+        connectPlanToDraft(id, targetId);
         return;
       }
       addCanvasEdge(id, targetId);
@@ -3736,6 +3878,7 @@ export default function CanvasPage() {
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
+      onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4086,12 +4229,17 @@ export default function CanvasPage() {
       const assetId = String(asset.id);
       const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
       if (opts?.reuseExisting) {
+        const libraryId = typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined;
         const existing = mediaNodesRef.current.find(
-          (n) =>
-            n.type === 'mediaNode' &&
-            ((n.data ?? {}) as Record<string, unknown>).mediaType === mediaType &&
-            readAssetId((n.data ?? {}) as Record<string, unknown>) === assetId &&
-            baseSourceError(n) === null,
+          (n) => {
+            if (n.type !== 'mediaNode') return false;
+            const data = (n.data ?? {}) as Record<string, unknown>;
+            if (data.mediaType !== mediaType || baseSourceError(n) !== null) return false;
+            const nodeAssetId = readAssetId(data);
+            if (nodeAssetId === assetId) return true;
+            if (libraryId && (data.materialId === libraryId || nodeAssetId === libraryId)) return true;
+            return false;
+          },
         );
         if (existing) {
           const patch = complianceFromAsset(asset);
@@ -4135,6 +4283,7 @@ export default function CanvasPage() {
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
+          onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4171,10 +4320,21 @@ export default function CanvasPage() {
    *  按打开来源分发——画布工具栏/Agent 面板落画布节点（Agent 面板额外挂会话附件），
    *  dock 对话框注入参考素材（带 assetId，发送时免重复上传）。
    *  选择行为与该入口现有上传一致：数量上限/超限提示由各消费方既有链路兜底。 */
-  const handleAssetsPickerSelect = (selectedAssets: AssetRecord[]) => {
+  const handleAssetsPickerSelect = async (selectedAssets: AssetRecord[]) => {
     const target = assetsPickerTarget;
     setShowAssetsPicker(false);
     if (selectedAssets.length === 0) return;
+    if (!currentId) {
+      showToast('error', '项目未就绪，请稍后重试');
+      return;
+    }
+    if (selectedAssets.some(isPendingLivenessLibraryAsset)) {
+      showToast('warn', '正在导入真人人像库素材…');
+    }
+    const assets = await importLivenessLibraryAssets(selectedAssets, currentId, (name, message) => {
+      showToast('error', `「${name}」${message}`);
+    });
+    if (assets.length === 0) return;
 
     if (target === 'videoDraft') {
       // 视频草稿面板「从资产中选择」（IKDMQS 来源补齐）：素材落画布节点并按槽位角色连线，
@@ -4186,7 +4346,7 @@ export default function CanvasPage() {
       const refs = videoDraftId
         ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
         : videoFreeRefs;
-      let accepted = selectedAssets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
+      let accepted = assets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
       if (role === 'first' || role === 'last') {
         if (refs[role]) {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
@@ -4214,7 +4374,9 @@ export default function CanvasPage() {
                 name: assetDisplayName(a),
                 assetId: String(a.id),
                 mediaType: asVideoRefMediaType(a.type),
-                materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
+                materialId: typeof a.material_id === 'string' && a.material_id
+                  ? a.material_id
+                  : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
               },
               frameRoles[i] ?? role,
             ),
@@ -4271,7 +4433,9 @@ export default function CanvasPage() {
               name: assetDisplayName(a),
               assetId: String(a.id),
               mediaType: asVideoRefMediaType(a.type),
-              materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
+              materialId: typeof a.material_id === 'string' && a.material_id
+                ? a.material_id
+                : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
             },
             role,
           ),
@@ -4290,7 +4454,7 @@ export default function CanvasPage() {
       // 弹窗确认只能接纳到打开时的面板，切换/关闭/生成中均不创建来源或连线。
       if (!showAudioDialog || !audioAssetPickTarget || audioAssetPickTarget.nodeId !== audioDraftId
         || audioAssetPickTarget.seed !== audioSeed?.ts || (audioDraftId && isGeneratingNode(audioDraftId))) return;
-      const audios = selectedAssets.filter(a => a.type === 'audio');
+      const audios = assets.filter(a => a.type === 'audio');
       if (!audioDraftId) {
         setAudioAssetPickResult({ ts: Date.now(), items: audios.map(a => ({
           id: `asset-${a.id}`, kind: 'audio', name: assetDisplayName(a), src: a.url,
@@ -4314,7 +4478,7 @@ export default function CanvasPage() {
       return;
     }
     if (target === 'imageDialog') {
-      const images = selectedAssets.filter((a) => a.type === 'image');
+      const images = assets.filter((a) => a.type === 'image');
       if (images.length === 0) return;
       // IKFA1M：草稿绑定模式下「从资产中选择」落画布节点并建立连线（与视频草稿同源；
       //  此前该入口在绑定模式经 externalPick 被忽略，@ 菜单「添加新参考」依赖本路径生效）。
@@ -4351,11 +4515,11 @@ export default function CanvasPage() {
     }
     if (target === 'agentPanel') {
       // Agent 面板：与上传一致落画布节点（IKBA6C），并挂 ready 会话附件
-      if (!placeAssetsOnCanvas(selectedAssets)) {
+      if (!placeAssetsOnCanvas(assets)) {
         showToast('error', '项目未就绪，请稍后重试');
         return;
       }
-      const blocks: SessionContentBlock[] = selectedAssets
+      const blocks: SessionContentBlock[] = assets
         .filter((a) => a.type === 'image' || a.type === 'video')
         .map((a) => ({
           type: 'asset_ref',
@@ -4369,7 +4533,7 @@ export default function CanvasPage() {
       return;
     }
     // 默认（画布工具栏）：全类型批量落画布
-    if (!placeAssetsOnCanvas(selectedAssets)) {
+    if (!placeAssetsOnCanvas(assets)) {
       showToast('error', '项目未就绪，请稍后重试');
     }
   };
@@ -4636,8 +4800,8 @@ export default function CanvasPage() {
   };
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
-   *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
-   *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥。
+   *  mediaRefs 仅 image/video/audio：单数组 references（保序），与 input_asset_ids 等旧参考字段互斥。
+   *  视频可含首尾帧角色；图片/音频 role 恒 reference。素材库引用（Asset- 前缀）走 material_id。
    *  targetNodeId 仅图片/视频（IKDLQF/IKDLQG）：从对应媒体节点面板发起时携带，服务端按最新画布推导连线文本附件。
    *  目标是草稿身份节点时（IKDMQQ）：不再新建占位卡，草稿原地转生成中，结果回填同一张卡。
    *  返回 true 表示创建请求已发出（IKFXZD：面板据此判定发送成功并自动隐藏）；
@@ -4767,37 +4931,36 @@ export default function CanvasPage() {
     const activeAtCreate = newNodeId('pending-generation');
     activeJobByNodeRef.current.set(nodeId, activeAtCreate);
     stopJobPolling(nodeId, jobTimersRef.current);
+    const jobRefs = videoRefs?.references;
+    const sendPrompt = promptDoc ? flattenPromptDocForSend(promptDoc) : parameters.prompt;
+    const sendAttachments = targetNodeId ? textAttachmentsForSend(targetNodeId) : undefined;
+    const jobPrompt = composeImageSendPrompt(sendAttachments, sendPrompt, promptDoc);
     try {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters: !promptDoc
-          ? {
-              ...parameters,
-              prompt: composeImageSendPrompt(
-                targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
-                parameters.prompt,
-              ),
-            }
-          : parameters,
-        input_asset_ids: inputAssetIds,
-        ...((type === 'video' || type === 'audio') && videoRefs?.references && videoRefs.references.length > 0
-          ? { references: videoRefs.references }
-          : {
-              first_frame_asset_id: videoRefs?.firstFrameAssetId,
-              last_frame_asset_id: videoRefs?.lastFrameAssetId,
-              reference_asset_ids: videoRefs?.referenceAssetIds?.length
-                ? videoRefs.referenceAssetIds
-                : undefined,
-              first_frame_material_id: videoRefs?.firstFrameMaterialId,
-              last_frame_material_id: videoRefs?.lastFrameMaterialId,
-              reference_materials: videoRefs?.referenceMaterials?.length
-                ? videoRefs.referenceMaterials
-                : undefined,
-            }),
+        parameters: {
+          ...parameters,
+          prompt: jobPrompt,
+        },
+        ...(inputAssetIds?.length ? { input_asset_ids: inputAssetIds } : {}),
+        ...(jobRefs && jobRefs.length > 0
+          ? { references: jobRefs }
+          : type === 'image' || type === 'audio'
+            ? {}
+            : {
+                first_frame_asset_id: videoRefs?.firstFrameAssetId,
+                last_frame_asset_id: videoRefs?.lastFrameAssetId,
+                reference_asset_ids: videoRefs?.referenceAssetIds?.length
+                  ? videoRefs.referenceAssetIds
+                  : undefined,
+                first_frame_material_id: videoRefs?.firstFrameMaterialId,
+                last_frame_material_id: videoRefs?.lastFrameMaterialId,
+                reference_materials: videoRefs?.referenceMaterials?.length
+                  ? videoRefs.referenceMaterials
+                  : undefined,
+              }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
-        // 结构化正文由接纳侧统一复核、编译并冻结。
-        ...(promptDoc ? { prompt_doc: promptDoc } : {}),
       })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
@@ -5004,6 +5167,111 @@ export default function CanvasPage() {
     const issued = startImageOutpaintJob(draftId, input);
     if (issued) endOutpaintSession();
     return issued;
+  };
+
+
+  /* ===== 擦除发送链路（IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+
+  /** 擦除任务发送核心：组装好的契约 input 直接 POST image-erasures；创建成功后
+   *  在源卡右侧建擦除结果卡（node id = input.target_node_id，发送前已生成冻结进任务）、
+   *  拉纯视觉来源线（origin=image-erase，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
+   *  创建失败（门槛拒/网络）不建卡不退出编辑态；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
+   *  免费口径同 image_enhance：无幂等头、无积分预估、不走余额拦截门。 */
+  const startImageEraseJob = async (
+    sourceNodeId: string,
+    input: ImageEraseInput,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起图片擦除');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源图卡不存在，无法发起图片擦除');
+      return false;
+    }
+    const targetNodeId = input.target_node_id;
+    try {
+      const created = await createImageErase(currentId, input);
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
+      exitEraseEditing();
+      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '擦除',
+        nodeId: targetNodeId,
+        data: {
+          imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(draftId, activeAtCreate);
+      patchMediaNode(draftId, { jobId: created.job_id });
+      pollJob(draftId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '创建擦除任务失败，请重试');
+      return false;
+    }
+  };
+
+  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处上传（source=mask_erase，
+   *  中间素材不进用户资产列表可见内容）→ 组装 selected_area_erase 四键 → 发任务。 */
+  const handleEraseDialogSendMask = async (file: File | null): Promise<boolean> => {
+    const nodeId = eraseTargetNodeId;
+    if (!nodeId) return false;
+    if (!file) {
+      showToast('error', '遮罩生成失败，请重试');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return false;
+    }
+    setEraseSubmitting(true);
+    try {
+      const uploaded = await uploadAssetFile(file, {
+        projectId: currentId ?? undefined,
+        assetSource: 'mask_erase',
+      });
+      const input: ImageEraseInput = {
+        source_asset_id: sourceAssetId,
+        target_node_id: newNodeId('media-draft'),
+        erase_scene: 'selected_area_erase',
+        mask_asset_id: uploaded.asset_id,
+      };
+      return await startImageEraseJob(nodeId, input);
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '遮罩上传失败，请重试');
+      return false;
+    } finally {
+      setEraseSubmitting(false);
+    }
+  };
+
+  /** 清除文字一键直发（不经遮罩）：full_screen_text_erase 三键直接发任务，
+   *  与涂抹发送共用同一条结果链路（规格故事 20）；请求发出即返回 true（编辑态随之退出）。 */
+  const handleEraseDialogSendText = (): boolean => {
+    const nodeId = eraseTargetNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return false;
+    }
+    const input: ImageEraseInput = {
+      source_asset_id: sourceAssetId,
+      target_node_id: newNodeId('media-draft'),
+      erase_scene: 'full_screen_text_erase',
+    };
+    setEraseSubmitting(true);
+    void startImageEraseJob(nodeId, input).finally(() => setEraseSubmitting(false));
+    return true;
   };
 
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
@@ -5319,6 +5587,37 @@ export default function CanvasPage() {
       startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
       return;
     }
+    const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
+      | ImageEraseIdentity
+      | undefined;
+    if (eraseIdentity?.lastInput) {
+      // 擦除卡分流（IKGOTB）：契约无 retry 端点，重试 = 冻结 input 原样重发创建接口
+      //（遮罩资产未删除，selected_area_erase 的 mask_asset_id 仍可被创建入口与 worker 解析）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法发起图片擦除');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createImageErase(currentId, eraseIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     const outpaintIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as
       | ImageOutpaintIdentity
       | undefined;
@@ -5406,6 +5705,26 @@ export default function CanvasPage() {
         title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
         text: extractTextNodeText(n.data),
       }));
+
+  /** 提交用附件正文：图片 @ 写成 &素材id&，面板展示仍用编号 */
+  const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
+    textAttachmentsOf(targetNodeId).map((att) => {
+      const node = textNodesRef.current.find((n) => n.id === att.nodeId);
+      const mentions = Array.isArray(node?.data.mediaMentions) ? (node.data.mediaMentions as MediaMention[]) : [];
+      const refs = Array.isArray(node?.data.mediaRefs) ? (node.data.mediaRefs as MediaRef[]) : [];
+      const imageNodeIds = new Set(refs.filter((ref) => ref.mediaType === 'image').map((ref) => ref.nodeId));
+      // Agent 方案卡应用的文本节点正文里的 @图1（promptMentions）也纳入替换：图片 → &素材id&
+      const promptMentions = Array.isArray(node?.data.promptMentions) ? (node.data.promptMentions as Array<{ start: number; end: number; assetId: string }>) : [];
+      const promptMaterials = Array.isArray(node?.data.promptMaterials) ? (node.data.promptMaterials as Array<{ assetId: string; mediaType: 'image' | 'video' | 'audio' }>) : [];
+      const promptImageAssetIds = new Set(promptMaterials.filter((m) => m.mediaType === 'image').map((m) => m.assetId));
+      const promptMentionsAdapted: MediaMention[] = promptMentions.map((m) => ({ start: m.start, end: m.end, nodeId: m.assetId, assetId: m.assetId }));
+      const allMentions = [...mentions, ...promptMentionsAdapted];
+      const isImage = (mention: MediaMention) => imageNodeIds.has(mention.nodeId) || promptImageAssetIds.has(mention.assetId);
+      return {
+        ...att,
+        text: replaceImageMentionsWithAssetTokens(att.text, allMentions, isImage),
+      };
+    });
 
   /** 目标连入边子序列重排（IKFCKT 从 IKDLQH 泛化）：orderedSources 是 target 连入边 source 的
    *  子集（文本边 / 媒体边 / 混合），按新顺序回填这些边占据的原槽位（其余边相对位置不变，各目标独立） */
@@ -5550,7 +5869,7 @@ export default function CanvasPage() {
   });
   const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
     const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
-    if (pending && targetId) void referencePlanRef.current(planNodeId, targetId, pending.bindings);
+    if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
   };
 
   /** 视频草稿绑定面板的文本附件实时跟随画布连线（IKDMQS，同图片草稿） */
@@ -5894,6 +6213,80 @@ export default function CanvasPage() {
     setOutpaintNodeId(id);
   };
 
+  /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
+   *  工具/活笔/发送中标记一并复位。 */
+  const exitEraseEditing = () => {
+    setEraseTargetNodeId(null);
+    setEraseMaskState(EMPTY_MASK_EDIT);
+    setEraseLiveOp(null);
+    eraseLiveOpRef.current = null;
+    eraseStrokePointsRef.current = [];
+    setEraseTool('brush');
+    setEraseSubmitting(false);
+  };
+
+  /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
+   *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
+   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）。 */
+  const handleNodeEraseImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    dismissAllGenPanels();
+    setEraseTargetNodeId(id);
+    setEraseMaskState(EMPTY_MASK_EDIT);
+    setEraseLiveOp(null);
+    eraseLiveOpRef.current = null;
+    eraseStrokePointsRef.current = [];
+    setEraseTool('brush');
+  };
+
+  /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
+
+  const handleEraseStrokeStart = (point: MaskPoint) => {
+    if (eraseTool === 'rect') {
+      const op: MaskOp = { kind: 'rect', erase: false, from: point, to: point };
+      eraseLiveOpRef.current = op;
+      setEraseLiveOp(op);
+      return;
+    }
+    eraseStrokePointsRef.current = [point];
+    const op: MaskOp = {
+      kind: 'stroke',
+      erase: eraseTool === 'eraser',
+      points: [point],
+      radius: eraseBrushRadius,
+    };
+    eraseLiveOpRef.current = op;
+    setEraseLiveOp(op);
+  };
+
+  const handleEraseStrokeMove = (point: MaskPoint) => {
+    const live = eraseLiveOpRef.current;
+    if (!live) return;
+    if (live.kind === 'rect') {
+      const next: MaskOp = { ...live, to: point };
+      eraseLiveOpRef.current = next;
+      setEraseLiveOp(next);
+      return;
+    }
+    eraseStrokePointsRef.current = [...eraseStrokePointsRef.current, point];
+    const next: MaskOp = { ...live, points: eraseStrokePointsRef.current };
+    eraseLiveOpRef.current = next;
+    setEraseLiveOp(next);
+  };
+
+  const handleEraseStrokeEnd = () => {
+    const live = eraseLiveOpRef.current;
+    eraseLiveOpRef.current = null;
+    setEraseLiveOp(null);
+    eraseStrokePointsRef.current = [];
+    if (!live) return;
+    setEraseMaskState((state) => applyMaskOp(state, live));
+  };
+
+  const handleEraseUndo = () => setEraseMaskState((state) => undoMaskEdit(state));
+  const handleEraseRedo = () => setEraseMaskState((state) => redoMaskEdit(state));
+
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
    *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
@@ -6166,6 +6559,7 @@ export default function CanvasPage() {
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.outpaintImage = handleNodeOutpaintImage;
+  actionsRef.current.eraseImage = handleNodeEraseImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -6272,7 +6666,29 @@ export default function CanvasPage() {
       const savedNodes = JSON.parse(result.canvas.nodes ?? '[]') as Node[];
       const savedEdges = JSON.parse(result.canvas.edges ?? '[]') as Edge[];
       const savedViewport = JSON.parse(result.canvas.viewport ?? 'null') as Viewport | null;
-      acceptDoc({ id: result.canvas.id, version: result.canvas.version, nodes: savedNodes, edges: savedEdges, viewport: savedViewport ?? viewport });
+      const textNodeId = result.node.id;
+      const extraAssetIds = (payload.assetRefItems ?? []).map((item) => item.assetId);
+      const assetIds = appliedPlanAssetIds(result.node as Node, extraAssetIds);
+      const oriented = dropReversedTextIndexEdges(textNodeId, savedEdges);
+      const indexEdges = textIndexEdgesForAppliedPlan(textNodeId, assetIds, savedNodes, oriented);
+      let nextNodes = savedNodes;
+      let nextEdges = [...oriented, ...indexEdges];
+      let nextVersion = result.canvas.version;
+      if (indexEdges.length > 0 || oriented.length !== savedEdges.length) {
+        try {
+          const persisted = await saveCanvasDoc(
+            projectId,
+            { viewport: savedViewport ?? viewport, nodes: savedNodes, edges: nextEdges },
+            result.canvas.version,
+          );
+          nextVersion = persisted.version;
+          nextNodes = JSON.parse(persisted.nodes ?? '[]') as Node[];
+          nextEdges = JSON.parse(persisted.edges ?? '[]') as Edge[];
+        } catch {
+          // 连线已在本地补上；落盘失败留给后续编辑触发保存
+        }
+      }
+      acceptDoc({ id: result.canvas.id, version: nextVersion, nodes: nextNodes, edges: nextEdges, viewport: savedViewport ?? viewport });
       const target = result.node.position;
       setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
       setSaveStatus('saved');
@@ -6722,6 +7138,7 @@ export default function CanvasPage() {
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
+              onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -7165,9 +7582,8 @@ export default function CanvasPage() {
     }
   };
 
-  /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源；
-   *  IKFM3S §2 含文本带入参考的合并推导，与后端权威并入同源）；
-   *  其余入口（资产卡等自由面板）沿用面板 files——有 assetId 直用，否则上传取 ID */
+  /** 收集图片参考 assetId：绑定模式按连线推导（与 Dock 显示同源，含文本带入）；
+   *  其余入口沿用面板 files——有 assetId 直用，否则上传取 ID。提交时再组装为 references。 */
   const collectImageInputAssetIds = async (
     targetNodeId: string | undefined,
     files: UploadedFile[],
@@ -7254,12 +7670,13 @@ export default function CanvasPage() {
       );
       if (targetNodeId && !(await flushCanvasSave(projectId))) return;
       if (activeProjectRef.current !== projectId) return;
+      const jobRefs = buildImageJobReferences(inputAssetIds);
       const submitted = startGenerationJob('image', {
         prompt: text,
         model_id: modelId,
         aspect_ratio: ratio,
         size,
-      }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId, undefined, promptDoc);
+      }, undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, targetNodeId, undefined, promptDoc);
       // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
       // 置 hidden 标记避免紧随的画布选中事件回弹重开
       if (submitted) { imagePanelHiddenRef.current = true; setShowImageDialog(false); }
@@ -7313,8 +7730,9 @@ export default function CanvasPage() {
         }
         if (activeProjectRef.current !== projectId) return;
         if (handoff.kind === 'image') {
+          const jobRefs = buildImageJobReferences(references.map(r => r.assetId));
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
-            references.map(r => r.assetId), undefined, undefined, { references });
+            undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, undefined, { references });
         } else {
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration,
@@ -7402,7 +7820,29 @@ export default function CanvasPage() {
           toolMode={toolMode}
           extraNodes={uploadedNodes}
           textNodes={textNodes}
-          mediaNodes={mediaNodes}
+          mediaNodes={
+            // 擦除编辑态（IKGOTB）：目标源图卡渲染期注入遮罩层 props（不进 state、不持久化，
+            // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
+            // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
+            // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
+            eraseTargetNodeId || submittingNodeId
+              ? mediaNodes.map((n) => {
+                  if (n.id !== eraseTargetNodeId && n.id !== submittingNodeId) return n;
+                  const data: Record<string, unknown> = { ...n.data };
+                  if (n.id === eraseTargetNodeId) {
+                    data.eraseEditing = {
+                      ops: eraseMaskState.ops,
+                      liveOp: eraseLiveOp,
+                      onStrokeStart: handleEraseStrokeStart,
+                      onStrokeMove: handleEraseStrokeMove,
+                      onStrokeEnd: handleEraseStrokeEnd,
+                    };
+                  }
+                  if (n.id === submittingNodeId) data.submitting = true;
+                  return { ...n, data };
+                })
+              : mediaNodes
+          }
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
@@ -7831,6 +8271,31 @@ export default function CanvasPage() {
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
           </div>
           )
+        )}
+
+        {/* 擦除编辑态工具条+发送条（IKGOTB，替换 IKGOT7 占位条）：工具/笔刷/撤销重做/清除文字/发送；
+            棋盘格遮罩层经 MediaNode 的 eraseEditing 注入渲染在源图卡上；四退出
+            （X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃遮罩不建卡不提交 */}
+        {eraseTargetNodeId && (
+          <ImageEraseDialog
+            onClose={exitEraseEditing}
+            onSendTextErase={handleEraseDialogSendText}
+            onSendMask={handleEraseDialogSendMask}
+            tool={eraseTool}
+            onToolChange={setEraseTool}
+            brushRadius={eraseBrushRadius}
+            onBrushRadiusChange={setEraseBrushRadius}
+            canUndo={canUndoMaskEdit(eraseMaskState)}
+            canRedo={canRedoMaskEdit(eraseMaskState)}
+            onUndo={handleEraseUndo}
+            onRedo={handleEraseRedo}
+            hasPaint={eraseHasPaint}
+            maskSpace={eraseMaskSpace}
+            ops={eraseMaskState.ops}
+            submitting={eraseSubmitting}
+            toolbarAnchor={eraseToolbarAnchor}
+            sendBarAnchor={eraseSendBarAnchor}
+          />
         )}
 
         {/* 底部音频对话框 */}

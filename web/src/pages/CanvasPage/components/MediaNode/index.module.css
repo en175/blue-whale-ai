@@ -612,54 +612,53 @@
   pointer-events: none;
 }
 
-/* ---- 「高清 ▾」下拉菜单（IKGOQX）：按钮下方弹出，仅含「高清」「扩图」两项 ---- */
-.menuWrap {
+/* 「高清 ▾」下拉（IKGOT7）：工具条内的包裹层，下拉浮层锚定其下方 */
+.qualityWrap {
   position: relative;
   display: flex;
+  align-items: center;
 }
 
-.menuPopup {
+.qualityMenu {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  min-width: 120px;
+  min-width: 148px;
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 10px;
+  padding: var(--spacing-xs);
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px;
-  background-color: rgba(24, 24, 24, 0.98);
-  border: 1px solid #333;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  z-index: 11;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
-.menuItem {
+.qualityMenuItem {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: none;
-  border-radius: 7px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
   background: transparent;
-  color: #ddd;
-  font-size: 12px;
-  text-align: left;
+  border: none;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  text-align: left;
+  transition: all var(--transition-fast);
 }
 
-.menuItem:hover {
-  color: #fff;
-  background-color: rgba(255, 255, 255, 0.08);
+.qualityMenuItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
 }
 
-.menuItem[aria-disabled='true'] {
+/* 置灰项（口径同工具条 disabled）：不响应悬停高亮，title 由组件保留悬停原因 */
+.qualityMenuItem[aria-disabled='true'] {
   color: #666;
   cursor: not-allowed;
   background: transparent;
-}
-
-.menuItem[aria-disabled='true']:hover {
-  color: #666;
 }

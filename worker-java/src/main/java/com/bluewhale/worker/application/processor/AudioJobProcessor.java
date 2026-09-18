@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
@@ -11,7 +12,6 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -39,7 +39,6 @@ import java.util.Optional;
  * 降级模式：TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.AudioEnabledCondition.class)
 public class AudioJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(AudioJobProcessor.class);
@@ -69,7 +68,7 @@ public class AudioJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "audio";
+        return GenerationMqRoute.AUDIO.tag();
     }
 
     /**
@@ -165,16 +164,11 @@ public class AudioJobProcessor implements JobProcessor {
         }
 
         // 5. 调 TTS（generation-worker.ts:398-401）
-        // IKFCXE：文本附件作为创作上下文与主提示词共同进入生成——组合语义与图片/视频同源
-        // （TextAttachmentPrompts.textAttachments/composeTextAttachmentPrompt：快照损坏或无字段按无附件处理，
-        // 非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；不因存在附件强制改为朗读任务，
-        // 环境音/配音意图由主提示词决定；主提示词为空的任务已在第 1 步校验拒绝。
-        // 正文文本标签的编号清单已在接纳时冻结，执行与重试不得重新拼接覆盖它。
-        String audioPrompt = input.get("composed_prompt") instanceof String composed && !composed.isBlank()
-                ? composed
-                : TextAttachmentPrompts.composeTextAttachmentPrompt(TextAttachmentPrompts.textAttachments(input), prompt);
+        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
+        // （&asset_id& → @图片N）与附件拼装，执行与重试不得重新拼接覆盖它。
+        // 原 composed_prompt 优先链与 TextAttachmentPrompts 兜底组合已退役。
         NewApiAudioClient.AudioResult audio = audioClient.generate(
-                providerToken, modelId, audioPrompt, audioRefs.refs());
+                providerToken, modelId, prompt, audioRefs.refs());
         log.info("[audio] 上游已返回 jobId={} requestId={} dataLen={} url={}",
                 job.id(), audio.requestId(),
                 audio.data() != null ? audio.data().length : 0,
@@ -196,6 +190,7 @@ public class AudioJobProcessor implements JobProcessor {
                 stored.storageKey(),
                 stored.mime(),
                 stored.size(),
+                stored.md5(),
                 null, // width
                 null, // height
                 audio.duration() != null ? (int) Math.round(audio.duration() * 1000) : null,
@@ -298,11 +293,15 @@ public class AudioJobProcessor implements JobProcessor {
             // 上传到 TOS
             TosMediaStorage.UploadResult uploaded = tosService.uploadBytes(data, "audio/mpeg");
             return new StoredMedia(uploaded.url(), uploaded.storageKey(),
-                    "audio/mpeg", (long) data.length);
+                    "audio/mpeg", (long) data.length, uploaded.md5());
         }
         // URL 回退（generation-worker.ts:752-761）——仅当 data 为空
         if (url != null && !url.isEmpty()) {
-            return new StoredMedia(url, null, null, null);
+            // IKGS73：上游只给了 URL、没给字节 → assets.md5 留空。**这条不依赖 TOS 配置**，
+            // 是三条降级路径里唯一「TOS 正常也可能走到」的一条。留一行痕，否则 md5 为空
+            // 这件事在库里静得看不出来。
+            log.warn("[audio] 上游未返回字节，仅回退 URL：assets.md5 将为空（IKGS73 已知边界）");
+            return new StoredMedia(url, null, null, null, null);
         }
         throw new AudioProviderError(GenerationError.ERROR_NO_RESULT, "生成服务未返回音频结果");
     }
@@ -354,5 +353,5 @@ public class AudioJobProcessor implements JobProcessor {
     record AudioRefsResult(boolean ok, List<Map<String, String>> refs, String message) {}
 
     /** 转存结果。 */
-    record StoredMedia(String url, String storageKey, String mime, Long size) {}
+    record StoredMedia(String url, String storageKey, String mime, Long size, String md5) {}
 }

@@ -380,7 +380,7 @@ describe('IKGOR6 轮询三态回填', () => {
       status: 'failed',
       progress: 0,
       asset: null,
-      error: { code: 1040, msg: '扩图失败：上游处理超时' },
+      error: { code: 1041, msg: '扩图失败：上游处理超时' },
     });
     await dragAndSend();
     const draftId = outpaintResultId();

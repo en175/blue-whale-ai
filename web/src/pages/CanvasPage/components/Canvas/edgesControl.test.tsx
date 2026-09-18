@@ -7,7 +7,8 @@ import FlowCanvas from './index';
 import edgeStyles from '../CustomEdge/index.module.css';
 
 /* IKDLQF：连线改为受控 props（父级持有 edges，水合恢复/自动保存签名用）。
-   本测试验证渲染门（showEdges）与剪刀删除经 onEdgesChange 上抛（受控模式唯一通路）。 */
+   本测试验证渲染门（showEdges）与剪刀删除经 onEdgesChange 上抛（受控模式唯一通路）。
+   IKGUVG：剪刀改为指针停稳满 1 秒才出现——删除链路按停稳口径驱动（真实计时器）。 */
 
 vi.hoisted(() => {
   // 开发期代码定位插件在导入时探测 Canvas；本测试不绘制位图。
@@ -19,6 +20,10 @@ let container: HTMLDivElement;
 let props: ComponentProps<typeof FlowCanvas>;
 
 const EDGE: Edge = { id: 'e1', source: 'text-1', target: 'text-2', type: 'custom' };
+
+/** 停稳门槛（与连线组件同值）：真实计时器下把这段时间的等待包进 act，
+    避免计时器回调在 act 之外更新状态 */
+const DWELL_MS = 1000;
 
 function textNode(id: string, x: number) {
   return {
@@ -99,10 +104,26 @@ describe('Canvas 受控连线', () => {
     expect(container.querySelector('.react-flow__edge')).toBeNull();
   });
 
-  it('剪刀删除经 onEdgesChange 上抛 remove 变更（受控模式下父级落状态）', async () => {
+  it('剪刀停稳 1 秒出现后单击，经 onEdgesChange 上抛 remove 变更（受控模式下父级落状态）', async () => {
     await renderCanvas();
     await vi.waitFor(() =>
-      expect(container.querySelector(`.${edgeStyles.deleteBtn}`)).not.toBeNull(),
+      expect(container.querySelector('.react-flow__edge')).not.toBeNull(),
+    );
+
+    // 指针进入连线：剪刀默认隐藏，需停稳满 1 秒才出现（真实计时器，放宽等待超时）
+    await act(async () => {
+      container
+        .querySelector(`.${edgeStyles.hitPath}`)!
+        .dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 }));
+    });
+    expect(container.querySelector(`.${edgeStyles.deleteBtnVisible}`)).toBeNull();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, DWELL_MS + 100));
+    });
+    await vi.waitFor(
+      () => expect(container.querySelector(`.${edgeStyles.deleteBtnVisible}`)).not.toBeNull(),
+      { timeout: 3000 },
     );
 
     await act(async () => {

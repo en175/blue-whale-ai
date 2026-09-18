@@ -5,15 +5,19 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, ChevronDown } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, Maximize2 } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { outpaintGateReason } from '../../imageOutpaint';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
+import { imageEraseGateReason } from '../../imageErase';
+import type { MaskOp, MaskPoint } from '../../eraseMask';
+import EraseMaskLayer from './EraseMaskLayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
@@ -110,6 +114,15 @@ interface MediaNodeData {
   pickMarked?: boolean;
   /** 视频选取会话中能力失效（如合规未通过）置灰 */
   pickBlocked?: boolean;
+  /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
+   *  CanvasPage 注入——棋盘格渲染数据与指针回调；仅正常图片内容区渲染 */
+  eraseEditing?: {
+    ops: readonly MaskOp[];
+    liveOp: MaskOp | null;
+    onStrokeStart: (point: MaskPoint) => void;
+    onStrokeMove: (point: MaskPoint) => void;
+    onStrokeEnd: () => void;
+  };
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -128,8 +141,10 @@ interface MediaNodeData {
   onGenImage?: (id: string) => void;
   /** 生成视频：打开视频对话框并带入图片 */
   onGenVideo?: (id: string) => void;
-  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线 */
+  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（「高清 ▾」下拉「高清」项派发） */
   onEnhanceImage?: (id: string) => void;
+  /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
+  onEraseImage?: (id: string) => void;
   /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
   onOutpaintImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
@@ -156,9 +171,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameError, setNameError] = useState('');
-  /** 「高清 ▾」下拉菜单（IKGOQX）：含「高清」（既有行为）与「扩图」两项 */
-  const [enhanceMenuOpen, setEnhanceMenuOpen] = useState(false);
-  const enhanceMenuRef = useRef<HTMLDivElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
@@ -194,19 +206,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
-
-  /** 「高清 ▾」菜单点外关闭（IKGOQX，交互模式参考 CanvasToolbar 弹出菜单：
-   *  点空白/点菜单外区域收起；再点按钮收起由 toggle 承担） */
-  useEffect(() => {
-    if (!enhanceMenuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (enhanceMenuRef.current && !enhanceMenuRef.current.contains(e.target as Node)) {
-        setEnhanceMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [enhanceMenuOpen]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -265,15 +264,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  /** 「高清 ▾」菜单（IKGOQX）：点「高清」行为与改造前完全一致；「扩图」按门槛预检置灰 */
-  const handleEnhanceImage = useCallback(() => {
-    setEnhanceMenuOpen(false);
-    data.onEnhanceImage?.(id);
-  }, [data, id]);
-  const handleOutpaintImage = useCallback(() => {
-    setEnhanceMenuOpen(false);
-    data.onOutpaintImage?.(id);
-  }, [data, id]);
+  const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
+  const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
+  const handleOutpaintImage = useCallback(() => data.onOutpaintImage?.(id), [data, id]);
   /** 扩图可用性预检（打开菜单时按当前源图快照判定）：置灰并悬停说明原因 */
   const outpaintDisabledReason = outpaintGateReason(
     typeof data.width === 'number' ? data.width : undefined,
@@ -315,6 +308,35 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
+  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
+   *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
+   *  「扩图」（IKGOQ0）按 outpaintGateReason 门槛预检置灰（插入高清与擦除之间的预留中间位） */
+  const qualityMenuItems: ImageQualityMenuItem[] = [
+    {
+      id: 'enhance',
+      label: '高清',
+      icon: Expand,
+      hint: '在右侧新建高清放大草稿卡',
+      disabledReason: null,
+      onSelect: handleEnhanceImage,
+    },
+    {
+      id: 'outpaint',
+      label: '扩图',
+      icon: Maximize2,
+      hint: '进入扩图模式，拖动边框向外扩展画面',
+      disabledReason: outpaintDisabledReason,
+      onSelect: handleOutpaintImage,
+    },
+    {
+      id: 'erase',
+      label: '擦除',
+      icon: Eraser,
+      hint: '涂抹或框选抹掉图中不要的内容',
+      disabledReason: imageEraseGateReason(data),
+      onSelect: handleEraseImage,
+    },
+  ];
   const isDraft = data.genStatus === 'draft';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
@@ -442,46 +464,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               <span>生成视频</span>
             </button>
           )}
-          {toolbar.enhanceImage && (
-            <div className={styles.menuWrap} ref={enhanceMenuRef}>
-              <button
-                className={styles.toolBtn}
-                onClick={() => setEnhanceMenuOpen((prev) => !prev)}
-                title="画面增强：高清放大 / 扩图"
-                data-testid="enhance-menu-btn"
-                aria-haspopup="menu"
-                aria-expanded={enhanceMenuOpen}
-              >
-                <Expand size={14} strokeWidth={2} />
-                <span>高清</span>
-                <ChevronDown size={12} strokeWidth={2} />
-              </button>
-              {enhanceMenuOpen && (
-                <div className={styles.menuPopup} role="menu" data-testid="enhance-menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.menuItem}
-                    onClick={handleEnhanceImage}
-                    title="在右侧新建高清放大草稿卡"
-                    data-testid="enhance-menu-enhance"
-                  >
-                    <span>高清</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    aria-disabled={!!outpaintDisabledReason || undefined}
-                    className={styles.menuItem}
-                    onClick={outpaintDisabledReason ? undefined : handleOutpaintImage}
-                    title={outpaintDisabledReason ?? '进入扩图模式，拖动边框向外扩展画面'}
-                    data-testid="enhance-menu-outpaint"
-                  >
-                    <span>扩图</span>
-                  </button>
-                </div>
-              )}
-            </div>
+          {toolbar.imageQuality && (
+            <ImageQualityMenu items={qualityMenuItems} />
           )}
           {data.mediaType === 'video' && (
             <button
@@ -641,14 +625,28 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             style={isSelect ? undefined : { pointerEvents: 'none' }}
           />
         ) : (
-          <img
-            className={styles.mediaImage}
-            src={data.src}
-            alt={data.fileName || 'image'}
-            draggable={false}
-            onLoad={handleImageLoad}
-            style={isSelect ? undefined : { pointerEvents: 'none' }}
-          />
+          <>
+            <img
+              className={styles.mediaImage}
+              src={data.src}
+              alt={data.fileName || 'image'}
+              draggable={false}
+              onLoad={handleImageLoad}
+              style={isSelect ? undefined : { pointerEvents: 'none' }}
+            />
+            {/* 擦除编辑态遮罩层（IKGOTB）：棋盘格渲染+指针接管，仅正常图片内容区叠加 */}
+            {data.eraseEditing && (
+              <EraseMaskLayer
+                ops={data.eraseEditing.ops}
+                liveOp={data.eraseEditing.liveOp}
+                displayWidth={contentBox.width}
+                displayHeight={contentBox.height}
+                onStrokeStart={data.eraseEditing.onStrokeStart}
+                onStrokeMove={data.eraseEditing.onStrokeMove}
+                onStrokeEnd={data.eraseEditing.onStrokeEnd}
+              />
+            )}
+          </>
         )}
         {isGenerating && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="regen-overlay">

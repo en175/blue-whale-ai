@@ -38,7 +38,6 @@ import java.util.concurrent.TimeUnit;
  * 分类逻辑统一复用 {@link NewApiErrorClassifier}（与图片/视频 client 同构，不再本地影子实现）。
  */
 @Component
-@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.AudioEnabledCondition.class)
 public class NewApiAudioClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiAudioClient.class);

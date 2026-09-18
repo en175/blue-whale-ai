@@ -20,15 +20,15 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 // 真 NestFactory 挂载生产 GenerationJobsController + AllExceptionsFilter（与 app.module 的
 // APP_FILTER 同款，保证「code、msg、HTTP 状态同出一张码表」的生产投影被测到）+ 隔离 MySQL
 // （IKG57P_DATABASE_URL 门控）。断言口径 = IKE5G8 实现决定 7.1/7.2/7.4：提交被拒、不创建
-// 任务、规格文案指出具体失效索引 #N、状态行与信封一致。
+// 任务、状态行与信封一致。
+// IKG6EK / ADR-0088：prompt_doc 退役后，缺失素材不再按 doc 声明细化「索引 #N」文案，
+// 统一走通用信封「参考素材不存在或无权访问」。
 describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
   "Generation job soft-deleted asset rejection (IKG57P)",
   () => {
     const prisma = new PrismaService();
     const projects = new ProjectService(prisma);
     const MODEL_ID = "ikg57p-image-model";
-    const MISSING_REF_MSG =
-      "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成";
     let app: Awaited<ReturnType<typeof NestFactory.create>>;
     let base = "";
     const previousDatabase = process.env.DATABASE_URL;
@@ -155,7 +155,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
       });
     }
 
-    it("正文标签引用的素材软删 → HTTP 400 与信封一致，规格 7.2 文案 + 索引 #N，不创建任务", async () => {
+    it("正文标签引用的素材软删 → HTTP 400 与信封一致，通用文案拒单，不创建任务", async () => {
       const projectId = (await projects.create("987654", "IKG57P soft-delete ref")).id;
       const assetId = await createAsset();
       await prisma.client.assets.update({
@@ -184,7 +184,8 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         data: unknown;
       };
       expect(body.code).toBe(400);
-      expect(body.msg).toBe(`索引 #1：${MISSING_REF_MSG}`);
+      // IKG6EK / ADR-0088：prompt_doc 退役后不再按 doc 声明细化索引文案，统一走通用信封
+      expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
     });
 

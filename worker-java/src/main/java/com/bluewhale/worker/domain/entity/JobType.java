@@ -11,7 +11,7 @@ public enum JobType {
     /** 图片生成（tag=image，Semaphore 20）。 */
     IMAGE("image"),
 
-    /** 视频生成（tag=step，顺序派发）。 */
+    /** 视频生成（tag=video，顺序派发）。 */
     VIDEO("video"),
 
     /** TTS 音频生成（tag=audio，Semaphore 5）。 */
@@ -22,6 +22,9 @@ public enum JobType {
 
     /** 高清放大（tag=image_enhance，契约 §14 / IKGM8U；消费者与处理器由 IKGM9D 按附录 C 触点注册）。 */
     IMAGE_ENHANCE("image_enhance"),
+
+    /** 图片擦除（tag=image_erase，契约 §15 / IKGOT3；消费者与处理器由 IKGOT6 按附录 C 触点注册）。 */
+    IMAGE_ERASE("image_erase"),
 
     /** 智能扩图（tag=image_outpaint，IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts；
      *  规格见 docs/specs/2026-09-18-image-outpaint-mediakit.md；消费者与处理器由后续票按附录 C 触点注册）。 */

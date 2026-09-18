@@ -529,9 +529,27 @@ async function renderPromptNode() {
   });
 }
 
+/** 非方案来源的素材标签节点（!734/IKG99G 起方案来源卡不再渲染素材下拉——素材由方案同步，
+ *  手动替换/新增素材标签的用例须落在非方案卡上才有下拉可点）。 */
+async function renderManualMentionNode() {
+  return renderNode({
+    text: '看这张素材#1中间素材#2结尾',
+    promptMentions: [
+      { start: 3, end: 7, assetId: 'a1', index: 1 },
+      { start: 9, end: 13, assetId: 'a2', index: 2 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+}
+
 /** 点选指定素材标签后，在节点操作条点对应按钮（非编辑态入口） */
-async function clickNodeBarButton(label: string) {
-  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
+async function clickNodeBarButton(label: string) {  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
   await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 }
 
@@ -547,7 +565,7 @@ it('非编辑态删除素材标签后，进入编辑光标落被删标签原位�
 });
 
 it('非编辑态替换素材标签后，进入编辑光标落替换后标签后', async () => {
-  const { editor } = await renderPromptNode();
+  const { editor } = await renderManualMentionNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   const select = container.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
@@ -562,7 +580,7 @@ it('非编辑态替换素材标签后，进入编辑光标落替换后标签后'
 });
 
 it('非编辑态新增素材标签后，进入编辑光标落新标签后', async () => {
-  const { editor } = await renderPromptNode();
+  const { editor } = await renderManualMentionNode();
   const select = container.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
   await act(async () => {
     select.value = 'a1';

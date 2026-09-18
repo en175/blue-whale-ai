@@ -25,7 +25,9 @@ export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
  *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials）；
  *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带）；
  *  textNodeId（IKFM3W 契约 §10）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），
- *  值为来源文本卡 id。 */
+ *  值为来源文本卡 id。
+ *  planNodeId（IKG99G）：该参考由生成卡（promptSource）经后端方案同步建素材边带入，
+ *  值为来源生成卡 id；展示层据此过滤，参数推导仍全量。 */
 export interface VideoMediaRef {
   nodeId: string;
   url: string;
@@ -35,6 +37,7 @@ export interface VideoMediaRef {
   materialId?: string;
   duration?: number;
   textNodeId?: string;
+  planNodeId?: string;
 }
 
 /** 目标视频草稿的分组参考：首帧/尾帧各至多一项（连线时校验，推导时防御性取首条） */
@@ -224,6 +227,11 @@ export function videoMediaRefsOf(
         : isMaterialLibraryId(assetId)
           ? assetId
           : undefined;
+    // IKG99G：标记生成卡经后端方案同步建素材边带入的参考（manual=false 且 planNodeIds 非空）
+    const inputSources = (edge.data as { inputSources?: { manual?: boolean; planNodeIds?: string[] } } | undefined)?.inputSources;
+    const planNodeId = inputSources && inputSources.manual === false && Array.isArray(inputSources.planNodeIds) && inputSources.planNodeIds.length > 0
+      ? inputSources.planNodeIds[0]
+      : undefined;
     const item: VideoMediaRef = {
       nodeId: source.id,
       url: data.src as string,
@@ -232,6 +240,7 @@ export function videoMediaRefsOf(
       mediaType: data.mediaType as 'image' | 'video' | 'audio',
       materialId,
       duration: typeof data.duration === 'number' && data.duration > 0 ? data.duration : undefined,
+      planNodeId,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;

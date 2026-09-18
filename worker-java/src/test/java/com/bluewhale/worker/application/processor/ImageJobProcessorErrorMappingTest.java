@@ -196,6 +196,44 @@ class ImageJobProcessorErrorMappingTest {
         verifyFailWithCode(GenerationError.ERROR_NO_RESULT);
     }
 
+    // ========== IKGS73：成功路径的 md5 透传 ==========
+    //
+    // 放在本类而不是新建测试类：走到 createAsset 所需的 stub 链（claim / capability / credential /
+    // provider）全在这里，另起一个类要么复制这套 helper、要么把它抽成共享基类，代价都比收益大。
+    // 本类名里的「ErrorMapping」因此不再完全准确——但测试的归属该由 stub 复杂度决定，不由类名决定。
+
+    @Test
+    @DisplayName("G40: 成功路径把 TOS 出口的 md5 透传进 createAsset（IKGS73）")
+    void successCarriesMd5() {
+        Map<String, Object> input = new HashMap<>(Map.of(
+                "prompt", "hello", "model_id", "gpt-image-1",
+                "provider_credential", "sealed-token"));
+        mockClaim(input);
+
+        GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
+        when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
+        when(credentialService.open("sealed-token")).thenReturn("token");
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                .thenReturn(List.of(new GeneratedImage(
+                        null, "abc".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        "image/png", 1, 1, "req-1")));
+        when(tosService.uploadImageBytes(any(), anyString(), anyString()))
+                .thenReturn(new TosMediaStorage.UploadResult(
+                        "https://tos/i.png", "uploads/1/image/i.png", "image/png", 3L,
+                        "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.createAsset(any())).thenReturn("a1");
+
+        processor.handle("100");
+
+        // image 是生成量最大的类型，而它的 createAsset 入参此前没有任何断言——md5 在这一层
+        // 被吞掉时全套测试仍然绿。这条把它钉住。
+        ArgumentCaptor<JobStateMachineService.CreateAssetInput> captor =
+                ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
+        verify(stateMachine).createAsset(captor.capture());
+        assertThat(captor.getValue().md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+    }
+
     // ========== 瞬态重试（:705-725） ==========
 
     @Test

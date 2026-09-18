@@ -3,15 +3,15 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
 import { apiRequest, isApiError, type ApiError } from './http';
-import type { PromptDoc } from '@/lib/prompt-doc';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
+import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取、高清放大与智能扩图任务（IKGM9O / IKGOR6）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_outpaint';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除与智能扩图任务（IKGM9O / IKGOT8 / IKGOR6）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -96,7 +96,7 @@ export interface AudioJobParameters {
 /** POST /api/projects/:id/generation-jobs 请求体 */
 export interface CreateJobPayload {
   type: GenerationJobType;
-  /** 输入参考资产ID列表（image 图片参考 / audio 参考音频；后端兼容字符串） */
+  /** 旧参考字段（图片曾用）；新提交走 references，与视频/音频对齐 */
   input_asset_ids?: (string | number)[];
   /** 期望生成数量 */
   expected_output_count: number;
@@ -114,17 +114,16 @@ export interface CreateJobPayload {
   /** 素材库参考素材（仅 video）：[{ id: "Asset-xxx", type: "image" | "video" }]；与首尾帧模式互斥 */
   reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
   /**
-   * 视频生成参考单数组（保序，与旧参考字段互斥）。
+   * 图/视频/音频生成参考单数组（保序，与旧参考字段互斥）。
    * 每项 asset_id（本地）与 material_id（素材库 asset- 前缀）二选一。
+   * 图片/音频 role 恒 reference；视频可含 first_frame / last_frame。
    */
   references?: GenerationRefItem[];
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
-  /** 正文素材标签结构（IKFA1M，仅 image）：服务端按真实输入顺序编译并冻结原始结构；纯文本不携带 */
-  prompt_doc?: PromptDoc;
 }
 
-/** 生成任务参考项（视频 references 契约） */
+/** 生成任务参考项（图/视频/音频 references 契约） */
 export interface GenerationRefItem {
   role: 'first_frame' | 'last_frame' | 'reference';
   type: 'image' | 'video' | 'audio';
@@ -258,6 +257,33 @@ export function createImageEnhancement(
 ): Promise<ImageEnhancementCreatedData> {
   return apiRequest<ImageEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/image-erasures 请求体（键名与 backend/libs/contracts/image-erase.ts 契约恒等；
+ *  按场景三键/四键，IKGOT4 创建入口 strict zod 复核）。
+ *  涂抹遮罩 PNG 已先经 uploadAssetFile 落库（source=mask_erase，资产列表不可见）取得 mask_asset_id。 */
+export type CreateImageErasePayload = ImageEraseInput;
+
+/** 创建图片擦除任务返回（IKGOTB）；同高清放大：入队失败创建响应仍 200、任务随即 enqueue_failed 经轮询呈现。 */
+export interface ImageEraseCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不带幂等头、无积分预估、不走余额拦截门。
+ *  擦除结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+export function createImageErase(
+  projectId: string,
+  payload: CreateImageErasePayload,
+): Promise<ImageEraseCreatedData> {
+  return apiRequest<ImageEraseCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

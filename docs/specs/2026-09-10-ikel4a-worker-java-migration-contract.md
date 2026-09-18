@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -23,10 +23,10 @@
 
 | 项 | 值 | 出处 |
 |---|---|---|
-| topic | `generation-video`（env `ROCKETMQ_TOPIC` 可覆盖） | `queue.constants.ts` / `video-queue.ts:43` |
-| tags | `step`(video) / `image` / `audio` / `media_extract` / `image_enhance`（§14） | `queue.constants.ts` |
-| TS 消费者组 | `generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker`（各 env 可覆盖） | 4 个 consumer `:28-85` |
-| Java 消费者组 | 同名 + `-java` 后缀；同一 tag 同一时刻仅一侧在消费（停一开一 = 灰度/回滚开关） | ADR-0084 决策 4 |
+| topic | `generation-task`（**修正六：由 `generation-video` 更名**）。**两侧都没有 env 覆盖**：topic 是编译期常量——生产侧（`backend`）单处来自 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`loadRocketMqConfig` 只绑连接参数，`createRocketMqVideoProducer` 直接读该常量）；消费侧（`worker-java`）单处来自 `GenerationMqRoute` 枚举。`ROCKETMQ_TOPIC` 在两侧都无绑定目标，部署环境里残留 `ROCKETMQ_TOPIC=generation-video` 在两侧都被静默忽略 ⇒ **没有任何运行时途径把消息投到旧名** | `queue.constants.ts` / `video-queue.ts`（`loadRocketMqConfig` / `createRocketMqVideoProducer`）/ `GenerationMqRoute` |
+| tags | `video`（**修正六：由 `step` 更名**，语义仍为视频多步任务）/ `image` / `audio` / `media_extract` / `image_enhance`（§14）/ `image_erase`（§15）——6 个 tag 由同一 topic 承载，**服务启动即全部消费，无按 tag 启停开关**（§16） | `queue.constants.ts` |
+| TS 消费者组 | **已退役**：TS worker 应用在 `release/2026.09.15` 整目录删除（`1312c474`，PR !636），组名现由 Java 侧独占（§16） | 4 个 consumer `:28-85`（删除前基线） |
+| Java 消费者组 | 全为**字面量**（修正六：`-java` 后缀与 `WORKER_GROUP_SUFFIX` 退役，无 env 覆盖）：`generation-extract-worker` / `generation-audio-worker` / `generation-image-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker` / `generation-video-worker` | ADR-0084 修正六决策 3/4 |
 | 消息体 | **恒为 `{"jobId":"<字符串>"}`**，无其他字段、无类型判别、无重试计数 | `video-queue.ts:57-59` |
 | 投递类型 | **全部 DELAY 消息**，delay 下限 1000ms（0 也按 1000） | `video-queue.ts:60`、`VIDEO_MIN_DELAY_MS:17` |
 | 拉取 | `receive(10, 30_000)`（batch=10，不可见 30s） | 4 consumer |
@@ -37,8 +37,8 @@
 ## 2. 生成负载字段与状态枚举
 
 - `generation_jobs.status` 合法值（VarChar(32)）：`queued` / `processing` / `succeeded` / `partially_succeeded` / `failed` / `cancelled`。**`partially_succeeded` 由 slot 聚合改写产生**（`settle-ops:104-121`），双端对账不可漏。
-- `generation_jobs.type`：`image` / `video` / `audio` / `media_extract` / `image_enhance`（§14）。`processClaimedJob` 仅收 image/video/audio，其余 `ERROR_UNSUPPORTED_TYPE`（`generation-worker.ts:287`）。
-- 领取 source 白名单：image/audio 共用 `CLAIMABLE_JOB_SOURCES = [bottom_dock, plan_apply, storyboard_preview]`（`-internals.ts:12-16`）；video 硬编码 `[bottom_dock, plan_apply, plan, scene_card]`（`claim-ops:139,261`）；**media_extract / audio claim-by-id 不过滤 source**；image_enhance 白名单仅 `[image_enhance]`（§14.1，唯一入口 = 画布图片卡工具条）。
+- `generation_jobs.type`：`image` / `video` / `audio` / `media_extract` / `image_enhance`（§14）/ `image_erase`（§15）。`processClaimedJob` 仅收 image/video/audio，其余 `ERROR_UNSUPPORTED_TYPE`（`generation-worker.ts:287`）。
+- 领取 source 白名单：image/audio 共用 `CLAIMABLE_JOB_SOURCES = [bottom_dock, plan_apply, storyboard_preview]`（`-internals.ts:12-16`）；video 硬编码 `[bottom_dock, plan_apply, plan, scene_card]`（`claim-ops:139,261`）；**media_extract / audio claim-by-id 不过滤 source**；image_enhance 白名单仅 `[image_enhance]`（§14.1，唯一入口 = 画布图片卡工具条）；image_erase 白名单仅 `[image_erase]`（§15.1，唯一入口 = 画布图片卡工具条「擦除」）。
 - **死列（不迁移、不参与对账）**：`evidence_reconcile_until`、`execution_deadline_at`（全仓无读写）；`next_poll_at`（写但领取用 `next_action_at`，疑似遗留）；`assets.content_sha256`（schema 有、代码从不写）。
 
 ## 3. claim / 租约 / 终态写入（**移植规格**——修正二：Java 逐条实现 + 金标套件对账；刀切换前写入权威仍是 TS）
@@ -98,7 +98,7 @@
 
 ## 7. recovery / asset-GC（**recovery 归 Java（IKF3AT）；asset-GC 留 TS**）
 
-- recovery（60s）：**Java `RecoveryService` 实现**（TS `recovery.service.ts:38-106` 逐字移植；`@Scheduled` + 启动即扫一次）。`listDue*JobIds`（批 100）选 `next_action_at<=now` 且（`queued` ∨ `processing 且租约空/过期`）；source 白名单：video=4 源、image=CLAIMABLE_JOB_SOURCES、audio/media_extract 不套白名单；重发同 body 延迟 1s。**窗口：创建 2 小时内**（用户 2026-09-11 指示，TS 的 24h 改 2h；env `RECOVERY_MAX_AGE_MINUTES` 可覆盖，默认 120）。**开关**：只对 `WORKER_ENABLED_TAGS` 内 tag 重投（生产者 bean 带 @Conditional，缺失即跳过）；TS 侧 recovery 同时在跑时重复投递无害（claim-by-id CAS + null-claim ack 幂等）。**不移植** `resetStalledImageJobs`——TS 侧无活调用方（死代码），孤儿由 claim-by-id 的「processing + 租约过期可接管」语义接走。→ **TS 进程退役不再阻塞**。
+- recovery（60s）：**Java `RecoveryService` 实现**（TS `recovery.service.ts:38-106` 逐字移植；`@Scheduled` + 启动即扫一次）。`listDue*JobIds`（批 100）选 `next_action_at<=now` 且（`queued` ∨ `processing 且租约空/过期`）；source 白名单：video=4 源、image=CLAIMABLE_JOB_SOURCES、audio/media_extract 不套白名单；重发同 body 延迟 1s。**窗口：创建 2 小时内**（用户 2026-09-11 指示，TS 的 24h 改 2h；env `RECOVERY_MAX_AGE_MINUTES` 可覆盖，默认 120）。**开关**：无（修正六后 producer bean 无条件装配，6 个 tag 全部重投；原「只对 `WORKER_ENABLED_TAGS` 内 tag 重投、生产者 bean 带 @Conditional」机制已退役，见 §16）；TS 侧 recovery 同时在跑时重复投递无害（claim-by-id CAS + null-claim ack 幂等）。**不移植** `resetStalledImageJobs`——TS 侧无活调用方（死代码），孤儿由 claim-by-id 的「processing + 租约过期可接管」语义接走。→ **TS 进程退役不再阻塞**。
 - asset-GC（1h）：`is_delete AND deleted_at<cutoff`（批 1000，延迟默认 7 天）→ live-ref 反查（`storage_key IN(...) AND is_delete=false`）→ 差集 `deleteMultiObjects`（404 视为幂等成功；partial Error 抛出）→ `deleteMany` → `operation_logs` 审计。
 
 ## 8. 资产 / TOS / 媒体处理等价标准
@@ -280,7 +280,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 - **ClaimedJob 是单概念**：领取投影 = 公共核心（身份 / input / 租约凭证 / 取消信号）+ 媒体 payload 扩展。现状 `ClaimedJobDto` / `ClaimedVideoJobDto` / `ClaimedMediaExtractJobDto` 三胞胎收敛为公共核心 + payload 形态（刀④落地）；新类型是加 payload，不是投影分叉。
 - **生命周期一套**：claim / complete / fail / publish（含 progress 心跳变体）按类型注册参数化实现；禁止按类型复制方法三元组。
-- 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：同名 + `-java`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
+- 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：group = `generation-<type>-worker` **字面量**，修正六后无后缀、无 env 覆盖）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
 - 新类型的 TS 侧字段与终态语义（§1/§3/§8）仍是对账权威：跨进程字段先在本附录契约定死后，TS、Java 双端才实现（红线：契约先行）。
 
 ## 14. 冻结增量（2026-09-17，IKGM8U）：image_enhance（高清放大）跨进程字段冻结
@@ -296,10 +296,10 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 | 项 | 值 | 说明 |
 |---|---|---|
 | `generation_jobs.type` | `image_enhance` | VARCHAR(32) 自由字符串，无 DB 迁移 |
-| RocketMQ tag | `image_enhance` | tag=type 口径同既有四类；复用 topic `generation-video` |
+| RocketMQ tag | `image_enhance` | tag=type 口径同既有四类；复用 topic `generation-task`（修正六更名） |
 | 任务来源 `source` | `image_enhance` | 唯一创建入口 = 画布图片卡工具条「高清放大」（media_extract 的 source=`dock` 同款专属来源值模式） |
 | claim source 白名单 | `source IN ('image_enhance')` | 单源白名单（image 是多入口才多值）；IKGM9D 落领取 SQL |
-| 消费者组 | `generation-image-enhance-worker` + groupSuffix | 附录 C 触点①命名规则 |
+| 消费者组 | `generation-image-enhance-worker`（字面量，修正六后无 groupSuffix） | 附录 C 触点①命名规则 |
 | 免费口径 | 无成本预留 / 无 provider 行 / 无素材合规门 / 无余额拦截 | 同 media_extract（IKARDY 先例）；本期网关 model_price 配 0 |
 | 错误码兜底 | `image_enhance_failed` → 数值 `1039` | `error-codes.ts` `ERROR_IMAGE_ENHANCE_FAILED`；无 worker 级自动重试 |
 
@@ -335,4 +335,89 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 - **本票（IKGM8U）已落**：JobType 枚举项、ImageEnhanceContract 常量类、TS 契约常量与 zod schema、错误码 `image_enhance_failed`(1039)、queue.constants tag、README 灰度 tag 列表登记、本节冻结。
 - **IKGM99（创建入口）**：backend 轻量创建路径（仿 media-extractions.service.ts：直接 insert，source=`image_enhance`，next_action_at 回拨 60s 口径）+ 参数复核（版本档枚举、倍数 ∈ 2/4/6、能力矩阵、源素材归属与媒体类型、源图尺寸门槛）+ producer 入队函数（tag=`IMAGE_ENHANCE_TAG`）。
-- **IKGM9D（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量；② Consumer 配置子类（`ImageEnhanceEnabledCondition`）；③ `ImageEnhanceJobProcessor`（MediaKit 客户端 + §14.5 编排）；④ claim 领取 SQL（type+source 白名单）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例。`GenerationTagsCondition` / `MediaStorageTagsCondition` 需把 `image_enhance` 纳入启用判定（MediaKit 客户端与 TOS 转存均依赖）。
+- **IKGM9D（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量；② Consumer 配置子类（`ImageEnhanceEnabledCondition`）；③ `ImageEnhanceJobProcessor`（MediaKit 客户端 + §14.5 编排）；④ claim 领取 SQL（type+source 白名单）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例。`GenerationTagsCondition` / `MediaStorageTagsCondition` 需把 `image_enhance` 纳入启用判定（MediaKit 客户端与 TOS 转存均依赖）。**（修正六：全部 `*EnabledCondition` 与 `TagsEnabledConditions` 已随标签开关退役删除，本句的启用判定不再适用——consumer / processor / 客户端 bean 现无条件装配。）**
+
+## 15. 冻结增量（2026-09-18，IKGOT3）：image_erase（图片擦除）跨进程字段冻结
+
+第 6 个生成类型（附录 C 预告位）。需求规格 = `docs/specs/2026-09-18-image-erase-mediakit.md`，术语 = 根 `CONTEXT.md`「画布图片擦除」，取舍 = `docs/adr/0094-image-erase-mediakit.md`。本节是 image_erase 跨进程字段的**唯一事实源**：后续创建入口票（IKGOT4）、worker 执行票（IKGOT6）、前端票一律照抄本节与常量落点，**不得另行发明字段名**。常量落点（双端各一处，防漂移断言对账）：
+
+- TS 侧：`backend/libs/contracts/image-erase.ts`（含 zod schema）；MQ tag 复用 `queue.constants.ts` 的 `IMAGE_ERASE_TAG`
+- Java 侧：`worker-java/src/main/java/com/bluewhale/worker/domain/entity/ImageEraseContract.java` + `JobType.IMAGE_ERASE` 枚举项
+- 防漂移断言：`backend/libs/contracts/image-erase.test.ts` 读 Java 源码文本与 TS 常量逐值对账（沿用 image-enhance.test.ts 同源断言模式），任一侧漂移即红
+- 供应商接口 = 火山引擎 AI MediaKit「提交图像擦除修复任务 API」（同步，`POST /api/v1/tools-sync/erase-image`；本仓经 new-api 网关调用，对客模型名 `mediakit-erase-image`）。**参数名以官方 PDF 为准**（出处逐条标注在契约常量注释），禁止引用二手信息。
+
+### 15.1 任务类型 / MQ / 来源
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `generation_jobs.type` | `image_erase` | VARCHAR(32) 自由字符串，无 DB 迁移 |
+| RocketMQ tag | `image_erase` | tag=type 口径同既有五类；复用 topic `generation-task`（修正六更名） |
+| 任务来源 `source` | `image_erase` | 唯一创建入口 = 画布图片卡工具条「擦除」（同 §14.1 专属来源值模式） |
+| claim source 白名单 | `source IN ('image_erase')` | 单源白名单；IKGOT6 落领取 SQL |
+| 消费者组 | `generation-image-erase-worker`（字面量，修正六后无 groupSuffix） | 附录 C 触点①命名规则 |
+| 免费口径 | 无成本预留 / 无 provider 行 / 无素材合规门 / 无余额拦截 | 同 media_extract / image_enhance 先例；本期网关 model_price 配 0 |
+| 错误码兜底 | `image_erase_failed` → 数值 `1040` | `error-codes.ts` `ERROR_IMAGE_ERASE_FAILED`；无 worker 级自动重试 |
+
+### 15.2 input 冻结键名（业务键按场景三/四键恒在、值恒为合法枚举，strict 无多余键）
+
+| 键名 | 类型 / 取值 | 语义 |
+|---|---|---|
+| `source_asset_id` | string（Asset id，非 `0` 开头数字串） | 源素材身份：被擦除的图片 Asset（命名沿用 media_extract） |
+| `target_node_id` | string（非空） | 目标节点身份：画布擦除结果卡 node id；**擦除是发送时才建卡**（区别于高清放大的草稿卡先行），node id 由前端生成传入；前端回填结果定位用，worker 不消费画布拓扑 |
+| `erase_scene` | `"full_screen_text_erase" \| "selected_area_erase"` | 擦除场景（取值与火山 API 参数 `standard_scene` 同名同值）；本期两值，`full_screen_icon_erase` / 指定文字擦除为范围外（枚举可扩展、不预写值） |
+| `mask_asset_id` | string（Asset id，非 `0` 开头数字串） | 遮罩素材身份（前端栅格化的黑白遮罩 PNG 经资产上传链路取得）：`selected_area_erase` **必填**、`full_screen_text_erase` **禁填**（zod discriminatedUnion 分支强制） |
+
+**基础设施键 `provider_credential`**：业务键之上由创建侧冻结落库（同 §14 image_enhance 口径，!719 审查 P0 教训：凭证必须冻进 input，worker 消费端校验 `provider_credential_missing`），不进契约 zod。
+
+### 15.3 场景出站映射与固定参数（单处定义、双端同源；文档出处 = 官方 PDF Body 参数节）
+
+- `tool_version`：**固定 `standard`**（文档明示当前仅支持 standard，无档位可选，区别于高清放大三档映射）。
+- `standard_scene`：取 `erase_scene` 同值透传。
+  - `full_screen_text_erase`：**不传**遮罩与 `standard_erase_text`（擦所有文字，文档默认行为）。
+  - `selected_area_erase`：**只传 `mask_url`**（遮罩素材公网地址；统一遮罩路径支持多框多笔并集），**不传** `selected_area` 矩形（文档允许两者并传擦并集，本仓不依赖该组合）。
+- `output_format`：**固定 `png`**（文档默认 webp；取 png 保证结果卡可二次擦除/扩图/高清放大）。
+- 遮罩硬性要求（文档）：黑白遮罩任意形状区域，**分辨率必须与源图 `image_url` 一致**——前端按源图自然分辨率栅格化（IKGOT8）。
+
+### 15.4 输入限制常量（文档出处 = 官方 PDF `image_url` 参数「图像输入分辨率 / 文件大小 / 支持格式」节）
+
+| 常量（TS / Java 同值） | 值 | 口径 |
+|---|---|---|
+| `IMAGE_ERASE_MAX_WIDTH_PX` / `MAX_INPUT_WIDTH_PX` | `2560` | 分辨率不得超过 2560x1440（宽x高） |
+| `IMAGE_ERASE_MAX_HEIGHT_PX` / `MAX_INPUT_HEIGHT_PX` | `1440` | 同上 |
+| `IMAGE_ERASE_MIN_SIDE_PX` / `MIN_INPUT_SIDE_PX` | `10` | 分辨率不得小于 10x10（文档有下限，同样入常量防两端漂移） |
+| `IMAGE_ERASE_MAX_FILE_BYTES` / `MAX_INPUT_FILE_BYTES` | `10 * 1024 * 1024` | 单张图片不得超过 10 MB |
+| `IMAGE_ERASE_INPUT_FORMATS` / `SUPPORTED_INPUT_FORMATS` | `png / jpg / jpeg / heic` | 格式白名单（**不含 webp/gif**，前端门槛置灰与后端复核同源） |
+
+消费方 = backend 创建入口复核（IKGOT4，超尺寸/超格式拒，**宽高缺失（存量图 null）放行**交供应商按官方门槛拒）+ web 菜单门槛预检（IKGOT7，import 契约常量做展示层判断）；worker-java 不做门槛复核（镜像常量仅对账用）。
+
+### 15.5 结果回填约定
+
+- **成功**：worker 调网关同步路由 `POST {NEW_API_BASE_URL}/v1/mediakit/sync/erase-image`（对客模型名 `mediakit-erase-image`，鉴权同 §14.5：任务冻结的用户 sk- + `X-Trace-Id`）→ 网关原样透传上游响应（`result.image_url` 同步返回，几秒级）→ **立即下载结果图（URL 仅 24h 有效）** → 落对象存储公开读 → 建 Asset（`type='image'` / `source='generated'` / `generation_job_id`，宽高按 §8 图像元数据等价标准）→ 终态 `succeeded`（`output_asset_ids`，免费工具无结算联动，同 §14.5 形态）→ 前端经 `GET /api/jobs/:id` 拿 Asset，按 `target_node_id` 回填擦除结果卡（源卡不动；结果卡 png 可再次擦除/扩图/高清放大）。
+- **失败**：调用失败 / 超时 / 供应商错误统一终态 `failed` + `error={code,message}` 走既有错误码投影（兜底 `image_erase_failed`；额度/内容政策信号识别沿用 §5）；**不提供自动重试**（同步接口不支持中途取消），用户在结果卡手动重试，沿用冻结 input。
+
+### 15.6 注册触点与工单分工（附录 C 清单的 image_erase 实例化）
+
+- **本票（IKGOT3）已落**：JobType 枚举项、ImageEraseContract 常量类、TS 契约常量与 zod schema、错误码 `image_erase_failed`(1040)、queue.constants tag、本节冻结。
+- **IKGOT4（创建入口）**：backend 轻量创建路径（仿 image-enhancements：凭证冻结六段式——sk- 必须冻进 input.provider_credential，双侧都验；source=`image_erase`）+ 参数复核（契约 zod、场景枚举、mask_asset_id 条件约束、源素材/遮罩归属校验、§15.4 门槛复核含宽高 null 放行）+ producer 入队函数（tag=`IMAGE_ERASE_TAG`）+ 入队失败回拨标记失败（`enqueue_failed` 终态口径）。
+- **IKGOT6（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量（`generation-image-erase-worker`）；② Consumer 配置子类；③ `ImageEraseJobProcessor`（MediaKit 客户端 ERASE_PATH + §15.3 场景映射 + §15.5 编排）；④ claim 领取 SQL（type+source 白名单，复用 `findCandidateByTypeAndSources` 参数化）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例。`GenerationTagsCondition` / `MediaStorageTagsCondition` 需把 `image_erase` 纳入启用判定（MediaKit 客户端与 TOS 转存均依赖）；README 灰度 tag 列表登记；任务来源白名单登记。**（修正六：全部 `*EnabledCondition` 与 `TagsEnabledConditions` 已删除、README「灰度开关」章节已改为「启动契约」，这两项登记动作随标签开关退役；任务来源白名单登记仍有效。）**
+
+## 16. 修正六（2026-09-18）：退役标签开关与命名对齐（工单 IKEL4A）
+
+背景：迁移收口后复盘发现，「按 tag 灰度开关」这套机制的存在理由已经消失，而它的默认值（空 = 什么都不消费）反而制造了一个静默故障形态——`WORKER_ENABLED_TAGS` 为空时 6 个 consumer bean 整只不装配、DataSource 退化为 Stub，而 `/ready` 仍返回 `{"status":"ready"}`，「这个实例什么都不消费」**没有任何报警途径**。决策者判定「启动还得配环境变量」不符合逻辑，据此重开决策；权威文本 = [ADR-0084](../adr/0084-generation-worker-java-runtime.md)「修正六」，本节与其同批落定。**本节取代 §1 表、§7 recovery 开关句、附录 C 触点①、§14.1 / §15.1 消费者组行中所有关于标签开关与 `-java` 后缀的描述**（正文已同步修订，旧段落保留作取证）。
+
+**决策**
+
+1. **退役 `WORKER_ENABLED_TAGS` 本体**：删除 6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`application.yml` 中的 `worker.enabled-tags` 映射、`Dockerfile` 中的 `ENV WORKER_ENABLED_TAGS=""`、`ReadyController` 的 `enabledTags` 字段；consumer / processor / 客户端 bean **全部无条件装配**。**服务启动即消费全部 6 个 tag**（§1 表）。
+2. **默认语义从「安全拉起」翻转为「缺配置即失败」**：启动即要求 MQ（`ROCKETMQ_ENDPOINTS`）、DB（`DATABASE_URL`）、上游网关（`NEW_API_BASE_URL`）、TOS（`VOLC_*`）**四套**配置齐备，缺任一项由 bean 装配抛出并终止启动（`NEW_API_BASE_URL` 与其余三套同属硬门槛：5 个网关客户端 audio / image / image_enhance / image_erase / video 全部无条件装配，构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`）。取代原「空 tags → 不连 MQ 不连 DB，只起 `/ready`」形态——该形态把「忘记配置」与「故意只探活」压成同一个状态，是本次修复的核心动因。
+3. **命名对齐**：topic `generation-video` → `generation-task`；tag `step` → `video`。生产侧与消费侧**必须在同一次发布内原子切换**：中间态不报错，只是消息无人消费（由 recovery 兜底，`RECOVERY_MAX_AGE_MINUTES` 默认 120）。**两侧取值来源相同——都是编译期常量，都没有 env 覆盖**：生产侧（`backend`）`video-queue.ts` 的 topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`createRocketMqVideoProducer` 直接取该常量，`loadRocketMqConfig` 只绑连接参数），tag 由六个入队函数各传各自常量；消费侧（`worker-java`）topic / tag 单处来自 `GenerationMqRoute` 枚举（`VideoConsumer.TAG`、`VideoJobProcessor.tag()` 都转发该枚举），`RocketMqConfig` 只绑连接参数。`ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 在两侧都无绑定目标、残留值被静默忽略，故不再存在「生产者被指回旧名」这条静默滞留途径；剩下的错配只可能来自两侧部署了不同版本的镜像。
+4. **退役 `WORKER_GROUP_SUFFIX`**：group 名回落为字面量 `generation-<type>-worker`（原 `generation-<type>-worker-java`）。位点绑定在 `(group, topic)` 上，topic 更名后新 topic 的位点本就从零开始，故本次是**唯一的零重放风险窗口**；错过此后每次改 group 名都需处理位点。前置：确认旧 TS worker 容器已停——否则 Java 与该进程落入同名 group，消息被分流。
+5. **topic 粒度保持单 topic，不按任务类型拆分**：隔离已在 consumer group 层取得（每个 tag 一个 group、一个 Semaphore、一条 receive 线程），重试队列/死信、并发度、扩缩容粒度均已独立；拆 topic 只增益位点重置/配额/按类积压可观测，对资源隔离无贡献。
+6. **`GET /ready` 只返回 `{"status":"ready"}`**：`enabledTags` 与 `consumerGroupSuffix` 两个字段随开关退役删除（运维事实源从「读数组」变回「进程活着即全部 tag 在消费」）。
+
+**被否决的备选**（同 ADR-0084 修正六）：每种任务一个独立 topic；按消费形态拆 3 个 topic；保留开关但反转默认值（空 = 全量）；保留默认全关、只把 `/ready` 改为非 ready。
+
+**未闭合 / 上线前置（运维）**
+
+- 风险 ③（火山流水线对 Java 镜像的构建部署支持）与 ⑥（刀②③④ 被 IKEF1K gate）在本修正后**仍未闭合**；TS 容器下线无任何记录，登记为**新风险 ⑧**。
+- 上线前置项（两项，与 ADR-0084 修正六 决策 7 同口径）：① broker 上已存在**可路由**的 topic `generation-task`——这是改名新建的 topic，而 `autoCreateTopicEnable` 只在**生产者首次发送**时建 topic，消费者订阅不触发，缺失时 worker 启动即失败（`No topic route info in name server`）而非静默；创建途径以生产 broker 实际形态为准；② 旧 TS worker 容器已停。工单 IKELHC 承接并补齐 runbook。
+- 对账用 TS 基线文件（§1 出处列、附录 A 行号）多为已删除文件，行号基线仅作历史取证，不得据此判断现行行为。

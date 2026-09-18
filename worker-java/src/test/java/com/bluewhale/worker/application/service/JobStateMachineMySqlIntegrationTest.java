@@ -63,7 +63,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 接线方式：手动 AnnotationConfigApplicationContext（不扫 autoconfig），
  * 仅注册 HikariDataSource→MybatisSqlSessionFactory→7 个 Mapper→JobStateMachineService→TxManager。
- * MQ consumer / scheduled recovery 完全不启动（worker.enabled-tags 默认空）。
+ * MQ consumer / scheduled recovery 完全不启动——靠「只注册 TestConfig、不做组件扫描」保证，
+ * 与已退役的 worker.enabled-tags 开关无关。
  */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("JobStateMachine 真库集成测试（MySQL Testcontainers）")
@@ -487,7 +488,7 @@ class JobStateMachineMySqlIntegrationTest {
             String assetId = service.createAsset(new JobStateMachineService.CreateAssetInput(
                     "9", "99", String.valueOf(id), "image",
                     "https://example.com/img.png", "k", "image/png",
-                    100L, 100, 100, null,
+                    100L, "0123456789abcdef0123456789abcdef", 100, 100, null,
                     "worker-1", 3L /* stale */));
 
             assertThat(assetId).isNull();
@@ -913,7 +914,7 @@ class JobStateMachineMySqlIntegrationTest {
             String assetId = service.createAsset(new JobStateMachineService.CreateAssetInput(
                     "9", "99", String.valueOf(jobId), "image",
                     "https://cdn.example.com/i.png", "gen/user/img.png", "image/png",
-                    1234L, 512, 512, null,
+                    1234L, "0123456789abcdef0123456789abcdef", 512, 512, null,
                     "worker-1", 5L));
 
             assertThat(assetId).isNotNull();
@@ -937,7 +938,7 @@ class JobStateMachineMySqlIntegrationTest {
             String assetId = service.createAsset(new JobStateMachineService.CreateAssetInput(
                     "9", "99", String.valueOf(jobId), "image",
                     "https://cdn.example.com/i.png", "k", "image/png",
-                    1234L, 512, 512, null,
+                    1234L, "0123456789abcdef0123456789abcdef", 512, 512, null,
                     "worker-1", 999L));
 
             assertThat(assetId).isNull();
@@ -960,7 +961,7 @@ class JobStateMachineMySqlIntegrationTest {
             boolean ok = service.publishMediaExtractResult(new PublishMediaExtractDto(
                     String.valueOf(jobId), "99", "9", "worker-1", 1L,
                     "https://cdn/audio.mp3", "gen/audio.mp3", "audio/mpeg",
-                    50_000L, 12.5));
+                    50_000L, "0123456789abcdef0123456789abcdef", 12.5));
 
             assertThat(ok).isTrue();
             GenerationJobEntity row = readJob(jobId);

@@ -26,6 +26,7 @@ import {
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { createUploadMaterialGate } from "./material-upload-gate.js";
 
 /**
  * 素材库 Action 白名单（产品侧唯一权威清单）。
@@ -238,6 +239,29 @@ export class MaterialService {
     "findByMaterialId" | "mirrorStatus"
   > {
     return this.materialAssetRepo;
+  }
+
+  /** IKGQWR：**上传口**的素材闸（ADR-0093 决策 3）。
+   *
+   *  与生成门共用同一套判定规则、同一套文案与同一套上游信封解析（见 material-upload-gate.ts），
+   *  差别只有两处：它会用上 `GetAsset` 的 `Result.GroupId`（上传口要往 `assets.material_group_id`
+   *  落列），以及能在无记录时**补建行**——后者是生成门做不到的（造行需要 group id）。
+   *
+   *  按调用构造：闭包捕获本次请求的 authorization，闸的生命周期不跨请求。 */
+  uploadMaterialGate(authorization: string | undefined) {
+    return createUploadMaterialGate({
+      repo: this.materialAssetRepo,
+      callAction: (action, body) => this.callAction(authorization, action, body),
+      onMaterialFailure: (input) =>
+        this.handleUpstreamMaterialFailure({
+          userId: input.userId,
+          materialId: input.materialId,
+          authorization,
+          errorCode: input.errorCode,
+          errorMessage: input.errorMessage,
+          deleteUpstream: input.deleteUpstream,
+        }),
+    });
   }
 
   /** IKF YHJ：上游判定素材失败时的**统一处置**（无论哪条路径发现的，都走这一个口子）。

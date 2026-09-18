@@ -450,7 +450,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
       await act(async () => release());
     }
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里\n\n本次提交 A');
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里本次提交 A'); // !723：正文与附件直连，不再 \n\n 分隔
     expect(nodeOf('g1').data.prompt).toBe('本次提交 A');
   });
 
@@ -472,7 +472,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
     const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(payload.target_node_id).toBe('g1');
-    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里\n\n重画一版');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里重画一版'); // !723：正文与附件直连
 
     // 原卡承接：卡片数不变（g1/u1，t1 为文本节点）、生成中、旧素材保留
     expect(flowProps.current.mediaNodes).toHaveLength(2);
@@ -626,7 +626,7 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     const repeated = apiMocks.createGenerationJob.mock.calls[1]![1];
     expect(repeated.target_node_id).toBe(generatedId);
     expect(repeated.parameters.model_id).toBe('m-test');
-    if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
+    if (kind === 'image') expect(repeated.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a2' }]);
     // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
     // !718：首页交接参考不再上传虚拟人像库换 materialId，按本地 asset_id 直接提交
     else expect(repeated.references).toEqual([

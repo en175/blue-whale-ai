@@ -193,6 +193,39 @@ export function flattenPromptDocWith(
     .join('');
 }
 
+/** 提交 parameters.prompt：图片标签写成 &素材id&，视觉编号只留在编辑器 */
+export function flattenPromptDocForSend(doc: PromptDoc): string {
+  return doc.segments
+    .map((segment) => {
+      if (segment.kind === 'text') return segment.text;
+      if (segment.invalid_label !== undefined) return `已失效：原${segment.invalid_label}`;
+      if (segment.kind === 'asset_ref') {
+        const label = segment.label ?? '';
+        if (label.startsWith('视频') || label.startsWith('音频')) return label || `&${segment.asset_id}&`;
+        return `&${segment.asset_id}&`;
+      }
+      return segment.label ?? '';
+    })
+    .join('');
+}
+
+const IMAGE_SEND_TOKEN_RE = /&[1-9][0-9]*&/g;
+
+/** 正文是否只剩 &素材id&（可重复），没有其它提示词 */
+export function isOnlyImageSendTokens(text: string): boolean {
+  return text.trim().replace(IMAGE_SEND_TOKEN_RE, '').trim() === '';
+}
+
+/** 生成框这段已经出现在文本附件里时不再拼接，避免同一个 @ 写成两次 &id& */
+export function promptCoveredByAttachmentParts(input: string, parts: readonly string[]): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) return true;
+  if (parts.some((part) => part === trimmed)) return true;
+  if (!isOnlyImageSendTokens(trimmed)) return false;
+  const tokens = trimmed.match(IMAGE_SEND_TOKEN_RE) ?? [];
+  return tokens.length > 0 && tokens.every((token) => parts.some((part) => part.includes(token)));
+}
+
 export function docHasAnyRef(doc: PromptDoc): boolean {
   return doc.segments.some((s) => s.kind !== 'text');
 }

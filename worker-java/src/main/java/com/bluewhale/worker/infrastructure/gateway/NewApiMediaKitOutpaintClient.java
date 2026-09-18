@@ -45,7 +45,6 @@ import java.util.UUID;
  * 其余（超时 / 供应商失败 / 无结果）由 processor 归并兜底码 image_outpaint_failed。
  */
 @Component
-@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.ImageOutpaintEnabledCondition.class)
 public class NewApiMediaKitOutpaintClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitOutpaintClient.class);

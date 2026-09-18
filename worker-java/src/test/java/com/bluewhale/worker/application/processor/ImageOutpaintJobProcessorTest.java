@@ -322,7 +322,8 @@ class ImageOutpaintJobProcessorTest {
                 .thenReturn(new NewApiMediaKitOutpaintClient.OutpaintResult(resultUrl));
         when(tosService.uploadImageBytes(any(), eq("image/png"), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/expanded.png", "uploads/9/image/expanded.png", "image/png", PNG_1X1.length));
+                        "https://tos/expanded.png", "uploads/9/image/expanded.png", "image/png", PNG_1X1.length,
+                        "md5-expanded"));
         when(stateMachine.publishImageOutpaintResult(any())).thenReturn(true);
 
         processor.handle("100");
@@ -339,6 +340,8 @@ class ImageOutpaintJobProcessorTest {
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/expanded.png");
         assertThat(published.mime()).isEqualTo("image/png");
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
+        // IKGS73：产物 md5 自 TOS 上传出口透传进发布 DTO（落 assets.md5 供去重）
+        assertThat(published.md5()).isEqualTo("md5-expanded");
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);
         verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
@@ -376,7 +379,7 @@ class ImageOutpaintJobProcessorTest {
                 .thenReturn(new NewApiMediaKitOutpaintClient.OutpaintResult(resultUrl));
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length));
+                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "md5-stub"));
         when(stateMachine.publishImageOutpaintResult(any())).thenReturn(false);
 
         processor.handle("100");
