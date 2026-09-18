@@ -129,3 +129,54 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
     expect(ruleBlockOf(mediaNodeCss, '.toolBtn:hover')).toContain('background-color: rgba(255, 255, 255, 0.08)');
   });
 });
+
+/* ---- IKGZ8D 底部面板家族十成员断言 ----
+   容器四件套必须引用令牌、规则体内不得残留硬编码容器背景/描边/阴影值。
+   圆角口径：七个大容器（dialog/panel）锁 --radius-xl；擦除工具条与裁切面板是
+   浮条形态，锁 --radius-lg；擦除发送条（999px）与扩图工具栏（24px）是验收拍板的
+   胶囊/异形圆角，无对应令牌档，仅锁背景/描边/阴影三令牌。 */
+
+/** 从 CSS 源提取顶层类选择器规则体（先剥离注释）；未找到时返回 null。 */
+function ruleBodyOf(css: string, className: string): string | null {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const match = stripped.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
+  return match ? match[1] : null;
+}
+
+describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无硬编码容器色值）', () => {
+  const componentsRoot = new URL('../pages/CanvasPage/components/', import.meta.url);
+
+  /** 成员容器清单；radius 为 null 表示胶囊/异形圆角无令牌档，不锁圆角。 */
+  const members: Array<{ component: string; container: string; radius: string | null }> = [
+    { component: 'ImageDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'BottomDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'AudioDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'AgentPanel', container: 'panel', radius: 'var(--radius-xl)' },
+    { component: 'MusicDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'TextGenDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'ImageEnhanceDialog', container: 'dialog', radius: 'var(--radius-xl)' },
+    { component: 'ImageEraseDialog', container: 'toolbar', radius: 'var(--radius-lg)' },
+    { component: 'ImageEraseDialog', container: 'sendBar', radius: null },
+    { component: 'OutpaintDialog', container: 'toolbar', radius: null },
+    { component: 'CropDialog', container: 'panel', radius: 'var(--radius-lg)' },
+  ];
+
+  for (const { component, container, radius } of members) {
+    it(`${component} .${container} 容器四件套引用令牌、无硬编码容器色值`, () => {
+      const css = readFileSync(
+        fileURLToPath(new URL(`${component}/index.module.css`, componentsRoot)),
+        'utf-8',
+      );
+      const body = ruleBodyOf(css, container);
+      expect(body).not.toBeNull();
+      expect(body).toContain('var(--color-bg-overlay)');
+      expect(body).toContain('var(--color-border-overlay)');
+      expect(body).toContain('var(--shadow-overlay)');
+      if (radius !== null) {
+        expect(body).toContain(`border-radius: ${radius}`);
+      }
+      expect(body).not.toMatch(/#1e1e1e|#2c2c2c/);
+      expect(body).not.toContain('0 8px 32px');
+    });
+  }
+});
