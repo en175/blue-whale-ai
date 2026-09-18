@@ -39,7 +39,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
-import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
@@ -78,6 +78,17 @@ import {
 } from './eraseMask';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
+import CropDialog from './components/CropDialog';
+import {
+  clampCropRect,
+  cropPresetRatio,
+  fullCropRect,
+  inscribeCropRect,
+  minCropSideDisplay,
+  type CropCoordinateSpace,
+  type CropPresetKey,
+  type CropRect,
+} from './imageCrop';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -333,9 +344,15 @@ export default function CanvasPage() {
   /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
   const [eraseSubmitting, setEraseSubmitting] = useState(false);
   /** 裁切编辑态（IKGW1H 模式进出骨架）：处于裁切编辑的源图卡 node id，null=未进入。
-   *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；本票仅状态骨架与进出链路，
-   *  裁切框/比例面板（IKGW1N）与确认建卡（IKGW1S）后续经 exitCropMode/onCropConfirm 接入。 */
+   *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；裁切框与比例（IKGW1N）
+   *  状态提升在本页（cropRect/cropPreset，同擦除编辑态口径），确认建卡（IKGW1S）经
+   *  exitCropMode/onCropConfirm 接入。 */
   const [cropTargetNodeId, setCropTargetNodeId] = useState<string | null>(null);
+  /** 裁切比例模式（IKGW1N）：free=自由；预设=锁比例（边手柄禁用、角手柄等比缩放） */
+  const [cropPreset, setCropPreset] = useState<CropPresetKey>('free');
+  /** 当前裁切框（IKGW1N，flow 坐标、与内容区 bounds 同系）：null=未在编辑；
+   *  进入默认自由比例全幅（fullCropRect），确认时 IKGW1S 读取本框换算自然分辨率裁切 */
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -1005,6 +1022,52 @@ export default function CanvasPage() {
   const eraseHasPaint = eraseDisplayBox
     ? maskHasPaintArea(eraseMaskState.ops, eraseDisplayBox.width, eraseDisplayBox.height)
     : eraseMaskState.ops.some((op) => !op.erase);
+  /** 裁切编辑态派生量（IKGW1N）：源图卡 / 内容区矩形（flow 坐标，标题偏移 22.5px）/
+   *  坐标空间（64 像素下限换算用；源图自然分辨率缺失时为 null → 无下限兜底，确认门由 IKGW1S 处理） */
+  const cropSourceNode = cropTargetNodeId
+    ? mediaNodes.find((n) => n.id === cropTargetNodeId) ?? null
+    : null;
+  const cropBounds = (() => {
+    if (!cropSourceNode) return null;
+    const d = (cropSourceNode.data ?? {}) as Record<string, unknown>;
+    const box = mediaContentBox({
+      mediaType: 'image',
+      width: typeof d.width === 'number' ? d.width : undefined,
+      height: typeof d.height === 'number' ? d.height : undefined,
+    });
+    return {
+      x: cropSourceNode.position.x,
+      y: cropSourceNode.position.y + MEDIA_CONTENT_TOP_OFFSET,
+      width: box.width,
+      height: box.height,
+    } satisfies CropRect;
+  })();
+  const cropSpace = (() => {
+    if (!cropSourceNode || !cropBounds) return null;
+    const d = (cropSourceNode.data ?? {}) as Record<string, unknown>;
+    if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
+    return {
+      displayWidth: cropBounds.width,
+      displayHeight: cropBounds.height,
+      naturalWidth: d.width,
+      naturalHeight: d.height,
+    } satisfies CropCoordinateSpace;
+  })();
+  /** 64 自然像素下限换算到显示坐标系（分辨率缺失时 0=无下限） */
+  const cropMinSide = cropSpace ? minCropSideDisplay(cropSpace) : 0;
+  /** 裁切面板跟随锚（IKGW1N）：源图卡下方（computeFollowAnchor 恒锚节点下方） */
+  const cropPanelAnchor = cropSourceNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: cropSourceNode.position.x,
+        nodeY: cropSourceNode.position.y,
+        nodeWidth: nodeBoxOf(cropSourceNode).width,
+        nodeHeight: nodeBoxOf(cropSourceNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 380,
+      })
+    : null;
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -3062,6 +3125,21 @@ export default function CanvasPage() {
     // exitCropMode 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cropTargetNodeId, mediaNodes]);
+
+  /** 裁切框随内容区钳制（IKGW1N，规格故事 14）：源图卡被移动/缩放（撤销等旁路改坐标）时
+   *  框保持完整落在内容区内（正常路径由纯函数钳制保证，本 effect 只兜底旁路变更）。
+   *  cropBounds/cropRect 每次渲染都是新对象，仅在数值变化时才 setState，无循环。 */
+  useEffect(() => {
+    if (!cropBounds || !cropRect) return;
+    const next = clampCropRect(cropRect, cropBounds, cropMinSide);
+    if (
+      next.x !== cropRect.x || next.y !== cropRect.y ||
+      next.width !== cropRect.width || next.height !== cropRect.height
+    ) {
+      setCropRect(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropBounds?.x, cropBounds?.y, cropBounds?.width, cropBounds?.height, cropRect, cropMinSide]);
 
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
@@ -5986,9 +6064,11 @@ export default function CanvasPage() {
   };
 
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
-   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留。裁切面板（IKGW1N）的取消即调本函数。 */
+   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
   const exitCropMode = () => {
     setCropTargetNodeId(null);
+    setCropRect(null);
+    setCropPreset('free');
   };
 
   /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
@@ -6007,15 +6087,44 @@ export default function CanvasPage() {
     setEraseTool('brush');
   };
 
-  /** 裁切（IKGW1H 入口）：把目标图片卡置为裁切编辑态。无门槛预检（菜单项恒可用）；
-   *  进入时关闭五个生成面板（同擦除口径）并退出擦除编辑态（编辑模式互斥）；
-   *  单值 cropTargetNodeId 即单目标——换目标卡自然替换。裁切框与比例面板由 IKGW1N 接入。 */
+  /** 裁切（IKGW1H 入口 / IKGW1N 补全默认态）：把目标图片卡置为裁切编辑态。无门槛预检
+   *  （菜单项恒可用）；进入时关闭五个生成面板（同擦除口径）并退出擦除编辑态（编辑模式互斥）；
+   *  默认自由比例、框为全幅（fullCropRect，干净起点不记忆上次状态）；单值 cropTargetNodeId
+   *  即单目标——换目标卡自然替换。 */
   const handleNodeCropImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
     dismissAllGenPanels();
     exitEraseEditing();
+    const d = (node.data ?? {}) as Record<string, unknown>;
+    const box = mediaContentBox({
+      mediaType: 'image',
+      width: typeof d.width === 'number' ? d.width : undefined,
+      height: typeof d.height === 'number' ? d.height : undefined,
+    });
+    const bounds: CropRect = {
+      x: node.position.x,
+      y: node.position.y + MEDIA_CONTENT_TOP_OFFSET,
+      width: box.width,
+      height: box.height,
+    };
+    setCropPreset('free');
+    setCropRect(fullCropRect(bounds));
     setCropTargetNodeId(id);
+  };
+
+  /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
+   *  自由 → 框保持不变（只是解除比例锁定）。 */
+  const handleCropPresetChange = (key: CropPresetKey) => {
+    setCropPreset(key);
+    const ratio = cropPresetRatio(key);
+    if (ratio != null && cropBounds) setCropRect(inscribeCropRect(cropBounds, ratio));
+  };
+
+  /** 裁切确认（IKGW1N 渲染在位、点击派发；裁切执行链路——离屏 canvas 按原图自然分辨率
+   *  裁切 → 资产上传 → 源卡右侧建「裁切」成品卡 + 来源连线——由 IKGW1S 实装）。 */
+  const handleCropConfirm = () => {
+    // IKGW1S 实装：读取 cropRect（显示框，经 cropRectToNatural 换算）与源图自然分辨率执行裁切建卡
   };
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
@@ -7607,6 +7716,20 @@ export default function CanvasPage() {
           assetNodes={assetNodes}
           showEdges={showEdges}
           snapAlignmentEnabled={snapAlignmentOn}
+          cropFrame={
+            // 裁切框覆盖层（IKGW1N）：编辑态挂载，屏幕空间覆盖层随内容区渲染期换算；
+            // 框/比例状态提升在本页，拖拽经 CropFrame 走 imageCrop 纯函数回写
+            cropTargetNodeId && cropBounds && cropRect
+              ? {
+                  bounds: cropBounds,
+                  rect: cropRect,
+                  preset: cropPreset,
+                  minSide: cropMinSide,
+                  onRectChange: setCropRect,
+                  onDarkAreaClick: exitCropMode,
+                }
+              : null
+          }
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
@@ -8039,6 +8162,19 @@ export default function CanvasPage() {
             submitting={eraseSubmitting}
             toolbarAnchor={eraseToolbarAnchor}
             sendBarAnchor={eraseSendBarAnchor}
+          />
+        )}
+
+        {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
+            名单，根元素打 data-gen-panel-territory）；取消绑 exitCropMode（四退出之一）；
+            确认 onConfirm 本票为占位实现，裁切执行与建卡由 IKGW1S 实装 */}
+        {cropTargetNodeId && (
+          <CropDialog
+            preset={cropPreset}
+            onPresetChange={handleCropPresetChange}
+            onConfirm={handleCropConfirm}
+            onClose={exitCropMode}
+            followAnchor={cropPanelAnchor}
           />
         )}
 
