@@ -7532,24 +7532,24 @@ export default function CanvasPage() {
           mediaNodes={
             // 擦除编辑态（IKGOTB）：目标源图卡渲染期注入遮罩层 props（不进 state、不持久化，
             // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
-            eraseTargetNodeId
-              ? mediaNodes.map((n) =>
-                  n.id === eraseTargetNodeId
-                    ? {
-                        ...n,
-                        data: {
-                          ...n.data,
-                          eraseEditing: {
-                            ops: eraseMaskState.ops,
-                            liveOp: eraseLiveOp,
-                            onStrokeStart: handleEraseStrokeStart,
-                            onStrokeMove: handleEraseStrokeMove,
-                            onStrokeEnd: handleEraseStrokeEnd,
-                          },
-                        },
-                      }
-                    : n,
-                )
+            // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
+            // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
+            eraseTargetNodeId || submittingNodeId
+              ? mediaNodes.map((n) => {
+                  if (n.id !== eraseTargetNodeId && n.id !== submittingNodeId) return n;
+                  const data: Record<string, unknown> = { ...n.data };
+                  if (n.id === eraseTargetNodeId) {
+                    data.eraseEditing = {
+                      ops: eraseMaskState.ops,
+                      liveOp: eraseLiveOp,
+                      onStrokeStart: handleEraseStrokeStart,
+                      onStrokeMove: handleEraseStrokeMove,
+                      onStrokeEnd: handleEraseStrokeEnd,
+                    };
+                  }
+                  if (n.id === submittingNodeId) data.submitting = true;
+                  return { ...n, data };
+                })
               : mediaNodes
           }
           productNodes={productNodes}

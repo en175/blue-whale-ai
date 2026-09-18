@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /* IKGGC0 回归锁：选中节点相连的流动动效必须与悬停共用同一条 CSS 规则
-   （一条规则、两个触发选择器），防止视觉定义漂移成两份；剪刀删除按钮
-   仍只在悬停时出现，选中相连不引入剪刀。渲染效果由人工浏览器回归验证。 */
+   （一条规则、两个触发选择器），防止视觉定义漂移成两份；
+   IKGUVG：剪刀出现时机不再由 CSS 悬停决定——悬停本身不显示剪刀，只有组件在
+   指针停稳满 1 秒后追加的出现类才显示；选中相连同样不引入剪刀。
+   渲染效果由人工浏览器回归验证。 */
 
 const edgeCss = readFileSync(fileURLToPath(new URL('./index.module.css', import.meta.url)), 'utf-8');
 
@@ -52,9 +54,27 @@ describe('IKGGC0 连线流动动效 CSS 源断言', () => {
     expect(edgeCss.match(/@keyframes\s+dashFlow/g)).toHaveLength(1);
   });
 
-  it('剪刀删除按钮仍只由悬停触发，选中相连不显示剪刀', () => {
-    const hoverDeleteRules = rules.filter(r => r.selectors.includes('.edgeGroup:hover .deleteBtn'));
-    expect(hoverDeleteRules.length).toBeGreaterThan(0);
+  it('剪刀可见性只由停稳出现类打开：悬停与选中相连都不显示剪刀', () => {
+    // 默认隐藏（等待期间的光标与点击都不受影响）
+    const baseRules = rules.filter(r => r.selectors.includes('.deleteBtn'));
+    expect(baseRules).toHaveLength(1);
+    expect(baseRules[0].body).toMatch(/opacity:\s*0/);
+    expect(baseRules[0].body).toMatch(/pointer-events:\s*none/);
+
+    // 唯一打开入口是组件按停稳状态追加的出现类
+    const visibleRules = rules.filter(r => r.selectors.includes('.deleteBtnVisible'));
+    expect(visibleRules).toHaveLength(1);
+    expect(visibleRules[0].body).toMatch(/opacity:\s*1/);
+    expect(visibleRules[0].body).toMatch(/pointer-events:\s*all/);
+
+    // 悬停本身不再显示剪刀（旧形态 .edgeGroup:hover .deleteBtn 已移除）；
+    // 剪刀自身的 :hover 只改填充色，不参与可见性
+    const hoverDeleteRules = rules.filter(r =>
+      r.selectors.some(s => s.includes('deleteBtn') && s.includes(':hover') && !s.includes('.deleteBtn:hover')),
+    );
+    expect(hoverDeleteRules).toHaveLength(0);
+
+    // 选中相连同样不引入剪刀
     const selectedDeleteRules = rules.filter(r =>
       r.selectors.some(s => s.includes('selectedConnected') && s.includes('deleteBtn')),
     );
