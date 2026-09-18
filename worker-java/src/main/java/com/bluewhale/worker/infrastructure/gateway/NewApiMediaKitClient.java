@@ -47,7 +47,6 @@ import java.util.UUID;
  * 其余（超时 / 供应商失败 / 无结果）由 processor 归并兜底码 image_enhance_failed（§14.5）。
  */
 @Component
-@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.ImageEnhanceEnabledCondition.class)
 public class NewApiMediaKitClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitClient.class);

@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
@@ -11,7 +12,6 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -39,7 +39,6 @@ import java.util.Optional;
  * 降级模式：TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.AudioEnabledCondition.class)
 public class AudioJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(AudioJobProcessor.class);
@@ -69,7 +68,7 @@ public class AudioJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "audio";
+        return GenerationMqRoute.AUDIO.tag();
     }
 
     /**

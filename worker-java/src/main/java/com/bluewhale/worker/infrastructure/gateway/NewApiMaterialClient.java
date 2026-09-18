@@ -27,8 +27,7 @@ import java.util.UUID;
  * X-Client-System: bluewhale）。
  * <p>
  * 与图片/视频/音频客户端的差异：本类<b>不在构造期校验 baseUrl</b>。定时跟进不是 tag 消费，
- * 没有 @Conditional 兜着——构造期抛错会把「WORKER_ENABLED_TAGS 为空」的安全拉起形态打挂。
- * 缺配置时改为每轮跳过 + 首次告警一次。
+ * 缺配置时每轮跳过 + 首次告警一次，不阻断跟进循环。
  */
 @Component
 public class NewApiMaterialClient {
@@ -167,8 +166,8 @@ public class NewApiMaterialClient {
     /**
      * 删除上游素材（IKFYHJ：上游判定失败时的清理动作）。
      * <p>
-     * 与 {@link #getAsset} 同样的「缺配置不抛」口径——本类不是 tag 消费，没有 {@code @Conditional}
-     * 兜着。区别是这里把失败**当返回值**（false）而不是 null：调用方要决定是否记日志，
+     * 与 {@link #getAsset} 同样的「缺配置不抛」口径——本类不是 tag 消费；缺 baseUrl 时按
+     * 返回值处理，不外抛。区别是这里把失败**当返回值**（false）而不是 null：调用方要决定是否记日志，
      * 但都不能因此中断跟进循环。
      *
      * @return true = 上游确认删除成功（2xx）

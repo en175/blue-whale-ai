@@ -1,4 +1,7 @@
-# 环境变量名与 TS worker 逐一对齐（ADR-0084 / 契约 §5）：灰度期一套部署 env 喂两个栈。
+# 环境变量名与 TS worker 逐一对齐（ADR-0084 / 契约 §5）：同一个生成任务 topic 按 tag 区分任务类型，
+# 消费侧 = worker-java 单栈（TS worker 已随刀④收口退役，不再有双栈共用 env 的灰度期）。
+# topic / tag 不在此配置：它们是契约 §1 的冻结值，单处定义在 domain/entity/GenerationMqRoute.java，
+# 故部署环境里残留的 ROCKETMQ_TOPIC / ROCKETMQ_TAG 不再有绑定目标（宽松绑定忽略未知属性，不报错也不生效）。
 server:
   port: ${GENERATION_WORKER_PORT:4002}
 
@@ -15,11 +18,6 @@ spring:
         size: 4
 
 worker:
-  # 逗号分隔列表；留空 = 不消费任何 tag（安全拉起默认值）。
-  # 一刀切换 = TS 侧停该 tag + 此列表加该 tag；反向即回滚。
-  enabled-tags: ${WORKER_ENABLED_TAGS:}
-  # consumer group 后缀：同一 tag 同一时刻只允许一侧（TS / Java）在消费
-  group-suffix: ${WORKER_GROUP_SUFFIX:-java}
   concurrency:
     image: ${IMAGE_CONCURRENCY:20}
     audio: ${AUDIO_CONCURRENCY:5}
@@ -33,7 +31,6 @@ rocketmq:
   access-key: ${ROCKETMQ_ACCESS_KEY:}
   secret-key: ${ROCKETMQ_SECRET_KEY:}
   ssl-enabled: ${ROCKETMQ_SSL_ENABLED:false}
-  topic: ${ROCKETMQ_TOPIC:generation-video}
 
 logging:
   level:

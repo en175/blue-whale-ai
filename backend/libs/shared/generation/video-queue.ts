@@ -2,14 +2,16 @@ import { Producer } from "rocketmq-client-nodejs";
 
 import {
   AUDIO_GENERATION_TAG,
+  GENERATION_TASK_QUEUE,
   IMAGE_ENHANCE_TAG,
   IMAGE_ERASE_TAG,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
-  VIDEO_GENERATION_QUEUE,
+  VIDEO_GENERATION_TAG,
 } from "./queue.constants.js";
+import type { GenerationTag } from "./queue.constants.js";
 
-/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
+/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=video）+ RocketMqMediaExtractConsumer（tag=media_extract）
  *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
  *  + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
  *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
@@ -24,14 +26,15 @@ export type VideoQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
 };
 
+/** 只含连接参数：topic / tag **不是配置项**，两侧都无 env 覆盖——它们是
+ *  `queue.constants.ts` 的编译期常量（与 worker-java `GenerationMqRoute` 同值），
+ *  故部署环境里残留的 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 静默忽略（无绑定目标）。 */
 export type RocketMqConfig = {
   /** gRPC proxy 端点（如 115.190.244.91:8081）。 */
   endpoints: string;
   sslEnabled: boolean;
   accessKey?: string;
   accessSecret?: string;
-  topic: string;
-  tag: string;
 };
 
 /** 加载 RocketMQ 连接配置。生产火山实例：AK/SK + sslEnabled=false（5.x 不支持 SSL）；测试环境裸连。 */
@@ -44,22 +47,23 @@ export function loadRocketMqConfig(
     endpoints: env.ROCKETMQ_ENDPOINTS ?? "",
     sslEnabled: env.ROCKETMQ_SSL_ENABLED === "true",
     ...(accessKey && accessSecret ? { accessKey, accessSecret } : {}),
-    topic: env.ROCKETMQ_TOPIC ?? VIDEO_GENERATION_QUEUE,
-    tag: env.ROCKETMQ_TAG ?? "step",
   };
 }
 
-/** RocketMQ 适配器：把 Producer 包成 VideoQueueProducer 端口。delay 单位 ms（客户端 delay → 投递时间戳 now+delay）。 */
+/** RocketMQ 适配器：把 Producer 包成 VideoQueueProducer 端口。
+ *  topic 恒为 {@link GENERATION_TASK_QUEUE}（编译期常量，读自本模块，不接受覆盖）；
+ *  tag 由调用方传入本类任务的常量（六类任务各一）。
+ *  delay 单位 ms（客户端 delay → 投递时间戳 now+delay）。 */
 export function createRocketMqVideoProducer(
   producer: Pick<Producer, "send">,
-  config: Pick<RocketMqConfig, "topic" | "tag">,
+  tag: GenerationTag,
 ): VideoQueueProducer {
   return {
     async enqueue(jobId, options = {}) {
       const delay = Math.max(0, options.delayMs ?? 0);
       await producer.send({
-        topic: config.topic,
-        tag: config.tag,
+        topic: GENERATION_TASK_QUEUE,
+        tag,
         body: Buffer.from(JSON.stringify({ jobId })),
         delay: delay > 0 ? delay : VIDEO_MIN_DELAY_MS,
       });
@@ -113,75 +117,75 @@ export async function enqueueVideoGenerationJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: config.tag,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    VIDEO_GENERATION_TAG,
+  ).enqueue(jobId, options);
 }
 
-/** 媒体提取（视频→音频）job 入队（IKARDY）：复用视频 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
+/** 媒体提取（视频→音频）job 入队（IKARDY）：复用生成任务 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
 export async function enqueueMediaExtractJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: MEDIA_EXTRACT_TAG,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    MEDIA_EXTRACT_TAG,
+  ).enqueue(jobId, options);
 }
 
-/** 图片生成 job 入队（IKBGKA）：复用视频 topic/queue，用独立 tag「image」区分任务类型。 */
+/** 图片生成 job 入队（IKBGKA）：复用生成任务 topic/queue，用独立 tag「image」区分任务类型。 */
 export async function enqueueImageGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: IMAGE_GENERATION_TAG,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    IMAGE_GENERATION_TAG,
+  ).enqueue(jobId, options);
 }
 
-/** 音频生成 job 入队（IKCR78）：复用视频 topic/queue，用独立 tag「audio」区分任务类型。 */
+/** 音频生成 job 入队（IKCR78）：复用生成任务 topic/queue，用独立 tag「audio」区分任务类型。 */
 export async function enqueueAudioGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: AUDIO_GENERATION_TAG,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    AUDIO_GENERATION_TAG,
+  ).enqueue(jobId, options);
 }
 
-/** 高清放大 job 入队（IKGM99，契约 §14.1）：复用视频 topic/queue，用独立 tag「image_enhance」区分任务类型。 */
+/** 高清放大 job 入队（IKGM99，契约 §14.1）：复用生成任务 topic/queue，用独立 tag「image_enhance」区分任务类型。 */
 export async function enqueueImageEnhanceJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: IMAGE_ENHANCE_TAG,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    IMAGE_ENHANCE_TAG,
+  ).enqueue(jobId, options);
 }
 
-/** 图片擦除 job 入队（IKGOT4，契约 §15）：复用视频 topic/queue，用独立 tag「image_erase」区分任务类型。 */
+/** 图片擦除 job 入队（IKGOT4，契约 §15）：复用生成任务 topic/queue，用独立 tag「image_erase」区分任务类型。 */
 export async function enqueueImageEraseJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(producer, {
-    topic: config.topic,
-    tag: IMAGE_ERASE_TAG,
-  }).enqueue(jobId, options);
+  await createRocketMqVideoProducer(
+    producer,
+    IMAGE_ERASE_TAG,
+  ).enqueue(jobId, options);
 }
 
 export async function closeVideoGenerationQueue(): Promise<void> {

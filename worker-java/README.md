@@ -1,21 +1,39 @@
 # worker-java
 
-Blue-Whale 生成执行服务（Java 薄执行器）。决策：[ADR-0084](../docs/adr/0084-generation-worker-java-runtime.md)；
+Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：claim / fencing / lease / 终态写入都在本进程内（ADR-0084 修正一撤回「薄执行器」原案，「Java 做任务、TS 只发任务」）。
+决策：[ADR-0084](../docs/adr/0084-generation-worker-java-runtime.md)；
 行为契约（冻结基准）：[docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md](../docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md)。
 
 技术栈：**Spring Boot 3.3.x + JDK 21（LTS）**（ADR-0084 决策 1）。
 
 ## 硬边界（违反即评审拦截项）
 
-- **本进程不实现任何 job 状态机**。claim / fencing / lease / complete / fail 一律走
-  backend internal endpoints（契约 §4）。guard fail 静默语义必须保留（契约 §3.1）。
+- **本进程实现 job 状态机**（claim / fencing / lease / 终态写入，契约 §3 为移植规格）——TS 只发任务、
+  Java 做任务，交互面 = 数据库 + MQ，无 HTTP（ADR-0084 修正二）。guard fail 静默语义必须保留（契约 §3.1）。
 - `cost_reservations` 记账不在实现范围（契约 §0 修正一，退役由 IKEF1K 承接）。
-- 环境变量名与 TS worker 完全同名（灰度期一套部署 env 喂两个栈）。
+- 环境变量名沿用 TS worker 命名（同名对齐，契约 §5）。
 
-## 灰度开关
+## 启动契约（修正六：按 tag 开关与 group 后缀均已退役）
 
-`WORKER_ENABLED_TAGS` 逗号列表（`step,image,audio,media_extract,image_enhance,image_erase`），默认为空 = 不消费。`image_enhance`（契约 §14 / IKGM8U）常量已冻结，消费者与处理器由 IKGM9D 注册。`image_erase`（契约 §15 / IKGOT3）常量已冻结，消费者与处理器由 IKGOT6 注册。
-一刀切换 = TS 侧停该 tag + 此列表加该 tag；consumer group 后缀 `-java`（双组并存即回滚位）。
+**服务启动即消费全部 6 个 tag**：`video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（契约 §1 / §16）。不存在按 tag 的启停开关，也不存在「空配置只探活」形态：
+
+- `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
+- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL`（上游网关）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）。
+- consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
+- **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/video-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
+- `GET /ready` 只返回 `{"status":"ready"}`。
+
+决策依据：ADR-0084「修正六」/ 契约 §16。
+
+## 上线前检查清单（原子改名，部署前逐条确认）
+
+topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**。**名字错配**的表现是静默的：进程健康、`/ready` 绿、消息无人消费或被旧进程抢走，什么都不报（这也是本清单存在的理由）；但**前置条件不满足是响亮失败**——新 topic 不存在时 worker 根本起不来。部署前必须确认：
+
+- [ ] **broker 上已存在可路由的 topic `generation-task`**：这是本次改名新建的 topic，而 RocketMQ 的 `autoCreateTopicEnable` **只在生产者首次发送时**建 topic，消费者订阅不触发——worker 的第一次消费者 `startUp` 早于任何生产者发送，所以不预建就起不来。失败是**响亮**的：`No topic route info in name server for the topic: generation-task` → `Error starting ApplicationContext` → 进程退出。**创建途径取决于生产 broker**（控制台 / OpenAPI / `mqadmin updateTopic`）——本仓没有描述生产 RocketMQ 部署形态的文档，以实际为准。**建完后要确认路由可查**（例如 topic route 查询）再起 worker：本地实测 `mqadmin updateTopic` 之后存在约 30s 的 broker→namesrv 注册窗口，生产经 gRPC proxy 还可能另有缓存——所以以「能查到路由」为准，别照抄固定秒数。
+- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，其余各项都只能证明「没有障碍」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
+- [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
+
+错配的后果都是**静默的**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但消息可能无人消费、或被打进旧进程的 group——所以上面第二条（六条启动日志）才是正面的「订阅真的对了」证据。生产侧（`backend`）也不再读 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`，残留这两个键不会再把生产者指回旧名。
 
 ## 构建 / 运行
 
@@ -32,27 +50,23 @@ curl localhost:4002/ready
 
 | 变量名 | 必需 | 说明 | 默认值 |
 |---|---|---|---|
-| `WORKER_ENABLED_TAGS` | 灰度控制 | 逗号分隔启用 tag（`media_extract`） | 空 = 不消费 |
-| `WORKER_GROUP_SUFFIX` | consumer group | consumer group 后缀 | `-java` |
-| `DATABASE_URL` | 是（media_extract 启用时） | `mysql://user:pass@host:port/db` | — |
-| `ROCKETMQ_ENDPOINTS` | 是（media_extract 启用时） | gRPC proxy 端点 | — |
+| `DATABASE_URL` | 是 | `mysql://user:pass@host:port/db` | — |
+| `ROCKETMQ_ENDPOINTS` | 是 | gRPC proxy 端点 | — |
 | `ROCKETMQ_ACCESS_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SECRET_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SSL_ENABLED` | 否 | 启用 SSL | `false` |
-| `ROCKETMQ_TOPIC` | 否 | MQ topic | `generation-video` |
-| `VOLC_ACCESS_KEY_ID` | 是（media_extract 启用时） | TOS 认证 | — |
-| `VOLC_SECRET_ACCESS_KEY` | 是（media_extract 启用时） | TOS 认证 | — |
-| `VOLC_TOS_ENDPOINT` | 是（media_extract 启用时） | TOS 端点 | — |
-| `VOLC_TOS_BUCKET` | 是（media_extract 启用时） | TOS 桶 | — |
-| `VOLC_TOS_REGION` | 是（media_extract 启用时） | TOS 区域 | — |
+| `VOLC_ACCESS_KEY_ID` | 是 | TOS 认证 | — |
+| `VOLC_SECRET_ACCESS_KEY` | 是 | TOS 认证 | — |
+| `VOLC_TOS_ENDPOINT` | 是 | TOS 端点 | — |
+| `VOLC_TOS_BUCKET` | 是 | TOS 桶 | — |
+| `VOLC_TOS_REGION` | 是 | TOS 区域 | — |
 | `FFMPEG_PATH` | 否 | ffmpeg 二进制路径（Dockerfile 须 ship 一个） | `ffmpeg`（PATH 查找） |
 | `TOS_CONNECT_TIMEOUT_MS` | 否 | TOS SDK 建链超时（毫秒） | `30000` |
 | `TOS_READ_TIMEOUT_MS` | 否 | TOS SDK 读超时（毫秒）——下载源视频中途超时会判 `video_download_failed` | `300000` |
 | `TOS_WRITE_TIMEOUT_MS` | 否 | TOS SDK 写超时（毫秒） | `300000` |
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
-| `NEW_API_BASE_URL` | 是（audio 启用时） | new-api 网关地址 | — |
-| `GENERATION_CREDENTIAL_SECRET` | 是（audio 启用时） | 凭证密封密钥（≥16 字符） | — |
+| `NEW_API_BASE_URL` | 是 | new-api 网关地址 | — |
 | `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 | `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
@@ -64,8 +78,8 @@ curl localhost:4002/ready
 
 ### 启动行为
 
-- `WORKER_ENABLED_TAGS` 为空 → 不连 MQ、不连 DB，只起 `/ready` 端点。
-- `WORKER_ENABLED_TAGS` 含 `media_extract` → 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `VOLC_*` 5 个 TOS env，缺一启动失败。
+- **无条件启动全部 6 个 tag 的消费者**（修正六：无按 tag 开关；`WORKER_ENABLED_TAGS` 已删除）。
+- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
 
 ### Docker 部署
@@ -73,9 +87,9 @@ curl localhost:4002/ready
 ```bash
 # 构建（多阶段 Dockerfile：镜像内完成 mvn package，无需外部预构建 jar）
 docker build -t worker-java .
-docker run -e WORKER_ENABLED_TAGS=media_extract \
-           -e DATABASE_URL=mysql://... \
+docker run -e DATABASE_URL=mysql://... \
            -e ROCKETMQ_ENDPOINTS=... \
+           -e NEW_API_BASE_URL=... \
            -e VOLC_ACCESS_KEY_ID=... \
            -e VOLC_SECRET_ACCESS_KEY=... \
            -e VOLC_TOS_ENDPOINT=... \
@@ -91,14 +105,16 @@ worker/
 ├─ application/{consumer(*Consumer), processor(*Processor), service(*Service)}
 ├─ domain/{entity(*Entity), dto(*Dto), error(*Error)}
 ├─ infrastructure/{mapper(*Mapper), mq, media(*Extractor), storage(*Storage)}
-├─ config(*Config/*Properties/*Condition) + web(*Controller)
+├─ config(*Config/*Properties) + web(*Controller)
 ```
 
 ## 现状进度（IKENZZZ / IKEL4L / IKEL4N / IKEL69）
 
+> 本节是各刀**落地当时**的历史记录。其中 `*EnabledCondition` / `StubDataSourceConfig` / `group=...+suffix` / `tag=step` / `GENERATION_CREDENTIAL_SECRET` 等命名与机制已随修正六 / 修正五退役，现行约定见上「启动契约」节。
+
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
-  - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 10）
+  - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 20）
   - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false
@@ -237,9 +253,7 @@ worker/
 
 | 变量名 | 必需 | 说明 | 默认值 |
 |---|---|---|---|
-| `WORKER_ENABLED_TAGS` | 灰度控制 | 逗号分隔启用 tag（`step`） | 空 = 不消费 |
-| `ROCKETMQ_TAG` | 否 | 视频 MQ tag | `step` |
-| `NEW_API_BASE_URL` | 是（step 启用时） | new-api 网关地址 | — |
-| `GENERATION_CREDENTIAL_SECRET` | 是（step 启用时） | 凭证密封密钥（≥16 字符） | — |
-| `VIDEO_POLL_INTERVAL_MS` | 否 | 视频轮询间隔（ms） | `5000` |
-| `MAX_VIDEO_POLLS` | 否 | 视频轮询上限 | `720` |
+| `NEW_API_BASE_URL` | 是 | new-api 网关地址 | — |
+
+- `VIDEO_POLL_INTERVAL_MS`（`5000`）与 `MAX_VIDEO_POLLS`（`720`）**不是环境变量**，是 `VideoJobProcessor` 内的 Java 常量（`public static final`），运行时不可覆盖。
+- `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX` 已删除（修正六）；`ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 已删除（改为 `GenerationMqRoute` 枚举，见「启动契约」节）；`GENERATION_CREDENTIAL_SECRET` 已随凭证去密删除（契约 修正五）。
