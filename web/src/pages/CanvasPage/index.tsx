@@ -5472,9 +5472,16 @@ export default function CanvasPage() {
       const mentions = Array.isArray(node?.data.mediaMentions) ? (node.data.mediaMentions as MediaMention[]) : [];
       const refs = Array.isArray(node?.data.mediaRefs) ? (node.data.mediaRefs as MediaRef[]) : [];
       const imageNodeIds = new Set(refs.filter((ref) => ref.mediaType === 'image').map((ref) => ref.nodeId));
+      // Agent 方案卡应用的文本节点正文里的 @图1（promptMentions）也纳入替换：图片 → &素材id&
+      const promptMentions = Array.isArray(node?.data.promptMentions) ? (node.data.promptMentions as Array<{ start: number; end: number; assetId: string }>) : [];
+      const promptMaterials = Array.isArray(node?.data.promptMaterials) ? (node.data.promptMaterials as Array<{ assetId: string; mediaType: 'image' | 'video' | 'audio' }>) : [];
+      const promptImageAssetIds = new Set(promptMaterials.filter((m) => m.mediaType === 'image').map((m) => m.assetId));
+      const promptMentionsAdapted: MediaMention[] = promptMentions.map((m) => ({ start: m.start, end: m.end, nodeId: m.assetId, assetId: m.assetId }));
+      const allMentions = [...mentions, ...promptMentionsAdapted];
+      const isImage = (mention: MediaMention) => imageNodeIds.has(mention.nodeId) || promptImageAssetIds.has(mention.assetId);
       return {
         ...att,
-        text: replaceImageMentionsWithAssetTokens(att.text, mentions, (mention) => imageNodeIds.has(mention.nodeId)),
+        text: replaceImageMentionsWithAssetTokens(att.text, allMentions, isImage),
       };
     });
 
