@@ -199,6 +199,14 @@ const noResidue = () => {
 
 const dialogEl = () => document.body.querySelector('[data-testid="outpaint-dialog"]');
 
+/** 打开比例上拉菜单（改版横条后预设项收在菜单内） */
+async function openRatioMenu() {
+  const trigger = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-ratio-trigger"]')!;
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 async function pressEscape() {
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -232,10 +240,11 @@ describe('IKGOQX 进入扩图模式', () => {
     expect(frame.rect.height).toBeCloseTo(280, 6);
     // 进入默认零扩展（框与原图重合、默认原图比例）
     expect(frame.expands).toEqual(ZERO_EXPANDS);
-    // 扩图面板浮现（比例行默认命中原图比例）
+    // 扩图工具栏浮现（比例菜单默认收起，展开后命中原图比例）
     expect(dialogEl()).toBeTruthy();
+    await openRatioMenu();
     const original = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-original"]')!;
-    expect(original.className).toMatch(/presetBtnActive/);
+    expect(original.className).toMatch(/menuItemActive/);
     // 模式期间禁用框选与他卡拖动（refPickActive 同语义），平移缩放保留
     expect(flowProps.current.refPickActive).toBe(true);
     noResidue();
@@ -336,8 +345,9 @@ describe('IKGOQX 再次进入从零开始', () => {
     // 再次进入：从零开始
     await enterOutpaint();
     expect(frameProps()!.expands).toEqual(ZERO_EXPANDS);
+    await openRatioMenu();
     const original = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-original"]')!;
-    expect(original.className).toMatch(/presetBtnActive/);
+    expect(original.className).toMatch(/menuItemActive/);
   });
 });
 
@@ -345,6 +355,7 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
   it('点 16:9 预设：以原图中心为锚外扩到最小包含框（上下零扩展、左右各 (533.33-497.78)/2）', async () => {
     await renderPage();
     await enterOutpaint();
+    await openRatioMenu();
     const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-16-9"]')!;
     await act(async () => {
       btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -361,6 +372,7 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
   it('点 9:16 预设：宽定高 497.78×16/9 ≈ 884.96，上下各扩 (884.96-280)/2 = 302.48 超 40% 上限（112）→ 置灰', async () => {
     await renderPage();
     await enterOutpaint();
+    await openRatioMenu();
     const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-9-16"]')!;
     expect(btn.getAttribute('aria-disabled')).toBe('true');
     expect(btn.getAttribute('title')).toContain('40%');
@@ -374,6 +386,7 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
   it('点 1:1 预设（4:3 源图场景）：i2 800×600 内容盒 373.33×280，1:1 上下各扩 46.67', async () => {
     await renderPage();
     await enterOutpaint('i2');
+    await openRatioMenu();
     const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-1-1"]')!;
     await act(async () => {
       btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -383,8 +396,9 @@ describe('IKGOQX 面板预设联动驱动扩展框', () => {
     expect(expands.right).toBeCloseTo(0, 6);
     expect(expands.top).toBeCloseTo(46.6667, 3);
     expect(expands.bottom).toBeCloseTo(46.6667, 3);
-    // 1:1 预设命中高亮
+    // 1:1 预设命中高亮（重新展开菜单查看）
+    await openRatioMenu();
     const active = document.body.querySelector<HTMLButtonElement>('[data-testid="outpaint-preset-1-1"]')!;
-    expect(active.className).toMatch(/presetBtnActive/);
+    expect(active.className).toMatch(/menuItemActive/);
   });
 });

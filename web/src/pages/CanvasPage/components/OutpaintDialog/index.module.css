@@ -1,6 +1,7 @@
 /* ============================================
- * OutpaintDialog 扩图参数面板样式（IKGOQX 骨架 / IKGOR6 补全字段）
- * 定位外壳与字段区沿用 ImageEnhanceDialog 同构；比例行是本面板的主体。
+ * OutpaintDialog 扩图工具栏样式（验收拍板改版横条，ADR-0095 修订）：
+ * 贴源图卡下方的单行深色胶囊工具栏 + 比例上拉菜单；定位外壳沿用
+ * ImageEnhanceDialog 同构（跟随锚定时绝对定位到源图卡下方）。
  * ============================================ */
 
 /* 定位外壳：与 ImageEnhanceDialog 同构（跟随锚定时绝对定位到源图卡下方） */
@@ -9,7 +10,7 @@
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  width: 320px;
+  width: max-content;
   max-width: 90%;
   z-index: 20;
   animation: outpaintFadeIn 0.2s ease;
@@ -32,29 +33,17 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.dialog {
+/* ---- 横条工具栏本体：单行深色胶囊 ---- */
+.toolbar {
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
+  align-items: center;
+  gap: var(--spacing-sm);
   background-color: #1e1e1e;
   border: 1px solid #2c2c2c;
-  border-radius: 16px;
-  padding: var(--spacing-lg);
+  border-radius: 24px;
+  padding: 8px 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-/* ---- 标题行 ---- */
-.headerRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .iconBtn {
@@ -76,103 +65,124 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 字段区 ---- */
-.fieldWrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  min-width: 0;
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: #333;
+  flex: none;
 }
 
-.fieldLabel {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
+/* ---- 比例上拉菜单：触发按钮 + 向上弹出的菜单 ---- */
+.menuAnchor {
+  position: relative;
+  display: flex;
 }
 
-/* 比例预设行：图标 + 文案纵向排列，允许换行 */
-.presetGroup {
+.triggerBtn {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  background-color: #262626;
-  border-radius: 12px;
-  padding: 4px;
-}
-
-.presetBtn {
-  flex: 1 1 30%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 8px 0 6px;
-  border-radius: 10px;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: var(--font-size-sm);
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.triggerBtn:hover {
+  background-color: #333;
+  color: #fff;
+}
+
+.menuPopup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+  animation: outpaintMenuIn 0.15s ease;
+}
+
+@keyframes outpaintMenuIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
   font-size: var(--font-size-sm);
   color: #999;
   background: transparent;
   border: none;
   cursor: pointer;
   transition: all var(--transition-fast);
+  text-align: left;
 }
 
-.presetBtn:hover {
+.menuItem:hover {
   color: #ddd;
+  background-color: #2a2a2a;
 }
 
-.presetBtnActive {
+.menuItemActive {
   background-color: #3a3a3a;
   color: #fff;
   font-weight: 700;
 }
 
-.presetBtn[aria-disabled='true'] {
+.menuItem[aria-disabled='true'] {
   color: #666;
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.presetBtn[aria-disabled='true']:hover {
+.menuItem[aria-disabled='true']:hover {
   color: #666;
+  background: transparent;
 }
 
-/* 自定义：被动状态胶囊（不可主动点选） */
-.customChip {
-  flex: 1 1 30%;
+/* 自定义：被动状态项（不可主动点选，与菜单项同版式） */
+.menuChip {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 8px 0;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
   font-size: var(--font-size-sm);
   color: #666;
+  background: transparent;
   user-select: none;
 }
 
-.customChipActive {
+.menuChipActive {
   background-color: #3a3a3a;
   color: #fff;
   font-weight: 700;
 }
 
 /* ---- 张数：固定「1张」禁用展示（多张生成未开放） ---- */
-.countGroup {
-  display: flex;
-  gap: 4px;
-  background-color: #262626;
-  border-radius: 12px;
-  padding: 4px;
-}
-
 .countBtn {
-  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 8px 0;
-  border-radius: 10px;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 12px;
   font-size: var(--font-size-sm);
   color: #666;
   background: transparent;
@@ -182,24 +192,18 @@
   user-select: none;
 }
 
-/* ---- 底部栏：免费提示 + 发送按钮（视觉同 ImageEnhanceDialog bottomBar） ---- */
-.bottomBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-sm);
-}
-
 .freeHint {
   font-size: 11px;
   color: var(--color-text-tertiary);
   user-select: none;
+  white-space: nowrap;
 }
 
+/* ---- 发送钮：圆形，激活白底黑箭头 ---- */
 .sendBtn {
-  width: 28.8px;
-  height: 28.8px;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -208,14 +212,15 @@
   border: none;
   cursor: not-allowed;
   transition: all var(--transition-fast);
+  flex: none;
 }
 
 .sendBtnActive {
-  background-color: #4a4a4a;
-  color: #fff;
+  background-color: #fff;
+  color: #111;
   cursor: pointer;
 }
 
 .sendBtnActive:hover {
-  background-color: #555;
+  background-color: #e8e8e8;
 }

@@ -964,7 +964,7 @@ export default function CanvasPage() {
         height: outpaintContentBox.height,
       }
     : null;
-  /** 扩图面板跟随锚：跟随扩展框下方（外扩时向下让位），面板宽 320 同高清面板 */
+  /** 扩图工具栏跟随锚：跟随扩展框下方（外扩时向下让位），横条自适应内容、钳制按约 400 估宽 */
   const outpaintFollowAnchor = outpaintSourceNode && outpaintRect && wrapperSize.width > 0
     ? computeFollowAnchor({
         nodeX: outpaintRect.x - outpaintExpands.left,
@@ -974,7 +974,7 @@ export default function CanvasPage() {
         viewport: liveViewport,
         containerWidth: wrapperSize.width,
         containerHeight: wrapperSize.height,
-        dialogWidth: 320,
+        dialogWidth: 400,
       })
     : null;
   /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
