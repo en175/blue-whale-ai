@@ -280,6 +280,24 @@ Web 依据 Conversation、GenerationOutputSlot、GenerationJob 与 Asset 形成�
 不同概念：前者是可重建的界面投影，后者是 Product API 管理的 Project 资源。
 _Avoid_: 持久化 Card；为 Card 设计资源接口；让浏览器随机生成 `projection_key`；把 Card 当作 NodeItem。
 
+**浮层容器（overlay）**:
+画布与生成界面上悬浮的界面容器统称，含三个家族：卡片工具栏、浮层菜单、底部面板。全部成员共享同一套
+容器视觉语言（背景/描边/阴影统一令牌，圆角分大容器档 16px 与浮条档 12px，见
+[ADR-0100](docs/adr/0100-canvas-overlay-container-visual-unification.md)）；半透明容器背景不属于
+任何成员。模态弹窗（资产库选择/共享资产/角色库/历史记录）、画布内操作框架（扩图框/裁切框/擦除
+遮罩）与画布常驻控件不是浮层容器。
+_Avoid_: 弹窗（指模态对话框时）、浮框；把模态弹窗或画布操作框架算进浮层容器
+
+**底部面板（bottom panel）**:
+屏幕底部上浮的生成与工具对话框家族：图片/视频/音频/音乐/文本生成/Agent 六类生成面板，加高清放大/
+擦除/扩图/裁切四个工具对话框；底部居中锚定，部分支持跟随卡片。浮层容器的大容器档成员。
+_Avoid_: 弹窗、对话框（口语可用，文档用底部面板）；把模态弹窗混称底部面板
+
+**浮层菜单（overlay menu）**:
+从画布或卡片上触发的轻量选择菜单：高清▾ 下拉、右键菜单、@菜单、标签操作层、连线类型菜单、参考
+来源菜单。浮层容器的浮条档成员。
+_Avoid_: 下拉框、弹出框
+
 **BottomDock**（底部生成 Dock）:
 Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video 工具触发，
 含 image / video 两种 mode。它是**纯生成工具**：手填参数（模型、比例、分辨率、
