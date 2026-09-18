@@ -180,3 +180,48 @@ describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无
     });
   }
 });
+
+/* ---- IKGZ8C 浮层菜单家族（6 成员，浮条档 12px） ---- */
+
+describe('IKGZ8C 浮层菜单家族（ADR-0100：6 成员统一到浮层容器令牌）', () => {
+  const memberCss = (component: string) =>
+    readFileSync(
+      fileURLToPath(new URL(`../pages/CanvasPage/components/${component}/index.module.css`, import.meta.url)),
+      'utf-8',
+    );
+  // 菜单容器不允许的硬编码背景/描边色值（8B 基础上补本家族旧值 #262626/#363636）
+  const menuHardcodedColors = [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636'];
+  const expectNoHardcoded = (block: string) => {
+    for (const hardcoded of menuHardcodedColors) {
+      expect(block).not.toContain(hardcoded);
+    }
+  };
+
+  it.each([
+    ['高清▾ 下拉 qualityMenu', 'MediaNode', '.qualityMenu'],
+    ['右键菜单主层', 'CanvasContextMenu', '.menu'],
+    ['右键菜单子层', 'CanvasContextMenu', '.subMenu'],
+    ['标签操作层 chipMenu', 'TextNode', '.chipMenu'],
+    ['连线类型菜单', 'ConnectTypeMenu', '.menu'],
+    ['参考来源菜单 sourceMenu', 'RefSourceMenu', '.sourceMenu'],
+  ] as const)('%s 容器四件套引用令牌、无硬编码容器色值', (_name, component, className) => {
+    const block = ruleBlockOf(memberCss(component), className);
+    expectOverlayContainer(block);
+    expectNoHardcoded(block);
+  });
+
+  it('@菜单 panel/flyout 容器四件套引用令牌（圆角 14px → 浮条档 12px）', () => {
+    const stripped = memberCss('AtMentionMenu').replace(/\/\*[\s\S]*?\*\//g, '');
+    const match = stripped.match(/\.panel,\s*\.flyout\s*\{([^}]*)\}/);
+    expect(match).not.toBeNull();
+    const block = match![1];
+    expectOverlayContainer(block);
+    expectNoHardcoded(block);
+  });
+
+  it('@菜单搜索框对比度连带修正：#1f1f1f 调暗到 --color-bg-secondary（容器 #1e1e1e 后原值失去层级）', () => {
+    const block = ruleBlockOf(memberCss('AtMentionMenu'), '.search');
+    expect(block).toContain('background: var(--color-bg-secondary)');
+    expect(block).not.toContain('#1f1f1f');
+  });
+});
