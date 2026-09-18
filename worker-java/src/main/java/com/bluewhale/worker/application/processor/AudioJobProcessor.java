@@ -298,6 +298,10 @@ public class AudioJobProcessor implements JobProcessor {
         }
         // URL 回退（generation-worker.ts:752-761）——仅当 data 为空
         if (url != null && !url.isEmpty()) {
+            // IKGS73：上游只给了 URL、没给字节 → assets.md5 留空。**这条不依赖 TOS 配置**，
+            // 是三条降级路径里唯一「TOS 正常也可能走到」的一条。留一行痕，否则 md5 为空
+            // 这件事在库里静得看不出来。
+            log.warn("[audio] 上游未返回字节，仅回退 URL：assets.md5 将为空（IKGS73 已知边界）");
             return new StoredMedia(url, null, null, null, null);
         }
         throw new AudioProviderError(GenerationError.ERROR_NO_RESULT, "生成服务未返回音频结果");

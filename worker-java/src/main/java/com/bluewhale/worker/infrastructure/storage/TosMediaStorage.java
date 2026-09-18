@@ -161,7 +161,7 @@ public class TosMediaStorage {
      *
      * @param filePath 本地 mp3 文件路径
      * @param mime     MIME 类型（恒 "audio/mpeg"）
-     * @return 上传结果（url / storageKey / mime / size）
+     * @return 上传结果（url / storageKey / mime / size / md5）
      * @throws MediaExtractError upload_failed
      */
     public UploadResult upload(Path filePath, String mime) {
@@ -311,7 +311,7 @@ public class TosMediaStorage {
         };
     }
 
-    /** 上传结果（对齐 tos-media-extract.ts:86-91 返回形状）。
+    /** 上传结果（形状对齐 tos-media-extract.ts:86-91；IKGS73 起多带 {@code md5}，故非逐字）。
      *  {@code md5}（IKGS73）：上传字节的 MD5，32 位小写 hex，供 {@code assets.md5} 落库。
      *  算法与编码统一走 {@link ContentDigest}——与视频转存出口共用同一份实现。 */
     public record UploadResult(String url, String storageKey, String mime, long size, String md5) {}

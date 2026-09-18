@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -87,5 +88,47 @@ class TosMediaStorageTest {
 
         assertThat(beats.get()).isZero();
         assertThat(Files.size(output)).isEqualTo(2);
+    }
+
+    // ========== IKGS73：三个上传出口必须真的算 md5 ==========
+    //
+    // 这三条盯的是本单的承重行（`ContentDigest.md5Hex(...)` 的三处调用点）。只测 ContentDigest
+    // 本身是不够的——把这里任意一处调用删掉，helper 的测试照样绿，而 assets.md5 会静默变空，
+    // 去重静默失效。用 RFC 1321 里 "abc" 的向量，同时钉住「算的是上传的那份字节」和「编码是小写 hex」。
+
+    private static final String MD5_OF_ABC = "900150983cd24fb0d6963f7d28e17f72";
+
+    @Test
+    @DisplayName("uploadBytes（audio 路径）的 md5 = 上传字节的 MD5")
+    void uploadBytesComputesMd5() {
+        TosMediaStorage storage = new TosMediaStorage(mock(TOSV2.class), "bucket", "endpoint");
+
+        TosMediaStorage.UploadResult result =
+                storage.uploadBytes("abc".getBytes(StandardCharsets.UTF_8), "audio/mpeg");
+
+        assertThat(result.md5()).isEqualTo(MD5_OF_ABC);
+    }
+
+    @Test
+    @DisplayName("uploadImageBytes（image / image_enhance 路径）的 md5 = 上传字节的 MD5")
+    void uploadImageBytesComputesMd5() {
+        TosMediaStorage storage = new TosMediaStorage(mock(TOSV2.class), "bucket", "endpoint");
+
+        TosMediaStorage.UploadResult result =
+                storage.uploadImageBytes("abc".getBytes(StandardCharsets.UTF_8), "image/png", "9");
+
+        assertThat(result.md5()).isEqualTo(MD5_OF_ABC);
+    }
+
+    @Test
+    @DisplayName("upload(Path)（media_extract 路径，走磁盘文件）的 md5 = 文件字节的 MD5")
+    void uploadPathComputesMd5(@TempDir Path tempDir) throws IOException {
+        Path file = tempDir.resolve("out.mp3");
+        Files.write(file, "abc".getBytes(StandardCharsets.UTF_8));
+        TosMediaStorage storage = new TosMediaStorage(mock(TOSV2.class), "bucket", "endpoint");
+
+        TosMediaStorage.UploadResult result = storage.upload(file, "audio/mpeg");
+
+        assertThat(result.md5()).isEqualTo(MD5_OF_ABC);
     }
 }

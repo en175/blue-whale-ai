@@ -258,7 +258,7 @@ class VideoJobProcessorTest {
 
         verify(videoClient, never()).submit(anyString(), any());
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble());
     }
 
     @Test
@@ -340,7 +340,7 @@ class VideoJobProcessorTest {
         verify(mediaRelay).persist(eq("http://video.mp4"), anyString());
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
-                eq(1024L), anyString(), anyInt(), anyInt(), anyDouble());
+                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble());
     }
 
     @Test
@@ -364,7 +364,7 @@ class VideoJobProcessorTest {
 
         // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
-                anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), anyString(),
+                anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
                 isNull(), isNull(), anyDouble());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
