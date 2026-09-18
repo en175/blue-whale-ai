@@ -3,12 +3,14 @@
    视觉与悬停共用同一份 CSS 定义（源断言见 edgeFlowSource.test.ts）；
    取消选中即恢复静态实线。类开关是唯一接缝，不写入连线数据。
    IKGUVG：剪刀改为指针停稳满 1 秒才出现（假计时器驱动），生成中的目标连线不出现。
-   IKGUVM：每条用户可见行为各一条独立用例——出现时机 / 移动重置 / 移出隐藏 / 出现位置偏移 /
+   IKGUVM：每条用户可见行为各一条独立用例——出现时机 / 移动重置 / 移出隐藏 / 出现位置 /
    出现后定格 / 指针在按钮上保持可见 / 目标节点生成中不出现；断言只落在渲染结果
    （出现类、transform、圆心坐标）与删除链路的 mock 调用上，不读组件内部状态。
-   另加两条守卫：偏移上限的几何不变量、两条连线之间的剪刀互斥。
+   另加两条守卫：圆心压在连线上的几何断言、两条连线之间的剪刀互斥。
    IKGUR7 审查修订：目标节点事后转入生成中时，已出现的剪刀立即收回、在途停稳计时一并清除；
-   指针进入连线（没有任何 mousemove）同样启动停稳计时。 */
+   指针进入连线（没有任何 mousemove）同样启动停稳计时。
+   IKGUR7 位置与尺寸修订：剪刀圆心压在连线上，沿连线朝剩余更长的一侧错开固定屏幕距离，
+   短连线收敛到端点；圆盘与图标按 1/zoom 反向缩放，屏幕尺寸不随画布缩放变化。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +18,8 @@ import { Position } from '@xyflow/react';
 import CustomEdge from './index';
 import styles from './index.module.css';
 
-/** 可控 store：nodeLookup 提供两端节点与第三方节点的 selected / data，模拟画布选中与生成态 */
+/** 可控 store：nodeLookup 提供两端节点与第三方节点的 selected / data，模拟画布选中与生成态；
+    transform[2] 是画布缩放倍率，剪刀按它做尺寸补偿 */
 const storeState = vi.hoisted(() => ({
   nodeLookup: new Map<string, { id: string; selected?: boolean; data?: Record<string, unknown> }>([
     ['n-src', { id: 'n-src', selected: false }],
@@ -25,6 +28,7 @@ const storeState = vi.hoisted(() => ({
     ['n-src-b', { id: 'n-src-b', selected: false }],
     ['n-dst-b', { id: 'n-dst-b', selected: false }],
   ]),
+  transform: [0, 0, 1],
 }));
 
 /** React Flow 替身：屏幕坐标换算故意带平移与缩放，断言位置确实走了 screenToFlowPosition */
@@ -39,6 +43,7 @@ const reactFlow = vi.hoisted(() => {
   return {
     state,
     deleteElements: vi.fn(),
+    getZoom: () => state.zoom,
     screenToFlowPosition: vi.fn((p: { x: number; y: number }) => ({
       x: p.x / state.zoom + state.flowDx,
       y: p.y / state.zoom + state.flowDy,
@@ -57,8 +62,8 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 
 /** 停稳门槛（与组件同值）：指针停稳满 1 秒剪刀才出现 */
 const DWELL_MS = 1000;
-/** 剪刀出现位置相对停稳指针的固定偏移（与组件 SCISSORS_OFFSET 同值，IKGUVK） */
-const SCISSORS_OFFSET = { x: 12, y: -12 };
+/** 剪刀圆心沿连线离开指针的距离，屏幕像素（与组件 SCISSORS_GAP 同值，IKGUR7） */
+const SCISSORS_GAP = 30;
 
 let root: Root;
 let container: HTMLDivElement;
@@ -98,13 +103,13 @@ const edgePropsB = {
 const SLOT_A = 'edge-slot-a';
 const SLOT_B = 'edge-slot-b';
 
-async function renderEdge() {
+async function renderEdge(props: typeof edgeProps = edgeProps) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(CustomEdge, edgeProps));
+    root.render(createElement(CustomEdge, props));
   });
 }
 
@@ -176,24 +181,54 @@ function scissorsRadius(scope: ParentNode = container): number {
   return Number(scope.querySelector(`.${styles.deleteBtn} circle`)!.getAttribute('r'));
 }
 
-/** 连线命中区域的半宽（渲染值）：命中路径描边宽度的一半 */
-function hitPathHalfWidth(scope: ParentNode = container): number {
-  return Number(scope.querySelector(`.${styles.hitPath}`)!.getAttribute('stroke-width')) / 2;
+/** 剪刀图标的边长（渲染值） */
+function scissorsIconSize(scope: ParentNode = container): number {
+  return Number(scope.querySelector(`.${styles.deleteBtn} foreignObject`)!.getAttribute('width'));
 }
 
-/** 接缝换算函数的期望结果：与 mock 的 screenToFlowPosition 同一公式（含画布缩放） */
-function flowPosition(clientX: number, clientY: number): { x: number; y: number } {
-  return {
-    x: clientX / reactFlow.state.zoom + reactFlow.state.flowDx,
-    y: clientY / reactFlow.state.zoom + reactFlow.state.flowDy,
+/** 剪刀组上的尺寸补偿倍率（渲染值）：按钮按 1/zoom 反向缩放，抵消画布缩放 */
+function scissorsScale(scope: ParentNode = container): number {
+  const matched = /scale\(([\d.]+)\)/.exec(scissorsTransform(scope) ?? '');
+  if (!matched) throw new Error(`剪刀按钮上没有可解析的 scale：${scissorsTransform(scope)}`);
+  return Number(matched[1]);
+}
+
+/** 剪刀圆盘在屏幕上的半径：渲染半径 × 尺寸补偿 × 画布缩放（IKGUR7 的验收量） */
+function scissorsScreenRadius(zoom: number, scope: ParentNode = container): number {
+  return scissorsRadius(scope) * scissorsScale(scope) * zoom;
+}
+
+/** 剪刀图标在屏幕上的边长 */
+function scissorsScreenIconSize(zoom: number, scope: ParentNode = container): number {
+  return scissorsIconSize(scope) * scissorsScale(scope) * zoom;
+}
+
+/** 圆心到渲染出来的连线路径的最近距离：用折线逼近贝塞尔，独立验证圆心是否压在连线上 */
+function distanceToDrawnEdge(point: { x: number; y: number }, scope: ParentNode = container): number {
+  const numbers = (scope.querySelector(`.${styles.basePath}`)!.getAttribute('d') ?? '').match(/-?[\d.]+/g)?.map(Number);
+  if (!numbers || numbers.length !== 8) throw new Error(`连线路径不是三次贝塞尔：${numbers}`);
+  const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = numbers;
+  const onCurve = (t: number) => {
+    const rest = 1 - t;
+    const a = rest ** 3;
+    const b = 3 * rest * rest * t;
+    const c = 3 * rest * t * t;
+    const d = t ** 3;
+    return { x: a * x0 + b * c1x + c * c2x + d * x1, y: a * y0 + b * c1y + c * c2y + d * y1 };
   };
-}
 
-/** 剪刀圆心相对指针换算位置的实际错开量：从渲染结果反推，不抄组件常量 */
-function measuredOffset(clientX: number, clientY: number, scope: ParentNode = container): { x: number; y: number } {
-  const center = scissorsCenter(scope);
-  const pointer = flowPosition(clientX, clientY);
-  return { x: center.x - pointer.x, y: center.y - pointer.y };
+  const segments = 200;
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < segments; index += 1) {
+    const from = onCurve(index / segments);
+    const to = onCurve((index + 1) / segments);
+    const span = (to.x - from.x) ** 2 + (to.y - from.y) ** 2;
+    const raw = span === 0 ? 0 : ((point.x - from.x) * (to.x - from.x) + (point.y - from.y) * (to.y - from.y)) / span;
+    const ratio = Math.min(1, Math.max(0, raw));
+    const foot = { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
+    nearest = Math.min(nearest, Math.hypot(point.x - foot.x, point.y - foot.y));
+  }
+  return nearest;
 }
 
 /** 指针在连线上移动（命中路径上派发，事件冒泡到连线组） */
@@ -203,6 +238,13 @@ async function movePointer(clientX: number, clientY: number, scope: ParentNode =
       .querySelector(`.${styles.hitPath}`)!
       .dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY }));
   });
+}
+
+/** 指针停在指定画布坐标处：位置类断言要求指针真的落在连线附近，
+    屏幕坐标按 mock 的换算公式（含 1000/2000 平移与缩放）反推得到 */
+async function movePointerAtFlow(x: number, y: number, scope: ParentNode = container) {
+  const { flowDx, flowDy, zoom } = reactFlow.state;
+  await movePointer((x - flowDx) * zoom, (y - flowDy) * zoom, scope);
 }
 
 /** 指针进入连线（无任何 mousemove）：React 的 onMouseEnter 由冒泡的 mouseover 合成，
@@ -368,8 +410,8 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
 
     await advance(1);
     expect(scissorsShown()).toBe(true);
-    // 出现位置仍是进入那一刻的指针位置加固定偏移
-    expect(measuredOffset(120, 80)).toEqual(SCISSORS_OFFSET);
+    // 出现位置仍是进入那一刻的指针位置换算出来的：圆心压在连线上
+    expect(distanceToDrawnEdge(scissorsCenter())).toBeLessThan(0.05);
   });
 
   it('移动重置：计时期间指针移动一次，原计时作废并从最后一次移动起重新计满 1 秒', async () => {
@@ -496,45 +538,89 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
   });
 });
 
-describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
+describe('IKGUVK 剪刀压在连线上、沿连线错开并就地定格', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     reactFlow.deleteElements.mockClear();
     reactFlow.screenToFlowPosition.mockClear();
     reactFlow.state.zoom = 1;
+    storeState.transform = [0, 0, 1];
   });
 
   afterEach(() => {
     vi.useRealTimers();
     reactFlow.state.zoom = 1;
+    storeState.transform = [0, 0, 1];
     setNodeData('n-src', undefined);
     setNodeData('n-dst', undefined);
   });
 
-  it('出现位置偏移：剪刀圆心落在指针换算位置加固定偏移处，指针正下方没有按钮', async () => {
+  it('出现位置：剪刀圆心压在连线上，指针正下方没有按钮', async () => {
     await renderEdge();
 
-    await movePointer(120, 80);
+    // 指针停在连线中点（画布坐标 50,50 正好落在连线上）
+    await movePointerAtFlow(50, 50);
     await advance(DWELL_MS);
     expect(scissorsShown()).toBe(true);
 
-    // 指针屏幕坐标经 screenToFlowPosition 换算后再加偏移（位置不是屏幕坐标原样使用）
-    expect(reactFlow.screenToFlowPosition).toHaveBeenCalledWith({ x: 120, y: 80 });
-    expect(measuredOffset(120, 80)).toEqual(SCISSORS_OFFSET);
-    // 指针正下方没有按钮：剪刀圆心不在指针换算位置上
-    expect(scissorsCenter()).not.toEqual(flowPosition(120, 80));
+    // 指针屏幕坐标经 screenToFlowPosition 换算成画布坐标后才参与定位
+    expect(reactFlow.screenToFlowPosition).toHaveBeenCalledWith({ x: -950, y: -1950 });
+    const center = scissorsCenter();
+    // 圆心压在连线上：到渲染出来的路径距离接近 0
+    expect(distanceToDrawnEdge(center)).toBeLessThan(0.05);
+    // 指针正下方没有按钮：圆心与指针位置的距离大于圆盘半径
+    expect(Math.hypot(center.x - 50, center.y - 50)).toBeGreaterThan(scissorsRadius());
   });
 
-  it('偏移上限：错开量小于命中路径半宽加剪刀圆半径，指针从连线移向剪刀不会掉进空档', async () => {
+  it('错开方向：朝连线剩余更长的一侧错开，指针靠近终点时朝起点一侧退', async () => {
     await renderEdge();
 
-    await movePointer(120, 80);
+    await movePointerAtFlow(95, 95);
     await advance(DWELL_MS);
-    const offset = measuredOffset(120, 80);
+    expect(scissorsShown()).toBe(true);
 
-    // 上限两侧都取渲染值（命中半宽 10 + 剪刀圆半径 11）：偏移超过这个距离时，
-    // 指针在连线与剪刀之间会同时不命中两者，剪刀闪一下就消失而其它用例全绿
-    expect(Math.hypot(offset.x, offset.y)).toBeLessThan(hitPathHalfWidth() + scissorsRadius());
+    const center = scissorsCenter();
+    expect(distanceToDrawnEdge(center)).toBeLessThan(0.05);
+    // 连线在 x、y 上都随参数单调递增：往起点一侧退，圆心 x 明显小于指针的 95
+    expect(center.x).toBeLessThan(80);
+  });
+
+  it('错开距离：沿连线离开指针 30 屏幕像素', async () => {
+    await renderEdge();
+
+    await movePointerAtFlow(50, 50);
+    await advance(DWELL_MS);
+
+    const center = scissorsCenter();
+    // 弧长按折线采样累加，实测弦长与设定值相差不到 1 像素
+    const gap = Math.hypot(center.x - 50, center.y - 50);
+    expect(gap).toBeGreaterThan(SCISSORS_GAP - 1);
+    expect(gap).toBeLessThan(SCISSORS_GAP + 0.5);
+  });
+
+  it('短连线一侧不够：朝另一侧退满错开量，圆心仍压在连线上', async () => {
+    // 60 单位长的连线，指针停在中后段：剩余更长的是起点一侧
+    await renderEdge({ ...edgeProps, id: 'e-short', targetX: 60, targetY: 0 });
+    await movePointerAtFlow(50, 0);
+    await advance(DWELL_MS);
+    expect(scissorsShown()).toBe(true);
+
+    const center = scissorsCenter();
+    expect(distanceToDrawnEdge(center)).toBeLessThan(0.05);
+    expect(center.x).toBeLessThan(50);
+    expect(Math.hypot(center.x - 50, center.y)).toBeGreaterThan(SCISSORS_GAP - 1);
+  });
+
+  it('连线比错开量还短：贴到端点，圆心不跑出连线', async () => {
+    // 20 单位长的连线，两侧剩余都只有 10，都不够 30
+    await renderEdge({ ...edgeProps, id: 'e-tiny', targetX: 20, targetY: 0 });
+    await movePointerAtFlow(10, 0);
+    await advance(DWELL_MS);
+    expect(scissorsShown()).toBe(true);
+
+    const center = scissorsCenter();
+    expect(Math.hypot(center.x - 20, center.y)).toBeLessThan(0.05);
+    expect(distanceToDrawnEdge(center)).toBeLessThan(0.05);
   });
 
   it('出现后定格：指针在连线上继续移动，剪刀位置保持不变', async () => {
@@ -581,8 +667,8 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
 
     await advance(1);
     expect(scissorsShown()).toBe(true);
-    // 重新出现落在新的指针位置：上一次的旧坐标没有残留
-    expect(measuredOffset(200, 120)).toEqual(SCISSORS_OFFSET);
+    // 重新出现落在新的指针位置附近：上一次的旧坐标没有残留，圆心仍压在连线上
+    expect(distanceToDrawnEdge(scissorsCenter())).toBeLessThan(0.05);
   });
 
   it('指针既不在连线上也不在按钮上：剪刀立即隐藏', async () => {
@@ -598,22 +684,52 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('偏移是画布流坐标定值：指针位置与画布缩放变化都不改错开量', async () => {
+  it('圆盘尺寸不随缩放变化：各档缩放下屏幕上的半径与图标边长都是定值', async () => {
     await renderEdge();
 
-    await movePointer(40, 30);
-    await advance(DWELL_MS);
-    expect(scissorsShown()).toBe(true);
-    expect(measuredOffset(40, 30)).toEqual(SCISSORS_OFFSET);
+    for (const zoom of [0.5, 1, 2]) {
+      reactFlow.state.zoom = zoom;
+      storeState.transform = [0, 0, zoom];
+      // mock 的 store 无订阅：改写缩放后必须重新 render，选择器才会重新求值
+      await rerenderEdge();
 
-    // 缩放变化：同一屏幕点换算出的流坐标变了，剪刀相对流坐标的错开量不变
+      await movePointerAtFlow(50, 50);
+      await advance(DWELL_MS);
+      expect(scissorsShown()).toBe(true);
+
+      // 渲染半径 × 组内补偿 × 画布缩放 = 屏幕像素：三档缩放都是 11 与 14
+      expect(scissorsScreenRadius(zoom)).toBeCloseTo(11, 5);
+      expect(scissorsScreenIconSize(zoom)).toBeCloseTo(14, 5);
+
+      await leaveEdge();
+    }
+  });
+
+  it('错开距离按屏幕像素固定：画布放大一倍，画布坐标里的错开量减半', async () => {
+    await renderEdge();
+
+    await movePointerAtFlow(50, 50);
+    await advance(DWELL_MS);
+    const centerAtOne = scissorsCenter();
+    const gapAtOne = Math.hypot(centerAtOne.x - 50, centerAtOne.y - 50);
+
     await leaveEdge();
     reactFlow.state.zoom = 2;
-    await movePointer(40, 30);
+    storeState.transform = [0, 0, 2];
+    await rerenderEdge();
+
+    await movePointerAtFlow(50, 50);
     await advance(DWELL_MS);
-    expect(scissorsShown()).toBe(true);
-    expect(flowPosition(40, 30)).not.toEqual({ x: 40 + reactFlow.state.flowDx, y: 30 + reactFlow.state.flowDy });
-    expect(measuredOffset(40, 30)).toEqual(SCISSORS_OFFSET);
+    const centerAtTwo = scissorsCenter();
+    const gapAtTwo = Math.hypot(centerAtTwo.x - 50, centerAtTwo.y - 50);
+
+    // 画布坐标里的错开量随缩放减半，乘回缩放后屏幕上仍是 30 像素
+    expect(gapAtOne).toBeGreaterThan(SCISSORS_GAP - 1);
+    expect(gapAtOne).toBeLessThan(SCISSORS_GAP + 0.5);
+    expect(gapAtTwo * 2).toBeGreaterThan(SCISSORS_GAP - 2);
+    expect(gapAtTwo * 2).toBeLessThan(SCISSORS_GAP + 0.5);
+    // 圆心仍压在连线上
+    expect(distanceToDrawnEdge(centerAtTwo)).toBeLessThan(0.05);
   });
 });
 

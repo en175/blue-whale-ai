@@ -4,17 +4,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBezierPath, useReactFlow, useStore, type EdgeProps } from '@xyflow/react';
 import { Scissors } from 'lucide-react';
+import { placeScissorsOnEdge } from './edgeGeometry';
 import styles from './index.module.css';
 
-/** 剪刀图标圆心相对 foreignObject 组原点的偏移 */
-const SCISSORS_CENTER = 10;
 /** 指针在连线上停稳满这么久剪刀才出现；期间任一次移动都重新计时（IKGUVG） */
 const DWELL_MS = 1000;
-/** 剪刀出现位置相对停稳指针的固定偏移：画布流坐标右上方，指针正下方不会出现按钮（IKGUVK）。
- *  偏移量须小于下方命中路径 strokeWidth 的一半加剪刀圆的 r，否则指针从连线移向剪刀的
- *  路上会掉进两边都不命中的空档；
- *  偏移是流坐标定值，画布缩放只改视觉大小，不改变这层关系 */
-const SCISSORS_OFFSET = { x: 12, y: -12 } as const;
+/** 剪刀圆心沿连线离开指针的距离，屏幕像素：错开一小段，指针正下方不会出现按钮（IKGUVK）。
+ *  错开方向取连线自身而不是垂直于连线——圆心始终压在连线上，指针沿连线走向剪刀的整条路
+ *  都落在连线的命中范围内，任何缩放级别都不会出现两边都不命中的空档；
+ *  距离按屏幕像素固定，画布放大缩小都不改变它（IKGUR7 修订） */
+const SCISSORS_GAP = 30;
+/** 剪刀圆盘半径与图标边长，屏幕像素：按钮组按 1/zoom 反向缩放，圆盘不随画布缩放变大变小 */
+const SCISSORS_RADIUS = 11;
+const SCISSORS_ICON = 14;
 
 export default function CustomEdge({
   id,
@@ -27,7 +29,7 @@ export default function CustomEdge({
   sourcePosition,
   targetPosition,
 }: EdgeProps) {
-  const { deleteElements, screenToFlowPosition } = useReactFlow();
+  const { deleteElements, getZoom, screenToFlowPosition } = useReactFlow();
   const [scissorsPos, setScissorsPos] = useState<{ x: number; y: number } | null>(null);
   /** 未触发的停稳计时（IKGUVG）：移动、离开、卸载都要清掉 */
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,6 +51,19 @@ export default function CustomEdge({
     return data?.genStatus === 'generating' || data?.submitting === true;
   });
 
+  /* IKGUR7 修订：圆盘尺寸按屏幕像素恒定，靠 1/zoom 反向缩放在缩放层内抵消画布缩放。
+     画布关闭了滚轮缩放（zoomOnScroll=false），缩放是离散动作，这里按节点标题的同一做法订阅缩放 */
+  const zoom = useStore((state) => state.transform[2]);
+
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
   const clearDwellTimer = useCallback(() => {
     if (dwellTimerRef.current !== null) {
       clearTimeout(dwellTimerRef.current);
@@ -68,24 +83,17 @@ export default function CustomEdge({
     setScissorsPos(null);
   }, [clearDwellTimer, targetGenerating]);
 
-  /** 启动停稳计时：满 1 秒后在「停稳那一刻的指针位置 + 固定偏移」处出现剪刀 */
+  /** 启动停稳计时：满 1 秒后在连线上落点处出现剪刀（圆心压在连线上，沿连线错开固定屏幕距离） */
   const startDwell = useCallback((clientX: number, clientY: number) => {
     clearDwellTimer();
-    const pos = screenToFlowPosition({ x: clientX, y: clientY });
+    const pointer = screenToFlowPosition({ x: clientX, y: clientY });
+    // 错开距离按屏幕像素给，换算到画布坐标要除以当前缩放
+    const gap = SCISSORS_GAP / getZoom();
     dwellTimerRef.current = setTimeout(() => {
       dwellTimerRef.current = null;
-      setScissorsPos({ x: pos.x + SCISSORS_OFFSET.x, y: pos.y + SCISSORS_OFFSET.y });
+      setScissorsPos(placeScissorsOnEdge(edgePath, pointer, gap));
     }, DWELL_MS);
-  }, [clearDwellTimer, screenToFlowPosition]);
-
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  });
+  }, [clearDwellTimer, edgePath, getZoom, screenToFlowPosition]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // 指针落在剪刀上：可见性与位置都不动（指针从连线移向剪刀时靠这条保持可点）
@@ -105,7 +113,7 @@ export default function CustomEdge({
 
     // 指针从剪刀移回连线：先收起剪刀，回到未出现状态，再按新位置重新计时（IKGUVK）
     if (backFromScissors) setScissorsPos(null);
-    // 每次移动都按新位置重新计时，停稳满 1 秒才出现；出现位置与指针保持固定偏移
+    // 每次移动都按新位置重新计时，停稳满 1 秒才出现；出现位置由连线投影加固定错开量给出
     startDwell(e.clientX, e.clientY);
   }, [clearDwellTimer, scissorsPos, startDwell, targetGenerating]);
 
@@ -156,16 +164,22 @@ export default function CustomEdge({
         className={styles.hitPath}
       />
 
-      {/* 剪刀删除按钮：停稳满 1 秒后追加出现类才可见，落点是停稳那一刻指针位置加固定偏移，
-          出现后不再随指针移动（IKGUVK） */}
+      {/* 剪刀删除按钮：停稳满 1 秒后追加出现类才可见；圆心落在连线上（组原点就是圆心），
+          尺寸按 1/zoom 反向缩放，屏幕上的圆盘大小与画布缩放无关（IKGUR7） */}
       <g
         className={scissorsPos !== null ? `${styles.deleteBtn} ${styles.deleteBtnVisible}` : styles.deleteBtn}
-        transform={`translate(${iconX - SCISSORS_CENTER}, ${iconY - SCISSORS_CENTER})`}
+        transform={`translate(${iconX}, ${iconY}) scale(${1 / zoom})`}
         onClick={handleDelete}
       >
-        <circle cx={10} cy={10} r={11} fill="#2a2a2a" stroke="#555" strokeWidth={1} />
-        <foreignObject x={3} y={3} width={14} height={14} style={{ pointerEvents: 'none' }}>
-          <Scissors size={14} strokeWidth={2} color="#ccc" />
+        <circle cx={0} cy={0} r={SCISSORS_RADIUS} fill="#2a2a2a" stroke="#555" strokeWidth={1} />
+        <foreignObject
+          x={-SCISSORS_ICON / 2}
+          y={-SCISSORS_ICON / 2}
+          width={SCISSORS_ICON}
+          height={SCISSORS_ICON}
+          style={{ pointerEvents: 'none' }}
+        >
+          <Scissors size={SCISSORS_ICON} strokeWidth={2} color="#ccc" />
         </foreignObject>
       </g>
     </g>
