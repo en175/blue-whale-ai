@@ -127,7 +127,7 @@ _Avoid_: 分辨率选择、画质档位、积分预估展示、竖向参数面�
 **扩图卡（outpaint card）**:
 发送扩图后创建的图像素材结果卡，内容为扩展框内完整画面（原图加 AI 补全区域），与源卡之间拉仅表达来源关系的纯视觉连线；发送成功即退出扩图模式。
 
-### 画布图片抠图（IKGXJ8 已确认目标，待实现）
+### 画布图片抠图（IKGXJ8 已实现）
 
 **抠图（image cutout）**:
 图片素材卡悬浮工具条「高清 ▾」下拉菜单中的动作入口（与「高清」「扩图」「擦除」「裁切」并列，位于擦除之后）；点击后源图卡下方浮出抠图工具栏，发送后为源图创建一张抠图卡。输入图固定为源卡素材；仅图片成品卡有此入口。源图为 webp/gif 格式、超过 30MB 或超过通用场景输入上限（长边 10240px、短边 6000px、总像素 40MP）时入口置灰并悬停说明原因，真实尺寸缺失不拦。
@@ -152,6 +152,20 @@ _Avoid_: 裁切（那是工具维度的画面裁剪）
 **抠图卡（cutout card）**:
 发送抠图后创建的图像素材结果卡，内容为移除背景后的透明 png，图片区垫棋盘格底纹标识透明；与源卡之间拉仅表达来源关系的纯视觉连线；发送即退出抠图工具栏；生成中到成品、失败可重试（原参数重发）。
 _Avoid_: 替换源卡素材、发送前建草稿卡
+
+### 画质工具家族交互（IKGYZY 已实现）
+
+**画质工具家族（quality tool family）**:
+图片素材卡悬浮工具条「高清 ▾」下拉承载的五个画质工具：高清（enhance）、扩图（outpaint）、裁切（crop）、擦除（erase）、抠图（cutout）；菜单现序为高清/扩图/裁切/擦除/抠图（裁切位于擦除之前——ADR-0098 正文的排位记述系笔误，以代码 `qualityMenuItems` 顺序与 [ADR-0099](docs/adr/0099-quality-tool-family-interaction-alignment.md) 记录为准）。家族级交互规则（工具会话模态隐藏 chrome、最近工具触发钮、发送钮统一 Dock 主发送钮样式）见本节词条与 ADR-0099；各工具自身的参数承载、门槛与建卡口径仍以各工具 ADR（0092/0094/0095/0098）为准。
+_Avoid_: 把「高清 ▾」当作高清放大独占入口（它承载五工具）、按 ADR-0098 的排位记述理解菜单顺序
+
+**工具会话（tool session）**:
+擦除/裁切/抠图/扩图四个编辑会话与高清面板打开态的统称：任一激活即界面进入「工具状态」模态——生成 Dock 六面板不可见不可开（会话期打开请求先按四路退出口径退出会话、未发送参数丢弃再放行；选中联动不回弹面板），媒体卡悬浮工具条整条不渲染（高清面板打开期间对全部图片卡生效）；Dock 已建草稿与面板编辑内容静默保留，会话退出后原样恢复。实现为派生会话态 `editSessionActive`（四会话目标 id 的或运算，不新增状态机）+ `exitEditSessionForGenPanel` 统一前置 + `soloToolbarHidden` 渲染期派生注入；四路退出（X、Esc、点其他卡、点画布空白）与四方互斥维持既有口径。
+_Avoid_: 新增全局模式状态机、会话期 Dock 折叠成细条/图标的中间态、会话期销毁 Dock 草稿
+
+**最近工具触发钮（recent-tool trigger）**:
+「高清 ▾」触发钮的显示语义：文案与图标显示全局记忆的最近使用画质工具——全局单值、不分画布文档、跨卡片共享，localStorage 单 key（`bw-recent-quality-tool`）持久，默认「高清」；悬浮触发钮自动展开菜单、移出延迟关闭；点击触发钮直启所显示工具（复用菜单项既有入口，进入会话/打开面板而非直接发送，ADR-0098 对一键直发的否决继续有效），直启与菜单选择共用同一启动路径与写入点（`recentQualityTool` 纯逻辑模块单一入口）。所显示工具对当前卡不可用时整钮置灰（`aria-disabled`、点击无效），hover 仍展开菜单可见置灰原因并改选。
+_Avoid_: 每卡各记一份最近工具、点击触发钮直发默认参数、置灰时禁止展开菜单
 
 ### Prompt 创作（IKDL9U 已确认目标，待实现）
 
@@ -306,10 +320,15 @@ Web 依据 Conversation、GenerationOutputSlot、GenerationJob 与 Asset 形成�
 _Avoid_: 持久化 Card；为 Card 设计资源接口；让浏览器随机生成 `projection_key`；把 Card 当作 NodeItem。
 
 **BottomDock**（底部生成 Dock）:
-Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video 工具触发，
-含 image / video 两种 mode。它是**纯生成工具**：手填参数（模型、比例、分辨率、
-时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
-对应 `_canvas/components/dock/`。
+Canvas 底部的生成工具面板，共六块：视频（BottomDialog）、图片（ImageDialog）、音频（AudioDialog）、
+音乐（MusicDialog）、文生文（TextGenDialog）与高清放大（ImageEnhanceDialog），实现位于
+`web/src/pages/CanvasPage/components/` 下各同名组件目录，由 CanvasPage 的六个 `showXxxDialog`
+布尔态互斥驱动；左侧工具栏（CanvasToolbar）经 `onToggleVideoDialog` / `onToggleImageDialog` /
+`onToggleAudioDialog` 回调打开视频/图片/音频三路，文生文、音乐与高清经卡上入口（重新编辑、
+点草稿卡、「高清 ▾」）与音频/音乐面板互切打开。它是**纯生成工具**：手填参数（模型、比例、
+分辨率、时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
+工具会话期间按模态隐藏 chrome 口径不可见不可开（见「工具会话」词条与
+[ADR-0099](docs/adr/0099-quality-tool-family-interaction-alignment.md)）。
 
 **生图入口（职责边界不同，非同一功能）**:
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
