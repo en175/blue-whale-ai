@@ -141,11 +141,11 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     });
   }
 
-  it('图片卡展开菜单含「高清」「擦除」两项', async () => {
+  it('图片卡展开菜单含「高清」「擦除」「抠图」三项（IKGXLT 追加尾项）', async () => {
     await renderNode('image');
     await openQualityMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
-    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '擦除']);
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '擦除', '抠图']);
   });
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {

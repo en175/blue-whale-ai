@@ -5,10 +5,11 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, WandSparkles } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import { imageEraseGateReason } from '../../imageErase';
+import { imageCutoutGateReason } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import EraseMaskLayer from './EraseMaskLayer';
 import { commitCardName } from '../cardName';
@@ -144,6 +145,9 @@ interface MediaNodeData {
   onEnhanceImage?: (id: string) => void;
   /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
   onEraseImage?: (id: string) => void;
+  /** 抠图（IKGXLT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts；
+   *  本票为占位通道，CanvasPage 侧 stub 空操作，工具栏接线归后续票） */
+  onCutoutImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -263,6 +267,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
   const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
   const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
+  const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -300,6 +305,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
    *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
+   *  「抠图」（IKGXLT）在「擦除」之后追加，按 imageCutout 门槛预检置灰（无最小边判定，
+   *  通用场景上限 10240/6000/40MP + 30MB；点击经 onCutoutImage 占位通道派发，接线归后续票）；
    *  扩图（IKGOQ0）后续在「高清」与「擦除」之间插入中间位——只改本数组 */
   const qualityMenuItems: ImageQualityMenuItem[] = [
     {
@@ -317,6 +324,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       hint: '涂抹或框选抹掉图中不要的内容',
       disabledReason: imageEraseGateReason(data),
       onSelect: handleEraseImage,
+    },
+    {
+      id: 'cutout',
+      label: '抠图',
+      icon: WandSparkles,
+      hint: '自动识别主体并移除背景',
+      disabledReason: imageCutoutGateReason(data),
+      onSelect: handleCutoutImage,
     },
   ];
   const isDraft = data.genStatus === 'draft';
