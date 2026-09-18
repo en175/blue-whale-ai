@@ -22,50 +22,80 @@
   pointer-events: none;
 }
 
-/* 边手柄：横条（上下边）/ 竖条（左右边），命中区比视觉条更大 */
-.edgeHandle {
+/* 边手柄 = 命中带 + 视觉把柄两层：
+   命中带透明、贯穿整条边、厚 12px 居中在线上——用户拖的是"边框线"本身；
+   中点蓝条只是视觉提示（pointer-events: none 不拦截） */
+.edgeHit {
   position: absolute;
   pointer-events: auto;
-  background-color: rgba(90, 170, 255, 0.85);
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  background: transparent;
 }
 
-.edgeHandle:hover {
-  background-color: #7cb8ff;
-}
-
-.edgeTop,
-.edgeBottom {
-  width: 40px;
-  height: 6px;
-  transform: translate(-50%, -50%);
+.edgeHitTop,
+.edgeHitBottom {
+  height: 12px;
+  transform: translateY(-50%);
   cursor: ns-resize;
 }
 
-.edgeLeft,
-.edgeRight {
-  width: 6px;
-  height: 40px;
-  transform: translate(-50%, -50%);
+.edgeHitLeft,
+.edgeHitRight {
+  width: 12px;
+  transform: translateX(-50%);
   cursor: ew-resize;
 }
 
-/* 角手柄：方形点 */
-.cornerHandle {
+.edgeVisual {
   position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(90, 170, 255, 0.85);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.edgeVisualH {
+  width: 40px;
+  height: 6px;
+}
+
+.edgeVisualV {
+  width: 6px;
+  height: 40px;
+}
+
+.edgeHit:hover .edgeVisual {
+  background-color: #7cb8ff;
+}
+
+/* 角手柄 = 20×20 透明命中区 + 10×10 视觉点；与边带交汇处角优先（z-index: 1） */
+.cornerHit {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  background: transparent;
+  z-index: 1;
+}
+
+.cornerVisual {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 10px;
   height: 10px;
   border-radius: 2px;
   background-color: #fff;
   border: 1.5px solid rgba(90, 170, 255, 0.95);
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
-  cursor: nwse-resize;
+  pointer-events: none;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
-.cornerHandle:hover {
+.cornerHit:hover .cornerVisual {
   border-color: #7cb8ff;
   background-color: #7cb8ff;
 }

@@ -86,6 +86,15 @@ export default function OutpaintFrame({ rect, expands, onExpandChange }: Outpain
     [],
   );
 
+  /** 会话期间拦截原生 dragstart：pointerdown 落空到图片时浏览器会启动 HTML5 拖拽
+   * （半透明重影跟手，验收实测报障）；捕获阶段统一按住。节点拖动走 pointer 事件
+   * 不依赖 HTML5 DnD，不受影响 */
+  useEffect(() => {
+    const block = (e: DragEvent) => e.preventDefault();
+    document.addEventListener('dragstart', block, true);
+    return () => document.removeEventListener('dragstart', block, true);
+  }, []);
+
   // 屏幕空间框几何（flow × zoom + 平移）
   const tl = flowToScreenPosition({ x: rect.x - expands.left, y: rect.y - expands.top });
   const br = flowToScreenPosition({
@@ -96,47 +105,55 @@ export default function OutpaintFrame({ rect, expands, onExpandChange }: Outpain
   const boxTop = tl.y;
   const boxW = br.x - tl.x;
   const boxH = br.y - tl.y;
-  const midX = boxLeft + boxW / 2;
-  const midY = boxTop + boxH / 2;
 
   return (
-    <div className={styles.frameLayer} data-testid="outpaint-frame">
+    <div className={styles.frameLayer} data-testid="outpaint-frame" data-outpaint-frame>
       {/* 框本体：纯视觉（边线 + 扩展区微填充），不拦截交互 */}
       <div
         className={styles.frameBox}
         style={{ left: boxLeft, top: boxTop, width: boxW, height: boxH }}
         data-testid="outpaint-frame-box"
       />
-      {/* 4 边手柄：单边外扩 */}
+      {/* 4 边手柄：命中带贯穿整条边（用户拖的是"边框线"本身，中点蓝条只是视觉提示）。
+          旧实现只有中点 40×6 小把柄，落空即被节点/画布/图片原生拖拽抢走事件（验收报障） */}
       <div
-        className={`nodrag nopan ${styles.edgeHandle} ${styles.edgeTop}`}
-        style={{ left: midX, top: boxTop }}
+        className={`nodrag nopan ${styles.edgeHit} ${styles.edgeHitTop}`}
+        style={{ left: boxLeft, top: boxTop, width: boxW }}
         data-testid="outpaint-handle-top"
         title="向外拖动扩展画面"
         onPointerDown={startDrag('edge', 'top')}
-      />
+      >
+        <div className={`${styles.edgeVisual} ${styles.edgeVisualH}`} />
+      </div>
       <div
-        className={`nodrag nopan ${styles.edgeHandle} ${styles.edgeBottom}`}
-        style={{ left: midX, top: br.y }}
+        className={`nodrag nopan ${styles.edgeHit} ${styles.edgeHitBottom}`}
+        style={{ left: boxLeft, top: br.y, width: boxW }}
         data-testid="outpaint-handle-bottom"
         title="向外拖动扩展画面"
         onPointerDown={startDrag('edge', 'bottom')}
-      />
+      >
+        <div className={`${styles.edgeVisual} ${styles.edgeVisualH}`} />
+      </div>
       <div
-        className={`nodrag nopan ${styles.edgeHandle} ${styles.edgeLeft}`}
-        style={{ left: boxLeft, top: midY }}
+        className={`nodrag nopan ${styles.edgeHit} ${styles.edgeHitLeft}`}
+        style={{ left: boxLeft, top: boxTop, height: boxH }}
         data-testid="outpaint-handle-left"
         title="向外拖动扩展画面"
         onPointerDown={startDrag('edge', 'left')}
-      />
+      >
+        <div className={`${styles.edgeVisual} ${styles.edgeVisualV}`} />
+      </div>
       <div
-        className={`nodrag nopan ${styles.edgeHandle} ${styles.edgeRight}`}
-        style={{ left: br.x, top: midY }}
+        className={`nodrag nopan ${styles.edgeHit} ${styles.edgeHitRight}`}
+        style={{ left: br.x, top: boxTop, height: boxH }}
         data-testid="outpaint-handle-right"
         title="向外拖动扩展画面"
         onPointerDown={startDrag('edge', 'right')}
-      />
-      {/* 4 角手柄：自由改比例；按住 Shift 锁定开始那一刻的比例等比外扩 */}
+      >
+        <div className={`${styles.edgeVisual} ${styles.edgeVisualV}`} />
+      </div>
+      {/* 4 角手柄：20×20 透明命中区（边角交汇处角优先，z-index 高于边带），视觉点 10×10；
+          自由改比例，按住 Shift 锁定开始那一刻的比例等比外扩 */}
       {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => {
         const cx = corner === 'nw' || corner === 'sw' ? boxLeft : br.x;
         const cy = corner === 'nw' || corner === 'ne' ? boxTop : br.y;
@@ -144,12 +161,14 @@ export default function OutpaintFrame({ rect, expands, onExpandChange }: Outpain
         return (
           <div
             key={corner}
-            className={`nodrag nopan ${styles.cornerHandle} ${dirClass}`}
+            className={`nodrag nopan ${styles.cornerHit} ${dirClass}`}
             style={{ left: cx, top: cy }}
             data-testid={`outpaint-handle-${corner}`}
             title="拖动同时调整宽高；按住 Shift 等比外扩"
             onPointerDown={startDrag('corner', corner)}
-          />
+          >
+            <div className={styles.cornerVisual} />
+          </div>
         );
       })}
     </div>

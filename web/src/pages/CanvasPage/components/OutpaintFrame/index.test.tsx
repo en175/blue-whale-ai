@@ -109,6 +109,28 @@ describe('IKGOQX 扩展框渲染', () => {
     expect(box.style.width).toBe('500px');
     expect(box.style.height).toBe('400px');
   });
+
+  it('边命中带贯穿整条边（不再只是中点 40px 小把柄，验收报障回归锁）', async () => {
+    await renderFrame();
+    const top = handle('top') as HTMLElement;
+    const left = handle('left') as HTMLElement;
+    // 命中带几何 = 框的整边（宽 400 / 高 300），线上居中
+    expect(top.style.left).toBe('1000px');
+    expect(top.style.top).toBe('500px');
+    expect(top.style.width).toBe('400px');
+    expect(left.style.left).toBe('1000px');
+    expect(left.style.top).toBe('500px');
+    expect(left.style.height).toBe('300px');
+    // 中点蓝条退为纯视觉层，不再承担命中
+    expect((top.firstElementChild as HTMLElement).className).toContain('edgeVisual');
+  });
+
+  it('扩图会话期间拦截原生 dragstart（防落空到图片时的半透明拖影重影）', async () => {
+    await renderFrame();
+    const event = new Event('dragstart', { bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
 });
 
 describe('IKGOQX 扩展框拖拽换算接线', () => {
