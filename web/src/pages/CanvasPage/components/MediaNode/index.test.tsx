@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReactFlowProvider } from '@xyflow/react';
 import MediaNode, { type MediaGenStatus } from './index';
+import styles from './index.module.css';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -86,6 +87,14 @@ describe('MediaNode selected toolbar', () => {
   it('keeps @ and generate actions on an image node', async () => {
     await renderNode('image');
     expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清', '详情', '下载', '添加到 Agent 聊天']);
+  });
+
+  it('工具条容器底类存在，「添加到对话」为透明底 toolBtn 而非胶囊类（IKGZ8B）', async () => {
+    await renderNode('image');
+    expect(mountNode.querySelector(`.${styles.toolbar}`)).not.toBeNull();
+    const addToChat = [...mountNode.querySelectorAll('button')]
+      .find((b) => b.getAttribute('title') === '添加到 Agent 聊天')!;
+    expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
   it('keeps @ and generate-video on a video node, still hides image-quality menu', async () => {
