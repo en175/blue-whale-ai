@@ -450,7 +450,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
       await act(async () => release());
     }
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里\n\n本次提交 A');
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里本次提交 A'); // !723：正文与附件直连，不再 \n\n 分隔
     expect(nodeOf('g1').data.prompt).toBe('本次提交 A');
   });
 
@@ -472,7 +472,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
     const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(payload.target_node_id).toBe('g1');
-    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里\n\n重画一版');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里重画一版'); // !723：正文与附件直连
 
     // 原卡承接：卡片数不变（g1/u1，t1 为文本节点）、生成中、旧素材保留
     expect(flowProps.current.mediaNodes).toHaveLength(2);
