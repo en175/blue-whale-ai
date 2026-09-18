@@ -36,6 +36,10 @@ import org.springframework.core.env.Environment;
  * 全部 bean 无条件装配：服务启动即消费全部 tag（ADR-0084 修正六）。
  * 缺 {@code ROCKETMQ_ENDPOINTS} 时 bean 装配直接抛错并终止启动——取代原
  * 「空 enabled-tags → 不连 MQ → 安全拉起 /ready」的形态。
+ * <p>
+ * 连接配置（属性绑定 + 缺 endpoints 守卫 + {@link ClientConfiguration} 构建）
+ * **只有一处**：{@link #rocketMqClientConfiguration(Environment)}。十二个
+ * consumer / producer bean 全部注入它的产物；守卫因此只跑一次、且早于任何 MQ 客户端创建。
  */
 @Configuration
 public class RocketMqConfig {
@@ -69,25 +73,22 @@ public class RocketMqConfig {
     }
 
     /**
-     * media_extract consumer。
+     * 共享的 RocketMQ 5 客户端配置——全类唯一构建点。
      * <p>
-     * consumer group = "generation-extract-worker"（契约 §1）。
-     * topic / tag = {@link GenerationMqRoute#MEDIA_EXTRACT}（= TS `MEDIA_EXTRACT_TAG`）。
-     * digitGuard = false（extract 不做纯数字守卫：与 TS rocketmq-extract.consumer.ts 一致）。
+     * 绑定 {@link RocketMqProperties} → 守卫缺 {@code ROCKETMQ_ENDPOINTS} → 构建
+     * {@link ClientConfiguration}（AK/SK 齐备才挂 {@code StaticSessionCredentialsProvider}）。
+     * 缺 endpoints 时在本 bean 创建期抛 {@link IllegalStateException}：因为它是全部 consumer /
+     * producer 的依赖，Spring 会在创建任何一个 MQ 客户端之前先建它，启动中止点比过去更早、更不可漏。
      */
-    @Bean(initMethod = "start", destroyMethod = "stop")
-    public MediaExtractConsumer mediaExtractConsumer(
-            MediaExtractJobProcessor processor,
-            WorkerProperties workerProps,
-            Environment env
-    ) {
+    @Bean
+    public ClientConfiguration rocketMqClientConfiguration(Environment env) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
                 .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：media_extract consumer 无法启动");
+                    "ROCKETMQ_ENDPOINTS 未配置：RocketMQ 客户端无法启动");
         }
 
         // ClientConfiguration 独立构建（RocketMQ 5.0.7 API）
@@ -100,13 +101,29 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
+        return configBuilder.build();
+    }
+
+    /**
+     * media_extract consumer。
+     * <p>
+     * consumer group = "generation-extract-worker"（契约 §1）。
+     * topic / tag = {@link GenerationMqRoute#MEDIA_EXTRACT}（= TS `MEDIA_EXTRACT_TAG`）。
+     * digitGuard = false（extract 不做纯数字守卫：与 TS rocketmq-extract.consumer.ts 一致）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public MediaExtractConsumer mediaExtractConsumer(
+            MediaExtractJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
         String consumerGroup = "generation-extract-worker";
         int concurrency = workerProps.concurrency().mediaExtract();
 
         return new MediaExtractConsumer(
                 processor,
                 GenerationMqRoute.MEDIA_EXTRACT.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup,
                 concurrency
         );
@@ -123,33 +140,15 @@ public class RocketMqConfig {
     public AudioConsumer audioConsumer(
             AudioJobProcessor processor,
             WorkerProperties workerProps,
-            Environment env
+            ClientConfiguration clientConfig
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：audio consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
         String consumerGroup = "generation-audio-worker";
         int concurrency = workerProps.concurrency().audio();
 
         return new AudioConsumer(
                 processor,
                 GenerationMqRoute.AUDIO.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup,
                 concurrency
         );
@@ -166,33 +165,15 @@ public class RocketMqConfig {
     public ImageConsumer imageConsumer(
             ImageJobProcessor processor,
             WorkerProperties workerProps,
-            Environment env
+            ClientConfiguration clientConfig
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：image consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
         String consumerGroup = "generation-image-worker";
         int concurrency = workerProps.concurrency().image();
 
         return new ImageConsumer(
                 processor,
                 GenerationMqRoute.IMAGE.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup,
                 concurrency
         );
@@ -209,33 +190,15 @@ public class RocketMqConfig {
     public ImageEnhanceConsumer imageEnhanceConsumer(
             ImageEnhanceJobProcessor processor,
             WorkerProperties workerProps,
-            Environment env
+            ClientConfiguration clientConfig
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：image_enhance consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
         String consumerGroup = "generation-image-enhance-worker";
         int concurrency = workerProps.concurrency().imageEnhance();
 
         return new ImageEnhanceConsumer(
                 processor,
                 GenerationMqRoute.IMAGE_ENHANCE.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup,
                 concurrency
         );
@@ -252,33 +215,15 @@ public class RocketMqConfig {
     public ImageEraseConsumer imageEraseConsumer(
             ImageEraseJobProcessor processor,
             WorkerProperties workerProps,
-            Environment env
+            ClientConfiguration clientConfig
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：image_erase consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
         String consumerGroup = "generation-image-erase-worker";
         int concurrency = workerProps.concurrency().imageErase();
 
         return new ImageEraseConsumer(
                 processor,
                 GenerationMqRoute.IMAGE_ERASE.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup,
                 concurrency
         );
@@ -293,27 +238,9 @@ public class RocketMqConfig {
      * producer 无 consumer group（video-queue.ts:79-98）。
      */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer generationMessageProducer(Environment env) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：video producer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
+    public GenerationMessageProducer generationMessageProducer(ClientConfiguration clientConfig) {
         return RocketMqGenerationMessageProducer.create(
-                configBuilder.build(),
+                clientConfig,
                 GenerationMqRoute.VIDEO.topic(),
                 GenerationMqRoute.VIDEO.tag());
     }
@@ -322,56 +249,39 @@ public class RocketMqConfig {
 
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer imageRecoveryProducer(Environment env) {
-        return createProducerForTag(env, GenerationMqRoute.IMAGE);
+    public GenerationMessageProducer imageRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE);
     }
 
     /** recovery 重投 audio。 */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer audioRecoveryProducer(Environment env) {
-        return createProducerForTag(env, GenerationMqRoute.AUDIO);
+    public GenerationMessageProducer audioRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.AUDIO);
     }
 
     /** recovery 重投 media_extract。 */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer mediaExtractRecoveryProducer(Environment env) {
-        return createProducerForTag(env, GenerationMqRoute.MEDIA_EXTRACT);
+    public GenerationMessageProducer mediaExtractRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.MEDIA_EXTRACT);
     }
 
     /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer imageEnhanceRecoveryProducer(Environment env) {
-        return createProducerForTag(env, GenerationMqRoute.IMAGE_ENHANCE);
+    public GenerationMessageProducer imageEnhanceRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_ENHANCE);
     }
 
     /** recovery 重投 image_erase（契约 §15 / IKGOT6）。 */
     @Bean(destroyMethod = "close")
-    public GenerationMessageProducer imageEraseRecoveryProducer(Environment env) {
-        return createProducerForTag(env, GenerationMqRoute.IMAGE_ERASE);
+    public GenerationMessageProducer imageEraseRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_ERASE);
     }
 
-    /** 按路由建 RocketMQ producer（校验与视频生产者同源语义）。 */
-    private GenerationMessageProducer createProducerForTag(Environment env, GenerationMqRoute route) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：recovery(" + route.tag() + ") producer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
+    /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */
+    private GenerationMessageProducer createProducerForTag(
+            ClientConfiguration clientConfig, GenerationMqRoute route) {
         return RocketMqGenerationMessageProducer.create(
-                configBuilder.build(), route.topic(), route.tag());
+                clientConfig, route.topic(), route.tag());
     }
 
     /**
@@ -404,32 +314,14 @@ public class RocketMqConfig {
     @Bean(initMethod = "start", destroyMethod = "stop")
     public VideoConsumer videoConsumer(
             VideoJobProcessor processor,
-            Environment env
+            ClientConfiguration clientConfig
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(DEFAULT_MQ_PROPS);
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：video consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
         String consumerGroup = "generation-video-worker";
 
         return new VideoConsumer(
                 processor,
                 GenerationMqRoute.VIDEO.topic(),
-                configBuilder.build(),
+                clientConfig,
                 consumerGroup
         );
     }

@@ -26,9 +26,7 @@ vi.mock("@lib/shared/generation/video-queue.js", () => ({
   enqueueImageGenerationJob: vi.fn(async () => {}),
   enqueueAudioGenerationJob: vi.fn(async () => {}),
   enqueueMediaExtractJob: vi.fn(async () => {}),
-  loadRocketMqConfig: vi.fn(() => ({
-    endpoints: "", sslEnabled: false, topic: "generation-task", tag: "video",
-  })),
+  loadRocketMqConfig: vi.fn(() => ({ endpoints: "", sslEnabled: false })),
   createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
   closeVideoGenerationQueue: vi.fn(async () => {}),
 }));

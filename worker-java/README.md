@@ -20,7 +20,7 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
 - **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL`（上游网关）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
-- **topic / tag 不再是配置项**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。worker 侧这两个键已无绑定目标，部署环境里的残留值会被静默忽略——但**生产侧仍读它们**，见下方检查清单。
+- **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/video-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
 - `GET /ready` 只返回 `{"status":"ready"}`。
 
 决策依据：ADR-0084「修正六」/ 契约 §16。
@@ -29,11 +29,10 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 
 topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**：旧名与新名都能启动成功，错配的唯一表现是消息无人消费——进程健康、`/ready` 绿、什么都不报。部署前必须确认：
 
-- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，其余各项都只能证明「没有旧名残留」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
+- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，下面第二条只能证明「没有旧进程在抢」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
 - [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
-- [ ] **backend（生产侧）部署环境无遗留的旧名 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`**：worker 侧这两个键已删除、残留会被忽略，但 `backend/libs/shared/generation/video-queue.ts` 的 `loadRocketMqConfig` 仍读它们，影响面按键区分——遗留 `ROCKETMQ_TOPIC` 把**六类**生产者全指回旧 topic；遗留 `ROCKETMQ_TAG` 只影响**视频**（`enqueueVideoGenerationJob` 是唯一透传 `config.tag` 的入队函数，其余五个入队函数直接用各自 tag 常量）。消费者固定在 `generation-task` + 六个枚举 tag，这些消息无人消费；但 job 会停在 `queued`，由 worker 的 recovery（60s 扫库、窗口 2h）按枚举重投到新 topic，**窗口内的工作可自愈**，超出 2h 窗口的才永久滞留。确认方式：这两个键不设，或显式设成新值。
 
-错配的共同后果都是**静默消息滞留**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但没有任何一条消息被消费——所以上面第一条（六条启动日志）才是正面的「订阅真的对了」证据。
+错配的后果都是**静默的**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但消息可能无人消费、或被打进旧进程的 group——所以上面第一条（六条启动日志）才是正面的「订阅真的对了」证据。生产侧（`backend`）也不再读 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`，残留这两个键不会再把生产者指回旧名。
 
 ## 构建 / 运行
 

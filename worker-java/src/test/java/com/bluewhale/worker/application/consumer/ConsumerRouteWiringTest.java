@@ -10,6 +10,7 @@ import com.bluewhale.worker.config.RocketMqConfig;
 import com.bluewhale.worker.config.WorkerProperties;
 import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 
+import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.MapPropertySource;
@@ -37,6 +38,9 @@ import static org.mockito.Mockito.mock;
  * 消费者 bean 是 {@code initMethod = "start"}，真起上下文就会建真实 SimpleConsumer 去连
  * {@code rocketmq.endpoints}，无 broker 的机器上必定失败（实测失败文案「SimpleConsumer 创建失败」）。
  * 本用例要验的是「喂进订阅表达式的值」，与能不能连上 broker 无关。
+ * <p>
+ * 连接配置经唯一的 {@code rocketMqClientConfiguration(env)} 构建（修正六之后全类仅此一处绑定），
+ * 再把产物注入六个 bean 方法——即生产装配的同一条路径。
  */
 class ConsumerRouteWiringTest {
 
@@ -67,15 +71,20 @@ class ConsumerRouteWiringTest {
         RocketMqConfig config = new RocketMqConfig();
         WorkerProperties workerProps = new WorkerProperties(null);
         StandardEnvironment env = residualOverrideEnvironment();
+        // 全类唯一的连接配置构建点：残留属性只喂到这里，且绑不到任何 topic / tag 分量。
+        ClientConfiguration clientConfig = config.rocketMqClientConfiguration(env);
 
         // 顺序与 ROUTES 对位：前五个走 workerProps 并发度，video 顺序消费不带并发度。
         List<AbstractGenerationConsumer> consumers = List.of(
-                config.mediaExtractConsumer(mock(MediaExtractJobProcessor.class), workerProps, env),
-                config.audioConsumer(mock(AudioJobProcessor.class), workerProps, env),
-                config.imageConsumer(mock(ImageJobProcessor.class), workerProps, env),
-                config.imageEnhanceConsumer(mock(ImageEnhanceJobProcessor.class), workerProps, env),
-                config.imageEraseConsumer(mock(ImageEraseJobProcessor.class), workerProps, env),
-                config.videoConsumer(mock(VideoJobProcessor.class), env));
+                config.mediaExtractConsumer(
+                        mock(MediaExtractJobProcessor.class), workerProps, clientConfig),
+                config.audioConsumer(mock(AudioJobProcessor.class), workerProps, clientConfig),
+                config.imageConsumer(mock(ImageJobProcessor.class), workerProps, clientConfig),
+                config.imageEnhanceConsumer(
+                        mock(ImageEnhanceJobProcessor.class), workerProps, clientConfig),
+                config.imageEraseConsumer(
+                        mock(ImageEraseJobProcessor.class), workerProps, clientConfig),
+                config.videoConsumer(mock(VideoJobProcessor.class), clientConfig));
 
         assertThat(consumers).hasSize(ROUTES.size());
 
