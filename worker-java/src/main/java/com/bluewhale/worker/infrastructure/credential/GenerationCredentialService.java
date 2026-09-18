@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
  * 契约：docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §5 修正四。
  */
 @Component
-@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.GenerationTagsCondition.class)
 public class GenerationCredentialService {
 
     /**

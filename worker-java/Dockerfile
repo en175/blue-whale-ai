@@ -29,8 +29,6 @@ WORKDIR /app
 # 通配符不匹配 spring-boot repackage 的 .jar.original，只会命中可执行 fat-jar
 COPY --from=build /build/target/worker-java-*.jar app.jar
 
-# 灰度开关（空 = 不消费，安全拉起 /ready）
-ENV WORKER_ENABLED_TAGS=""
 ENV GENERATION_WORKER_PORT=4002
 
 EXPOSE 4002
