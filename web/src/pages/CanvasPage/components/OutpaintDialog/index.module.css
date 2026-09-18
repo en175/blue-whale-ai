@@ -16,10 +16,11 @@
   animation: outpaintFadeIn 0.2s ease;
 }
 
+/* 跟随锚是扩展框中心点（left=中心 x）：自身 translateX(-50%) 真居中，不受估宽误差影响 */
 .dialogWrapFollow {
   bottom: auto;
   left: 0;
-  transform: none;
+  transform: translateX(-50%);
   animation: outpaintFadeInFollow 0.2s ease;
 }
 
@@ -29,8 +30,8 @@
 }
 
 @keyframes outpaintFadeInFollow {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
 /* ---- 横条工具栏本体：单行深色胶囊 ---- */

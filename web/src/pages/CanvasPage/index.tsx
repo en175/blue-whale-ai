@@ -15,6 +15,8 @@ import { nextDraftPosition, type SpawnBox } from './draftSpawn';
 import {
   computeFollowAnchor,
   enabledVideoFollowModes,
+  FOLLOW_GAP,
+  FOLLOW_PAD,
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
@@ -964,18 +966,23 @@ export default function CanvasPage() {
         height: outpaintContentBox.height,
       }
     : null;
-  /** 扩图工具栏跟随锚：跟随扩展框下方（外扩时向下让位），横条自适应内容、钳制按约 400 估宽 */
+  /** 扩图工具栏跟随锚：横条自适应内容宽，定位走「中心点」语义（组件内 translateX(-50%)
+   *  真居中，不受估宽误差影响）；估半宽只用于视口钳制。跟随扩展框中心与其下方（外扩让位）。 */
+  const OUTPAINT_TOOLBAR_HALF_WIDTH = 180;
   const outpaintFollowAnchor = outpaintSourceNode && outpaintRect && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: outpaintRect.x - outpaintExpands.left,
-        nodeY: outpaintSourceNode.position.y,
-        nodeWidth: outpaintRect.width + outpaintExpands.left + outpaintExpands.right,
-        nodeHeight: outpaintRect.height + MEDIA_CONTENT_TOP_OFFSET + outpaintExpands.bottom,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 400,
-      })
+    ? (() => {
+        const zoom = liveViewport.zoom || 1;
+        const frameLeft = outpaintRect.x - outpaintExpands.left;
+        const frameWidth = outpaintRect.width + outpaintExpands.left + outpaintExpands.right;
+        const centerX = frameLeft * zoom + liveViewport.x + (frameWidth * zoom) / 2;
+        const left = Math.max(
+          FOLLOW_PAD + OUTPAINT_TOOLBAR_HALF_WIDTH,
+          Math.min(centerX, wrapperSize.width - FOLLOW_PAD - OUTPAINT_TOOLBAR_HALF_WIDTH),
+        );
+        const top = (outpaintSourceNode.position.y + outpaintRect.height + MEDIA_CONTENT_TOP_OFFSET + outpaintExpands.bottom) * zoom
+          + liveViewport.y + FOLLOW_GAP;
+        return { left: Math.round(left), top: Math.round(top) };
+      })()
     : null;
   /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
   const handleOutpaintPresetSelect = useCallback(
