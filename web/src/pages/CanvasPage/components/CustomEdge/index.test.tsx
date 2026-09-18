@@ -36,6 +36,10 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 
 /** 停稳门槛（与组件同值）：指针停稳满 1 秒剪刀才出现 */
 const DWELL_MS = 1000;
+/** 剪刀出现位置相对停稳指针的固定偏移（与组件 SCISSORS_OFFSET 同值，IKGUVK） */
+const SCISSORS_OFFSET = { x: 12, y: -12 };
+/** 剪刀图标圆心相对按钮组原点的偏移（与组件 SCISSORS_CENTER 同值） */
+const SCISSORS_CENTER = 10;
 
 let root: Root;
 let container: HTMLDivElement;
@@ -94,6 +98,13 @@ function scissorsTransform(): string | null {
   return container.querySelector(`.${styles.deleteBtn}`)?.getAttribute('transform') ?? null;
 }
 
+/** 剪刀按钮组原点在画布流坐标里的位置；圆心 = 组原点 + SCISSORS_CENTER */
+function scissorsOrigin(): { x: number; y: number } {
+  const matched = scissorsTransform()?.match(/translate\((-?[\d.]+),\s*(-?[\d.]+)\)/);
+  if (!matched) throw new Error(`剪刀按钮上没有可解析的 transform：${scissorsTransform()}`);
+  return { x: Number(matched[1]), y: Number(matched[2]) };
+}
+
 /** 指针在连线上移动（命中路径上派发，事件冒泡到连线组） */
 async function movePointer(clientX: number, clientY: number) {
   await act(async () => {
@@ -109,6 +120,37 @@ async function leaveEdge() {
     container
       .querySelector(`.${styles.hitPath}`)!
       .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+  });
+}
+
+/** 指针从连线移到剪刀上：命中路径 mouseout 到剪刀（relatedTarget 落在连线组内），
+    随后剪刀收到 mousemove——真实浏览器里指针移向剪刀就是这两步，IKGUVK 的存活前提 */
+async function movePointerOntoScissors() {
+  const btn = container.querySelector(`.${styles.deleteBtn}`)!;
+  await act(async () => {
+    container
+      .querySelector(`.${styles.hitPath}`)!
+      .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: btn }));
+  });
+  await act(async () => {
+    btn.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  });
+}
+
+/** 指针从剪刀移出到画布空白：既不在连线上也不在剪刀上 */
+async function movePointerOffScissors() {
+  await act(async () => {
+    container
+      .querySelector(`.${styles.deleteBtn}`)!
+      .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+  });
+}
+
+async function clickScissors() {
+  await act(async () => {
+    container
+      .querySelector(`.${styles.deleteBtn}`)!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
@@ -201,15 +243,17 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('指针停稳满 1 秒：剪刀出现，且落在换算后的指针位置', async () => {
+  it('指针停稳满 1 秒：剪刀出现，且落在换算后的指针位置加固定偏移处', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
     await advance(DWELL_MS);
 
     expect(scissorsShown()).toBe(true);
-    // 换算函数返回 (clientX + 1000, clientY + 2000)，剪刀圆心相对组原点偏移 10
-    expect(scissorsTransform()).toBe(`translate(${120 + 1000 - 10}, ${80 + 2000 - 10})`);
+    // 换算函数返回 (clientX + 1000, clientY + 2000)；剪刀组原点 = 指针流坐标 + 固定偏移 - 圆心偏移
+    expect(scissorsTransform()).toBe(
+      `translate(${120 + 1000 + SCISSORS_OFFSET.x - SCISSORS_CENTER}, ${80 + 2000 + SCISSORS_OFFSET.y - SCISSORS_CENTER})`,
+    );
     expect(reactFlow.screenToFlowPosition).toHaveBeenCalledWith({ x: 120, y: 80 });
   });
 
@@ -303,5 +347,116 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
       root.unmount();
     });
     expect(vi.getTimerCount()).toBe(before);
+  });
+});
+
+describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    reactFlow.deleteElements.mockClear();
+    reactFlow.screenToFlowPosition.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setNodeData('n-src', undefined);
+    setNodeData('n-dst', undefined);
+  });
+
+  it('出现位置与指针存在固定偏移，不在指针坐标上', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+
+    expect(scissorsShown()).toBe(true);
+    // 换算函数返回 (clientX + 1000, clientY + 2000)；剪刀圆心 = 指针流坐标 + 固定偏移
+    const center = { x: scissorsOrigin().x + SCISSORS_CENTER, y: scissorsOrigin().y + SCISSORS_CENTER };
+    expect(center).toEqual({ x: 120 + 1000 + SCISSORS_OFFSET.x, y: 80 + 2000 + SCISSORS_OFFSET.y });
+    // 指针正下方没有按钮：圆心不在指针换算位置上
+    expect(center).not.toEqual({ x: 120 + 1000, y: 80 + 2000 });
+  });
+
+  it('出现后指针在连线上继续移动：位置就地定格，不再跟随指针', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    const locked = scissorsTransform();
+
+    await movePointer(400, 300);
+    expect(scissorsShown()).toBe(true);
+    expect(scissorsTransform()).toBe(locked);
+  });
+
+  it('指针移到剪刀上：剪刀保持可见，单击一次即删除', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    // 指针离开命中路径移向剪刀，路径上会短暂不在连线上
+    await movePointerOntoScissors();
+    expect(scissorsShown()).toBe(true);
+
+    await clickScissors();
+    expect(reactFlow.deleteElements).toHaveBeenCalledTimes(1);
+    expect(reactFlow.deleteElements).toHaveBeenCalledWith({ edges: [{ id: 'e1' }] });
+  });
+
+  it('指针从剪刀移回连线：重新计时，未满 1 秒不出现', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    await movePointerOntoScissors();
+    expect(scissorsShown()).toBe(true);
+
+    await movePointer(200, 120);
+    expect(scissorsShown()).toBe(false);
+
+    await advance(DWELL_MS - 1);
+    expect(scissorsShown()).toBe(false);
+
+    await advance(1);
+    expect(scissorsShown()).toBe(true);
+    // 重新出现落在新的指针位置：上一次的旧坐标没有残留
+    expect(scissorsOrigin()).toEqual({
+      x: 200 + 1000 + SCISSORS_OFFSET.x - SCISSORS_CENTER,
+      y: 120 + 2000 + SCISSORS_OFFSET.y - SCISSORS_CENTER,
+    });
+  });
+
+  it('指针既不在连线上也不在剪刀上：剪刀立即隐藏', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    await movePointerOntoScissors();
+    expect(scissorsShown()).toBe(true);
+
+    // 从剪刀移到画布空白
+    await movePointerOffScissors();
+    expect(scissorsShown()).toBe(false);
+  });
+
+  it('偏移量是画布流坐标定值：不同指针位置的错开量恒定，缩放只改视觉大小', async () => {
+    await renderEdge();
+
+    await movePointer(40, 30);
+    await advance(DWELL_MS);
+    const first = scissorsOrigin();
+    expect({
+      x: first.x + SCISSORS_CENTER - (40 + 1000),
+      y: first.y + SCISSORS_CENTER - (30 + 2000),
+    }).toEqual(SCISSORS_OFFSET);
+
+    await leaveEdge();
+    await movePointer(260, 180);
+    await advance(DWELL_MS);
+    const second = scissorsOrigin();
+    expect({
+      x: second.x + SCISSORS_CENTER - (260 + 1000),
+      y: second.y + SCISSORS_CENTER - (180 + 2000),
+    }).toEqual(SCISSORS_OFFSET);
   });
 });
