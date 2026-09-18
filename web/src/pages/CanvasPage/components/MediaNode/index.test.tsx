@@ -159,6 +159,24 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     expect(onEraseImage).toHaveBeenCalledWith('image-node');
   });
 
+  it('抠图结果卡（imageCutout 标记）：成品图片区垫棋盘格底底层（IKGXMT，规格故事 21）；无标记卡不渲染', async () => {
+    await renderNode('image', {
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    const checker = mountNode.querySelector('[data-testid="cutout-checkerboard"]');
+    expect(checker).toBeTruthy();
+    expect(checker!.getAttribute('aria-hidden')).toBe('true');
+    // 无标记的普通图片卡不渲染棋盘格
+    await renderNode('image', { data: { mime: 'image/png' } });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
+    // 生成中占位态不渲染（棋盘格仅成品图片分支）
+    await renderNode('image', {
+      genStatus: 'generating',
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
+  });
+
   it('超尺寸（长边>2560 或短边>1440，短边/长边语义）：擦除置灰并悬停原因，高清项不受影响', async () => {
     await renderNode('image', { data: { width: 3000, height: 1440, mime: 'image/png' } });
     await openQualityMenu();

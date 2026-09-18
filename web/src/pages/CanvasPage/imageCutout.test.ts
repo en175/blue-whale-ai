@@ -152,11 +152,13 @@ describe('imageCutoutSceneGateReason（按场景两档精校，规格故事 15�
 });
 
 describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', () => {
-  it('通用场景：恰四键（source_asset_id/target_node_id/cutout_scene/output_format），不携带增强参数', () => {
+  it('通用场景：恰三键（source_asset_id/target_node_id/cutout_scene），不携带增强参数与 output_format', () => {
     const request = buildImageCutoutRequest({ sourceAssetId: '123', targetNodeId: 'node-1', scene: 'general' });
-    expect(Object.keys(request).sort()).toEqual(['cutout_scene', 'output_format', 'source_asset_id', 'target_node_id']);
+    expect(Object.keys(request).sort()).toEqual(['cutout_scene', 'source_asset_id', 'target_node_id']);
     expect(request.cutout_scene).toBe('general');
-    expect(request.output_format).toBe('png');
+    // output_format 不进创建请求体：契约 strict schema 按场景三键/七键冻结，
+    // 固定 png 由 worker 出站携带（IKGXMT 对齐后端创建入口复核口径）
+    expect('output_format' in request).toBe(false);
     // 即使误传增强入参，通用场景也不携带（接口对 general 忽略，请求体不带忽略字段）
     const withExtras = buildImageCutoutRequest({
       sourceAssetId: '123',
@@ -166,10 +168,10 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
       contourSize: 20,
       needCropBackground: true,
     });
-    expect(Object.keys(withExtras).sort()).toEqual(['cutout_scene', 'output_format', 'source_asset_id', 'target_node_id']);
+    expect(Object.keys(withExtras).sort()).toEqual(['cutout_scene', 'source_asset_id', 'target_node_id']);
   });
 
-  it('人像/商品场景：追加 need_contour/contour_color/contour_size/need_crop_background 四参数', () => {
+  it('人像/商品场景：恰七键，追加 need_contour/contour_color/contour_size/need_crop_background 四参数', () => {
     for (const scene of ['human', 'product'] as const) {
       const request = buildImageCutoutRequest({
         sourceAssetId: '456',
@@ -185,7 +187,6 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
         'cutout_scene',
         'need_contour',
         'need_crop_background',
-        'output_format',
         'source_asset_id',
         'target_node_id',
       ]);
@@ -194,7 +195,7 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
       expect(request.contour_color).toBe('#FFFFFF');
       expect(request.contour_size).toBe(25);
       expect(request.need_crop_background).toBe(false);
-      expect(request.output_format).toBe('png');
+      expect('output_format' in request).toBe(false);
     }
   });
 
