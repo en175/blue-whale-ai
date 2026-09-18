@@ -660,15 +660,8 @@ describe('IKGW1N 比例面板接线（面板真实渲染）', () => {
     expectDiscardClean();
   });
 
-  it('面板确认：渲染在位、点击派发回调（本票占位：不退出、不建卡、无连线）', async () => {
-    await renderPage();
-    await cropImage('m1');
-    await clickBody('crop-confirm');
-    // 占位实现：模式保持，无新卡无连线（裁切执行由 IKGW1S 实装）
-    expect(cropEditing('m1')).toBe(true);
-    expect((flowProps.current.mediaNodes as Node[]).length).toBe(5);
-    expect(flowProps.current.edges).toEqual([]);
-  });
+  /* 面板确认（IKGW1N 占位用例随 IKGW1S 实装退役）：确认按钮的执行链路断言
+     （裁切→上传→建卡→连线→退出、不抢选中、失败留模式）由 cropEdit.test.tsx 完整接管。 */
 
   it('退出后重进：框回到全幅、比例回到自由（不记忆上次状态）', async () => {
     await renderPage();

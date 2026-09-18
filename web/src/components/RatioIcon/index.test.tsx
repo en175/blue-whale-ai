@@ -91,13 +91,14 @@ describe('RatioIcon 共享组件（IKGBTV）', () => {
   });
 });
 
-/* 接入点静态断言（IKGBTV）：三处实现收敛为共享组件，四处接入点统一引用；
+/* 接入点静态断言（IKGBTV）：三处实现收敛为共享组件，接入点统一引用；
    首页 22px 经 size 参数传入，画布沿用默认 16px；本地实现与查表法全部拆除 */
 describe('RatioIcon 接入点收敛', () => {
   const readSrc = (rel: string) => readFileSync(join(__dirname, '../..', rel), 'utf8');
   const imageDialog = readSrc('pages/CanvasPage/components/ImageDialog/index.tsx');
   const bottomDialog = readSrc('pages/CanvasPage/components/BottomDialog/index.tsx');
   const chatBox = readSrc('pages/Home/components/ChatBox/index.tsx');
+  const cropDialog = readSrc('pages/CanvasPage/components/CropDialog/index.tsx');
 
   it('ImageDialog 引用共享组件且不再保留本地实现', () => {
     expect(imageDialog).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
@@ -117,8 +118,13 @@ describe('RatioIcon 接入点收敛', () => {
     expect(calls).toHaveLength(4);
   });
 
-  it('画布两处接入不传 size，沿用默认 16px', () => {
-    for (const src of [imageDialog, bottomDialog]) {
+  it('CropDialog（IKGW1N 裁切比例选项）引用共享组件且不保留本地实现', () => {
+    expect(cropDialog).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
+    expect(cropDialog).not.toMatch(/function RatioIcon/);
+  });
+
+  it('画布接入不传 size，沿用默认 16px', () => {
+    for (const src of [imageDialog, bottomDialog, cropDialog]) {
       const calls = src.match(/<RatioIcon [^/]*\/>/g) ?? [];
       expect(calls.length).toBeGreaterThan(0);
       for (const call of calls) expect(call).not.toContain('size');

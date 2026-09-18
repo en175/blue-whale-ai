@@ -81,11 +81,16 @@ import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog'
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
+  cropOutputFormat,
   cropPresetRatio,
+  cropRectToNatural,
   fullCropRect,
+  IMAGE_CROP_EDGE_ORIGIN,
   inscribeCropRect,
   minCropSideDisplay,
   type CropCoordinateSpace,
+  type CropNaturalRect,
+  type CropOutputFormat,
   type CropPresetKey,
   type CropRect,
 } from './imageCrop';
@@ -213,6 +218,43 @@ function draftFileNameOf(type: unknown): string {
 /** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
 function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
+}
+
+/** 裁切执行（IKGW1S）：加载源图 → 离屏 canvas（尺寸=裁切结果自然分辨率）drawImage 框内画面
+ *  → toBlob 重编码（格式与质量由调用方按 cropOutputFormat 决定）为 File。
+ *  返回 null 表示源图加载或编码失败（调用方 toast 后留在裁切模式；jsdom 无 canvas 编码与
+ *  图加载，页面测试打桩 getContext/toBlob/Image，真实编码由人工回归覆盖，规格 Testing Decisions）。 */
+function cropImageToFile(
+  src: string,
+  natural: CropNaturalRect,
+  format: CropOutputFormat,
+): Promise<File | null> {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = natural.width;
+    canvas.height = natural.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        ctx.drawImage(img, natural.x, natural.y, natural.width, natural.height, 0, 0, natural.width, natural.height);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], `crop.${format.ext}`, { type: blob.type || format.mime }) : null),
+          format.mime,
+          format.quality,
+        );
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
 }
 
 export default function CanvasPage() {
@@ -353,6 +395,9 @@ export default function CanvasPage() {
   /** 当前裁切框（IKGW1N，flow 坐标、与内容区 bounds 同系）：null=未在编辑；
    *  进入默认自由比例全幅（fullCropRect），确认时 IKGW1S 读取本框换算自然分辨率裁切 */
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
+  /** 裁切执行中（IKGW1S：编码+上传期间）：重复点确认直接忽略（面板无 submitting 只读态，
+   *  本页侧防双卡；成功即退出模式，失败复位留在模式） */
+  const cropSubmittingRef = useRef(false);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -3347,17 +3392,20 @@ export default function CanvasPage() {
 
   /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
    *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），nodeId 指定节点 id
-   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖 */
+   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖；
+   *  skipSelect（IKGW1S 裁切成品卡）= 不抢选中：新卡 selected 为 false、不取消其他卡选中、
+   *  不发 selectRequest（默认 false，既有调用点行为不变）。 */
   const createImageDraftCard = (
     position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string },
+    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string; skipSelect?: boolean },
   ): string => {
     const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
+    const skipSelect = overrides?.skipSelect === true;
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
       position: position ?? spawnDraftPosition(),
-      selected: true,
+      selected: !skipSelect,
       data: {
         src: '',
         mediaType: 'image',
@@ -3389,6 +3437,13 @@ export default function CanvasPage() {
       },
     };
     const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    if (skipSelect) {
+      // 不抢选中：其他卡选中态原样保留，也不发程序化选中请求（规格故事 25：新卡不抢选中、源卡保持选中）
+      const nextMedia = [...mediaNodesRef.current, node];
+      mediaNodesRef.current = nextMedia;
+      setMediaNodes(nextMedia);
+      return nodeId;
+    }
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
@@ -6121,10 +6176,69 @@ export default function CanvasPage() {
     if (ratio != null && cropBounds) setCropRect(inscribeCropRect(cropBounds, ratio));
   };
 
-  /** 裁切确认（IKGW1N 渲染在位、点击派发；裁切执行链路——离屏 canvas 按原图自然分辨率
-   *  裁切 → 资产上传 → 源卡右侧建「裁切」成品卡 + 来源连线——由 IKGW1S 实装）。 */
+  /** 裁切确认（IKGW1N 渲染在位、点击派发；IKGW1S 执行链路）：离屏 canvas 按源图自然分辨率
+   *  裁出框内画面（cropRectToNatural）→ toBlob 重编码（cropOutputFormat 跟随源图：JPEG 约
+   *  0.92、PNG、判不出 PNG 兜底）→ new File → 既有资产上传链路（普通上传不带 assetSource，
+   *  裁切产物是用户成品）→ 源卡右侧紧邻新建「裁切」成品卡（fileName 先例同高清；无草稿、
+   *  无生成中过渡，直接显示结果；skipSelect 不抢选中）+ 纯视觉来源连线
+   *  （origin=IMAGE_CROP_EDGE_ORIGIN，参考推导跳过）→ exitCropMode（确认即退出）。
+   *  源图自然分辨率缺失（cropSpace null，存量老图）或加载/编码/上传失败：toast 报错、
+   *  留在裁切模式，不建卡不退态（无半成品；对齐擦除「上传失败留在编辑态」口径）。 */
   const handleCropConfirm = () => {
-    // IKGW1S 实装：读取 cropRect（显示框，经 cropRectToNatural 换算）与源图自然分辨率执行裁切建卡
+    const sourceNodeId = cropTargetNodeId;
+    const node = sourceNodeId ? mediaNodesRef.current.find((n) => n.id === sourceNodeId) : undefined;
+    const data = (node?.data ?? {}) as Record<string, unknown>;
+    const rect = cropRect;
+    const bounds = cropBounds;
+    const space = cropSpace;
+    if (!sourceNodeId || !node || !rect || !bounds || !space) {
+      showToast('warn', '源图分辨率未知，无法裁切');
+      return;
+    }
+    if (cropSubmittingRef.current) return;
+    const src = typeof data.src === 'string' ? data.src : '';
+    if (!src || src.startsWith('blob:')) {
+      showToast('warn', '源图不可用，无法裁切');
+      return;
+    }
+    cropSubmittingRef.current = true;
+    const natural = cropRectToNatural(rect, bounds, space);
+    const format = cropOutputFormat({
+      mime: typeof data.mime === 'string' ? data.mime : undefined,
+      src,
+      fileName: typeof data.fileName === 'string' ? data.fileName : undefined,
+    });
+    void (async () => {
+      try {
+        const file = await cropImageToFile(src, natural, format);
+        if (!file) {
+          showToast('error', '裁切生成失败，请重试');
+          return;
+        }
+        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined });
+        // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）
+        exitCropMode();
+        const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+          fileName: '裁切',
+          skipSelect: true,
+          data: {
+            src: uploaded.url,
+            assetId: uploaded.asset_id,
+            width: uploaded.width,
+            height: uploaded.height,
+            mime: uploaded.mime,
+            size: uploaded.size,
+            genStatus: undefined,
+            draft: undefined,
+          },
+        });
+        addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
+      } catch (e: unknown) {
+        showToast('error', isApiError(e) ? e.message : '裁切上传失败，请重试');
+      } finally {
+        cropSubmittingRef.current = false;
+      }
+    })();
   };
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
@@ -8167,7 +8281,7 @@ export default function CanvasPage() {
 
         {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
             名单，根元素打 data-gen-panel-territory）；取消绑 exitCropMode（四退出之一）；
-            确认 onConfirm 本票为占位实现，裁切执行与建卡由 IKGW1S 实装 */}
+            确认绑 handleCropConfirm（IKGW1S：裁切执行→上传→建卡闭环） */}
         {cropTargetNodeId && (
           <CropDialog
             preset={cropPreset}
