@@ -180,9 +180,15 @@ export function renderPromptMentions(
   isValid: (nodeId: string) => boolean = () => false,
 ) {
   editor.replaceChildren();
+  // IKG99G：应用到的生成卡同时携带 promptMentions 与 mediaMentions（同区间），
+  // 渲染去重——promptMention 覆盖的区间不再渲染 media chip，保留方案 #N 身份；
+  // mediaMentions 仅作画布内部接线（供 textIndexOfTarget 消费），不重复展示，
+  // 避免图片后跟一个"已失效/图片N"多余标签
+  const promptRanges = new Set(mentions.map(m => `${m.start}-${m.end}`));
   const combined = [
     ...mentions.map(mention => ({ kind: 'prompt' as const, start: mention.start, end: mention.end, mention })),
-    ...mediaMentions.map(mention => ({ kind: 'media' as const, start: mention.start, end: mention.end, mention })),
+    ...mediaMentions.filter(mention => !promptRanges.has(`${mention.start}-${mention.end}`))
+      .map(mention => ({ kind: 'media' as const, start: mention.start, end: mention.end, mention })),
   ].sort((a, b) => a.start - b.start);
   const refByNode = new Map(mediaRefs.map(ref => [ref.nodeId, ref]));
   const labels = deriveMediaMentionLabels(mediaMentions, mediaRefs, isValid);
