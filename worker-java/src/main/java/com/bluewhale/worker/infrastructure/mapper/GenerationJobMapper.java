@@ -724,4 +724,23 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     List<Long> listDueImageEraseJobIds(@Param("limit") int limit,
                                        @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 图片抠图到点/孤儿（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
+     *  套 source 白名单（与 claim 同源，单源 image_cutout）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'image_cutout'
+              AND source IN ('image_cutout')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueImageCutoutJobIds(@Param("limit") int limit,
+                                        @Param("maxAgeMinutes") int maxAgeMinutes);
 }
