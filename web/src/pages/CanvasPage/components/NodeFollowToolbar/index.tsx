@@ -8,6 +8,9 @@
  * translateX(-50%) 完成真居中，任何缩放级别（0.2~8）工具条屏幕尺寸恒定。
  * 显隐分工：调用方数据条件走 show（如媒体卡非生成中/素材未缺失）；
  * 「唯一选中 + 画布无多选」门（useSoloNodeSelected）留在本容器，与节点内原口径同源。
+ * hovered=true（IKGYYF，资产卡 hover 显示语义是第一个需要绕过唯一选中门的迁移方）：
+ * 跳过唯一选中门但 show 数据门与几何条件照旧——等价迁移前节点内 CSS .wrapper:hover
+ * 的显示语义（悬停显示与选中集合、多选抑制无关）。
  * 根元素打 data-gen-panel-territory（IKFYH6 点外关闭豁免）：工具条迁出 .react-flow__node
  * 后点击它不得被判成画布外点击而误关生成面板。
  * ============================================ */
@@ -22,6 +25,8 @@ export interface NodeFollowToolbarProps {
   nodeId: string;
   /** 调用方数据条件（缺省 true）；唯一选中的多选抑制恒由本容器判定 */
   show?: boolean;
+  /** 目标卡片处于指针悬停（缺省 false）：跳过唯一选中门，等价迁移前 CSS :hover 显示语义 */
+  hovered?: boolean;
   /** 工具栏估半宽（屏幕像素），仅用于水平视口钳制，不参与居中；缺省用 FOLLOW_ABOVE_HALF_WIDTH */
   toolbarHalfWidth?: number;
   /** 工具栏顶边相对卡片顶边的抬升量（屏幕像素，估高 + 间距）；缺省用 FOLLOW_ABOVE_LIFT */
@@ -32,6 +37,7 @@ export interface NodeFollowToolbarProps {
 export default function NodeFollowToolbar({
   nodeId,
   show = true,
+  hovered = false,
   toolbarHalfWidth,
   toolbarLift,
   children,
@@ -45,7 +51,9 @@ export default function NodeFollowToolbar({
   /** 绝对 flow 坐标（组内成员也正确；顶级节点上与 position 等价） */
   const position = node?.internals?.positionAbsolute;
   const nodeWidth = node?.measured?.width;
-  if (!show || !soloSelected || !position || nodeWidth == null || containerWidth <= 0) return null;
+  if (!show) return null;
+  if (!soloSelected && !hovered) return null;
+  if (!position || nodeWidth == null || containerWidth <= 0) return null;
 
   const anchor = computeFollowAnchorAbove({
     nodeX: position.x,
