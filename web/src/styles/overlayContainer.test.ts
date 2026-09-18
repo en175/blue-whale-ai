@@ -63,6 +63,13 @@ function expectOverlayContainer(block: string) {
 /** 容器四件套位置不允许的硬编码背景/描边色值与胶囊残迹。 */
 const HARDCODED_CONTAINER_COLORS = ['#2a2a2a', '#3a3a3a', '#333', 'rgba(24, 24, 24'];
 
+/** 断言规则块不含给定硬编码色值黑名单（默认容器色值黑名单，可传家族扩展名单）。 */
+const expectNoHardcoded = (block: string, colors: readonly string[] = HARDCODED_CONTAINER_COLORS) => {
+  for (const hardcoded of colors) {
+    expect(block).not.toContain(hardcoded);
+  }
+};
+
 describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层容器令牌）', () => {
   const memberCss = (component: string) =>
     readFileSync(
@@ -77,25 +84,19 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
   it('媒体卡工具栏容器四件套引用令牌，半透明底退役', () => {
     const block = ruleBlockOf(mediaNodeCss, '.toolbar');
     expectOverlayContainer(block);
-    for (const hardcoded of HARDCODED_CONTAINER_COLORS) {
-      expect(block).not.toContain(hardcoded);
-    }
+    expectNoHardcoded(block);
   });
 
   it('文本卡格式栏容器四件套引用令牌（圆角 8px → 浮条档 12px）', () => {
     const block = ruleBlockOf(textNodeCss, '.toolbar');
     expectOverlayContainer(block);
-    for (const hardcoded of HARDCODED_CONTAINER_COLORS) {
-      expect(block).not.toContain(hardcoded);
-    }
+    expectNoHardcoded(block);
   });
 
   it('文本卡操作条 nodeBar 带容器底（与媒体卡工具栏同规格）', () => {
     const block = ruleBlockOf(textNodeCss, '.nodeBar');
     expectOverlayContainer(block);
-    for (const hardcoded of HARDCODED_CONTAINER_COLORS) {
-      expect(block).not.toContain(hardcoded);
-    }
+    expectNoHardcoded(block);
   });
 
   it.each([
@@ -104,9 +105,7 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
   ] as const)('%s topBar 带容器底且不再撑满卡宽', (_name, css) => {
     const block = ruleBlockOf(css, '.topBar');
     expectOverlayContainer(block);
-    for (const hardcoded of HARDCODED_CONTAINER_COLORS) {
-      expect(block).not.toContain(hardcoded);
-    }
+    expectNoHardcoded(block);
     expect(block).not.toContain('justify-content: space-between');
     expect(block).toContain('width: fit-content');
   });
@@ -122,6 +121,13 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
     expect(block).not.toContain('999px');
     expect(block).not.toContain('#2a2a2a');
     expect(ruleBlockOf(css, '.addToChatBtn:hover')).toContain('background-color: rgba(255, 255, 255, 0.08)');
+    // IKGZ86 审查修复锁定：字号/文字色/过渡沿用基线令牌写法，不得回退 #ddd/12px/0.12s 字面量
+    expect(block).toContain('color: var(--color-text-primary)');
+    expect(block).toContain('font-size: var(--font-size-sm)');
+    expect(block).toContain('transition: background-color var(--transition-fast)');
+    expect(block).not.toContain('#ddd');
+    expect(block).not.toContain('12px');
+    expect(block).not.toContain('0.12s');
   });
 
   it('条内按钮悬停统一 rgba(255, 255, 255, 0.08) 微亮（文本卡 toolBtn 告别 #444）', () => {
@@ -136,11 +142,14 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
    浮条形态，锁 --radius-lg；擦除发送条（999px）与扩图工具栏（24px）是验收拍板的
    胶囊/异形圆角，无对应令牌档，仅锁背景/描边/阴影三令牌。 */
 
-/** 从 CSS 源提取顶层类选择器规则体（先剥离注释）；未找到时返回 null。 */
+/** 从 CSS 源提取顶层类选择器规则体（先剥离注释）；未找到时返回 null。
+    ruleBlockOf 的 null 容错薄壳：入参不带点（8D 成员清单风格），解析语义与 ruleBlockOf 单一实现。 */
 function ruleBodyOf(css: string, className: string): string | null {
-  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
-  const match = stripped.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
-  return match ? match[1] : null;
+  try {
+    return ruleBlockOf(css, `.${className}`);
+  } catch {
+    return null;
+  }
 }
 
 describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无硬编码容器色值）', () => {
@@ -191,11 +200,6 @@ describe('IKGZ8C 浮层菜单家族（ADR-0100：6 成员统一到浮层容器�
     );
   // 菜单容器不允许的硬编码背景/描边色值（8B 基础上补本家族旧值 #262626/#363636）
   const menuHardcodedColors = [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636'];
-  const expectNoHardcoded = (block: string) => {
-    for (const hardcoded of menuHardcodedColors) {
-      expect(block).not.toContain(hardcoded);
-    }
-  };
 
   it.each([
     ['高清▾ 下拉 qualityMenu', 'MediaNode', '.qualityMenu'],
@@ -207,7 +211,7 @@ describe('IKGZ8C 浮层菜单家族（ADR-0100：6 成员统一到浮层容器�
   ] as const)('%s 容器四件套引用令牌、无硬编码容器色值', (_name, component, className) => {
     const block = ruleBlockOf(memberCss(component), className);
     expectOverlayContainer(block);
-    expectNoHardcoded(block);
+    expectNoHardcoded(block, menuHardcodedColors);
   });
 
   it('@菜单 panel/flyout 容器四件套引用令牌（圆角 14px → 浮条档 12px）', () => {
@@ -216,7 +220,7 @@ describe('IKGZ8C 浮层菜单家族（ADR-0100：6 成员统一到浮层容器�
     expect(match).not.toBeNull();
     const block = match![1];
     expectOverlayContainer(block);
-    expectNoHardcoded(block);
+    expectNoHardcoded(block, menuHardcodedColors);
   });
 
   it('@菜单搜索框对比度连带修正：#1f1f1f 调暗到 --color-bg-secondary（容器 #1e1e1e 后原值失去层级）', () => {
