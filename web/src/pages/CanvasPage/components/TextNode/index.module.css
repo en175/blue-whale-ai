@@ -20,6 +20,11 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
@@ -37,18 +42,19 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  font-size: 12px;
   cursor: pointer;
-  transition: background-color var(--transition-fast);
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .addToChatBtn:hover {
-  background-color: #3a3a3a;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 /* ============================================
@@ -63,10 +69,10 @@
   align-items: center;
   gap: 2px;
   padding: 6px 8px;
-  background-color: #2a2a2a;
-  border-radius: 8px;
-  border: 1px solid #3a3a3a;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  background-color: var(--color-bg-overlay);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-overlay);
+  box-shadow: var(--shadow-overlay);
   white-space: nowrap;
   z-index: 10;
 }
@@ -91,7 +97,7 @@
 
 .toolBtn:hover {
   color: #fff;
-  background-color: #444;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 /* ---- 文字颜色按钮 ---- */
