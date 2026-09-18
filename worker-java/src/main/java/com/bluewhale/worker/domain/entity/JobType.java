@@ -11,7 +11,7 @@ public enum JobType {
     /** 图片生成（tag=image，Semaphore 20）。 */
     IMAGE("image"),
 
-    /** 视频生成（tag=step，顺序派发）。 */
+    /** 视频生成（tag=video，顺序派发）。 */
     VIDEO("video"),
 
     /** TTS 音频生成（tag=audio，Semaphore 5）。 */

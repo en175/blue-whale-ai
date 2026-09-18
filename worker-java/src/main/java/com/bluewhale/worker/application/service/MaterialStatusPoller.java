@@ -1,6 +1,5 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.config.WorkerProperties;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
@@ -30,8 +29,7 @@ import java.util.List;
  * 凭据来源：网关 {@code /api/material/*} 只认用户 sk-，没有服务级通道，而定时跟进发生在任何
  * 请求之外，没有会话可借。登录时 backend 把 sk- 落 {@code user_info}，这里按 user_id 取回。
  * <p>
- * 与 {@link RecoveryService} 同一套调度约定：启动即扫一次，整轮异常兜底不逃逸；
- * {@code WORKER_ENABLED_TAGS} 为空时完全跳过（stub DataSource 形态，不连库不刷错误日志）。
+ * 与 {@link RecoveryService} 同一套调度约定：启动即扫一次，整轮异常兜底不逃逸。
  */
 @Service
 public class MaterialStatusPoller {
@@ -49,23 +47,17 @@ public class MaterialStatusPoller {
     private final MaterialAssetMapper assetMapper;
     private final UserInfoMapper userInfoMapper;
     private final NewApiMaterialClient client;
-    private final WorkerProperties workerProps;
     private final int maxAgeMinutes;
-
-    /** 空 tags 提示只打一次（避免安全拉起形态下每轮刷屏）。 */
-    private boolean emptyTagsLogged;
 
     public MaterialStatusPoller(
             MaterialAssetMapper assetMapper,
             UserInfoMapper userInfoMapper,
             NewApiMaterialClient client,
-            WorkerProperties workerProps,
             @Value("${MATERIAL_STATUS_POLL_MAX_AGE_MINUTES:10}") int maxAgeMinutes
     ) {
         this.assetMapper = assetMapper;
         this.userInfoMapper = userInfoMapper;
         this.client = client;
-        this.workerProps = workerProps;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -80,13 +72,6 @@ public class MaterialStatusPoller {
             fixedDelayString = "${MATERIAL_STATUS_POLL_INTERVAL_MS:5000}"
     )
     public void poll() {
-        if (workerProps.enabledTags().isEmpty()) {
-            if (!emptyTagsLogged) {
-                emptyTagsLogged = true;
-                log.info("素材状态跟进跳过：WORKER_ENABLED_TAGS 为空（安全拉起形态，不连库不扫库）");
-            }
-            return;
-        }
         try {
             List<MaterialAssetEntity> rows =
                     assetMapper.listProcessingWithin(SCAN_LIMIT, maxAgeMinutes);

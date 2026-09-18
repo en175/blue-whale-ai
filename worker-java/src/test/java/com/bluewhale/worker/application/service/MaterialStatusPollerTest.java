@@ -1,6 +1,5 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.config.WorkerProperties;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
@@ -16,7 +15,6 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
-import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -25,7 +23,7 @@ import static org.mockito.Mockito.*;
  * 素材状态定时跟进测试（ADR-0087 决策 4）。
  * <p>
  * 覆盖：窗口内 Processing 行逐条实时查并回写、无凭证跳过、上游未知不写库（保持 Processing）、
- * 认不出的状态收敛成 Processing、单条失败不中断本轮、安全拉起完全跳过、扫描参数透传、
+ * 认不出的状态收敛成 Processing、单条失败不中断本轮、扫描参数透传、
  * 回写落空（行被删）不视为错误。
  */
 @ExtendWith(MockitoExtension.class)
@@ -40,10 +38,6 @@ class MaterialStatusPollerTest {
 
     private MaterialStatusPoller poller;
 
-    private static WorkerProperties props(Set<String> tags) {
-        return new WorkerProperties(tags, "-java", null);
-    }
-
     private static MaterialAssetEntity row(long userId, String materialId) {
         MaterialAssetEntity e = new MaterialAssetEntity();
         e.setUserId(userId);
@@ -56,7 +50,7 @@ class MaterialStatusPollerTest {
     void setUp() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt())).thenReturn(List.of());
         poller = new MaterialStatusPoller(assetMapper, userInfoMapper, client,
-                props(Set.of("video")), MAX_AGE_MINUTES);
+                MAX_AGE_MINUTES);
     }
 
     @Test
@@ -225,18 +219,5 @@ class MaterialStatusPollerTest {
         poller.poll(); // 不抛
 
         verifyNoInteractions(userInfoMapper);
-    }
-
-    @Test
-    @DisplayName("安全拉起（enabledTags 为空）→ 完全不碰库（stub DataSource 形态不刷错误日志）")
-    void skipsEntirelyWhenNoTagsEnabled() {
-        MaterialStatusPoller idle = new MaterialStatusPoller(assetMapper, userInfoMapper, client,
-                props(Set.of()), MAX_AGE_MINUTES);
-
-        idle.poll();
-
-        verifyNoInteractions(assetMapper);
-        verifyNoInteractions(userInfoMapper);
-        verifyNoInteractions(client);
     }
 }

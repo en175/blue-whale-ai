@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 /**
  * recovery 扫描测试（IKF3AT；TS recovery.service.ts:38-106 行为对账）。
  * <p>
- * 覆盖：到点 job 逐条重投（id 字符串 + 1000ms 延迟）、tag 未启用（生产者缺失）跳过、
+ * 覆盖：到点 job 逐条重投（id 字符串 + 1000ms 延迟）、生产者缺失（防御分支）跳过该 tag、
  * 单条投递失败不中断本轮、扫描参数（limit=100 / 窗口分钟数透传）、整轮异常兜底。
  */
 @ExtendWith(MockitoExtension.class)
@@ -47,10 +47,6 @@ class RecoveryServiceTest {
 
     private RecoveryService service;
 
-    private static com.bluewhale.worker.config.WorkerProperties props(java.util.Set<String> tags) {
-        return new com.bluewhale.worker.config.WorkerProperties(tags, "-java", null);
-    }
-
     @BeforeEach
     void setUp() {
         when(videoProvider.getIfAvailable()).thenReturn(videoProducer);
@@ -67,7 +63,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueImageEraseJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
                 audioProvider, extractProvider, imageEnhanceProvider, imageEraseProvider,
-                props(java.util.Set.of("image")), MAX_AGE_MINUTES);
+                MAX_AGE_MINUTES);
     }
 
     @Test
@@ -98,7 +94,7 @@ class RecoveryServiceTest {
     }
 
     @Test
-    @DisplayName("tag 未启用（生产者 bean 缺失）→ 该 tag 不投，其余照常")
+    @DisplayName("生产者缺失（防御分支）→ 该 tag 不投，其余照常")
     void skipsDisabledTag() {
         when(imageProvider.getIfAvailable()).thenReturn(null);
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of(1821L));
@@ -130,18 +126,5 @@ class RecoveryServiceTest {
         service.recover(); // 不抛
 
         verify(jobMapper, never()).listDueImageJobIds(anyInt(), anyInt());
-    }
-
-    @Test
-    @DisplayName("安全拉起（enabledTags 为空）→ 完全跳过扫库（stub DataSource 形态不刷错误日志）")
-    void skipsEntirelyWhenNoTagsEnabled() {
-        RecoveryService idle = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, imageEnhanceProvider, imageEraseProvider,
-                props(java.util.Set.of()), MAX_AGE_MINUTES);
-
-        idle.recover();
-
-        verifyNoInteractions(jobMapper);
-        verifyNoInteractions(imageProducer);
     }
 }

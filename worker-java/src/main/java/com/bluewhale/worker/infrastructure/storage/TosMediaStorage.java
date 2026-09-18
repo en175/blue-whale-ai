@@ -1,6 +1,5 @@
 package com.bluewhale.worker.infrastructure.storage;
 
-import com.bluewhale.worker.config.MediaStorageTagsCondition;
 import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
@@ -12,7 +11,6 @@ import com.volcengine.tos.model.object.PutObjectACLInput;
 import com.volcengine.tos.model.object.PutObjectInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -29,16 +27,14 @@ import java.util.UUID;
  * 配置：VOLC_ACCESS_KEY_ID / VOLC_SECRET_ACCESS_KEY / VOLC_TOS_ENDPOINT /
  * VOLC_TOS_BUCKET / VOLC_TOS_REGION（契约 §8：5 个全必需，缺一即硬失败）。
  * <p>
- * 装配门控：仅当 audio / image / media_extract 任一启用时实例化
- * （{@link MediaStorageTagsCondition}）；空 tag 安全拉起与 step-only（无 TOS 降级直存）
- * 均不构造本 bean，兑现 README「空 WORKER_ENABLED_TAGS 只起 /ready」承诺。
+ * 无条件装配（ADR-0084 修正六）：启动即构造本 bean，5 个 env 缺一即抛错终止启动。
+ * 视频路径不经本 bean（走 TosVideoMediaRelay，TOS 缺省 null 宽容降级）。
  * <p>
  * 偏差说明：TS 上传走预签名 PUT（prepareUpload → fetch PUT → makePublic），
  * Java 直走 SDK putObject + putObjectAcl（结果一致：对象在 TOS 中 public-read）。
  * 注释标注 {@code DEVIATION} 处。
  */
 @Component
-@Conditional(MediaStorageTagsCondition.class)
 public class TosMediaStorage {
 
     private static final Logger log = LoggerFactory.getLogger(TosMediaStorage.class);
@@ -55,7 +51,8 @@ public class TosMediaStorage {
 
     /**
      * 从环境变量构建 TOS 客户端。
-     * 5 个 env 全必需，缺一抛错（契约 §8：extract 硬失败「TOS configuration required for media extract」）。
+     * 5 个 {@code VOLC_*} env 全必需，缺一抛错。本 bean 无条件装配（修正六），
+     * 因此这条失败信息是所有 6 个 tag 共用的启动期中止信号，不再只属于 media_extract。
      */
     public TosMediaStorage() {
         String accessKeyId = System.getenv("VOLC_ACCESS_KEY_ID");
@@ -66,7 +63,7 @@ public class TosMediaStorage {
 
         if (isBlank(accessKeyId) || isBlank(secretAccessKey)
                 || isBlank(endpointEnv) || isBlank(bucketEnv) || isBlank(region)) {
-            throw new IllegalStateException("TOS configuration required for media extract");
+            throw new IllegalStateException("TOS configuration required (VOLC_*)");
         }
 
         // 去协议头和尾斜杠（tos-storage.ts:67-69 normalizeEndpoint）

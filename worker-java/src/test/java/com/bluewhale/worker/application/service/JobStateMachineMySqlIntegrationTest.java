@@ -63,7 +63,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 接线方式：手动 AnnotationConfigApplicationContext（不扫 autoconfig），
  * 仅注册 HikariDataSource→MybatisSqlSessionFactory→7 个 Mapper→JobStateMachineService→TxManager。
- * MQ consumer / scheduled recovery 完全不启动（worker.enabled-tags 默认空）。
+ * MQ consumer / scheduled recovery 完全不启动——靠「只注册 TestConfig、不做组件扫描」保证，
+ * 与已退役的 worker.enabled-tags 开关无关。
  */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("JobStateMachine 真库集成测试（MySQL Testcontainers）")

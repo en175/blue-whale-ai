@@ -21,7 +21,7 @@ import java.util.UUID;
 
 /**
  * new-api 网关 MediaKit 图像擦除客户端（契约 §15.5 / IKGOT6；以 NewApiMediaKitClient
- * （enhance）为模板，独立 bean / 独立灰度门：两者 @Conditional 各自随 tag 开关）。
+ * （enhance）为模板，两者各自独立 bean）。
  * <p>
  * 端点：{@code POST {NEW_API_BASE_URL}/v1/mediakit/sync/erase-image}（网关同步路由，
  * 本仓不直连火山、不新增凭证配置项——渠道与上游 API Key 在网关侧配置）。
@@ -49,7 +49,6 @@ import java.util.UUID;
  * 其余（超时 / 供应商失败 / 无结果）由 processor 归并兜底码 image_erase_failed（§15.5）。
  */
 @Component
-@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.ImageEraseEnabledCondition.class)
 public class NewApiMediaKitEraseClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitEraseClient.class);
