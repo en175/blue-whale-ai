@@ -29,7 +29,8 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 
 topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**：旧名与新名都能启动成功，错配的唯一表现是消息无人消费——进程健康、`/ready` 绿、什么都不报。部署前必须确认：
 
-- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，下面第二条只能证明「没有旧进程在抢」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
+- [ ] **broker 上已存在 topic `generation-task`**：这是本次改名新建的 topic，而 RocketMQ 的 `autoCreateTopicEnable` **只在生产者首次发送时**建 topic，消费者订阅不触发。topic 不存在时 worker **起不来**（`No topic route info in name server for the topic: generation-task` → `Error starting ApplicationContext` → 进程退出），不是静默。创建方式：`mqadmin updateTopic -n <namesrv> -c DefaultCluster -t generation-task`。**创建后要等 broker→namesrv 路由注册（默认 30s）再起 worker**——本地实测早于该窗口启动仍会失败。
+- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，其余各项都只能证明「没有障碍」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
 - [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
 
 错配的后果都是**静默的**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但消息可能无人消费、或被打进旧进程的 group——所以上面第一条（六条启动日志）才是正面的「订阅真的对了」证据。生产侧（`backend`）也不再读 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`，残留这两个键不会再把生产者指回旧名。

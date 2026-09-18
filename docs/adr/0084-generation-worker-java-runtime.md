@@ -62,7 +62,7 @@ grilling 会话钉实的事实（如实记录，防止后来者误读为技术�
 4. **退役 `WORKER_GROUP_SUFFIX`**：group 名回到 `generation-<type>-worker`。位点绑定在 `(group, topic)` 上，topic 更名后新 topic 的位点本就从零开始，故本次是唯一的零重放风险窗口；错过此后每次改 group 名都需处理位点。**前置**：确认旧 TS worker 容器已停——否则 Java 与 TS 落入同名 group，消息被分流给旧进程。
 5. **topic 粒度保持单 topic，不按任务类型拆分**。理由：隔离已在 consumer group 层取得（见上文事实）；拆 topic 只增益「位点重置、配额、按类积压可观测」这三项运维隔离，对资源隔离无贡献——真实共享点是同一个 JVM 的堆与 CPU，解它需要按类拆部署，拆 topic 不改变这一点。
 6. **同步修订**：契约文档 §1 的 topic / tag / consumer group 表、`worker-java/README.md` 的环境变量与运行手册。
-7. **上线前置项（运维）**：部署新 worker 的同一步里确认旧 TS worker 容器已停。工单 IKELHC 应承担此项并补齐 runbook。
+7. **上线前置项（运维）**：部署新 worker 的同一步里确认两件事——① broker 上已存在 topic `generation-task`（本次改名新建；RocketMQ 的 `autoCreateTopicEnable` **只在生产者首次发送时**建 topic，消费者订阅不会触发，topic 缺失时 worker 启动即失败而非静默；本地实测：`mqadmin updateTopic` 建完后还需等 broker→namesrv 路由注册约 30s）；② 旧 TS worker 容器已停。工单 IKELHC 应承担此项并补齐 runbook。
 
 **被否决的备选**
 
