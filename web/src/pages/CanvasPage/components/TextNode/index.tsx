@@ -776,13 +776,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       ) : (
         <div className={`${styles.nodeBar} ${showSoloToolbar ? styles.nodeBarVisible : ''} nodrag nopan`}>
           {hasPromptBindings && <>
-            <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
-              className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
-              onMouseDown={() => saveSelection()}
-              onChange={event => editMaterial(event.target.value, selectedMention)}>
-              <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
-              {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
-            </select>
+            {!data.promptSource && (
+              <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
+                className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
+                onMouseDown={() => saveSelection()}
+                onChange={event => editMaterial(event.target.value, selectedMention)}>
+                <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
+                {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
+              </select>
+            )}
             {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
           </>}
           <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
