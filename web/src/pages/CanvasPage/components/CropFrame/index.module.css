@@ -1,0 +1,124 @@
+/* ============================================
+ * CropFrame 裁切框覆盖层样式（IKGW1N）
+ * 屏幕空间层：pointer-events 由各元素自行声明；手柄尺寸恒为屏幕像素。
+ * ============================================ */
+
+/* 覆盖层根：铺满画布不拦截交互，仅命中元素可点（GroupOverlay / OutpaintFrame 同做法） */
+.frameLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6; /* 节点层(z4)之上、面板(z20)之下 */
+  overflow: hidden; /* 暗区不得溢出画布 */
+}
+
+/* ---- 框外暗区 4 带：视觉遮罩 + 点击退出，手势经组件转发直通画布 ---- */
+.darkBand {
+  position: absolute;
+  pointer-events: auto;
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.darkBandTop {
+  left: 0;
+  right: 0;
+  top: 0;
+}
+
+.darkBandBottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.darkBandLeft {
+  left: 0;
+}
+
+.darkBandRight {
+  right: 0;
+}
+
+/* ---- 框内平移命中区：按住拖动整体平移 ---- */
+.moveZone {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+  background-color: rgba(90, 170, 255, 0.06);
+  touch-action: none;
+}
+
+/* ---- 框本体：纯视觉边线 ---- */
+.frameBox {
+  position: absolute;
+  border: 1.5px solid rgba(90, 170, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* ---- 边手柄：命中带贯穿整条边、厚 12px 居中在线上（用户拖的是"边框线"本身） ---- */
+.edgeHit {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.edgeHitTop,
+.edgeHitBottom {
+  height: 12px;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+
+.edgeHitLeft,
+.edgeHitRight {
+  width: 12px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+
+/* 锁定比例：边手柄禁用并视觉弱化（半透明 + 不可拖） */
+.edgeHandleDisabled {
+  opacity: 0.35;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* ---- 角手柄：20×20 透明命中区 + 10×10 视觉点；与边带交汇处角优先 ---- */
+.cornerHit {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  background: transparent;
+  z-index: 1;
+}
+
+.cornerVisual {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background-color: #fff;
+  border: 1.5px solid rgba(90, 170, 255, 0.95);
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.cornerHit:hover .cornerVisual {
+  border-color: #7cb8ff;
+  background-color: #7cb8ff;
+}
+
+/* 对角方向：nw/se 与 ne/sw 光标相反 */
+.cornerNwse {
+  cursor: nwse-resize;
+}
+
+.cornerNesw {
+  cursor: nesw-resize;
+}

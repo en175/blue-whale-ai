@@ -30,7 +30,7 @@ const MEDIA_CONTENT_SHORT_SIDE = 280;
 const MEDIA_CONTENT_LONG_SIDE_MAX = 840;
 
 /** 媒体内容区相对节点左上角的纵向偏移（与 MediaNode wrapper 的 padding-top: 22.5px 对齐，
- *  扩图扩展框等屏幕空间覆盖层据此定位内容区（IKGOQX）。 */
+ *  裁切框（IKGW1N）/扩图扩展框（IKGOQX）等屏幕空间覆盖层据此定位内容区。 */
 export const MEDIA_CONTENT_TOP_OFFSET = 22.5;
 
 function parseRatio(ratio?: string): number | null {

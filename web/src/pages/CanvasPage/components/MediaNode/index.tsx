@@ -5,7 +5,7 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, Maximize2 } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, Crop, Maximize2 } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { outpaintGateReason } from '../../imageOutpaint';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
@@ -123,6 +123,9 @@ interface MediaNodeData {
     onStrokeMove: (point: MaskPoint) => void;
     onStrokeEnd: () => void;
   };
+  /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
+   *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
+  cropEditing?: true;
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -147,6 +150,8 @@ interface MediaNodeData {
   onEraseImage?: (id: string) => void;
   /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
   onOutpaintImage?: (id: string) => void;
+  /** 裁切（IKGW1H）：把本卡置为裁切编辑态（「高清 ▾」下拉「裁切」项派发；无门槛恒可用） */
+  onCropImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -273,6 +278,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     typeof data.height === 'number' ? data.height : undefined,
     typeof data.size === 'number' ? data.size : undefined,
   );
+  const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -310,7 +316,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
    *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
-   *  「扩图」（IKGOQ0）按 outpaintGateReason 门槛预检置灰（插入高清与擦除之间的预留中间位） */
+   *  「扩图」（IKGOQ0）按 outpaintGateReason 门槛预检置灰；
+   *  「裁切」（IKGW1H）无置灰门槛恒可用；顺序高清、扩图、裁切、擦除 */
   const qualityMenuItems: ImageQualityMenuItem[] = [
     {
       id: 'enhance',
@@ -327,6 +334,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       hint: '进入扩图模式，拖动边框向外扩展画面',
       disabledReason: outpaintDisabledReason,
       onSelect: handleOutpaintImage,
+    },
+    {
+      id: 'crop',
+      label: '裁切',
+      icon: Crop,
+      hint: '拖动裁切框，裁掉边缘保留选定区域',
+      disabledReason: null,
+      onSelect: handleCropImage,
     },
     {
       id: 'erase',
