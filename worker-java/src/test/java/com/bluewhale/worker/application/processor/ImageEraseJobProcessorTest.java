@@ -350,6 +350,10 @@ class ImageEraseJobProcessorTest {
         assertThat(published.size()).isEqualTo(PNG_1X1.length);
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);
+        // IKGS73：md5 必须从 stored 穿透到发布入参。没有这条，processor 哪天传了 null，
+        // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
+        // （已实测：去掉 ImageEraseJobProcessor 里的 stored.md5() 后，本文件 17 条全绿。）
+        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
