@@ -12,7 +12,7 @@ import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE,
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
+import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
@@ -190,6 +190,14 @@ export class CanvasService {
       }
       const additions: typeof nodes = [];
       const materialViews = [];
+      // Agent 方案卡应用到画布时，把方案正文里的素材索引（promptMentions/promptMaterials）
+      // 迁移成画布文本节点正文索引（mediaMentions/mediaRefs），并建 textNode→mediaNode 的
+      // textIndex 关系线——这样下游（textIndexOfTarget / textAttachmentsForSend）与手建文本
+      // 节点走同一套拼接：@图1 → &素材id& → references 推导 → 后端 @图片N 标记转移。
+      const newEdges: CanvasEdge[] = [];
+      const assetToNode = new Map<string, string>();
+      const assetToName = new Map<string, string>();
+      const textNodeId = `text-${randomUUID()}`;
       const requiredIds = existing && Array.isArray(existing.data?.promptMentions)
         ? new Set((existing.data.promptMentions as Array<{ assetId: string }>).map(mention => mention.assetId)) : undefined;
       for (const material of content.promptMaterials ?? []) {
@@ -200,17 +208,34 @@ export class CanvasService {
         const indices = content.promptMentions?.filter(mention => mention.assetId === material.assetId).map(mention => `#${mention.index}`).join("、");
         if (!asset) throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
         materialViews.push({ ...material, url: asset.url });
-        const exists = nodes.some(item => item.type === "mediaNode" && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId);
-        if (!existing && !exists) additions.push({ id: `media-${randomUUID()}`, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
+        if (existing) continue;
+        // 画布上已有同 assetId 的媒体节点则复用，否则新建；两种情况都建 textIndex 关系线
+        const existingMedia = nodes.find(item => item.type === "mediaNode" && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId);
+        const mediaNodeId = existingMedia?.id ?? `media-${randomUUID()}`;
+        if (!existingMedia) additions.push({ id: mediaNodeId, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
           data: { assetId: material.assetId, mediaType: material.mediaType, src: asset.url, width: asset.width, height: asset.height } });
+        assetToNode.set(material.assetId, mediaNodeId);
+        // 名称优先取已有媒体节点的 fileName，回落节点 id（与 cardNameOfNode 同口径）
+        const existingFileName = typeof existingMedia?.data?.fileName === "string" && existingMedia.data.fileName ? existingMedia.data.fileName : mediaNodeId;
+        assetToName.set(material.assetId, existingFileName);
+        newEdges.push({ id: `edge-${randomUUID()}`, source: textNodeId, target: mediaNodeId, data: { [TEXT_INDEX_EDGE_MARKER]: true } });
       }
       if (existing) return ok({ node: existing, canvas, reused: true });
-      const node = { id: `text-${randomUUID()}`, type: "textNode", position, data: { ...content,
-        ...(content.promptMaterials ? { promptMaterials: materialViews } : {}), promptSource: source } };
+      // promptMentions → mediaMentions（补 nodeId），materialViews → mediaRefs（补 nodeId/name）
+      const mediaMentions = (content.promptMentions ?? [])
+        .map(mention => ({ start: mention.start, end: mention.end, nodeId: assetToNode.get(mention.assetId)!, assetId: mention.assetId }))
+        .filter(mention => mention.nodeId);
+      const mediaRefs = materialViews
+        .map(material => ({ nodeId: assetToNode.get(material.assetId)!, assetId: material.assetId, mediaType: material.mediaType, name: assetToName.get(material.assetId)!, url: material.url }))
+        .filter(ref => ref.nodeId);
+      const node = { id: textNodeId, type: "textNode", position, data: { ...content,
+        ...(content.promptMaterials ? { promptMaterials: materialViews } : {}), promptSource: source, mediaMentions, mediaRefs } };
+      const existingEdges = JSON.parse(canvas.edges ?? "[]") as CanvasEdge[];
+      const serializedEdges = JSON.stringify([...existingEdges, ...newEdges]);
       const serialized = JSON.stringify([...nodes, ...additions, node]);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
       try {
-        const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, canvas.edges, { ownerId, items: content.promptMaterials ?? [] });
+        const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, serializedEdges, { ownerId, items: content.promptMaterials ?? [] });
         if (saved) return ok({ node, canvas: saved, reused: false });
       } catch (error) {
         if (error instanceof PromptMaterialUnavailableError) {
