@@ -36,15 +36,18 @@ export interface CropFrameProps {
   onDarkAreaClick: () => void;
 }
 
-type DragKind = 'edge' | 'corner' | 'move';
+/** 拖拽目标：kind 与手柄捆绑的判别联合——move 无手柄、edge/corner 各带合法手柄值，
+ *  编译期挡住 kind 与 handle 乱配，消除拖拽换算处的强转。 */
+type DragTarget =
+  | { kind: 'move' }
+  | { kind: 'edge'; handle: CropEdge }
+  | { kind: 'corner'; handle: CropCorner };
 
-/** 拖拽会话：手柄类型 + 按下那一刻的框快照与指针 flow 坐标（Shift 锁比例 / 平移基准） */
-interface DragSession {
-  kind: DragKind;
-  handle: string;
+/** 拖拽会话：拖拽目标 + 按下那一刻的框快照与指针 flow 坐标（Shift 锁比例 / 平移基准） */
+type DragSession = DragTarget & {
   start: CropRect;
   startPointer: { x: number; y: number };
-}
+};
 
 export default function CropFrame({ bounds, rect, preset, minSide, onRectChange, onDarkAreaClick }: CropFrameProps) {
   const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
@@ -66,11 +69,11 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
     if (drag.kind === 'move') {
       next = moveCropRect(drag.start, pointer.x - drag.startPointer.x, pointer.y - drag.startPointer.y, b);
     } else if (drag.kind === 'edge') {
-      next = dragCropEdge(drag.handle as CropEdge, r, b, pointer, ms);
+      next = dragCropEdge(drag.handle, r, b, pointer, ms);
     } else {
       // Shift 临时锁开始那一刻的框比例（同扩图手势）；面板锁定比例传预设值，同一算法两个入口
       const locked = e.shiftKey ? drag.start.width / drag.start.height : cropPresetRatio(p);
-      next = dragCropCorner(drag.handle as CropCorner, drag.start, b, pointer, ms, locked);
+      next = dragCropCorner(drag.handle, drag.start, b, pointer, ms, locked);
     }
     change(next);
   }, []);
@@ -81,16 +84,15 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
   }, []);
 
   const startDrag = useCallback(
-    (kind: DragKind, handle: string) => (e: React.PointerEvent) => {
+    (target: DragTarget) => (e: React.PointerEvent) => {
       if (e.button !== 0 || !e.isPrimary) return;
       // 锁定比例：边手柄禁用（单边调整必然破坏比例），视觉弱化 + 逻辑守卫双保险
-      if (kind === 'edge' && cropPresetRatio(latestRef.current.preset) != null) return;
+      if (target.kind === 'edge' && cropPresetRatio(latestRef.current.preset) != null) return;
       e.preventDefault();
       e.stopPropagation();
       const toFlow = latestRef.current.screenToFlowPosition;
       dragRef.current = {
-        kind,
-        handle,
+        ...target,
         start: latestRef.current.rect,
         startPointer: toFlow({ x: e.clientX, y: e.clientY }),
       };
@@ -207,7 +209,6 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
   };
 
   const darkBandProps = {
-    className: styles.darkBand,
     onPointerDown: onDarkPointerDown,
     onPointerMove: onDarkPointerMove,
     onPointerUp: onDarkPointerUp,
@@ -260,7 +261,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
         style={{ left: boxLeft, top: boxTop, width: boxW, height: boxH }}
         data-testid="crop-move-zone"
         title="按住拖动移动裁切框"
-        onPointerDown={startDrag('move', 'move')}
+        onPointerDown={startDrag({ kind: 'move' })}
         onWheel={forwardWheel}
       />
 
@@ -278,7 +279,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
         style={{ left: boxLeft, top: boxTop, width: boxW }}
         data-testid="crop-handle-top"
         title={locked ? '锁定比例下不可拖动单边' : '向内拖动收缩裁切范围'}
-        onPointerDown={startDrag('edge', 'top')}
+        onPointerDown={startDrag({ kind: 'edge', handle: 'top' })}
         onWheel={forwardWheel}
       />
       <div
@@ -286,7 +287,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
         style={{ left: boxLeft, top: br.y, width: boxW }}
         data-testid="crop-handle-bottom"
         title={locked ? '锁定比例下不可拖动单边' : '向内拖动收缩裁切范围'}
-        onPointerDown={startDrag('edge', 'bottom')}
+        onPointerDown={startDrag({ kind: 'edge', handle: 'bottom' })}
         onWheel={forwardWheel}
       />
       <div
@@ -294,7 +295,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
         style={{ left: boxLeft, top: boxTop, height: boxH }}
         data-testid="crop-handle-left"
         title={locked ? '锁定比例下不可拖动单边' : '向内拖动收缩裁切范围'}
-        onPointerDown={startDrag('edge', 'left')}
+        onPointerDown={startDrag({ kind: 'edge', handle: 'left' })}
         onWheel={forwardWheel}
       />
       <div
@@ -302,7 +303,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
         style={{ left: br.x, top: boxTop, height: boxH }}
         data-testid="crop-handle-right"
         title={locked ? '锁定比例下不可拖动单边' : '向内拖动收缩裁切范围'}
-        onPointerDown={startDrag('edge', 'right')}
+        onPointerDown={startDrag({ kind: 'edge', handle: 'right' })}
         onWheel={forwardWheel}
       />
 
@@ -319,7 +320,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
             style={{ left: cx, top: cy }}
             data-testid={`crop-handle-${corner}`}
             title={locked ? '拖动等比缩放（以对角为锚）' : '拖动调整宽高；按住 Shift 等比缩放'}
-            onPointerDown={startDrag('corner', corner)}
+            onPointerDown={startDrag({ kind: 'corner', handle: corner })}
             onWheel={forwardWheel}
           >
             <div className={styles.cornerVisual} />

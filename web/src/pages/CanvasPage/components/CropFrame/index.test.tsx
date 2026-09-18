@@ -2,12 +2,13 @@
 /* 裁切框覆盖层组件测试（IKGW1N）：默认全幅渲染与手柄定位、自由拖 4 边/4 角换算接线、
    Shift 临时锁比例、锁比例下边手柄禁用不可拖、角手柄对角锚等比缩放、框内平移钳制、
    64 像素下限（显示系 minSide 传入）、暗区点击退出、拖拽会话结束停止响应、
-   多帧连续拖动（重渲染不拆进行中的监听——拖不动 bug 回归锁，OutpaintFrame 同款）。
+   多帧连续拖动（重渲染不拆进行中的监听——拖不动 bug 回归锁，OutpaintFrame 同款）、
+   viewport 缩放平移后框换算跟随（编辑期间画布照常，规格故事 16）。
    换算本身在 imageCrop.test.ts 纯函数层覆盖，此处测组件把屏幕事件正确接到
    纯函数并回抛（zoom=1、容器在原点时 flow 坐标 == client 坐标）。 */
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropFrame from './index';
 import {
@@ -139,6 +140,44 @@ describe('IKGW1N 裁切框渲染', () => {
     const event = new Event('dragstart', { bubbles: true, cancelable: true });
     document.body.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('viewport 缩放平移后框与手柄按 flow→屏幕换算跟随（编辑期间画布照常，规格故事 16）', async () => {
+    // 经 store 注入 transform 与 domNode：无真实 ReactFlow 实例时 domNode 为 null，
+    // flowToScreenPosition 直透传不换算；bump state 复现库在 viewport 变化时对 children 的重渲染
+    let applyVp: (() => void) | undefined;
+    function ViewportHost() {
+      const [, bump] = useState(0);
+      const store = useStoreApi();
+      applyVp = () => {
+        store.setState({ transform: [60, 30, 2], domNode: container });
+        bump((n) => n + 1);
+      };
+      return createElement(CropFrame, {
+        bounds: { ...BOUNDS },
+        rect: { x: 1000, y: 500, width: 400, height: 300 },
+        preset: 'free',
+        minSide: MIN_SIDE,
+        onRectChange: () => {},
+        onDarkAreaClick: () => {},
+      });
+    }
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(ReactFlowProvider, null, createElement(ViewportHost)));
+    });
+    // viewport → x=60, y=30, zoom=2：屏幕 = flow × zoom + 平移
+    await act(async () => { applyVp!(); });
+    const box = container.querySelector('[data-testid="crop-frame-box"]') as HTMLElement;
+    expect(box.style.left).toBe('2060px');
+    expect(box.style.top).toBe('1030px');
+    expect(box.style.width).toBe('800px');
+    expect(box.style.height).toBe('600px');
+    const se = handle('se') as HTMLElement;
+    expect(se.style.left).toBe('2860px');
+    expect(se.style.top).toBe('1630px');
   });
 });
 

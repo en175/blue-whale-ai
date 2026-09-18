@@ -257,6 +257,35 @@ function cropImageToFile(
   });
 }
 
+/** 裁切内容区矩形（IKGW1N）：源图卡内容盒（mediaContentBox 保持源图宽高比，宽高缺失时
+ *  兜底默认尺寸）置于卡片位置 + 22.5 标题偏移；进入裁切（默认全幅框）与渲染期派生共用。 */
+function cropBoundsOf(node: Node): CropRect {
+  const d = (node.data ?? {}) as Record<string, unknown>;
+  const box = mediaContentBox({
+    mediaType: 'image',
+    width: typeof d.width === 'number' ? d.width : undefined,
+    height: typeof d.height === 'number' ? d.height : undefined,
+  });
+  return {
+    x: node.position.x,
+    y: node.position.y + MEDIA_CONTENT_TOP_OFFSET,
+    width: box.width,
+    height: box.height,
+  };
+}
+
+/** 裁切坐标空间（显示尺寸 × 源图自然分辨率）：自然分辨率缺失（存量图未实测）时为 null。 */
+function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
+  const d = (node.data ?? {}) as Record<string, unknown>;
+  if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
+  return {
+    displayWidth: bounds.width,
+    displayHeight: bounds.height,
+    naturalWidth: d.width,
+    naturalHeight: d.height,
+  };
+}
+
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1072,32 +1101,8 @@ export default function CanvasPage() {
   const cropSourceNode = cropTargetNodeId
     ? mediaNodes.find((n) => n.id === cropTargetNodeId) ?? null
     : null;
-  const cropBounds = (() => {
-    if (!cropSourceNode) return null;
-    const d = (cropSourceNode.data ?? {}) as Record<string, unknown>;
-    const box = mediaContentBox({
-      mediaType: 'image',
-      width: typeof d.width === 'number' ? d.width : undefined,
-      height: typeof d.height === 'number' ? d.height : undefined,
-    });
-    return {
-      x: cropSourceNode.position.x,
-      y: cropSourceNode.position.y + MEDIA_CONTENT_TOP_OFFSET,
-      width: box.width,
-      height: box.height,
-    } satisfies CropRect;
-  })();
-  const cropSpace = (() => {
-    if (!cropSourceNode || !cropBounds) return null;
-    const d = (cropSourceNode.data ?? {}) as Record<string, unknown>;
-    if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
-    return {
-      displayWidth: cropBounds.width,
-      displayHeight: cropBounds.height,
-      naturalWidth: d.width,
-      naturalHeight: d.height,
-    } satisfies CropCoordinateSpace;
-  })();
+  const cropBounds = cropSourceNode ? cropBoundsOf(cropSourceNode) : null;
+  const cropSpace = cropSourceNode && cropBounds ? cropSpaceOf(cropSourceNode, cropBounds) : null;
   /** 64 自然像素下限换算到显示坐标系（分辨率缺失时 0=无下限） */
   const cropMinSide = cropSpace ? minCropSideDisplay(cropSpace) : 0;
   /** 裁切面板跟随锚（IKGW1N）：源图卡下方（computeFollowAnchor 恒锚节点下方） */
@@ -6151,18 +6156,7 @@ export default function CanvasPage() {
     if (!node || node.type !== 'mediaNode') return;
     dismissAllGenPanels();
     exitEraseEditing();
-    const d = (node.data ?? {}) as Record<string, unknown>;
-    const box = mediaContentBox({
-      mediaType: 'image',
-      width: typeof d.width === 'number' ? d.width : undefined,
-      height: typeof d.height === 'number' ? d.height : undefined,
-    });
-    const bounds: CropRect = {
-      x: node.position.x,
-      y: node.position.y + MEDIA_CONTENT_TOP_OFFSET,
-      width: box.width,
-      height: box.height,
-    };
+    const bounds = cropBoundsOf(node);
     setCropPreset('free');
     setCropRect(fullCropRect(bounds));
     setCropTargetNodeId(id);
