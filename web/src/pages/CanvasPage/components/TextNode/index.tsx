@@ -20,6 +20,7 @@ import chipStyles from '../mediaChip.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
 import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
+import FollowToolbarLayer from './FollowToolbarLayer';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
@@ -27,6 +28,11 @@ import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
+
+/** 操作条顶边相对卡片顶边抬升量（IKGYYE 钉屏幕迁移）：条高约 32（addToChatBtn
+ *  padding 8×2 + 内容 14 + 边框 2）+ 与卡片顶边间距 10，口径同迁移前 bottom 公式；
+ * 格式工具栏条高 42 + 10 = FOLLOW_ABOVE_LIFT（52）用锚定函数缺省值 */
+const NODE_BAR_LIFT = 42;
 
 /** 正文双击间隔（毫秒）。选中节点会抬 zIndex 并重绘，原生 dblclick 容易丢失，故按按下间隔识别。 */
 const TEXT_BODY_DOUBLE_PRESS_MS = 350;
@@ -156,6 +162,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   /** 双击进入编辑；单击/拖动为移动节点。文本生成节点仅「自己编写」进入编辑 */
   const [editing, setEditing] = useState(false);
   const [writingSelf, setWritingSelf] = useState(false);
+  /** 悬停本卡（IKGYYE 钉屏幕迁移）：操作条 `.wrapper:hover .nodeBar` 的 hover 显示语义
+   *  由 JS 指针事件等价保持——工具条 DOM 迁出节点卡后 CSS :hover 不再作用于卡外层 */
+  const [hovered, setHovered] = useState(false);
   const isTextGen = data.textGen === true;
   const hasTextGenBody = Boolean(
     (typeof data.text === 'string' && data.text.trim())
@@ -723,76 +732,87 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     <div
       className={`${styles.wrapper} ${selected ? styles.selected : ''} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
       onContextMenu={handleContextMenu}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={nodeTitleSizing(zoom)}
     >
-      {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
-      {isFocused ? (
-        <div
-          className={`${styles.toolbar} nodrag nopan`}
-          onMouseDown={(e) => e.preventDefault()}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <button className={styles.toolBtn} onClick={() => setHeading('h1')} title="标题1">
-            <Heading1 size={14} strokeWidth={2} />
-          </button>
-          <button className={styles.toolBtn} onClick={() => setHeading('h2')} title="标题2">
-            <Heading2 size={14} strokeWidth={2} />
-          </button>
-          <button className={styles.toolBtn} onClick={() => setHeading('h3')} title="标题3">
-            <Heading3 size={14} strokeWidth={2} />
-          </button>
+      {/* IKGYYE 钉屏幕迁移：同一层操作位置的两条工具栏（编辑时格式工具栏、其余操作条，
+          两者互斥不叠成多行）迁出节点卡，经 FollowToolbarLayer portal 到 .react-flow 根
+          （viewport 变换层外）——任何缩放级别屏幕尺寸恒定、拖动/平移缩放实时跟随、
+          卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片 */}
+      <FollowToolbarLayer
+        nodeId={id}
+        show={isFocused || showSoloToolbar || hovered}
+        toolbarLift={isFocused ? undefined : NODE_BAR_LIFT}
+      >
+        {isFocused ? (
+          <div
+            className={`${styles.toolbar} nodrag nopan`}
+            onMouseDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button className={styles.toolBtn} onClick={() => setHeading('h1')} title="标题1">
+              <Heading1 size={14} strokeWidth={2} />
+            </button>
+            <button className={styles.toolBtn} onClick={() => setHeading('h2')} title="标题2">
+              <Heading2 size={14} strokeWidth={2} />
+            </button>
+            <button className={styles.toolBtn} onClick={() => setHeading('h3')} title="标题3">
+              <Heading3 size={14} strokeWidth={2} />
+            </button>
 
-          <div className={styles.divider} />
+            <div className={styles.divider} />
 
-          <button className={styles.toolBtn} onClick={() => execCmd('bold')} title="加粗">
-            <Bold size={14} strokeWidth={2.5} />
-          </button>
-          <button className={styles.toolBtn} onClick={() => execCmd('italic')} title="斜体">
-            <Italic size={14} strokeWidth={2.5} />
-          </button>
+            <button className={styles.toolBtn} onClick={() => execCmd('bold')} title="加粗">
+              <Bold size={14} strokeWidth={2.5} />
+            </button>
+            <button className={styles.toolBtn} onClick={() => execCmd('italic')} title="斜体">
+              <Italic size={14} strokeWidth={2.5} />
+            </button>
 
-          <div className={styles.divider} />
+            <div className={styles.divider} />
 
-          <button className={styles.toolBtn} onClick={() => execCmd('insertOrderedList')} title="有序列表">
-            <ListOrdered size={14} strokeWidth={2} />
-          </button>
-          <button className={styles.toolBtn} onClick={() => execCmd('insertUnorderedList')} title="无序列表">
-            <List size={14} strokeWidth={2} />
-          </button>
+            <button className={styles.toolBtn} onClick={() => execCmd('insertOrderedList')} title="有序列表">
+              <ListOrdered size={14} strokeWidth={2} />
+            </button>
+            <button className={styles.toolBtn} onClick={() => execCmd('insertUnorderedList')} title="无序列表">
+              <List size={14} strokeWidth={2} />
+            </button>
 
-          <div className={styles.divider} />
+            <div className={styles.divider} />
 
-          <button className={styles.toolBtn} onClick={() => execCmd('insertHorizontalRule')} title="分割线">
-            <Minus size={14} strokeWidth={2} />
-          </button>
+            <button className={styles.toolBtn} onClick={() => execCmd('insertHorizontalRule')} title="分割线">
+              <Minus size={14} strokeWidth={2} />
+            </button>
 
-          {/* 编辑时节点操作并入同一层操作位置，保持「添加到对话」可达且不叠成多行 */}
-          <div className={styles.divider} />
-          <button className={styles.toolBtn} onClick={() => data.onAddToChat?.(id)} title="添加到对话">
-            <AtSign size={14} strokeWidth={2} />
-            <span>添加到对话</span>
-          </button>
-        </div>
-      ) : (
-        <div className={`${styles.nodeBar} ${showSoloToolbar ? styles.nodeBarVisible : ''} nodrag nopan`}>
-          {hasPromptBindings && <>
-            {!data.promptSource && (
-              <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
-                className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
-                onMouseDown={() => saveSelection()}
-                onChange={event => editMaterial(event.target.value, selectedMention)}>
-                <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
-                {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
-              </select>
-            )}
-            {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
-          </>}
-          <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
-            <AtSign size={14} strokeWidth={2} />
-            <span>添加到对话</span>
-          </button>
-        </div>
-      )}
+            {/* 编辑时节点操作并入同一层操作位置，保持「添加到对话」可达且不叠成多行 */}
+            <div className={styles.divider} />
+            <button className={styles.toolBtn} onClick={() => data.onAddToChat?.(id)} title="添加到对话">
+              <AtSign size={14} strokeWidth={2} />
+              <span>添加到对话</span>
+            </button>
+          </div>
+        ) : (
+          <div className={`${styles.nodeBar} nodrag nopan`}>
+            {hasPromptBindings && <>
+              {!data.promptSource && (
+                <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
+                  className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
+                  onMouseDown={() => saveSelection()}
+                  onChange={event => editMaterial(event.target.value, selectedMention)}>
+                  <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
+                  {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
+                </select>
+              )}
+              {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
+            </>}
+            <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
+              <AtSign size={14} strokeWidth={2} />
+              <span>添加到对话</span>
+            </button>
+          </div>
+        )}
+      </FollowToolbarLayer>
 
       {/* 常驻标题行：名称编辑与正文展开 */}
       <div className={styles.titleRow} data-testid="text-title">
@@ -862,9 +882,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
-            // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态
+            // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态。
+            // IKGYYE 钉屏幕迁移后工具条在 FollowToolbarLayer 层内（DOM 已出节点卡），
+            // 白名单须覆盖层根（data-gen-panel-territory），否则点任何格式按钮都退出编辑
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, .${styles.chipMenu}, .${chipStyles.chipPreview}, [data-testid="mention-menu"]`)) return;
+            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, [data-gen-panel-territory], .${styles.chipMenu}, .${chipStyles.chipPreview}, [data-testid="mention-menu"]`)) return;
             setIsFocused(false);
             setEditing(false);
             setWritingSelf(false);
