@@ -18,11 +18,16 @@ export const IMAGE_ENHANCE_TAG = "image_enhance";
  *  与 generation_jobs.type / IMAGE_ERASE_JOB_TYPE（@lib/contracts）保持一致。 */
 export const IMAGE_ERASE_TAG = "image_erase";
 
+/** 图片抠图任务 tag（IKGXLS，契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md）：
+ *  复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / IMAGE_CUTOUT_JOB_TYPE（@lib/contracts）保持一致。 */
+export const IMAGE_CUTOUT_TAG = "image_cutout";
+
 /** 视频生成任务 tag（IKEL9A 刀④；修正六由 "step" 更名为与任务类型同名）：复用 GENERATION_TASK_QUEUE，
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
 export const VIDEO_GENERATION_TAG = "video";
 
-/** 六个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
+/** 七个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
  *  发明一个字符串不会有任何运行时报错，只会静默滞留）。 */
 export type GenerationTag =
   | typeof VIDEO_GENERATION_TAG
@@ -30,4 +35,5 @@ export type GenerationTag =
   | typeof AUDIO_GENERATION_TAG
   | typeof MEDIA_EXTRACT_TAG
   | typeof IMAGE_ENHANCE_TAG
-  | typeof IMAGE_ERASE_TAG;
+  | typeof IMAGE_ERASE_TAG
+  | typeof IMAGE_CUTOUT_TAG;

@@ -24,7 +24,11 @@ public enum JobType {
     IMAGE_ENHANCE("image_enhance"),
 
     /** 图片擦除（tag=image_erase，契约 §15 / IKGOT3；消费者与处理器由 IKGOT6 按附录 C 触点注册）。 */
-    IMAGE_ERASE("image_erase");
+    IMAGE_ERASE("image_erase"),
+
+    /** 图片抠图（tag=image_cutout，契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXLS；
+     *  消费者与处理器由 IKGXM2 按附录 C 触点注册）。 */
+    IMAGE_CUTOUT("image_cutout");
 
     private final String value;
 
