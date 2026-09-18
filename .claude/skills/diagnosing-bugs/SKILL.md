@@ -136,8 +136,3 @@ Required before declaring done:
 - [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
 - [ ] The hypothesis that turned out correct is stated in the commit / PR message, so the next debugger learns
-
-
-## Repository code discovery
-
-Before code exploration or delegation, read `agent-rules/code-discovery.md`. Apply it before creating a worktree, pass its graph evidence to subagents, and include query-backed conclusions or evidenced fallback in the handoff/review. Index creation alone is not query evidence.
