@@ -2,7 +2,11 @@
 /* IKGGC0 回归锁：选中节点（source/target 任一端）时相连线呈现流动动效，
    视觉与悬停共用同一份 CSS 定义（源断言见 edgeFlowSource.test.ts）；
    取消选中即恢复静态实线。类开关是唯一接缝，不写入连线数据。
-   IKGUVG：剪刀改为指针停稳满 1 秒才出现（假计时器驱动），生成中的目标连线不出现。 */
+   IKGUVG：剪刀改为指针停稳满 1 秒才出现（假计时器驱动），生成中的目标连线不出现。
+   IKGUVM：每条用户可见行为各一条独立用例——出现时机 / 移动重置 / 移出隐藏 / 出现位置偏移 /
+   出现后定格 / 指针在按钮上保持可见 / 目标节点生成中不出现；断言只落在渲染结果
+   （出现类、transform、圆心坐标）与删除链路的 mock 调用上，不读组件内部状态。
+   另加两条守卫：偏移上限的几何不变量、两条连线之间的剪刀互斥。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,14 +20,29 @@ const storeState = vi.hoisted(() => ({
     ['n-src', { id: 'n-src', selected: false }],
     ['n-dst', { id: 'n-dst', selected: false }],
     ['n-other', { id: 'n-other', selected: false }],
+    ['n-src-b', { id: 'n-src-b', selected: false }],
+    ['n-dst-b', { id: 'n-dst-b', selected: false }],
   ]),
 }));
 
-/** React Flow 替身：屏幕坐标换算故意加偏移，断言位置确实走了 screenToFlowPosition */
-const reactFlow = vi.hoisted(() => ({
-  deleteElements: vi.fn(),
-  screenToFlowPosition: vi.fn((p: { x: number; y: number }) => ({ x: p.x + 1000, y: p.y + 2000 })),
-}));
+/** React Flow 替身：屏幕坐标换算故意带平移与缩放，断言位置确实走了 screenToFlowPosition */
+const reactFlow = vi.hoisted(() => {
+  const state = {
+    /** 换算的平移偏移：故意不为 0，防止直接把屏幕坐标当流坐标用也能通过 */
+    flowDx: 1000,
+    flowDy: 2000,
+    /** 换算的缩放倍率：模拟画布缩放，改变同一屏幕点对应的流坐标 */
+    zoom: 1,
+  };
+  return {
+    state,
+    deleteElements: vi.fn(),
+    screenToFlowPosition: vi.fn((p: { x: number; y: number }) => ({
+      x: p.x / state.zoom + state.flowDx,
+      y: p.y / state.zoom + state.flowDy,
+    })),
+  };
+});
 
 vi.mock('@xyflow/react', async (importOriginal) => {
   const original = await importOriginal<typeof import('@xyflow/react')>();
@@ -38,8 +57,6 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 const DWELL_MS = 1000;
 /** 剪刀出现位置相对停稳指针的固定偏移（与组件 SCISSORS_OFFSET 同值，IKGUVK） */
 const SCISSORS_OFFSET = { x: 12, y: -12 };
-/** 剪刀图标圆心相对按钮组原点的偏移（与组件 SCISSORS_CENTER 同值） */
-const SCISSORS_CENTER = 10;
 
 let root: Root;
 let container: HTMLDivElement;
@@ -65,6 +82,20 @@ const edgeProps = {
   targetPosition: Position.Left,
 };
 
+/** 第二条连线（跨线互斥场景）：端点节点与几何都独立，两条实例互不共享状态 */
+const edgePropsB = {
+  ...edgeProps,
+  id: 'e2',
+  source: 'n-src-b',
+  target: 'n-dst-b',
+  sourceY: 200,
+  targetY: 300,
+};
+
+/** 多连线渲染时每条线各占一个槽位元素，按槽位取元素 */
+const SLOT_A = 'edge-slot-a';
+const SLOT_B = 'edge-slot-b';
+
 async function renderEdge() {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement('div');
@@ -75,10 +106,27 @@ async function renderEdge() {
   });
 }
 
-/** 连线根 <g> 的 class（选中相连时追加 selectedConnected） */
-function edgeGroupClass(): string {
-  const group = container.querySelector('g');
-  return group?.getAttribute('class') ?? '';
+/** 两条连线挂在同一个渲染根下（真实画布也是如此）：跨线互斥场景用 */
+async function renderTwoEdges() {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      createElement(
+        'div',
+        null,
+        createElement('div', { className: SLOT_A }, createElement(CustomEdge, edgeProps)),
+        createElement('div', { className: SLOT_B }, createElement(CustomEdge, edgePropsB)),
+      ),
+    );
+  });
+}
+
+/** 按槽位取某一条连线的元素范围 */
+function edgeSlot(key: 'a' | 'b'): ParentNode {
+  return container.querySelector(`.${key === 'a' ? SLOT_A : SLOT_B}`)!;
 }
 
 /** 重复 render 触发组件重执行（props 等价，但元素引用全新） */
@@ -88,47 +136,88 @@ async function rerenderEdge() {
   });
 }
 
+/** 连线根 <g> 的 class（选中相连时追加 selectedConnected） */
+function edgeGroupClass(scope: ParentNode = container): string {
+  const group = scope.querySelector('g');
+  return group?.getAttribute('class') ?? '';
+}
+
 /** 剪刀是否已出现：由组件按停稳状态追加出现类决定，默认隐藏 */
-function scissorsShown(): boolean {
-  const btn = container.querySelector(`.${styles.deleteBtn}`);
+function scissorsShown(scope: ParentNode = container): boolean {
+  const btn = scope.querySelector(`.${styles.deleteBtn}`);
   return (btn?.getAttribute('class') ?? '').split(/\s+/).includes(styles.deleteBtnVisible);
 }
 
-function scissorsTransform(): string | null {
-  return container.querySelector(`.${styles.deleteBtn}`)?.getAttribute('transform') ?? null;
+function scissorsTransform(scope: ParentNode = container): string | null {
+  return scope.querySelector(`.${styles.deleteBtn}`)?.getAttribute('transform') ?? null;
 }
 
-/** 剪刀按钮组原点在画布流坐标里的位置；圆心 = 组原点 + SCISSORS_CENTER */
-function scissorsOrigin(): { x: number; y: number } {
-  const matched = scissorsTransform()?.match(/translate\((-?[\d.]+),\s*(-?[\d.]+)\)/);
-  if (!matched) throw new Error(`剪刀按钮上没有可解析的 transform：${scissorsTransform()}`);
+/** 剪刀按钮组原点在画布流坐标里的位置 */
+function scissorsOrigin(scope: ParentNode = container): { x: number; y: number } {
+  const matched = scissorsTransform(scope)?.match(/translate\((-?[\d.]+),\s*(-?[\d.]+)\)/);
+  if (!matched) throw new Error(`剪刀按钮上没有可解析的 transform：${scissorsTransform(scope)}`);
   return { x: Number(matched[1]), y: Number(matched[2]) };
 }
 
+/** 剪刀圆心的画布流坐标：按钮组原点 + 圆在组内的 cx/cy（都读渲染结果，不抄组件常量） */
+function scissorsCenter(scope: ParentNode = container): { x: number; y: number } {
+  const circle = scope.querySelector(`.${styles.deleteBtn} circle`)!;
+  const origin = scissorsOrigin(scope);
+  return {
+    x: origin.x + Number(circle.getAttribute('cx')),
+    y: origin.y + Number(circle.getAttribute('cy')),
+  };
+}
+
+/** 剪刀可点圆的半径（渲染值） */
+function scissorsRadius(scope: ParentNode = container): number {
+  return Number(scope.querySelector(`.${styles.deleteBtn} circle`)!.getAttribute('r'));
+}
+
+/** 连线命中区域的半宽（渲染值）：命中路径描边宽度的一半 */
+function hitPathHalfWidth(scope: ParentNode = container): number {
+  return Number(scope.querySelector(`.${styles.hitPath}`)!.getAttribute('stroke-width')) / 2;
+}
+
+/** 接缝换算函数的期望结果：与 mock 的 screenToFlowPosition 同一公式（含画布缩放） */
+function flowPosition(clientX: number, clientY: number): { x: number; y: number } {
+  return {
+    x: clientX / reactFlow.state.zoom + reactFlow.state.flowDx,
+    y: clientY / reactFlow.state.zoom + reactFlow.state.flowDy,
+  };
+}
+
+/** 剪刀圆心相对指针换算位置的实际错开量：从渲染结果反推，不抄组件常量 */
+function measuredOffset(clientX: number, clientY: number, scope: ParentNode = container): { x: number; y: number } {
+  const center = scissorsCenter(scope);
+  const pointer = flowPosition(clientX, clientY);
+  return { x: center.x - pointer.x, y: center.y - pointer.y };
+}
+
 /** 指针在连线上移动（命中路径上派发，事件冒泡到连线组） */
-async function movePointer(clientX: number, clientY: number) {
+async function movePointer(clientX: number, clientY: number, scope: ParentNode = container) {
   await act(async () => {
-    container
+    scope
       .querySelector(`.${styles.hitPath}`)!
       .dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY }));
   });
 }
 
-/** 指针离开连线：React 的 onMouseLeave 由 mouseout(relatedTarget=外部) 合成 */
-async function leaveEdge() {
+/** 指针离开连线到 relatedTarget（默认画布空白）：React 的 onMouseLeave 由 mouseout 合成 */
+async function leaveEdge(relatedTarget: Element = document.body, scope: ParentNode = container) {
   await act(async () => {
-    container
+    scope
       .querySelector(`.${styles.hitPath}`)!
-      .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+      .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget }));
   });
 }
 
 /** 指针从连线移到剪刀上：命中路径 mouseout 到剪刀（relatedTarget 落在连线组内），
     随后剪刀收到 mousemove——真实浏览器里指针移向剪刀就是这两步，IKGUVK 的存活前提 */
-async function movePointerOntoScissors() {
-  const btn = container.querySelector(`.${styles.deleteBtn}`)!;
+async function movePointerOntoScissors(scope: ParentNode = container) {
+  const btn = scope.querySelector(`.${styles.deleteBtn}`)!;
   await act(async () => {
-    container
+    scope
       .querySelector(`.${styles.hitPath}`)!
       .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: btn }));
   });
@@ -138,17 +227,17 @@ async function movePointerOntoScissors() {
 }
 
 /** 指针从剪刀移出到画布空白：既不在连线上也不在剪刀上 */
-async function movePointerOffScissors() {
+async function movePointerOffScissors(scope: ParentNode = container) {
   await act(async () => {
-    container
+    scope
       .querySelector(`.${styles.deleteBtn}`)!
       .dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
   });
 }
 
-async function clickScissors() {
+async function clickScissors(scope: ParentNode = container) {
   await act(async () => {
-    container
+    scope
       .querySelector(`.${styles.deleteBtn}`)!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
@@ -233,7 +322,7 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     setNodeData('n-dst', undefined);
   });
 
-  it('指针进入连线未满 1 秒：剪刀不出现', async () => {
+  it('出现时机：指针进入连线未满 1 秒，剪刀不出现', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
@@ -243,21 +332,16 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('指针停稳满 1 秒：剪刀出现，且落在换算后的指针位置加固定偏移处', async () => {
+  it('出现时机：指针停稳满 1 秒，剪刀出现', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
     await advance(DWELL_MS);
 
     expect(scissorsShown()).toBe(true);
-    // 换算函数返回 (clientX + 1000, clientY + 2000)；剪刀组原点 = 指针流坐标 + 固定偏移 - 圆心偏移
-    expect(scissorsTransform()).toBe(
-      `translate(${120 + 1000 + SCISSORS_OFFSET.x - SCISSORS_CENTER}, ${80 + 2000 + SCISSORS_OFFSET.y - SCISSORS_CENTER})`,
-    );
-    expect(reactFlow.screenToFlowPosition).toHaveBeenCalledWith({ x: 120, y: 80 });
   });
 
-  it('计时期间指针移动一次：原计时作废，从最后一次移动起重新计满 1 秒', async () => {
+  it('移动重置：计时期间指针移动一次，原计时作废并从最后一次移动起重新计满 1 秒', async () => {
     await renderEdge();
 
     await movePointer(10, 10);
@@ -272,7 +356,7 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(true);
   });
 
-  it('指针离开连线：剪刀立即隐藏且不留迟到出现，返回后需重新停稳满 1 秒', async () => {
+  it('移出隐藏：剪刀出现后指针离开连线，立即隐藏', async () => {
     await renderEdge();
 
     await movePointer(10, 10);
@@ -281,20 +365,36 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
 
     await leaveEdge();
     expect(scissorsShown()).toBe(false);
+  });
 
-    // 离开发生在计时途中时，残余计时不得让剪刀迟到出现
+  it('移出隐藏：计时途中指针离开连线，残余计时不得让剪刀迟到出现', async () => {
+    await renderEdge();
+
     await movePointer(20, 20);
     await advance(DWELL_MS - 200);
     await leaveEdge();
     await advance(DWELL_MS * 2);
+
+    expect(scissorsShown()).toBe(false);
+  });
+
+  it('移出隐藏后返回：指针回到连线，重新停稳满 1 秒才再次出现', async () => {
+    await renderEdge();
+
+    await movePointer(10, 10);
+    await advance(DWELL_MS);
+    await leaveEdge();
     expect(scissorsShown()).toBe(false);
 
     await movePointer(30, 30);
-    await advance(DWELL_MS);
+    await advance(DWELL_MS - 1);
+    expect(scissorsShown()).toBe(false);
+
+    await advance(1);
     expect(scissorsShown()).toBe(true);
   });
 
-  it('目标节点生成中：停满 1 秒也不出现剪刀', async () => {
+  it('目标节点生成中不出现：目标节点 genStatus 为 generating，停满 1 秒也不出现剪刀', async () => {
     setNodeData('n-dst', { genStatus: 'generating' });
     await renderEdge();
 
@@ -303,7 +403,7 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('目标节点处于提交中（页面 submitting 标记）：停满 1 秒也不出现剪刀', async () => {
+  it('目标节点生成中不出现：目标节点处于页面提交窗口（submitting 标记），停满 1 秒也不出现剪刀', async () => {
     setNodeData('n-dst', { genStatus: 'draft', submitting: true });
     await renderEdge();
 
@@ -312,7 +412,7 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('只有目标节点生成中才拦：源节点生成中，相连线仍可停稳出现剪刀', async () => {
+  it('目标节点生成中不出现：只认目标端，源节点生成中的相连线仍可停稳出现剪刀', async () => {
     setNodeData('n-src', { genStatus: 'generating' });
     await renderEdge();
 
@@ -321,32 +421,15 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(true);
   });
 
-  it('剪刀出现后单击一次即触发删除链路', async () => {
+  it('删除链路：剪刀出现后单击一次即断开连线', async () => {
     await renderEdge();
 
     await movePointer(10, 10);
     await advance(DWELL_MS);
-    await act(async () => {
-      container
-        .querySelector(`.${styles.deleteBtn}`)!
-        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
+    await clickScissors();
 
     expect(reactFlow.deleteElements).toHaveBeenCalledTimes(1);
     expect(reactFlow.deleteElements).toHaveBeenCalledWith({ edges: [{ id: 'e1' }] });
-  });
-
-  it('卸载时清掉未触发的停稳计时，不留残余定时任务', async () => {
-    await renderEdge();
-    const before = vi.getTimerCount();
-
-    await movePointer(10, 10);
-    expect(vi.getTimerCount()).toBe(before + 1);
-
-    await act(async () => {
-      root.unmount();
-    });
-    expect(vi.getTimerCount()).toBe(before);
   });
 });
 
@@ -355,29 +438,43 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
     vi.useFakeTimers();
     reactFlow.deleteElements.mockClear();
     reactFlow.screenToFlowPosition.mockClear();
+    reactFlow.state.zoom = 1;
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    reactFlow.state.zoom = 1;
     setNodeData('n-src', undefined);
     setNodeData('n-dst', undefined);
   });
 
-  it('出现位置与指针存在固定偏移，不在指针坐标上', async () => {
+  it('出现位置偏移：剪刀圆心落在指针换算位置加固定偏移处，指针正下方没有按钮', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
     await advance(DWELL_MS);
-
     expect(scissorsShown()).toBe(true);
-    // 换算函数返回 (clientX + 1000, clientY + 2000)；剪刀圆心 = 指针流坐标 + 固定偏移
-    const center = { x: scissorsOrigin().x + SCISSORS_CENTER, y: scissorsOrigin().y + SCISSORS_CENTER };
-    expect(center).toEqual({ x: 120 + 1000 + SCISSORS_OFFSET.x, y: 80 + 2000 + SCISSORS_OFFSET.y });
-    // 指针正下方没有按钮：圆心不在指针换算位置上
-    expect(center).not.toEqual({ x: 120 + 1000, y: 80 + 2000 });
+
+    // 指针屏幕坐标经 screenToFlowPosition 换算后再加偏移（位置不是屏幕坐标原样使用）
+    expect(reactFlow.screenToFlowPosition).toHaveBeenCalledWith({ x: 120, y: 80 });
+    expect(measuredOffset(120, 80)).toEqual(SCISSORS_OFFSET);
+    // 指针正下方没有按钮：剪刀圆心不在指针换算位置上
+    expect(scissorsCenter()).not.toEqual(flowPosition(120, 80));
   });
 
-  it('出现后指针在连线上继续移动：位置就地定格，不再跟随指针', async () => {
+  it('偏移上限：错开量小于命中路径半宽加剪刀圆半径，指针从连线移向剪刀不会掉进空档', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    const offset = measuredOffset(120, 80);
+
+    // 上限两侧都取渲染值（命中半宽 10 + 剪刀圆半径 11）：偏移超过这个距离时，
+    // 指针在连线与剪刀之间会同时不命中两者，剪刀闪一下就消失而其它用例全绿
+    expect(Math.hypot(offset.x, offset.y)).toBeLessThan(hitPathHalfWidth() + scissorsRadius());
+  });
+
+  it('出现后定格：指针在连线上继续移动，剪刀位置保持不变', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
@@ -387,23 +484,25 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
     await movePointer(400, 300);
     expect(scissorsShown()).toBe(true);
     expect(scissorsTransform()).toBe(locked);
+
+    // 移动后继续停留：不被新的停稳计时重新定位
+    await advance(DWELL_MS * 2);
+    expect(scissorsShown()).toBe(true);
+    expect(scissorsTransform()).toBe(locked);
   });
 
-  it('指针移到剪刀上：剪刀保持可见，单击一次即删除', async () => {
+  it('指针在按钮上保持可见：指针离开连线移到剪刀上，剪刀不消失', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
     await advance(DWELL_MS);
     // 指针离开命中路径移向剪刀，路径上会短暂不在连线上
     await movePointerOntoScissors();
-    expect(scissorsShown()).toBe(true);
 
-    await clickScissors();
-    expect(reactFlow.deleteElements).toHaveBeenCalledTimes(1);
-    expect(reactFlow.deleteElements).toHaveBeenCalledWith({ edges: [{ id: 'e1' }] });
+    expect(scissorsShown()).toBe(true);
   });
 
-  it('指针从剪刀移回连线：重新计时，未满 1 秒不出现', async () => {
+  it('指针从按钮移回连线：重新计时，未满 1 秒不出现', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
@@ -420,13 +519,10 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
     await advance(1);
     expect(scissorsShown()).toBe(true);
     // 重新出现落在新的指针位置：上一次的旧坐标没有残留
-    expect(scissorsOrigin()).toEqual({
-      x: 200 + 1000 + SCISSORS_OFFSET.x - SCISSORS_CENTER,
-      y: 120 + 2000 + SCISSORS_OFFSET.y - SCISSORS_CENTER,
-    });
+    expect(measuredOffset(200, 120)).toEqual(SCISSORS_OFFSET);
   });
 
-  it('指针既不在连线上也不在剪刀上：剪刀立即隐藏', async () => {
+  it('指针既不在连线上也不在按钮上：剪刀立即隐藏', async () => {
     await renderEdge();
 
     await movePointer(120, 80);
@@ -439,24 +535,61 @@ describe('IKGUVK 剪刀位置与指针错开并就地定格', () => {
     expect(scissorsShown()).toBe(false);
   });
 
-  it('偏移量是画布流坐标定值：不同指针位置的错开量恒定，缩放只改视觉大小', async () => {
+  it('偏移是画布流坐标定值：指针位置与画布缩放变化都不改错开量', async () => {
     await renderEdge();
 
     await movePointer(40, 30);
     await advance(DWELL_MS);
-    const first = scissorsOrigin();
-    expect({
-      x: first.x + SCISSORS_CENTER - (40 + 1000),
-      y: first.y + SCISSORS_CENTER - (30 + 2000),
-    }).toEqual(SCISSORS_OFFSET);
+    expect(scissorsShown()).toBe(true);
+    expect(measuredOffset(40, 30)).toEqual(SCISSORS_OFFSET);
 
+    // 缩放变化：同一屏幕点换算出的流坐标变了，剪刀相对流坐标的错开量不变
     await leaveEdge();
-    await movePointer(260, 180);
+    reactFlow.state.zoom = 2;
+    await movePointer(40, 30);
     await advance(DWELL_MS);
-    const second = scissorsOrigin();
-    expect({
-      x: second.x + SCISSORS_CENTER - (260 + 1000),
-      y: second.y + SCISSORS_CENTER - (180 + 2000),
-    }).toEqual(SCISSORS_OFFSET);
+    expect(scissorsShown()).toBe(true);
+    expect(flowPosition(40, 30)).not.toEqual({ x: 40 + reactFlow.state.flowDx, y: 30 + reactFlow.state.flowDy });
+    expect(measuredOffset(40, 30)).toEqual(SCISSORS_OFFSET);
+  });
+});
+
+describe('IKGUVM 跨线互斥：同一时刻只有一把剪刀', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    reactFlow.deleteElements.mockClear();
+    reactFlow.screenToFlowPosition.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setNodeData('n-src-b', undefined);
+    setNodeData('n-dst-b', undefined);
+  });
+
+  it('指针从一条连线移到另一条连线：前一条剪刀先消失，新的一条需重新停稳满 1 秒', async () => {
+    await renderTwoEdges();
+    const slotA = edgeSlot('a');
+    const slotB = edgeSlot('b');
+    const visibleScissorsCount = () => container.querySelectorAll(`.${styles.deleteBtnVisible}`).length;
+
+    // A 线上停稳满 1 秒：A 出现剪刀
+    await movePointer(120, 80, slotA);
+    await advance(DWELL_MS);
+    expect(scissorsShown(slotA)).toBe(true);
+    expect(visibleScissorsCount()).toBe(1);
+
+    // 指针离开 A 线进入 B 线：浏览器里这是同一次指针移动产生的 mouseout + mousemove
+    await leaveEdge(slotB.querySelector(`.${styles.hitPath}`)!, slotA);
+    await movePointer(120, 280, slotB);
+    expect(scissorsShown(slotA)).toBe(false);
+    expect(scissorsShown(slotB)).toBe(false);
+    expect(visibleScissorsCount()).toBe(0);
+
+    // B 线上重新停稳满 1 秒：页面上只剩 B 的剪刀
+    await advance(DWELL_MS);
+    expect(scissorsShown(slotB)).toBe(true);
+    expect(scissorsShown(slotA)).toBe(false);
+    expect(visibleScissorsCount()).toBe(1);
   });
 });
