@@ -227,6 +227,11 @@ export function assetDurationSeconds(
   return durationMs == null ? null : durationMs / 1000;
 }
 
+/** Prisma 唯一约束冲突（P2002）。覆盖写与建行两条路径都要认它。 */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "P2002";
+}
+
 /**
  * 区分「已解析好的资产」与「Prisma 原始行」。
  *
@@ -807,32 +812,46 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         return true;
       }
       // IKGQWR（ADR-0093 决策 5）：覆盖写，双向。两步必须同事务。
-      await prisma.$transaction(async (tx) => {
-        // ① 先把旧主摘下来。`uq_asset_material_id` 是全库唯一（单列），不先清就撞 P2002 → 500。
-        await tx.assets.updateMany({
-          where: {
-            material_id: materialId,
-            user_id: uid,
-            id: { not: owned.id },
-          },
-          data: {
-            material_id: null,
-            material_group_id: null,
-            version: { increment: 1 },
-            gmt_modified: new Date(),
-          },
+      const apply = () =>
+        prisma.$transaction(async (tx) => {
+          // ① 先把旧主摘下来。`uq_asset_material_id` 是全库唯一（单列），不先清就撞 P2002 → 500。
+          await tx.assets.updateMany({
+            where: {
+              material_id: materialId,
+              user_id: uid,
+              id: { not: owned.id },
+            },
+            data: {
+              material_id: null,
+              material_group_id: null,
+              version: { increment: 1 },
+              gmt_modified: new Date(),
+            },
+          });
+          // ② 再写到本行，两列一起。
+          await tx.assets.update({
+            where: { id: owned.id },
+            data: {
+              material_id: materialId,
+              material_group_id: materialGroupId,
+              version: { increment: 1 },
+              gmt_modified: new Date(),
+            },
+          });
         });
-        // ② 再写到本行，两列一起。
-        await tx.assets.update({
-          where: { id: owned.id },
-          data: {
-            material_id: materialId,
-            material_group_id: materialGroupId,
-            version: { increment: 1 },
-            gmt_modified: new Date(),
-          },
-        });
-      });
+
+      try {
+        await apply();
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        // 并发改嫁同一张素材时的一次性重试。
+        //
+        // 两个请求各自把**不同的**本地资产改嫁到同一个 `material_id`：后手的事务里 ① 在对手
+        // 提交之前就执行完了，什么也没清到；随后 ② 撞上对手刚写下的那一行 → P2002。
+        // 此刻对手已经提交，重跑一次 ① 就能把它清掉（新事务开新快照，看得见已提交的行），
+        // ② 随之成功。收敛且幂等，不需要循环——三方以上同时改嫁同一张素材不构成真实场景。
+        await apply();
+      }
       return true;
     },
     async createUploadedAsset(input) {
@@ -900,7 +919,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         return created;
       }).catch(async (error: unknown) => {
         // 同一素材库 id 已被其它本地行占用：回读那条代表行，避免导入失败
-        if ((error as { code?: string }).code === "P2002" && input.materialId) {
+        if (isUniqueViolation(error) && input.materialId) {
           const existing = await prisma.assets.findFirst({
             where: {
               user_id: BigInt(input.userId),
