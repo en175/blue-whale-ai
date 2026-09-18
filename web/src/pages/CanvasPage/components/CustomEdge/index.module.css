@@ -34,7 +34,7 @@
   to   { stroke-dashoffset: -40; }
 }
 
-/* 删除按钮默认隐藏，悬停连线时显示 */
+/* 删除按钮默认隐藏：悬停本身不再显示，只有指针停稳满 1 秒后组件追加出现类才露出（IKGUVG） */
 .deleteBtn {
   opacity: 0;
   cursor: pointer;
@@ -42,7 +42,7 @@
   transition: opacity 0.15s ease;
 }
 
-.edgeGroup:hover .deleteBtn {
+.deleteBtnVisible {
   opacity: 1;
   pointer-events: all;
 }
