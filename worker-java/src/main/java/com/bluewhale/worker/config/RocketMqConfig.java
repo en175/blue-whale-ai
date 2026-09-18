@@ -41,22 +41,34 @@ public class RocketMqConfig {
 
     private static final Logger log = LoggerFactory.getLogger(RocketMqConfig.class);
 
+    /** 「全部留空」的兜底绑定值：topic / tag 由 {@link RocketMqProperties} 的紧凑构造器补默认值。 */
+    private static final RocketMqProperties DEFAULT_MQ_PROPS =
+            new RocketMqProperties("", "", "", false, "", "");
+
     /**
      * RocketMQ 配置属性（绑定 rocketmq.* YAML 前缀）。
      * 环境变量名与 TS worker 逐一对齐（契约 §5 / §1）。
+     * <p>
+     * topic 与 tag 的默认值都在本记录里归一，且**空串与 null 同等视为未配置**：
+     * 只对 null 兜底不够——{@code ROCKETMQ_TAG=""} 会绑定成空串，生产者把消息投到空 tag，
+     * 订阅 {@code "video"} 的消费者永远收不到，而进程与 {@code /ready} 全程无异常（静默滞留）。
+     * 显式给非空值仍然生效（覆盖能力不变）。
      */
     public record RocketMqProperties(
             String endpoints,
             String accessKey,
             String secretKey,
             boolean sslEnabled,
-            String topic
+            String topic,
+            String tag
     ) {
         public RocketMqProperties {
             endpoints = endpoints == null ? "" : endpoints;
             accessKey = accessKey == null ? "" : accessKey;
             secretKey = secretKey == null ? "" : secretKey;
             topic = topic == null || topic.isBlank() ? "generation-task" : topic;
+            // 修正六：视频 tag 由 "step" 更名，与 generation_jobs.type 同名。
+            tag = tag == null || tag.isBlank() ? "video" : tag;
         }
     }
 
@@ -75,7 +87,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -119,7 +131,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -162,7 +174,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -205,7 +217,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -248,7 +260,7 @@ public class RocketMqConfig {
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -288,7 +300,7 @@ public class RocketMqConfig {
     public GenerationMessageProducer generationMessageProducer(Environment env) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -304,7 +316,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String tag = env.getProperty("rocketmq.tag", "video");
+        String tag = mqProps.tag();
         return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
     }
 
@@ -344,7 +356,7 @@ public class RocketMqConfig {
     private GenerationMessageProducer createProducerForTag(Environment env, String tag) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
@@ -386,18 +398,17 @@ public class RocketMqConfig {
      * 视频消费者。
      * <p>
      * consumer group = "generation-video-worker"（契约 §1）。
-     * tag = "video"（queue.constants.ts:11）。
+     * tag = {@code "video"}，与 {@code generation_jobs.type} 同名（修正六由 "step" 更名）。
      * 顺序消费（无 Semaphore，rocketmq-video.consumer.ts:60-74 for-await each）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
     public VideoConsumer videoConsumer(
             VideoJobProcessor processor,
-            WorkerProperties workerProps,
             Environment env
     ) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-task"));
+                .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(

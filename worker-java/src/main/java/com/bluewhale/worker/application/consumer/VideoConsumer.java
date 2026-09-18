@@ -18,7 +18,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class VideoConsumer extends AbstractGenerationConsumer {
 
-    /** tag（queue.constants.ts:11 VIDEO_TAG = "video"）。 */
+    /** tag = {@code "video"}，与 {@code generation_jobs.type} 同名（修正六由 "step" 更名）。 */
     public static final String TAG = "video";
 
     /** 视频顺序派发（并发度 1 ≈ TS for-await；契约 §1）。 */

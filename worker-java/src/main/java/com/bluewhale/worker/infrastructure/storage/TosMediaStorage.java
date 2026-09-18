@@ -51,7 +51,8 @@ public class TosMediaStorage {
 
     /**
      * 从环境变量构建 TOS 客户端。
-     * 5 个 env 全必需，缺一抛错（契约 §8：extract 硬失败「TOS configuration required for media extract」）。
+     * 5 个 {@code VOLC_*} env 全必需，缺一抛错。本 bean 无条件装配（修正六），
+     * 因此这条失败信息是所有 6 个 tag 共用的启动期中止信号，不再只属于 media_extract。
      */
     public TosMediaStorage() {
         String accessKeyId = System.getenv("VOLC_ACCESS_KEY_ID");
@@ -62,7 +63,7 @@ public class TosMediaStorage {
 
         if (isBlank(accessKeyId) || isBlank(secretAccessKey)
                 || isBlank(endpointEnv) || isBlank(bucketEnv) || isBlank(region)) {
-            throw new IllegalStateException("TOS configuration required for media extract");
+            throw new IllegalStateException("TOS configuration required (VOLC_*)");
         }
 
         // 去协议头和尾斜杠（tos-storage.ts:67-69 normalizeEndpoint）

@@ -7,6 +7,7 @@ import {
   IMAGE_ERASE_TAG,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
+  VIDEO_GENERATION_TAG,
 } from "./queue.constants.js";
 
 /** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=video）+ RocketMqMediaExtractConsumer（tag=media_extract）
@@ -45,7 +46,7 @@ export function loadRocketMqConfig(
     sslEnabled: env.ROCKETMQ_SSL_ENABLED === "true",
     ...(accessKey && accessSecret ? { accessKey, accessSecret } : {}),
     topic: env.ROCKETMQ_TOPIC ?? GENERATION_TASK_QUEUE,
-    tag: env.ROCKETMQ_TAG ?? "video",
+    tag: env.ROCKETMQ_TAG ?? VIDEO_GENERATION_TAG,
   };
 }
 

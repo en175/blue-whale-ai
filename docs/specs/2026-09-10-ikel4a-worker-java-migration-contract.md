@@ -408,7 +408,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 **决策**
 
 1. **退役 `WORKER_ENABLED_TAGS` 本体**：删除 6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`application.yml` 中的 `worker.enabled-tags` 映射、`Dockerfile` 中的 `ENV WORKER_ENABLED_TAGS=""`、`ReadyController` 的 `enabledTags` 字段；consumer / processor / 客户端 bean **全部无条件装配**。**服务启动即消费全部 6 个 tag**（§1 表）。
-2. **默认语义从「安全拉起」翻转为「缺配置即失败」**：启动即要求 MQ（`ROCKETMQ_ENDPOINTS`）、DB（`DATABASE_URL`）、TOS（`VOLC_*`）三套配置齐备，缺任一项由 bean 装配抛出并终止启动。取代原「空 tags → 不连 MQ 不连 DB，只起 `/ready`」形态——该形态把「忘记配置」与「故意只探活」压成同一个状态，是本次修复的核心动因。
+2. **默认语义从「安全拉起」翻转为「缺配置即失败」**：启动即要求 MQ（`ROCKETMQ_ENDPOINTS`）、DB（`DATABASE_URL`）、上游网关（`NEW_API_BASE_URL`）、TOS（`VOLC_*`）**四套**配置齐备，缺任一项由 bean 装配抛出并终止启动（`NEW_API_BASE_URL` 与其余三套同属硬门槛：5 个网关客户端 audio / image / image_enhance / image_erase / video 全部无条件装配，构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`）。取代原「空 tags → 不连 MQ 不连 DB，只起 `/ready`」形态——该形态把「忘记配置」与「故意只探活」压成同一个状态，是本次修复的核心动因。
 3. **命名对齐**：topic `generation-video` → `generation-task`；tag `step` → `video`。生产侧（`backend/libs/shared/generation/queue.constants.ts`、`video-queue.ts` 的 `ROCKETMQ_TAG ?? "step"` 兜底）与消费侧（`VideoConsumer.TAG`、`VideoJobProcessor`、`RocketMqConfig` 的 `rocketmq.tag` 默认值）**必须在同一次发布内原子切换**：中间态不报错，只是消息无人消费（由 recovery 兜底，`RECOVERY_MAX_AGE_MINUTES` 默认 120）。
 4. **退役 `WORKER_GROUP_SUFFIX`**：group 名回落为字面量 `generation-<type>-worker`（原 `generation-<type>-worker-java`）。位点绑定在 `(group, topic)` 上，topic 更名后新 topic 的位点本就从零开始，故本次是**唯一的零重放风险窗口**；错过此后每次改 group 名都需处理位点。前置：确认旧 TS worker 容器已停——否则 Java 与该进程落入同名 group，消息被分流。
 5. **topic 粒度保持单 topic，不按任务类型拆分**：隔离已在 consumer group 层取得（每个 tag 一个 group、一个 Semaphore、一条 receive 线程），重试队列/死信、并发度、扩缩容粒度均已独立；拆 topic 只增益位点重置/配额/按类积压可观测，对资源隔离无贡献。

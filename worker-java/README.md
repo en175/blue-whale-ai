@@ -18,11 +18,20 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 **服务启动即消费全部 6 个 tag**：`video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（契约 §1 / §16）。不存在按 tag 的启停开关，也不存在「空配置只探活」形态：
 
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
-- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `VOLC_*`（TOS）三套配置必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。
+- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL`（上游网关）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
 - `GET /ready` 只返回 `{"status":"ready"}`。
 
 决策依据：ADR-0084「修正六」/ 契约 §16。
+
+## 上线前检查清单（原子改名，部署前逐条确认）
+
+topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**：旧名与新名都能启动成功，错配的唯一表现是消息无人消费——进程健康、`/ready` 绿、什么都不报。部署前必须确认：
+
+- [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
+- [ ] **部署环境无遗留的旧名 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 覆盖值**：遗留 `ROCKETMQ_TOPIC=generation-video`（或 `ROCKETMQ_TAG=step`）会把消费侧指回旧名，新 topic 的消息照样没人消费。确认方式：部署环境变量里这两个键要么不设（走默认 `generation-task` / `video`），要么显式设成新值。
+
+两项的共同后果都是**静默消息滞留**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但没有任何一条消息被消费。
 
 ## 构建 / 运行
 
@@ -69,7 +78,7 @@ curl localhost:4002/ready
 ### 启动行为
 
 - **无条件启动全部 6 个 tag 的消费者**（修正六：无按 tag 开关；`WORKER_ENABLED_TAGS` 已删除）。
-- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `VOLC_*` 5 个 TOS env，缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
+- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
 
 ### Docker 部署
@@ -104,7 +113,7 @@ worker/
 
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
-  - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 10）
+  - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 20）
   - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false

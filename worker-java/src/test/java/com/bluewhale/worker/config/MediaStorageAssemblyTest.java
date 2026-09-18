@@ -45,7 +45,7 @@ class MediaStorageAssemblyTest {
     private static void assertConstructedOrLoudlyFailed(AssertableApplicationContext ctx) {
         Throwable failure = ctx.getStartupFailure();
         if (failure != null) {
-            assertThat(chainContains(failure, "TOS configuration required"))
+            assertThat(chainContains(failure, "TOS configuration required (VOLC_*)"))
                     .as("启动失败必须源于 TOS 配置检查（语义=无条件尝试构造），实际：%s", failure).isTrue();
         } else {
             assertThat(ctx).hasSingleBean(TosMediaStorage.class);
