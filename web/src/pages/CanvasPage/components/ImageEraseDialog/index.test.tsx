@@ -138,6 +138,9 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     renderDialog();
     expect(btn('erase-send-btn').disabled).toBe(true);
     expect(btn('erase-send-btn').getAttribute('title')).toContain('请先用画笔涂抹或框选');
+    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
+    expect(btn('erase-send-btn').querySelector('svg.lucide-arrow-up')).toBeTruthy();
+    expect(btn('erase-send-btn').className).not.toMatch(/sendBtnActive/);
     expect(btn('erase-clear-text').disabled).toBe(false);
     await click(btn('erase-clear-text'));
     expect(sendTextMock).toHaveBeenCalledTimes(1);
@@ -153,6 +156,8 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
     renderDialog({ hasPaint: true, ops: OPS_WITH_PAINT });
     expect(btn('erase-send-btn').disabled).toBe(false);
+    // 可发态带 sendBtnActive（IKGZ5Q 置灰/激活两态）
+    expect(btn('erase-send-btn').className).toMatch(/sendBtnActive/);
     await click(btn('erase-send-btn'));
     expect(sendMaskMock).toHaveBeenCalledTimes(1);
     const [file] = sendMaskMock.mock.calls[0] as [File];

@@ -148,31 +148,29 @@
   color: var(--color-text-tertiary);
 }
 
+/* ---- 发送钮：Dock 主发送钮同款（IKGZ5Q：灰底圆角方形 + 白 ↑ 图标，
+ *    色值同源 BottomDialog .sendBtn/.sendBtnActive——置灰态即默认灰，无额外
+ *    disabled 透明度；尺寸随发送条布局 30×30） ---- */
 .sendBtn {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888;
   background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  cursor: pointer;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
   transition: all var(--transition-fast);
 }
 
-.sendBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .sendBtnActive {
+  background-color: #4a4a4a;
   color: #fff;
-  background-color: #3d5afe;
-  border-color: #3d5afe;
+  cursor: pointer;
 }
 
 .sendBtnActive:hover {
-  background-color: #2f4fe0;
+  background-color: #555;
 }
