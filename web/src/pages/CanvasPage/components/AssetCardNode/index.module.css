@@ -6,22 +6,12 @@
   position: relative;
 }
 
-/* ---- 悬停/选中顶部操作条（与商品节点一致） ---- */
+/* ---- 顶部操作条（IKGYYF 迁出卡内文档流：钉屏幕层悬浮形态，见 Toolbar.tsx；
+ *  显隐由 NodeFollowToolbar 容器条件渲染，不再有 opacity 占位常驻） ---- */
 .topBar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--spacing-md);
-  margin-bottom: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition-fast);
-}
-
-.wrapper:hover .topBar,
-.topBarVisible {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .topLabel {

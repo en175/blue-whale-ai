@@ -149,4 +149,36 @@ describe('IKGYYD NodeFollowToolbar（钉屏幕工具栏容器）', () => {
     await renderTree([createElement(StateInjector, { state }), toolbar('gone')]);
     expect(mountNode.querySelector('[data-gen-panel-territory]')).toBeNull();
   });
+
+  it('hovered=true 且节点未选中：仍渲染（IKGYYF hover 显示等价原 CSS :hover，不受唯一选中门约束）', async () => {
+    const state = flowState([{ id: 'n1', x: 100, y: 200, width: 400, height: 300, selected: false }]);
+    await renderTree([
+      createElement(StateInjector, { key: 'state', state }),
+      <NodeFollowToolbar key="toolbar" nodeId="n1" hovered>
+        {TOOLBAR_TEXT}
+      </NodeFollowToolbar>,
+    ]);
+    const layer = mountNode.querySelector('[data-gen-panel-territory]') as HTMLElement;
+    expect(layer).toBeTruthy();
+    expect(layer.textContent).toBe(TOOLBAR_TEXT);
+  });
+
+  it('多选抑制下 hovered=true 仍渲染（hover 语义与选中集合无关；show 数据门照旧生效）', async () => {
+    const state = flowState([
+      { id: 'n1', x: 100, y: 200, width: 400, height: 300, selected: true },
+      { id: 'n2', x: 800, y: 200, width: 400, height: 300, selected: true },
+    ]);
+    await renderTree([
+      createElement(StateInjector, { key: 'state', state }),
+      <NodeFollowToolbar key="toolbar" nodeId="n1" hovered>
+        {TOOLBAR_TEXT}
+      </NodeFollowToolbar>,
+      <NodeFollowToolbar key="hidden" nodeId="n1" hovered={true} show={false}>
+        HIDDEN
+      </NodeFollowToolbar>,
+    ]);
+    const layers = [...mountNode.querySelectorAll('[data-gen-panel-territory]')];
+    expect(layers).toHaveLength(1);
+    expect(layers[0].textContent).toBe(TOOLBAR_TEXT);
+  });
 });
