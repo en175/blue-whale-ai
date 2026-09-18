@@ -31,6 +31,7 @@ import { AuthModule } from "./api/auth/auth.module.js";
 import { CanvasApiModule } from "./api/canvases/canvases.module.js";
 import { GenerationApiModule } from "./api/generation/generation.module.js";
 import { HealthModule } from "./api/health/health.module.js";
+import { ImageCutoutsApiModule } from "./api/image-cutouts/image-cutouts.module.js";
 import { ImageEnhancementsApiModule } from "./api/image-enhancements/image-enhancements.module.js";
 import { ImageErasuresApiModule } from "./api/image-erasures/image-erasures.module.js";
 import { ImageOutpaintsApiModule } from "./api/image-outpaints/image-outpaints.module.js";
@@ -85,6 +86,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     MediaExtractionsApiModule,
     ImageEnhancementsApiModule,
     ImageErasuresApiModule,
+    ImageCutoutsApiModule,
     ImageOutpaintsApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,

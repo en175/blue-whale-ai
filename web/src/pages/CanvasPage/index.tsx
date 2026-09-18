@@ -68,6 +68,15 @@ import {
   type ImageEraseInput,
 } from './imageErase';
 import {
+  buildImageCutoutRequest,
+  imageCutoutSceneGateReason,
+  IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
+  type ImageCutoutIdentity,
+  type ImageCutoutRequest,
+  type ImageCutoutScene,
+} from './imageCutout';
+import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
+import {
   applyMaskOp,
   canRedoMaskEdit,
   canUndoMaskEdit,
@@ -94,7 +103,24 @@ import {
 } from './imageOutpaint';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
+import CropDialog from './components/CropDialog';
+import {
+  clampCropRect,
+  cropOutputFormat,
+  cropPresetRatio,
+  cropRectToNatural,
+  fullCropRect,
+  IMAGE_CROP_EDGE_ORIGIN,
+  inscribeCropRect,
+  minCropSideDisplay,
+  type CropCoordinateSpace,
+  type CropNaturalRect,
+  type CropOutputFormat,
+  type CropPresetKey,
+  type CropRect,
+} from './imageCrop';
 import OutpaintDialog from './components/OutpaintDialog';
+import CutoutToolbar from './components/CutoutToolbar';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -144,6 +170,7 @@ import {
   createMediaExtraction,
   createImageEnhancement,
   createImageErase,
+  createImageCutout,
   createImageOutpaint,
   readJobFailText,
   type ImageJobParameters,
@@ -221,6 +248,72 @@ function draftFileNameOf(type: unknown): string {
 /** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
 function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
+}
+
+/** 裁切执行（IKGW1S）：加载源图 → 离屏 canvas（尺寸=裁切结果自然分辨率）drawImage 框内画面
+ *  → toBlob 重编码（格式与质量由调用方按 cropOutputFormat 决定）为 File。
+ *  返回 null 表示源图加载或编码失败（调用方 toast 后留在裁切模式；jsdom 无 canvas 编码与
+ *  图加载，页面测试打桩 getContext/toBlob/Image，真实编码由人工回归覆盖，规格 Testing Decisions）。 */
+function cropImageToFile(
+  src: string,
+  natural: CropNaturalRect,
+  format: CropOutputFormat,
+): Promise<File | null> {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = natural.width;
+    canvas.height = natural.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        ctx.drawImage(img, natural.x, natural.y, natural.width, natural.height, 0, 0, natural.width, natural.height);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], `crop.${format.ext}`, { type: blob.type || format.mime }) : null),
+          format.mime,
+          format.quality,
+        );
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+/** 裁切内容区矩形（IKGW1N）：源图卡内容盒（mediaContentBox 保持源图宽高比，宽高缺失时
+ *  兜底默认尺寸）置于卡片位置 + 22.5 标题偏移；进入裁切（默认全幅框）与渲染期派生共用。 */
+function cropBoundsOf(node: Node): CropRect {
+  const d = (node.data ?? {}) as Record<string, unknown>;
+  const box = mediaContentBox({
+    mediaType: 'image',
+    width: typeof d.width === 'number' ? d.width : undefined,
+    height: typeof d.height === 'number' ? d.height : undefined,
+  });
+  return {
+    x: node.position.x,
+    y: node.position.y + MEDIA_CONTENT_TOP_OFFSET,
+    width: box.width,
+    height: box.height,
+  };
+}
+
+/** 裁切坐标空间（显示尺寸 × 源图自然分辨率）：自然分辨率缺失（存量图未实测）时为 null。 */
+function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
+  const d = (node.data ?? {}) as Record<string, unknown>;
+  if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
+  return {
+    displayWidth: bounds.width,
+    displayHeight: bounds.height,
+    naturalWidth: d.width,
+    naturalHeight: d.height,
+  };
 }
 
 export default function CanvasPage() {
@@ -351,6 +444,51 @@ export default function CanvasPage() {
   const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
   /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
   const [eraseSubmitting, setEraseSubmitting] = useState(false);
+  /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
+   *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
+   *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
+   *  冻结进结果卡 imageCutout.lastInput。 */
+  const [cutoutNodeId, setCutoutNodeId] = useState<string | null>(null);
+  /** 抠图场景（默认 general，规格故事 8：不主动切场景直接发送即合理结果） */
+  const [cutoutScene, setCutoutScene] = useState<ImageCutoutScene>('general');
+  /** 主体描边开关 + 宽度 px（1~50 默认 10，仅人像/商品场景携带出站；颜色固定白色不进 UI） */
+  const [cutoutNeedContour, setCutoutNeedContour] = useState(false);
+  const [cutoutContourSize, setCutoutContourSize] = useState<number>(IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT);
+  /** 透明背景裁剪开关（仅人像/商品场景携带出站） */
+  const [cutoutNeedCropBackground, setCutoutNeedCropBackground] = useState(false);
+  /** 抠图发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
+  const [cutoutSubmitting, setCutoutSubmitting] = useState(false);
+  /** 抠图会话参数默认值（进入/退出重置共用同一份，保证四路退出后重进无残留） */
+  const cutoutDefaultParams = {
+    scene: 'general' as ImageCutoutScene,
+    needContour: false,
+    contourSize: IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
+    needCropBackground: false,
+  };
+  /** 退出抠图会话（IKGXMT 四退出共用）：未发送的参数全部丢弃（无卡、无边、无任务），
+   *  会话身份与提交中标记一并复位。 */
+  const exitCutoutSession = useCallback(() => {
+    setCutoutNodeId(null);
+    setCutoutScene(cutoutDefaultParams.scene);
+    setCutoutNeedContour(cutoutDefaultParams.needContour);
+    setCutoutContourSize(cutoutDefaultParams.contourSize);
+    setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
+    setCutoutSubmitting(false);
+  }, []);
+
+  /** 裁切编辑态（IKGW1H 模式进出骨架）：处于裁切编辑的源图卡 node id，null=未进入。
+   *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；裁切框与比例（IKGW1N）
+   *  状态提升在本页（cropRect/cropPreset，同擦除编辑态口径），确认建卡（IKGW1S）经
+   *  exitCropMode/onCropConfirm 接入。 */
+  const [cropTargetNodeId, setCropTargetNodeId] = useState<string | null>(null);
+  /** 裁切比例模式（IKGW1N）：free=自由；预设=锁比例（边手柄禁用、角手柄等比缩放） */
+  const [cropPreset, setCropPreset] = useState<CropPresetKey>('free');
+  /** 当前裁切框（IKGW1N，flow 坐标、与内容区 bounds 同系）：null=未在编辑；
+   *  进入默认自由比例全幅（fullCropRect），确认时 IKGW1S 读取本框换算自然分辨率裁切 */
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
+  /** 裁切执行中（IKGW1S：编码+上传期间）：重复点确认直接忽略（面板无 submitting 只读态，
+   *  本页侧防双卡；成功即退出模式，失败复位留在模式） */
+  const cropSubmittingRef = useRef(false);
   /* ---------- 扩图模式会话（IKGOQX）：管理模式参考持续选取会话 ----------
    * 会话 = 源图卡 id + 四方向扩展量；纯界面交互态不持久化（刷新即退出，无残留）。
    * 四种退出（面板 X / Esc / 点其他卡 / 点画布空白）共用统一退出函数，均不留痕迹
@@ -1026,6 +1164,35 @@ export default function CanvasPage() {
         dialogWidth: 240,
       })
     : null;
+  /** 抠图会话源图卡（IKGXMT）：工具栏跟随锚与发送链路的判定输入 */
+  const cutoutSourceNode = cutoutNodeId
+    ? mediaNodes.find((n) => n.id === cutoutNodeId) ?? null
+    : null;
+  /** 抠图工具栏跟随锚（IKGXMT）：恒锚源图卡下方，left 传源卡中心 x——工具栏壳自身
+   *  translateX(-50%) 真居中（口径同扩图 OutpaintDialog）：横条宽度随人像/商品增强控件
+   *  显隐动态变化，估宽居中（computeFollowAnchor 的 dialogWidth）会在控件出现时失准跳位，
+   *  中心点居中不受宽度影响；top 换算同 computeFollowAnchor 的节点下方 + 16 间距。 */
+  const cutoutToolbarAnchor = (() => {
+    if (!cutoutSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(cutoutSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = cutoutSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = cutoutSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const bottom = Math.round(screenTop + box.height * zoom + 16);
+    return {
+      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
+      top: Math.max(8, bottom),
+    };
+  })();
+  /** 抠图发送钮置灰原因（IKGXMT，规格故事 15）：按当前场景档精校——菜单门槛已按通用档预检，
+   *  切人像/商品后按更严上限（7680/4320）重判；宽高缺失不拦（交后端按权威数据复核）。 */
+  const cutoutSendDisabledReason = cutoutSourceNode
+    ? imageCutoutSceneGateReason(
+        (cutoutSourceNode.data ?? {}) as Record<string, unknown>,
+        cutoutScene,
+      )
+    : null;
   /** 擦除遮罩坐标空间（显示尺寸 × 源图自然分辨率）：显示尺寸与 MediaNode 内容区同源
    *  （mediaContentBox 保持源图宽高比）；自然分辨率缺失（存量图未实测）时为 null，涂抹发送禁用。 */
   const eraseDisplayBox = (() => {
@@ -1052,6 +1219,28 @@ export default function CanvasPage() {
   const eraseHasPaint = eraseDisplayBox
     ? maskHasPaintArea(eraseMaskState.ops, eraseDisplayBox.width, eraseDisplayBox.height)
     : eraseMaskState.ops.some((op) => !op.erase);
+  /** 裁切编辑态派生量（IKGW1N）：源图卡 / 内容区矩形（flow 坐标，标题偏移 22.5px）/
+   *  坐标空间（64 像素下限换算用；源图自然分辨率缺失时为 null → 无下限兜底，确认门由 IKGW1S 处理） */
+  const cropSourceNode = cropTargetNodeId
+    ? mediaNodes.find((n) => n.id === cropTargetNodeId) ?? null
+    : null;
+  const cropBounds = cropSourceNode ? cropBoundsOf(cropSourceNode) : null;
+  const cropSpace = cropSourceNode && cropBounds ? cropSpaceOf(cropSourceNode, cropBounds) : null;
+  /** 64 自然像素下限换算到显示坐标系（分辨率缺失时 0=无下限） */
+  const cropMinSide = cropSpace ? minCropSideDisplay(cropSpace) : 0;
+  /** 裁切面板跟随锚（IKGW1N）：源图卡下方（computeFollowAnchor 恒锚节点下方） */
+  const cropPanelAnchor = cropSourceNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: cropSourceNode.position.x,
+        nodeY: cropSourceNode.position.y,
+        nodeWidth: nodeBoxOf(cropSourceNode).width,
+        nodeHeight: nodeBoxOf(cropSourceNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 380,
+      })
+    : null;
   /* ---------- 扩图模式派生量（IKGOQX） ---------- */
   /** 源图卡与内容区矩形（扩展框与面板的锚定基准；内容区 = 节点左上角 + 标题偏移 + 内容盒） */
   const outpaintSourceNode = outpaintSessionActive
@@ -1349,6 +1538,8 @@ export default function CanvasPage() {
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+          onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+          onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -2157,6 +2348,10 @@ export default function CanvasPage() {
     enhanceImage: (_id: string) => {},
     outpaintImage: (_id: string) => {},
     eraseImage: (_id: string) => {},
+    cropImage: (_id: string) => {},
+    /** 抠图（IKGXLT 通道 / IKGXMT 接线）：进入抠图工具栏会话（「高清 ▾」下拉「抠图」项派发）；
+     *  首帧渲染前经由 actionsRef.current.cutoutImage 分派到 handleNodeCutoutImage */
+    cutoutImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2486,6 +2681,15 @@ export default function CanvasPage() {
       }
       return;
     }
+    // 抠图会话优先拦截（IKGXMT 四退出之一，镜像扩图 IKGOQX 口径）：点其他卡退出会话并选中
+    // 那张卡；点源图卡本身保持会话（继续调参）
+    if (cutoutNodeId) {
+      if (node.id !== cutoutNodeId) {
+        exitCutoutSession();
+        setSelectRequest({ id: node.id, ts: Date.now() });
+      }
+      return;
+    }
     if (showAgent && node.type === 'textNode') {
       const text = extractTextNodeText(node.data);
       if (text) setAgentCandidate([{
@@ -2734,9 +2938,20 @@ export default function CanvasPage() {
    *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
+    // 抠图会话（IKGXMT 四退出之一，先于擦除——两会话互斥，进入任一会话即退出另一会话）：
+    // 点画布空白退出并丢弃未发送参数
+    if (cutoutNodeId) {
+      exitCutoutSession();
+      return;
+    }
     // 擦除编辑态（IKGOTB 四退出之一）：点画布空白退出并丢弃未发送遮罩
     if (eraseTargetNodeId) {
       exitEraseEditing();
+      return;
+    }
+    // 裁切编辑态（IKGW1H 四退出之一）：点画布空白/框外暗区退出并丢弃
+    if (cropTargetNodeId) {
+      exitCropMode();
       return;
     }
     // IKGOQX 扩图模式：点画布空白退出（不留痕迹）
@@ -2763,6 +2978,9 @@ export default function CanvasPage() {
    *  selection 变化先到达，此时 pickMode 仍活跃）。 */
   const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
     if (pickMode || pickTarget) return;
+    // 抠图会话期间冻结面板联动（IKGXMT，镜像扩图 IKGOQX 口径）：会话内点其他卡的选中变化
+    // 已由 onNodeClick 拦截处置，程序化选中（selectRequest/建卡 deselect）触发的变化不应误关其他状态
+    if (cutoutNodeId) return;
     // IKGOQX 扩图模式期间冻结面板联动：模式内点其他卡的选中变化已由 onNodeClick 拦截处置，
     // 程序化选中（selectRequest）触发的变化不应误关其他状态
     if (outpaintSessionActive) return;
@@ -2778,6 +2996,11 @@ export default function CanvasPage() {
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
       exitEraseEditing();
+    }
+    // 裁切编辑态（IKGW1H 四退出之一）：点其他卡等同点外退出——单选非目标或多选时丢弃
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (cropTargetNodeId && ((soloId && soloId !== cropTargetNodeId) || candidates.length > 1)) {
+      exitCropMode();
     }
     const syncPanelVisible = (
       boundId: string | null,
@@ -2857,11 +3080,13 @@ export default function CanvasPage() {
    *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
    *  （复用 isEditableKeyboardTarget）→ 擦除编辑态退出（IKGOTB，未发送丢弃遮罩）→ 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen && !eraseTargetNodeId) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
       if (isEditableKeyboardTarget(event.target)) return;
+      // 抠图会话有自己的 Esc handler（IKGXMT 专属处置，先于本链——让位顺序 cutout 先于 erase）
+      if (cutoutNodeId) return;
       // IKGOQX 扩图模式有自己的 Esc handler（先于本链处置）
       if (outpaintSessionActive) return;
       if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
@@ -2873,12 +3098,39 @@ export default function CanvasPage() {
         exitEraseEditing();
         return;
       }
+      if (cropTargetNodeId) {
+        exitCropMode();
+        return;
+      }
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, eraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+
+  /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
+   *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
+   *  公共链经 cutoutNodeId 让位（见上）。 */
+  useEffect(() => {
+    if (!cutoutNodeId) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      exitCutoutSession();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [cutoutNodeId, exitCutoutSession]);
+
+  /** 抠图会话绑定清理（IKGXMT）：源图卡被删除时结束会话（防工具栏悬挂），参数一并丢弃 */
+  useEffect(() => {
+    if (!cutoutNodeId) return;
+    if (!mediaNodes.some((n) => n.id === cutoutNodeId)) exitCutoutSession();
+    // exitCutoutSession 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutoutNodeId, mediaNodes]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -3158,6 +3410,29 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eraseTargetNodeId, mediaNodes]);
 
+  /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
+  useEffect(() => {
+    if (!cropTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === cropTargetNodeId)) exitCropMode();
+    // exitCropMode 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropTargetNodeId, mediaNodes]);
+
+  /** 裁切框随内容区钳制（IKGW1N，规格故事 14）：源图卡被移动/缩放（撤销等旁路改坐标）时
+   *  框保持完整落在内容区内（正常路径由纯函数钳制保证，本 effect 只兜底旁路变更）。
+   *  cropBounds/cropRect 每次渲染都是新对象，仅在数值变化时才 setState，无循环。 */
+  useEffect(() => {
+    if (!cropBounds || !cropRect) return;
+    const next = clampCropRect(cropRect, cropBounds, cropMinSide);
+    if (
+      next.x !== cropRect.x || next.y !== cropRect.y ||
+      next.width !== cropRect.width || next.height !== cropRect.height
+    ) {
+      setCropRect(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropBounds?.x, cropBounds?.y, cropBounds?.width, cropBounds?.height, cropRect, cropMinSide]);
+
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
     if (imagePickSession === undefined) return;
@@ -3383,17 +3658,20 @@ export default function CanvasPage() {
 
   /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
    *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），nodeId 指定节点 id
-   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖 */
+   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖；
+   *  skipSelect（IKGW1S 裁切成品卡）= 不抢选中：新卡 selected 为 false、不取消其他卡选中、
+   *  不发 selectRequest（默认 false，既有调用点行为不变）。 */
   const createImageDraftCard = (
     position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string },
+    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string; skipSelect?: boolean },
   ): string => {
     const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
+    const skipSelect = overrides?.skipSelect === true;
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
       position: position ?? spawnDraftPosition(),
-      selected: true,
+      selected: !skipSelect,
       data: {
         src: '',
         mediaType: 'image',
@@ -3417,6 +3695,8 @@ export default function CanvasPage() {
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+        onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+        onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3425,6 +3705,13 @@ export default function CanvasPage() {
       },
     };
     const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    if (skipSelect) {
+      // 不抢选中：其他卡选中态原样保留，也不发程序化选中请求（规格故事 25：新卡不抢选中、源卡保持选中）
+      const nextMedia = [...mediaNodesRef.current, node];
+      mediaNodesRef.current = nextMedia;
+      setMediaNodes(nextMedia);
+      return nodeId;
+    }
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
@@ -3879,6 +4166,8 @@ export default function CanvasPage() {
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+      onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+      onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4284,6 +4573,8 @@ export default function CanvasPage() {
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+          onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+          onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -5217,6 +5508,88 @@ export default function CanvasPage() {
     }
   };
 
+  /* ===== 抠图发送链路（IKGXMT，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+
+  /** 抠图任务发送核心：组装好的契约 input 直接 POST image-cutouts；创建成功后先退会话再在
+   *  源卡右侧建抠图结果卡（node id = input.target_node_id，发送前已生成冻结进任务；结果卡
+   *  带 imageCutout 身份标记——透明 png 内容区垫棋盘格底纹 + 失败重试 lastInput 同源）、
+   *  拉纯视觉来源线（origin=image-cutout，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
+   *  创建失败（门槛拒/网络）不建卡不退会话（擦除同口径：用户参数留在工具栏可调后重发，
+   *  规格故事 18「立即退出」指成功路径）。免费口径同 image_enhance / image_erase：
+   *  无幂等头、无积分预估、不走余额拦截门。 */
+  const startImageCutoutJob = async (
+    sourceNodeId: string,
+    input: ImageCutoutRequest,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起图片抠图');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源图卡不存在，无法发起图片抠图');
+      return false;
+    }
+    const targetNodeId = input.target_node_id;
+    try {
+      const created = await createImageCutout(currentId, input);
+      // 发送即退会话（先退再建卡：建卡的程序化选中不触发会话的「点其他卡退出」误判，口径同擦除）
+      exitCutoutSession();
+      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '抠图',
+        nodeId: targetNodeId,
+        data: {
+          imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CUTOUT_EDGE_ORIGIN });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(draftId, activeAtCreate);
+      patchMediaNode(draftId, { jobId: created.job_id });
+      pollJob(draftId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '创建抠图任务失败，请重试');
+      return false;
+    }
+  };
+
+  /** 抠图工具栏发送（横条圆形发送钮）：源素材身份 → 场景档精校兜底（发送钮置灰已拦，
+   *  实测尺寸回填竞态下再守一次）→ 组装契约 input（target_node_id 此刻生成冻结）→ 发任务。
+   *  请求发出即返回 true；会话退出与建卡在创建成功后由 startImageCutoutJob 承担。 */
+  const handleCutoutToolbarSend = (): boolean => {
+    const nodeId = cutoutNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起图片抠图');
+      return false;
+    }
+    const sceneReason = imageCutoutSceneGateReason(
+      (node.data ?? {}) as Record<string, unknown>,
+      cutoutScene,
+    );
+    if (sceneReason) {
+      showToast('warn', sceneReason);
+      return false;
+    }
+    const input = buildImageCutoutRequest({
+      sourceAssetId,
+      targetNodeId: newNodeId('media-draft'),
+      scene: cutoutScene,
+      needContour: cutoutNeedContour,
+      contourSize: cutoutContourSize,
+      needCropBackground: cutoutNeedCropBackground,
+    });
+    setCutoutSubmitting(true);
+    void startImageCutoutJob(nodeId, input).finally(() => setCutoutSubmitting(false));
+    return true;
+  };
+
   /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处上传（source=mask_erase，
    *  中间素材不进用户资产列表可见内容）→ 组装 selected_area_erase 四键 → 发任务。 */
   const handleEraseDialogSendMask = async (file: File | null): Promise<boolean> => {
@@ -5604,6 +5977,37 @@ export default function CanvasPage() {
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
       createImageErase(currentId, eraseIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
+    const cutoutIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageCutout as
+      | ImageCutoutIdentity
+      | undefined;
+    if (cutoutIdentity?.lastInput) {
+      // 抠图卡分流（IKGXMT，镜像擦除）：契约无 retry 端点，重试 = 冻结 input 原样重发创建接口
+      //（场景/描边/透明裁剪参数随 lastInput 冻结，规格故事 22 不从零再配）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法发起图片抠图');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createImageCutout(currentId, cutoutIdentity.lastInput)
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -6209,6 +6613,10 @@ export default function CanvasPage() {
       setPickAssetId(null);
     }
     dismissAllGenPanels();
+    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图（整包合并后的交叉缝隙）
+    exitEraseEditing();
+    exitCutoutSession();
+    exitCropMode();
     setOutpaintExpands(ZERO_EXPANDS);
     setOutpaintNodeId(id);
   };
@@ -6225,19 +6633,140 @@ export default function CanvasPage() {
     setEraseSubmitting(false);
   };
 
+  /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
+   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
+  const exitCropMode = () => {
+    setCropTargetNodeId(null);
+    setCropRect(null);
+    setCropPreset('free');
+  };
+
   /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
    *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
-   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）。 */
+   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）并退出裁切模式（编辑模式互斥）。 */
   const handleNodeEraseImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
+    exitCutoutSession(); // 与抠图会话互斥（IKGXMT）：编辑态是排他模式
+    endOutpaintSession(); // 与扩图会话互斥（整包合并后的交叉缝隙）
     dismissAllGenPanels();
+    exitCropMode();
     setEraseTargetNodeId(id);
     setEraseMaskState(EMPTY_MASK_EDIT);
     setEraseLiveOp(null);
     eraseLiveOpRef.current = null;
     eraseStrokePointsRef.current = [];
     setEraseTool('brush');
+  };
+
+  /** 抠图（IKGXLT 入口 / IKGXMT 会话）：把目标图片卡置为抠图会话（源图卡下方浮出横条工具栏），
+   *  参数重置默认（场景 general、描边关、宽度 10、透明裁剪关——规格故事 8/11/12 默认值）。
+   *  门槛预检（格式/通用档尺寸/大小）已在菜单项置灰层完成，此处只管进入；
+   *  进入时关闭五个生成面板（会话是独立模式）并退出擦除编辑态（两会话互斥）、不动视角（规格故事 13）。 */
+  const handleNodeCutoutImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图（三方整包合并后的交叉缝隙）
+    exitEraseEditing();
+    exitCropMode();
+    endOutpaintSession();
+    dismissAllGenPanels();
+    setCutoutNodeId(id);
+    setCutoutScene(cutoutDefaultParams.scene);
+    setCutoutNeedContour(cutoutDefaultParams.needContour);
+    setCutoutContourSize(cutoutDefaultParams.contourSize);
+    setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
+  };
+
+  /** 裁切（IKGW1H 入口 / IKGW1N 补全默认态）：把目标图片卡置为裁切编辑态。无门槛预检
+   *  （菜单项恒可用）；进入时关闭五个生成面板（同擦除口径）并退出擦除编辑态（编辑模式互斥）；
+   *  默认自由比例、框为全幅（fullCropRect，干净起点不记忆上次状态）；单值 cropTargetNodeId
+   *  即单目标——换目标卡自然替换。 */
+  const handleNodeCropImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    dismissAllGenPanels();
+    exitEraseEditing();
+    // 全屏编辑模式互斥：进入裁切同时退出扩图会话与抠图会话（整包合并后的交叉缝隙）
+    endOutpaintSession();
+    exitCutoutSession();
+    const bounds = cropBoundsOf(node);
+    setCropPreset('free');
+    setCropRect(fullCropRect(bounds));
+    setCropTargetNodeId(id);
+  };
+
+  /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
+   *  自由 → 框保持不变（只是解除比例锁定）。 */
+  const handleCropPresetChange = (key: CropPresetKey) => {
+    setCropPreset(key);
+    const ratio = cropPresetRatio(key);
+    if (ratio != null && cropBounds) setCropRect(inscribeCropRect(cropBounds, ratio));
+  };
+
+  /** 裁切确认（IKGW1N 渲染在位、点击派发；IKGW1S 执行链路）：离屏 canvas 按源图自然分辨率
+   *  裁出框内画面（cropRectToNatural）→ toBlob 重编码（cropOutputFormat 跟随源图：JPEG 约
+   *  0.92、PNG、判不出 PNG 兜底）→ new File → 既有资产上传链路（普通上传不带 assetSource，
+   *  裁切产物是用户成品）→ 源卡右侧紧邻新建「裁切」成品卡（fileName 先例同高清；无草稿、
+   *  无生成中过渡，直接显示结果；skipSelect 不抢选中）+ 纯视觉来源连线
+   *  （origin=IMAGE_CROP_EDGE_ORIGIN，参考推导跳过）→ exitCropMode（确认即退出）。
+   *  源图自然分辨率缺失（cropSpace null，存量老图）或加载/编码/上传失败：toast 报错、
+   *  留在裁切模式，不建卡不退态（无半成品；对齐擦除「上传失败留在编辑态」口径）。 */
+  const handleCropConfirm = () => {
+    const sourceNodeId = cropTargetNodeId;
+    const node = sourceNodeId ? mediaNodesRef.current.find((n) => n.id === sourceNodeId) : undefined;
+    const data = (node?.data ?? {}) as Record<string, unknown>;
+    const rect = cropRect;
+    const bounds = cropBounds;
+    const space = cropSpace;
+    if (!sourceNodeId || !node || !rect || !bounds || !space) {
+      showToast('warn', '源图分辨率未知，无法裁切');
+      return;
+    }
+    if (cropSubmittingRef.current) return;
+    const src = typeof data.src === 'string' ? data.src : '';
+    if (!src || src.startsWith('blob:')) {
+      showToast('warn', '源图不可用，无法裁切');
+      return;
+    }
+    cropSubmittingRef.current = true;
+    const natural = cropRectToNatural(rect, bounds, space);
+    const format = cropOutputFormat({
+      mime: typeof data.mime === 'string' ? data.mime : undefined,
+      src,
+      fileName: typeof data.fileName === 'string' ? data.fileName : undefined,
+    });
+    void (async () => {
+      try {
+        const file = await cropImageToFile(src, natural, format);
+        if (!file) {
+          showToast('error', '裁切生成失败，请重试');
+          return;
+        }
+        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined });
+        // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）
+        exitCropMode();
+        const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+          fileName: '裁切',
+          skipSelect: true,
+          data: {
+            src: uploaded.url,
+            assetId: uploaded.asset_id,
+            width: uploaded.width,
+            height: uploaded.height,
+            mime: uploaded.mime,
+            size: uploaded.size,
+            genStatus: undefined,
+            draft: undefined,
+          },
+        });
+        addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
+      } catch (e: unknown) {
+        showToast('error', isApiError(e) ? e.message : '裁切上传失败，请重试');
+      } finally {
+        cropSubmittingRef.current = false;
+      }
+    })();
   };
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
@@ -6560,6 +7089,8 @@ export default function CanvasPage() {
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.outpaintImage = handleNodeOutpaintImage;
   actionsRef.current.eraseImage = handleNodeEraseImage;
+  actionsRef.current.cutoutImage = handleNodeCutoutImage;
+  actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -7139,6 +7670,8 @@ export default function CanvasPage() {
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+              onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+              onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -7823,11 +8356,13 @@ export default function CanvasPage() {
           mediaNodes={
             // 擦除编辑态（IKGOTB）：目标源图卡渲染期注入遮罩层 props（不进 state、不持久化，
             // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
+            // 裁切编辑态（IKGW1H）：目标源图卡渲染期注入裁切标记（口径同上，不持久化）；
+            //  两编辑态互斥（进入时互相退出），裁切框/面板（IKGW1N）据此识别编辑目标
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            eraseTargetNodeId || submittingNodeId
+            eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               ? mediaNodes.map((n) => {
-                  if (n.id !== eraseTargetNodeId && n.id !== submittingNodeId) return n;
+                  if (n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId) return n;
                   const data: Record<string, unknown> = { ...n.data };
                   if (n.id === eraseTargetNodeId) {
                     data.eraseEditing = {
@@ -7839,6 +8374,7 @@ export default function CanvasPage() {
                     };
                   }
                   if (n.id === submittingNodeId) data.submitting = true;
+                  if (n.id === cropTargetNodeId) data.cropEditing = true;
                   return { ...n, data };
                 })
               : mediaNodes
@@ -7847,6 +8383,20 @@ export default function CanvasPage() {
           assetNodes={assetNodes}
           showEdges={showEdges}
           snapAlignmentEnabled={snapAlignmentOn}
+          cropFrame={
+            // 裁切框覆盖层（IKGW1N）：编辑态挂载，屏幕空间覆盖层随内容区渲染期换算；
+            // 框/比例状态提升在本页，拖拽经 CropFrame 走 imageCrop 纯函数回写
+            cropTargetNodeId && cropBounds && cropRect
+              ? {
+                  bounds: cropBounds,
+                  rect: cropRect,
+                  preset: cropPreset,
+                  minSide: cropMinSide,
+                  onRectChange: setCropRect,
+                  onDarkAreaClick: exitCropMode,
+                }
+              : null
+          }
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
@@ -8295,6 +8845,40 @@ export default function CanvasPage() {
             submitting={eraseSubmitting}
             toolbarAnchor={eraseToolbarAnchor}
             sendBarAnchor={eraseSendBarAnchor}
+          />
+        )}
+
+        {/* 抠图会话工具栏（IKGXMT，替换 IKGXLT 占位 stub）：源图卡下方横条——场景上拉/
+            人像与商品的描边上拉与透明裁剪/本期免费/圆形发送；参数为会话期态（四退出全丢弃），
+            条件渲染挂载（cutoutNodeId 非空且源节点存在，源卡被删由绑定清理 effect 退会话） */}
+        {cutoutNodeId && cutoutSourceNode && (
+          <CutoutToolbar
+            onClose={exitCutoutSession}
+            scene={cutoutScene}
+            onSceneChange={setCutoutScene}
+            needContour={cutoutNeedContour}
+            onNeedContourChange={setCutoutNeedContour}
+            contourSize={cutoutContourSize}
+            onContourSizeChange={setCutoutContourSize}
+            needCropBackground={cutoutNeedCropBackground}
+            onNeedCropBackgroundChange={setCutoutNeedCropBackground}
+            sendDisabledReason={cutoutSendDisabledReason}
+            submitting={cutoutSubmitting}
+            onSend={handleCutoutToolbarSend}
+            followAnchor={cutoutToolbarAnchor}
+          />
+        )}
+
+        {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
+            名单，根元素打 data-gen-panel-territory）；取消绑 exitCropMode（四退出之一）；
+            确认绑 handleCropConfirm（IKGW1S：裁切执行→上传→建卡闭环） */}
+        {cropTargetNodeId && (
+          <CropDialog
+            preset={cropPreset}
+            onPresetChange={handleCropPresetChange}
+            onConfirm={handleCropConfirm}
+            onClose={exitCropMode}
+            followAnchor={cropPanelAnchor}
           />
         )}
 

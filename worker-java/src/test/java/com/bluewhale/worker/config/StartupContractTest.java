@@ -2,6 +2,7 @@ package com.bluewhale.worker.config;
 
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
@@ -51,8 +52,8 @@ class StartupContractTest {
      * 装配 RocketMqConfig 所需的全部 processor 假体。
      * 本测试只关心配置校验路径，processor 行为无关。
      * <p>
-     * 本 runner 的上下文里只有 {@link RocketMqConfig}：另外 4 个网关客户端
-     * （audio / image / image_enhance / image_erase）是 {@code @Component}，不在此 runner 中扫描，
+     * 本 runner 的上下文里只有 {@link RocketMqConfig}：另外 5 个网关客户端
+     * （audio / image / image_enhance / image_erase / image_cutout）是 {@code @Component}，不在此 runner 中扫描，
      * 且它们各自读 {@code System.getenv}——Spring 属性喂不到它们。这里需要 baseUrl 的只有
      * {@link RocketMqConfig} 自己声明的 {@code newApiVideoClient} 这一个客户端，
      * 故 {@code NEW_API_BASE_URL} 置哑值只为让它的构造期校验先通过，使 MQ 校验成为唯一失败点。
@@ -65,6 +66,7 @@ class StartupContractTest {
             .withBean(ImageJobProcessor.class, () -> mock(ImageJobProcessor.class))
             .withBean(ImageEnhanceJobProcessor.class, () -> mock(ImageEnhanceJobProcessor.class))
             .withBean(ImageEraseJobProcessor.class, () -> mock(ImageEraseJobProcessor.class))
+            .withBean(ImageCutoutJobProcessor.class, () -> mock(ImageCutoutJobProcessor.class))
             .withBean(VideoJobProcessor.class, () -> mock(VideoJobProcessor.class))
             .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
             .withPropertyValues("NEW_API_BASE_URL=http://new-api.invalid");
@@ -144,7 +146,7 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 七个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 八个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
         Map<GenerationMqRoute, String> expectedTags = Map.of(
                 GenerationMqRoute.VIDEO, "video",
@@ -153,6 +155,7 @@ class StartupContractTest {
                 GenerationMqRoute.MEDIA_EXTRACT, "media_extract",
                 GenerationMqRoute.IMAGE_ENHANCE, "image_enhance",
                 GenerationMqRoute.IMAGE_ERASE, "image_erase",
+                GenerationMqRoute.IMAGE_CUTOUT, "image_cutout",
                 GenerationMqRoute.IMAGE_OUTPAINT, "image_outpaint");
 
         assertThat(GenerationMqRoute.values()).hasSize(expectedTags.size());
@@ -172,6 +175,7 @@ class StartupContractTest {
         assertThat(GenerationMqRoute.MEDIA_EXTRACT.tag()).isEqualTo(JobType.MEDIA_EXTRACT.value());
         assertThat(GenerationMqRoute.IMAGE_ENHANCE.tag()).isEqualTo(JobType.IMAGE_ENHANCE.value());
         assertThat(GenerationMqRoute.IMAGE_ERASE.tag()).isEqualTo(JobType.IMAGE_ERASE.value());
+        assertThat(GenerationMqRoute.IMAGE_CUTOUT.tag()).isEqualTo(JobType.IMAGE_CUTOUT.value());
         assertThat(GenerationMqRoute.IMAGE_OUTPAINT.tag()).isEqualTo(JobType.IMAGE_OUTPAINT.value());
     }
 

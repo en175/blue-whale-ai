@@ -18,6 +18,10 @@ export const IMAGE_ENHANCE_TAG = "image_enhance";
  *  与 generation_jobs.type / IMAGE_ERASE_JOB_TYPE（@lib/contracts）保持一致。 */
 export const IMAGE_ERASE_TAG = "image_erase";
 
+/** 图片抠图任务 tag（IKGXLS，契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md）：
+ *  复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / IMAGE_CUTOUT_JOB_TYPE（@lib/contracts）保持一致。 */
+export const IMAGE_CUTOUT_TAG = "image_cutout";
 /** 智能扩图任务 tag（IKGOQR，契约见 @lib/contracts/image-outpaint）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
  *  与 generation_jobs.type / IMAGE_OUTPAINT_JOB_TYPE（@lib/contracts）保持一致。 */
 export const IMAGE_OUTPAINT_TAG = "image_outpaint";
@@ -35,4 +39,5 @@ export type GenerationTag =
   | typeof MEDIA_EXTRACT_TAG
   | typeof IMAGE_ENHANCE_TAG
   | typeof IMAGE_ERASE_TAG
+  | typeof IMAGE_CUTOUT_TAG
   | typeof IMAGE_OUTPAINT_TAG;

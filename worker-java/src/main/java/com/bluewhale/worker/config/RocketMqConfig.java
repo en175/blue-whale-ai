@@ -4,11 +4,13 @@ import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
 import com.bluewhale.worker.application.consumer.AudioConsumer;
 import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.ImageEnhanceConsumer;
+import com.bluewhale.worker.application.consumer.ImageCutoutConsumer;
 import com.bluewhale.worker.application.consumer.ImageEraseConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
+import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
@@ -31,14 +33,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 /**
- * RocketMQ 5 客户端配置 + 6 个 consumer bean + 6 个 recovery producer bean。
+ * RocketMQ 5 客户端配置 + 7 个 consumer bean + 7 个 recovery producer bean。
  * <p>
  * 全部 bean 无条件装配：服务启动即消费全部 tag（ADR-0084 修正六）。
  * 缺 {@code ROCKETMQ_ENDPOINTS} 时 bean 装配直接抛错并终止启动——取代原
  * 「空 enabled-tags → 不连 MQ → 安全拉起 /ready」的形态。
  * <p>
  * 连接配置（属性绑定 + 缺 endpoints 守卫 + {@link ClientConfiguration} 构建）
- * **只有一处**：{@link #rocketMqClientConfiguration(Environment)}。十二个
+ * **只有一处**：{@link #rocketMqClientConfiguration(Environment)}。十四个
  * consumer / producer bean 全部注入它的产物；守卫因此只跑一次、且早于任何 MQ 客户端创建。
  */
 @Configuration
@@ -230,6 +232,31 @@ public class RocketMqConfig {
     }
 
     /**
+     * image_cutout（图片抠图）consumer（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。
+     * <p>
+     * consumer group = "generation-image-cutout-worker"（契约冻结值）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE_CUTOUT}。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public ImageCutoutConsumer imageCutoutConsumer(
+            ImageCutoutJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-image-cutout-worker";
+        int concurrency = workerProps.concurrency().imageCutout();
+
+        return new ImageCutoutConsumer(
+                processor,
+                GenerationMqRoute.IMAGE_CUTOUT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
      * image_outpaint（智能扩图）consumer（IKGOQW；以 imageEnhance/imageErase 接线为模板）。
      * <p>
      * consumer group = "generation-image-outpaint-worker"（冻结值）。
@@ -270,7 +297,7 @@ public class RocketMqConfig {
                 GenerationMqRoute.VIDEO.tag());
     }
 
-    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，六类全部无条件装配。
+    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，八类全部无条件装配。
 
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
@@ -300,6 +327,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageEraseRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_ERASE);
+    }
+
+    /** recovery 重投 image_cutout（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer imageCutoutRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_CUTOUT);
     }
 
     /** recovery 重投 image_outpaint（IKGOQW）。 */

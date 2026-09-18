@@ -33,6 +33,7 @@ import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
 import GroupOverlay from '../GroupOverlay';
 import GroupFrameNode from '../GroupFrameNode';
+import CropFrame, { type CropFrameProps } from '../CropFrame';
 import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTarget } from './keyboardDelete';
 import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboardClipboard';
 import { isMentionMenuOpen } from './canvasKeyboard';
@@ -150,9 +151,12 @@ interface FlowCanvasProps {
   /** 拖拽对齐吸附开关（IKGGCT T2）：吸附与对齐线整体受控，默认 true（undefined 视为开）。
    *  Alt/Option 是按住期间的临时禁用，不经过此开关。UI 与持久化由 T3 接线。 */
   snapAlignmentEnabled?: boolean;
+  /** 裁切框覆盖层（IKGW1N）：非 null 时作为 ReactFlow children 渲染屏幕空间裁切框
+   *  （同 GroupOverlay 层叠上下文先例，手柄尺寸恒为屏幕像素） */
+  cropFrame?: CropFrameProps | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -875,13 +879,25 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             isDraggingNode={isDraggingNode}
           />
         )}
+        {/* 裁切框覆盖层（IKGW1N）：同 GroupOverlay 须作为 ReactFlow children 渲染拿
+            viewport context，屏幕坐标 = flow × zoom + 平移，手柄恒屏幕像素 */}
+        {cropFrame && (
+          <CropFrame
+            bounds={cropFrame.bounds}
+            rect={cropFrame.rect}
+            preset={cropFrame.preset}
+            minSide={cropFrame.minSide}
+            onRectChange={cropFrame.onRectChange}
+            onDarkAreaClick={cropFrame.onDarkAreaClick}
+          />
+        )}
       </ReactFlow>
       {!hideZoomControl && <ZoomControl />}
     </div>
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -932,6 +948,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         refPickMarkedIds={refPickMarkedIds}
         refPickBlockedIds={refPickBlockedIds}
         snapAlignmentEnabled={snapAlignmentEnabled}
+        cropFrame={cropFrame}
       />
     </ReactFlowProvider>
   );

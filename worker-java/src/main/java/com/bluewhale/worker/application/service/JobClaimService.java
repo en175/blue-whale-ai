@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
@@ -77,6 +78,16 @@ public class JobClaimService {
     private static final List<String> IMAGE_ERASE_CLAIM_SOURCES =
             List.of("image_erase");
 
+    /**
+     * image_cutout 租约 420s（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
+     * 同步抠图调用读超时默认 300s，保守取与擦除同款 420s（> 超时 + 结果图下载 + TOS 转存余量，
+     * 防 recovery 孤儿重投双跑）。
+     */
+    private static final int IMAGE_CUTOUT_LEASE_SECONDS = 420;
+
+    /** image_cutout claim 的单源白名单（唯一创建入口 = 画布图片卡工具条「高清 ▾ → 抠图」）。 */
+    private static final List<String> IMAGE_CUTOUT_CLAIM_SOURCES =
+            List.of("image_cutout");
     /** image_outpaint claim 的单源白名单（IKGOQW：唯一创建入口 = 画布图片卡「高清 ▾」菜单）。 */
     private static final List<String> IMAGE_OUTPAINT_CLAIM_SOURCES =
             List.of(com.bluewhale.worker.domain.entity.ImageOutpaintContract.SOURCE);
@@ -316,6 +327,42 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new ClaimedImageEraseJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                workerId,
+                postIncrementToken));
+    }
+
+    /**
+     * 领取 image_cutout 作业（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约用 image_cutout 专用 420s（> MediaKit 读超时 + 转存余量）。
+     */
+    public Optional<ClaimedImageCutoutJobDto> claimImageCutout(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, "image_cutout", IMAGE_CUTOUT_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_CUTOUT_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[image_cutout] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedImageCutoutJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),
