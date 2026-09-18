@@ -18,6 +18,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
+import { appliedPlanAssetIds, dropReversedTextIndexEdges, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
@@ -408,6 +409,24 @@ export default function CanvasPage() {
     edgesRef.current = next;
     setEdges(next);
   };
+
+  /** 生成卡连到草稿：只建「生成卡 → 产物」，把方案 bindings 写在这条边上，避免走后端 referencePrompt 再给被引用图连产物。 */
+  const connectPlanToDraft = (planNodeId: string, targetId: string) => {
+    const node = textNodesRef.current.find((n) => n.id === planNodeId);
+    const mentions = promptMentionSchema.array().safeParse(node?.data.promptMentions ?? []);
+    const marker = node && mentions.success && validPromptMentions(extractTextNodeText(node.data), mentions.data)
+      ? { promptReference: { bindings: promptBindingList(mentions.data) } }
+      : undefined;
+    addCanvasEdge(planNodeId, targetId, undefined, marker);
+    if (!marker) return;
+    const next = edgesRef.current.map((edge) => (
+      edge.source === planNodeId && edge.target === targetId
+        ? { ...edge, data: { ...edge.data, ...marker } }
+        : edge
+    ));
+    edgesRef.current = next;
+    setEdges(next);
+  };
   /** 图片草稿参考连线校验（IKDMQR）：仅当目标是图片草稿且来源是媒体节点时介入——
    *  仅有效图片媒体结果可连入；重复素材（按 assetId 归一，兼容三形态）与超上限明确拒绝，不静默丢弃输入。
    *  文本/商品/资产卡等来源与非草稿目标沿用既有语义（文本附件/未来切片），本函数放行。 */
@@ -533,7 +552,7 @@ export default function CanvasPage() {
     if (targetKind) {
       if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
-        void referencePlanRef.current(source, target);
+        connectPlanToDraft(source, target);
         return true;
       }
       if (!validateImageRefConnect(source, target)) return false;
@@ -3384,12 +3403,10 @@ export default function CanvasPage() {
         addCanvasEdge(id, targetId, kind === 'video' ? 'reference' : undefined);
         return;
       }
-      // 生成卡（promptSource 文本节点）连入图片/视频草稿时走方案引用同步，
-      // 与 connectPair / @ 路径一致：由后端建素材边并写 promptReference，
-      // 避免 dock 弹出"同步素材到目标"手动确认按钮（IKG99G）
+      // 生成卡连入草稿：只拉「生成卡 → 产物」，不把被引用图再连到产物
       const sourceData = source.data as Record<string, unknown> | undefined;
       if (source.type === 'textNode' && sourceData?.promptSource && (kind === 'image' || kind === 'video')) {
-        void referencePlanRef.current(id, targetId);
+        connectPlanToDraft(id, targetId);
         return;
       }
       addCanvasEdge(id, targetId);
@@ -5636,7 +5653,7 @@ export default function CanvasPage() {
   });
   const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
     const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
-    if (pending && targetId) void referencePlanRef.current(planNodeId, targetId, pending.bindings);
+    if (pending && targetId) connectPlanToDraft(planNodeId, targetId);
   };
 
   /** 视频草稿绑定面板的文本附件实时跟随画布连线（IKDMQS，同图片草稿） */
@@ -6402,7 +6419,29 @@ export default function CanvasPage() {
       const savedNodes = JSON.parse(result.canvas.nodes ?? '[]') as Node[];
       const savedEdges = JSON.parse(result.canvas.edges ?? '[]') as Edge[];
       const savedViewport = JSON.parse(result.canvas.viewport ?? 'null') as Viewport | null;
-      acceptDoc({ id: result.canvas.id, version: result.canvas.version, nodes: savedNodes, edges: savedEdges, viewport: savedViewport ?? viewport });
+      const textNodeId = result.node.id;
+      const extraAssetIds = (payload.assetRefItems ?? []).map((item) => item.assetId);
+      const assetIds = appliedPlanAssetIds(result.node as Node, extraAssetIds);
+      const oriented = dropReversedTextIndexEdges(textNodeId, savedEdges);
+      const indexEdges = textIndexEdgesForAppliedPlan(textNodeId, assetIds, savedNodes, oriented);
+      let nextNodes = savedNodes;
+      let nextEdges = [...oriented, ...indexEdges];
+      let nextVersion = result.canvas.version;
+      if (indexEdges.length > 0 || oriented.length !== savedEdges.length) {
+        try {
+          const persisted = await saveCanvasDoc(
+            projectId,
+            { viewport: savedViewport ?? viewport, nodes: savedNodes, edges: nextEdges },
+            result.canvas.version,
+          );
+          nextVersion = persisted.version;
+          nextNodes = JSON.parse(persisted.nodes ?? '[]') as Node[];
+          nextEdges = JSON.parse(persisted.edges ?? '[]') as Edge[];
+        } catch {
+          // 连线已在本地补上；落盘失败留给后续编辑触发保存
+        }
+      }
+      acceptDoc({ id: result.canvas.id, version: nextVersion, nodes: nextNodes, edges: nextEdges, viewport: savedViewport ?? viewport });
       const target = result.node.position;
       setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
       setSaveStatus('saved');

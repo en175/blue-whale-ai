@@ -218,7 +218,10 @@ export class CanvasService {
         // 名称优先取已有媒体节点的 fileName，回落节点 id（与 cardNameOfNode 同口径）
         const existingFileName = typeof existingMedia?.data?.fileName === "string" && existingMedia.data.fileName ? existingMedia.data.fileName : mediaNodeId;
         assetToName.set(material.assetId, existingFileName);
-        newEdges.push({ id: `edge-${randomUUID()}`, source: textNodeId, target: mediaNodeId, data: { [TEXT_INDEX_EDGE_MARKER]: true } });
+        // textIndex 关系线方向与手建文本节点一致：media → text（source=媒体节点，target=文本节点）。
+        // 方向反了会导致 TextNode 媒体索引有效性判定（edge.source===media && edge.target===text）失败、
+        // 下游 textIndexOfTarget 也按 media→text 配对，应用后芯片会判为失效且参考推导断链。
+        newEdges.push({ id: `edge-${randomUUID()}`, source: mediaNodeId, target: textNodeId, data: { [TEXT_INDEX_EDGE_MARKER]: true } });
       }
       if (existing) return ok({ node: existing, canvas, reused: true });
       // promptMentions → mediaMentions（补 nodeId），materialViews → mediaRefs（补 nodeId/name）
@@ -387,11 +390,20 @@ export class CanvasService {
       if (!mentions.success || !refs.success || !validMediaMentions(text, mentions.data) || !mediaRefsCoverMentions(mentions.data, refs.data)) {
         throw new BadRequestException("正文媒体索引无效，原内容未改动");
       }
-      // 契约 §1：media 索引与 Agent 方案绑定（promptMentions）区间互不重叠
+      // 契约 §1：media 索引与 Agent 方案绑定（promptMentions）区间互不重叠；
+      // IKG99G 例外：应用方案卡时 mediaMentions 是 promptMentions 的同区间影子副本（供 textIndexOfTarget 接线），
+      // 同 (start, end, assetId) 视为同一标签，去重后再做重叠判定，避免影子被误判为区间重叠。
       const promptMentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
-      const combined = [...mentions.data, ...(promptMentions.success ? promptMentions.data : [])].sort((a, b) => a.start - b.start);
+      const combined = [...mentions.data, ...(promptMentions.success ? promptMentions.data : [])];
+      const seen = new Set<string>();
+      const deduped = combined.filter(range => {
+        const key = `${range.start}-${range.end}-${range.assetId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).sort((a, b) => a.start - b.start);
       let covered = 0;
-      for (const range of combined) {
+      for (const range of deduped) {
         if (range.start < covered) throw new BadRequestException("正文媒体索引与方案绑定区间重叠，原内容未改动");
         covered = range.end;
       }
