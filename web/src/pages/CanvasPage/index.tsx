@@ -136,7 +136,7 @@ import {
   type SaveSharedAssetRequest,
   type SharedAssetView,
 } from '@/api/sharedAssets';
-import { uploadAssetFile } from '@/utils/upload';
+import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
@@ -7133,12 +7133,16 @@ export default function CanvasPage() {
       }
       const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
       await putToPresignedUrl(presign, file);
+      // 探测尺寸/时长随 complete 上报（对齐主封装 uploadAssetFile）：漏报会让资产档案缺宽高，
+      // 扩图等以资产宽高为权威的功能会被服务端拦下（IKGOQ0 验收修订）；探测失败不阻断上传。
+      const meta = await probeMediaMeta(file, assetType).catch(() => ({}));
       const complete = await completeUpload({
         type: assetType,
         mime: file.type,
         size: file.size,
         storage_key: presign.storage_key,
         project_id: currentId || undefined,
+        ...meta,
       });
       return complete;
     } catch (e) {

@@ -20,6 +20,11 @@ import {
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import {
+  probeImageDimensions,
+  type ImageDimensions,
+} from "@lib/shared/assets/image-dimensions.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端预检只是体验层，这里返回可读文案）。 */
@@ -55,7 +60,29 @@ export class ImageOutpaintsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
   ) {}
+
+  /** 缺尺寸资产：Range 读文件头探测真实宽高，探测成功即回填资产行（后续请求直接命中）。
+   *  探测不可用/失败都不阻断主流程——返回 null 落回缺尺寸拒绝，行为与修订前一致。 */
+  private async probeAndBackfillDimensions(
+    assetId: string,
+    storageKey: string | null,
+  ): Promise<ImageDimensions | null> {
+    const uploads = this.storage.uploads;
+    if (!uploads || !storageKey) return null;
+    const probed = await probeImageDimensions(uploads, storageKey);
+    if (!probed) return null;
+    try {
+      await this.prisma.client.assets.update({
+        where: { id: BigInt(assetId) },
+        data: { width: probed.width, height: probed.height },
+      });
+    } catch {
+      // 回填失败只丢一次优化：本次复核照用探测值，下次请求还会再探测。
+    }
+    return probed;
+  }
 
   async create(
     userId: string,
@@ -84,12 +111,26 @@ export class ImageOutpaintsService {
     }
 
     // 源图门槛复核（长边 ≤4160px、文件 ≤10MB、真实宽高必须已知——与高清放大「缺尺寸放行」相反：
-    // 扩展比例相对原图短边换算，缺尺寸无法预检 40% 上限，一律拒绝）。
+    // 扩展比例相对原图短边换算，缺尺寸无法预检 40% 上限）。
+    // 资产宽高缺失时（画布/资产库上传路径历史上不上报尺寸，库存约四成图片如此）先从对象存储
+    // 探测真实宽高并回填资产行，探测不到才落回缺尺寸拒绝（IKGOQ0 验收修订：探测回填口径）。
     // 门槛数值与判定在契约 imageOutpaintSourceGate 单处定义（web 菜单项预检同源引用）。
     // size 是 prisma BigInt（10MB 上限内 Number 转换无损）；gate 同时服务 web 前端，签名保持 number。
+    let gateWidth = asset.width;
+    let gateHeight = asset.height;
+    if (gateWidth == null || gateHeight == null) {
+      const probed = await this.probeAndBackfillDimensions(
+        input[IMAGE_OUTPAINT_INPUT_KEYS.sourceAssetId],
+        asset.storage_key,
+      );
+      if (probed) {
+        gateWidth = probed.width;
+        gateHeight = probed.height;
+      }
+    }
     const gateError = imageOutpaintSourceGate(
-      asset.width,
-      asset.height,
+      gateWidth,
+      gateHeight,
       asset.size != null ? Number(asset.size) : null,
     );
     if (gateError) return fail(FAILURE_CODE, gateError);

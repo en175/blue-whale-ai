@@ -7,7 +7,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAssetReferences, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
-import { uploadAssetFile } from '@/utils/upload';
+import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
@@ -201,11 +201,15 @@ export default function Assets() {
         // 三步上传：presign → PUT → complete
         const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
         await putToPresignedUrl(presign, file);
+        // 探测尺寸/时长随 complete 上报（对齐主封装 uploadAssetFile）：漏报会让资产档案缺宽高，
+        // 扩图等以资产宽高为权威的功能会被服务端拦下（IKGOQ0 验收修订）；探测失败不阻断上传。
+        const meta = await probeMediaMeta(file, type).catch(() => ({}));
         await completeUpload({
           type,
           mime: file.type,
           size: file.size,
           storage_key: presign.storage_key,
+          ...meta,
         });
         // 上传会改变“全部”和对应类型缓存；本轮批量上传结束后统一失效并刷新。
         assetListChanged = true;

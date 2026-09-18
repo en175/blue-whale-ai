@@ -52,8 +52,12 @@ export const IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS = {
 } as const;
 
 /** 源图门槛（单处定义，规格内联口径，火山官方 PDF 溯源）：
- *  长边 = max(width, height) ≤ 4160px、文件 ≤ 10MB、真实宽高必须已知（宽高缺失即拒绝，
- *  与高清放大「缺尺寸放行」相反——扩展比例换算依赖短边，无尺寸无法预检 40% 上限）。
+ *  长边 = max(width, height) ≤ 4160px、文件 ≤ 10MB、真实宽高必须已知（与高清放大
+ *  「缺尺寸放行」相反——扩展比例换算依赖短边，无尺寸无法预检 40% 上限）。
+ *  缺尺寸处置（IKGOQ0 验收修订）：资产宽高为 NULL 时服务端先从对象存储 Range 读头
+ *  探测真实宽高并回填资产行（画布/资产库上传路径历史上不上报尺寸，库存约四成图片
+ *  如此），探测不到才按 missingDimensionsText 拒绝——彼时文件本身有问题，
+ *  「请重新上传」名副其实。
  *  消费方 = backend image-outpaints 服务端复核 + web 菜单项预检（两端判定与数值只此一份）；
  *  worker-java 不消费，出站前任务输入已过复核。 */
 export const IMAGE_OUTPAINT_SOURCE_LIMITS = {
