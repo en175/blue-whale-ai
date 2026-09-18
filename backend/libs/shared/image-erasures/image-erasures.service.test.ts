@@ -166,36 +166,43 @@ describe("ImageErasuresService.create：归属与媒体类型复核", () => {
 });
 
 describe("ImageErasuresService.create：输入门槛复核（官方 PDF 输入限制）", () => {
-  it("accepts at the exact boundary 2560x1440", async () => {
+  it("accepts at the exact boundary 2560x1440 and vertical 1440x2560 (short/long-side semantics)", async () => {
     const { service } = makeService({
       assets: {
-        findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 2560, height: 1440 })),
+        findOwnedSource: vi
+          .fn()
+          .mockResolvedValueOnce(makeImageAsset({ width: 2560, height: 1440 }))
+          .mockResolvedValueOnce(makeImageAsset({ width: 1440, height: 2560 })),
       },
     });
-    const result = await service.create("9", "55", VALID_TEXT_BODY);
-    expect(result.code).toBe(200);
+    expect((await service.create("9", "55", VALID_TEXT_BODY)).code).toBe(200);
+    // 竖图长短边对调同样合法：短边 1440、长边 2560
+    expect((await service.create("9", "55", VALID_TEXT_BODY)).code).toBe(200);
   });
 
-  it("rejects when width exceeds 2560 with a readable reason", async () => {
+  it("rejects when long side exceeds 2560 (landscape and vertical) with a readable reason", async () => {
     const { service } = makeService({
       assets: {
-        findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 2561, height: 100 })),
+        findOwnedSource: vi
+          .fn()
+          .mockResolvedValueOnce(makeImageAsset({ width: 2561, height: 100 }))
+          .mockResolvedValueOnce(makeImageAsset({ width: 100, height: 2561 })),
+      },
+    });
+    expect((await service.create("9", "55", VALID_TEXT_BODY)).msg).toContain("长边超过");
+    expect((await service.create("9", "55", VALID_TEXT_BODY)).msg).toContain("长边超过");
+  });
+
+  it("rejects when short side exceeds 1440 with a readable reason", async () => {
+    const { service } = makeService({
+      assets: {
+        // 宽 2000 高 1441：短边 1441 超上限（旧宽高绑定语义会漏判这种横图）
+        findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 2000, height: 1441 })),
       },
     });
     const result = await service.create("9", "55", VALID_TEXT_BODY);
     expect(result.code).not.toBe(200);
-    expect(result.msg).toContain("尺寸");
-  });
-
-  it("rejects when height exceeds 1440 with a readable reason", async () => {
-    const { service } = makeService({
-      assets: {
-        findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 1000, height: 1441 })),
-      },
-    });
-    const result = await service.create("9", "55", VALID_TEXT_BODY);
-    expect(result.code).not.toBe(200);
-    expect(result.msg).toContain("尺寸");
+    expect(result.msg).toContain("短边超过");
   });
 
   it("rejects when a side is below 10px", async () => {

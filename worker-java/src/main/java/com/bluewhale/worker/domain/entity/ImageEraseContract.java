@@ -64,11 +64,11 @@ public final class ImageEraseContract {
 
     // ========== 输入限制（官方 PDF image_url 参数节；backend 复核 + web 预检同源） ==========
 
-    /** 分辨率上限：宽不得超过 2560px。 */
-    public static final int MAX_INPUT_WIDTH_PX = 2560;
+    /** 分辨率上限：长边不得超过 2560px（短边/长边语义，竖图 1440x2560 合法）。 */
+    public static final int MAX_INPUT_LONG_SIDE_PX = 2560;
 
-    /** 分辨率上限：高不得超过 1440px。 */
-    public static final int MAX_INPUT_HEIGHT_PX = 1440;
+    /** 分辨率上限：短边不得超过 1440px。 */
+    public static final int MAX_INPUT_SHORT_SIDE_PX = 1440;
 
     /** 分辨率下限：宽高均不得小于 10px。 */
     public static final int MIN_INPUT_SIDE_PX = 10;

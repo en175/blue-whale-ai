@@ -571,7 +571,7 @@ describe('IKGOTB 发送与结果闭环', () => {
   });
 
   it('创建请求失败（门槛拒/网络）：不建卡、留在编辑态', async () => {
-    apiMocks.createImageErase.mockRejectedValue(Object.assign(new Error('图片尺寸超过 2560x1440 像素上限'), { status: 400 }));
+    apiMocks.createImageErase.mockRejectedValue(Object.assign(new Error('图片长边超过 2560 或短边超过 1440 像素上限'), { status: 400 }));
     await renderPage();
     await eraseImage();
     await click('erase-clear-text');

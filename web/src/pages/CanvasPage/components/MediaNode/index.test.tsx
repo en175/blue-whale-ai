@@ -159,22 +159,22 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     expect(onEraseImage).toHaveBeenCalledWith('image-node');
   });
 
-  it('超尺寸（宽>2560 或高>1440）：擦除置灰并悬停原因，高清项不受影响', async () => {
+  it('超尺寸（长边>2560 或短边>1440，短边/长边语义）：擦除置灰并悬停原因，高清项不受影响', async () => {
     await renderNode('image', { data: { width: 3000, height: 1440, mime: 'image/png' } });
     await openQualityMenu();
     const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
     expect(erase.getAttribute('aria-disabled')).toBe('true');
-    expect(erase.getAttribute('title')).toContain('2560×1440');
+    expect(erase.getAttribute('title')).toContain('长边超过 2560');
     const enhance = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!;
     expect(enhance.getAttribute('aria-disabled')).toBeNull();
 
-    // 高>1440 同样置灰（mime 补 png，避免默认 .bin 文件名先命中格式门槛）
+    // 短边>1440 同样置灰（横图 2000×1441：短边 1441 超上限；竖图 1440×2560 合法另测于 imageErase.test）
     const onEraseImage = vi.fn();
-    await renderNode('image', { id: 'tall-node', data: { width: 1000, height: 2000, mime: 'image/png', onEraseImage } });
+    await renderNode('image', { id: 'tall-node', data: { width: 2000, height: 1441, mime: 'image/png', onEraseImage } });
     await openQualityMenu();
     expect(
       mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.getAttribute('title'),
-    ).toContain('2560×1440');
+    ).toContain('短边超过 1440');
   });
 
   it('超大小（>10MB）：擦除置灰并悬停原因', async () => {

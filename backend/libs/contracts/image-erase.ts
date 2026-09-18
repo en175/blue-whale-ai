@@ -58,9 +58,10 @@ export const IMAGE_ERASE_OUTPUT_FORMAT = "png";
 /** 输入限制常量（文档出处：官方 PDF image_url 参数「图像输入分辨率 / 文件大小 / 支持格式」节；
  *  消费方 = backend 创建入口复核 + web 菜单门槛预检（两端判定与数值只此一份）；
  *  worker-java 不消费——宽高缺失的存量图放行，交供应商按官方门槛拒）。
- *  分辨率上限：不得超过 2560x1440 像素（宽x高）。 */
-export const IMAGE_ERASE_MAX_WIDTH_PX = 2560;
-export const IMAGE_ERASE_MAX_HEIGHT_PX = 1440;
+ *  分辨率上限按短边/长边语义（官方口径：10px ≤ 短边 ≤ 1440px，10px ≤ 长边 ≤ 2560px；
+ *  本地 PDF 字面「不得超过 2560x1440 像素(宽x高)」按宽高绑定解读是误读，竖图 1440x2560 合法）。 */
+export const IMAGE_ERASE_MAX_LONG_SIDE_PX = 2560;
+export const IMAGE_ERASE_MAX_SHORT_SIDE_PX = 1440;
 /** 分辨率下限：不得小于 10x10 像素（文档有下限，同样写入常量防两端漂移）。 */
 export const IMAGE_ERASE_MIN_SIDE_PX = 10;
 /** 文件大小上限：单张图片不得超过 10 MB。 */

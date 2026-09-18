@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  IMAGE_ERASE_MAX_HEIGHT,
+  IMAGE_ERASE_MAX_LONG_SIDE,
+  IMAGE_ERASE_MAX_SHORT_SIDE,
   IMAGE_ERASE_MAX_SIZE_BYTES,
-  IMAGE_ERASE_MAX_WIDTH,
   IMAGE_ERASE_MIN_SIDE,
   imageEraseFormatOf,
   imageEraseGateReason,
@@ -36,15 +36,22 @@ describe('imageEraseGateReason（擦除门槛预检，IKGOT7）', () => {
     ).toBeNull();
   });
 
-  it('恰在边界（2560×1440 / 10MB）放行', () => {
+  it('恰在边界（横图 2560×1440 / 竖图 1440×2560 / 10MB）放行', () => {
     expect(
-      imageEraseGateReason({ width: IMAGE_ERASE_MAX_WIDTH, height: IMAGE_ERASE_MAX_HEIGHT, size: IMAGE_ERASE_MAX_SIZE_BYTES }),
+      imageEraseGateReason({ width: IMAGE_ERASE_MAX_LONG_SIDE, height: IMAGE_ERASE_MAX_SHORT_SIDE, size: IMAGE_ERASE_MAX_SIZE_BYTES }),
+    ).toBeNull();
+    // 竖图长短边对调同样合法（短边/长边语义，不是宽高绑定）
+    expect(
+      imageEraseGateReason({ width: IMAGE_ERASE_MAX_SHORT_SIDE, height: IMAGE_ERASE_MAX_LONG_SIDE }),
     ).toBeNull();
   });
 
-  it('宽超 2560 或高超 1440 置灰并给出原因', () => {
-    expect(imageEraseGateReason({ width: 2561, height: 1440 })).toContain('2560×1440');
-    expect(imageEraseGateReason({ width: 2560, height: 1441 })).toContain('2560×1440');
+  it('长边超 2560 或短边超 1440 置灰并给出原因（横竖图同判）', () => {
+    expect(imageEraseGateReason({ width: 2561, height: 1440 })).toContain('2560');
+    expect(imageEraseGateReason({ width: 2560, height: 1441 })).toContain('1440');
+    // 竖图：宽 1440 高 2561 长边超；宽 1441 高 2000 短边超
+    expect(imageEraseGateReason({ width: 1440, height: 2561 })).toContain('2560');
+    expect(imageEraseGateReason({ width: 1441, height: 2000 })).toContain('1440');
   });
 
   it('宽或高小于 10px 置灰并给出原因（与后端复核同口径）', () => {

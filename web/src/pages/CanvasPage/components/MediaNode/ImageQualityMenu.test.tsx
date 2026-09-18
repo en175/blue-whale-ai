@@ -98,7 +98,7 @@ describe('ImageQualityMenu（高清 ▾ 下拉）', () => {
   });
 
   it('置灰项：aria-disabled + title 悬停原因，点击不派发不收起', async () => {
-    const reason = '图片尺寸超过 2560×1440，无法擦除';
+    const reason = '图片长边超过 2560 或短边超过 1440，无法擦除';
     const menuItems = items({ eraseDisabledReason: reason });
     await renderMenu(menuItems);
     await openMenu();

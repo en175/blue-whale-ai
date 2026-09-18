@@ -17,8 +17,8 @@ import {
   IMAGE_ERASE_INPUT_KEYS,
   IMAGE_ERASE_JOB_TYPE,
   IMAGE_ERASE_MAX_FILE_BYTES,
-  IMAGE_ERASE_MAX_HEIGHT_PX,
-  IMAGE_ERASE_MAX_WIDTH_PX,
+  IMAGE_ERASE_MAX_SHORT_SIDE_PX,
+  IMAGE_ERASE_MAX_LONG_SIDE_PX,
   IMAGE_ERASE_MIN_SIDE_PX,
   IMAGE_ERASE_OUTPUT_FORMAT,
   IMAGE_ERASE_SCENES,
@@ -63,8 +63,8 @@ describe("image_erase 契约不变量（§15.1–15.4，TS 侧）", () => {
   });
 
   it("输入限制常量与火山官方文档一致：≤2560×1440、≥10×10、≤10MB、png/jpg/jpeg/heic", () => {
-    expect(IMAGE_ERASE_MAX_WIDTH_PX).toBe(2560);
-    expect(IMAGE_ERASE_MAX_HEIGHT_PX).toBe(1440);
+    expect(IMAGE_ERASE_MAX_LONG_SIDE_PX).toBe(2560);
+    expect(IMAGE_ERASE_MAX_SHORT_SIDE_PX).toBe(1440);
     expect(IMAGE_ERASE_MIN_SIDE_PX).toBe(10);
     expect(IMAGE_ERASE_MAX_FILE_BYTES).toBe(10 * 1024 * 1024);
     expect([...IMAGE_ERASE_INPUT_FORMATS]).toEqual(["png", "jpg", "jpeg", "heic"]);
@@ -167,8 +167,8 @@ describe("image_erase 双端一致性（读 worker-java 源码文本，防漂移
   });
 
   it("ImageEraseContract：输入限制镜像与 TS 同值", () => {
-    expect(contractJava).toContain("int MAX_INPUT_WIDTH_PX = 2560;");
-    expect(contractJava).toContain("int MAX_INPUT_HEIGHT_PX = 1440;");
+    expect(contractJava).toContain("int MAX_INPUT_LONG_SIDE_PX = 2560;");
+    expect(contractJava).toContain("int MAX_INPUT_SHORT_SIDE_PX = 1440;");
     expect(contractJava).toContain("int MIN_INPUT_SIDE_PX = 10;");
     expect(contractJava).toContain("long MAX_INPUT_FILE_BYTES = 10L * 1024 * 1024;");
     expect(contractJava).toContain('List.of("png", "jpg", "jpeg", "heic")');

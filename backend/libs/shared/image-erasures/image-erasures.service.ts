@@ -10,8 +10,8 @@ import {
   IMAGE_ERASE_INPUT_KEYS,
   IMAGE_ERASE_JOB_TYPE,
   IMAGE_ERASE_MAX_FILE_BYTES,
-  IMAGE_ERASE_MAX_HEIGHT_PX,
-  IMAGE_ERASE_MAX_WIDTH_PX,
+  IMAGE_ERASE_MAX_SHORT_SIDE_PX,
+  IMAGE_ERASE_MAX_LONG_SIDE_PX,
   IMAGE_ERASE_MIN_SIDE_PX,
   IMAGE_ERASE_SOURCE,
   PARAM_MISSING_CODE,
@@ -116,17 +116,20 @@ export class ImageErasuresService {
       }
     }
 
-    // 输入门槛复核（官方 PDF image_url 输入限制；常量单源在契约 image-erase.ts，web 菜单预检同源）。
+    // 输入门槛复核（官方输入分辨率限制，短边/长边语义：10 ≤ 短边 ≤ 1440、10 ≤ 长边 ≤ 2560，
+    // 竖图 1440x2560 合法；常量单源在契约 image-erase.ts，web 菜单预检同源）。
     // assets.width/height 由前端上报、存量图大量为 null：缺权威尺寸不臆造、不拦——放行交供应商
     // 按官方门槛拒（与高清放大同口径）。
     if (asset.width != null && asset.height != null) {
+      const longSide = Math.max(asset.width, asset.height);
+      const shortSide = Math.min(asset.width, asset.height);
       if (
-        asset.width > IMAGE_ERASE_MAX_WIDTH_PX ||
-        asset.height > IMAGE_ERASE_MAX_HEIGHT_PX
+        longSide > IMAGE_ERASE_MAX_LONG_SIDE_PX ||
+        shortSide > IMAGE_ERASE_MAX_SHORT_SIDE_PX
       ) {
         return fail(
           FAILURE_CODE,
-          `图片尺寸超过 ${IMAGE_ERASE_MAX_WIDTH_PX}x${IMAGE_ERASE_MAX_HEIGHT_PX} 像素上限，无法擦除`,
+          `图片长边超过 ${IMAGE_ERASE_MAX_LONG_SIDE_PX} 或短边超过 ${IMAGE_ERASE_MAX_SHORT_SIDE_PX} 像素上限，无法擦除`,
         );
       }
       if (
