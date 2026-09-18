@@ -135,12 +135,6 @@ export interface AssetRepo {
   /** 取当前用户自己的单个资产详情（画布/资产库弹窗用）；不存在/不归属/已删 → null。
    *  比列表多带 `prompt`（IKFSSO），见 `AssetDetailView`。 */
   findOwnedById(assetId: string, userId: string): Promise<AssetDetailView | null>;
-  /** 在目标项目落下资产副本行（与源共享 storage_key 物理对象），返回新副本视图。 */
-  insertCopy(
-    projectId: string,
-    userId: string,
-    source: AssetSourceFields,
-  ): Promise<AssetView>;
   createPendingUpload(input: {
     userId: string;
     type: "image" | "video";
@@ -664,47 +658,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         height: row.height,
         duration_ms: row.duration_ms,
         source: row.source,
-      };
-    },
-    async insertCopy(projectId, userId, source) {
-      const row = await prisma.assets.create({
-        data: {
-          project_id: BigInt(projectId),
-          user_id: BigInt(userId),
-          type: source.type,
-          storage_key: source.storage_key,
-          url: source.url,
-          mime: source.mime,
-          size: source.size,
-          width: source.width,
-          height: source.height,
-          duration_ms: source.duration_ms ?? null,
-          source: source.source,
-          status: "normal",
-        },
-      });
-      return {
-        id: row.id.toString(),
-        type: row.type,
-        url: row.url,
-        width: row.width,
-        height: row.height,
-        duration: assetDurationSeconds(row.duration_ms),
-        source: row.source ?? null,
-        created_at: row.gmt_create?.toISOString() ?? null,
-        size: row.size == null ? null : Number(row.size),
-        generation_job_id:
-          row.generation_job_id == null ? null : row.generation_job_id.toString(),
-        project_id: row.project_id == null ? null : row.project_id.toString(),
-        mime: row.mime ?? null,
-        model: null,
-        // IKEXX8：跨项目复制出的新 asset 无素材库关联（未关联为 null）。
-        material_id: row.material_id ?? null,
-        material_group_id: row.material_group_id ?? null,
-        // 新副本没关联素材库 → 无校验状态。此处刻意不走 resolveMaterialStatuses：
-        // 刚创建的行不可能有状态（且没绑定就无从查），多一次往返没有意义。
-        material_status: null,
-        material_status_checked_at: null,
       };
     },
     async createPendingUpload(input) {

@@ -176,33 +176,3 @@ export function fetchProjectSnapshot(id: string): Promise<ProjectSnapshot> {
   return p;
 }
 
-/* ============ 复制资产到项目 ============ */
-
-/** 复制资产返回：新副本资产记录 */
-export interface CopiedAsset {
-  /** 新副本资产ID */
-  id: number;
-  type: 'image' | 'video' | 'audio';
-  url: string;
-  width: number | null;
-  height: number | null;
-  duration: number | null;
-  /** 来源：copied 表示复制而来 */
-  source: string;
-  created_at: string;
-}
-
-/** 复制资产到项目 POST /api/projects/:id/assets（资产库「添加到项目」） */
-export function copyAssetToProject(
-  projectId: string,
-  sourceAssetId: number,
-): Promise<CopiedAsset> {
-  return apiRequest<CopiedAsset>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ source_asset_id: sourceAssetId }),
-    },
-  );
-}
