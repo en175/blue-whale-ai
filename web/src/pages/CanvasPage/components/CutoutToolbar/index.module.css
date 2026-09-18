@@ -299,11 +299,12 @@
   white-space: nowrap;
 }
 
-/* ---- 发送钮：圆形，激活白底黑箭头（OutpaintDialog 同构） ---- */
+/* ---- 发送钮：Dock 主发送钮同款（IKGZ5Q：灰底圆角方形 + 白 ↑ 图标，
+ *    色值同源 BottomDialog .sendBtn/.sendBtnActive；尺寸随横条布局 32×32） ---- */
 .sendBtn {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -316,11 +317,11 @@
 }
 
 .sendBtnActive {
-  background-color: #fff;
-  color: #111;
+  background-color: #4a4a4a;
+  color: #fff;
   cursor: pointer;
 }
 
 .sendBtnActive:hover {
-  background-color: #e8e8e8;
+  background-color: #555;
 }

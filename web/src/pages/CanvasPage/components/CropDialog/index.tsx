@@ -1,12 +1,15 @@
 /* ============================================
  * CropDialog 裁切面板（IKGW1N，IKGV2J 整包第三票）：跟随源图卡下方浮出的横条，
  * 六选项（自由 + 1:1/4:3/3:4/16:9/9:16，选项数据单源于 imageCrop.ts 不另造）+
- * 「取消」「确认」。比例项视觉复用共享 RatioIcon（IKGBTV 口径；「自由」无固定比例不渲染图标）。
+ * 「取消」文字钮 + 确认图标钮（IKGZ5Q：Dock 主发送钮同款——灰底圆角方形 + 白 ↑ 图标，
+ * 裁切恒可确认故恒激活态；「确认」文案保留在 title）。比例项视觉复用共享 RatioIcon
+ * （IKGBTV 口径；「自由」无固定比例不渲染图标）。
  * 选中预设：父级以 inscribeCropRect 把框变为内容区内最大内接该比例矩形并居中；
  * 取消绑 onClose（CanvasPage 接 exitCropMode，四退出之一）；确认绑 onConfirm
  * （本票渲染在位、点击派发回调；裁切执行链路由 IKGW1S 实装）。
  * data-gen-panel-territory 豁免点外关闭误杀；锚定跟随沿用 ImageEraseDialog 同构。
  * ============================================ */
+import { ArrowUp } from 'lucide-react';
 import RatioIcon from '@/components/RatioIcon';
 import type { FollowDialogAnchor } from '../../followDialog';
 import { CROP_PRESET_LABELS, CROP_PRESET_ORDER, type CropPresetKey } from '../../imageCrop';
@@ -58,8 +61,14 @@ export default function CropDialog({ preset, onPresetChange, onConfirm, onClose,
       <button type="button" className={styles.cancelBtn} data-testid="crop-cancel" onClick={onClose}>
         取消
       </button>
-      <button type="button" className={styles.confirmBtn} data-testid="crop-confirm" onClick={onConfirm}>
-        确认
+      <button
+        type="button"
+        className={styles.confirmBtn}
+        data-testid="crop-confirm"
+        title="确认"
+        onClick={onConfirm}
+      >
+        <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
       </button>
     </div>
   );
