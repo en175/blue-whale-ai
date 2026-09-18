@@ -213,14 +213,12 @@ describe('IKGYYE 钉屏幕层渲染与出现时机', () => {
     expect(layer()).toBeNull();
   });
 
-  it('悬停未选中卡也显示操作条（.wrapper:hover 的 JS 等价），移出后消失', async () => {
+  it('悬停未选中卡也显示操作条（.wrapper:hover 的 JS 等价；移出清除见 hover 桥接 describe）', async () => {
     await renderTextNode();
     expect(layer()).toBeNull();
     await hoverCard();
     expect(layer()).toBeTruthy();
     expect(layer()!.textContent).toContain('添加到对话');
-    await leaveCard();
-    expect(layer()).toBeNull();
   });
 
   it('互斥（isFocused 优先）：选中且编辑时只出格式工具栏，不出操作条的素材标签控件', async () => {
@@ -352,5 +350,60 @@ describe('钉屏幕层锚定跟随（IKGYYD 基建 computeFollowAnchorAbove）',
       toolbarLift: 42,
     });
     expect(layer()!.style.top).toBe(`${anchor.top}px`);
+  });
+});
+
+describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~10px 间隙不属于卡 DOM，穿隙不闪卸）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** 鼠标进入工具条层（React onMouseEnter 由 mouseover 派生） */
+  async function enterLayer() {
+    await act(async () => layer()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+  }
+
+  /** 鼠标离开工具条层到卡外（mouseout + relatedTarget 在层外派生 onMouseLeave） */
+  async function leaveLayer() {
+    await act(async () => layer()!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+  }
+
+  it('未选中纯 hover 卡：离开卡进间隙后 120ms 内工具条不卸载，窗口过后才卸载', async () => {
+    await renderTextNode();
+    await hoverCard();
+    expect(layer()).toBeTruthy();
+    await leaveCard();
+    // 桥接窗口内（指针正穿间隙）不闪卸——修复前此处立即卸载、按钮点不到
+    expect(layer()).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(120); });
+    expect(layer()).toBeNull();
+  });
+
+  it('离开卡后 120ms 内进入工具条层：清除 timer 被取消，工具条保持', async () => {
+    await renderTextNode();
+    await hoverCard();
+    await leaveCard();
+    await enterLayer();
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(layer()).toBeTruthy();
+    expect(layer()!.textContent).toContain('添加到对话');
+  });
+
+  it('从工具条层移出到卡外：窗口过后才真清（移回卡则被卡 enter 取消）', async () => {
+    await renderTextNode();
+    await hoverCard();
+    await leaveCard();
+    await enterLayer();
+    await leaveLayer();
+    expect(layer()).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(120); });
+    expect(layer()).toBeNull();
+    // 对照：层 leave 后窗口内移回卡，清除被取消
+    await hoverCard();
+    await leaveCard();
+    await enterLayer();
+    await leaveLayer();
+    await hoverCard();
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(layer()).toBeTruthy();
   });
 });

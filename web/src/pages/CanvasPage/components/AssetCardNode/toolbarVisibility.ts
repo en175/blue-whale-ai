@@ -22,3 +22,9 @@ const HIDE_ASSET_TOP_BAR = false;
 export function assetCardToolbarVisible(kind: AssetCardKind | undefined, hideAssetTopBar = HIDE_ASSET_TOP_BAR): boolean {
   return (kind ?? 'custom') === 'generation' || !hideAssetTopBar;
 }
+
+/** 水合容错（IKGYYB 审查合一：卡体与悬浮工具条两处重复定义收口于此）：
+ * 持久化的 kind 可能不在枚举内（旧数据/脏数据），降级 custom 避免 KIND_META 落空 */
+export function assetCardKindOf(kind: AssetCardKind | undefined): AssetCardKind {
+  return kind && kind in KIND_META ? kind : 'custom';
+}

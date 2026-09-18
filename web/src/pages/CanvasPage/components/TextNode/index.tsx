@@ -31,8 +31,12 @@ const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 
 /** 操作条顶边相对卡片顶边抬升量（IKGYYE 钉屏幕迁移）：条高约 32（addToChatBtn
  *  padding 8×2 + 内容 14 + 边框 2）+ 与卡片顶边间距 10，口径同迁移前 bottom 公式；
- * 格式工具栏条高 42 + 10 = FOLLOW_ABOVE_LIFT（52）用锚定函数缺省值 */
+ *  格式工具栏条高 42 + 10 = FOLLOW_ABOVE_LIFT（52）用锚定函数缺省值 */
 const NODE_BAR_LIFT = 42;
+
+/** hover 桥接延迟（IKGYYB 审查修复）：卡与钉屏幕工具条之间的 ~10px 间隙不属于卡 DOM，
+ *  卡 leave 不立即清 hover，留 120ms 窗口给指针穿过间隙抵达工具条层（层 enter 取消清除） */
+const HOVER_BRIDGE_CLEAR_MS = 120;
 
 /** 正文双击间隔（毫秒）。选中节点会抬 zIndex 并重绘，原生 dblclick 容易丢失，故按按下间隔识别。 */
 const TEXT_BODY_DOUBLE_PRESS_MS = 350;
@@ -163,8 +167,26 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [editing, setEditing] = useState(false);
   const [writingSelf, setWritingSelf] = useState(false);
   /** 悬停本卡（IKGYYE 钉屏幕迁移）：操作条 `.wrapper:hover .nodeBar` 的 hover 显示语义
-   *  由 JS 指针事件等价保持——工具条 DOM 迁出节点卡后 CSS :hover 不再作用于卡外层 */
+   *  由 JS 指针事件等价保持——工具条 DOM 迁出节点卡后 CSS :hover 不再作用于卡外层。
+   *  IKGYYB hover 桥接：卡 leave 延迟 HOVER_BRIDGE_CLEAR_MS 清除，工具条层根 enter
+   *  取消清除——鼠标从卡移向工具条穿过间隙时不闪卸（未选中纯 hover 卡上按钮可达） */
   const [hovered, setHovered] = useState(false);
+  const hoverClearTimerRef = useRef<number | null>(null);
+  const clearHoverBridge = useCallback(() => {
+    if (hoverClearTimerRef.current != null) {
+      window.clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
+  const scheduleHoverClear = useCallback(() => {
+    clearHoverBridge();
+    hoverClearTimerRef.current = window.setTimeout(() => {
+      hoverClearTimerRef.current = null;
+      setHovered(false);
+    }, HOVER_BRIDGE_CLEAR_MS);
+  }, [clearHoverBridge]);
+  // 卸载清 timer：避免迟到的清除回调打在已卸载组件上
+  useEffect(() => clearHoverBridge, [clearHoverBridge]);
   const isTextGen = data.textGen === true;
   const hasTextGenBody = Boolean(
     (typeof data.text === 'string' && data.text.trim())
@@ -732,18 +754,21 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     <div
       className={`${styles.wrapper} ${selected ? styles.selected : ''} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
       onContextMenu={handleContextMenu}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => { clearHoverBridge(); setHovered(true); }}
+      onMouseLeave={scheduleHoverClear}
       style={nodeTitleSizing(zoom)}
     >
       {/* IKGYYE 钉屏幕迁移：同一层操作位置的两条工具栏（编辑时格式工具栏、其余操作条，
           两者互斥不叠成多行）迁出节点卡，经 FollowToolbarLayer portal 到 .react-flow 根
           （viewport 变换层外）——任何缩放级别屏幕尺寸恒定、拖动/平移缩放实时跟随、
-          卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片 */}
+          卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片。
+          IKGYYB hover 桥接：层根 enter/leave 接入桥接 timer（穿间隙不闪卸） */}
       <FollowToolbarLayer
         nodeId={id}
         show={isFocused || showSoloToolbar || hovered}
         toolbarLift={isFocused ? undefined : NODE_BAR_LIFT}
+        onLayerMouseEnter={clearHoverBridge}
+        onLayerMouseLeave={scheduleHoverClear}
       >
         {isFocused ? (
           <div

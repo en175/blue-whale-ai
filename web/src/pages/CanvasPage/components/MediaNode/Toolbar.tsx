@@ -11,7 +11,7 @@ import { useState, useCallback } from 'react';
 import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2 } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
-import { mediaNodeToolbarVisibility } from './toolbarVisibility';
+import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
@@ -89,8 +89,9 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     },
   ];
 
-  /* 数据条件（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显 */
-  if (data.genStatus || data.assetMissing || data.emptyShell === true) return null;
+  /* 数据门（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显；
+   *  谓词与 CanvasPage 显隐门共用（mediaCardToolbarVisible，IKGYYB 审查消双实现） */
+  if (!mediaCardToolbarVisible(data)) return null;
 
   return (
     <div className={styles.toolbar}>

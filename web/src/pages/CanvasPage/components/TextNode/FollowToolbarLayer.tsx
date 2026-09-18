@@ -23,10 +23,21 @@ export interface FollowToolbarLayerProps {
   show: boolean;
   /** 工具条顶边相对卡片顶边的抬升量（屏幕像素，估高 + 间距）；缺省用 FOLLOW_ABOVE_LIFT */
   toolbarLift?: number;
+  /** 层根鼠标进入（IKGYYB hover 桥接）：指针从卡间隙抵达工具条，取消延迟清除 hover */
+  onLayerMouseEnter?: () => void;
+  /** 层根鼠标离开（IKGYYB hover 桥接）：指针移向卡外，重新调度延迟清除（移回卡则被卡 enter 取消） */
+  onLayerMouseLeave?: () => void;
   children: ReactNode;
 }
 
-export default function FollowToolbarLayer({ nodeId, show, toolbarLift, children }: FollowToolbarLayerProps) {
+export default function FollowToolbarLayer({
+  nodeId,
+  show,
+  toolbarLift,
+  onLayerMouseEnter,
+  onLayerMouseLeave,
+  children,
+}: FollowToolbarLayerProps) {
   const flowDom = useStore((state) => state.domNode);
   const position = useStore((state) => state.nodeLookup.get(nodeId)?.internals?.positionAbsolute);
   const nodeWidth = useStore((state) => state.nodeLookup.get(nodeId)?.measured?.width);
@@ -48,6 +59,8 @@ export default function FollowToolbarLayer({ nodeId, show, toolbarLift, children
       className={layerStyles.toolbarLayer}
       data-gen-panel-territory
       style={{ left: anchor.left, top: anchor.top }}
+      onMouseEnter={onLayerMouseEnter}
+      onMouseLeave={onLayerMouseLeave}
     >
       {children}
     </div>,

@@ -50,7 +50,8 @@ const durationLabel = (duration?: number) =>
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
 
 /** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
-export interface MediaNodeData {  src?: string;
+export interface MediaNodeData {
+  src?: string;
   fileName?: string;
   mediaType?: 'image' | 'video' | 'audio';
   toolMode?: 'drag' | 'select';
@@ -253,7 +254,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 保存到共享资产（共享资产下线，入口已隐藏） */
   // const handleSaveToAssets = useCallback(() => {
   //   setContextMenu(null);
-  //   console.log('[MediaNode] 保存到共享资产', { nodeId, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
+  //   console.log('[MediaNode] 保存到共享资产', { nodeId: id, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
   //   data.onSaveToAssets?.(id);
   // }, [data, id]);
 

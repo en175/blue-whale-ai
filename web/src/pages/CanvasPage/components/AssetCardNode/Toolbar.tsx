@@ -9,31 +9,34 @@
  * ============================================ */
 import { useCallback } from 'react';
 import { AtSign } from 'lucide-react';
-import { KIND_META, assetCardToolbarVisible, type AssetCardKind } from './toolbarVisibility';
+import { KIND_META, assetCardKindOf, assetCardToolbarVisible } from './toolbarVisibility';
 import type { AssetCardNodeData } from './index';
 import styles from './index.module.css';
 
 interface AssetCardToolbarProps {
   id: string;
   data: AssetCardNodeData;
+  /** 指针进入/离开工具条（IKGYYB hover 桥接，挂根 div）：CanvasPage 接线
+   *  取消/重调 hover 延迟清除——指针穿卡-条间隙抵达工具条时不闪卸 */
+  onToolbarPointerEnter?: () => void;
+  onToolbarPointerLeave?: () => void;
 }
 
-/** 水合容错口径同卡内：脏 kind 降级 custom，避免 KIND_META 落空 */
-function kindOf(kind: AssetCardKind | undefined): AssetCardKind {
-  return kind && kind in KIND_META ? kind : 'custom';
-}
-
-export default function AssetCardToolbar({ id, data }: AssetCardToolbarProps) {
+export default function AssetCardToolbar({ id, data, onToolbarPointerEnter, onToolbarPointerLeave }: AssetCardToolbarProps) {
   const handleAddToChat = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   /* 渲染条件（同迁移前卡内判定）：生成卡恒显，纯资产卡受 HIDE_ASSET_TOP_BAR 门控（当前 false 显示） */
   if (!assetCardToolbarVisible(data.kind)) return null;
 
   return (
-    <div className={styles.topBar}>
+    <div
+      className={styles.topBar}
+      onPointerEnter={onToolbarPointerEnter}
+      onPointerLeave={onToolbarPointerLeave}
+    >
       <span className={styles.topLabel}>
         <AtSign size={14} strokeWidth={2} />
-        <span>{KIND_META[kindOf(data.kind)].title}</span>
+        <span>{KIND_META[assetCardKindOf(data.kind)].title}</span>
       </span>
       <button className={styles.addToChatBtn} onClick={handleAddToChat}>
         <AtSign size={14} strokeWidth={2} />

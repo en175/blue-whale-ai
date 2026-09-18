@@ -11,7 +11,7 @@ import { uploadAssetFile } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
-import { KIND_META, type AssetCardKind } from './toolbarVisibility';
+import { KIND_META, assetCardKindOf, type AssetCardKind } from './toolbarVisibility';
 import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
@@ -82,8 +82,8 @@ const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15; // 秒
 
 export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
-  // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
-  const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
+  // 水合容错（脏 kind 降级 custom，口径合一于 toolbarVisibility.ts 的 assetCardKindOf）
+  const kind: AssetCardKind = assetCardKindOf(data.kind);
   const meta = KIND_META[kind];
   const [refs, setRefs] = useState<CanvasGalleryRef[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');

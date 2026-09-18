@@ -13,6 +13,7 @@ import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import AssetCardNode, { type AssetCardNodeData } from './index';
 import AssetCardToolbar from './Toolbar';
 import NodeFollowToolbar from '../NodeFollowToolbar';
+import { useAssetHoverBridge } from '../../hooks/useAssetHoverBridge';
 import { computeFollowAnchorAbove } from '../../followDialog';
 import styles from './index.module.css';
 
@@ -85,7 +86,12 @@ async function renderCard(extra?: RenderExtra) {
           positionAbsoluteX={0}
           positionAbsoluteY={0}
         />
-        <NodeFollowToolbar key="toolbar" nodeId="asset-1" hovered={extra?.hovered ?? false}>
+        <NodeFollowToolbar
+          key="toolbar"
+          nodeId="asset-1"
+          hovered={extra?.hovered ?? false}
+          toolbarLift={42}
+        >
           <AssetCardToolbar id="asset-1" data={{ kind, onAddToChat } as AssetCardNodeData} />
         </NodeFollowToolbar>
       </ReactFlowProvider>,
@@ -104,9 +110,10 @@ function cardDom(): HTMLElement {
   return mountNode.querySelector(`.${styles.wrapper}`) as HTMLElement;
 }
 
-/** jsdom 无 PointerEvent 构造器：MouseEvent 带指针类型触发 React 合成指针事件（仓库测试同做法） */
-function pointerOn(target: Element, type: string) {
-  target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+/** jsdom 无 PointerEvent 构造器：MouseEvent 带指针类型触发 React 合成指针事件（仓库测试同做法）；
+ *  relatedTarget 表达指针去向（间隙=卡外非工具条元素） */
+function pointerOn(target: Element, type: string, relatedTarget: EventTarget | null = null) {
+  target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, relatedTarget }));
 }
 
 beforeEach(() => {
@@ -129,7 +136,7 @@ describe('IKGYYF 资产卡顶部操作条悬浮化（钉屏幕层）', () => {
     expect(cardDom().textContent).not.toContain('添加到对话');
   });
 
-  it('悬浮形态：不占卡片文档流（卡内无 topBar 元素），钉屏幕层按卡片上方锚定定位', async () => {
+  it('悬浮形态：不占卡片文档流（卡内无 topBar 元素），钉屏幕层按卡片上方锚定定位（lift=42 对齐文本卡操作条口径）', async () => {
     await renderCard({ selected: true });
     expect(cardDom().querySelector(`.${styles.topBar}`)).toBeNull();
     const layer = pinnedLayer()!;
@@ -139,6 +146,7 @@ describe('IKGYYF 资产卡顶部操作条悬浮化（钉屏幕层）', () => {
       nodeWidth: 320,
       viewport: { x: 0, y: 0, zoom: 1 },
       containerWidth: 1200,
+      toolbarLift: 42,
     });
     expect(layer.style.left).toBe(`${anchor.left}px`);
     expect(layer.style.top).toBe(`${anchor.top}px`);
@@ -203,5 +211,110 @@ describe('IKGYYF 资产卡顶部操作条悬浮化（钉屏幕层）', () => {
       root.unmount();
     });
     expect(onHoverChange).toHaveBeenLastCalledWith('asset-1', false);
+  });
+});
+
+/** 模拟 CanvasPage 侧接线（IKGYYB hover 桥接）：hover 态与延迟清除 timer 收口于
+ *  useAssetHoverBridge（真实 hook），卡经 data.onHoverChange 上报（叠加 spy 断言）、
+ *  工具条根经 AssetCardToolbar 指针回调上报——未选中纯 hover 卡验证穿隙交互 */
+function BridgeHost({ onHoverChange }: { onHoverChange: (id: string, hovered: boolean) => void }) {
+  const bridge = useAssetHoverBridge();
+  return (
+    <>
+      <AssetCardNode
+        id="asset-1"
+        data={{
+          kind: 'style',
+          onHoverChange: (id: string, hovered: boolean) => {
+            onHoverChange(id, hovered);
+            bridge.handleAssetHoverChange(id, hovered);
+          },
+        } as never}
+        selected={false}
+        type="assetNode"
+        dragging={false}
+        zIndex={1}
+        selectable={true}
+        deletable={true}
+        draggable={true}
+        isConnectable={true}
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
+      />
+      <NodeFollowToolbar nodeId="asset-1" hovered={bridge.hoveredAssetNodeId === 'asset-1'} toolbarLift={42}>
+        <AssetCardToolbar
+          id="asset-1"
+          data={{ kind: 'style' } as AssetCardNodeData}
+          onToolbarPointerEnter={bridge.handleToolbarPointerEnter}
+          onToolbarPointerLeave={bridge.handleToolbarPointerLeave}
+        />
+      </NodeFollowToolbar>
+    </>
+  );
+}
+
+async function renderBridgedCard() {
+  const onHoverChange = vi.fn();
+  mountNode = document.createElement('div');
+  document.body.appendChild(mountNode);
+  root = createRoot(mountNode);
+  await act(async () => {
+    root.render(
+      <ReactFlowProvider>
+        <StateInjector key="state" state={flowState(false)} />
+        <BridgeHost key="host" onHoverChange={onHoverChange} />
+      </ReactFlowProvider>,
+    );
+  });
+  return { onHoverChange };
+}
+
+describe('IKGYYB hover 间隙桥接（卡与钉屏幕工具条间 ~20px 间隙不属于卡 DOM，穿隙不闪卸）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('未选中纯 hover 卡：pointerleave 进间隙后 120ms 内工具条未卸载，窗口过后才卸载', async () => {
+    await renderBridgedCard();
+    const card = cardDom();
+    expect(pinnedLayer()).toBeNull();
+    await act(async () => { pointerOn(card, 'pointerover'); });
+    expect(pinnedLayer()).toBeTruthy();
+    await act(async () => { pointerOn(card, 'pointerout', document.body); });
+    // 桥接窗口内（指针正穿间隙）不闪卸——修复前此处立即卸载、按钮点不到
+    expect(pinnedLayer()).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(120); });
+    expect(pinnedLayer()).toBeNull();
+  });
+
+  it('穿隙进入工具条层：不卸载且清除 timer 取消（远超窗口仍在）', async () => {
+    await renderBridgedCard();
+    const card = cardDom();
+    await act(async () => { pointerOn(card, 'pointerover'); });
+    await act(async () => { pointerOn(card, 'pointerout', document.body); });
+    await act(async () => { pointerOn(pinnedLayer()!.firstElementChild!, 'pointerover'); });
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(pinnedLayer()).toBeTruthy();
+    expect(pinnedLayer()!.textContent).toContain('添加到对话');
+  });
+
+  it('从工具条层移出到卡外：窗口过后才真清；移回卡则被卡 enter 取消', async () => {
+    await renderBridgedCard();
+    const card = cardDom();
+    await act(async () => { pointerOn(card, 'pointerover'); });
+    await act(async () => { pointerOn(card, 'pointerout', document.body); });
+    const bar = pinnedLayer()!.firstElementChild!;
+    await act(async () => { pointerOn(bar, 'pointerover'); });
+    await act(async () => { pointerOn(bar, 'pointerout', document.body); });
+    expect(pinnedLayer()).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(120); });
+    expect(pinnedLayer()).toBeNull();
+    // 对照：层 leave 后窗口内移回卡，清除被取消
+    await act(async () => { pointerOn(card, 'pointerover'); });
+    await act(async () => { pointerOn(card, 'pointerout', document.body); });
+    await act(async () => { pointerOn(bar, 'pointerover'); });
+    await act(async () => { pointerOn(bar, 'pointerout', document.body); });
+    await act(async () => { pointerOn(card, 'pointerover'); });
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(pinnedLayer()).toBeTruthy();
   });
 });
