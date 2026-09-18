@@ -34,50 +34,56 @@ export default function OutpaintFrame({ rect, expands, onExpandChange }: Outpain
 
   /** 拖拽会话：手柄类型 + 按下那一刻的扩展快照（Shift 锁比例基准） */
   const dragRef = useRef<{ kind: 'edge' | 'corner'; handle: string; start: ExpandSides } | null>(null);
+  /** 动态依赖（rect / expands / onExpandChange / 换算器）进 ref：window 监听引用稳定，
+   *  拖拽进行中的重渲染不再拆监听。旧实现清理 effect 依赖 onMove，而 rect 每次渲染
+   *  都是父级新对象，第一帧 move 引起重渲染即拆掉监听、拖拽冻结（多帧回归用例钉死）。 */
+  const latestRef = useRef({ rect, expands, onExpandChange, screenToFlowPosition });
+  latestRef.current = { rect, expands, onExpandChange, screenToFlowPosition };
+  /** 会话 detach：startDrag 挂监听时赋值，up / 卸载兜底时调用 */
+  const detachRef = useRef<() => void>(() => {});
 
-  /** 屏幕点换 flow 坐标后走纯函数换算（组件行为与纯函数测试同源） */
-  const onMove = useCallback(
-    (e: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const pointer = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const max = maxExpandPerSide(rect);
-      const next = drag.kind === 'edge'
-        ? dragExpandEdge(drag.handle as EdgeHandle, rect, pointer, drag.start, max)
-        : dragExpandCorner(drag.handle as CornerHandle, rect, pointer, drag.start, max, e.shiftKey);
-      onExpandChange(next);
-    },
-    [rect, screenToFlowPosition, onExpandChange],
-  );
+  /** 屏幕点换 flow 坐标后走纯函数换算（动态取 latestRef，组件行为与纯函数测试同源） */
+  const handleMove = useCallback((e: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const { rect: r, onExpandChange: change, screenToFlowPosition: toFlow } = latestRef.current;
+    const pointer = toFlow({ x: e.clientX, y: e.clientY });
+    const max = maxExpandPerSide(r);
+    const next = drag.kind === 'edge'
+      ? dragExpandEdge(drag.handle as EdgeHandle, r, pointer, drag.start, max)
+      : dragExpandCorner(drag.handle as CornerHandle, r, pointer, drag.start, max, e.shiftKey);
+    change(next);
+  }, []);
 
-  const onUp = useCallback(() => {
+  const handleUp = useCallback(() => {
     dragRef.current = null;
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onUp);
-  }, [onMove]);
+    detachRef.current();
+  }, []);
 
   const startDrag = useCallback(
     (kind: 'edge' | 'corner', handle: string) => (e: React.PointerEvent) => {
       if (e.button !== 0 || !e.isPrimary) return;
       e.preventDefault();
       e.stopPropagation();
-      dragRef.current = { kind, handle, start: expands };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
+      dragRef.current = { kind, handle, start: latestRef.current.expands };
+      window.addEventListener('pointermove', handleMove);
+      window.addEventListener('pointerup', handleUp);
+      window.addEventListener('pointercancel', handleUp);
+      detachRef.current = () => {
+        window.removeEventListener('pointermove', handleMove);
+        window.removeEventListener('pointerup', handleUp);
+        window.removeEventListener('pointercancel', handleUp);
+      };
     },
-    [expands, onMove, onUp],
+    [handleMove, handleUp],
   );
 
-  /** 卸载时清理拖拽监听（不触发回调，避免卸载期写父级状态） */
+  /** 卸载时清理拖拽监听（不触发回调，避免卸载期写父级状态）；依赖 []：只做真正卸载兜底 */
   useEffect(
     () => () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      detachRef.current();
     },
-    [onMove, onUp],
+    [],
   );
 
   // 屏幕空间框几何（flow × zoom + 平移）

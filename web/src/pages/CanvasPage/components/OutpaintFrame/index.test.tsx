@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-/* IKGOQX 扩展框覆盖层组件测试：手柄渲染与定位、拖边/拖角/Shift 锁比例换算接线、
-   拖拽结束停止响应。换算本身在 imageOutpaint.test.ts 纯函数层覆盖，此处测组件
-   把屏幕事件正确接到纯函数并回抛（zoom=1、容器在原点时 flow 坐标 == client 坐标）。 */
-import { act, createElement } from 'react';
+/* 扩展框覆盖层组件测试：手柄渲染与定位、拖边/拖角/Shift 锁比例换算接线、
+   拖拽结束停止响应、多帧连续拖动（重渲染不拆进行中的监听——拖不动 bug 回归锁）。
+   换算本身在 imageOutpaint.test.ts 纯函数层覆盖，此处测组件把屏幕事件正确接到
+   纯函数并回抛（zoom=1、容器在原点时 flow 坐标 == client 坐标）。 */
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,8 +18,23 @@ let container: HTMLDivElement;
 let onChange: ReturnType<typeof vi.fn>;
 let current: ExpandSides;
 
-async function renderFrame(expands: ExpandSides = { top: 0, right: 0, bottom: 0, left: 0 }) {
+/** 带状态宿主：rect 每次渲染传新对象、onExpandChange setState 触发真实重渲染，
+ *  复现 CanvasPage 的 props 流（旧 bug：重渲染拆掉进行中的拖拽监听）。 */
+function Host({ initial }: { initial: ExpandSides }) {
+  const [expands, setExpands] = useState(initial);
   current = expands;
+  return createElement(OutpaintFrame, {
+    rect: { ...RECT },
+    expands,
+    onExpandChange: (next: ExpandSides) => {
+      current = next;
+      onChange(next);
+      setExpands(next);
+    },
+  });
+}
+
+async function renderFrame(expands: ExpandSides = { top: 0, right: 0, bottom: 0, left: 0 }) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -27,14 +43,7 @@ async function renderFrame(expands: ExpandSides = { top: 0, right: 0, bottom: 0,
       createElement(
         ReactFlowProvider,
         null,
-        createElement(OutpaintFrame, {
-          rect: RECT,
-          expands: current,
-          onExpandChange: (next: ExpandSides) => {
-            current = next;
-            onChange(next);
-          },
-        }),
+        createElement(Host, { initial: expands }),
       ),
     );
   });
@@ -144,6 +153,17 @@ describe('IKGOQX 扩展框拖拽换算接线', () => {
     const calls = onChange.mock.calls.length;
     await move(1200, 400);
     expect(onChange.mock.calls.length).toBe(calls);
+  });
+
+  it('多帧连续拖动：每帧 pointermove 都生效（重渲染不拆进行中的监听）', async () => {
+    await renderFrame();
+    await down(handle('top'), 1200, 500);
+    await move(1200, 450);
+    // 第一帧生效后宿主已重渲染（rect 新引用），第二帧必须仍然生效
+    expect(current).toEqual({ top: 50, right: 0, bottom: 0, left: 0 });
+    await move(1200, 420);
+    expect(current).toEqual({ top: 80, right: 0, bottom: 0, left: 0 });
+    await up(1200, 420);
   });
 
   it('拖拽只许外扩：向下拖 top 边（越进原图）钳到 0', async () => {
