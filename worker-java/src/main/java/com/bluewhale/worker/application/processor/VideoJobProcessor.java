@@ -427,17 +427,15 @@ public class VideoJobProcessor implements JobProcessor {
         // prompt（:571-586）
         String basePrompt = strOrEmpty(input, "prompt");
         if (basePrompt.isEmpty()) basePrompt = strOrEmpty(input, "prompt_text");
-        // IKDLQG（IKFCXC 补齐组合）：目标驱动视频任务的快照携带 text_attachments（接纳时冻结的
-        // 当次正文），提交时按契约确定性组合；存量任务无该字段，prompt 逐字节不变。
+        // 方案快照仍供下方组装 videoReferences（首尾帧/参考素材），但不再提供正文。
         Map<?, ?> plan = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
-        if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("providerPrompt") instanceof String text) || text.isBlank() || !(plan.get("videoReferences") instanceof List<?>))) {
+        if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("videoReferences") instanceof List<?>))) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频方案快照无效");
         }
-        // 提示词：方案快照 / composed_prompt 优先；否则用接纳侧已拼好的 prompt（与图片同源，不再在 worker 里把附件拼回去）。
-        String composedPrompt = input.get("composed_prompt") instanceof String cp && !cp.isBlank() ? cp : null;
-        String prompt = plan != null ? (String) plan.get("providerPrompt")
-                : composedPrompt != null ? composedPrompt
-                : basePrompt;
+        // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
+        // （&asset_id& → @图片N）与附件拼装，执行与重试不得重新拼接覆盖它。
+        // 原 providerPrompt > composed_prompt > 附件组合三级优先链全部退役。
+        String prompt = basePrompt;
 
         // model（:587-592）
         String model = strOrEmpty(input, "model_id");

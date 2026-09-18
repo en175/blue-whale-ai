@@ -509,9 +509,10 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
+    // !718：发送前不再自动上传参考图换 materialId，画布图片按本地参考 asset_id 直接提交
     expect(payload.references).toEqual([
-      { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
-      { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
+      { asset_id: 'a1', type: 'image', role: 'first_frame' },
+      { asset_id: 'a2', type: 'image', role: 'last_frame' },
     ]);
     // IKFXZD：发送成功即隐藏面板
     expect(container.querySelector('[data-testid="video-send"]')).toBeNull();
@@ -533,8 +534,9 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
+    // !718：画布图片不再上传换 materialId，与视频参考同按本地 asset_id 提交（顺序不变）
     expect(payload.references).toEqual([
-      { material_id: 'asset-compliance-test', type: 'image', role: 'reference' },
+      { asset_id: 'a1', type: 'image', role: 'reference' },
       { asset_id: 'a3', type: 'video', role: 'reference' },
     ]);
     // IKFXZD：发送成功即隐藏面板

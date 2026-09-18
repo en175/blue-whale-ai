@@ -63,6 +63,8 @@ export const ERROR_MEDIA_EXTRACT_FAILED = "media_extract_failed";
 export const ERROR_VIDEO_GENERATION_FAILED = "video_generation_failed";
 export const ERROR_IMAGE_GENERATION_FAILED = "image_generation_failed";
 export const ERROR_AUDIO_GENERATION_FAILED = "audio_generation_failed";
+/** IKGM8U：高清放大（image_enhance）执行兜底失败码（契约 §14，无 worker 级重试）。 */
+export const ERROR_IMAGE_ENHANCE_FAILED = "image_enhance_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -129,6 +131,7 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_INVALID_REFERENCE_TYPE]: 1035,
   [ERROR_INVALID_REFERENCE_MEDIA]: 1036,
   [ERROR_OUTPUT_COUNT_MISMATCH]: 1037,
+  [ERROR_IMAGE_ENHANCE_FAILED]: 1039,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -388,6 +391,7 @@ export const ERROR_CODES: Record<number, string> = {
   1035: "参考素材类型不符合要求，请更换后重试", // invalid_reference_type
   1036: "参考视频不符合要求（格式/大小/时长/像素），请更换后重试", // invalid_reference_media
   1037: "生成数量与预期不符，请重新生成", // output_count_mismatch
+  1039: "高清放大失败，请重试", // image_enhance_failed
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

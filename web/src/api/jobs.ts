@@ -3,12 +3,13 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
 import { apiRequest, isApiError, type ApiError } from './http';
+import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 
-/** 可由普通生成端点创建的任务类型 */
+/** 可由普通生成端点创建的任务类型（image_enhance 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取任务。 */
-export type JobType = GenerationJobType | 'media_extract';
+/** 通用任务查询可能返回媒体提取任务与高清放大任务（IKGM9O）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -148,6 +149,16 @@ export interface MediaExtractionCreatedData {
   status: 'queued';
 }
 
+/** POST /api/projects/:id/image-enhancements 请求体（六键，键名与 backend/libs/contracts/image-enhance.ts 契约恒等）。
+ *  IKGM9O 高清放大面板提交；版本档能力矩阵与源图尺寸门槛由服务端权威复核，前端预检只是体验层。 */
+export type CreateImageEnhancementPayload = ImageEnhanceInput;
+
+/** 创建高清放大任务返回。 */
+export interface ImageEnhancementCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -219,6 +230,21 @@ export function createMediaExtraction(
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 创建图片高清放大任务（IKGM9O）；免费口径同 media_extract——不带幂等头、无积分预估、不走余额拦截门。
+ *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+export function createImageEnhancement(
+  projectId: string,
+  payload: CreateImageEnhancementPayload,
+): Promise<ImageEnhancementCreatedData> {
+  return apiRequest<ImageEnhancementCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

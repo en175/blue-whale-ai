@@ -36,10 +36,12 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> imageProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> audioProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> extractProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> imageEnhanceProvider;
     @Mock private GenerationMessageProducer videoProducer;
     @Mock private GenerationMessageProducer imageProducer;
     @Mock private GenerationMessageProducer audioProducer;
     @Mock private GenerationMessageProducer extractProducer;
+    @Mock private GenerationMessageProducer imageEnhanceProducer;
 
     private RecoveryService service;
 
@@ -53,12 +55,15 @@ class RecoveryServiceTest {
         when(imageProvider.getIfAvailable()).thenReturn(imageProducer);
         when(audioProvider.getIfAvailable()).thenReturn(audioProducer);
         when(extractProvider.getIfAvailable()).thenReturn(extractProducer);
+        when(imageEnhanceProvider.getIfAvailable()).thenReturn(imageEnhanceProducer);
         when(jobMapper.listDueVideoJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueMediaExtractJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueImageEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, props(java.util.Set.of("image")), MAX_AGE_MINUTES);
+                audioProvider, extractProvider, imageEnhanceProvider,
+                props(java.util.Set.of("image")), MAX_AGE_MINUTES);
     }
 
     @Test
@@ -84,6 +89,7 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueImageJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueAudioJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueMediaExtractJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueImageEnhanceJobIds(100, MAX_AGE_MINUTES);
     }
 
     @Test
@@ -125,7 +131,8 @@ class RecoveryServiceTest {
     @DisplayName("安全拉起（enabledTags 为空）→ 完全跳过扫库（stub DataSource 形态不刷错误日志）")
     void skipsEntirelyWhenNoTagsEnabled() {
         RecoveryService idle = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, props(java.util.Set.of()), MAX_AGE_MINUTES);
+                audioProvider, extractProvider, imageEnhanceProvider,
+                props(java.util.Set.of()), MAX_AGE_MINUTES);
 
         idle.recover();
 

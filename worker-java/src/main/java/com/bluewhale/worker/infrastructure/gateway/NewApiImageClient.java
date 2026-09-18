@@ -385,8 +385,10 @@ public class NewApiImageClient {
     /**
      * 图片 MIME 嗅探：优先魔数（b64_json 响应没有 Content-Type 头），
      * 魔数不认识才回退响应头，最后兜底 image/png（官方 GPT Image 默认输出格式）。
+     * <p>
+     * public：ImageEnhanceJobProcessor（跨包）转存结果图时复用同一嗅探逻辑。
      */
-    static String sniffImageMime(byte[] data, String contentTypeHeader) {
+    public static String sniffImageMime(byte[] data, String contentTypeHeader) {
         if (startsWith(data, 0x89, 'P', 'N', 'G')) return "image/png";
         if (startsWith(data, 0xFF, 0xD8, 0xFF)) return "image/jpeg";
         if (data.length >= 12

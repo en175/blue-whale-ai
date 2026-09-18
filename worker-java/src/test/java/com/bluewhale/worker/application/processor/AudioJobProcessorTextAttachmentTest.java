@@ -27,14 +27,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * 音频文本附件执行消费测试（IKFCXE：附件作为创作上下文与主提示词共同进入生成）。
+ * 音频正文来源测试（IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt）。
  * <p>
- * 验证（对齐 Node generation-worker.test.ts IKFCXE 组与 VideoJobProcessor 组合语义）：
- * - text_attachments 存在 → audioClient.generate 收到组合 prompt（非空白附件正文在前、
- *   主提示词最后追加、"\n\n" 连接，不改写正文、不添加朗读指令）
- * - 无 text_attachments 的旧任务 → prompt 原样透传（回归，逐字节不变）
- * - 快照形状损坏 → 按无附件处理（与视频侧 textAttachments 同源语义）
- * - prompt 为空且仅有附件 → 保持既有校验拒绝（音频不引入"仅附件生成"）
+ * 拼装已移交前端——接纳侧完成附件与主提示词的合成与引用标记转移（&asset_id& → @图片N），
+ * 执行侧不再组合、不再拼接：
+ * - composed_prompt 被忽略（无论内容为何）→ 正文取 input.prompt
+ * - text_attachments 不再参与正文（形状损坏与否都不影响）
+ * - 无附加字段的旧任务 → prompt 原样透传（回归，逐字节不变）
+ * - prompt 为空 → 保持既有校验拒绝（不引入"仅附件生成"）
  */
 @ExtendWith(MockitoExtension.class)
 class AudioJobProcessorTextAttachmentTest {
@@ -65,16 +65,17 @@ class AudioJobProcessorTextAttachmentTest {
                 .thenReturn(true);
     }
 
-    static Stream<Arguments> audioPromptSnapshots() {
-        String fallback = "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音";
-        String frozen = "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音";
-        return Stream.of(Arguments.of(123, fallback), Arguments.of("   ", fallback), Arguments.of(frozen, frozen));
+    static Stream<Arguments> ignoredComposedPrompts() {
+        return Stream.of(
+                Arguments.of("文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音"),
+                Arguments.of(123),
+                Arguments.of("   "));
     }
 
     @ParameterizedTest
-    @MethodSource("audioPromptSnapshots")
-    @DisplayName("音频优先消费冻结编号正文，损坏或空白快照回退附件组合")
-    void composedPromptWithAttachments(Object composed, String expected) {
+    @MethodSource("ignoredComposedPrompts")
+    @DisplayName("IKG6EK: composed_prompt 不再被消费 → 正文取 input.prompt")
+    void composedPromptIsIgnored(Object composed) {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "生成环境音",
                 "composed_prompt", composed,
@@ -92,9 +93,9 @@ class AudioJobProcessorTextAttachmentTest {
 
         processor.handle("100");
 
-        // 完整附件正文与主提示词共同送达供应商（空白附件跳过、"\n\n" 连接、主提示词最后）
+        // 正文不再由附件组合而来——供应商收到的就是冻结的 input.prompt
         verify(audioClient).generate(eq("sk-token"), eq("seed-audio-1.0"),
-                eq(expected), any());
+                eq("生成环境音"), any());
         verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L));
     }
 
@@ -117,8 +118,8 @@ class AudioJobProcessorTextAttachmentTest {
     }
 
     @Test
-    @DisplayName("快照形状损坏（元素缺 text 字段）→ 按无附件处理，prompt 原样透传")
-    void corruptedSnapshotTreatedAsNoAttachments() {
+    @DisplayName("text_attachments 形状损坏也不再影响正文 → prompt 原样透传")
+    void corruptedSnapshotDoesNotAffectPrompt() {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "海浪",
                 "model_id", "seed-audio-1.0",

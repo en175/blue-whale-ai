@@ -41,7 +41,7 @@ public interface AssetMapper extends BaseMapper<AssetEntity> {
      */
     @Select("""
             <script>
-            SELECT storage_key, url, mime FROM assets
+            SELECT storage_key, url, mime, type FROM assets
             WHERE id = #{assetId}
               AND user_id = #{userId}
               AND status = 'normal'

@@ -22,11 +22,11 @@ public record WorkerProperties(
     public WorkerProperties {
         enabledTags = enabledTags == null ? Set.of() : enabledTags;
         groupSuffix = groupSuffix == null ? "-java" : groupSuffix;
-        concurrency = concurrency == null ? new Concurrency(20, 5, 2) : concurrency;
+        concurrency = concurrency == null ? new Concurrency(20, 5, 2, 5) : concurrency;
     }
 
     /** 各消费者的在制品上限，等价 TS 侧 Semaphore；取值范围与 TS 校验一致。 */
-    public record Concurrency(int image, int audio, int mediaExtract) {
+    public record Concurrency(int image, int audio, int mediaExtract, int imageEnhance) {
         public Concurrency {
             if (image < 1 || image > 64) {
                 throw new IllegalArgumentException("IMAGE_CONCURRENCY 超出 1-64 范围: " + image);
@@ -36,6 +36,9 @@ public record WorkerProperties(
             }
             if (mediaExtract < 1 || mediaExtract > 16) {
                 throw new IllegalArgumentException("MEDIA_EXTRACT_CONCURRENCY 超出 1-16 范围: " + mediaExtract);
+            }
+            if (imageEnhance < 1 || imageEnhance > 64) {
+                throw new IllegalArgumentException("IMAGE_ENHANCE_CONCURRENCY 超出 1-64 范围: " + imageEnhance);
             }
         }
     }
