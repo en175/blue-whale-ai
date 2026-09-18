@@ -419,5 +419,5 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 **未闭合 / 上线前置（运维）**
 
 - 风险 ③（火山流水线对 Java 镜像的构建部署支持）与 ⑥（刀②③④ 被 IKEF1K gate）在本修正后**仍未闭合**；TS 容器下线无任何记录，登记为**新风险 ⑧**。
-- 上线前置项：部署新 worker 的同一步里确认旧 TS worker 容器已停（工单 IKELHC 承接并补齐 runbook）。
+- 上线前置项（两项，与 ADR-0084 修正六 决策 7 同口径）：① broker 上已存在**可路由**的 topic `generation-task`——这是改名新建的 topic，而 `autoCreateTopicEnable` 只在**生产者首次发送**时建 topic，消费者订阅不触发，缺失时 worker 启动即失败（`No topic route info in name server`）而非静默；创建途径以生产 broker 实际形态为准；② 旧 TS worker 容器已停。工单 IKELHC 承接并补齐 runbook。
 - 对账用 TS 基线文件（§1 出处列、附录 A 行号）多为已删除文件，行号基线仅作历史取证，不得据此判断现行行为。

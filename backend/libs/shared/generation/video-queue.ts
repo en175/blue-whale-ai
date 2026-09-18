@@ -9,6 +9,7 @@ import {
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_TAG,
 } from "./queue.constants.js";
+import type { GenerationTag } from "./queue.constants.js";
 
 /** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=video）+ RocketMqMediaExtractConsumer（tag=media_extract）
  *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
@@ -55,7 +56,7 @@ export function loadRocketMqConfig(
  *  delay 单位 ms（客户端 delay → 投递时间戳 now+delay）。 */
 export function createRocketMqVideoProducer(
   producer: Pick<Producer, "send">,
-  tag: string,
+  tag: GenerationTag,
 ): VideoQueueProducer {
   return {
     async enqueue(jobId, options = {}) {

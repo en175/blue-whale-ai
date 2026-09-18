@@ -27,13 +27,13 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 
 ## 上线前检查清单（原子改名，部署前逐条确认）
 
-topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**：旧名与新名都能启动成功，错配的唯一表现是消息无人消费——进程健康、`/ready` 绿、什么都不报。部署前必须确认：
+topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**。**名字错配**的表现是静默的：进程健康、`/ready` 绿、消息无人消费或被旧进程抢走，什么都不报（这也是本清单存在的理由）；但**前置条件不满足是响亮失败**——新 topic 不存在时 worker 根本起不来。部署前必须确认：
 
-- [ ] **broker 上已存在 topic `generation-task`**：这是本次改名新建的 topic，而 RocketMQ 的 `autoCreateTopicEnable` **只在生产者首次发送时**建 topic，消费者订阅不触发。topic 不存在时 worker **起不来**（`No topic route info in name server for the topic: generation-task` → `Error starting ApplicationContext` → 进程退出），不是静默。创建方式：`mqadmin updateTopic -n <namesrv> -c DefaultCluster -t generation-task`。**创建后要等 broker→namesrv 路由注册（默认 30s）再起 worker**——本地实测早于该窗口启动仍会失败。
+- [ ] **broker 上已存在可路由的 topic `generation-task`**：这是本次改名新建的 topic，而 RocketMQ 的 `autoCreateTopicEnable` **只在生产者首次发送时**建 topic，消费者订阅不触发——worker 的第一次消费者 `startUp` 早于任何生产者发送，所以不预建就起不来。失败是**响亮**的：`No topic route info in name server for the topic: generation-task` → `Error starting ApplicationContext` → 进程退出。**创建途径取决于生产 broker**（控制台 / OpenAPI / `mqadmin updateTopic`）——本仓没有描述生产 RocketMQ 部署形态的文档，以实际为准。**建完后要确认路由可查**（例如 topic route 查询）再起 worker：本地实测 `mqadmin updateTopic` 之后存在约 30s 的 broker→namesrv 注册窗口，生产经 gRPC proxy 还可能另有缓存——所以以「能查到路由」为准，别照抄固定秒数。
 - [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，其余各项都只能证明「没有障碍」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
 - [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
 
-错配的后果都是**静默的**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但消息可能无人消费、或被打进旧进程的 group——所以上面第一条（六条启动日志）才是正面的「订阅真的对了」证据。生产侧（`backend`）也不再读 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`，残留这两个键不会再把生产者指回旧名。
+错配的后果都是**静默的**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但消息可能无人消费、或被打进旧进程的 group——所以上面第二条（六条启动日志）才是正面的「订阅真的对了」证据。生产侧（`backend`）也不再读 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`，残留这两个键不会再把生产者指回旧名。
 
 ## 构建 / 运行
 

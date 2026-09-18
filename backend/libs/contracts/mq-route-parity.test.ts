@@ -45,9 +45,16 @@ describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java �
 
   it("枚举常量表与 TS 六个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）", () => {
     // 形如 `    VIDEO("generation-task", "video"),`（末项以 `;` 收尾）。
+    // 缩进放宽为 `\s*`：纯格式化改动不该红；下面那条 length 断言负责把「正则没匹配上」
+    // 变成一句可读的失败，而不是 `expected [] to equal [6 items]` 这种查不出原因的报错。
     const declared = [
-      ...mqRouteJava.matchAll(/^\s{4}([A-Z_]+)\("([^"]+)",\s*"([^"]+)"\)[,;]\s*$/gm),
+      ...mqRouteJava.matchAll(/^\s*([A-Z_]+)\("([^"]+)",\s*"([^"]+)"\)[,;]\s*$/gm),
     ].map((match) => ({ entry: match[1], topic: match[2], tag: match[3] }));
+
+    expect(
+      declared.length,
+      "未从 GenerationMqRoute.java 解析出任何枚举常量——源码形状已偏离 `X(\"topic\", \"tag\")[,;]`，请同步本测试的正则",
+    ).toBeGreaterThan(0);
 
     expect(declared).toEqual(
       EXPECTED_ROUTES.map(({ entry, tag }) => ({
