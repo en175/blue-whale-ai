@@ -138,7 +138,7 @@ class ImageEraseJobProcessorTest {
     private void stubPublish() {
         when(tosService.uploadImageBytes(any(), anyString(), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/erased.png", "uploads/9/image/erased.png", "image/png", PNG_1X1.length));
+                        "https://tos/erased.png", "uploads/9/image/erased.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEraseResult(any())).thenReturn(true);
     }
 
@@ -404,7 +404,7 @@ class ImageEraseJobProcessorTest {
                 .thenReturn(new NewApiMediaKitEraseClient.EraseResult(resultUrl));
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
-                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length));
+                        "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishImageEraseResult(any())).thenReturn(false);
 
         processor.handle("100");

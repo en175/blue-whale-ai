@@ -187,7 +187,7 @@ public class JobFinalizer {
         }
 
         AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
-                input.url(), input.storageKey(), input.mime(), input.size(),
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
                 input.width(), input.height(), null);
         assetMapper.insert(asset);
 
