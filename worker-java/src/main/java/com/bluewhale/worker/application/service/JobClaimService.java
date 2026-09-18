@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -58,6 +59,16 @@ public class JobClaimService {
     /** image_enhance claim 的单源白名单（契约 §14.1：唯一创建入口 = 画布图片卡工具条）。 */
     private static final List<String> IMAGE_ENHANCE_CLAIM_SOURCES =
             List.of("image_enhance");
+
+    /**
+     * image_erase 租约 420s（契约 §15 / IKGOT6）：同步 erase 调用（读超时默认 300s）
+     * + 结果图下载 + TOS 转存需在同一租约窗口内完成（image_enhance 的 420s 语义同款）。
+     */
+    private static final int IMAGE_ERASE_LEASE_SECONDS = 420;
+
+    /** image_erase claim 的单源白名单（契约 §15.1：唯一创建入口 = 画布图片卡工具条「擦除」）。 */
+    private static final List<String> IMAGE_ERASE_CLAIM_SOURCES =
+            List.of("image_erase");
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -258,6 +269,42 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new ClaimedImageEnhanceJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                workerId,
+                postIncrementToken));
+    }
+
+    /**
+     * 领取 image_erase 作业（契约 §15 / IKGOT6，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租录用 image_erase 专用 420s（> MediaKit 读超时 + 转存余量）。
+     */
+    public Optional<ClaimedImageEraseJobDto> claimImageErase(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, "image_erase", IMAGE_ERASE_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_ERASE_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[image_erase] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedImageEraseJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

@@ -755,9 +755,9 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声'));
     await act(async () => sendButton().click());
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    // !722：prompt_doc 退役，payload 不再携带；音频引用以 references 提交（IKGJT2 行为）
     expect(apiMocks.createGenerationJob.mock.calls[0][1]).toMatchObject({
       references: [{ role: 'reference', asset_id: '601', type: 'audio' }],
-      prompt_doc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
     });
   });
 });
