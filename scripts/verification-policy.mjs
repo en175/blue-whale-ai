@@ -1,4 +1,4 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md)$/i;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 // `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
 // `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。
