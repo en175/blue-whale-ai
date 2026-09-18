@@ -91,6 +91,26 @@ export function deriveMediaMentionLabels(
   return labels;
 }
 
+/** 提交给模型的图片标签：视觉仍是「图片N」，正文里写成 &素材id& */
+export function imageMentionSendToken(assetId: string): string {
+  return `&${assetId}&`;
+}
+
+/** 把正文里的图片 @ 区间替换为 &素材id&（从后往前改，避免位移） */
+export function replaceImageMentionsWithAssetTokens(
+  text: string,
+  mentions: readonly MediaMention[],
+  isImage: (mention: MediaMention) => boolean,
+): string {
+  let result = text;
+  for (const mention of [...mentions].sort((a, b) => b.start - a.start)) {
+    if (!isImage(mention)) continue;
+    if (mention.start < 0 || mention.end > result.length || mention.end <= mention.start) continue;
+    result = result.slice(0, mention.start) + imageMentionSendToken(mention.assetId) + result.slice(mention.end);
+  }
+  return result;
+}
+
 /** 按给定出现顺序派生显示标签（编辑器 DOM 顺序场景；语义与 deriveMediaMentionLabels 一致）。 */
 export function deriveMediaMentionLabelsInOrder(
   identities: Array<Pick<MediaMention, "nodeId" | "assetId">>,

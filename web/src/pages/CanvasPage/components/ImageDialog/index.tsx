@@ -20,6 +20,7 @@ import {
   docHasInvalidRef,
   flattenPromptDocWith,
   imageRefLabelOf,
+  promptCoveredByAttachmentParts,
   textRefLabelOf,
   type PromptDoc,
   type PromptRefKey,
@@ -50,7 +51,8 @@ const DEFAULT_MAX_INPUT = 1000;
 export const IMAGE_COMPOSED_PROMPT_LIMIT = 1000;
 export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超出1000字限制，请重新编辑。';
 
-/** 参考文本在前、输入文本在后，跳过空白附件，以空行拼接为提交 prompt */
+/** 参考文本在前、输入文本在后直接拼接，中间不加空行。
+ *  生成框若只是文本附件里已经有的 &素材id&，不再追加，避免同一个 @ 拼两次。 */
 export function composeImageSendPrompt(
   attachments: ImageTextAttachment[] | undefined,
   input: string,
@@ -60,8 +62,8 @@ export function composeImageSendPrompt(
   const parts = indexed
     ? (attachments ?? []).map((item, i) => `文本${i + 1}：${item.text}`)
     : (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
-  if (input.trim().length > 0) parts.push(input);
-  return parts.join('\n\n');
+  if (input.trim().length > 0 && !promptCoveredByAttachmentParts(input, parts)) parts.push(input);
+  return parts.join('');
 }
 
 /** 图片面板普通参考中视频素材上限（ADR-0086：读能力行 video_reference_max，缺省 3；
@@ -75,7 +77,7 @@ export interface UploadedFile {
   name: string;
   /** 原始 File 对象（用户本地选择时携带，用于上传获取 assetId） */
   file?: File;
-  /** 已有资产 ID（画布节点选取时携带，直接作为 input_asset_ids） */
+  /** 已有资产 ID（画布节点选取时携带，直接作为 references[].asset_id） */
   assetId?: string | number;
 }
 
@@ -276,7 +278,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const imagesFull = edgeRefs ? edgeRefs.length >= maxImages : imageCount >= maxImages;
 
   /** 有效图片参考（保序去重）+ 展示编号（IKFA1M）：
-   *  编号 = 素材在最终 input_asset_ids 中的下标+1——连线模式 = 连线顺序（与服务端同源推导）；
+   *  编号 = 素材在最终 references 中的下标+1——连线模式 = 连线顺序（与服务端同源推导）；
    *  本地模式 = 图片文件顺序（含待上传项占位，与 collectImageInputAssetIds 保序一致）。
    *  附件区角标、@ 菜单、正文标签、服务端编译共用同一映射。 */
   const orderedImageRefs = useMemo(() => {

@@ -4,7 +4,7 @@
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
-import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
+import { replaceImageMentionsWithAssetTokens, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -67,7 +67,7 @@ import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './c
 import ImageDialog, { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
-import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
+import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -123,7 +123,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
-import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
+import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
   canConnectSourcesToGen,
@@ -4510,8 +4510,8 @@ export default function CanvasPage() {
   };
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
-   *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
-   *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥。
+   *  mediaRefs 仅 image/video/audio：单数组 references（保序），与 input_asset_ids 等旧参考字段互斥。
+   *  视频可含首尾帧角色；图片/音频 role 恒 reference。素材库引用（Asset- 前缀）走 material_id。
    *  targetNodeId 仅图片/视频（IKDLQF/IKDLQG）：从对应媒体节点面板发起时携带，服务端按最新画布推导连线文本附件。
    *  目标是草稿身份节点时（IKDMQQ）：不再新建占位卡，草稿原地转生成中，结果回填同一张卡。
    *  返回 true 表示创建请求已发出（IKFXZD：面板据此判定发送成功并自动隐藏）；
@@ -4641,37 +4641,36 @@ export default function CanvasPage() {
     const activeAtCreate = newNodeId('pending-generation');
     activeJobByNodeRef.current.set(nodeId, activeAtCreate);
     stopJobPolling(nodeId, jobTimersRef.current);
+    const jobRefs = videoRefs?.references;
+    const sendPrompt = promptDoc ? flattenPromptDocForSend(promptDoc) : parameters.prompt;
+    const sendAttachments = targetNodeId ? textAttachmentsForSend(targetNodeId) : undefined;
+    const jobPrompt = composeImageSendPrompt(sendAttachments, sendPrompt, promptDoc);
     try {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters: !promptDoc
-          ? {
-              ...parameters,
-              prompt: composeImageSendPrompt(
-                targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
-                parameters.prompt,
-              ),
-            }
-          : parameters,
-        input_asset_ids: inputAssetIds,
-        ...((type === 'video' || type === 'audio') && videoRefs?.references && videoRefs.references.length > 0
-          ? { references: videoRefs.references }
-          : {
-              first_frame_asset_id: videoRefs?.firstFrameAssetId,
-              last_frame_asset_id: videoRefs?.lastFrameAssetId,
-              reference_asset_ids: videoRefs?.referenceAssetIds?.length
-                ? videoRefs.referenceAssetIds
-                : undefined,
-              first_frame_material_id: videoRefs?.firstFrameMaterialId,
-              last_frame_material_id: videoRefs?.lastFrameMaterialId,
-              reference_materials: videoRefs?.referenceMaterials?.length
-                ? videoRefs.referenceMaterials
-                : undefined,
-            }),
+        parameters: {
+          ...parameters,
+          prompt: jobPrompt,
+        },
+        ...(inputAssetIds?.length ? { input_asset_ids: inputAssetIds } : {}),
+        ...(jobRefs && jobRefs.length > 0
+          ? { references: jobRefs }
+          : type === 'image' || type === 'audio'
+            ? {}
+            : {
+                first_frame_asset_id: videoRefs?.firstFrameAssetId,
+                last_frame_asset_id: videoRefs?.lastFrameAssetId,
+                reference_asset_ids: videoRefs?.referenceAssetIds?.length
+                  ? videoRefs.referenceAssetIds
+                  : undefined,
+                first_frame_material_id: videoRefs?.firstFrameMaterialId,
+                last_frame_material_id: videoRefs?.lastFrameMaterialId,
+                reference_materials: videoRefs?.referenceMaterials?.length
+                  ? videoRefs.referenceMaterials
+                  : undefined,
+              }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
-        // 结构化正文由接纳侧统一复核、编译并冻结。
-        ...(promptDoc ? { prompt_doc: promptDoc } : {}),
       })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
@@ -5191,6 +5190,19 @@ export default function CanvasPage() {
         title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
         text: extractTextNodeText(n.data),
       }));
+
+  /** 提交用附件正文：图片 @ 写成 &素材id&，面板展示仍用编号 */
+  const textAttachmentsForSend = (targetNodeId: string): ImageTextAttachment[] =>
+    textAttachmentsOf(targetNodeId).map((att) => {
+      const node = textNodesRef.current.find((n) => n.id === att.nodeId);
+      const mentions = Array.isArray(node?.data.mediaMentions) ? (node.data.mediaMentions as MediaMention[]) : [];
+      const refs = Array.isArray(node?.data.mediaRefs) ? (node.data.mediaRefs as MediaRef[]) : [];
+      const imageNodeIds = new Set(refs.filter((ref) => ref.mediaType === 'image').map((ref) => ref.nodeId));
+      return {
+        ...att,
+        text: replaceImageMentionsWithAssetTokens(att.text, mentions, (mention) => imageNodeIds.has(mention.nodeId)),
+      };
+    });
 
   /** 目标连入边子序列重排（IKFCKT 从 IKDLQH 泛化）：orderedSources 是 target 连入边 source 的
    *  子集（文本边 / 媒体边 / 混合），按新顺序回填这些边占据的原槽位（其余边相对位置不变，各目标独立） */
@@ -6914,9 +6926,8 @@ export default function CanvasPage() {
     }
   };
 
-  /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源；
-   *  IKFM3S §2 含文本带入参考的合并推导，与后端权威并入同源）；
-   *  其余入口（资产卡等自由面板）沿用面板 files——有 assetId 直用，否则上传取 ID */
+  /** 收集图片参考 assetId：绑定模式按连线推导（与 Dock 显示同源，含文本带入）；
+   *  其余入口沿用面板 files——有 assetId 直用，否则上传取 ID。提交时再组装为 references。 */
   const collectImageInputAssetIds = async (
     targetNodeId: string | undefined,
     files: UploadedFile[],
@@ -7003,12 +7014,13 @@ export default function CanvasPage() {
       );
       if (targetNodeId && !(await flushCanvasSave(projectId))) return;
       if (activeProjectRef.current !== projectId) return;
+      const jobRefs = buildImageJobReferences(inputAssetIds);
       const submitted = startGenerationJob('image', {
         prompt: text,
         model_id: modelId,
         aspect_ratio: ratio,
         size,
-      }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId, undefined, promptDoc);
+      }, undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, targetNodeId, undefined, promptDoc);
       // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
       // 置 hidden 标记避免紧随的画布选中事件回弹重开
       if (submitted) { imagePanelHiddenRef.current = true; setShowImageDialog(false); }
@@ -7062,8 +7074,9 @@ export default function CanvasPage() {
         }
         if (activeProjectRef.current !== projectId) return;
         if (handoff.kind === 'image') {
+          const jobRefs = buildImageJobReferences(references.map(r => r.assetId));
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
-            references.map(r => r.assetId), undefined, undefined, { references });
+            undefined, jobRefs.length > 0 ? { references: jobRefs } : undefined, undefined, { references });
         } else {
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration,

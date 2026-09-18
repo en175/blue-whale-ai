@@ -5,7 +5,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
 
-/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 input_asset_ids。
+/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 references[].asset_id。
  *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。 */
 export interface ImageMediaRef {
   nodeId: string;

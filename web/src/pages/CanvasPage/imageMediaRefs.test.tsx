@@ -273,7 +273,7 @@ afterEach(async () => {
 });
 
 describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
-  it('画布连入有效图片后 Dock 立即显示同一输入；提交携带连线推导的 input_asset_ids', async () => {
+  it('画布连入有效图片后 Dock 立即显示同一输入；提交携带连线推导的 references', async () => {
     await renderPage();
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -293,7 +293,7 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
     const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
     expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual([`m1->${draftId}`]);
 
-    // 提交：先落盘再建任务，input_asset_ids 与 Dock 显示一致
+    // 提交：先落盘再建任务，references 与 Dock 显示一致
     await typePrompt('参考这张图重新绘制');
     await act(async () => {
       sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -302,7 +302,8 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('image');
     expect(payload.target_node_id).toBe(draftId);
-    expect(payload.input_asset_ids).toEqual(['a1']);
+    expect(payload.input_asset_ids).toBeUndefined();
+    expect(payload.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
     expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder.at(-1)!).toBeLessThan(
       apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
     );
@@ -328,7 +329,8 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe(draftId);
-    expect(payload.input_asset_ids).toEqual(['a1']);
+    expect(payload.input_asset_ids).toBeUndefined();
+    expect(payload.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
   });
 
   it('点击文本缩略图 ×：仅断开当前连线（画布原文本卡保留），正文提及随之失效（IKFCKN）', async () => {
@@ -396,7 +398,8 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     await typePrompt('采用所选参考');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toBeUndefined();
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
   });
 
   it('Dock 选取非法来源（待生成草稿/视频）明确提示且不建立连线', async () => {
@@ -683,6 +686,7 @@ describe('IKDMQR 参考关系持久化恢复', () => {
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
-    expect(payload.input_asset_ids).toEqual(['a1']);
+    expect(payload.input_asset_ids).toBeUndefined();
+    expect(payload.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
   });
 });
