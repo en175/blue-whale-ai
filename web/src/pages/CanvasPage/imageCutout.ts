@@ -146,22 +146,22 @@ export interface BuildImageCutoutRequestInput {
   needCropBackground?: boolean;
 }
 
-/** 通用场景请求体（四键，无增强参数）。 */
+/** 通用场景请求体（三键，无增强参数；恒等契约 imageCutoutInputSchema general 分支——
+ *  output_format 是 worker 出站固定参数（契约注释「单处定义，worker 出站请求处引用」），
+ *  创建接口 input 冻结不携带，strict schema 传入即拒）。 */
 export interface ImageCutoutGeneralRequest {
   source_asset_id: string;
   target_node_id: string;
   cutout_scene: 'general';
-  output_format: typeof IMAGE_CUTOUT_OUTPUT_FORMAT;
 }
 
-/** 人像/商品场景请求体（四键 + 增强四参数）。 */
+/** 人像/商品场景请求体（三键 + 增强四参数，恒等契约 subject 分支）。 */
 export interface ImageCutoutSubjectRequest {
   source_asset_id: string;
   target_node_id: string;
   cutout_scene: 'human' | 'product';
-  output_format: typeof IMAGE_CUTOUT_OUTPUT_FORMAT;
   need_contour: boolean;
-  contour_color: string;
+  contour_color: typeof IMAGE_CUTOUT_CONTOUR_COLOR;
   contour_size: number;
   need_crop_background: boolean;
 }
@@ -172,14 +172,17 @@ export type ImageCutoutRequest = ImageCutoutGeneralRequest | ImageCutoutSubjectR
 
 /** 抠图发送参数组装：scene 直传三值；通用场景不携带 need_contour/contour_color/
  *  contour_size/need_crop_background 四参数（接口对 general 忽略，请求体不带忽略字段，
- *  规格故事 29）；描边宽度钳制 1~50 默认 10；contour_color 固定白色；output_format
- *  固定 png；queue_id 不传。重载按场景窄化返回形态。 */
+ *  规格故事 29）；也不携带 output_format（契约 strict schema 按场景三键/七键冻结，
+ *  固定 png 由 worker 出站时引用契约常量携带，IKGXMT 对齐后端创建入口复核口径）；
+ *  描边宽度钳制 1~50 默认 10；contour_color 固定白色。重载按场景窄化返回形态。 */
 export function buildImageCutoutRequest(
   input: BuildImageCutoutRequestInput & { scene: 'human' | 'product' },
 ): ImageCutoutSubjectRequest;
 export function buildImageCutoutRequest(
   input: BuildImageCutoutRequestInput & { scene: 'general' },
 ): ImageCutoutGeneralRequest;
+/** 宽签名（联合 scene，如 UI 会话态直传）：窄化信息丢失时返回判别联合，由契约侧收窄 */
+export function buildImageCutoutRequest(input: BuildImageCutoutRequestInput): ImageCutoutRequest;
 export function buildImageCutoutRequest(input: BuildImageCutoutRequestInput): ImageCutoutRequest {
   const { sourceAssetId, targetNodeId, scene } = input;
   if (scene === 'general') {
@@ -187,7 +190,6 @@ export function buildImageCutoutRequest(input: BuildImageCutoutRequestInput): Im
       source_asset_id: sourceAssetId,
       target_node_id: targetNodeId,
       cutout_scene: scene,
-      output_format: IMAGE_CUTOUT_OUTPUT_FORMAT,
     };
   }
   const raw = typeof input.contourSize === 'number' && Number.isFinite(input.contourSize)
@@ -198,10 +200,19 @@ export function buildImageCutoutRequest(input: BuildImageCutoutRequestInput): Im
     source_asset_id: sourceAssetId,
     target_node_id: targetNodeId,
     cutout_scene: scene,
-    output_format: IMAGE_CUTOUT_OUTPUT_FORMAT,
     need_contour: input.needContour === true,
     contour_color: IMAGE_CUTOUT_CONTOUR_COLOR,
     contour_size: contourSize,
     need_crop_background: input.needCropBackground === true,
   };
+}
+
+/** 抠图身份标记（node.data.imageCutout，形态对齐 imageErase.ts 的 ImageEraseIdentity）：
+ *  无参数面板（工具栏参数仅会话期持有，退出即弃），lastInput 供失败重试原样重发创建接口；
+ *  结果卡带本标记时内容区垫棋盘格底纹（透明 png 可辨识）。 */
+export interface ImageCutoutIdentity {
+  /** 源素材身份（assetId 归一字符串）：提交冻结 source_asset_id */
+  sourceAssetId?: string;
+  /** 上次提交参数（契约三键/七键形态，target_node_id 指向本卡）；失败重试原样重发 */
+  lastInput?: ImageCutoutRequest;
 }
