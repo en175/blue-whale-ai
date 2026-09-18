@@ -8,7 +8,7 @@ export {
   type VideoTaskType,
 } from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
-export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
+export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, imageMentionSendToken, replaceImageMentionsWithAssetTokens, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
 export { AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, TEXT_INDEX_INVALID_MESSAGE, TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE, textIndexOverflowMessage, checkAudioTextIndexSyncInput, checkTextIndexSyncInput, checkVideoTextIndexSyncInput, mergeTextProvidedReferences, textProvidedAudioReferences, textProvidedVideoReferences, textIndexOfTarget, textInputSignatureOf, type AudioTextIndexSyncError, type TargetTextIndex, type TargetTextInputEntry, type TextIndexCanvasNode, type TextIndexSyncError, type TextProvidedAudioReference, type TextProvidedRef, type TextProvidedVideoReference, type VideoReferenceLikeItem, type VideoTextIndexSyncError } from "./text-index-sync.js";
 export {
   legacyCardHistoryItemSchema,
@@ -34,20 +34,8 @@ export {
 } from "./canvas-edges.js";
 export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, COMPOSED_AUDIO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
 export {
-  PROMPT_DOC_VERSION,
-  promptDocSchema,
-  promptDocSegmentSchema,
-  imageRefLabel,
-  textRefLabel,
-  docHasTextRef,
-  validatePromptDocRefs,
-  compilePromptDoc,
   videoRefLabel,
-  validateVideoPromptDocRefs,
-  compileVideoPromptDoc,
-  type PromptDoc,
-  type PromptDocSegment,
-  type PromptDocRefFailure,
+  buildReferenceMarkerLabels,
   type VideoRefItem,
 } from "./prompt-doc.js";
 export {

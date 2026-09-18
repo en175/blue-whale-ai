@@ -478,9 +478,10 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
       expect(input.prompt).toBe("生成环境音，参考文本1");
-      expect(input.composed_prompt).toBe("文本1：雨夜街道，两个人争吵\n\n生成环境音，参考文本1");
-      expect(input.prompt_doc).toEqual(generationRequests[0].body.prompt_doc);
-      expect((input.prompt_doc as { segments: unknown[] }).segments).toContainEqual({ kind: "text_ref", node_id: "text-1", label: "文本1" });
+      // IKG6EK / ADR-0088：composed_prompt 与 prompt_doc 均已退役——前者是编号清单组合，
+      // 后者整体惰性化（不读、不冻结）。正文一律取 parameters.prompt。
+      expect(input).not.toHaveProperty("composed_prompt");
+      expect(input).not.toHaveProperty("prompt_doc");
       expect(input.text_attachments).toEqual([
         { node_id: "text-1", title: "雨夜", text: "雨夜街道，两个人争吵" },
       ]);

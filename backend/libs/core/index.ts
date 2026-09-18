@@ -90,8 +90,8 @@ export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
 export { composeImagePrompt } from "./compose-image-prompt.js";
 export {
   composeTextAttachmentPrompt,
-  composeTextAttachmentPromptIndexed,
 } from "./compose-text-attachment-prompt.js";
+export { transferReferenceMarkers } from "./transfer-reference-markers.js";
 export {
   issueAccessToken,
   verifyAccessToken,
