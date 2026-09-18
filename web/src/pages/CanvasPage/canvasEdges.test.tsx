@@ -718,10 +718,8 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
       const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
       // !718：角色库来源保持 material_id；画布图片不再上传换 materialId，按本地 asset_id 提交（顺序与编号一致）
       expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { asset_id: '101', type: 'image', role: 'reference' }]);
-      expect(payload.parameters.prompt).toBe('组合图片2和图片1');
-      expect(payload.prompt_doc.segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
-        { kind: 'asset_ref', asset_id: '101', label: '图片2' }, { kind: 'asset_ref', asset_id: 'asset-lib1', label: '图片1' },
-      ]);
+      // !723：图片标签写素材 id（&素材id& 形态）、正文直连；!722：prompt_doc 退役不再上送（IKGJT2/IKGJT5 行为）
+      expect(payload.parameters.prompt).toBe('一只蓝鲸在海里组合&101&和&asset-lib1&');
     } finally {
       rect.mockRestore();
     }
