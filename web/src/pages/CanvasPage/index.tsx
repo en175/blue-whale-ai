@@ -44,7 +44,9 @@ import {
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
-import type { MediaGenStatus } from './components/MediaNode';
+import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
+import MediaNodeToolbar from './components/MediaNode/Toolbar';
+import NodeFollowToolbar from './components/NodeFollowToolbar';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   buildMediaExtractPlaceholderNode,
@@ -345,6 +347,10 @@ export default function CanvasPage() {
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  /** 当前唯一选中节点 id（IKGYYD 钉屏幕悬浮工具栏的跟随目标）：onSelectionChange 顶部回写
+   *  （选取/扩图等早退分支不阻断）；「唯一选中 + 无多选」的精确门在 NodeFollowToolbar
+   *  容器内直读 React Flow store，本值只负责挑出该渲染哪个节点的工具条 */
+  const [soloSelectedNodeId, setSoloSelectedNodeId] = useState<string | null>(null);
   /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
   const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
@@ -1211,6 +1217,17 @@ export default function CanvasPage() {
         return { left: Math.round(left), top: Math.round(top) };
       })()
     : null;
+  /** IKGYYD 钉屏幕悬浮工具栏：唯一选中的普通成品媒体卡（数据条件同迁移前 MediaNode 内判定：
+   *  生成流程卡 / 素材缺失 / 空壳上传卡不显）；「唯一选中 + 画布无多选」精确门、锚定与
+   *  拖动/平移缩放实时跟随由 NodeFollowToolbar 容器承担（渲染在画布缩放层之外） */
+  const soloMediaToolbarNode = soloSelectedNodeId
+    ? mediaNodes.find((n) => n.id === soloSelectedNodeId) ?? null
+    : null;
+  const showSoloMediaToolbar = (() => {
+    if (!soloMediaToolbarNode) return false;
+    const d = (soloMediaToolbarNode.data ?? {}) as Record<string, unknown>;
+    return !d.genStatus && !d.assetMissing && d.emptyShell !== true;
+  })();
   /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
   const handleOutpaintPresetSelect = useCallback(
     (key: OutpaintPresetKey) => {
@@ -2886,6 +2903,13 @@ export default function CanvasPage() {
    *  选取参考模式进行中不关闭——用户正在为面板挑参考（pickMode 在 onNodeClick 尾部才清空，
    *  selection 变化先到达，此时 pickMode 仍活跃）。 */
   const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
+    // IKGYYD 钉屏幕工具栏跟随目标：唯一选中节点回写（mediaNodesRef 校正口径同下方
+    // candidates——程序化改选中时事件参数可能误报双选中）；放最前，早退分支不阻断
+    const soloToolbarCandidates = nodes.filter((n) => {
+      const m = mediaNodesRef.current.find((x) => x.id === n.id);
+      return !m || m.selected !== false;
+    });
+    setSoloSelectedNodeId(soloToolbarCandidates.length === 1 ? soloToolbarCandidates[0]!.id : null);
     if (pickMode || pickTarget) return;
     // IKGOQX 扩图模式期间冻结面板联动：模式内点其他卡的选中变化已由 onNodeClick 拦截处置，
     // 程序化选中（selectRequest）触发的变化不应误关其他状态
@@ -8122,6 +8146,15 @@ export default function CanvasPage() {
           assetNodes={assetNodes}
           showEdges={showEdges}
           snapAlignmentEnabled={snapAlignmentOn}
+          followToolbarLayer={
+            // IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
+            // 内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随
+            soloMediaToolbarNode ? (
+              <NodeFollowToolbar nodeId={soloMediaToolbarNode.id} show={showSoloMediaToolbar}>
+                <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
+              </NodeFollowToolbar>
+            ) : null
+          }
           cropFrame={
             // 裁切框覆盖层（IKGW1N）：编辑态挂载，屏幕空间覆盖层随内容区渲染期换算；
             // 框/比例状态提升在本页，拖拽经 CropFrame 走 imageCrop 纯函数回写
