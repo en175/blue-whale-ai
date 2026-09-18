@@ -24,6 +24,7 @@ worker:
     media-extract: ${MEDIA_EXTRACT_CONCURRENCY:2}
     image-enhance: ${IMAGE_ENHANCE_CONCURRENCY:5}
     image-erase: ${IMAGE_ERASE_CONCURRENCY:5}
+    image-outpaint: ${IMAGE_OUTPAINT_CONCURRENCY:5}
 
 rocketmq:
   # gRPC proxy 端点（与 TS 同组变量；凭证只走 env，禁止落库）

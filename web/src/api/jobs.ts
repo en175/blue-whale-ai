@@ -5,12 +5,13 @@
 import { apiRequest, isApiError, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
+import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 
-/** 可由普通生成端点创建的任务类型（image_enhance 走专属创建端点，不在此列） */
+/** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取任务与高清放大任务（IKGM9O）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除与智能扩图任务（IKGM9O / IKGOT8 / IKGOR6）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -160,6 +161,16 @@ export interface ImageEnhancementCreatedData {
   status: 'queued';
 }
 
+/** POST /api/projects/:id/image-outpaints 请求体（六键，键名与 backend/libs/contracts/image-outpaint.ts 契约恒等）。
+ *  IKGOR6 扩图面板提交；四比例值域与源图门槛由服务端权威复核，前端预检只是体验层。 */
+export type CreateImageOutpaintPayload = ImageOutpaintInput;
+
+/** 创建智能扩图任务返回。 */
+export interface ImageOutpaintCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -273,6 +284,22 @@ export function createImageErase(
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不带幂等头、
+ *  无积分预估、不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。 */
+export function createImageOutpaint(
+  projectId: string,
+  payload: CreateImageOutpaintPayload,
+): Promise<ImageOutpaintCreatedData> {
+  return apiRequest<ImageOutpaintCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

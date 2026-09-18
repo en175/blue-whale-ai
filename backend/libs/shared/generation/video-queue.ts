@@ -6,6 +6,7 @@ import {
   IMAGE_ENHANCE_TAG,
   IMAGE_ERASE_TAG,
   IMAGE_GENERATION_TAG,
+  IMAGE_OUTPAINT_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_TAG,
 } from "./queue.constants.js";
@@ -17,6 +18,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
  *  / enqueueAudioGenerationJob / enqueueImageEnhanceJob（tag=image_enhance，IKGM99）
  *  / enqueueImageEraseJob（tag=image_erase，IKGOT4）
+ *  / enqueueImageOutpaintJob（tag=image_outpaint，IKGOQV）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -185,6 +187,19 @@ export async function enqueueImageEraseJob(
   await createRocketMqVideoProducer(
     producer,
     IMAGE_ERASE_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 扩图 job 入队（IKGOQV，契约 image-outpaint.ts）：复用生成任务 topic/queue，用独立 tag「image_outpaint」区分任务类型。 */
+export async function enqueueImageOutpaintJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    IMAGE_OUTPAINT_TAG,
   ).enqueue(jobId, options);
 }
 

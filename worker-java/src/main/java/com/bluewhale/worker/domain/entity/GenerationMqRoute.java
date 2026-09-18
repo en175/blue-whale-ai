@@ -3,7 +3,7 @@ package com.bluewhale.worker.domain.entity;
 /**
  * 生成任务 MQ 路由表（topic + tag 单处定义；契约 §1 / ADR-0084 修正六）。
  * <p>
- * 六个入口一一对应六个消费者。{@link #tag()} 恒等于 {@code generation_jobs.type}
+ * 七个入口一一对应七个消费者。{@link #tag()} 恒等于 {@code generation_jobs.type}
  * （即 {@link JobType#value()}），取值是契约 §1 冻结的字面量——本枚举是该契约的可执行定义，
  * 生产侧（backend 的 queue.constants.ts）与消费侧都必须与它同值。
  * <p>
@@ -34,7 +34,10 @@ public enum GenerationMqRoute {
     IMAGE_ENHANCE("generation-task", "image_enhance"),
 
     /** 图片擦除（契约 §15 / IKGOT3）。 */
-    IMAGE_ERASE("generation-task", "image_erase");
+    IMAGE_ERASE("generation-task", "image_erase"),
+
+    /** 智能扩图（IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts）。 */
+    IMAGE_OUTPAINT("generation-task", "image_outpaint");
 
     private final String topic;
 

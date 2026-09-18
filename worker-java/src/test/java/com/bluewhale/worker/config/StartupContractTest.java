@@ -144,7 +144,7 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 六个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 七个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
         Map<GenerationMqRoute, String> expectedTags = Map.of(
                 GenerationMqRoute.VIDEO, "video",
@@ -152,7 +152,8 @@ class StartupContractTest {
                 GenerationMqRoute.AUDIO, "audio",
                 GenerationMqRoute.MEDIA_EXTRACT, "media_extract",
                 GenerationMqRoute.IMAGE_ENHANCE, "image_enhance",
-                GenerationMqRoute.IMAGE_ERASE, "image_erase");
+                GenerationMqRoute.IMAGE_ERASE, "image_erase",
+                GenerationMqRoute.IMAGE_OUTPAINT, "image_outpaint");
 
         assertThat(GenerationMqRoute.values()).hasSize(expectedTags.size());
         for (GenerationMqRoute route : GenerationMqRoute.values()) {
@@ -171,6 +172,7 @@ class StartupContractTest {
         assertThat(GenerationMqRoute.MEDIA_EXTRACT.tag()).isEqualTo(JobType.MEDIA_EXTRACT.value());
         assertThat(GenerationMqRoute.IMAGE_ENHANCE.tag()).isEqualTo(JobType.IMAGE_ENHANCE.value());
         assertThat(GenerationMqRoute.IMAGE_ERASE.tag()).isEqualTo(JobType.IMAGE_ERASE.value());
+        assertThat(GenerationMqRoute.IMAGE_OUTPAINT.tag()).isEqualTo(JobType.IMAGE_OUTPAINT.value());
     }
 
     /**
