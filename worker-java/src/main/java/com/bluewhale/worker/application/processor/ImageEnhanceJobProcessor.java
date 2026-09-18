@@ -240,6 +240,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
                 stored.storageKey(),
                 stored.mime(),
                 stored.size(),
+                stored.md5(),
                 width,
                 height));
         if (!published) {

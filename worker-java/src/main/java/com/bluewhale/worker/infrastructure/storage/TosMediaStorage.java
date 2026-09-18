@@ -161,7 +161,7 @@ public class TosMediaStorage {
      *
      * @param filePath 本地 mp3 文件路径
      * @param mime     MIME 类型（恒 "audio/mpeg"）
-     * @return 上传结果（url / storageKey / mime / size）
+     * @return 上传结果（url / storageKey / mime / size / md5）
      * @throws MediaExtractError upload_failed
      */
     public UploadResult upload(Path filePath, String mime) {
@@ -193,7 +193,7 @@ public class TosMediaStorage {
             client.putObjectAcl(aclInput);
 
             String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-            return new UploadResult(publicUrl, storageKey, mime, bytes.length);
+            return new UploadResult(publicUrl, storageKey, mime, bytes.length, ContentDigest.md5Hex(bytes));
         } catch (MediaExtractError e) {
             throw e;
         } catch (Exception e) {
@@ -237,7 +237,7 @@ public class TosMediaStorage {
             client.putObjectAcl(aclInput);
 
             String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-            return new UploadResult(publicUrl, storageKey, mime, data.length);
+            return new UploadResult(publicUrl, storageKey, mime, data.length, ContentDigest.md5Hex(data));
         } catch (Exception e) {
             throw new MediaExtractError(
                     MediaExtractError.UPLOAD_FAILED,
@@ -288,7 +288,7 @@ public class TosMediaStorage {
             client.putObjectAcl(aclInput);
 
             String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-            return new UploadResult(publicUrl, storageKey, mime, data.length);
+            return new UploadResult(publicUrl, storageKey, mime, data.length, ContentDigest.md5Hex(data));
         } catch (Exception e) {
             throw new MediaExtractError(
                     MediaExtractError.UPLOAD_FAILED,
@@ -311,8 +311,10 @@ public class TosMediaStorage {
         };
     }
 
-    /** 上传结果（对齐 tos-media-extract.ts:86-91 返回形状）。 */
-    public record UploadResult(String url, String storageKey, String mime, long size) {}
+    /** 上传结果（形状对齐 tos-media-extract.ts:86-91；IKGS73 起多带 {@code md5}，故非逐字）。
+     *  {@code md5}（IKGS73）：上传字节的 MD5，32 位小写 hex，供 {@code assets.md5} 落库。
+     *  算法与编码统一走 {@link ContentDigest}——与视频转存出口共用同一份实现。 */
+    public record UploadResult(String url, String storageKey, String mime, long size, String md5) {}
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();

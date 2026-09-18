@@ -137,7 +137,8 @@ class VideoWriteFenceGoldenTest {
         }).when(assetMapper).insert(any(com.bluewhale.worker.domain.entity.AssetEntity.class));
 
         boolean ok = service.publishVideoResult("300", "42", "9", "w1", 5,
-                "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L, 1080, 1920, 8.5);
+                "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5);
 
         assertThat(ok).isTrue();
         // 单槽 88L 恰好一次，asset 绑定回填 id

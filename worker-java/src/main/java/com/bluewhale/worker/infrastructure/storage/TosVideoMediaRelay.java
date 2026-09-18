@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 视频媒体转存（tos-video-media-relay.ts 逐字移植）。
+ * 视频媒体转存（tos-video-media-relay.ts 移植；IKGS73 起非逐字——出参多带 {@code md5}）。
  * <p>
  * 转存流程：fetch 源 URL → 校验 video/ mime → TOS PUT → putObjectAcl public-read。
  * <p>
@@ -157,7 +157,8 @@ public class TosVideoMediaRelay {
         }
 
         String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-        return new StoredVideo(publicUrl, storageKey, mime, (long) bytes.length);
+        return new StoredVideo(publicUrl, storageKey, mime, (long) bytes.length,
+                ContentDigest.md5Hex(bytes));
     }
 
     /**
@@ -169,8 +170,8 @@ public class TosVideoMediaRelay {
         return "mp4";
     }
 
-    /** 转存结果（video-job-runner.ts:89-94 StoredVideo 逐字移植）。 */
-    public record StoredVideo(String url, String storageKey, String mime, Long size) {}
+    /** 转存结果（video-job-runner.ts:89-94 StoredVideo 逐字移植，IKGS73 起多带 {@code md5}）。 */
+    public record StoredVideo(String url, String storageKey, String mime, Long size, String md5) {}
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();

@@ -137,19 +137,19 @@ public class JobStateMachineService {
 
     public boolean publishMediaExtractResult(
             String jobId, String projectId, String userId, String workerId, long fencingToken,
-            String url, String storageKey, String mime, Long size, Double duration
+            String url, String storageKey, String mime, Long size, String md5, Double duration
     ) {
         return finalizer.publishMediaExtractResult(
-                jobId, projectId, userId, workerId, fencingToken, url, storageKey, mime, size, duration);
+                jobId, projectId, userId, workerId, fencingToken, url, storageKey, mime, size, md5, duration);
     }
 
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
-                                      String url, String storageKey, String mime, Long size,
+                                      String url, String storageKey, String mime, Long size, String md5,
                                       Integer width, Integer height, double duration) {
         return finalizer.publishVideoResult(
                 jobId, projectId, userId, workerId, fencingToken,
-                url, storageKey, mime, size, width, height, duration);
+                url, storageKey, mime, size, md5, width, height, duration);
     }
 
     public boolean failVideoJob(String jobId, String errorCode, String errorMessage,
@@ -160,7 +160,7 @@ public class JobStateMachineService {
     public String createAsset(CreateAssetInput input) {
         return finalizer.createAsset(
                 input.userId(), input.projectId(), input.generationJobId(), input.type(),
-                input.url(), input.storageKey(), input.mime(), input.size(),
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
                 input.width(), input.height(), input.durationMs(),
                 input.workerId(), input.fencingToken());
     }
@@ -175,6 +175,8 @@ public class JobStateMachineService {
             String storageKey,
             String mime,
             Long size,
+            /** IKGS73：产物字节的 md5（32 位小写 hex），落 assets.md5 供去重。 */
+            String md5,
             Integer width,
             Integer height,
             Integer durationMs,
@@ -187,7 +189,7 @@ public class JobStateMachineService {
     public boolean publishMediaExtractResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
         return finalizer.publishMediaExtractResult(
                 input.jobId(), input.projectId(), input.userId(), input.workerId(), input.fencingToken(),
-                input.url(), input.storageKey(), input.mime(), input.size(), input.duration());
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(), input.duration());
     }
 
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
