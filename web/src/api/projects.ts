@@ -175,4 +175,3 @@ export function fetchProjectSnapshot(id: string): Promise<ProjectSnapshot> {
   snapshotPending.set(id, p);
   return p;
 }
-
