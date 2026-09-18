@@ -284,6 +284,23 @@ export const ASSET_ERROR_SPECS = {
     status: 503,
     message: "对象存储未配置",
   },
+  /**
+   * IKGQWR：上传时引用的素材库素材此刻不能关联（ADR-0093 决策 3）。
+   *
+   * **一个码 + 两条 msg**，与生成门（ADR-0087 决策 6）同款口径：
+   *   - 终局（素材未通过 / 上游已不存在）→ `MATERIAL_NOT_APPROVED_MESSAGE`（本 spec 的默认 message）
+   *   - 暂时故障（上游不可达、鉴权、限流、5xx）→ `MATERIAL_STATUS_UNAVAILABLE_MESSAGE`，调用点覆写
+   * 前端按 `msg` 分流：前者引导重走合规校验，后者给重试入口。
+   *
+   * 为什么不拆成两个码：拆了前端就要维护两套分流规则，而生成门那边已经按同一形状定了
+   * （三种情况同一个 `data.code`，按 msg 区分）。两条闸门的形状必须一致，否则同一个用户
+   * 在上传口和生成口拿到的是两套话术。
+   */
+  ASSET_MATERIAL_UNAVAILABLE: {
+    code: 2013,
+    status: 400,
+    message: "该素材未审核通过，不能用于视频生成",
+  },
 } as const satisfies Record<string, ErrorCodeSpec>;
 
 export type AssetErrorName = keyof typeof ASSET_ERROR_SPECS;

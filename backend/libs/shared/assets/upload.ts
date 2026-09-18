@@ -29,6 +29,8 @@ export type CompleteAssetInput = PresignAssetInput & {
   duration?: number;
   /** IKCNLS：落库时写入 md5，供去重查询。 */
   md5?: string;
+  /** 真人人像库素材导入：写入本地资产的素材库 id（Asset- 前缀）。 */
+  materialId?: string;
   /** IKGOTB：资产来源标记。仅白名单值生效（uploaded 普通上传 / mask_erase 擦除遮罩中间素材，
    *  后者在用户资产列表不可见），非白名单/缺省回落 uploaded（无鉴权语义，只是展示过滤维度）。 */
   source?: string;
@@ -41,6 +43,8 @@ export type DedupAssetInput = {
   size: number;
   md5: string;
   project_id?: string;
+  /** 真人人像库导入：命中已有本地资产时补绑素材库 id。 */
+  materialId?: string;
 };
 
 export interface AssetUploadStorage {
@@ -142,10 +146,51 @@ export async function handlePresignAsset(
   });
 }
 
+/** 素材库 id（Asset- 前缀）；非法值忽略，不阻断普通上传。 */
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+
+function readOptionalMaterialId(value: unknown): string | undefined {
+  if (typeof value !== "string" || !MATERIAL_ID_PATTERN.test(value.trim())) return undefined;
+  return value.trim();
+}
+
+/**
+ * IKGQWR：上传口素材闸的最小接口（实现见 `@lib/shared/material/material-upload-gate.ts`）。
+ *
+ * 刻意用**结构类型**而不是跨域 import：`upload.ts` 属于素材资产域，不因此依赖素材库域。
+ * 接线在控制器层完成（与生成门把接线放在 `material-gate-wiring.ts` 同一思路）。
+ */
+export interface UploadMaterialGate {
+  /** 放行时给出素材组 id（允许 null，见 material-upload-gate.ts 的说明）。 */
+  check(
+    userId: string,
+    materialId: string,
+  ): Promise<
+    { ok: true; materialGroupId: string | null } | { ok: false; message: string }
+  >;
+}
+
+/**
+ * 闸不过时的统一错误（ADR-0093 决策 3）。
+ *
+ * **一个码 + 两条 msg**：终局（素材未通过 / 上游已不存在）与暂时故障（上游不可达）共用
+ * `ASSET_MATERIAL_UNAVAILABLE`，前端按 `msg` 分流。与生成门同款口径（ADR-0087 决策 6）——
+ * 两条闸门形状必须一致，否则同一个用户在上传口和生成口拿到两套话术。
+ */
+function materialUnavailable(message: string): DomainError {
+  return new DomainError(
+    ASSET_ERROR_SPECS.ASSET_MATERIAL_UNAVAILABLE.code,
+    message,
+  );
+}
+
 /**
  * IKCNLS：上传 md5 去重（presign 前判断）。
  * 命中：返回该用户未删同 md5 的最优资产（toAssetResponse），并建 project_asset 关联，前端跳过 presign→PUT→complete 3 步。
  * 未命中：返回需上传标记，前端走 3 步。
+ *
+ * IKGQWR：带 `materialId` 时多两件事——先过素材闸，命中后再把 `material_id` /
+ * `material_group_id` 写到复用的那条资产上（ADR-0093 决策 2/3）。
  */
 export async function handleDedupAsset(
   userId: string,
@@ -153,14 +198,19 @@ export async function handleDedupAsset(
   deps: {
     projects: ProjectService;
     uploads: AssetService;
+    /** IKGQWR：带 materialId 时的素材闸。必填——可选会让生产漏接线时静默无闸。 */
+    materialGate: UploadMaterialGate;
   },
 ) {
   assertUploadInput(input);
-  // 去重是 presign 前的 fast-path，绝不该阻断正常上传：md5 缺失/格式不标准 → 返回 {dedup:false}，
-  // 前端走 presign→PUT→complete 3 步。type/mime/size 校验保持 fail-closed（presign/complete 也会校验）。
-  if (!input.md5 || !/^[a-f0-9]{32}$/i.test(input.md5)) {
-    return ok({ dedup: false });
-  }
+  const materialId = readOptionalMaterialId(input.materialId);
+
+  // IKGQWR：带素材库 id 时**先过闸**。这是对既有「去重是 presign 前的 fast-path，绝不该阻断
+  // 正常上传」的一处**有意例外**：那句话拦的是 md5 缺失/格式不标准这类本地小毛病，而素材状态
+  // 是用户明确指名要关联的对象——放行等于让一张不可用的素材悄悄变成可用的本地资产。
+  const gate = materialId ? await deps.materialGate.check(userId, materialId) : null;
+  if (gate !== null && !gate.ok) throw materialUnavailable(gate.message);
+
   const projectId = input.project_id || "0";
   if (
     projectId !== "0" &&
@@ -168,9 +218,14 @@ export async function handleDedupAsset(
   ) {
     throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   }
-  const existing = await deps.uploads.findOwnedByMd5(userId, input.md5);
-  // 命中但 type 不一致（同 md5 但存储时误标类型）→ 视为未命中，避免返回错误类型资产。
-  if (!existing || existing.type !== input.type) {
+
+  const reusable = await findReusableAsset(
+    deps.uploads,
+    userId,
+    input,
+    materialId,
+  );
+  if (!reusable) {
     // 未命中：标记需上传，前端走 presign→PUT→complete。
     return ok({ dedup: false });
   }
@@ -178,11 +233,43 @@ export async function handleDedupAsset(
   if (projectId !== "0") {
     await deps.uploads.linkAssetToProject({
       userId,
-      assetId: existing.id,
+      assetId: reusable.id,
       projectId,
     });
   }
-  return ok({ dedup: true, asset: toAssetResponse(existing) });
+  if (materialId && gate?.ok) {
+    await deps.uploads.bindMaterialId({
+      userId,
+      assetId: reusable.id,
+      materialId,
+      materialGroupId: gate.materialGroupId,
+    });
+  }
+  return ok({ dedup: true, asset: toAssetResponse(reusable) });
+}
+
+/**
+ * 去重的两个答案源：先 md5（IKCNLS 既有），未命中再按素材库 id 反查（IKGQWR / ADR-0093 决策 2）。
+ *
+ * 反查那一条不需要前端先算 md5，所以即便 md5 缺失/不标准也不该直接判「需上传」——前端已经
+ * 点名了素材，反查是零成本的一次查询，查得到就省一整轮 presign→PUT→complete。
+ * 两条都必须 type 一致：同 md5 但存储时误标类型的老问题，反查这边同样成立。
+ */
+async function findReusableAsset(
+  uploads: AssetService,
+  userId: string,
+  input: DedupAssetInput,
+  materialId: string | undefined,
+) {
+  if (typeof input.md5 === "string" && /^[a-f0-9]{32}$/i.test(input.md5)) {
+    const byMd5 = await uploads.findOwnedByMd5(userId, input.md5);
+    if (byMd5 && byMd5.type === input.type) return byMd5;
+  }
+  if (materialId) {
+    const byMaterial = await uploads.findOwnedByMaterialId(userId, materialId);
+    if (byMaterial && byMaterial.type === input.type) return byMaterial;
+  }
+  return null;
 }
 
 const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
@@ -243,6 +330,8 @@ export async function handleCompleteAsset(
     projects: ProjectService;
     uploads: AssetService;
     storage: AssetUploadStorage | null;
+    /** IKGQWR：带 materialId 时的素材闸。必填——可选会让生产漏接线时静默无闸。 */
+    materialGate: UploadMaterialGate;
   },
 ) {
   assertUploadInput(input);
@@ -254,18 +343,81 @@ export async function handleCompleteAsset(
   ) {
     throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   }
+  // IKGQWR：归属校验提到素材反查之前（!726 把它放在反查之后）。反查不碰对象存储，提前没有
+  // 功能损失，但「先证明这个 key 是你的，再谈别的」让越权请求尽早失败。
   if (!input.storage_key.startsWith(`uploads/${userId}/${input.type}/`)) {
     throw assetError("ASSET_STORAGE_KEY_FOREIGN");
   }
-
   if (!deps.storage) throw assetError("ASSET_STORAGE_UNCONFIGURED");
+
+  const materialId = readOptionalMaterialId(input.materialId);
+
+  // 幂等重放：这个 key 已经完成过 → 原样返回，**不重新过闸**。
+  // 与 ADR-0087 决策 7「门落在幂等重放命中之后」同一理由：一次重放不该按此刻的素材状态改写
+  // 既有结果。这里更要紧的是——重放命中时若因闸不过去删对象，删的正是既有资产行引用的那一份。
+  // 闸通过时补写关联是幂等的，照做（顺手补上 !726 时代留下的空 group 列）。
   const existing = await deps.uploads.findCommittedUpload(
     userId,
     input.storage_key,
   );
   if (existing) {
     await deps.storage.makePublic(input.storage_key);
+    if (materialId) {
+      const replayGate = await deps.materialGate.check(userId, materialId);
+      if (replayGate.ok) {
+        await deps.uploads.bindMaterialId({
+          userId,
+          assetId: existing.id,
+          materialId,
+          materialGroupId: replayGate.materialGroupId,
+        });
+      }
+    }
     return ok(toAssetResponse(existing));
+  }
+
+  // IKGQWR（ADR-0093 决策 3/4）：过了幂等这一关，说明这个 key 还没有任何行指向它——
+  // 此时闸不过就删字节是安全的。
+  const gate = materialId
+    ? await deps.materialGate.check(userId, materialId)
+    : null;
+  if (gate !== null && !gate.ok) {
+    // 闸不过 → **拒绝且不落任何本地痕迹**（2026-09-18 修正；原稿写的是「建行但不关联」，
+    // 那会留下一个前端拿不到 id、谁也引用不到的孤儿行，比孤儿对象更脏）。
+    // 字节已经在桶里了（complete 是后端第一次看见文件），按既有拒收惯例顺手删掉——
+    // rejectUploadedObject 的理由原文：「留着它没有任何用处，正因为没有任何一行数据指向它」。
+    return rejectUploadedObject(
+      deps.storage,
+      input.storage_key,
+      materialUnavailable(gate.message),
+    );
+  }
+
+  // IKGQWR / !726：本地已有这张素材对应的资产 → 免建新行直接复用（反查零成本，省一行一对象）。
+  // 既然复用别人，这份刚 PUT 上来的字节就没有任何行指向它，顺手回收（仅当它不是那行的对象）。
+  if (materialId && gate?.ok) {
+    const bound = await deps.uploads.findOwnedByMaterialId(userId, materialId);
+    if (bound) {
+      if (bound.storage_key !== input.storage_key) {
+        await deps.storage
+          .deleteMultiObjects([input.storage_key])
+          .catch(() => undefined);
+      }
+      if (projectId !== "0") {
+        await deps.uploads.linkAssetToProject({
+          userId,
+          assetId: bound.id,
+          projectId,
+        });
+      }
+      await deps.uploads.bindMaterialId({
+        userId,
+        assetId: bound.id,
+        materialId,
+        materialGroupId: gate.materialGroupId,
+      });
+      return ok(toAssetResponse(bound));
+    }
   }
   const object = await deps.storage.inspectObject(input.storage_key);
   if (!object) {
@@ -325,6 +477,11 @@ export async function handleCompleteAsset(
     ...(input.height == null ? {} : { height: input.height }),
     ...(input.duration == null ? {} : { duration: input.duration }),
     ...(input.md5 ? { md5: input.md5 } : {}),
+    ...(materialId ? { materialId } : {}),
+    // IKGQWR：组 id 与素材 id 成对写入（ADR-0093 决策 2）。闸不过时走不到这里。
+    ...(materialId && gate?.ok
+      ? { materialGroupId: gate.materialGroupId }
+      : {}),
     source,
   });
 

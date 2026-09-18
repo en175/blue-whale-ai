@@ -284,6 +284,225 @@ describe("complete 的文件头校验（IKE53U）", () => {
   });
 });
 
+describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
+  const MATERIAL = "asset-20260820153209-6c9z8";
+  const GROUP = "group-20260827113901-cbkmf";
+  const NOT_APPROVED = "该素材未审核通过，不能用于视频生成";
+  const UNAVAILABLE = "素材状态校验失败，请稍后重试";
+
+  const DEDUP_INPUT = {
+    type: "video" as const,
+    mime: "video/mp4",
+    size: 100,
+    md5: VALID_MD5,
+  };
+
+  const allow = (materialGroupId: string | null = GROUP) => ({
+    check: vi.fn().mockResolvedValue({ ok: true, materialGroupId }),
+  });
+  const deny = (message: string) => ({
+    check: vi.fn().mockResolvedValue({ ok: false, message }),
+  });
+
+  /** complete 的正常路径：对象在、文件头读不到（放行）、没有已存在的行。 */
+  const completeDeps = (materialGate: unknown, overrides: Record<string, unknown> = {}) => ({
+    projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "313" }) } as never,
+    uploads: {
+      findCommittedUpload: vi.fn().mockResolvedValue(null),
+      findOwnedByMaterialId: vi.fn().mockResolvedValue(null),
+      createUploadedAsset: vi.fn().mockResolvedValue(ASSET),
+      bindMaterialId: vi.fn().mockResolvedValue(true),
+      linkAssetToProject: vi.fn().mockResolvedValue(true),
+      ...overrides,
+    } as never,
+    storage: {
+      readHead: vi.fn().mockResolvedValue(null),
+      inspectObject: vi.fn().mockResolvedValue({
+        size: 100,
+        mime: "video/mp4",
+        publicUrl: "https://bucket.tos.test/uploads/9/video/x.mp4",
+      }),
+      makePublic: vi.fn(),
+      prepareUpload: vi.fn(),
+      deleteMultiObjects: vi.fn(),
+    } as never,
+    materialGate,
+  });
+
+  const COMPLETE_INPUT = {
+    type: "video" as const,
+    mime: "video/mp4",
+    size: 100,
+    storage_key: "uploads/9/video/x.mp4",
+    project_id: "313",
+    materialId: MATERIAL,
+  };
+
+  it("dedup：闸不过 → 抛 2013 + 闸给的文案，且根本不去查 md5", async () => {
+    const findOwnedByMd5 = vi.fn();
+    const gate = deny(NOT_APPROVED);
+    const error = await expectRejected(
+      () =>
+        handleDedupAsset(
+          "9",
+          { ...DEDUP_INPUT, materialId: MATERIAL },
+          {
+            projects: { findOwnedById: vi.fn() },
+            uploads: { findOwnedByMd5 },
+            materialGate: gate,
+          } as never,
+        ),
+      { code: 2013, status: 400 },
+    );
+    expect(error.message).toBe(NOT_APPROVED);
+    expect(gate.check).toHaveBeenCalledWith("9", MATERIAL);
+    // 被拒的素材，查到可复用资产也不该关联出去——查都别查。
+    expect(findOwnedByMd5).not.toHaveBeenCalled();
+  });
+
+  it("dedup：闸不过且是暂时故障 → 仍是同一个码 2013，靠 msg 分流", async () => {
+    const error = await expectRejected(
+      () =>
+        handleDedupAsset(
+          "9",
+          { ...DEDUP_INPUT, materialId: MATERIAL },
+          {
+            projects: { findOwnedById: vi.fn() },
+            uploads: { findOwnedByMd5: vi.fn() },
+            materialGate: deny(UNAVAILABLE),
+          } as never,
+        ),
+      { code: 2013, status: 400 },
+    );
+    // 一个码两条 msg 是刻意的（与生成门同款口径）；拆成两个码会让前端维护两套分流规则。
+    expect(error.message).toBe(UNAVAILABLE);
+  });
+
+  it("dedup：闸通过 + md5 命中 → 两列一起绑（material_id 与 material_group_id）", async () => {
+    const bindMaterialId = vi.fn().mockResolvedValue(true);
+    const gate = allow();
+    const result = await handleDedupAsset(
+      "9",
+      { ...DEDUP_INPUT, materialId: MATERIAL },
+      {
+        projects: { findOwnedById: vi.fn().mockResolvedValue({ id: 313n }) },
+        uploads: {
+          findOwnedByMd5: vi.fn().mockResolvedValue(ASSET),
+          linkAssetToProject: vi.fn().mockResolvedValue(true),
+          bindMaterialId,
+        },
+        materialGate: gate,
+      } as never,
+    );
+    expect(bindMaterialId).toHaveBeenCalledWith({
+      userId: "9",
+      assetId: "526",
+      materialId: MATERIAL,
+      materialGroupId: GROUP,
+    });
+    expect((result as { data: { dedup: boolean } }).data.dedup).toBe(true);
+  });
+
+  it("dedup：md5 未命中但按素材库 id 反查命中 → dedup:true，前端不必再上传一轮", async () => {
+    const findOwnedByMaterialId = vi.fn().mockResolvedValue(ASSET);
+    const result = await handleDedupAsset(
+      "9",
+      { ...DEDUP_INPUT, materialId: MATERIAL },
+      {
+        projects: { findOwnedById: vi.fn() },
+        uploads: {
+          findOwnedByMd5: vi.fn().mockResolvedValue(null),
+          findOwnedByMaterialId,
+          bindMaterialId: vi.fn().mockResolvedValue(true),
+        },
+        materialGate: allow(),
+      } as never,
+    );
+    expect(findOwnedByMaterialId).toHaveBeenCalledWith("9", MATERIAL);
+    expect((result as { data: { dedup: boolean } }).data.dedup).toBe(true);
+  });
+
+  it("dedup：不带 materialId → 闸完全不参与，既有路径逐字不变", async () => {
+    const gate = allow();
+    const result = await handleDedupAsset(
+      "9",
+      { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5 },
+      {
+        projects: { findOwnedById: vi.fn() },
+        uploads: {
+          findOwnedByMd5: vi.fn().mockResolvedValue(ASSET),
+          linkAssetToProject: vi.fn(),
+        },
+        materialGate: gate,
+      } as never,
+    );
+    expect(gate.check).not.toHaveBeenCalled();
+    expect((result as { data: { dedup: boolean } }).data.dedup).toBe(true);
+  });
+
+  it("complete：闸不过 → 删掉刚 PUT 的字节 + 抛 2013，且不建行", async () => {
+    const deps = completeDeps(deny(NOT_APPROVED));
+    const error = await expectRejected(
+      () => handleCompleteAsset("9", COMPLETE_INPUT, deps as never),
+      { code: 2013, status: 400 },
+    );
+    expect(error.message).toBe(NOT_APPROVED);
+    // 返回 400 却把行建出来，只会留下一个前端拿不到 id、谁也引用不到的孤儿行——
+    // 比桶里那份孤儿对象更脏。所以「拒绝」必须同时意味着「不落本地痕迹」。
+    expect(
+      (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).not.toHaveBeenCalled();
+    expect(
+      (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
+        .deleteMultiObjects,
+    ).toHaveBeenCalledWith(["uploads/9/video/x.mp4"]);
+  });
+
+  it("complete：闸通过 → 建行时把素材组 id 一并写进去", async () => {
+    const deps = completeDeps(allow());
+    await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect(
+      (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        materialId: MATERIAL,
+        materialGroupId: GROUP,
+      }),
+    );
+  });
+
+  it("complete：闸不过时也要求 storage_key 先归属校验 —— 别人的 key 不该被我们删对象", async () => {
+    const deps = completeDeps(deny(NOT_APPROVED));
+    await expectRejected(
+      () =>
+        handleCompleteAsset(
+          "9",
+          { ...COMPLETE_INPUT, storage_key: "uploads/7/video/x.mp4" },
+          deps as never,
+        ),
+      { code: 2006, status: 403 },
+    );
+    expect(
+      (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
+        .deleteMultiObjects,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("complete：幂等重放命中 → 返回既有资产，且不因闸不过去删既有资产引用的那份字节", async () => {
+    const deps = completeDeps(deny(NOT_APPROVED), {
+      findCommittedUpload: vi.fn().mockResolvedValue(ASSET),
+    });
+    const result = await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect((result as { data: { asset_id: string } }).data.asset_id).toBe("526");
+    expect(
+      (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
+        .deleteMultiObjects,
+    ).not.toHaveBeenCalled();
+  });
+});
+
 describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表）", () => {
   const pngHead = () => {
     const buffer = new Uint8Array(32);

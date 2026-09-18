@@ -1,5 +1,10 @@
 # 音频文本上下文生成闭环契约（IKFCXE）
 
+> ⚠️ **部分已由 [ADR-0088](../adr/0088-prompt-assembly-ownership-and-reference-marker.md) 取代**：
+> 本契约中「双端优先消费非空白 `composed_prompt` 冻结正文」「附件由服务端组合进提示词」的条款
+> 已作废——正文一律取提交方的 `parameters.prompt`，执行侧只读 `input.prompt`，不再回退附件组合。
+> 音频参考素材的接纳与冻结部分继续有效。
+
 ## 时间
 
 2026-09-13

@@ -1,7 +1,7 @@
 # 上传 md5 去重 API 对接文档（前端）
 
 > 需求：IKCNLS 上传 md5 去重（后端）。目的：同一用户上传内容相同的文件时，按 md5 去重，命中则复用已有素材，跳过 TOS 重复上传，**省流量省存储**。
-> 版本：v1（2026-09-02）。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 为成功，前端 `apiRequest` 已解包 `data`。
+> 版本：**v2（2026-09-18）**——v2 新增 §6：带素材库 id 上传时的自动关联与状态闸（IKGQWR / ADR-0093）。v1（2026-09-02）：md5 去重。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 为成功，前端 `apiRequest` 已解包 `data`。
 
 ---
 
@@ -137,3 +137,62 @@ async function fileMd5(file: File): Promise<string> {
 
 - IKCNLS 上传 md5 去重（后端）
 - IKCNLP 资产删除一致性（project_asset 关联表，`link` 接口被 dedup 命中复用）——见 `docs/api/` 相关文档或工单
+
+---
+
+## 6. v2（2026-09-18，IKGQWR / ADR-0093）：带素材库 id 上传时的自动关联与状态闸
+
+> 背景：人像库（虚拟 + 真人）素材进画布要先转成本地资产。`!726` 落了骨架（`materialId` 字段、
+> md5 命中即关联、按素材库 id 反查免上传），本版补上**状态闸**、**`material_group_id` 落列**与
+> **覆盖语义**。设计全文见 `docs/adr/0093-material-autolink-and-upload-gate.md`。
+
+### 6.1 请求体字段 `materialId`
+
+`POST /api/agent/assets/uploads/dedup` 与 `POST /api/agent/assets/uploads/complete` 的请求体各有一个**可选**字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `materialId` | string | 否 | 素材库素材 id，`Asset-` 前缀（大小写不敏感）。格式不符 → **静默忽略并跳过关联**，不影响上传本身 |
+
+> ⚠️ 命名不一致：同一 DTO 里 `storage_key` / `project_id` 是 snake_case，这个字段是 camelCase。`!726` 已合入，**沿用不改**——改名是纯破坏性 churn，收益只是命名一致。
+
+### 6.2 `dedup` 多了一条命中路径
+
+带 `materialId` 时，后端除了 md5 还会**按素材库 id 反查本地资产**：
+
+- **md5 未命中 ≠ 要上传。** 反查命中时同样返回 `{dedup:true, asset}`。
+- **md5 算不出来时也要照常调 dedup**（例如跨域导致 md5 为 `undefined`）。只要带 `materialId`，反查仍可能命中。
+
+`data.dedup` 的语义与返回值形状**没有变化**，前端不需要区分命中来源。
+
+### 6.3 新增错误：`400 + code 2013`
+
+闸不过时 `dedup` / `complete` 返回产品信封（**不是**上游信封）：
+
+```json
+{ "code": 2013, "msg": "该素材未审核通过，不能用于视频生成", "data": null }
+```
+
+`code` 固定为 `2013`（`ASSET_MATERIAL_UNAVAILABLE`），**前端按 `msg` 分流**（与生成门同款口径，ADR-0087 决策 6）：
+
+| `msg` | 含义 | 前端动作 |
+| --- | --- | --- |
+| `该素材未审核通过，不能用于视频生成` | 终局：素材 `Failed`，或上游已不存在 | 引导重走合规校验，**不要给重试按钮** |
+| `素材状态校验失败，请稍后重试` | 暂时故障：上游不可达 / 鉴权 / 限流 / 5xx | 给重试入口 |
+
+⚠️ **不要按两个 code 分流**——刻意的一个码两条 msg，与生成门一致；拆成两个码会让用户在上传口和生成口拿到两套话术。
+
+### 6.4 `complete` 被拒时会删掉刚 PUT 的对象
+
+闸不过时后端会把 `storage_key` 指向的对象从 TOS 删掉（对齐既有 `rejectUploadedObject` 惯例——「留着它没有任何用处，正因为没有任何一行数据指向它」）。前端必须知道：
+
+- 被拒后**不能**拿同一个 `storage_key` 重试 `complete`（对象已删），要重走 `presign → PUT → complete`。
+- 不要假设「文件已经传上去了，只是没关联上」。
+
+### 6.5 §0 那条「绝不阻断上传」变了——**只对带 `materialId` 的请求**
+
+第 0 节说「后端只做去重，不改变主链路；md5 不合法一律 fail-open」，这对**不带 `materialId`** 的请求逐字成立，回归不受影响。但带上 `materialId` 之后，素材状态是用户**明确指名**要关联的对象——放行等于让一张不可用的素材悄悄变成可用的本地资产。所以那条路径是 **fail-closed** 的，§0 的表述只覆盖前者。
+
+### 6.6 `complete` 复用既有资产时会回收这份新字节
+
+若本地已有该素材对应的资产（反查命中），后端直接复用，并把前端这次 PUT 上来的那份多余对象一并删掉（仅当它不是被复用那行的对象）。前端同样不要假设这个 `storage_key` 还活着。

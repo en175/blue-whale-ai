@@ -729,9 +729,11 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
 
     // 历史生成请求冻结当次输入：素材身份不随后续改名变化，也不会重复提交
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    expect(payload.input_asset_ids).toEqual(['a1']);
+    expect(payload.input_asset_ids).toBeUndefined();
+    expect(payload.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
     await renameVia('img-a', 'media', '发送后再改');
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toBeUndefined();
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
   });
 

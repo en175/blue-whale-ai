@@ -50,7 +50,7 @@ function toMediaRef(item: TextProvidedRef): ImageMediaRef {
 }
 
 /** 图片目标的合并参考（契约 §2）：直接参考在前、文本带入参考追加在后，同 assetId 去重保首见。
- *  Dock 展示与生成提交共用（提交 input_asset_ids 由面板 orderedImageRefs 从本结果派生）。 */
+ *  Dock 展示与生成提交共用（提交 references 由面板 orderedImageRefs 从本结果派生）。 */
 export function mergedImageRefsOf(targetNodeId: string, edges: Edge[], nodes: Node[]): ImageMediaRef[] {
   const direct = imageMediaRefsOf(targetNodeId, edges, nodes);
   const index = imageTargetTextIndex(targetNodeId, edges, nodes);

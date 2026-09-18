@@ -447,6 +447,7 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await typePrompt('参考这张图重绘');
     await clickSend();
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(2));
-    expect(apiMocks.createGenerationJob.mock.calls[1]![1].input_asset_ids).toEqual(['a1']);
+    expect(apiMocks.createGenerationJob.mock.calls[1]![1].input_asset_ids).toBeUndefined();
+    expect(apiMocks.createGenerationJob.mock.calls[1]![1].references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a1' }]);
   });
 });
