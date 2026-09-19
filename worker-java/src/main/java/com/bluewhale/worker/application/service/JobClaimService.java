@@ -104,6 +104,13 @@ public class JobClaimService {
     private static final List<String> VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES =
             List.of(com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.SOURCE);
 
+    /**
+     * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
+     * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
+     * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
+     */
+    private static final int MEDIA_EXTRACT_LEASE_SECONDS = 420;
+
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
         String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
@@ -127,7 +134,10 @@ public class JobClaimService {
     }
 
     /**
-     * 领取 media_extract 作业（claim-ops.ts:447-502）。
+     * 领取 media_extract 作业（claim-ops.ts:447-502；迁移契约 §18 / IKH28W 起投影扩
+     * providerTaskId / pollCount / progress 三字段——火山异步链复用视频轮询骨架，分相判据
+     * 与超限判定需要富投影，形态对齐 claimVideoSubtitleErase；候选查询本就 SELECT *
+     * 全列，仅投影侧补字段，SQL 零改动）。
      */
     public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
@@ -137,7 +147,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
         int affected = jobMapper.claimMediaExtractCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -154,8 +164,11 @@ public class JobClaimService {
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),
                 input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
                 workerId,
-                postIncrementToken));
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
     }
 
     /**

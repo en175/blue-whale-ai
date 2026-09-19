@@ -7,7 +7,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { isMediaExtractNodeId } from '../../mediaExtract';
+import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
@@ -149,6 +149,15 @@ export interface MediaNodeData {
    *  由 CanvasPage 注入，视频暂停锁定在当前帧（会话期无播放控制）。与 subtitleEraseEditing
    *  分开：框选模式两者都有，智能模式只有本标记——智能模式零框选工具，不渲染框层 */
   subtitleErasePaused?: true;
+  /** 音视频分离编辑态标记（IKH28U，渲染期派生注入，不持久化）：本卡为音视频分离目标
+   *  源视频卡时由 CanvasPage 注入——视频暂停在当前帧并锁定播放控制（透明锁定层接管
+   *  指针，退出标记移除即恢复）；上方 X 工具条/下方发送条由 CanvasPage 浮出
+   *  （VideoAudioSplitDialog） */
+  splitEditing?: true;
+  /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
+   *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
+   *  失败卡无身份不渲染，口径同家族身份分流先例） */
+  mediaExtract?: MediaExtractIdentity;
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -184,10 +193,11 @@ export interface MediaNodeData {
    *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；
    *  门槛预检见 videoSubtitleErase.ts */
   onVideoSubtitleErase?: (id: string, mode: VideoSubtitleEraseMode) => void;
+  /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
+   *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
+  onAudioVideoSplit?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
-  /** 视频整段提取音频；音频节点由后端注入画布。 */
-  onExtractAudio?: (id: string) => Promise<void> | void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -272,6 +282,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (!subtitleEraseLocked) return;
     videoRef.current?.pause();
   }, [subtitleEraseLocked]);
+
+  /** 音视频分离编辑态（IKH28U）：进入即定格在当前帧，锁定层接管指针，标记移除即恢复 */
+  useEffect(() => {
+    if (!data.splitEditing) return;
+    videoRef.current?.pause();
+  }, [data.splitEditing]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -426,11 +442,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       );
     }
     if (isGenDone) {
-      /* 失败/已取消：错误提示 + 重试 */
+      /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
+          才可重试——IKH28X 编辑态发送的失败卡原参数重发；存量直发时代失败卡无身份不渲染） */
+      const canRetry = data.genStatus === 'failed'
+        && (!isMediaExtraction || data.mediaExtract != null);
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
-          {data.genStatus === 'failed' && !isMediaExtraction && (
+          {canRetry && (
             <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
               重试
             </button>
@@ -600,7 +619,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <AudioPlayer src={data.src || ''} fileName={data.fileName} onDownload={() => data.onDownload?.(id)} />
+          <AudioPlayer
+            src={data.src || ''}
+            fileName={data.fileName}
+            duration={typeof data.duration === 'number' ? data.duration : undefined}
+            onDownload={() => data.onDownload?.(id)}
+          />
         ) : data.mediaType === 'video' ? (
           <>
             <video
@@ -626,6 +650,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                 onBoxStart={data.subtitleEraseEditing.onBoxStart}
                 onBoxMove={data.subtitleEraseEditing.onBoxMove}
                 onBoxEnd={data.subtitleEraseEditing.onBoxEnd}
+              />
+            )}
+            {/* 音视频分离编辑态锁定层（IKH28U）：透明全覆盖接管指针（无框层，先例=去字幕
+                框层全覆盖接管）——编辑态期间播放控制不可达、点视频不响应播放操作；
+                退出（标记移除）即恢复播放控制。nodrag/nopan 同框层口径（层上拖不动卡/画布） */}
+            {data.splitEditing && (
+              <div
+                className="nodrag nopan"
+                data-testid="split-lock-layer"
+                style={{ position: 'absolute', inset: 0, zIndex: 5, cursor: 'default', touchAction: 'none' }}
               />
             )}
           </>
@@ -674,7 +708,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isGenDone && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
-            {data.genStatus === 'failed' && !isMediaExtraction && (
+            {data.genStatus === 'failed'
+              && (!isMediaExtraction || data.mediaExtract != null) && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>

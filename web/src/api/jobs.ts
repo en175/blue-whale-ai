@@ -8,6 +8,7 @@ import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
+import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -142,10 +143,11 @@ export interface JobCreatedData {
   cursor: number;
 }
 
-/** POST /api/projects/:id/media-extractions 请求体。当前后端仅支持 MP3 整段提取。 */
+/** POST /api/projects/:id/media-extractions 请求体。output_format 五值（缺省 m4a；
+ *  产物文件名后缀与展示名跟随所选格式），类型与契约同源（@lib/contracts/media-extract）。 */
 export interface CreateMediaExtractionPayload {
   source_asset_id: string | number;
-  output_format?: 'mp3';
+  output_format?: MediaExtractOutputFormat;
 }
 
 /** 创建媒体提取任务返回。 */
@@ -238,7 +240,8 @@ export function createGenerationJob(
   );
 }
 
-/** 视频整段提取音频；音频占位节点及最终节点由后端写入画布快照。 */
+/** 音视频分离建任务（原「提取音频」一键直发，IKH28X 编辑态发送闭环复用）；
+ *  音频占位节点与最终节点由前端写入画布快照。 */
 export function createMediaExtraction(
   projectId: string,
   payload: CreateMediaExtractionPayload,

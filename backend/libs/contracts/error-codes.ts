@@ -73,6 +73,9 @@ export const ERROR_IMAGE_OUTPAINT_FAILED = "image_outpaint_failed";
 export const ERROR_IMAGE_CUTOUT_FAILED = "image_cutout_failed";
 /** IKGZ7Z：视频去字幕（video_subtitle_erase）执行兜底失败码（迁移契约 §17，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_VIDEO_SUBTITLE_ERASE_FAILED = "video_subtitle_erase_failed";
+/** IKH28T：音视频分离（media_extract）火山执行路径兜底失败码（迁移契约 §18——网关分类链外
+ *  的火山任务失败与转存失败归并；与本地 ffmpeg 链路兜底 1020 区分，双执行路径并存 ADR-0103）。 */
+export const ERROR_MEDIA_EXTRACT_PROVIDER_FAILED = "media_extract_provider_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -147,6 +150,8 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_IMAGE_CUTOUT_FAILED]: 1042,
   // IKGZ7Z 注：1039-1042 已由高清放大/擦除/扩图/抠图占用，去字幕兜底码取下一空号 1043。
   [ERROR_VIDEO_SUBTITLE_ERASE_FAILED]: 1043,
+  // IKH28T 注：1043 已由去字幕占用，音视频分离火山路径兜底码取下一空号 1044（映射口径 = 迁移契约 §18）。
+  [ERROR_MEDIA_EXTRACT_PROVIDER_FAILED]: 1044,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -428,6 +433,7 @@ export const ERROR_CODES: Record<number, string> = {
   1041: "扩图失败，请重试", // image_outpaint_failed
   1042: "抠图失败，请重试", // image_cutout_failed
   1043: "去字幕失败，请重试", // video_subtitle_erase_failed
+  1044: "音频提取失败，请重试", // media_extract_provider_failed（火山执行路径）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

@@ -10,6 +10,10 @@ export interface ProjectView {
   /** 本项目画布上还挂着的最近 3 张 image URL（可用素材 ∩ nodes_json；按 gmt_create 倒序）。不足 3 张为实际张数，无图为空数组。 */
   previews: string[];
   created_at: string;
+  /** 上次打开时间（进入画布时服务端记录，IKH1YI）；从未打开为 null。 */
+  last_opened_at: string | null;
+  /** 置顶时间（IKH1YI）；非空即已置顶，置顶组内按此倒序；未置顶为 null。 */
+  pinned_at: string | null;
 }
 
 /** 对齐 GET /api/assets 分页壳：{ records, total, size, current }。 */
@@ -41,6 +45,14 @@ export interface ProjectRepo {
     ownerId: string,
     name: string,
   ): Promise<ProjectView | null>;
+  /** 记一笔「上次打开」（IKH1YI）：last_opened_at 置当前时间；非本人/不存在返回 false。 */
+  touchLastOpened(id: string, ownerId: string): Promise<boolean>;
+  /** 置顶/取消置顶（IKH1YI）：pinned=true 写当前时间，false 清空；成功回读投影，非本人/不存在返回 null。 */
+  setPinned(
+    id: string,
+    ownerId: string,
+    pinned: boolean,
+  ): Promise<ProjectView | null>;
   delete(id: string, ownerId: string): Promise<boolean>;
   batchDelete(
     ownerId: string,
@@ -53,6 +65,8 @@ function toView(row: {
   name: string;
   thumb: string | null;
   gmt_create: Date;
+  last_opened_at: Date | null;
+  pinned_at: Date | null;
 }): ProjectView {
   return {
     id: row.id.toString(),
@@ -60,6 +74,8 @@ function toView(row: {
     thumb: row.thumb,
     previews: [],
     created_at: row.gmt_create.toISOString(),
+    last_opened_at: row.last_opened_at?.toISOString() ?? null,
+    pinned_at: row.pinned_at?.toISOString() ?? null,
   };
 }
 
@@ -218,7 +234,9 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
           purpose: "canvas",
           is_delete: 0,
         },
-        orderBy: { gmt_create: "desc" },
+        // 置顶组在前（置顶时间倒序），其余按创建时间倒序（IKH1YI）；
+        // MySQL DESC 下 NULL 排最后，未置顶组天然在后，无需 nulls 参数。
+        orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }],
       });
       const views = rows.map(toView);
       await attachPreviews(ownerId, rows, views);
@@ -234,8 +252,9 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         prisma.project.count({ where }),
         prisma.project.findMany({
           where,
+          // 置顶组在前（置顶时间倒序），其余按创建时间倒序（IKH1YI）；
           // id desc 兜底：gmt_create 秒级并列时跨页不重复（对齐 assets 列表）。
-          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }, { id: "desc" }],
           skip: (page - 1) * size,
           take: size,
         }),
@@ -289,6 +308,42 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
           is_delete: 0,
         },
         data: { name: finalName },
+      });
+      if (updated.count !== 1) return null;
+      const row = await prisma.project.findFirst({
+        where: {
+          id: BigInt(id),
+          owner_id: BigInt(ownerId),
+          purpose: "canvas",
+          is_delete: 0,
+        },
+      });
+      return row ? toView(row) : null;
+    },
+    async touchLastOpened(id, ownerId) {
+      // 只写 last_opened_at 单列（IKH1YI）：gmt_modified 无 ON UPDATE、schema 无
+      // @updatedAt，data 不含 gmt_modified/version 即天然不动二者。
+      const updated = await prisma.project.updateMany({
+        where: {
+          id: BigInt(id),
+          owner_id: BigInt(ownerId),
+          purpose: "canvas",
+          is_delete: 0,
+        },
+        data: { last_opened_at: new Date() },
+      });
+      return updated.count === 1;
+    },
+    async setPinned(id, ownerId, pinned) {
+      // 同 touch：只写 pinned_at 两态（置顶=当前时间 / 取消=null），不动 gmt_modified/version。
+      const updated = await prisma.project.updateMany({
+        where: {
+          id: BigInt(id),
+          owner_id: BigInt(ownerId),
+          purpose: "canvas",
+          is_delete: 0,
+        },
+        data: { pinned_at: pinned ? new Date() : null },
       });
       if (updated.count !== 1) return null;
       const row = await prisma.project.findFirst({

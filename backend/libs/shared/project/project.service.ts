@@ -40,6 +40,14 @@ export class ProjectService {
     return this.repo.rename(id, ownerId, name);
   }
 
+  touchLastOpened(id: string, ownerId: string) {
+    return this.repo.touchLastOpened(id, ownerId);
+  }
+
+  setPinned(id: string, ownerId: string, pinned: boolean) {
+    return this.repo.setPinned(id, ownerId, pinned);
+  }
+
   delete(id: string, ownerId: string) {
     return this.repo.delete(id, ownerId);
   }

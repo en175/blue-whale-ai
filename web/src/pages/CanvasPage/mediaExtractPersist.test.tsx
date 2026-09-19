@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-/* IKFS5W 提取音频：画布落盘串行化回归。
+/* IKH28X 音视频分离：画布落盘串行化回归（IKFS5W 旧直发入口退役后以编辑态发送形态重建）。
    修复前 flushCanvasSave 只“等”在途保存、不登记自己，800ms 防抖自动保存会在 flush 在途时
    再发一个 PUT——两个请求共用同一个 If-Match（后到的 412，且先到的可能带旧节点数组把刚插入的
-   占位节点抹掉）。本用例锁死：flush 在途期间自动保存必须跳过，且节点+连线由同一次 PUT 落库。 */
+   占位节点抹掉）。本用例锁死：flush 在途期间自动保存必须跳过，且节点+连线由同一次 PUT 落库。
+   入口 = 音视频分离编辑态发送（进入会话不建任务，点发送条发送钮才建卡）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -71,6 +72,8 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/projects', () => ({
+  touchProjectLastOpened: vi.fn(async () => undefined),
+  pinProject: vi.fn(async () => undefined),
   fetchProjects: apiMocks.fetchProjects,
   createProject: apiMocks.createProject,
   renameProject: apiMocks.renameProject,
@@ -187,19 +190,20 @@ async function renderPage() {
   });
 }
 
-/** 走视频节点工具栏的「提取音频」入口（回调挂在节点 data 上） */
-async function extractAudio() {
+/** 进入音视频分离编辑态（源视频卡工具条回调挂点，IKH28U） */
+async function enterSplit() {
   const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
   await act(async () => {
-    await video.data.onExtractAudio('v1');
+    video.data.onAudioVideoSplit('v1');
   });
 }
 
-/** 发起提取但不等待 handler 收尾（flush 挂在在途 PUT 上时 handler 不会 resolve） */
-async function startExtractAudio() {
-  const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
+/** 编辑态内点发送条发送钮（IKH28X 闭环入口；startAudioVideoSplitJob 含 await 创建，
+ *  等 50ms 让建卡与 flush 发起但不等 flush 收尾——flush 挂在在途 PUT 上时 handler 不会 resolve） */
+async function sendSplit() {
   await act(async () => {
-    void video.data.onExtractAudio('v1');
+    document.body.querySelector<HTMLButtonElement>('[data-testid="audio-video-split-send-btn"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 }
@@ -222,10 +226,11 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('IKFS5W 提取音频落盘', () => {
-  it('节点与连线由同一次 PUT 落库，源视频在右侧按内容宽让开', async () => {
+describe('IKH28X 音视频分离发送落盘', () => {
+  it('发送后节点与连线由同一次 PUT 落库，源视频在右侧按内容宽让开、展示名跟随格式', async () => {
     await renderPage();
-    await extractAudio();
+    await enterSplit();
+    await sendSplit();
 
     // flush 立即落库一次（不等 800ms 防抖）
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
@@ -234,9 +239,12 @@ describe('IKFS5W 提取音频落盘', () => {
     // 来源边必须带标记：否则音频卡重新编辑时该视频会被判成非法参考、卡住发送
     const edge = apiMocks.saveCanvasDoc.mock.calls[0][1].edges.find((e) => e.target === 'media-extract-j1')!;
     expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
-    // 16:9 源视频内容宽 280×16/9≈497.78 → x = 400 + 498 + 60
+    // 16:9 源视频内容宽 280×16/9≈497.78 → x = 400 + 498 + 60；展示名后缀跟随所选格式（默认 m4a）
     const audio = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes.find((n) => n.id === 'media-extract-j1')!;
     expect(audio.position).toEqual({ x: 958, y: 0 });
+    expect((audio.data as Record<string, unknown>).fileName).toBe('素材视频(audio).m4a');
+    // 建任务带所选格式（默认 m4a）
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' });
   });
 
   it('flush 在途时 800ms 防抖自动保存跳过，不并发第二个 PUT', async () => {
@@ -246,7 +254,8 @@ describe('IKFS5W 提取音频落盘', () => {
     }));
 
     await renderPage();
-    await startExtractAudio();
+    await enterSplit();
+    await sendSplit();
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
 
     // 越过 800ms 防抖窗口，此时首个 PUT 仍在途 → 自动保存必须跳过
@@ -264,7 +273,7 @@ describe('IKFS5W 提取音频落盘', () => {
     expect(apiMocks.saveCanvasDoc.mock.calls[0][2]).toBe(3);
   }, 20000);
 
-  it('并发提取两个视频：两次落盘串行、版本递增，两个节点与两条来源边都在', async () => {
+  it('并发发送两个视频：两次落盘串行、版本递增，两个节点与两条来源边都在', async () => {
     let version = 3;
     let job = 0;
     apiMocks.saveCanvasDoc.mockImplementation(async (_projectId, _payload, _v) => {
@@ -275,12 +284,19 @@ describe('IKFS5W 提取音频落盘', () => {
     pushVideoNode('v2', 'a10');
 
     await renderPage();
-    const nodes = flowProps.current.mediaNodes;
-    await act(async () => {
-      void nodes.find((n: Node) => n.id === 'v1').data.onExtractAudio('v1');
-      void nodes.find((n: Node) => n.id === 'v2').data.onExtractAudio('v2');
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    });
+    // 两个视频先后进入编辑态并发送（编辑态互斥：第二次进入自动退出第一次的会话）
+    const enterAndSend = async (id: string) => {
+      await act(async () => {
+        flowProps.current.mediaNodes.find((n: Node) => n.id === id).data.onAudioVideoSplit(id);
+      });
+      await act(async () => {
+        document.body.querySelector<HTMLButtonElement>('[data-testid="audio-video-split-send-btn"]')!
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+    };
+    await enterAndSend('v1');
+    await enterAndSend('v2');
 
     const calls = apiMocks.saveCanvasDoc.mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(2);

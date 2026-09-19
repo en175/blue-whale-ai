@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /* GroupOverlay 捕获阶段 pointerdown 拦截的放行规则（IKGOQ0 验收报障回归锁）：
    onDown 在 window 捕获阶段把「落点在内容卡盒内、目标不在卡元素上」的按下
-   stopPropagation 拦死（防穿透框选）。扩图扩展框手柄命中带压在源图卡盒边界上，
-   落点必在卡盒内——不加放行时扩图拖拽永远启动不了。此处钉死：
-   命中 [data-outpaint-frame] 的按下放行；非豁免目标的同位置按下仍被拦。 */
+   stopPropagation 拦死（防穿透框选）。扩图扩展框与裁切框的手柄命中带都压在
+   源图卡盒边界上，落点必在卡盒内——不加放行时拖拽永远启动不了。此处钉死：
+   命中 [data-outpaint-frame] / [data-crop-frame] 的按下放行；非豁免目标的
+   同位置按下仍被拦。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider, type Node } from '@xyflow/react';
@@ -82,6 +83,21 @@ describe('GroupOverlay 捕获拦截的覆盖层放行', () => {
     handle.addEventListener('pointerdown', () => { reached = true; });
     // 落点 (150,150) 在内容卡盒 (100..300, 100..300) 内，目标不在 .react-flow__node 上：
     // 旧逻辑必拦（stopPropagation 于 window 捕获），豁免后须到达手柄
+    handle.dispatchEvent(pointerDown(150, 150));
+    expect(reached).toBe(true);
+    frame.remove();
+  });
+
+  it('按下目标是裁切框（data-crop-frame 子树）：放行，不再拦死传播（IKH1WJ）', async () => {
+    await mountOverlay();
+    const frame = document.createElement('div');
+    frame.setAttribute('data-crop-frame', '');
+    const handle = document.createElement('div');
+    frame.appendChild(handle);
+    document.body.appendChild(frame);
+    let reached = false;
+    handle.addEventListener('pointerdown', () => { reached = true; });
+    // 同上：边手柄命中带压在源图卡盒边界上，落点必在卡盒内，不豁免则拖拽永远启动不了
     handle.dispatchEvent(pointerDown(150, 150));
     expect(reached).toBe(true);
     frame.remove();

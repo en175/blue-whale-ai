@@ -139,14 +139,14 @@ describe('MediaNode generating overlay', () => {
     expect(labels()).toEqual(['取消生成']);
   });
 
-  it('keeps extract progress copy and bar for audio extraction', async () => {
+  it('keeps extract progress copy and bar for audio video split (IKH28X 更名)', async () => {
     await renderNode('audio', {
       id: 'media-extract-job-1',
       genStatus: 'generating',
       progress: 42,
       selected: false,
     });
-    expect(mountNode.textContent).toContain('正在提取音频 42%');
+    expect(mountNode.textContent).toContain('音视频分离处理中 42%');
     expect(mountNode.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
     expect(labels()).not.toContain('取消生成');
   });
@@ -193,7 +193,30 @@ describe('MediaNode failed overlay', () => {
     });
     expect(mountNode.textContent).toContain('视频没有音轨');
     expect(mountNode.textContent).not.toContain('音频提取失败');
+    // 存量直发时代失败卡无 mediaExtract 身份：不渲染重试钮（IKH28X 身份分流）
     expect(labels()).not.toContain('重试');
+  });
+
+  it('IKH28X 带身份的失败提取卡渲染重试钮并派发 onRetryJob（原参数重发）', async () => {
+    const onRetryJob = vi.fn();
+    await renderNode('audio', {
+      id: 'media-extract-j9',
+      genStatus: 'failed',
+      errorText: '音频提取失败，请重试',
+      selected: false,
+      data: {
+        onRetryJob,
+        mediaExtract: {
+          sourceAssetId: '9',
+          lastInput: { source_asset_id: '9', output_format: 'wav' },
+        },
+      },
+    });
+    expect(labels()).toContain('重试');
+    await act(async () => {
+      [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.trim() === '重试')!.click();
+    });
+    expect(onRetryJob).toHaveBeenCalledWith('media-extract-j9');
   });
 });
 
@@ -693,5 +716,25 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     expect(normalVideo.hasAttribute('controls')).toBe(true);
     expect(normalVideo.style.pointerEvents).toBe('');
     pause.mockRestore();
+  });
+});
+
+describe('MediaNode 音视频分离编辑态锁定层（IKH28U）', () => {
+  /** 视频卡注入 splitEditing 时：透明锁定层全覆盖内容区接管指针（nodrag/nopan 同框层口径）
+      且视频元素被暂停在当前帧；未注入（正常视频卡）不渲染。 */
+  it('注入 splitEditing：渲染锁定层并暂停视频；未注入不渲染', async () => {
+    // jsdom 不加载媒体：拦截 HTMLMediaElement.prototype.pause 验证编辑态注入即暂停在当前帧
+    const pauseSpy = vi.fn();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseSpy);
+    await renderNode('video', { data: { splitEditing: true } });
+    expect(pauseSpy).toHaveBeenCalled();
+    pause.mockRestore();
+    const layer = mountNode.querySelector('[data-testid="split-lock-layer"]');
+    expect(layer).toBeTruthy();
+    expect(layer!.className).toContain('nodrag');
+    expect(layer!.className).toContain('nopan');
+    // 未注入的正常视频卡不渲染锁定层
+    await renderNode('video', {});
+    expect(mountNode.querySelector('[data-testid="split-lock-layer"]')).toBeNull();
   });
 });

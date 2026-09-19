@@ -55,12 +55,14 @@ import { assetCardToolbarVisible } from './components/AssetCardNode/toolbarVisib
 import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
+  MEDIA_EXTRACT_EDGE_ORIGIN,
   buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
-  MEDIA_EXTRACT_EDGE_ORIGIN,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
+  type MediaExtractIdentity,
 } from './mediaExtract';
+import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './audioVideoSplit';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
@@ -133,6 +135,7 @@ import {
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
 import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
+import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
@@ -182,6 +185,8 @@ import {
   createProject,
   renameProject,
   deleteProject,
+  touchProjectLastOpened,
+  pinProject,
   projectKeys,
   type SnapshotAsset,
 } from '@/api/projects';
@@ -198,12 +203,12 @@ import {
   cancelGenerationJob,
   retryGenerationJob,
   fetchJobStatus,
-  createMediaExtraction,
   createImageEnhancement,
   createImageErase,
   createImageCutout,
   createImageOutpaint,
   createVideoSubtitleErase,
+  createMediaExtraction,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -264,6 +269,8 @@ import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } f
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
+  findLastOpenedProjectId,
+  findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -510,6 +517,18 @@ export default function CanvasPage() {
   const subtitleEraseLiveBoxRef = useRef<SubtitleBoxOp | null>(null);
   /** 去字幕发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
   const [subtitleEraseSubmitting, setSubtitleEraseSubmitting] = useState(false);
+  /** 音视频分离编辑态（IKH28U 骨架 / IKH28X 发送闭环）：处于音视频分离编辑的源视频卡
+   *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
+   *  上方仅 X 工具条 + 下方发送条（格式下拉/本期免费/发送钮，VideoAudioSplitDialog）。
+   *  发送按所选格式建任务与音频占位卡；未发送退出（X/Esc/点其他卡/点画布空白）
+   *  不建任务不建卡。 */
+  const [audioVideoSplitTargetNodeId, setAudioVideoSplitTargetNodeId] = useState<string | null>(null);
+  /** 分离格式（IKH28X，会话期交互态）：发送条下拉选择，m4a 默认。格式不跨会话记忆——
+   *  进入编辑态重置、退出复位（exitAudioVideoSplitEditing）；发送时随任务冻结进占位卡
+   *  身份（mediaExtract.lastInput），失败重试按冻结参数原样重发。 */
+  const [audioVideoSplitFormat, setAudioVideoSplitFormat] = useState<AudioVideoSplitFormat>(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+  /** 音视频分离发送中（创建请求飞行期防重复提交，口径同 subtitleEraseSubmitting） */
+  const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
   /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
    *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
    *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
@@ -1218,6 +1237,38 @@ export default function CanvasPage() {
       top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
     };
   })();
+  /** 音视频分离编辑态跟随锚（IKH28U，口径同去字幕）：源视频卡上方工具条 / 下方发送条。
+   *  工具条手动换算（高约 42 + 间距 10）；发送条走 IKH25A 中心点锚口径（left=源卡中心 x，
+   *  组件 translateX(-50%) 真居中；halfWidth 仅视口钳制不参与居中，恒偏左 130px 缺陷不复现）。 */
+  const audioVideoSplitSourceNode = audioVideoSplitTargetNodeId
+    ? mediaNodes.find((n) => n.id === audioVideoSplitTargetNodeId) ?? null
+    : null;
+  const audioVideoSplitToolbarAnchor = (() => {
+    if (!audioVideoSplitSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(audioVideoSplitSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = audioVideoSplitSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = audioVideoSplitSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    return {
+      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
+      top: Math.round(Math.max(8, screenTop - 52)),
+    };
+  })();
+  const audioVideoSplitSendBarAnchor = (() => {
+    if (!audioVideoSplitSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(audioVideoSplitSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = audioVideoSplitSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = audioVideoSplitSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    // 估半宽 = 估宽 260 的一半，仅用于视口钳制，不参与居中（对齐 IKH25A 中心点锚口径）
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
@@ -1481,30 +1532,43 @@ export default function CanvasPage() {
     };
   }, [setQuota]);
 
-  // 加载项目列表；?project= 不在列表中时回退首项；无项目自动创建
+  // 加载项目列表；落点三级规则（IKH1YK）：?project= 合法值 > 上次打开 > 首项；无项目自动创建
   useEffect(() => {
     let alive = true;
     fetchProjects()
       .then(async (list) => {
         if (!alive) return;
-        let mapped = list.map((p) => ({ id: String(p.id), name: p.name }));
+        const lastOpenedId = findLastOpenedProjectId(list);
+        const latestCreatedId = findLatestCreatedProjectId(list);
+        let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
         if (mapped.length === 0) {
           try {
             const created = await createProject('未命名项目');
             if (!alive) return;
-            mapped = [{ id: String(created.id), name: created.name }];
+            mapped = [{ id: String(created.id), name: created.name, pinned: false }];
           } catch {
             /* 创建失败静默降级：空项目列表 */
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id)));
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId, latestCreatedId));
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
+
+  /** 打开即记（IKH1YK）：进入画布那一刻向服务端记一笔 last_opened_at，失败静默。
+   *  ref 去重：同一次进入（含 StrictMode 双挂载）只记一次；A→B→A 切换每次都记。 */
+  const lastTouchedProjectRef = useRef('');
+  useEffect(() => {
+    if (!currentId || lastTouchedProjectRef.current === currentId) return;
+    // projects 就绪且包含该 id 才记，防止记到无效 id
+    if (!projects.some((p) => p.id === currentId)) return;
+    lastTouchedProjectRef.current = currentId;
+    touchProjectLastOpened(currentId).catch(() => undefined);
+  }, [currentId, projects]);
 
   /** 地址栏改 query（含后退）时切回对应画布 */
   useEffect(() => {
@@ -1644,7 +1708,7 @@ export default function CanvasPage() {
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
           onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
-          onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+          onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -2519,7 +2583,10 @@ export default function CanvasPage() {
      *  「智能去字幕 ▾」下拉菜单项派发，mode 定死会话形态）；首帧渲染前经由
      *  actionsRef.current.videoSubtitleErase 分派到 handleNodeVideoSubtitleErase */
     videoSubtitleErase: (_id: string, _mode: VideoSubtitleEraseMode) => {},
-    extractAudio: async (_id: string) => {},
+    /** 音视频分离（IKH28U 通道/接线）：进入音视频分离编辑态（视频卡工具条「音视频分离」
+     *  按钮派发，原提取音频一键直发通道退役）；首帧渲染前经由
+     *  actionsRef.current.audioVideoSplit 分派到 handleNodeAudioVideoSplit */
+    audioVideoSplit: (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
@@ -3103,12 +3170,12 @@ export default function CanvasPage() {
     closeEnhanceDialog();
   };
 
-  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕任一
-   *  会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
+  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
+   *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
    *  见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
-    || subtitleEraseTargetNodeId != null;
+    || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置：按四路退出口径退出当前编辑会话（未发送
    *  参数全部丢弃），面板随后放行打开；无会话时为幂等空操作（各 exit 幂等复位）。 */
   const exitEditSessionForGenPanel = () => {
@@ -3117,6 +3184,7 @@ export default function CanvasPage() {
     exitCropMode();
     endOutpaintSession();
     exitSubtitleEraseEditing();
+    exitAudioVideoSplitEditing();
   };
 
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
@@ -3149,6 +3217,11 @@ export default function CanvasPage() {
     // 去字幕编辑态（IKGZ83 四退出之一）：点画布空白退出并丢弃框与开关状态
     if (subtitleEraseTargetNodeId) {
       exitSubtitleEraseEditing();
+      return;
+    }
+    // 音视频分离编辑态（IKH28U 四退出之一）：点画布空白退出，未发送不建任务不建卡
+    if (audioVideoSplitTargetNodeId) {
+      exitAudioVideoSplitEditing();
       return;
     }
     if (imagePickSessionActive) { endImagePickSession(); return; }
@@ -3205,6 +3278,11 @@ export default function CanvasPage() {
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (subtitleEraseTargetNodeId && ((soloId && soloId !== subtitleEraseTargetNodeId) || candidates.length > 1)) {
       exitSubtitleEraseEditing();
+    }
+    // 音视频分离编辑态（IKH28U 四退出之一）：点其他卡或多选时退出
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (audioVideoSplitTargetNodeId && ((soloId && soloId !== audioVideoSplitTargetNodeId) || candidates.length > 1)) {
+      exitAudioVideoSplitEditing();
     }
     // IKFOHK：单选草稿/成品生成卡时原子切换到对应对话框。选中变化经 React Flow
     // useEffect 到达，可能早于或代替 onNodeClick（nodeDragThreshold=1 时轻微位移会吞掉 click）。
@@ -3316,10 +3394,11 @@ export default function CanvasPage() {
 
   /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
    *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
-   *  （复用 isEditableKeyboardTarget）→ 擦除/去字幕编辑态退出（未发送丢弃遮罩/框与开关状态）
-   *  → 其余情况关闭五面板。 */
+   *  （复用 isEditableKeyboardTarget）→ 擦除/去字幕/音视频分离编辑态退出（未发送丢弃
+   *  遮罩/框与开关状态；分离未发送不建任务不建卡）→ 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId && !subtitleEraseTargetNodeId) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId && !subtitleEraseTargetNodeId
+      && !audioVideoSplitTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
@@ -3341,6 +3420,10 @@ export default function CanvasPage() {
         exitSubtitleEraseEditing();
         return;
       }
+      if (audioVideoSplitTargetNodeId) {
+        exitAudioVideoSplitEditing();
+        return;
+      }
       if (cropTargetNodeId) {
         exitCropMode();
         return;
@@ -3350,7 +3433,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -3663,6 +3746,15 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtitleEraseTargetNodeId, mediaNodes]);
 
+  /** 音视频分离编辑态绑定清理（IKH28U）：目标源视频卡被删除时退出编辑态，防浮条悬挂
+   *  （口径同去字幕绑定清理） */
+  useEffect(() => {
+    if (!audioVideoSplitTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === audioVideoSplitTargetNodeId)) exitAudioVideoSplitEditing();
+    // exitAudioVideoSplitEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioVideoSplitTargetNodeId, mediaNodes]);
+
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
     if (!cropTargetNodeId) return;
@@ -3847,7 +3939,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -3892,7 +3984,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -3952,7 +4044,7 @@ export default function CanvasPage() {
         onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
         onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4353,6 +4445,18 @@ export default function CanvasPage() {
       .catch(() => undefined);
   };
 
+  /** 置顶/取消置顶：成功后全量重拉列表（服务端排序直出），不动 currentId；并同步项目卡片页缓存 */
+  const handleToggleProjectPin = (id: string, pinned: boolean) => {
+    pinProject(id, pinned)
+      .then(() => fetchProjects())
+      .then((list) => {
+        setProjects(list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) })));
+        // 项目卡片页缓存需同步置顶口径；置顶失败不回滚本地，下次重拉自然校正。
+        queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      })
+      .catch(() => undefined);
+  };
+
   /** 删除当前画布后回到项目列表；删除其他项目时留在当前画布。 */
   const handleDelete = (id: string) => {
     deleteProject(id)
@@ -4426,7 +4530,7 @@ export default function CanvasPage() {
       onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
       onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
-      onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+      onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
       onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4844,7 +4948,7 @@ export default function CanvasPage() {
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
           onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
-          onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+          onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5492,7 +5596,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -6428,6 +6532,37 @@ export default function CanvasPage() {
       startImageOutpaintJob(nodeId, outpaintIdentity.lastParams);
       return;
     }
+    const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
+      | MediaExtractIdentity
+      | undefined;
+    if (mediaExtractIdentity?.lastInput) {
+      // 音视频分离卡分流（IKH28X，镜像去字幕/擦除）：契约无 retry 端点，重试 = 冻结 input
+      // 原样重发创建接口（源素材与格式随 lastInput 冻结，不从零再选）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法音视频分离');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createMediaExtraction(currentId, mediaExtractIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     if (!currentId || !jobId) return;
     // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
     if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
@@ -7010,11 +7145,12 @@ export default function CanvasPage() {
       setPickAssetId(null);
     }
     dismissAllGenPanels();
-    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图/去字幕（整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图/去字幕/音视频分离（整包合并后的交叉缝隙）
     exitEraseEditing();
     exitCutoutSession();
     exitCropMode();
     exitSubtitleEraseEditing();
+    exitAudioVideoSplitEditing();
     setOutpaintExpands(ZERO_EXPANDS);
     setOutpaintNodeId(id);
   };
@@ -7043,6 +7179,15 @@ export default function CanvasPage() {
     setSubtitleEraseSubmitting(false);
   };
 
+  /** 退出音视频分离编辑态（IKH28U 四退出共用）：会话参数（分离格式）与发送中复位——
+   *  格式不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
+   *  自动恢复（MediaNode 承担）。 */
+  const exitAudioVideoSplitEditing = () => {
+    setAudioVideoSplitTargetNodeId(null);
+    setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+    setAudioVideoSplitSubmitting(false);
+  };
+
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
    *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
   const exitCropMode = () => {
@@ -7062,6 +7207,7 @@ export default function CanvasPage() {
     dismissAllGenPanels();
     exitCropMode();
     exitSubtitleEraseEditing(); // 与去字幕编辑态互斥（IKGZ83）：编辑态是排他模式
+    exitAudioVideoSplitEditing(); // 与音视频分离编辑态互斥（IKH28U）：编辑态是排他模式
     setEraseTargetNodeId(id);
     setEraseMaskState(EMPTY_MASK_EDIT);
     setEraseLiveOp(null);
@@ -7077,11 +7223,12 @@ export default function CanvasPage() {
   const handleNodeCutoutImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图/去字幕（整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图/去字幕/音视频分离（整包合并后的交叉缝隙）
     exitEraseEditing();
     exitCropMode();
     endOutpaintSession();
     exitSubtitleEraseEditing();
+    exitAudioVideoSplitEditing();
     dismissAllGenPanels();
     setCutoutNodeId(id);
     setCutoutScene(cutoutDefaultParams.scene);
@@ -7099,10 +7246,11 @@ export default function CanvasPage() {
     if (!node || node.type !== 'mediaNode') return;
     dismissAllGenPanels();
     exitEraseEditing();
-    // 全屏编辑模式互斥：进入裁切同时退出扩图会话、抠图会话与去字幕编辑态（整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入裁切同时退出扩图会话、抠图会话、去字幕与音视频分离编辑态（整包合并后的交叉缝隙）
     endOutpaintSession();
     exitCutoutSession();
     exitSubtitleEraseEditing();
+    exitAudioVideoSplitEditing();
     const bounds = cropBoundsOf(node);
     setCropPreset('free');
     setCropRect(fullCropRect(bounds));
@@ -7117,17 +7265,37 @@ export default function CanvasPage() {
   const handleNodeVideoSubtitleErase = (id: string, mode: VideoSubtitleEraseMode) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入去字幕同时退出擦除/抠图/裁切/扩图（编辑态是排他模式）
+    // 全屏编辑模式互斥：进入去字幕同时退出擦除/抠图/裁切/扩图/音视频分离（编辑态是排他模式）
     exitEraseEditing();
     exitCutoutSession();
     exitCropMode();
     endOutpaintSession();
+    exitAudioVideoSplitEditing();
     dismissAllGenPanels();
     setSubtitleEraseTargetNodeId(id);
     setSubtitleEraseMode(mode);
     setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
     setSubtitleEraseLiveBox(null);
     subtitleEraseLiveBoxRef.current = null;
+  };
+
+  /** 音视频分离（IKH28U 入口 / IKH28X 格式状态）：把目标视频卡置为音视频分离编辑态
+   *  （原「提取音频」一键直发入口退役为会话入口）。置灰门槛（assetId 缺失）已在工具条
+   *  按钮置灰层完成（audioVideoSplitGateReason），此处只管进入；进入时关闭五个生成面板
+   *  （编辑态是独立模式）并退出其余五个编辑会话（编辑模式互斥）、不动视角；格式重置
+   *  m4a 默认（不跨会话记忆）；视频随编辑态注入暂停并锁定播放控制（MediaNode 承担）。 */
+  const handleNodeAudioVideoSplit = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    // 全屏编辑模式互斥：进入音视频分离同时退出擦除/抠图/裁切/扩图/去字幕（编辑态是排他模式）
+    exitEraseEditing();
+    exitCutoutSession();
+    exitCropMode();
+    endOutpaintSession();
+    exitSubtitleEraseEditing();
+    dismissAllGenPanels();
+    setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+    setAudioVideoSplitTargetNodeId(id);
   };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
@@ -7322,32 +7490,41 @@ export default function CanvasPage() {
     setShowEnhanceDialog(false);
   };
 
-  /** 视频整段提取音频（IKFS5W）：建任务后本地插入音频占位节点（画布只由前端写），
-   *  立刻落库避免刚建任务就关页丢节点，再用返回的 job_id 轮询，终态本地补丁收敛。 */
-  const handleNodeExtractAudio = async (id: string) => {
-    const node = mediaNodesRef.current.find((item) => item.id === id);
-    const assetId = node?.data?.assetId as string | number | undefined;
-    if (node?.data?.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return;
-    }
-    if (!currentId) {
-      showToast('warn', '未选中项目，无法提取音频');
-      return;
-    }
-    if (node?.data?.mediaType !== 'video' || assetId == null) {
-      showToast('warn', '当前视频尚未关联资产，无法提取音频');
-      return;
-    }
+  /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
 
+  /** 音视频分离任务发送核心：按所选格式 POST media-extractions；创建成功后先退编辑态再在
+   *  源视频右侧建音频占位卡（node id = media-extract-{job_id}，展示名后缀跟随所选格式；
+   *  带 mediaExtract 身份——lastInput 供失败重试原样重发）、拉来源边（origin=media-extract，
+   *  参考推导跳过，源视频不占参考位不参与 @ 编号）、启动轮询（applyJobTerminal 的媒体提取
+   *  分支回填成品/失败）、立刻落盘（best-effort，防刚建任务就关页丢节点）。
+   *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，去字幕同口径）；入队失败创建
+   *  响应仍 200，任务经轮询呈现 enqueue_failed。免费口径同 image_enhance / image_erase：
+   *  无幂等头、无积分预估、不走余额拦截门。 */
+  const startAudioVideoSplitJob = async (
+    sourceNodeId: string,
+    payload: { source_asset_id: string; output_format: AudioVideoSplitFormat },
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法音视频分离');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法音视频分离');
+      return false;
+    }
     try {
-      const created = await createMediaExtraction(currentId, {
-        source_asset_id: assetId,
-        output_format: 'mp3',
-      });
+      const created = await createMediaExtraction(currentId, payload);
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
+      exitAudioVideoSplitEditing();
       const nodeId = mediaExtractNodeId(created.job_id);
       const placeholder = attachCallbacks(
-        buildMediaExtractPlaceholderNode({ jobId: created.job_id, source: node }) as Node,
+        buildMediaExtractPlaceholderNode({
+          jobId: created.job_id,
+          outputFormat: payload.output_format,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
       );
       // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
       // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
@@ -7355,15 +7532,37 @@ export default function CanvasPage() {
       const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
       mediaNodesRef.current = next;
       setMediaNodes(next);
-      // 连一条视频 → 音频的**来源边**（带 origin 标记）：说明音频是从这段视频提取来的；
+      // 连一条视频 → 音频的**来源边**（带 origin 标记）：说明音频是从这段视频分离来的；
       // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
-      addCanvasEdge(id, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
       pollJob(nodeId, created.job_id);
       // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
       await flushCanvasSave(currentId).catch(() => {});
-    } catch (error) {
-      if (!isApiError(error)) showToast('error', '音频提取任务创建失败');
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '音视频分离任务创建失败，请重试');
+      return false;
     }
+  };
+
+  /** 音视频分离发送（发送条发送钮）：源素材身份 + 当前所选格式 → 建任务。
+   *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioVideoSplitJob 承担，
+   *  失败停留编辑态（格式可调后重发）。 */
+  const handleAudioVideoSplitSend = (): boolean => {
+    const nodeId = audioVideoSplitTargetNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '当前视频尚未关联资产，无法音视频分离');
+      return false;
+    }
+    setAudioVideoSplitSubmitting(true);
+    void startAudioVideoSplitJob(nodeId, {
+      source_asset_id: String(sourceAssetId),
+      output_format: audioVideoSplitFormat,
+    }).finally(() => setAudioVideoSplitSubmitting(false));
+    return true;
   };
 
   /** 自由图片面板的文本附件按节点身份刷新标题与正文（IKFCX4）：来源改名/改文后再次预览即用当前值；
@@ -7561,7 +7760,7 @@ export default function CanvasPage() {
   actionsRef.current.cutoutImage = handleNodeCutoutImage;
   actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
-  actionsRef.current.extractAudio = handleNodeExtractAudio;
+  actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
 
@@ -8168,7 +8367,7 @@ export default function CanvasPage() {
               onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
               onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
-              onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+              onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -9041,6 +9240,7 @@ export default function CanvasPage() {
         onSelectProject={handleSelect}
         onRenameProject={handleRename}
         onDeleteProject={handleDelete}
+        onTogglePinProject={handleToggleProjectPin}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
         onShowLegacyHistory={legacyHistory && legacyHistory.length > 0 ? () => setShowLegacyHistory(true) : undefined}
@@ -9078,14 +9278,16 @@ export default function CanvasPage() {
             // 去字幕会话（IKGZ83，IKH3OU 单条化）：目标源视频卡渲染期注入停帧标记
             //  （两模式都有）与框层 props（仅框选模式，智能模式零框选工具不盖透明浮层）
             //  ——SubtitleEraseBoxesLayer 与下方单条共享本页会话状态
+            // 音视频分离编辑态（IKH28U）：目标源视频卡渲染期注入 splitEditing 标记（不持久化）
+            //  ——MediaNode 据此暂停视频并以透明锁定层接管指针，浮条由本页 VideoAudioSplitDialog 承担
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕）或高清面板
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离）或高清面板
             // 打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
             // 集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showEnhanceDialog
-              || subtitleEraseTargetNodeId
+              || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     showEnhanceDialog
@@ -9093,7 +9295,8 @@ export default function CanvasPage() {
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
                     || n.id === outpaintNodeId
-                    || n.id === subtitleEraseTargetNodeId;
+                    || n.id === subtitleEraseTargetNodeId
+                    || n.id === audioVideoSplitTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
                     && n.id !== subtitleEraseTargetNodeId
@@ -9123,6 +9326,7 @@ export default function CanvasPage() {
                       };
                     }
                   }
+                  if (n.id === audioVideoSplitTargetNodeId) data.splitEditing = true;
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
                   if (hideToolbar) data.soloToolbarHidden = true;
@@ -9655,6 +9859,23 @@ export default function CanvasPage() {
             submitting={subtitleEraseSubmitting}
             sendBlockedReason={subtitleEraseSendBlockedReason}
             sendBarAnchor={subtitleEraseSendBarAnchor}
+          />
+        )}
+
+        {/* 音视频分离编辑态浮条（IKH28U 骨架 / IKH28X 发送闭环）：上条仅 X 退出（本工具
+            无画布操作）；下条 = 分离格式下拉（触发钮显当前格式）+ 本期免费 + 发送钮；
+            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
+            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送按当前所选格式
+            建任务（发送即先退编辑态再建占位卡） */}
+        {audioVideoSplitTargetNodeId && (
+          <VideoAudioSplitDialog
+            onClose={exitAudioVideoSplitEditing}
+            format={audioVideoSplitFormat}
+            onFormatChange={setAudioVideoSplitFormat}
+            onSend={handleAudioVideoSplitSend}
+            submitting={audioVideoSplitSubmitting}
+            toolbarAnchor={audioVideoSplitToolbarAnchor}
+            sendBarAnchor={audioVideoSplitSendBarAnchor}
           />
         )}
 

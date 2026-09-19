@@ -103,6 +103,8 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/projects', () => ({
+  touchProjectLastOpened: vi.fn(async () => undefined),
+  pinProject: vi.fn(async () => undefined),
   fetchProjects: apiMocks.fetchProjects,
   createProject: apiMocks.createProject,
   renameProject: apiMocks.renameProject,

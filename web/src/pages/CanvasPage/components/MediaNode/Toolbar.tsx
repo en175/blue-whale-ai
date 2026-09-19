@@ -8,12 +8,13 @@
  * 工具条 DOM 不再位于节点卡内：点击按钮天然不触发节点拖拽/选中变化（原 nodrag/nopan 与
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
+import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { hasGenerationRecordData } from '../../mediaReEdit';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
@@ -33,8 +34,6 @@ interface MediaNodeToolbarProps {
 }
 
 export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
-  const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
-
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
@@ -62,15 +61,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const videoSubtitleEraseDisabledReason = videoSubtitleEraseGateReason(data);
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
-  const handleExtractAudio = useCallback(async () => {
-    if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
-    setIsExtractSubmitting(true);
-    try {
-      await data.onExtractAudio(id);
-    } finally {
-      setIsExtractSubmitting(false);
-    }
-  }, [data, id, isExtractSubmitting]);
+  /** 音视频分离（IKH28U）：点击进入编辑态（不再一键直发，发送闭环归 IKH28X），
+   *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
+  const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
+  const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
@@ -178,12 +172,12 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
       {data.mediaType === 'video' && (
         <button
           className={styles.toolBtn}
-          onClick={() => void handleExtractAudio()}
-          disabled={data.assetId == null || isExtractSubmitting}
-          title={data.assetId == null ? '当前视频尚未关联资产，无法提取音频' : '提取视频中的完整音轨'}
+          onClick={handleAudioVideoSplit}
+          disabled={audioVideoSplitDisabledReason !== null}
+          title={audioVideoSplitDisabledReason ?? AUDIO_VIDEO_SPLIT_ENTRY_HINT}
         >
           <AudioLines size={14} strokeWidth={2} />
-          <span>{isExtractSubmitting ? '提交中…' : '提取音频'}</span>
+          <span>音视频分离</span>
         </button>
       )}
       <span className={styles.toolDivider} />

@@ -9,6 +9,8 @@ import styles from './index.module.css';
 interface AudioPlayerProps {
   src: string;
   fileName?: string;
+  /** 服务端权威时长（秒，story 15）：有值时优先于浏览器实测（ogg/flac 等格式 metadata 支持不稳） */
+  duration?: number;
   onDownload?: () => void;
 }
 
@@ -65,10 +67,10 @@ function fallbackWaveform(src: string, duration: number, bars: number): number[]
   });
 }
 
-export default function AudioPlayer({ src }: AudioPlayerProps) {
+export default function AudioPlayer({ src, duration: authoritativeDuration }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(authoritativeDuration ?? 0);
   const [currentTime, setCurrentTime] = useState(0);
   const [err, setErr] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -76,8 +78,9 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
   const trackRef = useRef<HTMLDivElement>(null);
 
   const onLoaded = useCallback(() => {
-    if (audioRef.current) setDuration(audioRef.current.duration || 0);
-  }, []);
+    // 服务端权威值优先（对齐 video 路径「已有值不覆盖」先例），仅缺失时用浏览器实测兜底
+    if (audioRef.current && authoritativeDuration == null) setDuration(audioRef.current.duration || 0);
+  }, [authoritativeDuration]);
 
   /** timeupdate 兜底：拖拽时不更新，播放中主要靠 rAF 高频刷新 */
   const onTimeUpdate = useCallback(() => {
