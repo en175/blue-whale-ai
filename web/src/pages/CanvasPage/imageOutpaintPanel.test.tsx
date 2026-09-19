@@ -217,7 +217,7 @@ async function renderPage() {
   });
 }
 
-/** 走图片卡「高清 ▾」菜单的「扩图」入口（回调挂在节点 data 上） */
+/** 走图片卡画质工具横排「扩图」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function enterOutpaint(nodeId = 'i1') {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!;
   await act(async () => {

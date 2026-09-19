@@ -77,8 +77,8 @@ export default function CutoutToolbar({
   const sceneAnchorRef = useRef<HTMLDivElement | null>(null);
   const contourAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  /** 点外关闭上拉菜单（口径同扩图工具栏 / MediaNode 高清 ▾ 菜单：document pointerdown + contains；
-   *  Esc 不单独关菜单——直接退整个会话，与扩图同构口径）。 */
+  /** 点外关闭上拉菜单（点外关闭口径同扩图工具栏 / MediaNode SubtitleEraseMenu 下拉；
+   *  document pointerdown + contains；Esc 不单独关菜单——直接退整个会话，与扩图同构口径）。 */
   useEffect(() => {
     if (!sceneMenuOpen && !contourMenuOpen) return;
     const onPointerDown = (e: PointerEvent) => {

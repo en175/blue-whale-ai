@@ -184,7 +184,7 @@ async function renderPage() {
   });
 }
 
-/** 进入擦除编辑态（「高清 ▾」下拉「擦除」项派发的回调） */
+/** 进入擦除编辑态（画质工具横排「擦除」按钮派发的回调，IKH3XZ） */
 async function eraseImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {

@@ -2606,7 +2606,7 @@ export default function CanvasPage() {
     outpaintImage: (_id: string) => {},
     eraseImage: (_id: string) => {},
     cropImage: (_id: string) => {},
-    /** 抠图（IKGXLT 通道 / IKGXMT 接线）：进入抠图工具栏会话（「高清 ▾」下拉「抠图」项派发）；
+    /** 抠图（IKGXLT 通道 / IKGXMT 接线）：进入抠图工具栏会话（画质工具横排「抠图」按钮派发，IKH3XZ）；
      *  首帧渲染前经由 actionsRef.current.cutoutImage 分派到 handleNodeCutoutImage */
     cutoutImage: (_id: string) => {},
     /** 智能去字幕（IKGZ82 通道 / IKH3OU 模式前置）：进入去字幕会话（视频卡工具条
@@ -6668,7 +6668,7 @@ export default function CanvasPage() {
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
   pollJobRef.current = pollJob;
 
-  /* ============ 节点动作实现：点卡片开面板/高清 ▾ 菜单/详情下载（工具条生成类
+  /* ============ 节点动作实现：点卡片开面板/画质横排按钮/详情下载（工具条生成类
      按钮已撤，IKH3WE：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片） ============ */
 
   /** 目标节点的文本附件（IKDLQF）：连线 target 为该节点、source 为 textNode 且 data.text 为 string；
@@ -7239,7 +7239,7 @@ export default function CanvasPage() {
     return true;
   };
 
-  /** 进入扩图模式（IKGOQX）：「高清 ▾」菜单「扩图」项——门槛预检后建立会话（不建卡不连线），
+  /** 进入扩图模式（IKGOQX）：画质工具横排「扩图」按钮（IKH3XZ）——门槛预检后建立会话（不建卡不连线），
    *  扩展量从零开始；进入时关其他生成面板与残留选取态，模式期间禁用框选与他卡拖动（Canvas refPickActive） */
   const handleNodeOutpaintImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
