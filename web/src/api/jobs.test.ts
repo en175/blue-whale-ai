@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './http';
 import {
   createMediaExtraction,
+  createVideoEnhancement,
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
@@ -30,6 +31,38 @@ describe('createMediaExtraction', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       source_asset_id: '3985',
       output_format: 'mp3',
+    });
+  });
+});
+
+describe('createVideoEnhancement', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目视频 HD 高清端点提交冻结三键（IKH3VH，契约键名恒等）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '901', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVideoEnhancement('p1', {
+        source_asset_id: '5',
+        target_node_id: 'media-draft-1',
+        resolution: '2k',
+      }),
+    ).resolves.toEqual({ job_id: '901', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/video-enhancements');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '5',
+      target_node_id: 'media-draft-1',
+      resolution: '2k',
     });
   });
 });

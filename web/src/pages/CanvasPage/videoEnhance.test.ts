@@ -1,11 +1,14 @@
 /* IKH3VG 视频 HD 高清纯逻辑测试：门槛预检四情形与边界（契约常量同源数值）、
-   lastParams 恢复（缺键/非法值回落默认档）、草稿卡出生位（口径同 imageEnhance）。 */
+   lastParams 恢复（缺键/非法值回落默认档）、草稿卡出生位（口径同 imageEnhance）。
+   IKH3VH 增补：契约三键组装（zod strict 校验）与失败文案家族映射（1045 兜底）。 */
 import { describe, expect, it } from 'vitest';
 import {
   VIDEO_ENHANCE_ENTRY_HINT,
   VIDEO_ENHANCE_MISSING_ASSET_REASON,
+  buildVideoEnhanceInput,
   restoreVideoEnhanceResolution,
   videoEnhanceDraftPosition,
+  videoEnhanceErrorText,
   videoEnhanceGateReason,
 } from './videoEnhance';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
@@ -68,5 +71,44 @@ describe('videoEnhanceDraftPosition（HD 草稿卡出生位）', () => {
     const pos = videoEnhanceDraftPosition({ data: {} });
     expect(pos.y).toBe(0);
     expect(Number.isFinite(pos.x)).toBe(true);
+  });
+});
+
+describe('buildVideoEnhanceInput（IKH3VH 契约三键组装）', () => {
+  it('三键键名与值恒等契约形态（source_asset_id / target_node_id / resolution）', () => {
+    expect(buildVideoEnhanceInput('5', 'media-draft-1', '2k')).toEqual({
+      source_asset_id: '5',
+      target_node_id: 'media-draft-1',
+      resolution: '2k',
+    });
+    expect(buildVideoEnhanceInput('7', 'media-draft-9', '1080p')).toBeTruthy();
+    expect(buildVideoEnhanceInput('7', 'media-draft-9', '4k')).toBeTruthy();
+  });
+
+  it('非法输入返回 null（资产 id 非数字串 / 目标节点空 / 分辨率越枚举含被裁撤的 720p）', () => {
+    expect(buildVideoEnhanceInput('a5', 'media-draft-1', '1080p')).toBeNull();
+    expect(buildVideoEnhanceInput('5', '', '1080p')).toBeNull();
+    expect(buildVideoEnhanceInput('5', 'media-draft-1', '720p')).toBeNull();
+    expect(buildVideoEnhanceInput('5', 'media-draft-1', '8k' as never)).toBeNull();
+  });
+});
+
+describe('videoEnhanceErrorText（IKH3VH 失败文案家族映射）', () => {
+  it('后端 msg 优先透传（上游可读原因随 message 投影）', () => {
+    expect(videoEnhanceErrorText({ code: 1045, msg: '源视频为 SDR 以外色彩空间，暂不支持' })).toBe(
+      '源视频为 SDR 以外色彩空间，暂不支持',
+    );
+  });
+
+  it('msg 为空按错误码兜底：video_enhance_failed / 1045 →「视频画质增强失败，请重试」', () => {
+    expect(videoEnhanceErrorText({ code: 'video_enhance_failed', msg: '' })).toBe('视频画质增强失败，请重试');
+    expect(videoEnhanceErrorText({ code: 1045, msg: '' })).toBe('视频画质增强失败，请重试');
+    expect(videoEnhanceErrorText({ code: 'enqueue_failed' })).toBe('任务入队失败，请重试');
+  });
+
+  it('无错误对象/未知码兜底同句，失败态不空白', () => {
+    expect(videoEnhanceErrorText(null)).toBe('视频画质增强失败，请重试');
+    expect(videoEnhanceErrorText(undefined)).toBe('视频画质增强失败，请重试');
+    expect(videoEnhanceErrorText({ code: 'unknown_code', msg: '' })).toBe('视频画质增强失败，请重试');
   });
 });
