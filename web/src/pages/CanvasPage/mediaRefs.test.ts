@@ -145,4 +145,17 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
     ]);
     expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
   });
+
+  it('去字幕来源边（IKGZ83 origin=video-subtitle-erase，首个视频系来源边）同样跳过推导', () => {
+    const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
+    const edges = [
+      // 去字幕结果卡 d1 的来源边：纯视觉「结果卡由该视频去字幕而来」，推导跳过
+      { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'video-subtitle-erase' } },
+      { id: 'e2', source: 'm2', target: 'd1' },
+    ] as Edge[];
+    expect(imageMediaRefsOf('d1', edges, nodes)).toEqual([
+      { nodeId: 'm2', url: 'http://img/m2.png', name: '图m2', assetId: 'a2' },
+    ]);
+    expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
+  });
 });
