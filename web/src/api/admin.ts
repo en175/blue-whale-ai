@@ -434,6 +434,16 @@ export interface ModelSize {
   label?: string;
 }
 
+/** 时长范围（消费端契约形态）。
+ *  库中 `supported_durations` 有两种形态：管理端提交用数组 `[min,max,step]`，
+ *  消费端契约、种子与迁移写入的是本对象形态。后台表单读回时必须两种都认，
+ *  否则会把对象行读成空、保存时整列覆盖成 null（IKG4UR）。 */
+export interface DurationRange {
+  min: number;
+  max: number;
+  step?: number;
+}
+
 /** 模型能力记录（generation_model_capability） */
 export interface AdminModel {
   /** 行ID（bigint string） */
@@ -452,8 +462,9 @@ export interface AdminModel {
   supported_sizes: ModelSize[];
   /** 支持的宽高比字符串数组 */
   supported_aspect_ratios: string[];
-  /** 支持的视频时长（秒），图片/文生文为 null */
-  supported_durations: number[] | null;
+  /** 支持的视频时长（秒），图片/文生文为 null。读回时可能是数组（管理端写入）
+   *  或 DurationRange（消费端契约/种子写入）——IKG4UR */
+  supported_durations: number[] | DurationRange | null;
   /** 支持的输出格式字符串数组 */
   supported_formats: string[];
   /** 默认分辨率档位 */
@@ -495,7 +506,8 @@ export interface CreateAdminModelParams {
   icon?: string | null;
   supported_sizes?: ModelSize[];
   supported_aspect_ratios?: string[];
-  supported_durations?: number[] | null;
+  /** IKG4UR：写回保持原形态——数组行写数组、对象行写对象（两者在读侧语义不同） */
+  supported_durations?: number[] | DurationRange | null;
   supported_formats?: string[];
   default_size?: string | null;
   default_format?: string | null;

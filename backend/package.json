@@ -7,20 +7,18 @@
     "build": "prisma generate && tsc -b && tsc-alias",
     "prestart": "node -e 'const fs=require(\"fs\");const p=\"dist/apps/blue-whale/src/main.js\";if(!fs.existsSync(p)){console.error(\"dist 不存在：先 npm run build\");process.exit(1)}if(fs.readFileSync(p,\"utf8\").includes(\"@lib/\")){console.error(\"dist 残留 @lib/ 别名（tsc-alias 未跑完的半成品）：重新 npm run build\");process.exit(1)}'",
     "start": "node dist/apps/blue-whale/src/main.js",
-    "start:worker": "node dist/apps/generation-worker/src/main.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@blue-whale/contracts": "workspace:*",
-    "@blue-whale/core": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
-    "@nestjs/schedule": "^5.0.0",
     "@nestjs/terminus": "^11.0.0",
     "@prisma/adapter-mariadb": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "@volcengine/openapi": "^1.36.2",
     "@volcengine/tos-sdk": "^2.9.1",
+    "jose": "^6.2.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
@@ -41,6 +39,6 @@
     "@types/node": "24.13.3",
     "prisma": "^7.9.0",
     "tsc-alias": "^1.8.10",
-    "typescript": "5.9.3"
+    "typescript": "~6.0.2"
   }
 }

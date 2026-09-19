@@ -6,7 +6,7 @@
 // 蓝鲸侧不再装配自研 agent manifest。
 // 命名 *_fixture.ts：被 vitest 默认排除（不匹配 *.test.*），仅由 *.test.* 用例 import。
 import { createHash } from "node:crypto";
-import { canonicalizeJsonValue } from "@blue-whale/contracts";
+import { canonicalizeJsonValue } from "@lib/contracts";
 
 const base = {
   schema_version: 1,

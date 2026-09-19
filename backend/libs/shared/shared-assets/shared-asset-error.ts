@@ -1,5 +1,5 @@
-import { SHARED_ASSET_TYPE_UNSUPPORTED_CODE } from "@blue-whale/contracts";
-import type { SharedAssetKind, SharedAssetType } from "@blue-whale/contracts";
+import { SHARED_ASSET_TYPE_UNSUPPORTED_CODE } from "@lib/contracts";
+import type { SharedAssetKind, SharedAssetType } from "@lib/contracts";
 
 /** 共享资产领域错误：携带契约错误码，由 API 层捕获转为 fail(code, msg)。 */
 export class SharedAssetError extends Error {

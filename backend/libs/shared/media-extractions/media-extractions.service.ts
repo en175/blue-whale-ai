@@ -1,4 +1,5 @@
 // IKARDY：媒体提取（视频→音频）建任务服务。校验视频资产归属 → 插 generation_jobs(type=media_extract)。
+// IKFS5W：不写画布——占位节点由前端建任务前本地插入，产物经 GET /api/jobs/:id 的 asset 回给前端落库。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
@@ -6,11 +7,8 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
-} from "@blue-whale/contracts";
-import {
-  createGenerationCommandRepo,
-  placeMediaExtractPendingNode,
-} from "@lib/shared/persistence/index.js";
+} from "@lib/contracts";
+import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -67,12 +65,6 @@ export class MediaExtractionsService {
         next_action_at: new Date(Date.now() - 60_000),
       },
     });
-    // 入队前：画布插入「待开始」音频占位节点（源视频节点左侧）；失败不阻塞建任务（提取仍继续）。
-    await placeMediaExtractPendingNode(this.prisma.client, {
-      projectId,
-      jobId: job.id.toString(),
-      sourceAssetId,
-    }).catch(() => {});
     return ok({
       job_id: job.id.toString(),
       status: "queued",

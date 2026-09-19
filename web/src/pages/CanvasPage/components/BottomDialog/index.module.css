@@ -16,20 +16,27 @@
   animation: dialogFadeIn 0.2s ease;
 }
 
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
 .dialog {
   position: relative;
-  /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
-  height: 200px;
+  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
-  border-radius: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
   padding: var(--spacing-lg);
 }
 
@@ -38,117 +45,49 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
 }
 
-/* 输入区包裹层：填充窗口剩余高度，与图片对话窗尺寸对齐 */
+/* 默认三行，随内容增长到四行；展开后填充窗口剩余高度。 */
 .editorWrap {
+  font-size: var(--font-size-md);
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 5.4em;
+  position: relative;
+}
+
+.dialogExpanded .editorWrap {
   flex: 1;
   min-height: 0;
 }
 
-/* ---- 连线文本附件（IKDLQG，与 ImageDialog 附件区同构） ---- */
-.attachments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.attachmentItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #242424;
-  border: 1px solid #2c2c2c;
-  border-radius: 12px;
-}
-
-.attachmentTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.attachmentHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-sm);
-}
-
-.attachmentMoves {
-  display: flex;
-  gap: 2px;
-}
-
-.attachmentMove {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentMove:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: #2c2c2c;
-}
-
-.attachmentMove:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.attachmentText {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.attachmentTextCollapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.attachmentToggle {
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  padding: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentToggle:hover {
-  color: var(--color-text-primary);
-}
-
 .editorArea {
-  height: 100%;
+  min-height: 5.4em;
+  max-height: 7.2em;
   overflow-y: auto;
 }
 
-/* ---- 右上角操作（放大/收起 + 关闭） ---- */
-.topActions {
-  position: absolute;
-  top: var(--spacing-sm);
-  right: var(--spacing-sm);
-  display: flex;
-  gap: var(--spacing-xs);
-  z-index: 1;
+.dialogExpanded .editorArea {
+  height: 100%;
+  max-height: none;
+}
+
+/* ---- 第一行：附件操作条行（IKGB1X） ----
+ * IKGB7W：第一行改为共享组件 AttachmentActionBar（左「+ 参考」「资产库」pill、右侧并入
+ * 展开/关闭按钮）；旧 .topActions（absolute 右上角）随操作条落地退役，原为其腾位的
+ * .refRoleArea padding-right 一并移除。操作条视觉定义单一来源在共享样式表（源唯一性锁见
+ * AttachmentActionBar/actionBarVisualSource.test.ts），此处仅承载面板侧行间距。 */
+.actionBarRow {
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
 }
 
 .iconBtn {
@@ -182,109 +121,8 @@
   flex-wrap: wrap;
 }
 
-/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
-.mediaThumb {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--color-border-secondary);
-  flex-shrink: 0;
-}
-
-.mediaThumbImg {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.mediaThumbRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-  z-index: 1;
-}
-
-.mediaThumbRemove:hover {
-  background-color: rgba(250, 82, 82, 0.8);
-}
-
-/* 视频时长徽章 */
-.mediaDuration {
-  position: absolute;
-  bottom: 2px;
-  right: 2px;
-  padding: 0 4px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.65);
-  line-height: 1.4;
-}
-
-/* 视频播放图标（居中半透明） */
-.mediaPlayIcon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-}
-
-/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
-.mediaBtn {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-tertiary);
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.mediaBtn:hover {
-  color: var(--color-text-secondary);
-  border-color: var(--color-border-hover);
-  background-color: #333;
-}
-
-/* 首尾帧模式下视频按钮禁用 */
-.mediaBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.mediaBtn:disabled:hover {
-  color: var(--color-text-tertiary);
-  border-color: var(--color-border-primary);
-  background-color: #2a2a2a;
-}
+/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
+/* IKFE8U：来源菜单按钮退役（统一入口 RefSourceMenu 自带样式），mediaBtn 系列一并下线 */
 
 .mediaDot {
   width: 4px;
@@ -460,6 +298,17 @@
   font-weight: 500;
 }
 
+.modeOptionDisabled {
+  color: #666;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.modeOptionDisabled:hover {
+  color: #666;
+  background: transparent;
+}
+
 /* ---- 信息文字 ---- */
 .barDivider {
   font-size: var(--font-size-sm);
@@ -499,9 +348,9 @@
 
 /* 发送按钮（与图片对话框统一） */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -567,11 +416,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
 }
 
 .charCountWarn {
@@ -589,7 +437,7 @@
 /* ---- 配置面板（悬浮于底栏上方；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  bottom: 72px;
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -634,6 +482,57 @@
   margin-bottom: var(--spacing-sm);
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
+}
+
+/* ---- IKG0LP：是否带音频开关（结构对齐 MusicDialog 的 switch） ---- */
+.audioRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.audioHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.audioSwitch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background-color: #3a3a3a;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.audioSwitch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.audioSwitchOn {
+  background-color: var(--color-accent-primary);
+}
+
+.audioSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #fff;
+  transition: transform var(--transition-fast);
+}
+
+.audioSwitchOn .audioSwitchKnob {
+  transform: translateX(16px);
 }
 
 .configRow {
@@ -691,6 +590,19 @@
   padding: var(--spacing-xs);
   z-index: 6;
   animation: popupFadeIn 0.15s ease;
+}
+
+.selectDropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.selectDropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.selectDropdown::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
 }
 
 .selectOption {
@@ -828,80 +740,14 @@
   font-weight: 600;
 }
 
-.ratioIcon {
-  display: block;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
-}
-
-/* ---- 「视频上传 / 到节点选择」弹菜单（与图片对话框一致） ---- */
-.sourceWrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-/* 菜单打开时的透明遮罩：点击外部关闭 */
-.menuOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 25;
-  background: transparent;
-}
-
-.sourceMenu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 128px;
-  background-color: #262626;
-  border: 1px solid #363636;
-  border-radius: 10px;
-  padding: var(--spacing-xs);
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.sourceMenuItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--transition-fast);
-}
-
-.sourceMenuItem:hover {
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-}
-
-/* 画布选取模式进行中：视频按钮高亮 */
-.mediaBtnPicking {
-  color: var(--color-accent-text, #4c6ef5);
-  border: 1px dashed var(--color-accent-text, #4c6ef5);
-}
-
-/* 首尾帧空占位：按钮内展示「首帧/尾帧」文字（无图时） */
-.mediaBtnLabel {
-  font-size: 12px;
-  line-height: 1.2;
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
-}
+/* IKFE8U：来源菜单弹层（sourceWrap/menuOverlay/sourceMenu/sourceMenuItem）与
+ * mediaBtnPicking/mediaBtnLabel 随旧来源菜单按钮退役，统一入口样式见 RefSourceMenu。 */
 
 /* ============================================
  * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
  * ============================================ */
 .refRoleArea {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
@@ -911,63 +757,9 @@
 
 .refSlot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm, 8px);
-}
-
-.refSlotLabel {
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  flex: 0 0 48px;
-}
-
-/* 角色徽标：缩略图左下角常驻显示输入用途（显式角色，不按顺序猜测） */
-.refRoleBadge {
-  position: absolute;
-  left: 2px;
-  bottom: 2px;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 16px;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.55);
-  pointer-events: none;
-}
-
-/* 首帧/尾帧徽标强调（普通参考保持中性）：灰色底，禁用蓝色 */
-.refRoleBadgeFrame {
-  background-color: rgba(42, 42, 42, 0.85);
-}
-
-/* 角色切换按钮组：悬停缩略图时可见（与移除按钮同层） */
-.refRoleSwitch {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: none;
-  gap: 4px;
-}
-
-.mediaThumb:hover .refRoleSwitch {
-  display: flex;
-}
-
-.refRoleSwitch button {
-  padding: 2px 6px;
-  border: none;
-  border-radius: 4px;
-  font-size: 11px;
-  color: #fff;
-  background-color: rgba(76, 110, 245, 0.9);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.refRoleSwitch button:hover {
-  background-color: rgba(76, 110, 245, 1);
 }
 
 /* 组合冲突提示：明确说明不可提交的原因（禁止静默丢弃或降级） */
@@ -981,4 +773,25 @@
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
+}
+
+/* @ 菜单 dock（IKFA1O）：脱出 .dialog 滚动框，挂 .dialogWrap 层向上弹出（与 configPanel 同法） */
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+}
+
+.mentionDock > button {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #fff);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
 }

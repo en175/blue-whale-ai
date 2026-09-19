@@ -17,7 +17,16 @@ function buildDeps() {
   });
   const listEnabledByType = vi
     .fn()
-    .mockResolvedValue([{ model_id: "seed-audio-1.0" }]);
+    .mockResolvedValue([
+      {
+        model_id: "seed-audio-1.0",
+        features: {
+          audio_reference_max: 3,
+          image_reference_max: 1,
+          max_reference_images: 10,
+        },
+      },
+    ]);
   const createJob = vi.fn().mockResolvedValue({
     generation_job_id: "1",
     cursor: 1,
@@ -117,6 +126,9 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + 音频参考（references type:audio）→ 200，job.input 冻结 references", async () => {
     const { deps, createJob } = buildDeps();
+    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "audio" as const })));
 
     const result = await handleCreateGenerationJob(
       "u1",
@@ -139,6 +151,9 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + 图片参考（references type:image）→ 200", async () => {
     const { deps, createJob } = buildDeps();
+    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "image" as const })));
 
     const result = await handleCreateGenerationJob(
       "u1",
@@ -282,6 +297,9 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
 
   it("音频 + references + 空旧字段 input_asset_ids:[] → 200（空数组不误判为旧字段，IKE4GC）", async () => {
     const { deps, createJob } = buildDeps();
+    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑）
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "audio" as const })));
 
     const result = await handleCreateGenerationJob(
       "u1",
@@ -471,6 +489,203 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
   });
 });
 
+// IKG6EK / ADR-0088：图片端也认单数组 references（三端统一），旧字段 input_asset_ids 保留兼容。
+describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG6EK）", () => {
+  const refsOf = (ids: string[]) =>
+    ids.map((id) => ({ role: "reference" as const, asset_id: id, type: "image" as const }));
+
+  it("references 提供参考 → input_asset_ids 按 references 顺序冻结", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["3", "1"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual(["3", "1"]);
+  });
+
+  it("references 含 material_id（合法素材库形态）→ 400 素材库引用仅支持视频生成", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...imageBody(0),
+        references: [{ role: "reference", material_id: "asset-img-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("素材库引用仅支持视频生成");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 形态非法 → 400 参考素材引用无效（不再静默当空处理）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: [{ role: "reference", type: "image" }] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 超能力上限 → 400，文案含真实上限", async () => {
+    const { deps, createJob } = buildImageDeps(2);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["1", "2", "3"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考图最多 2 张");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("旧字段 input_asset_ids 仍可用（回归）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(2), null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
+
+  it("references: [] 视为未提供 → 回落旧字段 input_asset_ids，不被静默清空", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(2), references: [] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
+
+  it("references 内重复素材 → 去重保首见（与旧字段 uniqueAssetIds 同口径）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["3", "1", "3"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual(["3", "1"]);
+  });
+});
+
+// IKG6EK / ADR-0088：编号表与冻结的文本附件必须来自**同一次**画布读取——
+// 两次读会拿到不同版本，与「同次画布读取」的不变式冲突（原 IKFA1J 并发用例随 doc 退役删除，此处补回）。
+describe("handleCreateGenerationJob 同次画布读取（IKG6EK）", () => {
+  it("目标路径：文本索引派生与目标快照复用同一次读取，画布只读一次", async () => {
+    const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", IMAGE_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledTimes(1);
+    expect(getByProject).toHaveBeenCalledTimes(1);
+  });
+});
+
+// IKG6EK / ADR-0088：引用标记转移的端到端接线——references 的身份 → 编号表 → input.prompt。
+// （删掉 reference-marker-transfer.ts 之后，这条链只剩这里能钉住；纯替换由 core 的用例覆盖。）
+describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", () => {
+  it("视频：素材库身份（material_id 提交）→ 正文 &asset-x& 出 @图片1", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "角色参考&asset-active-1& 出场" },
+        references: [{ role: "reference", material_id: "asset-active-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 标记里的身份与 references 元素身份同源（asset_id ?? material_id），直接查表，不做互认
+    expect(cmdArg.input.prompt).toBe("角色参考@图片1 出场");
+  });
+
+  it("视频：首帧按角色、普通参考按同类型编号", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "&11&转场到&12&" },
+        references: [
+          { role: "first_frame", asset_id: "11", type: "image" },
+          { role: "reference", asset_id: "12", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("@首帧转场到@图片1");
+  });
+
+  it("未提交的身份不转，原样保留（不猜、不删、不报错）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "参考&99999999& 和 &12&" },
+        references: [{ role: "reference", asset_id: "12", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("参考&99999999& 和 @图片1");
+  });
+});
+
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
 function buildVideoDeps() {
   const findOwnedById = vi.fn().mockResolvedValue({
@@ -490,7 +705,8 @@ function buildVideoDeps() {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
-    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
+    assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
   } as unknown as HandlerDeps;
   return { deps, createJob };
 }
@@ -976,6 +1192,10 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
   it("references 参考音频（type=audio, role=reference）→ 200 冻结进 input 且不占图/视频额度", async () => {
     const { deps, createJob } = buildVideoDeps();
+    // IKG6EK：references 的归属/类型复核现在无条件执行（原先只在携带 prompt_doc 时跑），
+    // 本地 asset 的声明类型必须与素材实际类型一致——本用例声明 audio，固按 audio 返回。
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "audio" as const })));
     const result = await handleCreateGenerationJob(
       "u1",
       "p1",
@@ -1391,18 +1611,20 @@ const AUDIO_TARGET_BODY = {
 };
 
 describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", () => {
-  it("合法音频目标 → 200 冻结 target_node_id，文本连线不推导不冻结", async () => {
+  it("合法音频目标 → 200 冻结 target_node_id 与文本连线全文", async () => {
     const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
 
     const result = await handleCreateGenerationJob("u1", "p1", AUDIO_TARGET_BODY, null, deps);
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    // e6（text-a → media-4）存在但不被音频消费：无 text_attachments 字段
+    // IKFCXE：e6（text-a → media-4）按画布边序推导冻结——附件正文与主提示词共同进入任务快照
     expect(cmdArg.input.target_node_id).toBe("media-4");
     expect(cmdArg.input.prompt).toBe("哼一段轻快的旋律");
     expect(cmdArg.input.model_id).toBe("audio-model");
-    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
   });
 
   it("目标是视频 mediaNode → 400 不是音频媒体节点，不建任务", async () => {
@@ -1587,6 +1809,78 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     expect(createJob).toHaveBeenCalled();
   });
 
+  // IKG0FR：上游档位命名不遵循 <N>p 时（火山 Seedance 2.0 的 4k），本地换算不出像素，
+  // 但值本身在能力行白名单里——合法性由白名单负责，像素只回写资产（列可空），不得拒单。
+  it("分辨率命中能力行但本地算不出像素（4k）→ 200 建任务，不误拦", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      {
+        ...VIDEO_CAPABILITY_ROW,
+        supported_sizes: [
+          { id: "1k", api_value: "720p" },
+          { id: "2k", api_value: "1080p" },
+          { id: "4k", api_value: "4k" },
+        ],
+      },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, resolution: "4k" },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+    // IKG0FR 的保证是「值原样到达 worker」，不只是「没被拒」——冻结进快照的必须是 4k 本身
+    const frozen = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(frozen.resolution).toBe("4k");
+  });
+
+  // IKG0LP：视频带音频——能力位 features.audio 允许时冻结用户选择（缺省 true）；
+  // 不允许（false/未配）时快照不写该字段，worker 不下发，维持上游默认。
+  it("能力位 features.audio=true → 冻结用户选择，缺省 true", async () => {
+    const row = { ...VIDEO_CAPABILITY_ROW, features: { audio: true } };
+
+    const depsA = buildCapabilityDeps([row]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, depsA.deps)).code,
+    ).toBe(200);
+    const inputA = (depsA.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputA.generate_audio).toBe(true);
+
+    const depsB = buildCapabilityDeps([row]);
+    expect(
+      (
+        await handleCreateGenerationJob(
+          "u1",
+          "p1",
+          {
+            ...VIDEO_PARAMS_OK,
+            parameters: { ...VIDEO_PARAMS_OK.parameters, generate_audio: false },
+          },
+          null,
+          depsB.deps,
+        )
+      ).code,
+    ).toBe(200);
+    const inputB = (depsB.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputB.generate_audio).toBe(false);
+  });
+
+  it("能力位未配 features.audio → 快照不写 generate_audio（出站维持上游默认）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, deps)).code,
+    ).toBe(200);
+    const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(Object.hasOwn(input, "generate_audio")).toBe(false);
+  });
+
   it("能力行未配置 supported_* 时不阻断（worker 兜底）", async () => {
     const { deps, createJob } = buildCapabilityDeps([
       { model_id: "doubao-seedance-2-0-260128" },
@@ -1735,6 +2029,366 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
     expect(result.code).toBe(400);
     expect(result.data?.code).toBe("invalid_reference_type");
     expect(result.msg).toBe("参考素材必须是图片");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKG57P：素材软删后提交未被方案级校验拦截——8453e04a 把 freezePromptPlans（planError：
+// 规格 7.2 文案 + #N 索引，抛 BadRequestException）挪到通用存在性检查之后，软删素材先命中
+// 通用检查的信封 fail 被短路。修复为合并语义：通用检查发现缺失且正文标签引用了缺失素材时，
+// 按 planError 同源形态抛规格文案与具体索引；纯参考清单维持通用文案信封（HTTP 投影在 controller）。
+describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () => {
+  it("纯参考清单（无正文标签）素材软删 → 维持通用文案信封 400 invalid_reference", async () => {
+    const { deps, createJob, resolveInputAssets } = buildImageDeps();
+    resolveInputAssets.mockResolvedValue([]);
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(1), null, deps);
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe("参考素材不存在或无权访问");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("视频正文标签引用的素材被软删 → 同口径拦截（普通参考同类型编号）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(
+      async (ids: string[]) => ids.filter((id) => id !== "2").map((id) => ({ id, type: "image" })),
+    );
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [
+          { role: "first_frame", asset_id: "101", type: "image" },
+          { role: "last_frame", asset_id: "102", type: "image" },
+          { role: "reference", asset_id: "1", type: "image" },
+          { role: "reference", asset_id: "2", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+    // IKG6EK：doc 退役后不再按 doc 声明细化索引文案，视频与图片同口径走通用信封
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe("参考素材不存在或无权访问");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKESD6 / ADR-0085：raw prompt 上限跟随模型目录 features.max_prompt_length，
+// 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与文案不变。
+describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () => {
+  function promptOf(len: number) {
+    return "a".repeat(len);
+  }
+
+  function imageBodyWithPrompt(prompt: string) {
+    return {
+      type: "image",
+      expected_output_count: 1,
+      parameters: { prompt, model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
+    };
+  }
+
+  it("max_prompt_length=32000：5000 字 prompt → 200（旧 4000 硬编码会误拒）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(5000)), null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("max_prompt_length=32000：32001 字 → 400 prompt 无效", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(32001)), null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("未配置：4001 字 → 400（缺省回落旧硬编码，行为回归）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { reference_image: true } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(4001)), null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("配置收紧（500）：501 字 → 400，500 字 → 200", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 500 } },
+    ]);
+
+    const over = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(501)), null, deps,
+    );
+    const exact = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(500)), null, deps,
+    );
+
+    expect(over.code).toBe(400);
+    expect(exact.code).toBe(200);
+  });
+});
+
+// IKESD6 / ADR-0085：组合闸取 max(契约预算 30000, 模型值)——配了 32000 的模型
+// 挂文本附件不应先撞 30000（否则配置形同虚设）。
+describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", () => {
+  function buildTargetDepsWithPromptCap(opts: {
+    maxPromptLength?: number;
+    attachLen: number;
+  }) {
+    const findOwnedById = vi.fn().mockResolvedValue({ id: "1" });
+    const listEnabledByType = vi.fn().mockResolvedValue([
+      {
+        model_id: "seedream-5.0",
+        features: opts.maxPromptLength
+          ? { max_prompt_length: opts.maxPromptLength }
+          : undefined,
+      },
+    ]);
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: "1", cursor: 1 });
+    const getByProject = vi.fn().mockResolvedValue({
+      id: "9",
+      project_id: "1",
+      version: 3,
+      viewport: null,
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(opts.attachLen) } },
+        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(opts.attachLen) } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e1", source: "text-a", target: "media-1" },
+        { id: "e2", source: "text-b", target: "media-1" },
+      ]),
+    });
+    const deps = {
+      projects: { findOwnedById },
+      models: { listEnabledByType },
+      command: { createJob },
+      canvas: { getByProject },
+      assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  }
+
+  function emptyPromptOnTarget() {
+    return {
+      ...IMAGE_TARGET_BODY,
+      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
+    };
+  }
+
+  it("模型 32000：组合 30002（>旧闸 30000，≤模型值）→ 200 放行", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 32_000,
+      attachLen: 15_000,
+    });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    // 30000 + 2 个换行连接符 = 30002：旧组合闸必拒，跟随模型值后放行。
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("模型 32000：组合 40002 超闸 → 400 且文案上限取模型值", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 32_000,
+      attachLen: 20_000,
+    });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 32000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("未配置：30002 组合仍撞旧闸 30000（回归）", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({ attachLen: 15_000 });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+/* IKG6EK / ADR-0088：`prompt_doc` 已退役——提交方给正文全文（`parameters.prompt` 一律权威），
+   引用标记转移在接纳管线完成（用例见本文件「引用标记转移」组）。
+   IKFA1M / IKFA1O / IKFA1P / IKFCJG 四套「doc 权威编译 + 身份复核」用例随契约一并退役。 */
+
+describe("handleCreateGenerationJob prompt_doc 已退役（IKG6EK / ADR-0088）", () => {
+  it("图片：携带 prompt_doc 不报错、不生效——正文取 parameters.prompt，input 不冻结该字段", async () => {
+    const { deps, createJob } = buildImageDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...imageBody(1),
+        prompt_doc: { version: 1, segments: [{ kind: "text", text: "doc 说什么都不算" }] },
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("海边日落");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
+  });
+
+  it("视频：同上", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "1", type: "image" }],
+        prompt_doc: { version: 1, segments: [{ kind: "text", text: "doc 说什么都不算" }] },
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
+  });
+
+  it("doc 结构非法（未知版本 / 未知片段）也不再拦截——字段已惰性化，兼容当前版本前端", async () => {
+    const { deps, createJob } = buildImageDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(1), prompt_doc: { version: 99, segments: [{ kind: "nope" }] } },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+// IKG6EK / ADR-0088：正文一律取 parameters.prompt，长度闸也量它（不再有 doc 编译结果）。
+it.each([32000, 32001])("正文遵循模型 32000 字边界：%i", async (length) => {
+  const { deps, createJob } = buildCapabilityDeps([
+    { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+  ]);
+  const result = await handleCreateGenerationJob("u1", "p1", {
+    type: "image", expected_output_count: 1,
+    parameters: { prompt: "a".repeat(length), model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
+  }, null, deps);
+  expect(result.code).toBe(length === 32000 ? 200 : 400);
+  expect(createJob).toHaveBeenCalledTimes(length === 32000 ? 1 : 0);
+});
+
+describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () => {
+  const videoDepsWithFeatures = (features: Record<string, unknown>) => {
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: '1', cursor: 1 });
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: '1', name: '项目', thumb: null, created_at: '2026-08-18T00:00:00.000Z' }) },
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue([
+          {
+            model_id: 'doubao-seedance-2-0-260128',
+            supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
+            features: {
+              reference_image: true,
+              max_reference_images: 10,
+              quantity_max: 1,
+              video_reference: false,
+              video_reference_max: 3,
+              audio_reference: false,
+              audio_reference_max: 3,
+              image_reference_max: 1,
+              max_reference_duration_sec: null,
+              ...features,
+            },
+          },
+        ]),
+      },
+      command: { createJob },
+      assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  };
+
+  const imageRef = (i: number) => ({ role: 'reference' as const, asset_id: String(i), type: 'image' as const });
+
+  it('视频普通参考图片数超能力行 max_reference_images → 400 参考图最多 N 张', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [1, 2, 3, 4].map(imageRef),
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('参考图最多 3 张');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('恰好达到图上限（3 张）放行', async () => {
+    const { deps } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [1, 2, 3].map(imageRef),
+    }, null, deps);
+    expect(result.code).toBe(200);
+  });
+
+  it('普通参考含视频素材但模型 video_reference=false → 400 不支持视频素材参考', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({});
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [{ role: 'reference', asset_id: '9', type: 'video' }],
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('当前模型不支持视频素材参考');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('参考素材总时长超能力行上限 → 400（capacity 行 max_reference_duration_sec=15，两条 10s 视频共 20s）', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({
+      max_reference_duration_sec: 15,
+      video_reference: true,
+      video_reference_max: 3,
+    });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [
+        { role: 'reference', asset_id: '9', type: 'video', duration: 10 },
+        { role: 'reference', asset_id: '10', type: 'video', duration: 10 },
+      ],
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('参考素材总时长超过 15 秒');
     expect(createJob).not.toHaveBeenCalled();
   });
 });

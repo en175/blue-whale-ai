@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { AdminUsersController } from "./users.controller.js";

@@ -1,4 +1,4 @@
-import type { AdminModel, CreateAdminModelParams, ModelSize } from '@/api/admin';
+import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/api/admin';
 
 export type ModelType = 'image' | 'video' | 'text' | 'audio';
 
@@ -56,6 +56,10 @@ export type FormSnapshot = {
   durationMin: string;
   durationMax: string;
   durationStep: string;
+  /** IKG4UR：该行 `supported_durations` 原本的形态。保存时按原形态写回——
+   *  两种形态在读侧语义不同（数组被 durationInRange 当档位列表、对象当区间），
+   *  擅自改形态会悄悄改掉该行的时长约束。新建行用 'object'（区间语义无歧义）。 */
+  durationShape: 'array' | 'object';
   formats: string[];
   defaultSize: string;
   defaultRatio: string;
@@ -158,14 +162,25 @@ export function buildRequestMapping(form: FormSnapshot): unknown {
   };
 }
 
-function parseDurationFields(form: FormSnapshot): number[] | null {
+function parseDurationFields(form: FormSnapshot): number[] | DurationRange | null {
   const min = form.durationMin.trim();
   const max = form.durationMax.trim();
   const step = form.durationStep.trim();
   if (!min && !max && !step) return null;
   const nums = [min, max, step].filter(Boolean).map(Number);
   if (nums.some((n) => !Number.isFinite(n))) return null;
-  return nums;
+  // IKG4UR：按**原形态**写回——数组行写数组、对象行写对象。
+  // 两种形态在读侧语义不同（数组被 durationInRange 当档位列表用、对象当区间用），
+  // 保存时若擅自改形态，会把该行的时长约束悄悄改掉（如 4–30 缩成 {1,4,30}）。
+  // IKG4UR：两种形态都要求 min/max 成对——**先校验再分形态**。
+  // 数组分支此前是早返回，只填最小秒会写出 `[5]`，正是本轮要消灭的形态；
+  // 对象分支缺项则写 null（静默变成「不配时长」）——两者都不可接受，交调用方报错。
+  if (nums.length < 2) return null;
+  if (form.durationShape === 'array') return nums;
+  const [minN, maxN, stepN] = nums;
+  return stepN === undefined
+    ? { min: minN, max: maxN }
+    : { min: minN, max: maxN, step: stepN };
 }
 
 export function typeName(type: ModelType) {
@@ -181,9 +196,14 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
     if (gptErr) return { ok: false, error: gptErr };
   }
 
-  const durations = form.type === 'text' || form.type === 'image' ? null : parseDurationFields(form);
-  if ((form.type === 'video' || form.type === 'audio') && form.durationMin && form.durationMax) {
-    if (durations == null) return { ok: false, error: '时长须为数字。' };
+  // IKG4UR：时长只对视频可配（音频上游无 duration 参数、库里已置 NULL）——
+  // 在代码层钉死不变式「supported_durations 非空 ⟺ 该模型时长可配」。
+  const durations = form.type === 'video' ? parseDurationFields(form) : null;
+  // IKG4UR：**任一时长字段有值就必须成对**——原先的条件是 `min && max`，
+  // 只在两端都填时才可能进入，而「只填一端」恰恰是它文案说的场景（条件恒假 = 校验形同虚设）：
+  // 视频行清空「最大秒」会被静默存成「不配时长」（滑杆消失、服务端放行任意正数）。
+  if (form.type === 'video' && (form.durationMin || form.durationMax || form.durationStep)) {
+    if (durations == null) return { ok: false, error: '时长须为数字，且最小/最大需成对填写。' };
   }
 
   const sizes = form.type === 'text' || form.type === 'audio' ? [] : form.sizes.filter((s) => s.id.trim());
@@ -269,6 +289,17 @@ export function diffUpdateParams(
 
 export function durationsFromModel(model?: AdminModel): { min: string; max: string; step: string } {
   const raw = model?.supported_durations;
+  // IKG4UR：库里 `supported_durations` 有数组与对象两种形态——管理端提交用数组，
+  // 而消费端契约、种子与迁移写入的是 `{min,max,step}`。只认数组会让表单把对象行读成空串，
+  // 保存时整列被覆盖成 null（静默数据损坏）。两种形态都要认，往返才无损。
+  if (raw != null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const range = raw as { min?: unknown; max?: unknown; step?: unknown };
+    return {
+      min: range.min != null ? String(range.min) : '',
+      max: range.max != null ? String(range.max) : '',
+      step: range.step != null ? String(range.step) : '',
+    };
+  }
   if (!Array.isArray(raw) || raw.length === 0) return { min: '', max: '', step: '' };
   return {
     min: raw[0] != null ? String(raw[0]) : '',

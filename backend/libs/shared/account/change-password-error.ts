@@ -8,7 +8,7 @@ import {
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
   accountErrorToNumeric,
   accountMessageFor,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 export interface ProjectedAccountError {
   code: number;

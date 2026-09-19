@@ -16,6 +16,11 @@
   position: relative;
 }
 
+/* 到节点选择（图片 / 首尾帧）：非图片节点降亮，提示只能点图片节点 */
+.pickingImage :global(.react-flow__node:not(:has([data-media-type="image"]))) {
+  opacity: 0.35;
+}
+
 /* ---- 左下角按钮组 ---- */
 .bottomLeftActions {
   position: absolute;
@@ -113,4 +118,28 @@
   z-index: 30;
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* IKFR4X 持续选取会话版提示条：含「完成选取」按钮，开启指针交互 */
+.pickHintSession {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 6px 18px;
+  pointer-events: auto;
+}
+
+.pickHintFinish {
+  padding: 2px 6px;
+  font-size: var(--font-size-sm);
+  color: #1a1a1a;
+  background: #d4d4d4;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pickHintFinish:hover {
+  background: #e8e8e8;
 }

@@ -3,7 +3,7 @@
  * ============================================ */
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from './http';
-import type { LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {
@@ -142,6 +142,12 @@ export interface SnapshotAsset {
   access_url: string;
   width: number | null;
   height: number | null;
+  /** 已关联虚拟人像库则为素材库 id，未关联为 null */
+  material_id?: string | null;
+  material_group_id?: string | null;
+  /** 素材库校验镜像：Active 为已通过合规；Processing / Failed / null 均未通过 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
+  material_status_checked_at?: string | null;
 }
 
 /** GET /api/projects/:id/snapshot 返回：项目信息 + 画布 + 资产字典 + 任务摘要 */
@@ -168,35 +174,4 @@ export function fetchProjectSnapshot(id: string): Promise<ProjectSnapshot> {
   });
   snapshotPending.set(id, p);
   return p;
-}
-
-/* ============ 复制资产到项目 ============ */
-
-/** 复制资产返回：新副本资产记录 */
-export interface CopiedAsset {
-  /** 新副本资产ID */
-  id: number;
-  type: 'image' | 'video' | 'audio';
-  url: string;
-  width: number | null;
-  height: number | null;
-  duration: number | null;
-  /** 来源：copied 表示复制而来 */
-  source: string;
-  created_at: string;
-}
-
-/** 复制资产到项目 POST /api/projects/:id/assets（资产库「添加到项目」） */
-export function copyAssetToProject(
-  projectId: string,
-  sourceAssetId: number,
-): Promise<CopiedAsset> {
-  return apiRequest<CopiedAsset>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ source_asset_id: sourceAssetId }),
-    },
-  );
 }

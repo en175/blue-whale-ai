@@ -1,5 +1,5 @@
 /* ============================================
- * CustomEdge 连线边样式：默认实线，hover 变虚线流动
+ * CustomEdge 连线边样式：默认实线，hover 或选中节点相连时变虚线流动
  * ============================================ */
 .edgeGroup {
   cursor: default;
@@ -21,8 +21,9 @@
   transition: stroke 0.15s ease;
 }
 
-/* hover：变虚线 + 流动 */
-.edgeGroup:hover .basePath {
+/* hover 或选中节点相连：变虚线 + 流动（同一份视觉定义，两个触发入口） */
+.edgeGroup:hover .basePath,
+.edgeGroup.selectedConnected .basePath {
   stroke: rgba(220, 220, 230, 0.7);
   stroke-dasharray: 10 10;
   animation: dashFlow 1.8s linear infinite;
@@ -33,7 +34,7 @@
   to   { stroke-dashoffset: -40; }
 }
 
-/* 删除按钮默认隐藏，悬停连线时显示 */
+/* 删除按钮默认隐藏：悬停本身不再显示，只有指针停稳满 1 秒后组件追加出现类才露出（IKGUVG） */
 .deleteBtn {
   opacity: 0;
   cursor: pointer;
@@ -41,7 +42,7 @@
   transition: opacity 0.15s ease;
 }
 
-.edgeGroup:hover .deleteBtn {
+.deleteBtnVisible {
   opacity: 1;
   pointer-events: all;
 }

@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { COLLECT_TOKEN_ENV } from "./collect-token.js";

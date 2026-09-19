@@ -11,6 +11,8 @@ describe("MaterialGroupRepo", () => {
     name: "默认分组：9",
     cover_url: null,
     is_default: true,
+    gmt_create: new Date("2026-09-11T02:32:22Z"),
+    gmt_modified: new Date("2026-09-11T02:40:00Z"),
   };
 
   it("upsert 创建虚拟默认组：按 (user_id, material_group_id) 复合唯一落表", async () => {
@@ -47,6 +49,8 @@ describe("MaterialGroupRepo", () => {
       name: "默认分组：9",
       coverUrl: null,
       isDefault: true,
+      createdAt: new Date("2026-09-11T02:32:22Z"),
+      updatedAt: new Date("2026-09-11T02:40:00Z"),
     });
   });
 
@@ -90,6 +94,29 @@ describe("MaterialGroupRepo", () => {
     );
     expect(views).toHaveLength(1);
     expect(views[0].kind).toBe("virtual");
+  });
+
+  it("pageByUser：count + 分页查询（gmt_create desc, id desc），供组查询分流（IKEXX8）", async () => {
+    const count = vi.fn().mockResolvedValue(3);
+    const findMany = vi.fn().mockResolvedValue([row]);
+    const repo = createMaterialGroupRepo({
+      material_groups: { count, findMany },
+    } as never);
+
+    const { total, rows } = await repo.pageByUser("9", "virtual", 2, 10);
+
+    expect(count).toHaveBeenCalledWith({
+      where: { user_id: 9n, kind: "virtual", is_delete: false },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { user_id: 9n, kind: "virtual", is_delete: false },
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      skip: 10,
+      take: 10,
+    });
+    expect(total).toBe(3);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].createdAt).toEqual(new Date("2026-09-11T02:32:22Z"));
   });
 
   it("softDelete：按 (user_id, material_group_id) 软删，置 is_delete + deleted_at", async () => {

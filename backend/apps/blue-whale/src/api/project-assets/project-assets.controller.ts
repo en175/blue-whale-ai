@@ -1,13 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post, Res } from "@nestjs/common";
+import { Controller, Get, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { fail, ok } from "@blue-whale/contracts";
+import { fail, ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import {
   handleAccessAsset,
   handleContentAsset,
-  handleCopyAsset,
 } from "@lib/shared/assets/project-assets.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -35,19 +34,6 @@ export class ProjectAssetsController {
       projectId,
     });
     return linked ? ok({ projectId, assetId }) : fail(100301, "资源不存在");
-  }
-
-  @Post()
-  async copy(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Body() body: { source_asset_id?: unknown },
-    @Headers("idempotency-key") idempotencyKey?: string,
-  ) {
-    return handleCopyAsset(user.userId, projectId, body, idempotencyKey, {
-      project: this.project,
-      assets: this.assets,
-    });
   }
 
   @Get(":assetId")

@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
-import { ScheduleModule } from "@nestjs/schedule";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { AuthGuard } from "@lib/infra/guard/auth.guard.js";
 import { TransformInterceptor } from "@lib/infra/interceptors/transform.interceptor.js";
@@ -32,6 +31,10 @@ import { AuthModule } from "./api/auth/auth.module.js";
 import { CanvasApiModule } from "./api/canvases/canvases.module.js";
 import { GenerationApiModule } from "./api/generation/generation.module.js";
 import { HealthModule } from "./api/health/health.module.js";
+import { ImageCutoutsApiModule } from "./api/image-cutouts/image-cutouts.module.js";
+import { ImageEnhancementsApiModule } from "./api/image-enhancements/image-enhancements.module.js";
+import { ImageErasuresApiModule } from "./api/image-erasures/image-erasures.module.js";
+import { ImageOutpaintsApiModule } from "./api/image-outpaints/image-outpaints.module.js";
 import { JobsApiModule } from "./api/jobs/jobs.module.js";
 import { MaterialApiModule } from "./api/material/material.module.js";
 import { MediaExtractionsApiModule } from "./api/media-extractions/media-extractions.module.js";
@@ -45,12 +48,12 @@ import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
+import { VideoSubtitleErasuresApiModule } from "./api/video-subtitle-erasures/video-subtitle-erasures.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
     PrismaModule,
     AccountModule,
     AssetModule,
@@ -82,6 +85,11 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     CanvasApiModule,
     MaterialApiModule,
     MediaExtractionsApiModule,
+    ImageEnhancementsApiModule,
+    ImageErasuresApiModule,
+    ImageCutoutsApiModule,
+    ImageOutpaintsApiModule,
+    VideoSubtitleErasuresApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,

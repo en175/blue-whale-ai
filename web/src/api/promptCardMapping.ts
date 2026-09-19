@@ -1,4 +1,4 @@
-import type { GenerationCardBlock, PromptCardRecord, PromptCardRevision } from './agentSessions';
+import type { GenerationCardBlock, PromptCardRecord, PromptCardRevision, RequirementUnderstanding } from './agentSessions';
 
 /**
  * 生成卡批次（agent V3）→ 侧边栏卡片块。
@@ -20,15 +20,36 @@ import type { GenerationCardBlock, PromptCardRecord, PromptCardRevision } from '
  * - @素材：镜头里绑的是 asset_ref_id，可读名称与 asset_id 只在批次的 assets 出处表里。
  *   查不到的引用直接丢掉——宁可不显示，也不要把内部 id 甩给用户看。
  */
-export function cardsFromRevision(record: PromptCardRecord): GenerationCardBlock[] {
-  return record.active_revision ? cardsOfRevision(record.session_id ?? '', record.active_revision) : [];
+export function cardsFromRevision(record: PromptCardRecord, taskLabel?: string): GenerationCardBlock[] {
+  return record.active_revision ? cardsOfRevision(record.session_id ?? '', record.active_revision, taskLabel) : [];
+}
+
+/**
+ * 会话里每件事的标签（IKG793）：另开的一件事按它的方案卡写「视频版 · 承接上一张〈咖啡产地信息图〉」，
+ * 第一件事没有。同一血统几版里取最新一版写了范围的；卡上的字要跟用户当时点确认的那张一致。
+ */
+export function taskLabelsOf(understandings: readonly RequirementUnderstanding[] | undefined): Map<string, string> {
+  const labels = new Map<string, string>();
+  const byTask = new Map<string, RequirementUnderstanding[]>();
+  for (const one of understandings ?? []) {
+    const task = one.task_id ?? one.understanding_id;
+    byTask.set(task, [...(byTask.get(task) ?? []), one]);
+  }
+  for (const [task, versions] of byTask) {
+    const latest = [...versions].sort((a, b) => b.version - a.version).find((one) => one.solution_card?.scope?.derived_from);
+    const scope = latest?.solution_card?.scope;
+    if (!scope?.derived_from) continue;
+    const head = scope.kind === 'new_task' ? `${scope.label} · ` : '';
+    labels.set(task, `${head}承接上一张〈${scope.derived_from}〉`);
+  }
+  return labels;
 }
 
 /**
  * 任意一个修订版 → 侧边栏卡片块。当前生效的那一版和历史版本（IKEV0V）走同一条翻译，
  * 卡片 id 都是 `${revision_id}#${shot_no}`，所以两版的卡互不覆盖。
  */
-export function cardsOfRevision(sessionId: string, revision: PromptCardRevision): GenerationCardBlock[] {
+export function cardsOfRevision(sessionId: string, revision: PromptCardRevision, taskLabel?: string): GenerationCardBlock[] {
   if (!revision?.payload?.shots?.length) return [];
   const { shots, assets, target_media, target_model } = revision.payload;
   // 批次级的一项，每张卡都标（F32「每张生成卡标注目标模型与版本」）。老卡没有就整项不带。
@@ -46,15 +67,30 @@ export function cardsOfRevision(sessionId: string, revision: PromptCardRevision)
       elapsed += seconds;
     }
 
+    // 正文里的记号（`@图1`）按服务端算好的位置认，不按文字猜：同一份素材的号、原文都从这里来。
+    const mentionsOf = new Map<string, { index: number; texts: string[] }>();
+    for (const mention of shot.prompt_mentions ?? []) {
+      const text = shot.prompt_text.slice(mention.start, mention.end);
+      if (!text) continue;
+      const seen = mentionsOf.get(mention.asset_ref_id) ?? { index: mention.index, texts: [] };
+      if (!seen.texts.includes(text)) seen.texts.push(text);
+      mentionsOf.set(mention.asset_ref_id, seen);
+    }
     const assetRefItems = (shot.asset_bindings ?? [])
       .map((binding) => provenanceOf.get(binding.asset_ref_id))
       .filter((provenance): provenance is NonNullable<typeof provenance> => Boolean(provenance?.display_label))
-      .map((provenance) => ({
-        assetId: provenance.asset_id,
-        // 展示名不带 @：前缀是渲染层的修辞，塞进数据里会让「名字」和「怎么显示名字」纠缠。
-        label: provenance.display_label.replace(/^@/, ''),
-        mediaType: provenance.media_type,
-      }));
+      .map((provenance) => {
+        const mention = mentionsOf.get(provenance.asset_ref_id);
+        return {
+          assetId: provenance.asset_id,
+          // 展示名不带 @：前缀是渲染层的修辞，塞进数据里会让「名字」和「怎么显示名字」纠缠。
+          label: provenance.display_label.replace(/^@/, ''),
+          mediaType: provenance.media_type,
+          ...(mention
+            ? { marker: `${provenance.media_type === 'video' ? '视频' : '图'}${mention.index}`, markerTexts: mention.texts }
+            : {}),
+        };
+      });
     // 纯文本场景（复制、给 Agent 的引用文案）仍需要 @名称 形式，与胶囊并存。
     const assetRefs = assetRefItems.map((item) => `@${item.label}`);
 
@@ -75,6 +111,7 @@ export function cardsOfRevision(sessionId: string, revision: PromptCardRevision)
       ...(aspectRatio ? { aspectRatio } : {}),
       ...(targetModel ? { targetModel } : {}),
       ...(typeof seconds === 'number' && seconds > 0 ? { durationSeconds: seconds } : {}),
+      ...(taskLabel ? { taskLabel } : {}),
     };
   });
 }

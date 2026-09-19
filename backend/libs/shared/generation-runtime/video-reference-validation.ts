@@ -2,11 +2,10 @@ import {
   ERROR_INVALID_REFERENCE_MEDIA,
   ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import type { MaterialReference } from "./material-reference.js";
 import { VideoInputError } from "./material-reference.js";
-import type { VideoWorkerInputAsset } from "./video-job-runner.js";
-import type { VideoReference } from "./video-job-runner.js";
+import type { VideoWorkerInputAsset, VideoReference } from "./video-job-types.js";
 
 const MAX_REFERENCE_IMAGES = 9;
 const MAX_REFERENCE_VIDEOS = 3;

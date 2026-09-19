@@ -1,6 +1,6 @@
 # 代码理解工具：CBM 主 + graphify 进阶
 
-> CBM（codebase-memory-mcp）是默认第一站，graphify 按需进阶。两者互补不冲突。
+> 探索行为唯一规则见 [仓库代码探索协议](../../agent-rules/code-discovery.md)。本页仅保留工具速查与安装信息。
 
 ## 分工：任务意图 → 工具
 
@@ -64,6 +64,4 @@ CBM 二进制和 MCP 配置在用户级，clone 后没有。首次接入：
 
 ## 降级路径
 
-- **CBM 不可用**（未装 / 索引未就绪）→ grep/glob + Read 兜底。CBM gate 只 inject 不 deny，天然允许降级。
-- **graphify 未生成**（无 `graphify-out/`）→ 跳过，CBM 已覆盖结构查询。
-- **本仓 `graphify-out/` 被 gitignore**，各 worktree / clone 需各自生成或共享。
+遵循 [有依据的降级](../../agent-rules/code-discovery.md#有依据的降级)，不另设停止条件。

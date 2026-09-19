@@ -1,5 +1,5 @@
 import { Controller, Get } from "@nestjs/common";
-import { ok } from "@blue-whale/contracts";
+import { ok } from "@lib/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { HomepageHeroService } from "@lib/shared/homepage-hero/homepage-hero.service.js";
 

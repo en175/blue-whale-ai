@@ -3,12 +3,18 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
 import { apiRequest, isApiError, type ApiError } from './http';
+import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
+import type { ImageEraseInput } from '@lib/contracts/image-erase';
+import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
+import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
+import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 
-/** 可由普通生成端点创建的任务类型 */
+/** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取任务。 */
-export type JobType = GenerationJobType | 'media_extract';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图与视频去字幕任务
+ *  （IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -78,6 +84,10 @@ export interface VideoJobParameters {
   resolution: string;
   /** 时长（秒） */
   duration: number;
+  /** IKG0LP：是否生成带音频的视频（用户选择，缺省 true）。
+   *  仅当模型能力位 features.audio 为 true 时前端才提供该选择；
+   *  契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
+  generate_audio?: boolean;
 }
 
 /** 音频生成参数 */
@@ -89,7 +99,7 @@ export interface AudioJobParameters {
 /** POST /api/projects/:id/generation-jobs 请求体 */
 export interface CreateJobPayload {
   type: GenerationJobType;
-  /** 输入参考资产ID列表（image 图片参考 / audio 参考音频；后端兼容字符串） */
+  /** 旧参考字段（图片曾用）；新提交走 references，与视频/音频对齐 */
   input_asset_ids?: (string | number)[];
   /** 期望生成数量 */
   expected_output_count: number;
@@ -106,8 +116,22 @@ export interface CreateJobPayload {
   last_frame_material_id?: string;
   /** 素材库参考素材（仅 video）：[{ id: "Asset-xxx", type: "image" | "video" }]；与首尾帧模式互斥 */
   reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
+  /**
+   * 图/视频/音频生成参考单数组（保序，与旧参考字段互斥）。
+   * 每项 asset_id（本地）与 material_id（素材库 asset- 前缀）二选一。
+   * 图片/音频 role 恒 reference；视频可含 first_frame / last_frame。
+   */
+  references?: GenerationRefItem[];
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
+}
+
+/** 生成任务参考项（图/视频/音频 references 契约） */
+export interface GenerationRefItem {
+  role: 'first_frame' | 'last_frame' | 'reference';
+  type: 'image' | 'video' | 'audio';
+  asset_id?: string;
+  material_id?: string;
 }
 
 /** 创建/重试任务返回 */
@@ -130,6 +154,26 @@ export interface MediaExtractionCreatedData {
   status: 'queued';
 }
 
+/** POST /api/projects/:id/image-enhancements 请求体（六键，键名与 backend/libs/contracts/image-enhance.ts 契约恒等）。
+ *  IKGM9O 高清放大面板提交；版本档能力矩阵与源图尺寸门槛由服务端权威复核，前端预检只是体验层。 */
+export type CreateImageEnhancementPayload = ImageEnhanceInput;
+
+/** 创建高清放大任务返回。 */
+export interface ImageEnhancementCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** POST /api/projects/:id/image-outpaints 请求体（六键，键名与 backend/libs/contracts/image-outpaint.ts 契约恒等）。
+ *  IKGOR6 扩图面板提交；四比例值域与源图门槛由服务端权威复核，前端预检只是体验层。 */
+export type CreateImageOutpaintPayload = ImageOutpaintInput;
+
+/** 创建智能扩图任务返回。 */
+export interface ImageOutpaintCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -138,6 +182,8 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
+  text_input_signature?: string | null;
   error?: JobError | null;
 }
 
@@ -199,6 +245,119 @@ export function createMediaExtraction(
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 创建图片高清放大任务（IKGM9O）；免费口径同 media_extract——不带幂等头、无积分预估、不走余额拦截门。
+ *  高清草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+export function createImageEnhancement(
+  projectId: string,
+  payload: CreateImageEnhancementPayload,
+): Promise<ImageEnhancementCreatedData> {
+  return apiRequest<ImageEnhancementCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-enhancements`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/image-erasures 请求体（键名与 backend/libs/contracts/image-erase.ts 契约恒等；
+ *  按场景三键/四键，IKGOT4 创建入口 strict zod 复核）。
+ *  涂抹遮罩 PNG 已先经 uploadAssetFile 落库（source=mask_erase，资产列表不可见）取得 mask_asset_id。 */
+export type CreateImageErasePayload = ImageEraseInput;
+
+/** 创建图片擦除任务返回（IKGOTB）；同高清放大：入队失败创建响应仍 200、任务随即 enqueue_failed 经轮询呈现。 */
+export interface ImageEraseCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建图片擦除任务（IKGOTB）；免费口径同 image_enhance——不带幂等头、无积分预估、不走余额拦截门。
+ *  擦除结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+export function createImageErase(
+  projectId: string,
+  payload: CreateImageErasePayload,
+): Promise<ImageEraseCreatedData> {
+  return apiRequest<ImageEraseCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/image-cutouts 请求体（键名与 backend/libs/contracts/image-cutout.ts 契约恒等；
+ *  按场景三键/七键，创建入口 strict zod 复核；通用场景不携带描边与裁剪参数（接口会忽略的字段不进请求体））。 */
+export type CreateImageCutoutPayload = ImageCutoutInput;
+
+/** 创建图片抠图任务返回（IKGXLS）；同高清放大/擦除：入队失败创建响应仍 200、任务随即 enqueue_failed 经轮询呈现。 */
+export interface ImageCutoutCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不带幂等头、无积分预估、不走余额拦截门。
+ *  抠图结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+export function createImageCutout(
+  projectId: string,
+  payload: CreateImageCutoutPayload,
+): Promise<ImageCutoutCreatedData> {
+  return apiRequest<ImageCutoutCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 创建智能扩图任务（IKGOR6）；免费口径同 media_extract / image_enhance——不带幂等头、
+ *  无积分预估、不走余额拦截门。扩图结果卡已由前端本地建好（target_node_id 指向它），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（新分辨率随 asset 宽高回填结果卡）。 */
+export function createImageOutpaint(
+  projectId: string,
+  payload: CreateImageOutpaintPayload,
+): Promise<ImageOutpaintCreatedData> {
+  return apiRequest<ImageOutpaintCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-subtitle-erasures 请求体（四键，键名与
+ *  backend/libs/contracts/video-subtitle-erase.ts 契约恒等；IKGZ80 创建入口 strict zod 复核：
+ *  detect_mode 两值枚举、erase_boxes 空/≤20、框四键 ∈ [0,1] 归一化坐标）。 */
+export type CreateVideoSubtitleErasePayload = VideoSubtitleEraseInput;
+
+/** 创建视频去字幕任务返回（IKGZ83）；同高清放大/擦除/抠图：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoSubtitleEraseCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频智能去字幕任务（IKGZ83）；免费口径同 image_enhance / image_erase / image_cutout
+ *  ——不带幂等头、无积分预估、不走余额拦截门。去字幕结果卡由前端在创建成功后本地插入
+ *  （发送时才建卡，target_node_id 发送时生成传入），产物经 GET /api/jobs/:id 的 asset
+ *  按 target_node_id 回填（结果卡是普通视频素材卡，可再次去字幕）。 */
+export function createVideoSubtitleErase(
+  projectId: string,
+  payload: CreateVideoSubtitleErasePayload,
+): Promise<VideoSubtitleEraseCreatedData> {
+  return apiRequest<VideoSubtitleEraseCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -3,7 +3,6 @@
  * 从画布拖入/添加图片参考、生成图片唤起底部图片对话框、角色卡音色设置
  * ============================================ */
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
@@ -12,6 +11,7 @@ import { uploadAssetFile } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
+import { KIND_META, assetCardKindOf, type AssetCardKind } from './toolbarVisibility';
 import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
@@ -35,21 +35,8 @@ function HandlePlus() {
   );
 }
 
-/** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
-export type AssetCardKind = 'style' | 'character' | 'object' | 'environment' | 'custom' | 'generation';
-
-/** 各类型标题与描述占位文案（对应设计稿） */
-const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> = {
-  style: { title: '风格卡', placeholder: '描述视觉风格、配色与艺术方向...' },
-  character: { title: '角色卡', placeholder: '描述外观、性格、角色弧光、语音风格...' },
-  object: { title: '物体卡', placeholder: '描述形状、材质与颜色...' },
-  environment: { title: '环境卡', placeholder: '描述布局、氛围、光照与情绪...' },
-  custom: { title: '自定义卡', placeholder: '添加此资产的备注或细节...' },
-  generation: { title: '生成卡', placeholder: '分镜提示词生成卡' },
-};
-
-/** 临时隐藏：资产卡（风格/角色/物体/环境/自定义）顶部 @ 操作条，会后恢复（改回 false） */
-const HIDE_ASSET_TOP_BAR = false;
+/** 资产卡类型与元数据（IKGYYF 拆至 ./toolbarVisibility，类型出口保留给既有消费方） */
+export type { AssetCardKind } from './toolbarVisibility';
 
 /** React Flow 约定：节点内滚动容器加此类，滚轮只滚内容、不触发画布缩放 */
 const NOWHEEL = 'nowheel';
@@ -59,7 +46,7 @@ const NOWHEEL = 'nowheel';
  * 双正文编辑、「引用到 dock」「给 Agent」活动路径已退役，引用统一走顶部「添加到对话」。 */
 export interface GenerationCardNodeData extends Partial<GenerationCardBlock> {}
 
-interface AssetCardNodeData {
+export interface AssetCardNodeData {
   kind?: AssetCardKind;
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
@@ -71,6 +58,8 @@ interface AssetCardNodeData {
   initialDesc?: string;
   /** 水合初始音色（角色卡，共享资产加回画布时注入） */
   voice?: { name: string; src: string; type?: 'audio' };
+  /** 指针进入/离开卡片（IKGYYF）：驱动悬浮工具条 hover 显示（等价迁移前 CSS .wrapper:hover） */
+  onHoverChange?: (id: string, hovered: boolean) => void;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   /** 保存到共享资产 */
@@ -92,9 +81,9 @@ const MAX_IMAGE_REFS = 9;
 const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15; // 秒
 
-export default function AssetCardNode({ id, data, selected }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
-  // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
-  const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
+export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
+  // 水合容错（脏 kind 降级 custom，口径合一于 toolbarVisibility.ts 的 assetCardKindOf）
+  const kind: AssetCardKind = assetCardKindOf(data.kind);
   const meta = KIND_META[kind];
   const [refs, setRefs] = useState<CanvasGalleryRef[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
@@ -159,9 +148,10 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     };
   }, [addMenu]);
 
-  // 卸载时取消所有待上传任务、释放 blob URL
+  // 卸载时取消所有待上传任务、释放 blob URL；同步清理 hover 态（节点删除/项目切换不留悬空悬浮工具条）
   useEffect(() => {
     return () => {
+      data.onHoverChange?.(id, false);
       pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
       pendingUploadsRef.current.clear();
       refs.forEach((r) => {
@@ -179,19 +169,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY });
   }, [data.toolMode]);
 
-  const handleDelete = useCallback(() => {
-    setContextMenu(null);
-    data.onDelete?.(id);
-  }, [data, id]);
-
-  /** 添加到 Agent 聊天 */
-  const handleAddToChat = useCallback(() => {
-    setContextMenu(null);
-    data.onAddToChat?.(id);
-  }, [data, id]);
+  /** 添加到 Agent 聊天：随顶部操作条迁出（IKGYYF），见 AssetCardToolbar 的「添加到对话」 */
 
   /** 保存到共享资产（共享资产下线，入口已隐藏） */
   // const handleSaveToAssets = useCallback(() => {
@@ -339,27 +319,20 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   };
 
   return (
-    <div className={styles.wrapper} onContextMenu={handleContextMenu}>
+    <div
+      className={styles.wrapper}
+      onContextMenu={handleContextMenu}
+      onPointerEnter={() => data.onHoverChange?.(id, true)}
+      onPointerLeave={() => data.onHoverChange?.(id, false)}
+    >
       {!data.isFirst && (
         <Handle type="target" position={Position.Left} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>
       )}
 
-      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致）
-          资产卡临时隐藏（HIDE_ASSET_TOP_BAR，会后恢复），生成卡不受影响 */}
-      {(isGeneration || !HIDE_ASSET_TOP_BAR) && (
-        <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
-          <span className={styles.topLabel}>
-            <AtSign size={14} strokeWidth={2} />
-            <span>{meta.title}</span>
-          </span>
-          <button className={`${styles.addToChatBtn} nodrag`} onClick={handleAddToChat}>
-            <AtSign size={14} strokeWidth={2} />
-            <span>添加到对话</span>
-          </button>
-        </div>
-      )}
+      {/* 顶部操作条已迁出（IKGYYF 钉屏幕层悬浮化）：内容与显示语义迁至 AssetCardToolbar，
+          由 CanvasPage 经 NodeFollowToolbar 容器渲染在卡片上方，不再占卡片文档流空间 */}
 
       <div
         className={styles.card}
@@ -624,27 +597,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
         <HandlePlus />
       </Handle>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button className={styles.contextItem} onClick={handleAddToChat}>
-              <span>添加到聊天</span>
-            </button>
-            {/* 共享资产概念下线，隐藏入口 */}
-            {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
-              <span>保存到共享资产</span>
-            </button> */}
-            <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-              <span>删除</span>
-            </button>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

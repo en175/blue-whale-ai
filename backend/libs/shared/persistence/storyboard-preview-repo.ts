@@ -5,8 +5,8 @@ import type {
   ProviderPromptAsset,
   StoryboardFrameView,
   StoryboardPreviewParameters,
-} from "@blue-whale/contracts";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+} from "@lib/contracts";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
@@ -27,7 +27,7 @@ export interface CreateStoryboardPreviewInput {
   base_scene_card_version: number;
   parameters: StoryboardPreviewParameters;
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 密封的供应商 sk token（与图片计划应用一致）；worker 解密后调网关。 */
+  /** 明文供应商 sk token（修正四：去密，与图片计划应用一致）；worker 直接取用调网关。 */
   provider_credential?: string;
   /** 余额预检回调（与 plan apply 图片分支一致）；缺失视为不检查。 */
   quotaCheck?: () => Promise<{ sufficient: boolean }>;

@@ -3,6 +3,13 @@
  * ============================================ */
 
 .panel {
+  /* 字号档位面板级提档（IKETRR）：正文 md 13→14、辅助 sm 12→13、超小 xs 10→12。
+     只在面板根覆盖、不碰全局 variables.css——那套档位被全站 41 个 CSS 文件共用，
+     admin / BottomDialog 等密度型 UI 仍按原档。面板内所有 var() 引用（含 ChipTextEditor）
+     经 CSS 继承自动吃到新档。 */
+  --font-size-md: 14px;
+  --font-size-sm: 13px;
+  --font-size-xs: 12px;
   position: absolute;
   /* 基准宽度 468 = 边框 1×2 + 输入区左右各 4px + 输入框 458（IKAGZC 对齐参照物的实测值）。
      停靠抽屉的实际宽度由内联 style 接管（IKDLD4 可调宽，规则见 drawerWidth.ts），这里是首帧兜底。 */
@@ -11,10 +18,10 @@
   min-width: 0;
   /* 高度的共享兜底；停靠抽屉由 .panelDrawer 覆盖成全高（100%），浮动模式由内联 style 接管。 */
   height: calc(100% - var(--header-height) - 8px);
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
   display: flex;
   flex-direction: column;
   z-index: var(--z-dropdown);
@@ -505,8 +512,8 @@
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-sm);
   background-color: #1e1e1e;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
   color: var(--color-text-secondary);
 }
 
@@ -923,7 +930,7 @@
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   white-space: nowrap;
   max-width: 200px;
@@ -941,7 +948,7 @@
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--color-border);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   max-width: 200px;
   overflow: hidden;
@@ -958,7 +965,7 @@
 /* chip 内的 @ 符号 */
 .userMediaChipAt {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 /* 用户气泡中的文字内容 */
@@ -974,7 +981,7 @@
   max-width: 100%;
   color: #d6d6d6;
   font-size: var(--font-size-md);
-  line-height: 21px;
+  line-height: 22px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -990,7 +997,7 @@
   padding: 8px 10px;
   border-radius: 12px 12px 12px 2px;
   font-size: var(--font-size-md);
-  line-height: 21px;
+  line-height: 22px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1213,7 +1220,7 @@
 
 .thinkingMark {
   color: #6f7378;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .thinkingMarkLive {
@@ -1295,7 +1302,7 @@
   gap: 8px;
   /* 撑满消息流宽度（430）。原来是 94% + 居中，叠上父层的 95% 后只剩 385。 */
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -1328,17 +1335,103 @@
 
 /* 按哪套写法编的（F32）。压低到和时间同一层——它是核对用的注脚，不是标题的一部分。 */
 .shotTargetModel {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.shotTitleIcon {
+  color: var(--color-accent-agent);
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.shotRefsLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  align-self: center;
+}
+
+/* 提示词正文：默认收成三行，「展开全文」再看。正文走 Markdown，素材名是胶囊。 */
+.shotPrompt {
+  position: relative;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
+.shotPromptClamp {
+  max-height: calc(1.7em * 3);
+  overflow: hidden;
+}
+
+.shotPromptClamp::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.4em;
+  background: linear-gradient(to bottom, rgba(36, 36, 37, 0), #242425);
+}
+
+.shotPromptMd {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shotPromptMd p {
+  margin: 0;
+}
+
+.shotMore {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.shotMore:hover {
+  color: var(--color-text-primary);
+}
+
+.shotActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.shotActions .cardBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
+}
+
+/* 另开的一件事的卡头标签（IKG793）：与目标模型同一档字号，长了截断、悬停看全。 */
+.shotTaskLabel {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
   margin-left: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shotField {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
   word-break: break-word;
@@ -1426,8 +1519,8 @@
 
 /* 形态徽标：大写字母 + 字距，和右边的参数徽标区分开——它是这批卡「是什么」，不是参数。 */
 .shotKind {
-  /* 10px 是跟同排的 ~15s / 16:9 对齐推的，参照物这一枚走的是 class，dump 里读不到实测值。 */
-  font-size: 10px;
+  /* 走 xs 档（IKETRR 面板提档前是硬编码 10px，按同排 ~15s / 16:9 徽标对齐推的）。 */
+  font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--color-text-tertiary);
@@ -1437,7 +1530,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-tertiary);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   letter-spacing: 0.2px;
   line-height: 1.4;
@@ -1796,8 +1889,8 @@
   padding: 2px 8px;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-sm);
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
   opacity: 0.8;
 }
 
@@ -1811,7 +1904,7 @@
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1907,6 +2000,15 @@
   color: var(--color-text-tertiary);
 }
 
+/* 等待行（IKFLB9）：不是做了一件事，是在等一件事，比工具行再淡一档。 */
+.toolCallWaiting {
+  color: var(--color-text-tertiary);
+}
+
+.thinkingToggle:disabled {
+  cursor: default;
+}
+
 .toolCallSubsteps {
   display: flex;
   flex-direction: column;
@@ -1943,6 +2045,104 @@
   }
 }
 
+/* ---- 过程组（IKFLB9 定稿）：一轮的思考、工具、等待收成一行，点开按阶段分组 ----
+   头一行和思考块同一档灰、同一个 ✶ / ✻；阶段缩进一档带竖线，阶段里的叶子再缩一档。 */
+.processGroup {
+  margin: 2px 0 6px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+}
+
+.processHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 4px;
+  margin-left: -4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #9a9ea4;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.processHead:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.processChevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-text-tertiary);
+}
+
+.processLabel {
+  font-variant-numeric: tabular-nums;
+}
+
+.processCounts {
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.processBody {
+  margin: 2px 0 0 7px;
+  padding-left: 10px;
+  border-left: 1px solid #3a3d40;
+}
+
+.processPhase {
+  display: flex;
+  flex-direction: column;
+}
+
+.processPhaseHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0;
+  background: transparent;
+  border: none;
+  color: #92959a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.processPhaseHead:disabled {
+  cursor: default;
+}
+
+.processPhaseHead:not(:disabled):hover .toolCallLabel {
+  color: var(--color-text-primary);
+}
+
+.processChevron:empty {
+  width: 12px;
+}
+
+.processPhaseHead .toolCallLabel {
+  flex: 1;
+}
+
+.processPhaseMarkDone {
+  color: #7fb069;
+}
+
+.processPhaseMarkRunning {
+  color: var(--color-accent-agent);
+}
+
+.processPhaseItems {
+  margin: 1px 0 4px 20px;
+}
+
 /* ---- 轮（IKDK5I）：一批用户输入 + 回答 + 轮尾的账 ---- */
 .turn {
   display: flex;
@@ -1957,7 +2157,7 @@
   gap: 6px;
   margin: -2px 0 0 2px;
   font-size: var(--font-size-xs);
-  line-height: 16px;
+  line-height: 18px;
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }

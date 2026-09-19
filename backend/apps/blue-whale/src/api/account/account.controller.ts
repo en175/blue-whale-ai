@@ -1,10 +1,11 @@
 import { Controller, Get, Headers, Query } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { ok } from "@lib/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import {
   mapPaymentMethodLabel,
   mapTopUpStatus,
+  parseConsumeLogTypes,
   parseRecordPaging,
   toAccountConsumptionItem,
   topUpCreditsGained,
@@ -23,11 +24,16 @@ export class AccountController {
   ) {
     const token = parseBearerToken(authorization);
     if (!token) throw new NewApiError("未提供有效令牌", 401, "unauthorized");
-    const { page, pageSize } = parseRecordPaging(new URLSearchParams(query));
+    const searchParams = new URLSearchParams(query);
+    const { page, pageSize } = parseRecordPaging(searchParams);
+    // 参数校验放在 try 之外：这条错误里没有上游参与，不该过 toUpstreamError 的重包装
+    // （它把非 4xx 一律改写成 502），也别让 invalid_log_type 这个细分码被冲掉。
+    const type = parseConsumeLogTypes(searchParams);
     try {
       const result = await this.account.listUserConsumeLogs(token, {
         page,
         pageSize,
+        type,
       });
       return ok({
         items: result.items.map(toAccountConsumptionItem),

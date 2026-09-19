@@ -27,6 +27,8 @@ export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
  * - Enter：继续拦截，避免误触发（输入框内忽略）
  */
 export function canvasDeleteKeyAction(key: string, target: EventTarget | null): CanvasDeleteKeyAction {
+  // 引用菜单自行处理键盘，避免确认素材被画布快捷键截断。
+  if (target instanceof Element && target.closest('[data-canvas-keyboard-scope="mention"]')) return 'ignore';
   if (key === 'Delete' || key === 'Backspace') {
     return isEditableKeyboardTarget(target) ? 'ignore' : 'delete-selected';
   }
@@ -40,12 +42,12 @@ export function selectedNodeIds(nodes: Array<{ id: string; selected?: boolean }>
   return nodes.filter((node) => node.selected).map((node) => node.id);
 }
 
-/** 对选中节点逐个调用删除回调；无选中时为 no-op。返回实际删除的 id。 */
+/** 将选中节点一次性交给删除回调（一次操作入一次撤销栈）；无选中时为 no-op。返回实际删除的 id。 */
 export function deleteSelectedCanvasNodes(
   nodes: Array<{ id: string; selected?: boolean }>,
-  onDeleteNode: (id: string) => void,
+  onDeleteNodes: (ids: string[]) => void,
 ): string[] {
   const ids = selectedNodeIds(nodes);
-  ids.forEach((id) => onDeleteNode(id));
+  if (ids.length > 0) onDeleteNodes(ids);
   return ids;
 }

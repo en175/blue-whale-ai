@@ -7,7 +7,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAssetReferences, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
-import { uploadAssetFile } from '@/utils/upload';
+import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
@@ -19,6 +19,7 @@ import CharacterLibrary from './components/CharacterLibrary';
 import AssetMasonry, { type AssetGridItem } from './components/AssetMasonry';
 import { appendUniqueAssets, typeLabel } from './assetGrid';
 import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
+import { usePreviewAsset } from './previewAsset';
 import styles from './index.module.css';
 
 /** 筛选按钮定义 */
@@ -48,12 +49,17 @@ export default function Assets() {
   /** 引用项目数查询结果（带目标 ID，切换目标时不展示旧值）；count null = 查询失败 */
   const [refCount, setRefCount] = useState<{ id: string; count: number | null } | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
+  /** 详情补拉（IKFTQW）：列表记录先渲染弹窗，详情回来后覆盖。见 usePreviewAsset。 */
+  const previewAsset = usePreviewAsset(previewTarget);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
-  /** 素材库分组详情视图中当前分组 ID（null = 不在详情视图）；虚拟人像库/真人人像库共用 */
+  /** 素材库分组详情视图中当前分组 ID（null = 不在详情视图）；真人人像库用 */
   const [materialDetailGroupId, setMaterialDetailGroupId] = useState<string | null>(null);
-  /** 素材库分组详情刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
+  /** 素材库刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
   const [materialRefreshTick, setMaterialRefreshTick] = useState(0);
+  const handleMaterialDetailViewChange = useCallback((inDetail: boolean, groupId: string | null) => {
+    setMaterialDetailGroupId(inDetail ? groupId : null);
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -118,8 +124,8 @@ export default function Assets() {
     // 先清空 input 以支持重复上传同一文件
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // 素材库分组详情视图（虚拟人像库/真人人像库）：走素材库 API（支持图片+视频）
-    if (isMaterialView && materialDetailGroupId) {
+    // 素材库视图（虚拟人像库平铺 / 真人人像库分组详情）：走素材库 API（支持图片+视频）
+    if (isMaterialView) {
       setUploading(true);
       const errors: string[] = [];
 
@@ -139,11 +145,19 @@ export default function Assets() {
           const rawName = file.name;
           const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
           if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
+          // 虚拟人像库不传分组，后端自动归组；真人人像库落入当前详情分组
+          if (activeFilter === 'liveness' && !materialDetailGroupId) {
+            errors.push(`${file.name}：请先进入分组再上传`);
+            continue;
+          }
           await createMaterialAsset({
-            GroupId: materialDetailGroupId,
+            ...(activeFilter === 'liveness' && materialDetailGroupId
+              ? { GroupId: materialDetailGroupId }
+              : {}),
             URL: uploadResult.url,
             Name: finalName,
             AssetType: assetType,
+            SourceAssetId: String(uploadResult.asset_id),
           });
         } catch (err) {
           // API 错误已由请求层统一 toast，这里只收集本地校验类错误。
@@ -166,16 +180,14 @@ export default function Assets() {
     let assetListChanged = false;
 
     for (const file of list) {
-      // 虚拟人视图下，上传类型固定为 character
-      const forceCharacter = activeFilter === 'character';
-      const type: AssetType = forceCharacter ? 'character' : (fileToAssetType(file) as AssetType);
+      const type: AssetType = fileToAssetType(file) as AssetType;
 
       if (!type) {
         errors.push(`不支持的文件类型：${file.name}`);
         continue;
       }
       // tab 筛选下的类型约束：选中特定 tab 时只允许对应类型（同时校验 MIME 和扩展名）
-      if (!forceCharacter && activeFilter !== 'all' && activeFilter !== type) {
+      if (activeFilter !== 'all' && activeFilter !== type) {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         errors.push(`${file.name}：当前「${filterTabs.find((t) => t.key === activeFilter)?.label}」tab 不支持 .${ext || '?'} 格式`);
         continue;
@@ -185,21 +197,19 @@ export default function Assets() {
         errors.push(`${file.name} 超过 ${limitMb}MB 上限`);
         continue;
       }
-      // 虚拟人视图只接受图片
-      if (forceCharacter && !file.type.startsWith('image/')) {
-        errors.push(`${file.name}：虚拟人仅支持上传图片`);
-        continue;
-      }
       try {
         // 三步上传：presign → PUT → complete
         const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
         await putToPresignedUrl(presign, file);
+        // 探测尺寸/时长随 complete 上报（对齐主封装 uploadAssetFile）：漏报会让资产档案缺宽高，
+        // 扩图等以资产宽高为权威的功能会被服务端拦下（IKGOQ0 验收修订）；探测失败不阻断上传。
+        const meta = await probeMediaMeta(file, type).catch(() => ({}));
         await completeUpload({
           type,
           mime: file.type,
           size: file.size,
           storage_key: presign.storage_key,
-          ...(forceCharacter ? {} : {}),
+          ...meta,
         });
         // 上传会改变“全部”和对应类型缓存；本轮批量上传结束后统一失效并刷新。
         assetListChanged = true;
@@ -306,7 +316,7 @@ export default function Assets() {
             type="file"
             multiple
             accept={(() => {
-              if (isMaterialView && materialDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+              if (isMaterialView) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
               if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
               if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
               if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
@@ -321,7 +331,7 @@ export default function Assets() {
             <CharacterLibrary
               groupType={activeFilter === 'liveness' ? 'LivenessFace' : 'AIGC'}
               refreshTick={materialRefreshTick}
-              onDetailViewChange={(inDetail, groupId) => setMaterialDetailGroupId(inDetail ? groupId : null)}
+              onDetailViewChange={handleMaterialDetailViewChange}
               onUpload={handleUpload}
             />
           ) : (
@@ -360,7 +370,10 @@ export default function Assets() {
         </div>
       </div>
 
-      <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />
+      <AssetDetailModal
+        asset={previewAsset}
+        onClose={() => setPreviewTarget(null)}
+      />
 
       {/* 删除确认弹窗：引用数查询中显示加载提示，返回后展示关联项目数，失败兜底普通文案（IKCZAT） */}
       <ConfirmModal

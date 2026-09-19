@@ -1,4 +1,4 @@
-import { DomainError, SKILL_ERROR_SPECS } from "@blue-whale/contracts";
+import { DomainError, SKILL_ERROR_SPECS } from "@lib/contracts";
 import {
   SkillAddConflictError,
   SkillInUseError,

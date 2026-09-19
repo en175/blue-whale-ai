@@ -5,7 +5,7 @@ import {
   type LegacyMigrationReport,
   type PublicGenerationError,
   type ResultEnvelope,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { projectPublicError } from "@lib/shared/jobs/generation-job-error-projection.js";
 import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
@@ -36,6 +36,20 @@ export interface SnapshotAssetSummary {
   asset_id: string;
   access_url: string;
   type: string;
+  /** IKEXX8：素材库关联两列成对吐出（未关联为 null），前端据此以 asset:// 引用直发素材库链路。 */
+  material_id: string | null;
+  material_group_id: string | null;
+  /** IKFYHJ：素材校验状态（ADR-0087）——`Active` / `Processing` / `Failed`。
+   *  null = 未关联素材库，或关联了但本地无镜像行（早于本功能入库的存量素材）。
+   *  **取自本地镜像，可能陈旧**（只跟进素材创建后 10 分钟内，之后上游再变就追不上）；
+   *  要「此刻能不能用」的权威答案，以生成接口的判定为准（那里会实时查上游）。
+   *  `material_status_checked_at` 供前端判断这个镜像有多旧。 */
+  material_status: string | null;
+  material_status_checked_at: string | null;
+  /** 素材内容 md5；老资产未落 md5 时为 null。前端据此比对/去重同内容素材。
+   *  注意大小写：写入侧未归一化（upload 校验用 /^[a-f0-9]{32}$/i 但原样落库），
+   *  比对时按大小写不敏感处理，或先在前端 toLowerCase()。 */
+  md5: string | null;
 }
 
 export interface SnapshotData {
@@ -114,6 +128,11 @@ export async function handleGetSnapshot(
       asset_id: asset.id,
       access_url: asset.url,
       type: asset.type,
+      material_id: asset.material_id ?? null,
+      material_group_id: asset.material_group_id ?? null,
+      material_status: asset.material_status ?? null,
+      material_status_checked_at: asset.material_status_checked_at ?? null,
+      md5: asset.md5 ?? null,
     };
   }
 

@@ -105,10 +105,13 @@ export interface DeleteAssetGroupParams {
 
 /** 上传素材请求 */
 export interface CreateAssetParams {
-  GroupId: string;
+  /** 素材组 id；虚拟人像库可不传，由后端自动归组 */
+  GroupId?: string;
   URL: string;
   Name: string;
   AssetType: MaterialAssetType;
+  /** 本地 assets 表 id，绑定画布原件与素材库条目 */
+  SourceAssetId?: string;
 }
 
 /** 列出素材请求 */
@@ -141,6 +144,10 @@ export interface VisualValidateResult {
 
 /* ---------- 底层：素材库专用请求 ---------- */
 
+/** 列表查询在途去重：StrictMode 双挂载/重复进入只发一次，完成后释放 */
+const materialListInflight = new Map<string, Promise<unknown>>();
+const MATERIAL_LIST_ACTIONS = new Set(['ListAssetGroups', 'ListAssets']);
+
 /**
  * 素材库专用请求：不套产品信封，直接读上游响应。
  * - 成功：HTTP 2xx + Result 字段
@@ -149,6 +156,24 @@ export interface VisualValidateResult {
  * - 失败统一 toast（与 http.ts doRequest 行为一致），页面无需重复展示
  */
 async function materialRequest<T>(
+  action: string,
+  body: unknown,
+  opts?: { silent?: boolean },
+): Promise<T> {
+  if (MATERIAL_LIST_ACTIONS.has(action)) {
+    const key = `${action}:${JSON.stringify(body ?? {})}`;
+    const existed = materialListInflight.get(key);
+    if (existed) return existed as Promise<T>;
+    const pending = materialRequestOnce<T>(action, body, opts).finally(() => {
+      materialListInflight.delete(key);
+    });
+    materialListInflight.set(key, pending);
+    return pending;
+  }
+  return materialRequestOnce<T>(action, body, opts);
+}
+
+async function materialRequestOnce<T>(
   action: string,
   body: unknown,
   opts?: { silent?: boolean },
@@ -252,8 +277,8 @@ export function deleteAssetGroup(id: string, opts?: { silent?: boolean }) {
 /* ---------- 素材接口 ---------- */
 
 /** 上传素材（两段式：先通过 Asset 管道拿公网 URL，再调此接口） */
-export function createAsset(params: CreateAssetParams) {
-  return materialRequest<{ Id: string }>('CreateAsset', params);
+export function createAsset(params: CreateAssetParams, opts?: { silent?: boolean }) {
+  return materialRequest<{ Id: string }>('CreateAsset', params, opts);
 }
 
 /** 列出素材 */
@@ -261,9 +286,9 @@ export function listAssets(params: ListAssetsParams) {
   return materialRequest<ListAssetsResult>('ListAssets', params);
 }
 
-/** 获取素材详情 */
-export function getAsset(id: string) {
-  return materialRequest<MaterialAsset>('GetAsset', { Id: id });
+/** 获取素材详情（silent 供轮询使用，失败不打断页面） */
+export function getAsset(id: string, opts?: { silent?: boolean }) {
+  return materialRequest<MaterialAsset>('GetAsset', { Id: id }, opts);
 }
 
 /** 更新素材（仅支持修改 Name） */
@@ -298,6 +323,14 @@ export function getVisualValidateResult(bytedToken: string, opts?: { silent?: bo
   }, opts);
 }
 
+/** 上游素材 Status 为 Failed（合规未通过） */
+export class MaterialAssetFailedError extends Error {
+  constructor() {
+    super('seedance2.0合规校验失败，不可用于视频生成');
+    this.name = 'MaterialAssetFailedError';
+  }
+}
+
 /* ---------- 辅助：等待素材就绪 ---------- */
 
 /**
@@ -312,19 +345,15 @@ export async function waitAssetReady(
   intervalMs = 5000,
 ): Promise<MaterialAsset> {
   for (let i = 0; i < maxAttempts; i++) {
-    const asset = await getAsset(id);
+    const asset = await getAsset(id, { silent: true });
     if (asset.Status === 'Active') return asset;
     if (asset.Status === 'Failed') {
-      throw new ApiError(
-        500,
-        asset.Error?.Message ?? `素材处理失败(${asset.Error?.Code})`,
-        asset.Error?.Code ?? 'AssetFailed',
-      );
+      throw new MaterialAssetFailedError();
     }
     // Processing → 等待后继续
     if (i < maxAttempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
   }
-  throw new ApiError(408, '素材处理超时', 'Timeout');
+  throw new Error('素材合规校验超时，请重试');
 }

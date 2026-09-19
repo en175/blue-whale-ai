@@ -8,7 +8,7 @@ import {
   SCENE_CARD_VERSION_CONFLICT_CODE,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { SceneCardResourceService } from "@lib/shared/scene-card/scene-card.service.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";

@@ -1,4 +1,4 @@
-import type { ReadinessProbe } from "@blue-whale/core";
+import type { ReadinessProbe } from "@lib/core";
 import { createPool, type Pool } from "mysql2/promise";
 
 export interface MySqlConfig {

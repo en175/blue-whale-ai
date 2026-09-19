@@ -4,7 +4,7 @@
  * ============================================ */
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, type RefObject } from 'react';
 import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type RenderComponentProps } from 'masonic';
-import { Trash2, RotateCw, AlertCircle, Plus, Check } from 'lucide-react';
+import { Trash2, RotateCw, AlertCircle, Plus, Check, ZoomIn } from 'lucide-react';
 import type { AssetRecord } from '@/api/assets';
 import Skeleton from '@/components/Skeleton';
 import AudioPlayer, { type AudioPlayerHandle } from '../AudioPlayer';
@@ -265,7 +265,9 @@ export interface AssetMasonryProps {
   libraryMode?: boolean;
 }
 
-function AssetCard({
+/** 素材卡：资产页（点卡预览 + 悬浮删除）与选择弹窗（点卡勾选 + 悬浮删除/放大预览，IKGHZ3）共用。
+ *  放大预览按钮仅多选模式渲染（资产页点卡即预览，无需按钮）；两枚按钮固定卡片右下角（删除在左）。 */
+export function AssetCard({
   asset,
   onPreview,
   onDelete,
@@ -321,6 +323,11 @@ function AssetCard({
           </div>
         )}
         <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        {asset.material_status === 'Active' && (
+          <span className={styles.complianceBadge} title="校验通过">
+            <img src="/success.png" alt="" />
+          </span>
+        )}
         {/* 多选模式：左上角勾选角标，选中态高亮 */}
         {isSelectable && (
           <span
@@ -330,17 +337,33 @@ function AssetCard({
             {selected && <Check size={12} strokeWidth={3} />}
           </span>
         )}
-        {onDelete && (
-          <button
-            className={styles.deleteBtn}
-            title="删除资产"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(asset);
-            }}
-          >
-            <Trash2 size={14} strokeWidth={2} />
-          </button>
+        {(onDelete || (isSelectable && onPreview)) && (
+          <div className={styles.cardActions}>
+            {onDelete && (
+              <button
+                className={styles.deleteBtn}
+                title="删除资产"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(asset);
+                }}
+              >
+                <Trash2 size={14} strokeWidth={2} />
+              </button>
+            )}
+            {isSelectable && onPreview && (
+              <button
+                className={styles.previewBtn}
+                title="放大预览"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPreview(asset);
+                }}
+              >
+                <ZoomIn size={14} strokeWidth={2} />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

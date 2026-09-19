@@ -19,7 +19,7 @@
  *   2. new-api 已配真实火山引擎渠道（图片 doubao-seedream-4-0-250828 /
  *      视频 doubao-seedance-2-0-260128，种子见 backend/prisma/schema/002_seed.sql）；
  *   3. 对象存储（TOS：VOLC_ACCESS_KEY_ID / VOLC_SECRET_ACCESS_KEY / VOLC_TOS_ENDPOINT /
- *      VOLC_TOS_BUCKET / VOLC_TOS_REGION）已配到 web 与 generation-worker 进程——
+ *      VOLC_TOS_BUCKET / VOLC_TOS_REGION）已配到 web 与 worker-java 进程——
  *      未配置时生成结果会直引 provider 源 URL，对象存储断言会 FAIL（这正是要验的点）。
  *
  * 用法：
@@ -280,7 +280,7 @@ export function mergeSseEventIds(...windows) {
 /** 对象存储身份判定：生成产物转存 TOS 后 URL 形态为
  *  https://{bucket}.{endpoint}/uploads/{userId}/{type}/{uuid}.{ext}
  *  （tos-storage.ts prepareUpload/inspectObject 的 publicUrl）。
- *  未配存储时 worker 直引 provider 源 URL（generation-worker.ts persistProviderMedia
+ *  未配存储时 worker 直引 provider 源 URL（worker-java 的 TOS 降级路径，原 TS generation-worker persistProviderMedia
  *  storage=null 分支），此时该断言必须 FAIL。
  *  返回 { ok, reason, safeUrl }；safeUrl 已剥 query，可进证据。 */
 export function checkStorageIdentity(accessUrl, userId, type) {
