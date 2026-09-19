@@ -15,6 +15,8 @@ interface CanvasHeaderProps {
   onSelectProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onDeleteProject: (id: string) => void;
+  /** 置顶/取消置顶（IKH1YL）：透传 ProjectSelector，缺省时下拉仍渲染按钮但不生效 */
+  onTogglePinProject?: (id: string, pinned: boolean) => void;
   onNewProject: () => void;
   onToggleAgent: () => void;
   /** 旧生成卡迁移历史入口（IKDLQK）：仅项目存在迁移历史时提供，缺省不渲染 */
@@ -29,6 +31,7 @@ export default function CanvasHeader({
   onSelectProject,
   onRenameProject,
   onDeleteProject,
+  onTogglePinProject,
   onNewProject,
   onToggleAgent,
   onShowLegacyHistory,
@@ -55,6 +58,7 @@ export default function CanvasHeader({
           onSelect={onSelectProject}
           onRename={onRenameProject}
           onDelete={onDeleteProject}
+          onTogglePin={onTogglePinProject}
           onNewProject={onNewProject}
         />
       </div>

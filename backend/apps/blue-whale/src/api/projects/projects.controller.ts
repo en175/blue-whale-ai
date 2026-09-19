@@ -120,6 +120,32 @@ export class ProjectsController {
     return ok(project);
   }
 
+  /** PUT /api/projects/:id/last-opened — 进入画布时记一笔「上次打开」（IKH1YI）。无 body。 */
+  @Put(":id/last-opened")
+  async touchLastOpened(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    const touched = await this.project.touchLastOpened(id, user.userId);
+    if (!touched) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    return ok(null);
+  }
+
+  /** PUT /api/projects/:id/pin — 置顶/取消置顶（IKH1YI）。body { pinned: boolean }。 */
+  @Put(":id/pin")
+  async pin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() body: { pinned?: unknown },
+  ) {
+    if (typeof body.pinned !== "boolean") {
+      return fail(FAILURE_CODE, "pinned 必须为布尔值");
+    }
+    const project = await this.project.setPinned(id, user.userId, body.pinned);
+    if (!project) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    return ok(project);
+  }
+
   @Get(":id/snapshot")
   async getSnapshot(
     @CurrentUser() user: AuthenticatedUser,

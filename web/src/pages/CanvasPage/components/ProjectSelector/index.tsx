@@ -2,7 +2,7 @@
  * ProjectSelector 项目选择器：项目列表下拉切换
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus } from 'lucide-react';
+import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus, Pin, PinOff } from 'lucide-react';
 import { defaultProjectName } from '@/lib/projectName';
 import styles from './index.module.css';
 
@@ -10,6 +10,8 @@ import styles from './index.module.css';
 export interface CanvasProject {
   id: string;
   name: string;
+  /** 已置顶（pinned_at 非空）；缺省视为未置顶 */
+  pinned?: boolean;
 }
 
 interface ProjectSelectorProps {
@@ -18,6 +20,7 @@ interface ProjectSelectorProps {
   onSelect: (id: string) => void;
   onRename: (id: string, newName: string) => void;
   onDelete: (id: string) => void;
+  onTogglePin?: (id: string, pinned: boolean) => void;
   onNewProject: () => void;
 }
 
@@ -27,6 +30,7 @@ export default function ProjectSelector({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
   onNewProject,
 }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
@@ -149,6 +153,32 @@ export default function ProjectSelector({
                 ) : (
                   <span className={styles.projectName}>{project.name}</span>
                 )}
+
+                {/* 置顶项目常显图钉标记 */}
+                {project.pinned && (
+                  <Pin
+                    size={12}
+                    strokeWidth={2}
+                    className={styles.pinnedIcon}
+                    aria-hidden="true"
+                  />
+                )}
+
+                {/* 悬停显示置顶按钮；点击不关闭下拉，可连续操作 */}
+                <button
+                  className={styles.pinBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePin?.(project.id, !project.pinned);
+                  }}
+                  title={project.pinned ? '取消置顶' : '置顶'}
+                >
+                  {project.pinned ? (
+                    <PinOff size={14} strokeWidth={2} />
+                  ) : (
+                    <Pin size={14} strokeWidth={2} />
+                  )}
+                </button>
 
                 {/* 悬停显示删除按钮 */}
                 <button

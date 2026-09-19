@@ -17,6 +17,10 @@ export interface ProjectRecord {
   previews: string[];
   /** 创建时间（ISO 字符串） */
   created_at: string;
+  /** 上次打开时间（ISO 字符串）；从未打开过为 null */
+  last_opened_at: string | null;
+  /** 置顶时间（ISO 字符串）；非空即已置顶（组内按此倒序），未置顶为 null */
+  pinned_at: string | null;
 }
 
 /** 项目分页包络：与 GET /api/assets 保持一致。 */
@@ -58,6 +62,14 @@ export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
   return apiRequest<ProjectPageData>(`/api/projects?${params.toString()}`, { silent: true });
 }
 
+/** 打开即记 PUT /api/projects/:id/last-opened（IKH1YK）：失败静默由调用方 catch。 */
+export function touchProjectLastOpened(id: ProjectRecord['id']): Promise<void> {
+  return apiRequest<void>(`/api/projects/${encodeURIComponent(String(id))}/last-opened`, {
+    method: 'PUT',
+    silent: true,
+  });
+}
+
 /** 项目卡片页的 TanStack Query 无限分页配置。 */
 export function projectPageQueryOptions(size = PROJECT_PAGE_SIZE) {
   return infiniteQueryOptions({
@@ -91,6 +103,15 @@ export function renameProject(id: ProjectRecord['id'], name: string, init?: ApiR
     ...init,
     method: 'PUT',
     body: JSON.stringify({ name }),
+  });
+}
+
+/** 置顶/取消置顶项目 PUT /api/projects/:id/pin（成功 data 为更新后项目记录） */
+export function pinProject(id: ProjectRecord['id'], pinned: boolean, init?: ApiRequestInit) {
+  return apiRequest<ProjectRecord>(`/api/projects/${encodeURIComponent(String(id))}/pin`, {
+    ...init,
+    method: 'PUT',
+    body: JSON.stringify({ pinned }),
   });
 }
 
