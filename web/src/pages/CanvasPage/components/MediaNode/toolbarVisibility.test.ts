@@ -2,33 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
-  it('hides mention, generate-image, image-quality menu, generate-video, video-enhance and subtitle-erase on audio nodes', () => {
+  it('hides mention, image-quality menu, video-enhance and subtitle-erase on audio nodes', () => {
     expect(mediaNodeToolbarVisibility('audio')).toEqual({
       mention: false,
-      genImage: false,
-      genVideo: false,
       imageQuality: false,
       videoEnhance: false,
       videoSubtitleErase: false,
     });
   });
 
-  it('keeps mention and generate actions on image nodes', () => {
+  it('keeps mention and image-quality menu on image nodes', () => {
     expect(mediaNodeToolbarVisibility('image')).toEqual({
       mention: true,
-      genImage: true,
-      genVideo: true,
       imageQuality: true,
       videoEnhance: false,
       videoSubtitleErase: false,
     });
   });
 
-  it('keeps mention, video-enhance, generate-video and subtitle-erase on video nodes, still hides generate-image and image-quality menu', () => {
+  it('keeps mention, video-enhance and subtitle-erase on video nodes, still hides image-quality menu', () => {
     expect(mediaNodeToolbarVisibility('video')).toEqual({
       mention: true,
-      genImage: false,
-      genVideo: true,
       imageQuality: false,
       videoEnhance: true,
       videoSubtitleErase: true,
@@ -38,8 +32,6 @@ describe('mediaNodeToolbarVisibility', () => {
   it('treats unspecified media as an image node', () => {
     expect(mediaNodeToolbarVisibility(undefined)).toEqual({
       mention: true,
-      genImage: true,
-      genVideo: true,
       imageQuality: true,
       videoEnhance: false,
       videoSubtitleErase: false,

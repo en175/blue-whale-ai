@@ -334,13 +334,13 @@ describe('IKGM9O 发送创建任务闭环', () => {
   });
 });
 
-describe('IKGM9O 重新编辑分流与回填', () => {
-  it('成品高清卡「重新编辑」打开高清面板并回填 lastParams（不再开发图片面板）', async () => {
+describe('IKGM9O 重新编辑分流与回填（IKH3WE 起入口 = 点卡片开面板）', () => {
+  it('成品高清卡点卡片打开高清面板并回填 lastParams（不再开发图片面板）', async () => {
     seedDoc(true);
     await renderPage();
 
     await act(async () => {
-      ((mediaNode('h1').data as Record<string, unknown>).onReEdit as (id: string) => void)('h1');
+      flowProps.current.onNodeClick(mediaNode('h1'));
     });
     expect(panelSend()).toBeTruthy();
     // lastParams 回填：Max / 4x / 保真度优先 / 色彩校正开
@@ -361,7 +361,7 @@ describe('IKGM9O 重新编辑分流与回填', () => {
     await renderPage();
 
     await act(async () => {
-      ((mediaNode('h1').data as Record<string, unknown>).onReEdit as (id: string) => void)('h1');
+      flowProps.current.onNodeClick(mediaNode('h1'));
     });
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

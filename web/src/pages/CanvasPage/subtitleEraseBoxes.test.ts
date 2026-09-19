@@ -3,10 +3,12 @@ import {
   applySubtitleBox,
   canAddSubtitleBox,
   canRedoSubtitleBoxEdit,
+  canResetSubtitleBoxEdit,
   canUndoSubtitleBoxEdit,
   displayBoxToNormalized,
   EMPTY_SUBTITLE_BOX_EDIT,
   redoSubtitleBoxEdit,
+  resetSubtitleBoxEdit,
   subtitleBoxesToPayload,
   undoSubtitleBoxEdit,
   type SubtitleBoxOp,
@@ -69,6 +71,65 @@ describe('IKGZ83 框集合：增删与撤销重做小栈', () => {
     expect(clicked).toBe(EMPTY_SUBTITLE_BOX_EDIT);
     const dragged = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(30, 30, 30, 31));
     expect(dragged.boxes.length).toBe(1);
+  });
+});
+
+describe('IKH3OV 重置：清空全部框且一步可撤销（undo/redo 从逐框增删扩为逐框增删+整批清空）', () => {
+  it('重置清空全部框并可撤销；无框时原样返回不产生空步骤', () => {
+    expect(resetSubtitleBoxEdit(EMPTY_SUBTITLE_BOX_EDIT)).toBe(EMPTY_SUBTITLE_BOX_EDIT);
+    let state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
+    state = applySubtitleBox(state, box(3, 3, 4, 4));
+    const cleared = resetSubtitleBoxEdit(state);
+    expect(cleared.boxes).toEqual([]);
+    // 重置本身是撤销栈里的一步：框清了但仍可撤销
+    expect(canUndoSubtitleBoxEdit(cleared)).toBe(true);
+    expect(canRedoSubtitleBoxEdit(cleared)).toBe(false);
+    expect(canAddSubtitleBox(cleared)).toBe(true);
+    // 已无框可清：不产生第二次 reset 步骤（避免用无效操作污染撤销栈）
+    expect(resetSubtitleBoxEdit(cleared)).toBe(cleared);
+  });
+
+  it('重置可用谓词只看有无框：与 canUndo 语义不同（重置后 boxes 空但仍可撤销）', () => {
+    expect(canResetSubtitleBoxEdit(EMPTY_SUBTITLE_BOX_EDIT)).toBe(false);
+    const one = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
+    expect(canResetSubtitleBoxEdit(one)).toBe(true);
+    const cleared = resetSubtitleBoxEdit(one);
+    expect(canResetSubtitleBoxEdit(cleared)).toBe(false);
+    expect(canUndoSubtitleBoxEdit(cleared)).toBe(true);
+  });
+
+  it('撤销重置：把清空前的框集合整批还原（顺序不变）；重做再次清空', () => {
+    const first = box(10, 20, 100, 80);
+    const second = box(20, 30, 120, 90);
+    let state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, first);
+    state = applySubtitleBox(state, second);
+    const restored = undoSubtitleBoxEdit(resetSubtitleBoxEdit(state));
+    expect(restored.boxes).toEqual([first, second]);
+    expect(canRedoSubtitleBoxEdit(restored)).toBe(true);
+    const reCleared = redoSubtitleBoxEdit(restored);
+    expect(reCleared.boxes).toEqual([]);
+    expect(canRedoSubtitleBoxEdit(reCleared)).toBe(false);
+  });
+
+  it('逐步撤销跨过重置步骤：先整批还原，再逐框回退到空栈', () => {
+    let state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
+    state = applySubtitleBox(state, box(3, 3, 4, 4));
+    state = resetSubtitleBoxEdit(state);
+    state = undoSubtitleBoxEdit(state);
+    expect(state.boxes.length).toBe(2);
+    state = undoSubtitleBoxEdit(state);
+    expect(state.boxes.length).toBe(1);
+    state = undoSubtitleBoxEdit(state);
+    expect(state.boxes.length).toBe(0);
+    expect(canUndoSubtitleBoxEdit(state)).toBe(false);
+  });
+
+  it('重置后落新框清空重做栈：被清空的旧框分支不可再重做', () => {
+    let state = applySubtitleBox(EMPTY_SUBTITLE_BOX_EDIT, box(1, 1, 2, 2));
+    state = resetSubtitleBoxEdit(state);
+    state = applySubtitleBox(state, box(5, 5, 6, 6));
+    expect(state.boxes.length).toBe(1);
+    expect(canRedoSubtitleBoxEdit(state)).toBe(false);
   });
 });
 

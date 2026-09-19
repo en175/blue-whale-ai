@@ -266,24 +266,24 @@ describe('IKH28U 编辑态呈现（进入不建任务）', () => {
     expect(flowProps.current.edges).toEqual([]);
   });
 
-  it('与其他工具编辑会话互斥：去字幕编辑态中点音视频分离，去字幕浮条退出、分离浮条接管', async () => {
+  it('与其他工具编辑会话互斥：去字幕会话中点音视频分离，去字幕单条退出、分离浮条接管', async () => {
     await renderPage();
     const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
     await act(async () => {
-      video.data.onVideoSubtitleErase('v1');
+      video.data.onVideoSubtitleErase('v1', 'smart');
     });
-    expect(document.body.querySelector('[data-testid="subtitle-erase-toolbar"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="subtitle-erase-send-bar"]')).toBeTruthy();
     await enterSplit();
-    expect(document.body.querySelector('[data-testid="subtitle-erase-toolbar"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="subtitle-erase-send-bar"]')).toBeNull();
     expect(toolbar()).toBeTruthy();
     expect(v1Data().splitEditing).toBe(true);
-    // 去字幕未发送无痕迹：反向互斥——分离态中点去字幕，分离浮条退出
+    // 去字幕未发送无痕迹：反向互斥——分离态中点去字幕，分离浮条退出、去字幕单条接管
     await act(async () => {
-      video.data.onVideoSubtitleErase('v1');
+      video.data.onVideoSubtitleErase('v1', 'smart');
     });
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
+    expect(document.body.querySelector('[data-testid="subtitle-erase-send-bar"]')).toBeTruthy();
   });
 });
 

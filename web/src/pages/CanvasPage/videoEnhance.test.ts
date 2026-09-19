@@ -88,7 +88,7 @@ describe('buildVideoEnhanceInput（IKH3VH 契约三键组装）', () => {
   it('非法输入返回 null（资产 id 非数字串 / 目标节点空 / 分辨率越枚举含被裁撤的 720p）', () => {
     expect(buildVideoEnhanceInput('a5', 'media-draft-1', '1080p')).toBeNull();
     expect(buildVideoEnhanceInput('5', '', '1080p')).toBeNull();
-    expect(buildVideoEnhanceInput('5', 'media-draft-1', '720p')).toBeNull();
+    expect(buildVideoEnhanceInput('5', 'media-draft-1', '720p' as never)).toBeNull();
     expect(buildVideoEnhanceInput('5', 'media-draft-1', '8k' as never)).toBeNull();
   });
 });

@@ -196,17 +196,17 @@ describe('IKGZ8D 底部面板家族十成员（容器四件套引用令牌、无
   }
 });
 
-/* ---- IKGZ83 去字幕编辑态浮条家族（2 成员，24px 胶囊对齐 OutpaintDialog 统一后形态） ---- */
+/* ---- IKH3OU 去字幕会话单条家族（1 成员，24px 胶囊对齐 OutpaintDialog 统一后形态）：
+   IKGZ83 的「上方工具条 + 下方发送条」双条随 ADR-0104 单条化退役，成员数由 2 降为 1。 ---- */
 
-describe('IKGZ83 去字幕编辑态工具条/发送条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
+describe('IKH3OU 去字幕会话单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
   const dialogCss = readFileSync(
     fileURLToPath(new URL('../pages/CanvasPage/components/VideoSubtitleEraseDialog/index.module.css', import.meta.url)),
     'utf-8',
   );
 
   it.each([
-    ['源视频卡上方工具条', 'toolbar'],
-    ['源视频卡下方发送条', 'sendBar'],
+    ['源视频卡下方单条', 'sendBar'],
   ] as const)('%s 容器三件套引用令牌、圆角 24px 胶囊、无硬编码容器色值', (_name, container) => {
     const block = ruleBlockOf(dialogCss, `.${container}`);
     expect(block).toContain('background-color: var(--color-bg-overlay)');

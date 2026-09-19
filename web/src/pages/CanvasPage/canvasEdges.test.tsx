@@ -439,9 +439,10 @@ describe('IKDLQG 视频目标接线', () => {
     seedVideoDoc();
     await renderPage();
 
+    // IKH3WE 撤除工具条「生成视频」按钮后，成品视频卡原卡重跑唯一路径 = 点卡片打开绑定面板
     const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1');
     await act(async () => {
-      media.data.onGenVideo('v1');
+      flowProps.current.onNodeClick(media);
     });
 
     // 面板打开即展示当前附件（IKFCKQ：FileText 缩略图进参考栏，标题在缩略图 title）
@@ -480,29 +481,6 @@ describe('IKDLQG 视频目标接线', () => {
     const saved = apiMocks.saveCanvasDoc.mock.calls[0]![1];
     expect(saved.nodes.find((n) => n.id === 't1')!.data.text).toBe('一只蓝鲸在海里游');
     expect(saved.edges).toHaveLength(1);
-  });
-
-  it('重新编辑入口同样携带目标节点与附件快照', async () => {
-    seedVideoDoc();
-    await renderPage();
-
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1');
-    await act(async () => {
-      media.data.onReEdit('v1');
-    });
-
-    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
-    expect(container.querySelector('[data-testid="dock-text-ref"]')!.getAttribute('title')).toBe('故事文案');
-
-    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-    await act(async () => {
-      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
-    expect(payload.type).toBe('video');
-    expect(payload.target_node_id).toBe('v1');
   });
 
   it('底部固定入口打开视频对话框：无附件区、空提示词禁用发送', async () => {

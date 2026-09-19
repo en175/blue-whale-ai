@@ -13,6 +13,7 @@ import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
+import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import { commitCardName } from '../cardName';
@@ -137,9 +138,10 @@ export interface MediaNodeData {
     onStrokeMove: (point: MaskPoint) => void;
     onStrokeEnd: () => void;
   };
-  /** 去字幕编辑态框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕目标源视频卡时由
-   *  CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针回调；仅正常视频内容区
-   *  渲染，层存在即视频暂停在当前帧（本期无播放控制，规格 Out of Scope） */
+  /** 去字幕框选模式框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡且
+   *  会话处于框选模式时由 CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针
+   *  回调，仅正常视频内容区渲染；智能模式不注入（零框选工具）。停帧由 subtitleErasePaused
+   *  单独承担（IKH3OU），与本标记解耦 */
   subtitleEraseEditing?: {
     boxes: readonly SubtitleBoxOp[];
     liveBox: SubtitleBoxOp | null;
@@ -147,6 +149,10 @@ export interface MediaNodeData {
     onBoxMove: (point: SubtitleBoxPoint) => void;
     onBoxEnd: () => void;
   };
+  /** 去字幕会话停帧标记（IKH3OU，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡时
+   *  由 CanvasPage 注入，视频暂停锁定在当前帧（会话期无播放控制）。与 subtitleEraseEditing
+   *  分开：框选模式两者都有，智能模式只有本标记——智能模式零框选工具，不渲染框层 */
+  subtitleErasePaused?: true;
   /** 音视频分离编辑态标记（IKH28U，渲染期派生注入，不持久化）：本卡为音视频分离目标
    *  源视频卡时由 CanvasPage 注入——视频暂停在当前帧并锁定播放控制（透明锁定层接管
    *  指针，退出标记移除即恢复）；上方 X 工具条/下方发送条由 CanvasPage 浮出
@@ -171,12 +177,6 @@ export interface MediaNodeData {
   onRetryJob?: (id: string) => void;
   /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
   onTitleChange?: (id: string, name: string) => void;
-  /** 重新编辑：打开图片对话框并带入提示词与图片 */
-  onReEdit?: (id: string) => void;
-  /** 生成图片：打开图片对话框并带入图片 */
-  onGenImage?: (id: string) => void;
-  /** 生成视频：打开视频对话框并带入图片 */
-  onGenVideo?: (id: string) => void;
   /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（「高清 ▾」下拉「高清」项派发） */
   onEnhanceImage?: (id: string) => void;
   /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
@@ -187,9 +187,10 @@ export interface MediaNodeData {
   onCropImage?: (id: string) => void;
   /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
-  /** 智能去字幕（IKGZ82）：进入去字幕编辑态（本票入口占位未接线，IKGZ83 由 CanvasPage 接入；
-   *  门槛预检见 videoSubtitleErase.ts） */
-  onVideoSubtitleErase?: (id: string) => void;
+  /** 智能去字幕（IKGZ82 入口 / IKH3OU 交互重做）：进入去字幕会话；mode 由「智能去字幕 ▾」
+   *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；
+   *  门槛预检见 videoSubtitleErase.ts */
+  onVideoSubtitleErase?: (id: string, mode: VideoSubtitleEraseMode) => void;
   /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
    *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
   onVideoEnhance?: (id: string) => void;
@@ -224,6 +225,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+  /** 去字幕会话锁定（IKH3NP 审查修订）：框选（subtitleEraseEditing 注入）与智能（仅
+   *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
+   *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
+  const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -270,11 +275,20 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     };
   }, [contextMenu]);
 
-  /** 去字幕/音视频分离编辑态（IKGZ83/IKH28U）：视频暂停在当前帧——去字幕便于精确框选，
-   *  分离为锁定态定格；依赖编辑态标记的注入/移除（对象引用变化或布尔翻转即进入/退出） */
+  /** 去字幕会话（IKGZ83）：视频暂停锁定在当前帧——拉框对全片生效、画面定格便于精确框选；
+   *  两模式共用会话锁定布尔（IKH3NP 审查修订：框层只在框选模式注入，智能模式借
+   *  subtitleErasePaused 停在当前帧）。依赖稳定布尔而非每次渲染新生的对象引用，
+   *  语义不变且不再靠引用变化反复重放。 */
   useEffect(() => {
-    if (data.subtitleEraseEditing || data.splitEditing) videoRef.current?.pause();
-  }, [data.subtitleEraseEditing, data.splitEditing]);
+    if (!subtitleEraseLocked) return;
+    videoRef.current?.pause();
+  }, [subtitleEraseLocked]);
+
+  /** 音视频分离编辑态（IKH28U）：进入即定格在当前帧，锁定层接管指针，标记移除即恢复 */
+  useEffect(() => {
+    if (!data.splitEditing) return;
+    videoRef.current?.pause();
+  }, [data.splitEditing]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -621,13 +635,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               ref={videoRef}
               className={styles.mediaVideo}
               src={data.src}
-              controls={isSelect}
+              controls={isSelect && !subtitleEraseLocked}
               preload="metadata"
               disablePictureInPicture
               disableRemotePlayback
               controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
               onLoadedMetadata={handleVideoMetadata}
-              style={isSelect ? undefined : { pointerEvents: 'none' }}
+              style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
             />
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
                 仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}

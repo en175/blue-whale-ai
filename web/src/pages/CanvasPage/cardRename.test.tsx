@@ -357,12 +357,6 @@ function dockRefNames(): string[] {
   );
 }
 
-/** 图片自由面板参考项名称（无 dock 测试标识，取面板内预览项 img 的 alt） */
-function freePanelRefNames(): string[] {
-  const dialog = container.querySelector('[class*="dialog"]');
-  return [...(dialog?.querySelectorAll<HTMLImageElement>('img[alt]') ?? [])].map((img) => img.alt);
-}
-
 /** 视频面板参考缩略项标题（BottomDialog 按来源节点身份渲染，title = 参考名称） */
 function dockVideoRefNames(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="dock-video-ref"]')].map(
@@ -741,16 +735,27 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
   });
 
-  it('图片自由面板（画布节点带入的参考）同步改名后的名称', async () => {
+  it('拖线落空白经类型菜单建图片草稿：面板参考同步改名后的名称', async () => {
     await renderPage();
+    // jsdom 无 elementsFromPoint：空栈 = 松手点不命中任何节点 → 落空白弹类型菜单
+    document.elementsFromPoint = () => [];
     await act(async () => {
-      (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
+      flowProps.current.onConnectEnd(
+        new MouseEvent('mouseup', { clientX: 400, clientY: 300 }),
+        { fromNode: mediaNode('img-a') },
+      );
+    });
+    const menuItem = () => [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent === '图片生成')!;
+    await vi.waitFor(() => expect(menuItem()).toBeTruthy());
+    await act(async () => {
+      menuItem().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-    expect(freePanelRefNames()).toEqual(['上传图.png']);
+    expect(dockRefNames()).toEqual(['上传图.png']);
 
     await renameVia('img-a', 'media', '自由面板改名');
-    await vi.waitFor(() => expect(freePanelRefNames()).toEqual(['自由面板改名']));
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['自由面板改名']));
   });
 });
 

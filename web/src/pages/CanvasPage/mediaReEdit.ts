@@ -13,7 +13,7 @@ function readJobId(data: { jobId?: unknown } | undefined): string | number | und
 }
 
 /** 成品卡「有生成记录」判定（无 Node 上下文）：jobId 存在且非草稿。
- *  工具条「重新编辑」显隐与 hasGenerationRecord 共用此口径（IKGX5M）。 */
+ *  点卡片打开绑定面板（onNodeClick，IKH3WE 起重新编辑唯一入口）与 hasGenerationRecord 共用此口径（IKGX5M）。 */
 export function hasGenerationRecordData(data: { jobId?: unknown; draft?: unknown } | undefined): boolean {
   return data?.draft !== true && readJobId(data) !== undefined;
 }

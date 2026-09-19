@@ -89,6 +89,28 @@ describe('IKGOTB EraseMaskLayer 指针交互', () => {
     });
     expect(callbacks.onStrokeMove).not.toHaveBeenCalled();
   });
+
+  it('落笔后的 click 不冒泡出层（防止触发节点 onNodeClick 退出编辑态）', () => {
+    renderLayer();
+    layerEl().getBoundingClientRect = () => ({ left: 0, top: 0, width: 280, height: 158 }) as DOMRect;
+    // 父级 click 监听模拟 React Flow NodeWrapper 的 onClick（onSelectNodeHandler）：
+    // 挂在 body 上（React root 容器之外），层的 stopPropagation 生效时此处收不到
+    const outerClick = vi.fn();
+    document.body.addEventListener('click', outerClick);
+    try {
+      act(() => {
+        pointer('pointerdown', 10, 10);
+        pointer('pointermove', 60, 40);
+        pointer('pointerup', 60, 40);
+        // 浏览器在 pointerup 后派发 click（target=层，pointer capture 保证落点仍在层上）
+        layerEl().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+      expect(callbacks.onStrokeEnd).toHaveBeenCalledTimes(1);
+      expect(outerClick).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener('click', outerClick);
+    }
+  });
 });
 
 describe('IKGOTB EraseMaskLayer 棋盘格渲染', () => {

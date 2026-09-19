@@ -325,7 +325,9 @@ describe('IKH3VG 会话模态：全局工具条门与互斥', () => {
     expect(panelSend()).toBeTruthy();
 
     await act(async () => {
-      (mediaNode('v1').data as Record<string, unknown>).onVideoSubtitleErase?.('v1');
+      const enterSubtitleErase = (mediaNode('v1').data as Record<string, unknown>)
+        .onVideoSubtitleErase as ((id: string, mode?: string) => void) | undefined;
+      enterSubtitleErase?.('v1', 'smart');
     });
     expect(panelSend()).toBeNull();
     expect(hdDraft()).toBeTruthy(); // 草稿卡保留
@@ -387,21 +389,8 @@ describe('IKH3VG 关闭再开与四路退出', () => {
 });
 
 describe('IKH3VG 重新编辑分流与参数恢复', () => {
-  it('成品 HD 卡「重新编辑」打开 HD 面板并回填 lastParams（不进视频生成面板）', async () => {
-    seedDoc(true);
-    await renderPage();
-
-    await act(async () => {
-      ((mediaNode('h1').data as Record<string, unknown>).onReEdit as (id: string) => void)('h1');
-    });
-    // HD 面板特征（若进了视频生成面板则不会有 HD 发送钮）
-    expect(panelSend()).toBeTruthy();
-    // lastParams 回填：4K 选中
-    expect(panelResolution('4k')!.className).toMatch(/Active/);
-    expect(panelResolution('1080p')!.className).not.toMatch(/Active/);
-  });
-
-  it('成品 HD 卡点卡也回 HD 面板（hasGenerationRecord 成品卡路径同分流）', async () => {
+  // IKH3WE 后「重新编辑」不再有工具栏按钮，行为入口收敛为点卡片（下方用例即该入口）
+  it('成品 HD 卡点卡（重新编辑口径）打开 HD 面板并回填 lastParams（不进视频生成面板）', async () => {
     seedDoc(true);
     await renderPage();
     await act(async () => {
@@ -409,5 +398,6 @@ describe('IKH3VG 重新编辑分流与参数恢复', () => {
     });
     expect(panelSend()).toBeTruthy();
     expect(panelResolution('4k')!.className).toMatch(/Active/);
+    expect(panelResolution('1080p')!.className).not.toMatch(/Active/);
   });
 });
