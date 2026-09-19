@@ -104,6 +104,15 @@ export function renameProject(id: ProjectRecord['id'], name: string, init?: ApiR
   });
 }
 
+/** 置顶/取消置顶项目 PUT /api/projects/:id/pin（成功 data 为更新后项目记录） */
+export function pinProject(id: ProjectRecord['id'], pinned: boolean, init?: ApiRequestInit) {
+  return apiRequest<ProjectRecord>(`/api/projects/${encodeURIComponent(String(id))}/pin`, {
+    ...init,
+    method: 'PUT',
+    body: JSON.stringify({ pinned }),
+  });
+}
+
 /** 删除项目 DELETE /api/projects/:id（成功 data 为 null，前端移除列表项） */
 export function deleteProject(id: ProjectRecord['id'], init?: ApiRequestInit) {
   return apiRequest<null>(`/api/projects/${encodeURIComponent(String(id))}`, {

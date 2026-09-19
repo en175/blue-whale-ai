@@ -161,6 +161,7 @@ import {
   renameProject,
   deleteProject,
   touchProjectLastOpened,
+  pinProject,
   projectKeys,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
@@ -1440,12 +1441,12 @@ export default function CanvasPage() {
       .then(async (list) => {
         if (!alive) return;
         const lastOpenedId = findLastOpenedProjectId(list);
-        let mapped = list.map((p) => ({ id: String(p.id), name: p.name }));
+        let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
         if (mapped.length === 0) {
           try {
             const created = await createProject('未命名项目');
             if (!alive) return;
-            mapped = [{ id: String(created.id), name: created.name }];
+            mapped = [{ id: String(created.id), name: created.name, pinned: false }];
           } catch {
             /* 创建失败静默降级：空项目列表 */
           }
@@ -4212,6 +4213,18 @@ export default function CanvasPage() {
         setProjects((prev) =>
           prev.map((p) => (p.id === id ? { ...p, name: updated.name } : p)),
         );
+      })
+      .catch(() => undefined);
+  };
+
+  /** 置顶/取消置顶：成功后全量重拉列表（服务端排序直出），不动 currentId；并同步项目卡片页缓存 */
+  const handleToggleProjectPin = (id: string, pinned: boolean) => {
+    pinProject(id, pinned)
+      .then(() => fetchProjects())
+      .then((list) => {
+        setProjects(list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) })));
+        // 项目卡片页缓存需同步置顶口径；置顶失败不回滚本地，下次重拉自然校正。
+        queryClient.invalidateQueries({ queryKey: projectKeys.all });
       })
       .catch(() => undefined);
   };
@@ -8471,6 +8484,7 @@ export default function CanvasPage() {
         onSelectProject={handleSelect}
         onRenameProject={handleRename}
         onDeleteProject={handleDelete}
+        onTogglePinProject={handleToggleProjectPin}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
         onShowLegacyHistory={legacyHistory && legacyHistory.length > 0 ? () => setShowLegacyHistory(true) : undefined}
