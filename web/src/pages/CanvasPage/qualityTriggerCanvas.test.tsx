@@ -27,6 +27,7 @@ vi.mock('./components/Canvas', async () => {
   const { createElement } = await import('react');
   const { ReactFlowProvider } = await import('@xyflow/react');
   const { default: MediaNode } = await import('./components/MediaNode');
+  const { default: MediaNodeToolbar } = await import('./components/MediaNode/Toolbar');
   return {
     default: (props: Record<string, any>) => {
       flowProps.current = props;
@@ -36,14 +37,21 @@ vi.mock('./components/Canvas', async () => {
         createElement(
           'div',
           { 'data-testid': 'flow-canvas' },
-          (props.mediaNodes as Array<Record<string, any>>).map((n) =>
+          // IKGYYD 迁移后媒体卡工具条由钉屏幕层渲染（followToolbarLayer→NodeFollowToolbar→
+          // MediaNodeToolbar）；桩内无真 React Flow 实例，容器几何门读不到 store，故并列渲染
+          // MediaNodeToolbar 仿真工具条可见效果（MediaNode 本体已无工具条）。会话模态门在
+          // CanvasPage show 表达式里（本桩不经过），按同步注入的 soloToolbarHidden 标记仿真隐藏
+          (props.mediaNodes as Array<Record<string, any>>).flatMap((n) => [
             createElement(MediaNode, {
               key: n.id,
               ...n,
               selected: true,
               dragging: false,
               isConnectable: true,
-            } as never)),
+            } as never),
+            !(n.data as Record<string, unknown>).soloToolbarHidden &&
+              createElement(MediaNodeToolbar, { key: `${n.id}-toolbar`, id: n.id, data: n.data }),
+          ]),
         ),
       );
     },
