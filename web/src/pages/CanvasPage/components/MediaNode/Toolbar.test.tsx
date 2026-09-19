@@ -3,7 +3,9 @@
    用例自 MediaNode/index.test.tsx 迁移；渲染模式沿用该文件（createRoot + act）；
    「唯一选中」门在 NodeFollowToolbar 容器（index.test.tsx 已覆盖），本文件覆盖数据条件
    （生成中/素材缺失/空壳不显）与工具条本体。IKH3WE 撤除「重新编辑」「生成图片」「生成视频」
-   三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。 */
+   三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
+   IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
+   「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,9 +65,15 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
     expect(labels()).toEqual(['详情', '下载']);
   });
 
-  it('图片卡全显（高清▾/详情/下载/@）', async () => {
+  it('图片卡全显（五画质工具横排 + 详情/下载/@，IKH3XZ）', async () => {
     await renderToolbar('image');
-    expect(labels()).toEqual(['高清', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['高清', '扩图', '裁切', '擦除', '抠图', '详情', '下载', '添加到 Agent 聊天']);
+  });
+
+  it('画质五按钮连排且整体在「详情」之前（IKGM9F 位次不变）', async () => {
+    await renderToolbar('image');
+    const order = labels();
+    expect(order.indexOf('抠图')).toBeLessThan(order.indexOf('详情'));
   });
 
   it('工具条容器底类存在，「添加到对话」为透明底 toolBtn 而非胶囊类（IKGZ8B）', async () => {
@@ -96,28 +104,6 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
     expect(labels()).not.toContain('生成视频');
   });
 
-  it('「高清 ▾」下拉在详情之前（IKGM9F 位次不变）', async () => {
-    await renderToolbar('image');
-    const order = labels();
-    expect(order.indexOf('高清')).toBeLessThan(order.indexOf('详情'));
-  });
-
-  it('点击高清放大派发 onEnhanceImage（携带节点 id；经「高清 ▾」下拉菜单项触发）', async () => {
-    const onEnhanceImage = vi.fn();
-    await renderToolbar('image', { data: { onEnhanceImage } });
-    const trigger = [...mountNode.querySelectorAll('button')]
-      .find((b) => b.textContent?.trim() === '高清')!;
-    // IKGZ5P：悬浮展开（mouseover），点击触发钮改为直启所显示工具
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
-    });
-    const item = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!;
-    await act(async () => {
-      item.click();
-    });
-    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
-  });
-
   it('生成中的图片卡不显示工具条（数据条件，同迁移前）', async () => {
     await renderToolbar('image', { genStatus: 'generating', data: { src: 'http://img/old.png' } });
     expect(labels()).toEqual([]);
@@ -144,28 +130,56 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
   });
 });
 
-describe('MediaNodeToolbar image-quality menu（高清 ▾）', () => {
-  /** 展开「高清 ▾」下拉（IKGZ5P 悬浮展开：mouseover 合成 onMouseEnter） */
-  async function openQualityMenu() {
-    const trigger = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-trigger"]')!;
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
-    });
-  }
+describe('MediaNodeToolbar 画质工具横排按钮（IKH3XZ：五工具离开「高清 ▾」下拉）', () => {
+  const tool = (id: string) => mountNode.querySelector<HTMLButtonElement>(`[data-testid="quality-tool-${id}"]`)!;
 
-  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」「抠图」五项（IKGW1H+IKGOQ0+IKGXLT 合并顺序）', async () => {
+  it('五按钮顺序高清/扩图/裁切/擦除/抠图（ADR-0101 顺序不变），图标与文字齐全', async () => {
     await renderToolbar('image');
-    await openQualityMenu();
-    const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
+    const rendered = [...mountNode.querySelectorAll('[data-testid^="quality-tool-"]')];
     expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除', '抠图']);
+    rendered.forEach((b) => {
+      expect(b.querySelector('svg')).not.toBeNull();
+      expect(b.querySelector('span')).not.toBeNull();
+    });
+    // 复用透明底 toolBtn（与详情/下载同款家族口径）
+    rendered.forEach((b) => expect(b.classList.contains(styles.toolBtn)).toBe(true));
+  });
+
+  it('「高清」图标为 ZoomIn，与「扩图」Maximize2 区分（IKH3XZ：Expand 并排撞脸）', async () => {
+    await renderToolbar('image');
+    expect(tool('enhance').querySelector('svg')?.classList.contains('lucide-zoom-in')).toBe(true);
+    expect(tool('outpaint').querySelector('svg')?.classList.contains('lucide-maximize-2')).toBe(true);
+  });
+
+  it('可用态悬停 title 为各自 hint（置灰态为原因，同一 title 通道互斥）', async () => {
+    await renderToolbar('image', { data: { width: 1600, height: 900, size: 1000, mime: 'image/png' } });
+    expect(tool('enhance').getAttribute('title')).toBe('在右侧新建高清放大草稿卡');
+    expect(tool('outpaint').getAttribute('title')).toBe('进入扩图模式，拖动边框向外扩展画面');
+    expect(tool('crop').getAttribute('title')).toBe('拖动裁切框，裁掉边缘保留选定区域');
+    expect(tool('erase').getAttribute('title')).toBe('涂抹或框选抹掉图中不要的内容');
+    expect(tool('cutout').getAttribute('title')).toBe('自动识别主体并移除背景');
+  });
+
+  it('下拉触发钮与菜单不再渲染（悬浮展开/最近工具记忆整套退役，ADR-0107）', async () => {
+    await renderToolbar('image');
+    expect(mountNode.querySelector('[data-testid="image-quality-trigger"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="image-quality-menu"]')).toBeNull();
+  });
+
+  it('点「高清」派发 onEnhanceImage（携带节点 id）', async () => {
+    const onEnhanceImage = vi.fn();
+    await renderToolbar('image', { data: { onEnhanceImage } });
+    await act(async () => {
+      tool('enhance').click();
+    });
+    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
   });
 
   it('点「抠图」派发 onCutoutImage（携带节点 id）', async () => {
     const onCutoutImage = vi.fn();
     await renderToolbar('image', { data: { onCutoutImage, mime: 'image/png' } });
-    await openQualityMenu();
     await act(async () => {
-      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-cutout"]')!.click();
+      tool('cutout').click();
     });
     expect(onCutoutImage).toHaveBeenCalledWith('image-node');
   });
@@ -173,103 +187,72 @@ describe('MediaNodeToolbar image-quality menu（高清 ▾）', () => {
   it('点「裁切」派发 onCropImage（携带节点 id）', async () => {
     const onCropImage = vi.fn();
     await renderToolbar('image', { data: { onCropImage } });
-    await openQualityMenu();
     await act(async () => {
-      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!.click();
+      tool('crop').click();
     });
     expect(onCropImage).toHaveBeenCalledWith('image-node');
-  });
-
-  it('裁切项无置灰门槛：超尺寸/超大小/webp 的图也不置灰（与擦除门槛对照）', async () => {
-    await renderToolbar('image', { data: { width: 3000, height: 1440, size: 10 * 1024 * 1024 + 1, mime: 'image/webp' } });
-    await openQualityMenu();
-    const crop = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!;
-    expect(crop.getAttribute('aria-disabled')).toBeNull();
-    // 擦除项按门槛置灰，裁切不受影响
-    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
-    expect(erase.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {
     const onEraseImage = vi.fn();
     // mime 补 png：默认 fixture 文件名 .bin 在擦除格式白名单外（png/jpg/jpeg/heic）会被置灰
     await renderToolbar('image', { data: { onEraseImage, mime: 'image/png' } });
-    await openQualityMenu();
     await act(async () => {
-      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.click();
+      tool('erase').click();
     });
     expect(onEraseImage).toHaveBeenCalledWith('image-node');
   });
 
+  it('裁切无置灰门槛：超尺寸/超大小/webp 的图也不置灰（与擦除门槛对照）', async () => {
+    await renderToolbar('image', { data: { width: 3000, height: 1440, size: 10 * 1024 * 1024 + 1, mime: 'image/webp' } });
+    expect(tool('crop').getAttribute('aria-disabled')).toBeNull();
+    // 擦除项按门槛置灰，裁切不受影响
+    expect(tool('erase').getAttribute('aria-disabled')).toBe('true');
+  });
+
   it('超尺寸（长边>2560 或短边>1440）：擦除置灰并悬停原因，高清项不受影响', async () => {
     await renderToolbar('image', { data: { width: 3000, height: 1440, mime: 'image/png' } });
-    await openQualityMenu();
-    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    const erase = tool('erase');
     expect(erase.getAttribute('aria-disabled')).toBe('true');
     expect(erase.getAttribute('title')).toContain('长边超过 2560');
-    const enhance = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!;
-    expect(enhance.getAttribute('aria-disabled')).toBeNull();
+    expect(tool('enhance').getAttribute('aria-disabled')).toBeNull();
 
     // 短边>1440 同样置灰（横图 2000×1441：短边 1441 超上限；竖图 1440×2560 合法另测于 imageErase.test）
     await renderToolbar('image', { id: 'tall-node', data: { width: 2000, height: 1441, mime: 'image/png', onEraseImage: vi.fn() } });
-    await openQualityMenu();
-    expect(
-      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.getAttribute('title'),
-    ).toContain('短边超过 1440');
+    expect(tool('erase').getAttribute('title')).toContain('短边超过 1440');
   });
 
   it('超大小（>10MB）：擦除置灰并悬停原因', async () => {
     await renderToolbar('image', { data: { width: 1600, height: 900, size: 10 * 1024 * 1024 + 1, mime: 'image/png' } });
-    await openQualityMenu();
-    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    const erase = tool('erase');
     expect(erase.getAttribute('aria-disabled')).toBe('true');
     expect(erase.getAttribute('title')).toContain('10MB');
   });
 
   it('webp 与 gif（mime / src 后缀）：擦除置灰并说明格式不支持', async () => {
     await renderToolbar('image', { data: { width: 1600, height: 900, mime: 'image/webp' } });
-    await openQualityMenu();
-    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    const erase = tool('erase');
     expect(erase.getAttribute('aria-disabled')).toBe('true');
     expect(erase.getAttribute('title')).toContain('webp');
 
     await renderToolbar('image', { id: 'gif-node', data: { width: 1600, height: 900, src: 'http://img/x.gif' } });
-    await openQualityMenu();
-    const gifErase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    const gifErase = tool('erase');
     expect(gifErase.getAttribute('aria-disabled')).toBe('true');
     expect(gifErase.getAttribute('title')).toContain('gif');
   });
 
   it('尺寸 null 的存量图：擦除不置灰', async () => {
     await renderToolbar('image', { data: { mime: 'image/png' } });
-    await openQualityMenu();
-    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
-    expect(erase.getAttribute('aria-disabled')).toBeNull();
+    expect(tool('erase').getAttribute('aria-disabled')).toBeNull();
   });
-});
 
-describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
-  const menuBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-trigger"]')!;
-  const menu = () => mountNode.querySelector('[data-testid="image-quality-menu"]');
-  const menuItem = (id: string) => mountNode.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
-
-  /** IKGZ5P 悬浮展开：mouseover 合成 onMouseEnter（点击触发钮已改为直启最近工具） */
-  async function openMenu() {
-    await act(async () => {
-      menuBtn().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
-    });
-    expect(menu()).toBeTruthy();
-  }
-
-  it('菜单项「扩图」派发 onOutpaintImage 并收起菜单', async () => {
+  it('菜单项「扩图」派发 onOutpaintImage（携带节点 id）', async () => {
     const onOutpaintImage = vi.fn();
     await renderToolbar('image', { data: { onOutpaintImage, width: 1600, height: 900, size: 1000 } });
-    await openMenu();
     await act(async () => {
-      menuItem('image-quality-item-outpaint').click();
+      tool('outpaint').click();
     });
     expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
-    expect(menu()).toBeNull();
   });
 
   it('源图门槛达标时「扩图」可用（长边恰 4160、文件恰 10MB）', async () => {
@@ -277,11 +260,10 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
     await renderToolbar('image', {
       data: { onOutpaintImage, width: 4160, height: 2000, size: 10 * 1024 * 1024 },
     });
-    await openMenu();
-    const item = menuItem('image-quality-item-outpaint');
-    expect(item.getAttribute('aria-disabled')).toBeNull();
+    const btn = tool('outpaint');
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
     await act(async () => {
-      item.click();
+      btn.click();
     });
     expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
   });
@@ -290,39 +272,29 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
     // 长边超限
     const overLong = { onOutpaintImage: vi.fn(), width: 4161, height: 2000, size: 1000 };
     await renderToolbar('image', { data: overLong });
-    await openMenu();
-    const item1 = menuItem('image-quality-item-outpaint');
+    const item1 = tool('outpaint');
     expect(item1.getAttribute('aria-disabled')).toBe('true');
     expect(item1.getAttribute('title')).toContain('4160');
     await act(async () => {
       item1.click();
     });
     expect(overLong.onOutpaintImage).not.toHaveBeenCalled();
-    expect(menu()).toBeTruthy(); // 置灰点击不收菜单
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    });
 
     // 文件超限
     const overSize = { onOutpaintImage: vi.fn(), width: 2000, height: 1000, size: 10 * 1024 * 1024 + 1 };
     await renderToolbar('image', { data: overSize });
-    await openMenu();
-    const item2 = menuItem('image-quality-item-outpaint');
+    const item2 = tool('outpaint');
     expect(item2.getAttribute('aria-disabled')).toBe('true');
     expect(item2.getAttribute('title')).toContain('10MB');
     await act(async () => {
       item2.click();
     });
     expect(overSize.onOutpaintImage).not.toHaveBeenCalled();
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    });
 
     // 真实宽高缺失
     const noDims = { onOutpaintImage: vi.fn(), size: 1000 };
     await renderToolbar('image', { data: noDims });
-    await openMenu();
-    const item3 = menuItem('image-quality-item-outpaint');
+    const item3 = tool('outpaint');
     expect(item3.getAttribute('aria-disabled')).toBe('true');
     // 拒绝文案与契约单处定义同源（IKGOR6 切契约后不再是本地「尺寸未知」措辞）
     expect(item3.getAttribute('title')).toContain('缺少真实尺寸信息');
@@ -335,19 +307,31 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
   it('扩图门槛不影响「高清」项：门槛超标时高清仍可点', async () => {
     const onEnhanceImage = vi.fn();
     await renderToolbar('image', { data: { onEnhanceImage, width: 5000, height: 4000, size: 20 * 1024 * 1024 } });
-    await openMenu();
-    expect(menuItem('image-quality-item-outpaint').getAttribute('aria-disabled')).toBe('true');
+    expect(tool('outpaint').getAttribute('aria-disabled')).toBe('true');
     await act(async () => {
-      menuItem('image-quality-item-enhance').click();
+      tool('enhance').click();
     });
     expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
   });
+
+  it('webp 卡「抠图」置灰悬停原因且点击不派发（横排保持渲染不隐藏，ADR-0107 置灰口径）', async () => {
+    const onCutoutImage = vi.fn();
+    await renderToolbar('image', { data: { onCutoutImage, width: 1600, height: 900, mime: 'image/webp' } });
+    const cutout = tool('cutout');
+    expect(cutout).not.toBeNull();
+    expect(cutout.getAttribute('aria-disabled')).toBe('true');
+    expect(cutout.getAttribute('title')).toContain('webp');
+    await act(async () => {
+      cutout.click();
+    });
+    expect(onCutoutImage).not.toHaveBeenCalled();
+  });
 });
 
-/* IKH3OU（ADR-0104）：入口从单按钮改「智能去字幕 ▾」下拉触发钮，交互口径同图片「高清 ▾」
-   家族（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、整钮 aria-disabled 置灰但
-   hover 仍展开菜单看原因），差异是无最近工具记忆（文案固定）与菜单项纯文字无图标。
-   合成事件口径沿用 ImageQualityMenu.test.tsx（mouseover/mouseout + relatedTarget 在 wrap 外）。 */
+/* IKH3OU（ADR-0104）：入口从单按钮改「智能去字幕 ▾」下拉触发钮，交互口径同图片画质工具
+   家族旧下拉形态（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、整钮 aria-disabled
+   置灰但 hover 仍展开菜单看原因），差异是菜单项纯文字无图标。图片侧已随 IKH3XZ 横排退役
+   下拉，本家族仅剩视频卡这一处下拉。合成事件口径：mouseover/mouseout + relatedTarget 在 wrap 外。 */
 describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', () => {
   const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="subtitle-erase-menu-trigger"]')!;
   const menu = () => mountNode.querySelector('[data-testid="subtitle-erase-menu"]');

@@ -140,4 +140,11 @@ describe('IKGYYD computeFollowAnchorAbove（卡片上方居中锚定）', () => 
       top: Math.round(200 * 1.1 + 0.4 - 52),
     });
   });
+
+  it('缺省估半宽为 250（IKH3XZ：五画质工具横排后工具条实测 473px，真实半宽约 236）', () => {
+    const { toolbarHalfWidth: _omit, ...noHalfWidth } = base;
+    // 节点中心贴近左缘，验证缺省钳制按 250 而非旧值 200（473px 工具条贴屏幕边缘不被裁）
+    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: -600 })).toEqual({ left: 12 + 250, top: 148 });
+    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: 1000 })).toEqual({ left: 1200 - 250 - 12, top: 148 });
+  });
 });

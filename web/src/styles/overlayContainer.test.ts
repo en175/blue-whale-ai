@@ -249,7 +249,7 @@ describe('IKGZ8C 浮层菜单家族（ADR-0100：7 成员统一到浮层容器�
   const menuHardcodedColors = [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636'];
 
   it.each([
-    ['高清▾ 下拉 qualityMenu', 'MediaNode', '.qualityMenu'],
+    ['智能去字幕▾ 下拉 qualityMenu（图片高清▾ 已随 IKH3XZ 横排退役）', 'MediaNode', '.qualityMenu'],
     ['分离格式下拉 formMenu', 'VideoAudioSplitDialog', '.formatMenu'],
     ['右键菜单主层', 'CanvasContextMenu', '.menu'],
     ['右键菜单子层', 'CanvasContextMenu', '.subMenu'],
