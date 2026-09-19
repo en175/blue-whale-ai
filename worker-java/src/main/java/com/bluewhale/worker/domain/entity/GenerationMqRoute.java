@@ -43,7 +43,10 @@ public enum GenerationMqRoute {
     IMAGE_OUTPAINT("generation-task", "image_outpaint"),
 
     /** 视频智能去字幕（迁移契约 §17 / IKGZ7Z；契约 = backend/libs/contracts/video-subtitle-erase.ts）。 */
-    VIDEO_SUBTITLE_ERASE("generation-task", "video_subtitle_erase");
+    VIDEO_SUBTITLE_ERASE("generation-task", "video_subtitle_erase"),
+
+    /** 视频 HD 高清（IKH3VE，父规格 IKH3VB；契约 = backend/libs/contracts/video-enhance.ts）。 */
+    VIDEO_ENHANCE("generation-task", "video_enhance");
 
     private final String topic;
 
