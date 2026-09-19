@@ -26,7 +26,7 @@ export interface MediaDims {
   duration?: number;
 }
 
-const MEDIA_CONTENT_SHORT_SIDE = 280;
+export const MEDIA_CONTENT_SHORT_SIDE = 280;
 const MEDIA_CONTENT_LONG_SIDE_MAX = 840;
 
 /** 媒体内容区相对节点左上角的纵向偏移（与 MediaNode wrapper 的 padding-top: 22.5px 对齐，

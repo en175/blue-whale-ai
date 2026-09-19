@@ -337,7 +337,7 @@ public class RocketMqConfig {
                 GenerationMqRoute.VIDEO_SUBTITLE_ERASE.tag());
     }
 
-    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，八类全部无条件装配。
+    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")

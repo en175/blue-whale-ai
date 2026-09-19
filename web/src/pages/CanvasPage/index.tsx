@@ -45,7 +45,7 @@ import {
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
-import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
+import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
@@ -5797,8 +5797,8 @@ export default function CanvasPage() {
       targetNodeId: newNodeId('media-draft'),
       fullText: subtitleEraseFullText,
       boxes: subtitleEraseBoxes.boxes,
-      displayWidth: displayBox?.width ?? 280,
-      displayHeight: displayBox?.height ?? 280,
+      displayWidth: displayBox?.width ?? MEDIA_CONTENT_SHORT_SIDE,
+      displayHeight: displayBox?.height ?? MEDIA_CONTENT_SHORT_SIDE,
     });
     setSubtitleEraseSubmitting(true);
     void startVideoSubtitleEraseJob(nodeId, input).finally(() => setSubtitleEraseSubmitting(false));
