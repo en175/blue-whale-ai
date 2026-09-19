@@ -37,6 +37,8 @@ import {
   videoRefConflict,
   videoRefSourceError,
   checkAddVideoRef,
+  incomingVideoRefOccupied,
+  occupiedVideoRefIds,
   type VideoMediaRef,
   type VideoMediaRefs,
   type VideoRefRole,
@@ -44,7 +46,12 @@ import {
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
-import type { MediaGenStatus } from './components/MediaNode';
+import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
+import MediaNodeToolbar from './components/MediaNode/Toolbar';
+import NodeFollowToolbar from './components/NodeFollowToolbar';
+import AssetCardToolbar from './components/AssetCardNode/Toolbar';
+import { assetCardToolbarVisible } from './components/AssetCardNode/toolbarVisibility';
+import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   buildMediaExtractPlaceholderNode,
@@ -138,7 +145,7 @@ import AssetsPickerModal from './components/AssetsPickerModal';
 import CharacterLibraryModal from './components/CharacterLibraryModal';
 import type { MaterialAsset } from '@/api/material';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
-import type { AssetCardKind } from './components/AssetCardNode';
+import type { AssetCardKind, AssetCardNodeData } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
@@ -207,6 +214,7 @@ import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
+import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
 import {
   applyIndependentGroupDrag,
   bringGroupToFront,
@@ -239,6 +247,10 @@ import type { AtMentionItem } from './atMention';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
+
+/** 资产卡顶部操作条抬升量（IKGYYB 审查对齐）：条高约 32（addToChatBtn padding 8×2 +
+ *  内容 14 + 边框 2）+ 与卡片顶边间距 10 = 42，对齐文本卡操作条 NODE_BAR_LIFT 口径 */
+const ASSET_TOOLBAR_LIFT = 42;
 
 /** 草稿回退显示名（IKDMQW）：取消回待生成/创建回退共用（节点 data 宽松类型，按字面量收窄） */
 function draftFileNameOf(type: unknown): string {
@@ -356,6 +368,20 @@ export default function CanvasPage() {
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  /** 当前唯一选中节点 id（IKGYYD 钉屏幕悬浮工具栏的跟随目标）：onSelectionChange 顶部回写
+   *  （选取/扩图等早退分支不阻断）；「唯一选中 + 无多选」的精确门在 NodeFollowToolbar
+   *  容器内直读 React Flow store，本值只负责挑出该渲染哪个节点的工具条 */
+  const [soloSelectedNodeId, setSoloSelectedNodeId] = useState<string | null>(null);
+  /** 指针悬停中的资产卡 id（IKGYYF 悬浮顶部操作条 hover 显示）：卡上 pointerenter/leave 经
+   *  data.onHoverChange 上报（等价迁移前 CSS .wrapper:hover），节点删除时卡组件卸载清理兜底。
+   *  IKGYYB hover 桥接：清除延迟 ASSET_HOVER_BRIDGE_MS——鼠标穿卡-条间隙（~20px，不属于卡
+   *  DOM）时不闪卸，条根 enter 取消清除、移出到卡外才真清（见 hooks/useAssetHoverBridge.ts） */
+  const {
+    hoveredAssetNodeId,
+    handleAssetHoverChange,
+    handleToolbarPointerEnter,
+    handleToolbarPointerLeave,
+  } = useAssetHoverBridge();
   /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
   const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
@@ -639,9 +665,13 @@ export default function CanvasPage() {
       return false;
     }
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
-    const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video' | 'audio';
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs);
+    const sourceData = (source.data ?? {}) as Record<string, unknown>;
+    const assetId = readAssetId(sourceData);
+    const mediaType = sourceData.mediaType as 'image' | 'video' | 'audio';
+    const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
+      ? sourceData.materialId
+      : undefined;
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, undefined, [materialId]);
     if (msg) {
       showToast('warn', msg);
       return false;
@@ -1283,6 +1313,26 @@ export default function CanvasPage() {
         return { left: Math.round(left), top: Math.round(top) };
       })()
     : null;
+  /** IKGYYD 钉屏幕悬浮工具栏：唯一选中的普通成品媒体卡（数据门同迁移前 MediaNode 内判定：
+   *  生成流程卡 / 素材缺失 / 空壳上传卡不显——谓词与 MediaNodeToolbar 共用，
+   *  IKGYYB 审查消弱类型双实现）；「唯一选中 + 画布无多选」精确门、锚定与
+   *  拖动/平移缩放实时跟随由 NodeFollowToolbar 容器承担（渲染在画布缩放层之外） */
+  const soloMediaToolbarNode = soloSelectedNodeId
+    ? mediaNodes.find((n) => n.id === soloSelectedNodeId) ?? null
+    : null;
+  const showSoloMediaToolbar = soloMediaToolbarNode != null
+    && mediaCardToolbarVisible(soloMediaToolbarNode.data ?? {});
+  /** IKGYYF 资产卡悬浮顶部操作条：hover 的资产卡优先（等价迁移前 .wrapper:hover），
+   *  否则唯一选中的资产卡；渲染条件（生成卡恒显 / HIDE_ASSET_TOP_BAR 门控纯资产卡）
+   *  与内容迁至 AssetCardToolbar，「唯一选中 + hover」门在 NodeFollowToolbar 容器。
+   *  hover 目标已不在画布（删除后 state 残留）时 find 落空自然不渲染 */
+  const hoverAssetToolbarNode = hoveredAssetNodeId
+    ? assetNodes.find((n) => n.id === hoveredAssetNodeId) ?? null
+    : null;
+  const soloAssetToolbarNode = soloSelectedNodeId
+    ? assetNodes.find((n) => n.id === soloSelectedNodeId) ?? null
+    : null;
+  const assetToolbarNode = hoverAssetToolbarNode ?? soloAssetToolbarNode;
   /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
   const handleOutpaintPresetSelect = useCallback(
     (key: OutpaintPresetKey) => {
@@ -1576,6 +1626,7 @@ export default function CanvasPage() {
           ...base.data,
           // 节点内上传素材携带当前项目（运行期注入，不持久化）
           projectId: currentId,
+          onHoverChange: handleAssetHoverChange,
           onDelete: (id: string) => {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
@@ -2470,13 +2521,15 @@ export default function CanvasPage() {
       return null;
     }
     const current = role === 'first' ? refs.first : refs.last;
-    if (current?.assetId === assetId) return null;
+    const sourceMaterialId = typeof data.materialId === 'string' && data.materialId ? data.materialId : undefined;
+    if (current && incomingVideoRefOccupied({ reference: [current] }, [assetId, sourceMaterialId])) return null;
     // 已作为普通参考连入的同一素材：选尾帧/首帧时应改角色，不按「素材重复」拒绝
+    const sameIncoming = (r: VideoMediaRef) => incomingVideoRefOccupied({ reference: [r] }, [assetId, sourceMaterialId]);
     const slotCleared: VideoMediaRefs = {
       ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
-      reference: refs.reference.filter((r) => r.assetId !== assetId),
+      reference: refs.reference.filter((r) => !sameIncoming(r)),
     };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared);
+    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, undefined, [sourceMaterialId]);
     if (msg) {
       showToast('warn', msg);
       return null;
@@ -2977,6 +3030,17 @@ export default function CanvasPage() {
    *  选取参考模式进行中不关闭——用户正在为面板挑参考（pickMode 在 onNodeClick 尾部才清空，
    *  selection 变化先到达，此时 pickMode 仍活跃）。 */
   const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
+    // IKGYYD 钉屏幕工具栏跟随目标：唯一选中节点回写；放最前，早退分支不阻断。
+    // 事件参数在程序化改选中时会滞后误报（React Flow 内部 selection store 与受控 nodes
+    // 的同步窗口：侧栏新建草稿 deselect 旧卡 + select 新卡，事件可能报旧卡+新卡双选中，
+    // 把刚打开的面板当多选误关）——以受控 state 为准：state 明确 selected:false 的排除。
+    // 一次计算两用：soloId 即工具栏跟随目标（IKGYYB 审查消重复 filter）
+    const candidates = nodes.filter((n) => {
+      const m = mediaNodesRef.current.find((x) => x.id === n.id);
+      return !m || m.selected !== false;
+    });
+    const soloId = candidates.length === 1 ? candidates[0]!.id : null;
+    setSoloSelectedNodeId(soloId);
     if (pickMode || pickTarget) return;
     // 抠图会话期间冻结面板联动（IKGXMT，镜像扩图 IKGOQX 口径）：会话内点其他卡的选中变化
     // 已由 onNodeClick 拦截处置，程序化选中（selectRequest/建卡 deselect）触发的变化不应误关其他状态
@@ -2984,14 +3048,6 @@ export default function CanvasPage() {
     // IKGOQX 扩图模式期间冻结面板联动：模式内点其他卡的选中变化已由 onNodeClick 拦截处置，
     // 程序化选中（selectRequest）触发的变化不应误关其他状态
     if (outpaintSessionActive) return;
-    // 事件参数在程序化改选中时会滞后误报（React Flow 内部 selection store 与受控 nodes
-    // 的同步窗口：侧栏新建草稿 deselect 旧卡 + select 新卡，事件可能报旧卡+新卡双选中，
-    // 把刚打开的面板当多选误关）——以受控 state 为准：state 明确 selected:false 的排除
-    const candidates = nodes.filter((n) => {
-      const m = mediaNodesRef.current.find((x) => x.id === n.id);
-      return !m || m.selected !== false;
-    });
-    const soloId = candidates.length === 1 ? candidates[0]!.id : null;
     // 擦除编辑态（IKGOTB 四退出之一）：单选其他卡或多选时退出并丢弃未发送遮罩
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
@@ -4686,8 +4742,8 @@ export default function CanvasPage() {
         return;
       }
       // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
-      // 缺省回落旧 9/3/3）；assetId 查重跳过
-      const known = new Set(refs.reference.map((r) => r.assetId));
+      // 缺省回落旧 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      const known = occupiedVideoRefIds(refs);
       let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
       let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
       let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
@@ -4695,7 +4751,8 @@ export default function CanvasPage() {
       let skippedDup = false;
       const filtered: AssetRecord[] = [];
       for (const a of accepted) {
-        if (known.has(String(a.id))) {
+        const materialId = typeof a.material_id === 'string' && a.material_id ? a.material_id : undefined;
+        if (known.has(String(a.id)) || (materialId && known.has(materialId))) {
           skippedDup = true;
           continue;
         }
@@ -4709,6 +4766,7 @@ export default function CanvasPage() {
         else if (isVideo) vidSlots -= 1;
         else audSlots -= 1;
         known.add(String(a.id));
+        if (materialId) known.add(materialId);
         filtered.push(a);
       }
       accepted = filtered;
@@ -6492,7 +6550,7 @@ export default function CanvasPage() {
    *  槽位占用/尾帧配首帧/查重/图9视频3上限；通过后写入本地 refs，不落画布不连线 */
   const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole): void => {
     const refs = videoFreeRefs;
-    const msg = checkAddVideoRef(role, item.mediaType, item.assetId, refs);
+    const msg = checkAddVideoRef(role, item.mediaType, item.assetId, refs, undefined, [item.materialId]);
     if (msg) {
       showToast('warn', msg);
       return;
@@ -7432,6 +7490,7 @@ export default function CanvasPage() {
         toolMode,
         // 节点内上传素材携带当前项目（运行期注入，不持久化）
         projectId: currentId,
+        onHoverChange: handleAssetHoverChange,
         onDelete: (id: string) => {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
@@ -7702,6 +7761,7 @@ export default function CanvasPage() {
               toolMode,
               // 节点内上传素材携带当前项目（运行期注入，不持久化）
               projectId: currentId,
+              onHoverChange: handleAssetHoverChange,
               onDelete: (id: string) => {
                 setAssetNodes((prev) => prev.filter((n) => n.id !== id));
               },
@@ -8383,6 +8443,37 @@ export default function CanvasPage() {
           assetNodes={assetNodes}
           showEdges={showEdges}
           snapAlignmentEnabled={snapAlignmentOn}
+          followToolbarLayer={
+            <>
+              {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
+                  内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随 */}
+              {soloMediaToolbarNode ? (
+                <NodeFollowToolbar nodeId={soloMediaToolbarNode.id} show={showSoloMediaToolbar}>
+                  <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
+                </NodeFollowToolbar>
+              ) : null}
+              {/* IKGYYF：资产卡顶部操作条迁入钉屏幕层（同容器 + AssetCardToolbar 内容）；
+                  hover 的资产卡走 hovered 门（等价迁移前 CSS .wrapper:hover，不受唯一选中约束）。
+                  IKGYYB：toolbarLift 对齐文本卡操作条 42 口径；条根指针事件接 hover 桥接 */}
+              {assetToolbarNode ? (
+                <NodeFollowToolbar
+                  nodeId={assetToolbarNode.id}
+                  hovered={hoverAssetToolbarNode != null}
+                  toolbarLift={ASSET_TOOLBAR_LIFT}
+                  show={assetCardToolbarVisible(
+                    ((assetToolbarNode.data ?? {}) as { kind?: AssetCardKind }).kind,
+                  )}
+                >
+                  <AssetCardToolbar
+                    id={assetToolbarNode.id}
+                    data={assetToolbarNode.data as AssetCardNodeData}
+                    onToolbarPointerEnter={handleToolbarPointerEnter}
+                    onToolbarPointerLeave={handleToolbarPointerLeave}
+                  />
+                </NodeFollowToolbar>
+              ) : null}
+            </>
+          }
           cropFrame={
             // 裁切框覆盖层（IKGW1N）：编辑态挂载，屏幕空间覆盖层随内容区渲染期换算；
             // 框/比例状态提升在本页，拖拽经 CropFrame 走 imageCrop 纯函数回写

@@ -30,15 +30,29 @@ beforeAll(() => {
   });
 });
 
-const storeState = vi.hoisted(() => ({
-  nodes: [
+const storeState = vi.hoisted(() => {
+  const nodes = [
     { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: {} },
     { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { assetId: 'a1', mediaType: 'image', src: 'http://img/m1.png', fileName: '素材图一' } },
     { id: 'm2', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: 'a2', mediaType: 'image', src: 'http://img/m2.png', fileName: '素材图二' } },
-  ],
-  edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
-  transform: [0, 0, 1],
-}));
+  ];
+  return {
+    nodes,
+    edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
+    transform: [0, 0, 1],
+    // IKGYYE 钉屏幕层（FollowToolbarLayer）订阅的字段：nodeLookup/width 必备；
+    // domNode 为层 portal 宿主（.react-flow 根），renderNode 时注入
+    width: 1200,
+    domNode: null as HTMLElement | null,
+    nodeLookup: new Map(
+      nodes.map((n) => [n.id, {
+        ...n,
+        internals: { positionAbsolute: { ...n.position } },
+        measured: { width: 360, height: 292 },
+      }]),
+    ),
+  };
+});
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
@@ -53,11 +67,17 @@ function rectOf(top: number, bottom: number, left: number): DOMRect {
 
 let root: Root;
 let container: HTMLDivElement;
+/** 钉屏幕层宿主（IKGYYE：节点操作条迁入 FollowToolbarLayer，portal 到 .react-flow 根） */
+let flowRoot: HTMLDivElement;
 /** 最近一次 renderNode 注入的 onMediaIndexChange（选中路径断言用） */
 let onMediaIndexChange: ReturnType<typeof vi.fn> | null = null;
 
-async function renderNode(dataOverride: Record<string, unknown> = {}) {
+async function renderNode(dataOverride: Record<string, unknown> = {}, { selected = false }: { selected?: boolean } = {}) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  flowRoot = document.createElement('div');
+  flowRoot.className = 'react-flow';
+  document.body.append(flowRoot);
+  storeState.domNode = flowRoot;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -65,7 +85,7 @@ async function renderNode(dataOverride: Record<string, unknown> = {}) {
   await act(async () => root.render(createElement(TextNode, {
     id: 't1',
     type: 'textNode',
-    selected: false,
+    selected,
     dragging: false,
     zIndex: 1,
     selectable: true,
@@ -144,6 +164,8 @@ function caretOffsetIn(editor: HTMLElement): number | null {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
+  flowRoot?.remove();
+  storeState.domNode = null;
 });
 
 it('汉字后逐键输入 @ 弹出素材菜单', async () => {
@@ -510,7 +532,8 @@ it('唯一标签删除后光标落被删位置（正文中间，不落编辑器�
 
 /* ---------- IKFXDB 追加：素材标签（prompt #N）新增/替换/删除后的光标落点 ---------- */
 
-/** 素材标签场景：prompt 绑定文本卡，正文两张 chip（素材#1 / 素材#2） */
+/** 素材标签场景：prompt 绑定文本卡，正文两张 chip（素材#1 / 素材#2）。
+ *  IKGYYE 后操作条在钉屏幕层：非编辑态入口用例按真实用户路径唯一选中卡片（selected） */
 async function renderPromptNode() {
   return renderNode({
     promptSource: 'chat',
@@ -526,11 +549,12 @@ async function renderPromptNode() {
     mediaMentions: [],
     mediaRefs: [],
     onPromptChange: vi.fn(),
-  });
+  }, { selected: true });
 }
 
 /** 非方案来源的素材标签节点（!734/IKG99G 起方案来源卡不再渲染素材下拉——素材由方案同步，
- *  手动替换/新增素材标签的用例须落在非方案卡上才有下拉可点）。 */
+ *  手动替换/新增素材标签的用例须落在非方案卡上才有下拉可点）。非编辑态入口用例按真实
+ *  用户路径唯一选中卡片（IKGYYE 后操作条在钉屏幕层）。 */
 async function renderManualMentionNode() {
   return renderNode({
     text: '看这张素材#1中间素材#2结尾',
@@ -545,11 +569,11 @@ async function renderManualMentionNode() {
     mediaMentions: [],
     mediaRefs: [],
     onPromptChange: vi.fn(),
-  });
+  }, { selected: true });
 }
 
-/** 点选指定素材标签后，在节点操作条点对应按钮（非编辑态入口） */
-async function clickNodeBarButton(label: string) {  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
+/** 点选指定素材标签后，在节点操作条（钉屏幕层，IKGYYE 后不在节点卡 DOM 内）点对应按钮 */
+async function clickNodeBarButton(label: string) {  const button = [...document.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
   await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 }
 
@@ -568,7 +592,7 @@ it('非编辑态替换素材标签后，进入编辑光标落替换后标签后'
   const { editor } = await renderManualMentionNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
+  const select = document.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
   await act(async () => {
     select.value = 'a2';
     select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -581,7 +605,7 @@ it('非编辑态替换素材标签后，进入编辑光标落替换后标签后'
 
 it('非编辑态新增素材标签后，进入编辑光标落新标签后', async () => {
   const { editor } = await renderManualMentionNode();
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
+  const select = document.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
   await act(async () => {
     select.value = 'a1';
     select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -608,7 +632,7 @@ it('同编号多张素材标签删除，锚点取点击的那张原位置', asyn
     mediaMentions: [],
     mediaRefs: [],
     onPromptChange: vi.fn(),
-  });
+  }, { selected: true });
   // 点第二张 #1（#2 之后）：删除全部 #1 后幸存 #2 在点击位置之前，光标应落 #2 后
   const ones = () => [...editor.querySelectorAll<HTMLElement>('[data-prompt-index="1"]')];
   await act(async () => ones()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -635,7 +659,7 @@ it('同编号多张素材标签删除，点第一张时锚点取第一张原位�
     mediaMentions: [],
     mediaRefs: [],
     onPromptChange: vi.fn(),
-  });
+  }, { selected: true });
   // 点第一张 #1（正文开头）：删除后光标应落正文开头，而非第二张 #1 的位置
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));

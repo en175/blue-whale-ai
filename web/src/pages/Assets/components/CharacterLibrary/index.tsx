@@ -473,12 +473,60 @@ function AssetPickerCard({
   );
 }
 
+/** 上传卡：优先用 label 包 file input（画布弹窗里对 display:none 再 click() 打不开系统选档）。 */
+function UploadMaterialCard({
+  onUpload,
+  onPickFiles,
+}: {
+  onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
+}) {
+  if (!onUpload && !onPickFiles) return null;
+  const thumb = (
+    <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
+      <Plus size={28} strokeWidth={1.5} />
+      <span className={styles.uploadCardLabel}>上传素材</span>
+    </div>
+  );
+  if (onPickFiles) {
+    return (
+      <label className={`${styles.assetCard} ${styles.uploadAssetCard}`}>
+        <input
+          type="file"
+          multiple
+          accept="image/*,video/*,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
+          className={styles.nativeFileInput}
+          onChange={(e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            onPickFiles(Array.from(files));
+            e.target.value = '';
+          }}
+        />
+        {thumb}
+      </label>
+    );
+  }
+  return (
+    <div
+      className={`${styles.assetCard} ${styles.uploadAssetCard}`}
+      onClick={onUpload}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onUpload?.(); }}
+    >
+      {thumb}
+    </div>
+  );
+}
+
 function GroupDetail({
   group,
   assets,
   onBack,
   onDeleteAsset,
   onUpload,
+  onPickFiles,
   pickerSelectedIds,
   onPickerToggleAsset,
   pickerMediaTypes,
@@ -489,6 +537,7 @@ function GroupDetail({
   onBack: () => void;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
@@ -511,16 +560,7 @@ function GroupDetail({
       </div>
 
       <div className={styles.assetGrid}>
-        {/* 第一个位置：上传素材卡片 */}
-        {onUpload && (
-          <div className={`${styles.assetCard} ${styles.uploadAssetCard}`} onClick={onUpload} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter') onUpload(); }}>
-            <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
-              <Plus size={28} strokeWidth={1.5} />
-              <span className={styles.uploadCardLabel}>上传素材</span>
-            </div>
-          </div>
-        )}
+        <UploadMaterialCard onUpload={onUpload} onPickFiles={onPickFiles} />
         {assets.map((asset) => (
           <AssetPickerCard
             key={asset.Id}
@@ -534,7 +574,7 @@ function GroupDetail({
             onClosePreview={closePreview}
           />
         ))}
-        {!onUpload && assets.length === 0 && (
+        {!onUpload && !onPickFiles && assets.length === 0 && (
           <div className={styles.empty}>该分组暂无素材</div>
         )}
       </div>
@@ -578,6 +618,7 @@ async function fetchAllAigcPages<T>(
 
 function AigcFlatView({
   onUpload,
+  onPickFiles,
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
@@ -586,6 +627,7 @@ function AigcFlatView({
   onPickerPreviewChange,
 }: {
   onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
   refreshTick?: number;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
@@ -678,23 +720,7 @@ function AigcFlatView({
   return (
     <>
       <div className={styles.assetGrid}>
-        {/* 第一个位置：上传素材卡片 */}
-        {onUpload && (
-          <div
-            className={`${styles.assetCard} ${styles.uploadAssetCard}`}
-            onClick={onUpload}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onUpload();
-            }}
-          >
-            <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
-              <Plus size={28} strokeWidth={1.5} />
-              <span className={styles.uploadCardLabel}>上传素材</span>
-            </div>
-          </div>
-        )}
+        <UploadMaterialCard onUpload={onUpload} onPickFiles={onPickFiles} />
         {assets.map((asset) => (
           <AssetPickerCard
             key={asset.Id}
@@ -708,10 +734,10 @@ function AigcFlatView({
             onClosePreview={closePreview}
           />
         ))}
-        {!onUpload && assets.length === 0 && !loading && !loadError && (
+        {!onUpload && !onPickFiles && assets.length === 0 && !loading && !loadError && (
           <div className={styles.empty}>暂无素材，请上传</div>
         )}
-        {onUpload && assets.length === 0 && !loading && !loadError && (
+        {(onUpload || onPickFiles) && assets.length === 0 && !loading && !loadError && (
           <div className={styles.empty}>点击上方上传素材</div>
         )}
       </div>
@@ -751,6 +777,7 @@ export default function CharacterLibrary({
   groupType = 'AIGC',
   onDetailViewChange,
   onUpload,
+  onPickFiles,
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
@@ -761,6 +788,8 @@ export default function CharacterLibrary({
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
+  /** 画布弹窗：选档后直接回调，避免 display:none input 再 click() 打不开系统对话框 */
+  onPickFiles?: (files: File[]) => void;
   refreshTick?: number;
   /** 画布资产选择弹窗：勾选素材（真人分组详情与虚拟平铺视图） */
   pickerSelectedIds?: ReadonlySet<string>;
@@ -783,6 +812,7 @@ export default function CharacterLibrary({
     return (
       <AigcFlatView
         onUpload={onUpload}
+        onPickFiles={onPickFiles}
         refreshTick={refreshTick}
         pickerSelectedIds={pickerSelectedIds}
         onPickerToggleAsset={onPickerToggleAsset}
@@ -799,6 +829,7 @@ export default function CharacterLibrary({
       groupType={groupType}
       onDetailViewChange={onDetailViewChange}
       onUpload={onUpload}
+      onPickFiles={onPickFiles}
       refreshTick={refreshTick}
       pickerSelectedIds={pickerSelectedIds}
       onPickerToggleAsset={onPickerToggleAsset}
@@ -813,6 +844,7 @@ function LivenessLibrary({
   groupType = 'AIGC',
   onDetailViewChange,
   onUpload,
+  onPickFiles,
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
@@ -823,6 +855,7 @@ function LivenessLibrary({
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
   refreshTick?: number;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
@@ -1099,6 +1132,7 @@ function LivenessLibrary({
           onBack={() => setDetailGroupId(null)}
           onDeleteAsset={handleDeleteAsset}
           onUpload={onUpload}
+          onPickFiles={onPickFiles}
           pickerSelectedIds={pickerSelectedIds}
           onPickerToggleAsset={onPickerToggleAsset}
           pickerMediaTypes={pickerMediaTypes}
