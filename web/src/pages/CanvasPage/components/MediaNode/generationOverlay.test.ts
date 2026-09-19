@@ -10,10 +10,10 @@ describe('mediaNodeGenerationOverlay', () => {
     });
   });
 
-  it('keeps progress copy and bar for audio extraction', () => {
+  it('keeps progress copy and bar for audio video split (IKH28X 处理中语义：火山无中间百分比)', () => {
     expect(mediaNodeGenerationOverlay(true)).toEqual({
       showProgress: true,
-      progressLabel: '正在提取音频',
+      progressLabel: '音视频分离处理中',
       showCancel: false,
     });
   });

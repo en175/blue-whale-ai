@@ -337,6 +337,22 @@ public class RocketMqConfig {
                 GenerationMqRoute.VIDEO_SUBTITLE_ERASE.tag());
     }
 
+    /**
+     * media_extract 轮询自投生产者（迁移契约 §18 / IKH28W；去字幕 videoSubtitleEraseMessageProducer
+     * 同款）。
+     * <p>
+     * MediaExtractJobProcessor 火山异步链 submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = media_extract）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer mediaExtractMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRoute.MEDIA_EXTRACT.topic(),
+                GenerationMqRoute.MEDIA_EXTRACT.tag());
+    }
+
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
@@ -411,6 +427,16 @@ public class RocketMqConfig {
     @Bean
     public TosVideoMediaRelay tosVideoMediaRelay() {
         return TosVideoMediaRelay.fromEnv();
+    }
+
+    /**
+     * 音频媒体转存（迁移契约 §18 / IKH28W；TosVideoMediaRelay 同款 fromEnv 装配）。
+     * TOS 未配置 → null（MediaExtractJobProcessor 判 null → 终态 1044：火山结果 URL
+     * 仅 24h 有效，强依赖不降级直存，对齐去字幕口径——区别于视频的降级直存）。
+     */
+    @Bean
+    public com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay tosAudioMediaRelay() {
+        return com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay.fromEnv();
     }
 
     /**

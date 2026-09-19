@@ -130,6 +130,8 @@ GET /api/jobs/:id
 | 1026 | `extract_failed` | 音频提取失败 |
 | 1027 | `upload_failed` | 音频上传失败 |
 | 1028 | `enqueue_failed` | 任务入队失败 |
+| 1029-1043 | （后续工单新增细分码） | 能力目录/参考系/图像系（高清/擦除/扩图/抠图）/去字幕等兜底与细分码——单一来源 = `backend/libs/contracts/error-codes.ts` 数值表，此处不再逐行展开 |
+| **1044** | `media_extract_provider_failed` | 音频提取失败，请重试（音视频分离火山执行路径兜底；本地 ffmpeg 链路兜底仍为 1020，映射口径 = 迁移契约 §18.4） |
 
 > **段位约定**（全项目统一，`packages/contracts/src/result.ts`）：
 > - `4xx`/`5xx`：HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）
