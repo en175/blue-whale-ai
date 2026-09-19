@@ -4,6 +4,8 @@
    渲染模式沿用 ImageEnhanceDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageEraseDialog from './index';
 import type { MaskOp } from '../../eraseMask';
@@ -182,5 +184,25 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     renderDialog();
     await click(btn('erase-clear-text'));
     expect(sendTextMock).toHaveReturnedWith(true);
+  });
+});
+
+/* ===== IKH1WI 发送条跟随态 CSS 中心点锚（CSS 源断言，先例 mediaChipVisualSource.test.ts）：
+   跟随锚 left 是源卡中心 x，真居中由基础 .sendBar 的 translateX(-50%) 完成；
+   .sendBarFollow 对齐 CutoutToolbar .dialogWrapFollow 先例（left:0 兜底 inline 缺失，
+   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。 ===== */
+describe('IKH1WI 发送条跟随态 CSS 中心点锚', () => {
+  const css = readFileSync(resolve('src/pages/CanvasPage/components/ImageEraseDialog/index.module.css'), 'utf-8');
+  const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+
+  it('基础 .sendBar 保留 translateX(-50%)：中心点锚的真居中由自身 transform 完成', () => {
+    expect(block('\\.sendBar')).toContain('translateX(-50%)');
+  });
+
+  it('.sendBarFollow 对齐先例：left: 0 + bottom: auto，不覆盖 transform（继承真居中）', () => {
+    const follow = block('\\.sendBarFollow');
+    expect(follow).toContain('bottom: auto');
+    expect(follow).toContain('left: 0');
+    expect(follow).not.toContain('transform');
   });
 });

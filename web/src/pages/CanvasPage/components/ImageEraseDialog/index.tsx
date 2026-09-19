@@ -184,7 +184,8 @@ export default function ImageEraseDialog({
         </button>
       </div>
 
-      {/* 源图卡下方发送条（跟随锚定时 inline left/top 生效，需解除默认 bottom 定位） */}
+      {/* 源图卡下方发送条（IKH1WI 中心点锚：inline left = 源卡中心 x，自身 translateX(-50%)
+          真居中；sendBarFollow 解除默认 bottom 定位避免 top/bottom 双侧拉伸） */}
       <div
         className={`${styles.sendBar} ${sendBarAnchor ? styles.sendBarFollow : ''}`}
         style={anchorStyle(sendBarAnchor)}

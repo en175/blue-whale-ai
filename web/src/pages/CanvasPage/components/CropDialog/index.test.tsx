@@ -6,6 +6,8 @@
    领土豁免标记；跟随锚定 inline left/top 生效。选项数据源自 imageCrop.ts 单源，不另造。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropDialog from './index';
 import { CROP_PRESET_ORDER, type CropPresetKey } from '../../imageCrop';
@@ -118,5 +120,25 @@ describe('IKGW1N 裁切面板交互', () => {
       (mountNode.querySelector('[data-testid="crop-cancel"]') as HTMLElement).click();
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ===== IKH1WI 跟随态 CSS 中心点锚（CSS 源断言，先例 mediaChipVisualSource.test.ts）：
+   跟随锚 left 是源卡中心 x，真居中由基础 .panel 的 translateX(-50%) 完成；
+   .panelFollow 对齐 CutoutToolbar .dialogWrapFollow 先例（left:0 兜底 inline 缺失，
+   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。 ===== */
+describe('IKH1WI 跟随态 CSS 中心点锚', () => {
+  const css = readFileSync(resolve('src/pages/CanvasPage/components/CropDialog/index.module.css'), 'utf-8');
+  const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+
+  it('基础 .panel 保留 translateX(-50%)：中心点锚的真居中由自身 transform 完成', () => {
+    expect(block('\\.panel')).toContain('translateX(-50%)');
+  });
+
+  it('.panelFollow 对齐先例：left: 0 + bottom: auto，不覆盖 transform（继承真居中）', () => {
+    const follow = block('\\.panelFollow');
+    expect(follow).toContain('bottom: auto');
+    expect(follow).toContain('left: 0');
+    expect(follow).not.toContain('transform');
   });
 });

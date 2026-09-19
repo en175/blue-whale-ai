@@ -7,7 +7,8 @@
  * 选中预设：父级以 inscribeCropRect 把框变为内容区内最大内接该比例矩形并居中；
  * 取消绑 onClose（CanvasPage 接 exitCropMode，四退出之一）；确认绑 onConfirm
  * （本票渲染在位、点击派发回调；裁切执行链路由 IKGW1S 实装）。
- * data-gen-panel-territory 豁免点外关闭误杀；锚定跟随沿用 ImageEraseDialog 同构。
+ * data-gen-panel-territory 豁免点外关闭误杀；跟随锚为中心点锚（IKH1WI：inline left = 源卡
+ * 中心 x，面板自身 translateX(-50%) 真居中，口径同 CutoutToolbar）。
  * ============================================ */
 import { ArrowUp } from 'lucide-react';
 import RatioIcon from '@/components/RatioIcon';
