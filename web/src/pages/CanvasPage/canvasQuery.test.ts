@@ -3,6 +3,7 @@ import {
   CANVAS_QUERY_KEY,
   canvasLocationSearch,
   findLastOpenedProjectId,
+  findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -74,6 +75,50 @@ describe('pickCanvasIdAfterLoad', () => {
     expect(pickCanvasIdAfterLoad('', ['a', 'b'])).toBe('a');
     expect(pickCanvasIdAfterLoad('gone', ['a', 'b'])).toBe('a');
     expect(pickCanvasIdAfterLoad('', [])).toBe('');
+  });
+
+  it('falls back to the latest created canvas when neither query nor last opened matches', () => {
+    // 置顶排序后首项是置顶组头，第三级兜底仍按最新创建落点
+    expect(pickCanvasIdAfterLoad('', ['pinned-old', 'newest', 'mid'], '', 'newest')).toBe('newest');
+    expect(pickCanvasIdAfterLoad('gone', ['pinned-old', 'newest', 'mid'], '', 'newest')).toBe('newest');
+  });
+
+  it('prefers the last opened canvas over the latest created one', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b', 'c'], 'a', 'c')).toBe('a');
+  });
+
+  it('falls back to the first canvas when the latest created id is not in the list', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b'], '', 'deleted')).toBe('a');
+  });
+
+  it('ignores an empty latest created id', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b'], '', '')).toBe('a');
+  });
+});
+
+describe('findLatestCreatedProjectId', () => {
+  it('returns the most recently created project id regardless of order', () => {
+    expect(
+      findLatestCreatedProjectId([
+        { id: 'pinned', created_at: '2026-09-01T00:00:00Z' },
+        { id: 'newest', created_at: '2026-09-20T00:00:00Z' },
+        { id: 'mid', created_at: '2026-09-10T00:00:00Z' },
+      ]),
+    ).toBe('newest');
+  });
+
+  it('returns empty string when every created_at is null', () => {
+    expect(
+      findLatestCreatedProjectId([
+        { id: 'a', created_at: null },
+        { id: 'b', created_at: null },
+      ]),
+    ).toBe('');
+  });
+
+  it('returns the single project id and empty string for an empty list', () => {
+    expect(findLatestCreatedProjectId([{ id: 7, created_at: '2026-09-01T00:00:00Z' }])).toBe('7');
+    expect(findLatestCreatedProjectId([])).toBe('');
   });
 });
 

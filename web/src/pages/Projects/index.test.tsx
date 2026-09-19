@@ -17,6 +17,7 @@ const projectApi = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/projects', () => ({
+  touchProjectLastOpened: vi.fn(async () => undefined),
   projectKeys: {
     all: ['projects'],
     pages: (size: number) => ['projects', 'pages', size],

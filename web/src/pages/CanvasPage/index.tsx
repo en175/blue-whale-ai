@@ -243,6 +243,7 @@ import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource
 import {
   canvasLocationSearch,
   findLastOpenedProjectId,
+  findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -1441,6 +1442,7 @@ export default function CanvasPage() {
       .then(async (list) => {
         if (!alive) return;
         const lastOpenedId = findLastOpenedProjectId(list);
+        const latestCreatedId = findLatestCreatedProjectId(list);
         let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
         if (mapped.length === 0) {
           try {
@@ -1452,7 +1454,7 @@ export default function CanvasPage() {
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId));
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId, latestCreatedId));
       })
       .catch(() => undefined);
     return () => {
