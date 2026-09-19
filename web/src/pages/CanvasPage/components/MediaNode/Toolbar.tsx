@@ -9,10 +9,11 @@
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
 import { useState, useCallback } from 'react';
-import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles } from 'lucide-react';
+import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles, Subtitles } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
+import { VIDEO_SUBTITLE_ERASE_ENTRY_HINT, videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { hasGenerationRecordData } from '../../mediaReEdit';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
@@ -36,6 +37,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
+  const handleVideoSubtitleErase = useCallback(() => data.onVideoSubtitleErase?.(id), [data, id]);
   const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
   const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
   const handleOutpaintImage = useCallback(() => data.onOutpaintImage?.(id), [data, id]);
@@ -45,6 +47,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     typeof data.height === 'number' ? data.height : undefined,
     typeof data.size === 'number' ? data.size : undefined,
   );
+  /** 「智能去字幕」可用性预检（IKGZ82）：分辨率超 2K 或时长超 10 分钟置灰并悬停原因；
+   *  宽高/时长缺失不拦（null 放行，后端按权威数据复核）。可用态悬停为效果边界一句，
+   *  与置灰原因走同一 title 通道（互斥）。 */
+  const videoSubtitleEraseDisabledReason = videoSubtitleEraseGateReason(data);
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
@@ -132,6 +138,17 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
         <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
           <Video size={14} strokeWidth={2} />
           <span>生成视频</span>
+        </button>
+      )}
+      {toolbar.videoSubtitleErase && (
+        <button
+          className={styles.toolBtn}
+          onClick={handleVideoSubtitleErase}
+          disabled={videoSubtitleEraseDisabledReason !== null}
+          title={videoSubtitleEraseDisabledReason ?? VIDEO_SUBTITLE_ERASE_ENTRY_HINT}
+        >
+          <Subtitles size={14} strokeWidth={2} />
+          <span>智能去字幕</span>
         </button>
       )}
       {toolbar.imageQuality && (
