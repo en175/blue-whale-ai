@@ -165,7 +165,18 @@ import {
 } from './imageCrop';
 import OutpaintDialog from './components/OutpaintDialog';
 import CutoutToolbar from './components/CutoutToolbar';
-import { enterToolSession, type ToolSessionKind } from './toolSessionCoordinator';
+import {
+  enterToolSession,
+  escDefersToToolSessionHandler,
+  exitToolSession,
+  exitToolSessionOnEsc,
+  handleToolSessionNodeClick,
+  handleToolSessionPaneClick,
+  handleToolSessionSelectionChange,
+  hasEscExitSession,
+  type ToolSessionDeps,
+  type ToolSessionKind,
+} from './toolSessionCoordinator';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -2946,23 +2957,10 @@ export default function CanvasPage() {
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
-    // IKGOQX 扩图模式优先拦截：点其他卡退出模式并选中那张卡；点源图卡本身保持模式
-    if (outpaintSessionActive) {
-      if (node.id !== outpaintNodeId) {
-        endOutpaintSession();
-        setSelectRequest({ id: node.id, ts: Date.now() });
-      }
-      return;
-    }
-    // 抠图会话优先拦截（IKGXMT 四退出之一，镜像扩图 IKGOQX 口径）：点其他卡退出会话并选中
-    // 那张卡；点源图卡本身保持会话（继续调参）
-    if (cutoutNodeId) {
-      if (node.id !== cutoutNodeId) {
-        exitCutoutSession();
-        setSelectRequest({ id: node.id, ts: Date.now() });
-      }
-      return;
-    }
+    // 六会话四退出之「点其他卡」（node-click 拦截，仅抠图/扩图）：点其他卡退出会话并选中
+    // 那张卡、点源卡本身保持会话，两种都消费（不落入下方普通选中/开面板分支——同次点击
+    // 不开普通面板）；规则集中在 toolSessionCoordinator。其余四工具不拦截，交还原流程
+    if (handleToolSessionNodeClick(node.id, buildToolSessionDeps()) === 'consumed') return;
     if (showAgent && node.type === 'textNode') {
       const text = extractTextNodeText(node.data);
       if (text) setAgentCandidate([{
@@ -3214,33 +3212,39 @@ export default function CanvasPage() {
     closeVideoEnhanceDialog();
   };
 
-  /** 工具会话协调装配（IKH3ZH 进入路径）：每次调用时以当轮渲染的最新六会话 target 装配
-   *  快照交给 module（函数每轮渲染重建、不落长期 ref，无过期闭包、无第二份事实源）；
-   *  互斥清单知识只在 toolSessionCoordinator，六入口只表达目标工具与自身初始化。 */
+  /** 工具会话协调依赖装配（IKH3ZH 进入 / IKH3ZI 退出与画布事件消费共用）：每次调用时
+   *  以当轮渲染的最新六会话 target、六 exit、面板关闭与 selectRequest 通道装配快照交给
+   *  module（函数每轮渲染重建、调用时才读取，无过期闭包、无第二份事实源）；六 exit 是
+   *  const 且部分定义于文件后部，本函数必须保持「调用时才读」的函数形态（TDZ 安全）。
+   *  进入互斥、四路退出与画布事件消费规则全部只在 toolSessionCoordinator。 */
+  const buildToolSessionDeps = (): ToolSessionDeps => ({
+    activity: {
+      erase: eraseTargetNodeId,
+      cutout: cutoutNodeId,
+      crop: cropTargetNodeId,
+      outpaint: outpaintNodeId,
+      subtitleErase: subtitleEraseTargetNodeId,
+      audioVideoSplit: audioVideoSplitTargetNodeId,
+    },
+    exits: {
+      erase: exitEraseEditing,
+      cutout: exitCutoutSession,
+      crop: exitCropMode,
+      outpaint: endOutpaintSession,
+      subtitleErase: exitSubtitleEraseEditing,
+      audioVideoSplit: exitAudioVideoSplitEditing,
+    },
+    dismissGenPanels: dismissAllGenPanels,
+    selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
+  });
+
   const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
-    enterToolSession(
-      kind,
-      {
-        activity: {
-          erase: eraseTargetNodeId,
-          cutout: cutoutNodeId,
-          crop: cropTargetNodeId,
-          outpaint: outpaintNodeId,
-          subtitleErase: subtitleEraseTargetNodeId,
-          audioVideoSplit: audioVideoSplitTargetNodeId,
-        },
-        exits: {
-          erase: exitEraseEditing,
-          cutout: exitCutoutSession,
-          crop: exitCropMode,
-          outpaint: endOutpaintSession,
-          subtitleErase: exitSubtitleEraseEditing,
-          audioVideoSplit: exitAudioVideoSplitEditing,
-        },
-        dismissGenPanels: dismissAllGenPanels,
-      },
-      init,
-    );
+    enterToolSession(kind, buildToolSessionDeps(), init);
+
+  /** 定向退出指定工具会话（关闭钮/框外暗区/专属 Esc 等定向入口）：经协调 module 执行
+   *  该会话的完整清理（映射知识在 module 的 exits，页面只表达目标工具身份）。 */
+  const closeToolSession = (kind: ToolSessionKind) =>
+    exitToolSession(kind, buildToolSessionDeps());
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
    *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
@@ -3265,37 +3269,9 @@ export default function CanvasPage() {
    *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
-    // 抠图会话（IKGXMT 四退出之一，先于擦除——两会话互斥，进入任一会话即退出另一会话）：
-    // 点画布空白退出并丢弃未发送参数
-    if (cutoutNodeId) {
-      exitCutoutSession();
-      return;
-    }
-    // 擦除编辑态（IKGOTB 四退出之一）：点画布空白退出并丢弃未发送遮罩
-    if (eraseTargetNodeId) {
-      exitEraseEditing();
-      return;
-    }
-    // 裁切编辑态（IKGW1H 四退出之一）：点画布空白/框外暗区退出并丢弃
-    if (cropTargetNodeId) {
-      exitCropMode();
-      return;
-    }
-    // IKGOQX 扩图模式：点画布空白退出（不留痕迹）
-    if (outpaintSessionActive) {
-      endOutpaintSession();
-      return;
-    }
-    // 去字幕编辑态（IKGZ83 四退出之一）：点画布空白退出并丢弃框与开关状态
-    if (subtitleEraseTargetNodeId) {
-      exitSubtitleEraseEditing();
-      return;
-    }
-    // 音视频分离编辑态（IKH28U 四退出之一）：点画布空白退出，未发送不建任务不建卡
-    if (audioVideoSplitTargetNodeId) {
-      exitAudioVideoSplitEditing();
-      return;
-    }
+    // 六会话四退出之「点画布空白」：任一会话活跃即退出并消费本次点击（丢弃未发送参数），
+    // 规则集中在 toolSessionCoordinator——不落入选取会话/选取模式/面板关闭链
+    if (handleToolSessionPaneClick(buildToolSessionDeps()) === 'consumed') return;
     if (imagePickSessionActive) { endImagePickSession(); return; }
     if (videoPickSessionActive) { endVideoPickSession(); return; }
     if (audioPickSessionActive) { endAudioPickSession(); return; }
@@ -3330,32 +3306,15 @@ export default function CanvasPage() {
     const soloId = candidates.length === 1 ? candidates[0]!.id : null;
     setSoloSelectedNodeId(soloId);
     if (pickMode || pickTarget) return;
-    // 抠图会话期间冻结面板联动（IKGXMT，镜像扩图 IKGOQX 口径）：会话内点其他卡的选中变化
-    // 已由 onNodeClick 拦截处置，程序化选中（selectRequest/建卡 deselect）触发的变化不应误关其他状态
-    if (cutoutNodeId) return;
-    // IKGOQX 扩图模式期间冻结面板联动：模式内点其他卡的选中变化已由 onNodeClick 拦截处置，
-    // 程序化选中（selectRequest）触发的变化不应误关其他状态
-    if (outpaintSessionActive) return;
-    // 擦除编辑态（IKGOTB 四退出之一）：单选其他卡或多选时退出并丢弃未发送遮罩
-    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
-    if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
-      exitEraseEditing();
-    }
-    // 裁切编辑态（IKGW1H 四退出之一）：点其他卡等同点外退出——单选非目标或多选时丢弃
-    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
-    if (cropTargetNodeId && ((soloId && soloId !== cropTargetNodeId) || candidates.length > 1)) {
-      exitCropMode();
-    }
-    // 去字幕编辑态（IKGZ83 四退出之一）：点其他卡或多选时退出并丢弃框与开关状态
-    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
-    if (subtitleEraseTargetNodeId && ((soloId && soloId !== subtitleEraseTargetNodeId) || candidates.length > 1)) {
-      exitSubtitleEraseEditing();
-    }
-    // 音视频分离编辑态（IKH28U 四退出之一）：点其他卡或多选时退出
-    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
-    if (audioVideoSplitTargetNodeId && ((soloId && soloId !== audioVideoSplitTargetNodeId) || candidates.length > 1)) {
-      exitAudioVideoSplitEditing();
-    }
+    // 六会话四退出之「选中变化」（选中规范化退出，规则集中在 toolSessionCoordinator）：
+    // 抠图/扩图活跃时冻结面板联动（返回 true 即 return——会话内点其他卡已由 onNodeClick
+    // 拦截处置，程序化选中触发的变化不应误关其他状态）；擦除/裁切/去字幕/分离按单选其他卡
+    // 或多选退出，退出后不 return 继续走下方面板联动（同轮不开面板由下方「本轮渲染的旧
+    // editSessionActive」门挡住——IKFOHK 同一手势多次通知无重复副作用的既有机制）
+    if (handleToolSessionSelectionChange(
+      { soloId, multiSelect: candidates.length > 1 },
+      buildToolSessionDeps(),
+    )) return;
     // IKFOHK：单选草稿/成品生成卡时原子切换到对应对话框。选中变化经 React Flow
     // useEffect 到达，可能早于或代替 onNodeClick（nodeDragThreshold=1 时轻微位移会吞掉 click）。
     // 已打开同一绑定则交给下方 syncPanelVisible 保持，避免重复 seed 导致面板重挂载。
@@ -3472,40 +3431,24 @@ export default function CanvasPage() {
 
   /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
    *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
-   *  （复用 isEditableKeyboardTarget）→ 擦除/去字幕/音视频分离编辑态退出（未发送丢弃
-   *  遮罩/框与开关状态；分离未发送不建任务不建卡）→ 其余情况关闭五面板。 */
+   *  （复用 isEditableKeyboardTarget）→ 抠图/扩图让位专属 handler → 擦除/去字幕/音视频分离/
+   *  裁切编辑态按 module 顺序退出（未发送丢弃）→ 其余情况关闭五面板。六会话的让位与退出
+   *  顺序知识集中在 toolSessionCoordinator（escDefersToToolSessionHandler / exitToolSessionOnEsc）。 */
   useEffect(() => {
-    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId && !subtitleEraseTargetNodeId
-      && !audioVideoSplitTargetNodeId) return;
+    if (!anyGenPanelOpen && !hasEscExitSession(buildToolSessionDeps())) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
       if (isEditableKeyboardTarget(event.target)) return;
-      // 抠图会话有自己的 Esc handler（IKGXMT 专属处置，先于本链——让位顺序 cutout 先于 erase）
-      if (cutoutNodeId) return;
-      // IKGOQX 扩图模式有自己的 Esc handler（先于本链处置）
-      if (outpaintSessionActive) return;
+      // 抠图/扩图有自己的 Esc handler（专属处置先于本链，含输入框豁免与 preventDefault）——让位
+      if (escDefersToToolSessionHandler(buildToolSessionDeps())) return;
       if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
       if (pickMode || pickTarget) {
         resetPickState();
         return;
       }
-      if (eraseTargetNodeId) {
-        exitEraseEditing();
-        return;
-      }
-      if (subtitleEraseTargetNodeId) {
-        exitSubtitleEraseEditing();
-        return;
-      }
-      if (audioVideoSplitTargetNodeId) {
-        exitAudioVideoSplitEditing();
-        return;
-      }
-      if (cropTargetNodeId) {
-        exitCropMode();
-        return;
-      }
+      // 擦除→去字幕→音视频分离→裁切顺序退出首个活跃会话（顺序在 module）；交还则关五面板
+      if (exitToolSessionOnEsc(buildToolSessionDeps())) return;
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);
@@ -3522,10 +3465,13 @@ export default function CanvasPage() {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      exitCutoutSession();
+      closeToolSession('cutout');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+    // closeToolSession('cutout') 仅经稳定的 exitCutoutSession 生效（module 定向退出不读
+    // 其他会话快照），此处引用不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cutoutNodeId, exitCutoutSession]);
 
   /** 抠图会话绑定清理（IKGXMT）：源图卡被删除时结束会话（防工具栏悬挂），参数一并丢弃 */
@@ -3957,10 +3903,13 @@ export default function CanvasPage() {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      endOutpaintSession();
+      closeToolSession('outpaint');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+    // closeToolSession('outpaint') 仅经稳定的 endOutpaintSession 生效（module 定向退出
+    // 不读其他会话快照），此处引用不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outpaintSessionActive, endOutpaintSession]);
 
   /** IKGOQX 扩图会话绑定清理：源图卡被删除时结束会话（其余退出路径见统一退出函数） */
@@ -9462,7 +9411,7 @@ export default function CanvasPage() {
                   preset: cropPreset,
                   minSide: cropMinSide,
                   onRectChange: setCropRect,
-                  onDarkAreaClick: exitCropMode,
+                  onDarkAreaClick: () => closeToolSession('crop'),
                 }
               : null
           }
@@ -9841,7 +9790,7 @@ export default function CanvasPage() {
         {/* 扩图参数面板（IKGOQX 骨架 / IKGOR6 发送闭环）：绑定源图卡，发送建结果卡后退出扩图模式 */}
         {outpaintSessionActive && outpaintRect && (
           <OutpaintDialog
-            onClose={endOutpaintSession}
+            onClose={() => closeToolSession('outpaint')}
             sourceSize={{ width: outpaintRect.width, height: outpaintRect.height }}
             expands={outpaintExpands}
             onPresetSelect={handleOutpaintPresetSelect}
@@ -9917,7 +9866,7 @@ export default function CanvasPage() {
             （X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃遮罩不建卡不提交 */}
         {eraseTargetNodeId && (
           <ImageEraseDialog
-            onClose={exitEraseEditing}
+            onClose={() => closeToolSession('erase')}
             onSendTextErase={handleEraseDialogSendText}
             onSendMask={handleEraseDialogSendMask}
             tool={eraseTool}
@@ -9944,7 +9893,7 @@ export default function CanvasPage() {
         {subtitleEraseTargetNodeId && (
           <VideoSubtitleEraseDialog
             mode={subtitleEraseMode}
-            onClose={exitSubtitleEraseEditing}
+            onClose={() => closeToolSession('subtitleErase')}
             onSend={handleSubtitleEraseSend}
             canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
             canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
@@ -9966,7 +9915,7 @@ export default function CanvasPage() {
             建任务（发送即先退编辑态再建占位卡） */}
         {audioVideoSplitTargetNodeId && (
           <VideoAudioSplitDialog
-            onClose={exitAudioVideoSplitEditing}
+            onClose={() => closeToolSession('audioVideoSplit')}
             format={audioVideoSplitFormat}
             onFormatChange={setAudioVideoSplitFormat}
             onSend={handleAudioVideoSplitSend}
@@ -9981,7 +9930,7 @@ export default function CanvasPage() {
             条件渲染挂载（cutoutNodeId 非空且源节点存在，源卡被删由绑定清理 effect 退会话） */}
         {cutoutNodeId && cutoutSourceNode && (
           <CutoutToolbar
-            onClose={exitCutoutSession}
+            onClose={() => closeToolSession('cutout')}
             scene={cutoutScene}
             onSceneChange={setCutoutScene}
             needContour={cutoutNeedContour}
@@ -9998,14 +9947,15 @@ export default function CanvasPage() {
         )}
 
         {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
-            名单，根元素打 data-gen-panel-territory）；取消绑 exitCropMode（四退出之一）；
-            确认绑 handleCropConfirm（IKGW1S：裁切执行→上传→建卡闭环） */}
+            名单，根元素打 data-gen-panel-territory）；取消经 closeToolSession('crop') 定向退出
+            （四退出之一，完整清理映射在 toolSessionCoordinator）；确认绑 handleCropConfirm
+            （IKGW1S：裁切执行→上传→建卡闭环） */}
         {cropTargetNodeId && (
           <CropDialog
             preset={cropPreset}
             onPresetChange={handleCropPresetChange}
             onConfirm={handleCropConfirm}
-            onClose={exitCropMode}
+            onClose={() => closeToolSession('crop')}
             followAnchor={cropPanelAnchor}
           />
         )}
