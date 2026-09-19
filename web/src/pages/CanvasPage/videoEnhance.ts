@@ -7,12 +7,16 @@
  * ============================================ */
 import {
   VIDEO_ENHANCE_DEFAULT_RESOLUTION,
+  VIDEO_ENHANCE_INPUT_KEYS,
   VIDEO_ENHANCE_MAX_INPUT_LONG_SIDE_PX,
   VIDEO_ENHANCE_MAX_INPUT_SHORT_SIDE_PX,
   VIDEO_ENHANCE_MIN_INPUT_SHORT_SIDE_PX,
   VIDEO_ENHANCE_RESOLUTIONS,
+  videoEnhanceInputSchema,
+  type VideoEnhanceInput,
   type VideoEnhanceResolution,
 } from '@lib/contracts/video-enhance';
+import { readJobFailText } from '@/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 /** HD 来源边标记（写在 edge.data.origin）：这条边表达「HD 卡由该视频增强而来」，
@@ -113,4 +117,42 @@ export function restoreVideoEnhanceResolution(
   return (VIDEO_ENHANCE_RESOLUTIONS as readonly string[]).includes(resolution as string)
     ? (resolution as VideoEnhanceResolution)
     : VIDEO_ENHANCE_DEFAULT_RESOLUTION;
+}
+
+/* ============ 发送闭环（IKH3VH）：契约三键组装与失败文案家族映射 ============ */
+
+/** 组装 HD 任务创建契约三键（IKH3VH，先例 buildImageEnhanceInput）：source_asset_id 冻结自
+ *  HD 身份、target_node_id=HD 卡节点 id、resolution 面板所选档；过契约 zod strict 校验，
+ *  非法（如资产 id 非数字串）返回 null 由调用方守卫提示。 */
+export function buildVideoEnhanceInput(
+  sourceAssetId: string,
+  targetNodeId: string,
+  resolution: VideoEnhanceResolution,
+): VideoEnhanceInput | null {
+  const input = {
+    [VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId]: sourceAssetId,
+    [VIDEO_ENHANCE_INPUT_KEYS.targetNodeId]: targetNodeId,
+    [VIDEO_ENHANCE_INPUT_KEYS.resolution]: resolution,
+  };
+  return videoEnhanceInputSchema.safeParse(input).success ? (input as VideoEnhanceInput) : null;
+}
+
+/** HD 失败文案家族映射（口径同 mediaExtractErrorText）：后端 msg 优先；msg 为空时按错误码
+ *  兜底——video_enhance_failed / 1045（含 SDR 限制、短长边超限等供应商拒绝场景，契约执行面
+ *  统一归并）→「视频画质增强失败，请重试」，入队失败同款兜底；再兜同句防空白失败态。 */
+const VIDEO_ENHANCE_ERROR_CODE_TEXT: Record<string, string> = {
+  video_enhance_failed: '视频画质增强失败，请重试',
+  '1045': '视频画质增强失败，请重试',
+  enqueue_failed: '任务入队失败，请重试',
+};
+
+export function videoEnhanceErrorText(
+  error?: { code?: string | number; message?: string; msg?: string } | null,
+): string {
+  const text = readJobFailText(error);
+  if (text) return text;
+  if (error?.code != null && VIDEO_ENHANCE_ERROR_CODE_TEXT[String(error.code)]) {
+    return VIDEO_ENHANCE_ERROR_CODE_TEXT[String(error.code)];
+  }
+  return '视频画质增强失败，请重试';
 }

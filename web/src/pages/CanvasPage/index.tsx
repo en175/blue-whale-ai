@@ -73,8 +73,10 @@ import {
 } from './imageEnhance';
 import {
   VIDEO_ENHANCE_EDGE_ORIGIN,
+  buildVideoEnhanceInput,
   restoreVideoEnhanceResolution,
   videoEnhanceDraftPosition,
+  videoEnhanceErrorText,
   videoEnhanceGateReason,
   type VideoEnhanceIdentity,
 } from './videoEnhance';
@@ -214,6 +216,7 @@ import {
   createImageCutout,
   createImageOutpaint,
   createVideoSubtitleErase,
+  createVideoEnhancement,
   createMediaExtraction,
   readJobFailText,
   type ImageJobParameters,
@@ -543,6 +546,9 @@ export default function CanvasPage() {
   const [audioVideoSplitFormat, setAudioVideoSplitFormat] = useState<AudioVideoSplitFormat>(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
   /** 音视频分离发送中（创建请求飞行期防重复提交，口径同 subtitleEraseSubmitting） */
   const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
+  /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
+   *  创建失败复位（面板保留可调档重发） */
+  const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
   /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
    *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
    *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
@@ -5501,7 +5507,11 @@ export default function CanvasPage() {
       }
       patchMediaNode(nodeId, {
         genStatus: 'failed',
-        errorText: readJobFailText(detail.error),
+        // HD 卡失败文案走家族映射（IKH3VH）：msg 为空时按 1045 兜底「视频画质增强失败，请重试」
+        //（含 SDR/超限供应商拒绝场景）；其余卡维持 msg 透传
+        errorText: ((node.data ?? {}) as Record<string, unknown>).videoEnhance
+          ? videoEnhanceErrorText(detail.error)
+          : readJobFailText(detail.error),
       });
       return 'terminal';
     }
@@ -6536,6 +6546,16 @@ export default function CanvasPage() {
       startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
       return;
     }
+    const videoEnhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as
+      | VideoEnhanceIdentity
+      | undefined;
+    if (videoEnhanceIdentity?.lastParams) {
+      // HD 卡分流（IKH3VH，镜像高清放大）：契约无 retry 端点，重试 = lastParams 原样重发
+      // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      void startVideoEnhanceJob(nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
+      return;
+    }
     const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
       | ImageEraseIdentity
       | undefined;
@@ -7257,10 +7277,73 @@ export default function CanvasPage() {
     });
   };
 
-  /** HD 面板发送（IKH3VG）：本票发送不接真调用——创建入口接线归 IKH3VH，占位恒返回
-   *  false（面板保持打开，可再次点击）；参数已随切换即时写卡，无未持久化状态。 */
-  const handleVideoEnhanceDialogSend = (_resolution: VideoEnhanceResolution): boolean => {
-    return false;
+  /** 视频 HD 高清任务发送核心（IKH3VH，先例 startAudioVideoSplitJob 的 await 口径 + 高清放大
+   *  的原地承接）：契约三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、
+   *  resolution 面板所选档）经 buildVideoEnhanceInput 契约 zod 校验后 POST video-enhancements。
+   *  创建成功：HD 卡原地转生成中（lastParams 随提交写卡，重试/重新编辑回填同源）+ jobId 登记
+   *  + 启动轮询（applyJobTerminal 通用终态回填——成功回填 URL/mediaType/宽高/时长、失败文案走
+   *  videoEnhanceErrorText 家族映射），返回 true（面板据此自动关闭）。
+   *  创建失败（网络/门槛拒）：HD 卡保持原状（草稿不转生成中、不写 jobId），toast 可读原因，
+   *  返回 false（面板保留可调档重发——本票口径「创建失败面板保留可重试」，区别于图片高清的
+   *  异步失败收敛卡态）。免费口径（本期免费）：无积分预估、不走余额拦截门、无幂等头。 */
+  const startVideoEnhanceJob = async (
+    nodeId: string,
+    resolution: VideoEnhanceResolution,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起 HD 高清');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as VideoEnhanceIdentity | undefined;
+    const sourceAssetId = identity?.sourceAssetId;
+    if (!sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起 HD 高清');
+      return false;
+    }
+    const input = buildVideoEnhanceInput(String(sourceAssetId), nodeId, resolution);
+    if (!input) {
+      showToast('warn', 'HD 高清参数不合法，请调整后重试');
+      return false;
+    }
+    try {
+      const created = await createVideoEnhancement(currentId, input);
+      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      patchMediaNode(nodeId, {
+        genStatus: 'generating',
+        progress: 0,
+        errorText: undefined,
+        jobId: created.job_id,
+        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+        videoEnhance: { ...identity, lastParams: { resolution } },
+      });
+      pollJob(nodeId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : 'HD 高清任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** HD 面板发送（IKH3VH）：面板只交付目标分辨率档；创建成功才关面板（置隐藏标记避免紧随的
+   *  选中事件回弹重开——家族已知缺陷模式，口径同图片面板 handleEnhanceDialogSend），创建失败
+   *  面板保留可调档重发；创建往返期间 submitting 只读防重复提交。 */
+  const handleVideoEnhanceDialogSend = (resolution: VideoEnhanceResolution): boolean => {
+    const nodeId = videoEnhanceDraftId;
+    if (!nodeId || videoEnhanceSubmitting) return false;
+    setVideoEnhanceSubmitting(true);
+    void startVideoEnhanceJob(nodeId, resolution)
+      .then((issued) => {
+        if (issued) {
+          videoEnhancePanelHiddenRef.current = true;
+          setShowVideoEnhanceDialog(false);
+        }
+      })
+      .finally(() => setVideoEnhanceSubmitting(false));
+    return true;
   };
 
   /** 进入扩图模式（IKGOQX）：「高清 ▾」菜单「扩图」项——门槛预检后建立会话（不建卡不连线），
@@ -9880,8 +9963,8 @@ export default function CanvasPage() {
             followAnchor={enhanceDraftId ? enhanceFollowAnchor : null}
           />
         )}
-        {/* 视频 HD 高清面板（IKH3VG）：绑定 HD 卡，极简骨架（ADR-0105）；切换即时写卡，
-            发送本票不接真调用（IKH3VH 接通） */}
+        {/* 视频 HD 高清面板（IKH3VG 骨架 / IKH3VH 发送闭环）：绑定 HD 卡，极简骨架（ADR-0105）；
+            切换即时写卡，发送 POST video-enhancements（创建成功关面板、失败保留可重发） */}
         {showVideoEnhanceDialog && (
           <VideoEnhanceDialog
             key={videoEnhanceSeed?.ts ?? 0}
@@ -9895,7 +9978,7 @@ export default function CanvasPage() {
               ((mediaNodes.find((n) => n.id === videoEnhanceDraftId)?.data ?? {}) as Record<string, unknown>)
                 ?.genStatus === 'generating'
             }
-            submitting={submittingNodeId === videoEnhanceDraftId}
+            submitting={videoEnhanceSubmitting}
             followAnchor={videoEnhanceDraftId ? videoEnhanceFollowAnchor : null}
           />
         )}

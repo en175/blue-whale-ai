@@ -97,6 +97,7 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
   fetchJobStatus: apiMocks.fetchJobStatus,
+  createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));

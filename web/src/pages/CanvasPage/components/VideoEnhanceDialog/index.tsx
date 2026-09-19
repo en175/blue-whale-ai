@@ -4,7 +4,8 @@
  * 无供应商/模型两级下拉、无高级参数（那是图片高清面板骨架，视频侧已裁撤）。
  * 跟随锚定在 HD 卡下方；锚定/拖动跟随/点外关闭/Esc 关闭沿用既有面板约定
  * （关闭与领土豁免由 CanvasPage 的 dismissAllGenPanels / data-gen-panel-territory 承载）。
- * 分辨率切换即时生效（经 onParamsChange 写卡持久化 lastParams）；发送任务接通归 IKH3VH。
+ * 分辨率切换即时生效（经 onParamsChange 写卡持久化 lastParams）；发送经 onSend 调创建端点
+ * （IKH3VH：创建成功父级关面板、失败面板保留，submitting 飞行期只读防重复提交）。
  * ============================================ */
 import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
@@ -15,8 +16,7 @@ import styles from './index.module.css';
 
 interface VideoEnhanceDialogProps {
   onClose: () => void;
-  /** 发送：携带目标分辨率；返回 true 表示创建请求已发出（父级据此自动关面板）。
-   *  本票（IKH3VG）发送不接真调用——父级恒返回 false，面板保持打开。 */
+  /** 发送：携带目标分辨率；创建请求发出后父级关面板，失败面板保留（返回值仅供类型兼容） */
   onSend: (resolution: VideoEnhanceResolution) => boolean | Promise<boolean>;
   /** 分辨率切换即时生效：父级写卡持久化 lastParams（关闭/重开/重新编辑恢复同源） */
   onParamsChange: (resolution: VideoEnhanceResolution) => void;
@@ -59,7 +59,7 @@ export default function VideoEnhanceDialog({
     onParamsChange(next);
   };
 
-  /** 发送：本票父级不接真调用（返回 false 面板保持打开）；发送钮悬停见 sendTitle */
+  /** 发送：父级按创建结果关面板/保留重发；发送钮悬停见 sendTitle */
   const handleSend = () => {
     if (!canSend) return;
     void Promise.resolve(onSend(resolution));
