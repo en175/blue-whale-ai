@@ -37,7 +37,12 @@ public enum JobType {
     /** 视频智能去字幕（tag=video_subtitle_erase，迁移契约 §17 / IKGZ7Z；契约 =
      *  backend/libs/contracts/video-subtitle-erase.ts，规格见 docs/specs/2026-09-19-video-subtitle-erase-mediakit.md；
      *  消费者与处理器由 Z81 按附录 C 触点注册）。 */
-    VIDEO_SUBTITLE_ERASE("video_subtitle_erase");
+    VIDEO_SUBTITLE_ERASE("video_subtitle_erase"),
+
+    /** 视频 HD 高清（tag=video_enhance，IKH3VE，父规格 IKH3VB；契约 =
+     *  backend/libs/contracts/video-enhance.ts，火山 MediaKit 画质增强大模型版）；
+     *  消费者与处理器由 worker 票按附录 C 触点注册。 */
+    VIDEO_ENHANCE("video_enhance");
 
     private final String value;
 

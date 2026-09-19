@@ -306,6 +306,32 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * video_enhance（视频 HD 高清，火山 MediaKit 画质增强大模型版）consumer（IKH3VF，父规格
+     * IKH3VB；以 videoSubtitleErase 接线为模板）。
+     * <p>
+     * consumer group = "generation-video-enhance-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRoute#VIDEO_ENHANCE}（= TS `VIDEO_ENHANCE_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VideoEnhanceConsumer videoEnhanceConsumer(
+            com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-video-enhance-worker";
+        int concurrency = workerProps.concurrency().videoEnhance();
+
+        return new com.bluewhale.worker.application.consumer.VideoEnhanceConsumer(
+                processor,
+                GenerationMqRoute.VIDEO_ENHANCE.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -351,6 +377,21 @@ public class RocketMqConfig {
                 clientConfig,
                 GenerationMqRoute.MEDIA_EXTRACT.topic(),
                 GenerationMqRoute.MEDIA_EXTRACT.tag());
+    }
+
+    /**
+     * video_enhance 轮询自投生产者（IKH3VF；去字幕 videoSubtitleEraseMessageProducer 同款）。
+     * <p>
+     * VideoEnhanceJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = video_enhance）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoEnhanceMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRoute.VIDEO_ENHANCE.topic(),
+                GenerationMqRoute.VIDEO_ENHANCE.tag());
     }
 
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
@@ -401,6 +442,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoSubtitleEraseRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRoute.VIDEO_SUBTITLE_ERASE);
+    }
+
+    /** recovery 重投 video_enhance（IKH3VF，父规格 IKH3VB）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoEnhanceRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.VIDEO_ENHANCE);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */

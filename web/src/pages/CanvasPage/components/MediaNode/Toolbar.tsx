@@ -16,6 +16,7 @@ import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
+import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
@@ -56,6 +57,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
+  /** 视频 HD 高清（IKH3VG）：点击在源卡右侧建 HD 草稿卡并弹出 HD 面板；置灰预检见
+   *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
+  const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
+  const videoEnhanceDisabledReason = videoEnhanceGateReason(data);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
@@ -135,6 +140,18 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
 
   return (
     <div className={styles.toolbar}>
+      {toolbar.videoEnhance && (
+        <button
+          className={styles.toolBtn}
+          onClick={handleVideoEnhance}
+          disabled={videoEnhanceDisabledReason !== null}
+          title={videoEnhanceDisabledReason ?? VIDEO_ENHANCE_ENTRY_HINT}
+          data-testid="video-enhance-btn"
+        >
+          <span className={styles.hdBadge}>HD</span>
+          <span>高清</span>
+        </button>
+      )}
       {toolbar.videoSubtitleErase && (
         <SubtitleEraseMenu items={subtitleEraseMenuItems} />
       )}

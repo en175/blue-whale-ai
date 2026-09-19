@@ -12,6 +12,9 @@ export function mediaNodeToolbarVisibility(mediaType: CanvasMediaType | undefine
     /** 「智能去字幕」（IKGZ82）：独立按钮（渲染位置在「音视频分离」之前），仅视频卡显示；
      *  门槛置灰见 videoSubtitleErase.ts */
     videoSubtitleErase: isVideo,
+    /** 「HD」高清增强（IKH3VG）：文字徽标单按钮（渲染位置在「智能去字幕」之前），仅视频卡
+     *  显示；门槛置灰见 videoEnhance.ts */
+    videoEnhance: isVideo,
   };
 }
 
