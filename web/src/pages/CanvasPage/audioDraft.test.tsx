@@ -58,6 +58,7 @@ const apiMocks = vi.hoisted(() => ({
   createProject: vi.fn(),
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
+  touchProjectLastOpened: vi.fn(async () => undefined),
   fetchMe: vi.fn(async () => null),
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
@@ -122,6 +123,7 @@ vi.mock('@/api/projects', () => ({
   createProject: apiMocks.createProject,
   renameProject: apiMocks.renameProject,
   deleteProject: apiMocks.deleteProject,
+  touchProjectLastOpened: apiMocks.touchProjectLastOpened,
 }));
 
 vi.mock('@/api/auth', () => ({
