@@ -7,6 +7,7 @@ import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.JobStatus;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
@@ -91,6 +92,17 @@ public class JobClaimService {
     /** image_outpaint claim 的单源白名单（IKGOQW：唯一创建入口 = 画布图片卡「高清 ▾」菜单）。 */
     private static final List<String> IMAGE_OUTPAINT_CLAIM_SOURCES =
             List.of(com.bluewhale.worker.domain.entity.ImageOutpaintContract.SOURCE);
+
+    /**
+     * video_subtitle_erase 租约 420s（迁移契约 §17 / IKGZ81）：轮询到点步是短查询，但 completed
+     * 步要在同一租约窗口内完成结果视频下载（可达 200MB）+ TOS 转存——取同步 MediaKit 家族的
+     * 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
+     */
+    private static final int VIDEO_SUBTITLE_ERASE_LEASE_SECONDS = 420;
+
+    /** video_subtitle_erase claim 的单源白名单（§17.1：唯一创建入口 = 画布视频卡工具条「智能去字幕」）。 */
+    private static final List<String> VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES =
+            List.of(com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.SOURCE);
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -407,6 +419,48 @@ public class JobClaimService {
                 input != null ? input : Map.of(),
                 workerId,
                 postIncrementToken));
+    }
+
+    /**
+     * 领取 video_subtitle_erase 作业（迁移契约 §17 / IKGZ81，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
+     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     */
+    public Optional<ClaimedVideoSubtitleEraseJobDto> claimVideoSubtitleErase(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.TAG,
+                VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_SUBTITLE_ERASE_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[video_subtitle_erase] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedVideoSubtitleEraseJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
     }
 
     // ========== 内部工具 ==========
