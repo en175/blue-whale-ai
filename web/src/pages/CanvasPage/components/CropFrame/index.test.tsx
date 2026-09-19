@@ -3,14 +3,16 @@
    Shift 临时锁比例、锁比例下边手柄禁用不可拖、角手柄对角锚等比缩放、框内平移钳制、
    64 像素下限（显示系 minSide 传入）、暗区点击退出、拖拽会话结束停止响应、
    多帧连续拖动（重渲染不拆进行中的监听——拖不动 bug 回归锁，OutpaintFrame 同款）、
-   viewport 缩放平移后框换算跟随（编辑期间画布照常，规格故事 16）。
+   viewport 缩放平移后框换算跟随（编辑期间画布照常，规格故事 16）、
+   与 GroupOverlay 同挂的组合回归（IKH1WJ：捕获层不截断裁切框按下）。
    换算本身在 imageCrop.test.ts 纯函数层覆盖，此处测组件把屏幕事件正确接到
    纯函数并回抛（zoom=1、容器在原点时 flow 坐标 == client 坐标）。 */
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
+import { ReactFlowProvider, useStoreApi, type Node } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropFrame from './index';
+import GroupOverlay from '../GroupOverlay';
 import {
   fullCropRect,
   inscribeCropRect,
@@ -300,5 +302,46 @@ describe('IKGW1N 框外暗区', () => {
     expect(onDarkClick).toHaveBeenCalledTimes(1);
     await click(dark('left'), 100, 650);
     expect(onDarkClick).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('IKH1WJ 组合渲染：GroupOverlay 捕获层不截断裁切框按下', () => {
+  /* 本文件其余用例只渲染 CropFrame 自身、不挂 GroupOverlay——这正是 IKH1WJ
+     未被测试拦截的原因：组框覆盖层在 window 捕获阶段把「落点在源图卡盒内、
+     目标不在卡元素上」的按下 stopPropagation 拦死，React 委托监听收不到，
+     拖拽会话从未启动。此处两组件同挂，锁死手柄按下不被截断、拖拽正常接线。 */
+  it('源图卡盒边界内侧按住左边手柄：拖拽立即启动并跟随收缩', async () => {
+    // 源图卡盒与内容区同盒 (1000,500)-(1400,800)：边手柄命中带整条压在卡盒边界上，
+    // 按下点 (1000,650) 必在卡盒内（闭合区间含边界）——即生产被拦路径
+    const overlayNode = {
+      id: 'm1',
+      type: 'mediaNode',
+      position: { x: 1000, y: 500 },
+      measured: { width: 400, height: 300 },
+      data: {},
+    } as Node;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(
+        ReactFlowProvider,
+        null,
+        createElement(GroupOverlay, {
+          nodes: [overlayNode],
+          groups: [],
+          onCreateGroup: () => {},
+          onUngroup: () => {},
+          onDeleteGroup: () => {},
+          onDownloadNodes: () => {},
+          setNodes: () => {},
+        }),
+        createElement(Host, { initial: fullCropRect(BOUNDS) }),
+      ));
+    });
+    await down(handle('left'), 1000, 650);
+    await move(1050, 650);
+    await up(1050, 650);
+    expect(onChange).toHaveBeenLastCalledWith({ x: 1050, y: 500, width: 350, height: 300 });
   });
 });

@@ -388,6 +388,9 @@ export default function GroupOverlay({
       // 扩图扩展框是交互覆盖层（与 .react-flow__panel 同类，须放行）：其手柄命中带压在
       // 源图卡盒边界上，落点必在卡盒内——若在此拦死，扩图拖拽永远启动不了（IKGOQ0 验收报障）
       if (e.target instanceof Element && e.target.closest('[data-outpaint-frame]')) return;
+      // 裁切框同病同款：边手柄命中带同样整条压在源图卡盒边界上，不豁免则裁切拖拽
+      // 永远启动不了（IKH1WJ）
+      if (e.target instanceof Element && e.target.closest('[data-crop-frame]')) return;
       const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
       if (content) {
