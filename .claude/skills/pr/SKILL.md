@@ -1,16 +1,16 @@
 ---
 name: pr
-description: "写 PR 正文（body）时使用本模板：概要图示、验证证据前后对照、合并风险三段。"
+description: "Use when writing a PR body."
 metadata:
   credits:
     skill: show-me
     author: Dex Horthy
     organisation: Humanlayer
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
-  localization: "中文语言定制：模板骨架与指导文案中文化，tests/agent-rules.test.mjs 守护防回潮。同步 mattpocock 上游时保留本定制，只合并上游的方法论变更。"
+  localization: "模板骨架中文化（结构性标签与占位符中文，代码与 diff 内容保留英文原样），由 tests/agent-rules.test.mjs 守护防回潮。指导文案与上游保持一致；同步 mattpocock 上游时仅保留模板骨架的中文定制。"
 ---
 
-写 PR 正文时使用以下模板：
+Use this template for writing the PR body:
 
 ```markdown
 ## 概要
@@ -33,15 +33,15 @@ metadata:
 <可选：合并后可能的连带影响>
 ```
 
-## 三个段落
+## Sections
 
-不写客套开场，散文保持简短。术语使用 `CONTEXT.md` 里的领域语言。代码、diff、组件树、伪代码中的代码内容保留英文原样，结构性标签一律中文。
+Skip all preambles and keep prose brief. Use the user's domain language from `CONTEXT.md`.
 
-### 概要
+### Summary
 
-选能把关键点讲清楚的最小视图。
+Pick the smallest view that makes the key point clear.
 
-- 逻辑或算法用伪代码：
+- Show logic or an algorithm as pseudocode:
 
 ```text
 on(save)
@@ -51,7 +51,7 @@ on(save)
   return fresh result
 ```
 
-- 运行时控制流用调用树：
+- Show runtime control flow as a call tree:
 
 ```text
 submitForm
@@ -61,23 +61,23 @@ submitForm
   navigateToSession
 ```
 
-- UI 结构用组件树，标出要紧的状态与模块边界：
+- Show UI structure as a component tree, including state and module boundaries that matter:
 
 ```tsx
 <SessionPage>(apps / example / src / routes / session.tsx);
 useSessionEvents() < SessionToolbar > <RunSkillButton>(packages / ui);
 ```
 
-- 文件职责或大范围重构用浅层文件树：
+- Show file responsibility or a broad refactor as a shallow file tree:
 
 ```text
 src/
-├── commands/       # 解析用户操作
-├── sessions/       # 持有会话状态
-└── transport/      # 发送 API 请求
+├── commands/       # parses user actions
+├── sessions/       # owns session state
+└── transport/      # sends API requests
 ```
 
-- 组件交互、控制流或数据流用 Mermaid：
+- Show component interaction, control flow, or data flow with Mermaid:
 
 ```mermaid
 sequenceDiagram
@@ -89,9 +89,9 @@ sequenceDiagram
     Daemon-->>UI: stream result
 ```
 
-- 重点在「改了什么」且周围结构已存在时用 `diff`，diff 的形态贴合主题。
+- Use `diff` when the point is what changes and the surrounding shape already exists. Match the diff shape to the topic.
 
-组件类改动：
+For a component change:
 
 ```diff
  <SessionPage>
@@ -102,20 +102,20 @@ sequenceDiagram
 +    <SkillResultCard />
 ```
 
-文件布局类改动：
+For a file-layout change:
 
 ```diff
  src/
  ├── commands/
-+│   └── show-me.ts       # 展开斜杠命令
++│   └── show-me.ts       # expands the slash command
  ├── sessions/
 -└── transport.ts
 +└── transport/
 +    ├── client.ts
-+    └── server.ts
++    └── stream.ts
 ```
 
-调用树或调用栈类改动：
+For a call-tree or call-stack change:
 
 ```diff
  submitForm
@@ -128,7 +128,7 @@ sequenceDiagram
 +    subscribeToEvents
 ```
 
-状态或控制流类改动：
+For a state or control-flow change:
 
 ```diff
  on(save)
@@ -139,7 +139,7 @@ sequenceDiagram
 +  invalidate cache
 ```
 
-- 大部分是新增代码、省略上下文会掩盖归属或顺序、或读者需要一份可复制的目标形态时，整块展示：
+- Show the whole block when most of it is new, when omitted context would hide ownership or order, or when the user needs a copyable target shape:
 
 ```ts
 function expandSkill(command: string): string {
@@ -148,22 +148,22 @@ function expandSkill(command: string): string {
 }
 ```
 
-#### 使用要领
+#### Guidance
 
-每张图放在它支撑的那段短文旁边。只保留回答读者当前问题或解决当前讨论点所需的调用、文件、props、状态与边界。
+Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to answer the user's current question or the options to resolve the current discussion point.
 
-这些形式可以用一种，也可以几种混用，但不太可能全用上。自行判断，不要堆砌。
+You may use one of these, you may use several, it is unlikely you will use all of them. Use your judgement and don't overwhelm the user.
 
-### 验证证据
+### Evidence
 
-证明改动有效的具体证据，展示变更前与变更后。
+Concrete evidence that the change works. Show a before and after.
 
-截图是最高优先级证据，环境允许且改动可视时优先用。
+Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
-执行类证据次之：测试结果、控制台输出。用伪代码展示那条原来失败、现在通过的用例。
+Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.
 
-### 合并风险
+### Merge Danger
 
-说明这是单向门还是双向门。双向门可以走回去，单向门不行。回滚代价低的 PR 风险更低。涉及破坏性操作或难以撤销的决策属于单向门。
+Describe whether it's a one-way or two-way door. You can walk back through two-way doors, but not one-way doors. A PR that is cheap to roll back is lower risk. Changes that involve destructive actions or hard-to-reverse decisions are one-way doors.
 
-影响半径指这个 PR 引入的改动的潜在影响范围，把各种可能都考虑到，例如布局位移、消费方破坏、移动端适配等。
+The blast radius is the potential impact or scope of the changes introduced by this PR. Consider all possibilities. Examples are layout shift, breakages for consumers, mobile responsiveness, etc.
