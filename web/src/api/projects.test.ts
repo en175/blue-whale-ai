@@ -18,6 +18,8 @@ const project = {
   thumb: null,
   previews: [],
   created_at: '2026-09-04T00:00:00.000Z',
+  last_opened_at: null,
+  pinned_at: null,
 };
 
 function apiResponse(data: unknown) {

@@ -5,13 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { type InfiniteData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Check, ImageOff, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ImageOff, MoreHorizontal, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
 import {
   batchDeleteProjects,
   createProject,
   deleteProject,
+  pinProject,
   projectKeys,
   projectPageQueryOptions,
   renameProject,
@@ -123,6 +124,7 @@ export default function Projects() {
 
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState('');
+  const [pinError, setPinError] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<ProjectRecord | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -166,6 +168,10 @@ export default function Projects() {
   });
   const deleteMutation = useMutation({
     mutationFn: (id: ProjectRecord['id']) => deleteProject(id, { silent: true }),
+  });
+  const pinMutation = useMutation({
+    mutationFn: ({ id, pinned }: { id: ProjectRecord['id']; pinned: boolean }) =>
+      pinProject(id, pinned, { silent: true }),
   });
   const batchDeleteMutation = useMutation({
     mutationFn: (ids: string[]) => batchDeleteProjects(ids, { silent: true }),
@@ -292,6 +298,21 @@ export default function Projects() {
     setDeleteTarget(project);
     setDeleteConfirmation('');
     setDeleteError('');
+  };
+
+  /** 置顶/取消置顶（IKH1YL）：口径改变列表顺序，成功后重拉已加载页让服务端排序直出。 */
+  const handleTogglePin = (project: ProjectRecord) => {
+    setOpenMenuId(null);
+    setPinError('');
+    pinMutation.mutate(
+      { id: project.id, pinned: !project.pinned_at },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: projectKeys.all });
+        },
+        onError: (error) => setPinError(errorMessage(error, '置顶操作失败，请稍后重试')),
+      },
+    );
   };
 
   const closeSingleDelete = () => {
@@ -431,7 +452,9 @@ export default function Projects() {
               </>
             )}
           </div>
-          {createError && <p className={styles.createError} role="alert">{createError}</p>}
+          {(createError || pinError) && (
+            <p className={styles.createError} role="alert">{createError || pinError}</p>
+          )}
         </header>
 
         <main className={styles.content}>
@@ -477,6 +500,13 @@ export default function Projects() {
                   >
                     <PreviewGallery project={project} />
 
+                    {/* 置顶项目图钉角标（IKH1YL） */}
+                    {project.pinned_at && (
+                      <span className={styles.pinBadge} title="已置顶">
+                        <Pin size={13} strokeWidth={2} aria-hidden="true" />
+                      </span>
+                    )}
+
                     {selectionMode && (
                       <button
                         className={styles.selectionToggle}
@@ -517,6 +547,21 @@ export default function Projects() {
 
                           {isMenuOpen && (
                             <div className={styles.cardMenu} role="menu" aria-label={`${project.name} 操作`}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleTogglePin(project);
+                                }}
+                              >
+                                {project.pinned_at ? (
+                                  <PinOff size={15} strokeWidth={2} aria-hidden="true" />
+                                ) : (
+                                  <Pin size={15} strokeWidth={2} aria-hidden="true" />
+                                )}
+                                {project.pinned_at ? '取消置顶' : '置顶'}
+                              </button>
                               <button
                                 type="button"
                                 role="menuitem"

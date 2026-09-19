@@ -13,6 +13,7 @@ const projectApi = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   batchDeleteProjects: vi.fn(),
+  pinProject: vi.fn(),
 }));
 
 vi.mock('@/api/projects', () => ({
@@ -30,6 +31,7 @@ vi.mock('@/api/projects', () => ({
   renameProject: projectApi.renameProject,
   deleteProject: projectApi.deleteProject,
   batchDeleteProjects: projectApi.batchDeleteProjects,
+  pinProject: projectApi.pinProject,
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,6 +39,7 @@ vi.mock('@/api/projects', () => ({
 let root: Root | undefined;
 let mountNode: HTMLDivElement | undefined;
 
+/* 服务端排序直出：置顶项目在首位（pinned_at 非空），前端不重排。 */
 const projects: ProjectRecord[] = [
   {
     id: 'with-previews',
@@ -49,6 +52,8 @@ const projects: ProjectRecord[] = [
       'https://cdn.example.test/previews/four.png',
     ],
     created_at: '2026-09-04T00:00:00.000Z',
+    last_opened_at: null,
+    pinned_at: '2026-09-10T00:00:00.000Z',
   },
   {
     id: 'without-previews',
@@ -56,6 +61,8 @@ const projects: ProjectRecord[] = [
     thumb: null,
     previews: [],
     created_at: '2026-09-03T00:00:00.000Z',
+    last_opened_at: null,
+    pinned_at: null,
   },
 ];
 
@@ -212,5 +219,46 @@ describe('Projects 项目卡片页', () => {
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.textContent).toContain('重命名项目');
     expect(dialog?.querySelector<HTMLInputElement>('input')?.value).toBe('有预览项目');
+  });
+
+  it('置顶项目卡片渲染图钉角标，More 菜单显示「取消置顶」', async () => {
+    await renderPage();
+
+    expect(document.body.querySelector('span[title="已置顶"]')).not.toBeNull();
+
+    const more = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="有预览项目 的更多操作"]',
+    );
+    if (!more) throw new Error('置顶项目更多操作按钮未渲染');
+    await act(async () => { more.click(); });
+
+    expect([...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .some((button) => button.textContent?.trim() === '取消置顶')).toBe(true);
+    expect([...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .some((button) => button.textContent?.trim() === '重命名')).toBe(true);
+    expect([...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .some((button) => button.textContent?.trim() === '删除项目')).toBe(true);
+  });
+
+  it('未置顶项目 More 菜单显示「置顶」，点击调 pinProject(id, true) 并刷新列表', async () => {
+    projectApi.pinProject.mockResolvedValue({ ...projects[1], pinned_at: '2026-09-19T00:00:00.000Z' });
+    await renderPage();
+    const callsAfterLoad = projectApi.fetchProjectPage.mock.calls.length;
+
+    const more = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="空预览项目 的更多操作"]',
+    );
+    if (!more) throw new Error('未置顶项目更多操作按钮未渲染');
+    await act(async () => { more.click(); });
+
+    const pinItem = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === '置顶');
+    if (!pinItem) throw new Error('置顶操作未渲染');
+    await act(async () => { pinItem.click(); });
+    await settle();
+
+    expect(projectApi.pinProject).toHaveBeenCalledWith('without-previews', true, { silent: true });
+    // 置顶口径改变列表顺序：invalidate 后重新拉取已加载页。
+    expect(projectApi.fetchProjectPage.mock.calls.length).toBeGreaterThan(callsAfterLoad);
   });
 });
