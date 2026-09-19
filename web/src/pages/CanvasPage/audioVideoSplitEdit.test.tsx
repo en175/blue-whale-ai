@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-/* IKH28U 音视频分离编辑态骨架（画布链路）：点击「音视频分离」（原提取音频一键直发入口
+/* IKH28U 骨架 / IKH28X 发送闭环（画布链路）：点击「音视频分离」（原提取音频一键直发入口
    退役）进入编辑态而非建任务；splitEditing/soloToolbarHidden 渲染期注入（视频暂停与播放
-   控制锁定由 MediaNode 承担，见 MediaNode/index.test.tsx）；上条仅 X + 下条占位发送条
-   （三要素与发送闭环归 IKH28X）；与其他工具编辑会话互斥（去字幕先例口径）；四退出
-   （X/Esc/点其他卡/点画布空白）未发送无痕迹——无卡无边无任务。渲染模式沿用
+   控制锁定由 MediaNode 承担，见 MediaNode/index.test.tsx）；上条仅 X + 下条三要素发送条
+   （格式下拉/本期免费/发送钮）；与其他工具编辑会话互斥（去字幕先例口径）；四退出
+   （X/Esc/点其他卡/点画布空白）未发送无痕迹——无卡无边无任务。发送闭环（IKH28X）：
+   按所选格式建任务、先退编辑态再建占位卡、来源边 origin=media-extract、轮询终态收敛
+   （成功成卡/失败可读文案）、失败带身份卡原参数重试、格式不跨会话。渲染模式沿用
    videoSubtitleEraseEdit.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -12,6 +14,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import type { GenerationModel } from '@/api/generation';
 
 vi.mock('./components/AgentPanel', () => ({
@@ -205,6 +208,24 @@ function toolbar(): HTMLElement | null {
   return document.body.querySelector('[data-testid="audio-video-split-toolbar"]');
 }
 
+/** 编辑态内选格式（展开下拉点选项） */
+async function selectFormat(format: string) {
+  await click('audio-video-split-format-trigger');
+  await click(`audio-video-split-format-item-${format}`);
+}
+
+/** 编辑态内点发送（startAudioVideoSplitJob 含 await 创建，等 50ms 让建卡与轮询首 tick 发起） */
+async function sendSplit() {
+  await click('audio-video-split-send-btn');
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
+function nodeById(id: string): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -222,14 +243,16 @@ afterEach(async () => {
 });
 
 describe('IKH28U 编辑态呈现（进入不建任务）', () => {
-  it('进入编辑态：上条仅 X、下条占位发送条；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
+  it('进入编辑态：上条仅 X、下条三要素发送条（格式 M4A/本期免费/发送钮）；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
     await renderPage();
     await enterSplit();
     expect(toolbar()).toBeTruthy();
     expect(bodyBtn('audio-video-split-close')).toBeTruthy();
     const sendBar = document.body.querySelector('[data-testid="audio-video-split-send-bar"]')!;
-    expect(sendBar.textContent).toContain('发送功能即将可用');
-    expect(sendBar.querySelectorAll('button').length).toBe(0); // 三要素归 IKH28X
+    // 三要素（IKH28X）：格式触发钮显当前格式（默认 M4A）+ 本期免费 + 发送钮
+    expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
+    expect(sendBar.textContent).toContain('本期免费');
+    expect(bodyBtn('audio-video-split-send-btn')).toBeTruthy();
     // 源视频卡注入 splitEditing（视频暂停+锁定层）与 soloToolbarHidden（会话模态口径）
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
@@ -320,5 +343,116 @@ describe('IKH28U 会话口径（!743 体系接入）', () => {
     await enterSplit();
     expect(v1Data().splitEditing).toBe(true);
     expect(toolbar()).toBeTruthy();
+  });
+});
+
+describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () => {
+  it('发送（默认 m4a）：按所选格式建任务、先退编辑态再建占位卡、来源边 origin=media-extract、展示名跟随格式', async () => {
+    apiMocks.createMediaExtraction.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterSplit();
+    await sendSplit();
+    // 建任务带所选格式（默认 m4a）
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' });
+    // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
+    expect(toolbar()).toBeNull();
+    expect(v1Data().splitEditing).toBeUndefined();
+    expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
+    const audio = nodeById('media-extract-j1')!;
+    expect(audio.data.fileName).toBe('素材视频(audio).m4a');
+    // 占位卡带身份（lastInput 冻结源素材+格式，失败重试原样重发）
+    expect(audio.data.mediaExtract).toEqual({
+      sourceAssetId: '5',
+      lastInput: { source_asset_id: '5', output_format: 'm4a' },
+    });
+    // 来源边：参考推导跳过口径（origin 标记）
+    const edge = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>)
+      .find((e) => e.target === 'media-extract-j1')!;
+    expect(edge.source).toBe('v1');
+    expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+  });
+
+  it('切换格式后发送：任务参数与占位卡展示名跟随所选格式（所见即所得）；未发送退出重进格式复位 m4a', async () => {
+    apiMocks.createMediaExtraction.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterSplit();
+    await selectFormat('wav');
+    expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('WAV');
+    // 未发送退出重进：格式不跨会话记忆，复位 m4a
+    await click('audio-video-split-close');
+    await enterSplit();
+    expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
+    // 重选 wav 后发送：任务参数与占位卡展示名所见即所得
+    await selectFormat('wav');
+    await sendSplit();
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'wav' });
+    expect(nodeById('media-extract-j1')!.data.fileName).toBe('素材视频(audio).wav');
+  });
+
+  it('创建失败（网络）：不建卡不退编辑态，停留可调格式后重发', async () => {
+    apiMocks.createMediaExtraction.mockRejectedValue(new Error('network down'));
+    await renderPage();
+    await enterSplit();
+    await sendSplit();
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
+    expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
+    expect(flowProps.current.edges).toEqual([]);
+    // 编辑态保留（浮条仍在），submitting 已复位（发送钮可再点）
+    expect(toolbar()).not.toBeNull();
+    expect(bodyBtn('audio-video-split-send-btn').disabled).toBe(false);
+  });
+
+  it('轮询终态 succeeded：占位卡收敛为成品音频卡（src/assetId 回填、进度 100、展示名保留）', async () => {
+    apiMocks.createMediaExtraction.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({
+      job_id: 'j1', status: 'succeeded', progress: 100,
+      asset: { id: 'a88', url: 'http://tos/x.m4a', type: 'audio', duration: 65.5 },
+    });
+    await renderPage();
+    await enterSplit();
+    await sendSplit();
+    const audio = nodeById('media-extract-j1')!;
+    expect(audio.data.genStatus).toBeUndefined();
+    expect(audio.data.progress).toBe(100);
+    expect(audio.data.src).toBe('http://tos/x.m4a');
+    expect(audio.data.assetId).toBe('a88');
+    // 展示名保留建卡所选格式的后缀（不被「生成-{jobId}」自动命名覆盖）
+    expect(audio.data.fileName).toBe('素材视频(audio).m4a');
+  });
+
+  it('轮询终态 failed：1044 火山兜底码映射可读文案；带身份卡原参数重试建新任务并收敛成品', async () => {
+    apiMocks.createMediaExtraction.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({
+      job_id: 'j1', status: 'failed', progress: 1,
+      error: { code: 'media_extract_provider_failed', msg: '' },
+    });
+    await renderPage();
+    await enterSplit();
+    await sendSplit();
+    const failed = nodeById('media-extract-j1')!;
+    expect(failed.data.genStatus).toBe('failed');
+    // W 票错误码面：media_extract_provider_failed（1044）→「音频提取失败，请重试」
+    expect(failed.data.errorText).toBe('音频提取失败，请重试');
+
+    // 重试：lastInput（源素材+格式）原样重发创建接口（新 job），轮询 succeeded 收敛成品
+    apiMocks.createMediaExtraction.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({
+      job_id: 'j2', status: 'succeeded', progress: 100,
+      asset: { id: 'a89', url: 'http://tos/y.m4a', type: 'audio' },
+    });
+    await act(async () => {
+      (failed.data.onRetryJob as (id: string) => void)('media-extract-j1');
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(apiMocks.createMediaExtraction).toHaveBeenLastCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' });
+    const retried = nodeById('media-extract-j1')!;
+    expect(retried.data.jobId).toBe('j2');
+    expect(retried.data.genStatus).toBeUndefined();
+    expect(retried.data.src).toBe('http://tos/y.m4a');
   });
 });
