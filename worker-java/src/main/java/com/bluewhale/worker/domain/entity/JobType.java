@@ -32,7 +32,12 @@ public enum JobType {
 
     /** 智能扩图（tag=image_outpaint，IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts；
      *  规格见 docs/specs/2026-09-18-image-outpaint-mediakit.md；消费者与处理器由后续票按附录 C 触点注册）。 */
-    IMAGE_OUTPAINT("image_outpaint");
+    IMAGE_OUTPAINT("image_outpaint"),
+
+    /** 视频智能去字幕（tag=video_subtitle_erase，迁移契约 §17 / IKGZ7Z；契约 =
+     *  backend/libs/contracts/video-subtitle-erase.ts，规格见 docs/specs/2026-09-19-video-subtitle-erase-mediakit.md；
+     *  消费者与处理器由 Z81 按附录 C 触点注册）。 */
+    VIDEO_SUBTITLE_ERASE("video_subtitle_erase");
 
     private final String value;
 
