@@ -12,6 +12,7 @@ import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
+import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import { commitCardName } from '../cardName';
@@ -133,9 +134,10 @@ export interface MediaNodeData {
     onStrokeMove: (point: MaskPoint) => void;
     onStrokeEnd: () => void;
   };
-  /** 去字幕编辑态框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕目标源视频卡时由
-   *  CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针回调；仅正常视频内容区
-   *  渲染，层存在即视频暂停在当前帧（本期无播放控制，规格 Out of Scope） */
+  /** 去字幕框选模式框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡且
+   *  会话处于框选模式时由 CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针
+   *  回调，仅正常视频内容区渲染；智能模式不注入（零框选工具）。停帧由 subtitleErasePaused
+   *  单独承担（IKH3OU），与本标记解耦 */
   subtitleEraseEditing?: {
     boxes: readonly SubtitleBoxOp[];
     liveBox: SubtitleBoxOp | null;
@@ -143,6 +145,10 @@ export interface MediaNodeData {
     onBoxMove: (point: SubtitleBoxPoint) => void;
     onBoxEnd: () => void;
   };
+  /** 去字幕会话停帧标记（IKH3OU，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡时
+   *  由 CanvasPage 注入，视频暂停锁定在当前帧（会话期无播放控制）。与 subtitleEraseEditing
+   *  分开：框选模式两者都有，智能模式只有本标记——智能模式零框选工具，不渲染框层 */
+  subtitleErasePaused?: true;
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -174,9 +180,10 @@ export interface MediaNodeData {
   onCropImage?: (id: string) => void;
   /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
-  /** 智能去字幕（IKGZ82）：进入去字幕编辑态（本票入口占位未接线，IKGZ83 由 CanvasPage 接入；
-   *  门槛预检见 videoSubtitleErase.ts） */
-  onVideoSubtitleErase?: (id: string) => void;
+  /** 智能去字幕（IKGZ82 入口 / IKH3OU 交互重做）：进入去字幕会话；mode 由「智能去字幕 ▾」
+   *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；
+   *  门槛预检见 videoSubtitleErase.ts */
+  onVideoSubtitleErase?: (id: string, mode: VideoSubtitleEraseMode) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -253,11 +260,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     };
   }, [contextMenu]);
 
-  /** 去字幕编辑态（IKGZ83）：视频暂停在当前帧——拉框对全片生效，画面定格便于精确框选；
-   *  依赖 subtitleEraseEditing 的注入/移除（对象引用变化即进入/退出编辑态） */
+  /** 去字幕会话（IKGZ83）：视频暂停锁定在当前帧——拉框对全片生效、画面定格便于精确框选；
+   *  两个标记任一存在即停帧（IKH3OU 单条化后框层只在框选模式注入，智能模式借
+   *  subtitleErasePaused 停帧——不注入框层就没有盖在视频上的透明十字浮层）。 */
   useEffect(() => {
-    if (data.subtitleEraseEditing) videoRef.current?.pause();
-  }, [data.subtitleEraseEditing]);
+    if (!data.subtitleEraseEditing && !data.subtitleErasePaused) return;
+    videoRef.current?.pause();
+  }, [data.subtitleEraseEditing, data.subtitleErasePaused]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =

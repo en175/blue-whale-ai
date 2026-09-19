@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-/* IKGZ83 去字幕编辑态工具条/发送条组件测试：控件齐全（框选/全画面文字开关/撤销/重做/X、
-   本期免费+输出最高 1080P+发送）、开关两态受控、撤销重做与发送中置灰透传、
-   框满置灰、发送钮始终可发（无框=智能模式，语义统一）。渲染模式沿用
-   ImageEraseDialog 测试（createRoot + act）。 */
+/* IKH3OU 去字幕会话单条组件测试（IKGZ83 双条 → 单条化，ADR-0104）：形态随 mode 切换——
+   智能模式仅 X/「智能擦除」/⚡0/发送四元素（零框选工具），框选模式再加框选/撤销/重做；
+   唯一一条浮条、标记 data-gen-panel-territory；⚡0 徽标取代「本期免费」文字、「输出最高 1080P」
+   挪到发送钮 title；撤销重做与发送中置灰透传、框满置灰。
+   渲染模式沿用 ImageEraseDialog 测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
@@ -13,7 +14,6 @@ import VideoSubtitleEraseDialog from './index';
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 const sendMock = vi.fn();
-const fullTextChangeMock = vi.fn();
 const undoMock = vi.fn();
 const redoMock = vi.fn();
 const closeMock = vi.fn();
@@ -25,16 +25,14 @@ function renderDialog(props: Partial<Parameters<typeof VideoSubtitleEraseDialog>
   act(() => {
     root!.render(
       createElement(VideoSubtitleEraseDialog, {
+        mode: 'box',
         onClose: closeMock,
         onSend: sendMock,
         canUndo: false,
         canRedo: false,
         onUndo: undoMock,
         onRedo: redoMock,
-        fullText: false,
-        onFullTextChange: fullTextChangeMock,
         boxLimitReached: false,
-        toolbarAnchor: null,
         sendBarAnchor: null,
         ...props,
       } as Parameters<typeof VideoSubtitleEraseDialog>[0]),
@@ -43,6 +41,8 @@ function renderDialog(props: Partial<Parameters<typeof VideoSubtitleEraseDialog>
 }
 
 const btn = (testId: string) => container!.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+const has = (testId: string) => container!.querySelector(`[data-testid="${testId}"]`) != null;
+const sendBar = () => container!.querySelector('[data-testid="subtitle-erase-send-bar"]')!;
 
 async function click(node: Element | null) {
   await act(async () => {
@@ -63,57 +63,76 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('IKGZ83 工具条与发送条呈现', () => {
-  it('两条齐全：工具条框选/全画面文字开关/撤销/重做/X；发送条本期免费+输出最高 1080P+发送', () => {
-    renderDialog();
-    for (const id of ['subtitle-erase-tool-box', 'subtitle-erase-full-text-toggle', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-close']) {
+describe('IKH3OU 单条两形态', () => {
+  it('智能模式仅四元素：X / 智能擦除 / ⚡0 / 发送——零框选工具、无？帮助', () => {
+    renderDialog({ mode: 'smart' });
+    expect(btn('subtitle-erase-close')).toBeTruthy();
+    expect(btn('subtitle-erase-title').textContent).toBe('智能擦除');
+    expect(btn('subtitle-erase-free-badge')).toBeTruthy();
+    expect(btn('subtitle-erase-send-btn')).toBeTruthy();
+    // 零框选工具：框选/撤销/重做一律不渲染
+    for (const id of ['subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo']) {
+      expect(has(id), id).toBe(false);
+    }
+    // X 在最左
+    const bar = sendBar();
+    expect(bar.firstElementChild).toBe(btn('subtitle-erase-close'));
+  });
+
+  it('框选模式完整单条：X / 框选擦除 / 框选·撤销·重做 / ⚡0 / 发送', () => {
+    renderDialog({ mode: 'box' });
+    expect(btn('subtitle-erase-title').textContent).toBe('框选擦除');
+    for (const id of ['subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo']) {
       expect(btn(id), id).toBeTruthy();
     }
-    expect(container!.querySelector('[data-testid="subtitle-erase-toolbar"]')!.textContent).toContain('全画面文字');
-    const sendBar = container!.querySelector('[data-testid="subtitle-erase-send-bar"]')!;
-    expect(sendBar.textContent).toContain('本期免费');
-    expect(sendBar.textContent).toContain('输出最高 1080P');
+    expect(btn('subtitle-erase-close')).toBeTruthy();
+    expect(btn('subtitle-erase-free-badge')).toBeTruthy();
     expect(btn('subtitle-erase-send-btn')).toBeTruthy();
   });
 
-  it('两条浮条均标记 data-gen-panel-territory（豁免点外关闭误杀）', () => {
-    renderDialog();
-    expect(container!.querySelector('[data-testid="subtitle-erase-toolbar"]')!.hasAttribute('data-gen-panel-territory')).toBe(true);
-    expect(container!.querySelector('[data-testid="subtitle-erase-send-bar"]')!.hasAttribute('data-gen-panel-territory')).toBe(true);
+  it('只渲染下方一条：上方工具条与「全画面文字」开关一并退役', () => {
+    renderDialog({ mode: 'box' });
+    expect(has('subtitle-erase-toolbar')).toBe(false);
+    expect(has('subtitle-erase-full-text-toggle')).toBe(false);
+    // 组件内仅一条浮条（data-gen-panel-territory 唯一，豁免点外关闭误杀）
+    expect(container!.querySelectorAll('[data-gen-panel-territory]').length).toBe(1);
+    expect(sendBar().hasAttribute('data-gen-panel-territory')).toBe(true);
+    expect(container!.textContent).not.toContain('全画面文字');
   });
 
-  it('框选是唯一工具恒激活（aria-pressed=true）；框满时置灰并提示上限', () => {
-    renderDialog();
+  it('⚡0 徽标取代「本期免费」文字（免费语义转 title）；「输出最高 1080P」不再作条内文字', () => {
+    renderDialog({ mode: 'smart' });
+    const badge = sendBar().querySelector('[data-testid="subtitle-erase-free-badge"]')!;
+    expect(badge.textContent).toBe('0');
+    expect(badge.getAttribute('title')).toBe('本期免费');
+    expect(sendBar().textContent).not.toContain('本期免费');
+    expect(sendBar().textContent).not.toContain('输出最高 1080P');
+  });
+
+  it('发送钮 title 两模式各表发送语义且都含「输出最高 1080P」', () => {
+    renderDialog({ mode: 'smart' });
+    expect(btn('subtitle-erase-send-btn').getAttribute('title')).toContain('自动擦除画面下半字幕');
+    expect(btn('subtitle-erase-send-btn').getAttribute('title')).toContain('输出最高 1080P');
+    renderDialog({ mode: 'box' });
+    expect(btn('subtitle-erase-send-btn').getAttribute('title')).toContain('检测框');
+    expect(btn('subtitle-erase-send-btn').getAttribute('title')).toContain('输出最高 1080P');
+  });
+
+  it('框选是框选模式唯一工具恒激活（aria-pressed=true）；框满时置灰并提示上限', () => {
+    renderDialog({ mode: 'box' });
     expect(btn('subtitle-erase-tool-box').getAttribute('aria-pressed')).toBe('true');
-    renderDialog({ boxLimitReached: true });
+    renderDialog({ mode: 'box', boxLimitReached: true });
     expect(btn('subtitle-erase-tool-box').disabled).toBe(true);
     expect(btn('subtitle-erase-tool-box').getAttribute('title')).toContain('20 个上限');
   });
-
-  it('「全画面文字」开关悬停说明含顶部字幕指引（title 通道）', () => {
-    renderDialog();
-    expect(btn('subtitle-erase-full-text-toggle').getAttribute('title')).toContain('顶部字幕需开此开关');
-  });
 });
 
-describe('IKGZ83 开关与回调透传', () => {
-  it('开关两态受控：aria-checked 跟随 props，点击上抛取反', async () => {
-    renderDialog();
-    const toggle = btn('subtitle-erase-full-text-toggle');
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
-    await click(toggle);
-    expect(fullTextChangeMock).toHaveBeenCalledWith(true);
-    renderDialog({ fullText: true });
-    expect(btn('subtitle-erase-full-text-toggle').getAttribute('aria-checked')).toBe('true');
-    await click(btn('subtitle-erase-full-text-toggle'));
-    expect(fullTextChangeMock).toHaveBeenCalledWith(false);
-  });
-
+describe('IKH3OU 回调透传与只读', () => {
   it('撤销/重做置灰透传：无操作禁用，可用时点击回调', async () => {
-    renderDialog();
+    renderDialog({ mode: 'box' });
     expect(btn('subtitle-erase-undo').disabled).toBe(true);
     expect(btn('subtitle-erase-redo').disabled).toBe(true);
-    renderDialog({ canUndo: true, canRedo: true });
+    renderDialog({ mode: 'box', canUndo: true, canRedo: true });
     expect(btn('subtitle-erase-undo').disabled).toBe(false);
     expect(btn('subtitle-erase-redo').disabled).toBe(false);
     await click(btn('subtitle-erase-undo'));
@@ -122,8 +141,8 @@ describe('IKGZ83 开关与回调透传', () => {
     expect(redoMock).toHaveBeenCalledTimes(1);
   });
 
-  it('X 关闭与发送回调透传；发送钮默认可发（无框=智能模式）', async () => {
-    renderDialog();
+  it('X 关闭与发送回调透传；智能模式发送钮默认可发（无框直发）', async () => {
+    renderDialog({ mode: 'smart' });
     expect(btn('subtitle-erase-send-btn').disabled).toBe(false);
     await click(btn('subtitle-erase-send-btn'));
     expect(sendMock).toHaveBeenCalledTimes(1);
@@ -132,22 +151,24 @@ describe('IKGZ83 开关与回调透传', () => {
   });
 
   it('发送中（submitting）：全部控件只读防重复提交', async () => {
-    renderDialog({ submitting: true, canUndo: true, fullText: false });
+    renderDialog({ mode: 'box', submitting: true, canUndo: true });
     expect(btn('subtitle-erase-send-btn').disabled).toBe(true);
     expect(btn('subtitle-erase-undo').disabled).toBe(true);
-    expect(btn('subtitle-erase-full-text-toggle').disabled).toBe(true);
+    expect(btn('subtitle-erase-tool-box').disabled).toBe(true);
     await click(btn('subtitle-erase-send-btn'));
-    await click(btn('subtitle-erase-full-text-toggle'));
+    await click(btn('subtitle-erase-undo'));
     expect(sendMock).not.toHaveBeenCalled();
-    expect(fullTextChangeMock).not.toHaveBeenCalled();
+    expect(undoMock).not.toHaveBeenCalled();
+    expect(btn('subtitle-erase-send-btn').getAttribute('title')).toBe('正在发送，请稍候');
   });
 });
 
-/* ===== IKH25A 发送条跟随态 CSS 中心点锚（CSS 源断言，先例 CropDialog IKH1WI describe）：
+/* ===== IKH25A 单条跟随态 CSS 中心点锚（CSS 源断言，先例 CropDialog IKH1WI describe）：
    跟随锚 left 是源卡中心 x，真居中由基础 .sendBar 的 translateX(-50%) 完成；
    .sendBarFollow 对齐 CropDialog .panelFollow 先例（left:0 兜底 inline 缺失，
-   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。 ===== */
-describe('IKH25A 发送条跟随态 CSS 中心点锚', () => {
+   transform 不覆盖 → 继承基础态完成真居中，不再对中心点锚二次左移）。
+   IKH3OU 单条化后成员数从两条降为一条，退役样式块一并删除。 ===== */
+describe('IKH25A 单条跟随态 CSS 中心点锚', () => {
   const css = readFileSync(resolve('src/pages/CanvasPage/components/VideoSubtitleEraseDialog/index.module.css'), 'utf-8');
   const block = (selector: string) => css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
@@ -160,5 +181,14 @@ describe('IKH25A 发送条跟随态 CSS 中心点锚', () => {
     expect(follow).toContain('bottom: auto');
     expect(follow).toContain('left: 0');
     expect(follow).not.toContain('transform');
+  });
+
+  it('退役样式已删除：上方工具条容器与「全画面文字」开关块不留死样式', () => {
+    expect(block('\\.toolbar')).toBe('');
+    expect(block('\\.fullTextToggle')).toBe('');
+    expect(block('\\.togglePill')).toBe('');
+    expect(block('\\.toggleKnob')).toBe('');
+    // 输出最高 1080P 已挪到发送钮 title，条内说明文字样式同步退役
+    expect(block('\\.sendHint')).toBe('');
   });
 });
