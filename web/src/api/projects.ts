@@ -17,6 +17,8 @@ export interface ProjectRecord {
   previews: string[];
   /** 创建时间（ISO 字符串） */
   created_at: string;
+  last_opened_at: string | null;
+  pinned_at: string | null;
 }
 
 /** 项目分页包络：与 GET /api/assets 保持一致。 */
@@ -56,6 +58,14 @@ export function fetchProjects() {
 export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   return apiRequest<ProjectPageData>(`/api/projects?${params.toString()}`, { silent: true });
+}
+
+/** 打开即记 PUT /api/projects/:id/last-opened（IKH1YK）：失败静默由调用方 catch。 */
+export function touchProjectLastOpened(id: string | number): Promise<void> {
+  return apiRequest<void>(`/api/projects/${encodeURIComponent(String(id))}/last-opened`, {
+    method: 'PUT',
+    silent: true,
+  });
 }
 
 /** 项目卡片页的 TanStack Query 无限分页配置。 */

@@ -49,6 +49,8 @@ const projects: ProjectRecord[] = [
       'https://cdn.example.test/previews/four.png',
     ],
     created_at: '2026-09-04T00:00:00.000Z',
+    last_opened_at: null,
+    pinned_at: null,
   },
   {
     id: 'without-previews',
@@ -56,6 +58,8 @@ const projects: ProjectRecord[] = [
     thumb: null,
     previews: [],
     created_at: '2026-09-03T00:00:00.000Z',
+    last_opened_at: null,
+    pinned_at: null,
   },
 ];
 

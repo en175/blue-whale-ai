@@ -21,10 +21,29 @@ export function canvasLocationSearch(searchParams: URLSearchParams, canvasId: st
   return qs ? `?${qs}` : '';
 }
 
-/** Keep a query id that is still in the list; otherwise fall back to the first canvas. */
-export function pickCanvasIdAfterLoad(queryId: string, projectIds: readonly string[]): string {
+/** 恢复落点候选：查询参数 > 上次打开 > 首项。 */
+export function pickCanvasIdAfterLoad(
+  queryId: string,
+  projectIds: readonly string[],
+  lastOpenedId?: string,
+): string {
   if (queryId && projectIds.includes(queryId)) return queryId;
+  if (lastOpenedId && projectIds.includes(lastOpenedId)) return lastOpenedId;
   return projectIds[0] ?? '';
+}
+
+/** 从项目列表挑出 last_opened_at 最新的一项 id；全空或空列表返回空串（ISO 字典序即时间序）。 */
+export function findLastOpenedProjectId(
+  projects: readonly { id: string | number; last_opened_at: string | null }[],
+): string {
+  let best: { id: string | number; last_opened_at: string } | null = null;
+  for (const p of projects) {
+    if (!p.last_opened_at) continue;
+    if (!best || p.last_opened_at > best.last_opened_at) {
+      best = { id: p.id, last_opened_at: p.last_opened_at };
+    }
+  }
+  return best ? String(best.id) : '';
 }
 
 /** Deleting the current canvas returns the user to the project list. */
