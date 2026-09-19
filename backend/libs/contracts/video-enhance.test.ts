@@ -11,6 +11,11 @@ import { describe, expect, it } from "vitest";
 
 import { VIDEO_ENHANCE_TAG } from "../shared/generation/queue.constants.js";
 import {
+  ERROR_CODES,
+  ERROR_VIDEO_ENHANCE_FAILED,
+  GENERATION_ERROR_NUMERIC_CODES,
+} from "./error-codes.js";
+import {
   VIDEO_ENHANCE_BITRATE_LEVEL,
   VIDEO_ENHANCE_DEFAULT_RESOLUTION,
   VIDEO_ENHANCE_INPUT_KEYS,
@@ -163,5 +168,24 @@ describe("video_enhance 双端一致性（读 worker-java 源码文本，防漂�
     expect(contractJava).toContain("int MAX_INPUT_SHORT_SIDE_PX = 1080;");
     expect(contractJava).toContain("int MIN_INPUT_LONG_SIDE_PX = 360;");
     expect(contractJava).toContain("int MAX_INPUT_LONG_SIDE_PX = 1920;");
+  });
+
+  it("执行面兜底码 video_enhance_failed → 1045（1044 已由音视频分离占用），Java 契约侧常量同步", () => {
+    expect(ERROR_VIDEO_ENHANCE_FAILED).toBe("video_enhance_failed");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_ENHANCE_FAILED]).toBe(1045);
+    expect(ERROR_CODES[1045]).toBeTruthy();
+    // worker 执行面（IKH3VF）引用侧防漂移：Java 契约常量与错误类常量同值
+    expect(contractJava).toContain(
+      'String ERROR_VIDEO_ENHANCE_FAILED = "video_enhance_failed";',
+    );
+    expect(
+      readFileSync(
+        new URL(
+          "../../../worker-java/src/main/java/com/bluewhale/worker/domain/error/VideoEnhanceError.java",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ).toContain('String VIDEO_ENHANCE_FAILED = "video_enhance_failed";');
   });
 });
