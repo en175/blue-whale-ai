@@ -1735,7 +1735,6 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -2626,7 +2625,6 @@ export default function CanvasPage() {
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
     firePendingVideoDraft: () => {},
-    img2img: (_id: string, _file: File) => {},
     renameCard: (_id: string, _name: string) => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard };
@@ -4030,7 +4028,6 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4072,7 +4069,6 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4122,7 +4118,6 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -4607,7 +4602,6 @@ export default function CanvasPage() {
       onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
       onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-      onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -4878,31 +4872,6 @@ export default function CanvasPage() {
     });
   };
 
-  /** 图片生成节点「图生图」：本地图落入画布、自动连线、进入参考清单 */
-  const handleImg2Img = (draftId: string, file: File) => {
-    if (!file.type.startsWith('image/')) {
-      showToast('warn', '图生图仅支持图片');
-      return;
-    }
-    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
-    const center = draft
-      ? { x: draft.position.x - 360, y: draft.position.y }
-      : spawnDraftPosition();
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-    const position = nextDraftPosition({
-      center,
-      dockTop: center.y + 2000,
-      nodes: nodes.map(nodeBoxOf),
-    });
-    void placeFileOnCanvas(file, { position }).then((done) => {
-      addCanvasEdge(done.nodeId, draftId);
-      void actionsRef.current.complianceCheck(done.nodeId);
-      openImageDraftDialog(draftId);
-    }).catch((err) => {
-      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-    });
-  };
-
   actionsRef.current = {
     ...actionsRef.current,
     duplicate: handleDuplicateNode,
@@ -4918,7 +4887,6 @@ export default function CanvasPage() {
     copyImage: (id) => { void handleCopyImage(id); },
     complianceCheck: (id) => { void handleComplianceCheck(id); },
     fillEmptyShell: handleFillEmptyShell,
-    img2img: handleImg2Img,
   };
 
   /** 从资产 URL 提取展示名（无元数据字段时的兜底命名） */
@@ -5022,7 +4990,6 @@ export default function CanvasPage() {
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -5677,7 +5644,6 @@ export default function CanvasPage() {
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -8469,7 +8435,6 @@ export default function CanvasPage() {
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
