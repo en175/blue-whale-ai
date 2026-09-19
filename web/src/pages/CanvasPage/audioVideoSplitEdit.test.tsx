@@ -419,6 +419,8 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(audio.data.progress).toBe(100);
     expect(audio.data.src).toBe('http://tos/x.m4a');
     expect(audio.data.assetId).toBe('a88');
+    // 时长取服务端权威值（story 15，火山返回 duration 经终态补丁落卡）
+    expect(audio.data.duration).toBe(65.5);
     // 展示名保留建卡所选格式的后缀（不被「生成-{jobId}」自动命名覆盖）
     expect(audio.data.fileName).toBe('素材视频(audio).m4a');
   });

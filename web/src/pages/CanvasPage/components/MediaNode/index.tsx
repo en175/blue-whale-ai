@@ -554,7 +554,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <AudioPlayer src={data.src || ''} fileName={data.fileName} onDownload={() => data.onDownload?.(id)} />
+          <AudioPlayer
+            src={data.src || ''}
+            fileName={data.fileName}
+            duration={typeof data.duration === 'number' ? data.duration : undefined}
+            onDownload={() => data.onDownload?.(id)}
+          />
         ) : data.mediaType === 'video' ? (
           <>
             <video

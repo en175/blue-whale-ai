@@ -8,6 +8,7 @@ import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
+import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -142,11 +143,11 @@ export interface JobCreatedData {
   cursor: number;
 }
 
-/** POST /api/projects/:id/media-extractions 请求体。output_format 五值（IKH28X，缺省 m4a；
- *  产物文件名后缀与展示名跟随所选格式），与 CanvasPage/audioVideoSplit.ts 格式清单同源。 */
+/** POST /api/projects/:id/media-extractions 请求体。output_format 五值（缺省 m4a；
+ *  产物文件名后缀与展示名跟随所选格式），类型与契约同源（@lib/contracts/media-extract）。 */
 export interface CreateMediaExtractionPayload {
   source_asset_id: string | number;
-  output_format?: 'm4a' | 'mp3' | 'ogg' | 'flac' | 'wav';
+  output_format?: MediaExtractOutputFormat;
 }
 
 /** 创建媒体提取任务返回。 */

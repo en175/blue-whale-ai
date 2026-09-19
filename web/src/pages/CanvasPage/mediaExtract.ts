@@ -117,12 +117,12 @@ export function mediaExtractErrorText(
 }
 
 /** 提取任务终态的本地节点补丁；进行中返回 null，调用方继续轮询。
- *  只写展示与播放必需字段：mime/size 是下载文件名与详情面板的兜底（blob.type / 资产详情优先），
- *  duration 由浏览器实测补齐（handleMediaDims），故不再像旧的 worker 回写那样写入——改动前先确认消费方。 */
+ *  只写展示与播放必需字段：mime/size 是下载文件名与详情面板的兜底（blob.type / 资产详情优先）；
+ *  duration 用服务端权威值（火山返回，story 15），浏览器实测仅在资产缺该字段时兜底。 */
 export function mediaExtractTerminalPatch(
   detail: {
     status: string;
-    asset?: { id?: string; url?: string } | null;
+    asset?: { id?: string; url?: string; duration?: number | null } | null;
     error?: { code?: string | number; message?: string; msg?: string } | null;
   },
   currentFileName?: string,
@@ -135,6 +135,7 @@ export function mediaExtractTerminalPatch(
       mediaType: 'audio',
       ...(currentFileName ? { fileName: currentFileName } : {}),
       assetId: detail.asset?.id,
+      ...(detail.asset?.duration != null ? { duration: detail.asset.duration } : {}),
     };
   }
   if (detail.status === 'failed') {

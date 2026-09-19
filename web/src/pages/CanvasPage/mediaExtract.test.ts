@@ -35,10 +35,10 @@ describe('mediaExtractTerminalPatch', () => {
     });
   });
 
-  it('succeeded 时落成品音频（保留当前展示名，后缀跟随建卡所选格式）', () => {
+  it('succeeded 时落成品音频（保留当前展示名、后缀跟随建卡所选格式、时长取服务端权威值）', () => {
     expect(
       mediaExtractTerminalPatch(
-        { status: 'succeeded', asset: { id: 'a1', url: 'http://tos/a1.m4a' } },
+        { status: 'succeeded', asset: { id: 'a1', url: 'http://tos/a1.m4a', duration: 65.5 } },
         '测试视频(audio).wav',
       ),
     ).toEqual({
@@ -48,6 +48,7 @@ describe('mediaExtractTerminalPatch', () => {
       mediaType: 'audio',
       fileName: '测试视频(audio).wav',
       assetId: 'a1',
+      duration: 65.5,
     });
   });
 });
