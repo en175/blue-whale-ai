@@ -53,6 +53,7 @@ export {
   ERROR_IMAGE_GENERATION_FAILED,
   ERROR_INVALID_INPUT,
   ERROR_MEDIA_EXTRACT_FAILED,
+  ERROR_MEDIA_EXTRACT_PROVIDER_FAILED,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_NO_RESULT,
   ERROR_PROVIDER_CONFIG,
@@ -213,6 +214,18 @@ export {
   type VideoSubtitleEraseEraseBox,
   type VideoSubtitleEraseTimeSegmentFilter,
 } from "./video-subtitle-erase.js";
+export {
+  MEDIA_EXTRACT_JOB_TYPE,
+  MEDIA_EXTRACT_SOURCE,
+  MEDIA_EXTRACT_INPUT_KEYS,
+  MEDIA_EXTRACT_OUTPUT_FORMATS,
+  MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT,
+  MEDIA_EXTRACT_SUBMIT_PATH,
+  MEDIA_EXTRACT_POLL_PATH_PREFIX,
+  mediaExtractInputSchema,
+  type MediaExtractOutputFormat,
+  type MediaExtractInput,
+} from "./media-extract.js";
 export {
   DomainError,
   assetError,

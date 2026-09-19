@@ -61,4 +61,47 @@ describe("MediaExtractionsService.create", () => {
       }),
     });
   });
+
+  // IKH28T 契约口径（@lib/contracts/media-extract）：缺省补默认 m4a，非法值明确拒绝
+  // （静默回退 mp3 的旧口径废除）。
+  it("defaults output_format to m4a when omitted", async () => {
+    const { service, create } = makeService();
+    const result = await service.create("9", "55", { source_asset_id: "88" });
+    expect(result.code).toBe(200);
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        input: { source_asset_id: "88", output_format: "m4a" },
+      }),
+    });
+  });
+
+  it.each(["aac", "MP3", "", null, 42])(
+    "rejects an output_format outside the contract enum (%s)",
+    async (outputFormat) => {
+      const { service, create } = makeService();
+      const result = await service.create("9", "55", {
+        source_asset_id: "88",
+        output_format: outputFormat,
+      });
+      expect(result.code).not.toBe(200);
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["m4a", "mp3", "ogg", "flac", "wav"])(
+    "accepts every contract enum value (%s)",
+    async (outputFormat) => {
+      const { service, create } = makeService();
+      const result = await service.create("9", "55", {
+        source_asset_id: "88",
+        output_format: outputFormat,
+      });
+      expect(result.code).toBe(200);
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          input: { source_asset_id: "88", output_format: outputFormat },
+        }),
+      });
+    },
+  );
 });

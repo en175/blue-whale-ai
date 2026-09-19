@@ -1,7 +1,8 @@
 # 视频提取音频 API 对接文档（前端）
 
 > 需求：IKARDY 画布视频节点提取音频。后端 `media-extractions` 模块 + `generation-worker` 提取。
-> 版本：v2（2026-09-15，IKFS5W）。**画布改由前端写**：建任务接口不再注入节点，worker 不再回写画布。
+> 版本：v3（2026-09-19，IKH28T 契约扩面）。**output_format 枚举扩为五值、默认 m4a、非法值拒绝**（静默回退 mp3 废除）；错误码面新增火山执行路径兜底 1044（执行路径切换由后续票承载，切换前 worker 仍为本地 ffmpeg 链路）。
+> 上一版：v2（2026-09-15，IKFS5W）画布改由前端写。**画布改由前端写**：建任务接口不再注入节点，worker 不再回写画布。
 > 所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 成功，前端 `apiRequest` 已解包 `data`。
 
 ---
@@ -29,7 +30,7 @@ POST /api/projects/:projectId/media-extractions
 { "source_asset_id": "3985", "output_format": "mp3" }
 ```
 - `source_asset_id`：**必填**，画布视频节点的 `data.assetId`（后端校验归属 + 必须 `type=video`，非视频返回失败）
-- `output_format`：可选，目前仅 `mp3`（缺省 `mp3`）
+- `output_format`：可选，**`m4a`（缺省值）/ `mp3` / `ogg` / `flac` / `wav` 五值**（IKH28T 契约口径，对齐火山官方 `format` 参数；缺省落 `m4a`——官方默认值）；**传枚举外值 / 非字符串 / `null` 会被明确拒绝**（不再静默回退 mp3）
 
 响应 `data`：
 ```json
@@ -108,6 +109,8 @@ GET /api/jobs/:id
 | `upload_failed` | 音频上传失败 | 提示「音频上传失败」 |
 | `source_asset_unavailable` | 源视频资产不可用 | 提示刷新 |
 | `enqueue_failed` | 任务入队失败（瞬时） | 提示重试 |
+
+> 以上为现行本地 ffmpeg 链路错误码。IKH28T 已为火山执行路径定义兜底码 **`media_extract_provider_failed`（数值 1044，「音频提取失败，请重试」）**——网关分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 / 超时 1012）之外的火山任务失败与转存失败统一归并该码；映射口径全文 = 迁移契约 §18.4。执行路径切换（worker 票 IKH28W）落地后该码开始产生，本地链路细分码（`video_too_large` 等）随之不再由新任务产生（存量已落库任务的投影不变）。
 
 ---
 
