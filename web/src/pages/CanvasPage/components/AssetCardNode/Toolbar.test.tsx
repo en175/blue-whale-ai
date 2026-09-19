@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssetCardToolbar from './Toolbar';
 import { assetCardToolbarVisible } from './toolbarVisibility';
 import type { AssetCardNodeData } from './index';
+import styles from './index.module.css';
+
 let root: Root;
 let mountNode: HTMLDivElement;
 
@@ -67,6 +69,12 @@ describe('AssetCardToolbar 内容构成（迁移前后一致）', () => {
     expect(mountNode.textContent).toContain('自定义卡');
     await renderToolbar({ kind: 'legacy-junk' });
     expect(mountNode.textContent).toContain('自定义卡');
+  });
+
+  it('topBar 容器底类存在，「添加到对话」为透明底 addToChatBtn 而非胶囊类（IKGZ8B）', async () => {
+    await renderToolbar({ kind: 'style' });
+    expect(mountNode.querySelector(`.${styles.topBar}`)).not.toBeNull();
+    expect(mountNode.querySelector(`.${styles.addToChatBtn}`)).not.toBeNull();
   });
 
   it('点击「添加到对话」派发 onAddToChat（携带节点 id）', async () => {

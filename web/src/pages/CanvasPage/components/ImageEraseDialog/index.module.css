@@ -14,10 +14,10 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background-color: #1e1e1e;
-  border: 1px solid #2c2c2c;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   white-space: nowrap;
 }
 
@@ -124,10 +124,10 @@
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
-  background-color: #1e1e1e;
-  border: 1px solid #2c2c2c;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
   border-radius: 999px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-overlay);
 }
 
 /* 跟随锚定（inline left/top 生效）：解除默认 bottom 定位避免 top/bottom 双侧拉伸 */

@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import TextNode from './index';
 import { computeFollowAnchorAbove } from '../../followDialog';
+import styles from './index.module.css';
 
 beforeAll(() => {
   // jsdom 未实现 Range 几何 API 与 execCommand（格式化命令点击路径用）
@@ -284,6 +285,13 @@ describe('操作条（唯一选中、非编辑）', () => {
     const buttons = [...(layer()!.querySelectorAll('button, select') ?? [])];
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('添加到对话');
+  });
+
+  it('操作条 nodeBar 容器底类存在，「添加到对话」为透明底 addToChatBtn 而非胶囊类（IKGZ8B）', async () => {
+    await renderTextNode({ selected: true });
+    const bar = layer()!;
+    expect(bar.querySelector(`.${styles.nodeBar}`)).not.toBeNull();
+    expect(bar.querySelector(`.${styles.addToChatBtn}`)).not.toBeNull();
   });
 
   it('素材标签卡（promptMentions 绑定、非 promptSource）：新增素材标签 select 列画布素材 + 添加到对话', async () => {

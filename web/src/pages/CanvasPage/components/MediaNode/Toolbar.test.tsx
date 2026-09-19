@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MediaNodeToolbar from './Toolbar';
 import type { MediaGenStatus } from './index';
+import styles from './index.module.css';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -64,6 +65,14 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
   it('图片卡全显（重新编辑/生成图片/生成视频/高清▾/详情/下载/@）', async () => {
     await renderToolbar('image');
     expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清', '详情', '下载', '添加到 Agent 聊天']);
+  });
+
+  it('工具条容器底类存在，「添加到对话」为透明底 toolBtn 而非胶囊类（IKGZ8B）', async () => {
+    await renderToolbar('image');
+    expect(mountNode.querySelector(`.${styles.toolbar}`)).not.toBeNull();
+    const addToChat = [...mountNode.querySelectorAll('button')]
+      .find((b) => b.getAttribute('title') === '添加到 Agent 聊天')!;
+    expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
   it('视频卡保留生成视频与 @，隐藏生成图片与「高清 ▾」，多提取音频', async () => {

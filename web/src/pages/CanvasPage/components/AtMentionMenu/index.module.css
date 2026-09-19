@@ -12,10 +12,10 @@
 .panel,
 .flyout {
   pointer-events: auto;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   box-sizing: border-box;
 }
 
@@ -47,7 +47,8 @@
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid #3f3f3f;
-  background: #1f1f1f;
+  /* IKGZ8C：容器统一 #1e1e1e 后原 #1f1f1f 失去对比度，调暗到 --color-bg-secondary 恢复层级 */
+  background: var(--color-bg-secondary);
   color: #9a9a9a;
 }
 
