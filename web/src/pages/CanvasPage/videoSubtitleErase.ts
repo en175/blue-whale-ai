@@ -1,6 +1,7 @@
 /* ============================================
- * 视频智能去字幕（IKGZ82）：「智能去字幕」入口门槛预检与效果边界文案（纯逻辑，
- * 无 React 依赖，形状与判定口径对齐 imageErase.ts / imageCutout.ts 先例）。
+ * 视频智能去字幕（IKGZ82 入口 / IKH3OU 交互重做）：「智能去字幕 ▾」入口门槛预检、
+ * 会话模式与发送参数推导（纯逻辑，无 React 依赖，形状与判定口径对齐
+ * imageErase.ts / imageCutout.ts 先例）。
  * 门槛常量经 @lib/contracts/video-subtitle-erase 与契约同源引用
  * （对齐 imageCutout.ts 契约同源切换先例 IKGOR6，数值不变仅换单源）；
  * 数值出处 = 规格 docs/specs/2026-09-19-video-subtitle-erase-mediakit.md
@@ -25,9 +26,10 @@ export {
 };
 export type { VideoSubtitleEraseInput };
 
-/** 入口可用态悬停说明（效果边界，规格故事 6）：默认擦白色中英文字幕，
- *  彩色/顶部字幕走编辑态框选加「全画面文字」模式。置灰态与原因文案互斥（同一 title 通道）。 */
-export const VIDEO_SUBTITLE_ERASE_ENTRY_HINT = '适合白色中英文字幕，彩色或顶部字幕请用框选加全画面模式';
+/** 去字幕会话模式（IKH3OU，ADR-0104 模式前置到入口下拉）：入口菜单两项各进一种会话，
+ *  会话内不互切（换模式 = X 退出后从菜单重选）。两模式 detect_mode 恒为 subtitle_smart，
+ *  差异只在框选工具与检测框集合：smart=零框选工具、无框直发；box=拉框指定擦除区域。 */
+export type VideoSubtitleEraseMode = 'smart' | 'box';
 
 /* ============ 门槛预检 ============ */
 
@@ -67,23 +69,20 @@ export interface VideoSubtitleEraseSendSource {
   sourceAssetId: string;
   /** 发送时才生成（先冻结进任务再据此建结果卡） */
   targetNodeId: string;
-  /** 「全画面文字」开关（默认关）：true=text_full（全画面文字，擦顶部字幕的途径）、
-   *  false=subtitle_smart（智能模式，自动擦画面下半字幕）——开关单独决定检测模式。 */
-  fullText: boolean;
   boxes: readonly SubtitleBoxOp[];
   displayWidth: number;
   displayHeight: number;
 }
 
-/** 组装发送契约 input（一个发送钮统一两种语义，规格故事 17/18/12）：
- *  detect_mode 只由「全画面文字」开关推导（开=text_full、关=subtitle_smart）；
- *  erase_boxes 只由框集合推导（无框=空数组——智能模式自动擦下半字幕，不传框键由
- *  worker 判空承担；有框=按框擦，模式与框独立组合）。 */
+/** 组装发送契约 input（IKH3OU，ADR-0104：模式前置到入口后，一个发送钮只服务一种语义）：
+ *  detect_mode 恒 `subtitle_smart`——智能模式自动擦画面下半字幕，框选模式在其之上叠加
+ *  检测框；erase_boxes 只由框集合推导（智能模式恒空数组：入口零框选工具，不传框键由
+ *  worker 判空承担）。`text_full`（全画面检测）契约枚举保留但本期无 UI 入口（ADR-0104）。 */
 export function buildVideoSubtitleEraseInput(source: VideoSubtitleEraseSendSource): VideoSubtitleEraseInput {
   return {
     source_asset_id: source.sourceAssetId,
     target_node_id: source.targetNodeId,
-    detect_mode: source.fullText ? 'text_full' : 'subtitle_smart',
+    detect_mode: 'subtitle_smart',
     erase_boxes: subtitleBoxesToPayload(source.boxes, source.displayWidth, source.displayHeight),
   };
 }
