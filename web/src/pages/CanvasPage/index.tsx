@@ -1231,7 +1231,10 @@ export default function CanvasPage() {
       })
     : null;
   /** 去字幕编辑态跟随锚（IKGZ83，口径同擦除）：源视频卡上方工具条 / 下方发送条。
-   *  工具条手动换算（高约 42 + 间距 10）；发送条复用 computeFollowAnchor（恒锚节点下方）。 */
+   *  工具条手动换算（高约 42 + 间距 10）；发送条同 cutoutToolbarAnchor 中心点锚（IKH25A）——
+   *  发送条壳自身 translateX(-50%) 真居中，left 传源卡中心 x（估宽左上角语义叠加
+   *  translateX(-50%) 会恒偏左估宽一半 130px），估半宽 130 仅用于视口钳制；
+   *  top 同 computeFollowAnchor 的节点下方 + 16 间距（垂直口径不变）。 */
   const subtitleEraseSourceNode = subtitleEraseTargetNodeId
     ? mediaNodes.find((n) => n.id === subtitleEraseTargetNodeId) ?? null
     : null;
@@ -1247,18 +1250,20 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const subtitleEraseSendBarAnchor = subtitleEraseSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: subtitleEraseSourceNode.position.x,
-        nodeY: subtitleEraseSourceNode.position.y,
-        nodeWidth: nodeBoxOf(subtitleEraseSourceNode).width,
-        nodeHeight: nodeBoxOf(subtitleEraseSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 260,
-      })
-    : null;
+  const subtitleEraseSendBarAnchor = (() => {
+    if (!subtitleEraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(subtitleEraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = subtitleEraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = subtitleEraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    // 估半宽 = 估宽 260 的一半（IKH25A 前口径），仅用于视口钳制，不参与居中
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
