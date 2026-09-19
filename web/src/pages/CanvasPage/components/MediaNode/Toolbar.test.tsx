@@ -75,9 +75,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多音视频分离', async () => {
+  it('视频卡保留 HD 与生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多音视频分离', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['重新编辑', '生成视频', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['重新编辑', '生成视频', 'HD', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「高清 ▾」下拉排在生成视频之后（IKGM9F 位次不变）', async () => {
@@ -396,6 +396,80 @@ describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
     const disabled = eraseBtn();
     expect(disabled.getAttribute('title')).toContain('无法智能去字幕');
     expect(disabled.getAttribute('title')).not.toContain('白色中英文字幕');
+  });
+});
+
+describe('MediaNodeToolbar HD 高清入口（IKH3VG）', () => {
+  const hdBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="video-enhance-btn"]')!;
+
+  it('仅视频卡渲染（图片卡/音频卡不出现 HD）', async () => {
+    await renderToolbar('image');
+    expect(mountNode.querySelector('[data-testid="video-enhance-btn"]')).toBeNull();
+    await renderToolbar('audio');
+    expect(mountNode.querySelector('[data-testid="video-enhance-btn"]')).toBeNull();
+    await renderToolbar('video');
+    expect(hdBtn()).toBeTruthy();
+  });
+
+  it('排位在「智能去字幕」之前、「生成视频」之后（ADR-0105 位次）', async () => {
+    await renderToolbar('video');
+    const order = labels();
+    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('HD'));
+    expect(order.indexOf('HD')).toBeLessThan(order.indexOf('智能去字幕'));
+  });
+
+  it('文字徽标形态：HD 文本 + 描边小方标类（非图标）', async () => {
+    await renderToolbar('video');
+    expect(hdBtn().textContent).toBe('HD');
+    expect(hdBtn().querySelector(`.${styles.hdBadge}`)).toBeTruthy();
+  });
+
+  it('点击派发 onVideoEnhance（携带节点 id）', async () => {
+    const onVideoEnhance = vi.fn();
+    await renderToolbar('video', { data: { onVideoEnhance, assetId: 'a1' } });
+    await act(async () => {
+      hdBtn().click();
+    });
+    expect(onVideoEnhance).toHaveBeenCalledWith('video-node');
+  });
+
+  it('置灰四情形之未关联资产：置灰并悬停唯一原因（宽高缺失不叠加拦截）', async () => {
+    await renderToolbar('video');
+    expect(hdBtn().disabled).toBe(true);
+    expect(hdBtn().getAttribute('title')).toContain('尚未关联资产');
+    // 宽高缺失（存量视频）不拦：关联资产即可用
+    await renderToolbar('video', { id: 'v2', data: { assetId: 'a1' } });
+    expect(hdBtn().disabled).toBe(false);
+    expect(hdBtn().getAttribute('title')).toContain('4K');
+  });
+
+  it('置灰四情形之短/长边超上限：横屏长边>1920、竖屏短边>1080 均置灰并悬停原因；竖屏 1080×1920 合法', async () => {
+    const onVideoEnhance = vi.fn();
+    // 横屏长边超限（2561>1920）
+    await renderToolbar('video', { data: { onVideoEnhance, assetId: 'a1', width: 2561, height: 1440 } });
+    expect(hdBtn().disabled).toBe(true);
+    expect(hdBtn().getAttribute('title')).toContain('1920');
+    // 竖屏短边超限（短边 1081>1080）
+    await renderToolbar('video', { id: 'tall', data: { onVideoEnhance, assetId: 'a1', width: 1081, height: 1920 } });
+    expect(hdBtn().disabled).toBe(true);
+    expect(hdBtn().getAttribute('title')).toContain('1080');
+    // 竖屏恰 1080×1920 合法（契约「短边 [360,1080]、长边 [360,1920]」）
+    await renderToolbar('video', { id: 'legal', data: { onVideoEnhance, assetId: 'a1', width: 1080, height: 1920 } });
+    expect(hdBtn().disabled).toBe(false);
+    // 置灰点击不派发
+    await renderToolbar('video', { id: 'over', data: { onVideoEnhance, assetId: 'a1', width: 3840, height: 2160 } });
+    await act(async () => {
+      hdBtn().click();
+    });
+    expect(onVideoEnhance).not.toHaveBeenCalled();
+  });
+
+  it('置灰四情形之短边不足 360：置灰并悬停原因；恰 360 放行', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1', width: 640, height: 359 } });
+    expect(hdBtn().disabled).toBe(true);
+    expect(hdBtn().getAttribute('title')).toContain('360');
+    await renderToolbar('video', { id: 'exact', data: { assetId: 'a1', width: 640, height: 360 } });
+    expect(hdBtn().disabled).toBe(false);
   });
 });
 
