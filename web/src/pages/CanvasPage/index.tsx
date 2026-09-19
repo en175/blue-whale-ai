@@ -3144,7 +3144,11 @@ export default function CanvasPage() {
     // 一次计算两用：soloId 即工具栏跟随目标（IKGYYB 审查消重复 filter）
     const candidates = nodes.filter((n) => {
       const m = mediaNodesRef.current.find((x) => x.id === n.id);
-      return !m || m.selected !== false;
+      if (!m || m.selected !== false) return true;
+      // 父层 selected:false 只消化「程序化双选滞后」（同批里还有父层认选中的新卡）。
+      // 用户点到一张父层仍记为未选中的卡时，报告里没有权威选中项，必须保留该卡；
+      // 否则第一次点击会被当成空选中：旧对话框不关、新对话框也不开（IKFOHK）。
+      return !nodes.some((other) => mediaNodesRef.current.find((x) => x.id === other.id)?.selected === true);
     });
     const soloId = candidates.length === 1 ? candidates[0]!.id : null;
     setSoloSelectedNodeId(soloId);
@@ -3169,6 +3173,27 @@ export default function CanvasPage() {
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (subtitleEraseTargetNodeId && ((soloId && soloId !== subtitleEraseTargetNodeId) || candidates.length > 1)) {
       exitSubtitleEraseEditing();
+    }
+    // IKFOHK：单选草稿/成品生成卡时原子切换到对应对话框。选中变化经 React Flow
+    // useEffect 到达，可能早于或代替 onNodeClick（nodeDragThreshold=1 时轻微位移会吞掉 click）。
+    // 已打开同一绑定则交给下方 syncPanelVisible 保持，避免重复 seed 导致面板重挂载。
+    if (soloId && !editSessionActive) {
+      const mediaNode = mediaNodesRef.current.find((n) => n.id === soloId);
+      const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
+      if (mediaNode && (mediaData.draft === true || hasGenerationRecord(mediaNode))) {
+        const mediaType = mediaData.mediaType;
+        const alreadyOpen = mediaType === 'video'
+          ? showBottomDialog && videoDraftId === soloId
+          : mediaType === 'audio'
+            ? showAudioDialog && audioDraftId === soloId
+            : mediaData.imageEnhance
+              ? showEnhanceDialog && enhanceDraftId === soloId
+              : showImageDialog && imageDraftId === soloId;
+        if (!alreadyOpen) {
+          openMediaDraftDialog(soloId, mediaType);
+          return;
+        }
+      }
     }
     const syncPanelVisible = (
       boundId: string | null,
