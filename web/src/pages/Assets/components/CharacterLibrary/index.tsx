@@ -24,6 +24,7 @@ import {
 } from '@/api/material';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '@/components/ConfirmModal';
+import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
 
 /* ============================================
@@ -254,7 +255,7 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
             </div>
             <div className={styles.detailItem}>
               <dt>创建时间</dt>
-              <dd>{asset.CreateTime || '暂无数据'}</dd>
+              <dd>{formatAssetCreatedAt(asset.CreateTime ?? null)}</dd>
             </div>
           </dl>
         </aside>
