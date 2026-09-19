@@ -4,14 +4,13 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen, User } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import RatioIcon from '@/components/RatioIcon';
 import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
-import CharacterLibraryModal from '@/pages/CanvasPage/components/CharacterLibraryModal';
+import { PANEL_REF_MEDIA_TYPES } from '@/pages/CanvasPage/refSourceTypes';
 import { type AssetRecord } from '@/api/assets';
-import { type MaterialAsset } from '@/api/material';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -22,6 +21,7 @@ import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow, classifyRefOverflows, refOverflowToast } from '@/utils/ref-overflow';
 import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOfCap, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -73,9 +73,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [showLogin, setShowLogin] = useState(false);
   /** 从资产中选择弹窗打开来源（agent/video/image，null 关闭）：决定 mediaTypes 过滤与确认后的注入目标 */
   const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
-  /** 角色库弹窗开关（仅 AI视频 tab 入口：虚拟/真人人像库双 tab 多选，与画布视频入口一致） */
-  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
-  /** 参考卡上传菜单开关（三个 tab 的参考/附件卡共用：本地上传 / 从资产中选择） */
+  /** 参考卡上传菜单开关（本地上传 / 从资产中选择） */
   const [refMenu, setRefMenu] = useState<'agent' | 'video' | 'image' | null>(null);
   /** 菜单 fixed 定位（portal 到 body，避免被 refArea 滚动容器裁切） */
   const [refMenuPos, setRefMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -141,7 +139,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     first?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
     last?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
   }>({});
-  /** 首尾帧槽位当前的添加目标（本地上传/资产/角色库共用分流） */
+  /** 首尾帧槽位当前的添加目标（从资产中选择分流） */
   const [slotTarget, setSlotTarget] = useState<'first' | 'last' | null>(null);
   /** 校验类轻提示（顶部弹出，自动消失） */
   const [toast, setToast] = useState('');
@@ -170,11 +168,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { file?: File; preview: string; name?: string; assetId?: string | number }[]
   >([]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  /** 首尾帧槽位占位按钮的定位 ref（本地上传/资产/角色库菜单按对应槽定位） */
-  const firstSlotRef = useRef<HTMLButtonElement>(null);
-  const lastSlotRef = useRef<HTMLButtonElement>(null);
-
   const creationRef = useRef<HTMLDivElement>(null);
   const reasoningRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
@@ -188,6 +181,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const imgRatioRef = useRef<HTMLDivElement>(null);
   const imgResRef = useRef<HTMLDivElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const firstSlotRef = useRef<HTMLButtonElement>(null);
+  const lastSlotRef = useRef<HTMLButtonElement>(null);
 
   // 模型能力列表（首页并发调用 text/video/image；失败保留本地兜底选项）
   const [textModels, setTextModels] = useState<GenerationModel[]>([]);
@@ -693,7 +689,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    // 首尾帧模式：每个槽位只接受一张图片，写入目标槽（本地上传已限定 accept=image/*）
     if (isKeyframe) {
       const image = files.find((f) => f.type.startsWith('image/'));
       if (image && slotTarget) {
@@ -707,7 +702,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
     let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
-    // ADR-0086：模型不接受视频素材参考（features.video_reference=false）时直接拒绝，不静默丢弃。
     const videoRefUnsupported =
       files.some((f) => f.type.startsWith('video/')) && !supportsVideoReferenceOf(selectedVideoModel?.features);
     const newFiles = files
@@ -737,7 +731,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     else if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
     else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
-    // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -795,72 +788,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setAssetsPickerTarget(target);
   };
 
-  /** 打开角色库弹窗（仅 AI视频 tab；未登录先弹登录框，与资产选择入口一致） */
-  const openCharacterLibrary = () => {
-    if (!user) {
-      setShowLogin(true);
-      return;
-    }
-    setShowCharacterLibrary(true);
-  };
-
-  /** 角色库多选确认：注入 AI视频 参考素材
-   *  （assetId 去重 + 图片/视频分类型上限截断；超限/重复合并为一条提示，与画布视频入口口径一致） */
-  const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {
-    setShowCharacterLibrary(false);
-    // 首尾帧模式：角色库仅取一张图片写入目标槽
-    if (isKeyframe) {
-      const image = assets.find((a) => a.AssetType === 'Image');
-      if (image && slotTarget) {
-        const item = { preview: image.URL, type: 'image' as const, assetId: image.Id };
-        setKeyframeRefs((prev) =>
-          slotTarget === 'first' ? { ...prev, first: item } : { ...prev, last: item },
-        );
-      }
-      return;
-    }
-    const existing = new Set(
-      refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
-    );
-    let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-    let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
-    // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传/资产路径同口径，不静默加入）
-    const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
-    const eligible = assets.filter((a) => a.AssetType === 'Image' || a.AssetType === 'Video');
-    const unique = eligible
-      .filter((a) => !(videoRefUnsupported && a.AssetType === 'Video'))
-      .filter((a) => !existing.has(String(a.Id)));
-    const items = unique
-      .filter((a) => {
-        if (a.AssetType === 'Image') {
-          if (imgRoom <= 0) return false;
-          imgRoom -= 1;
-          return true;
-        }
-        if (vidRoom <= 0) return false;
-        vidRoom -= 1;
-        return true;
-      })
-      .map((a) => ({
-        preview: a.URL,
-        type: (a.AssetType === 'Video' ? 'video' : 'image') as 'image' | 'video',
-        assetId: a.Id,
-      }));
-    const parts: string[] = [];
-    const overflows = classifyRefOverflows({
-      selectedImages: unique.filter((a) => a.AssetType === 'Image').length,
-      selectedVideos: unique.filter((a) => a.AssetType === 'Video').length,
-      acceptedImages: items.filter((i) => i.type === 'image').length,
-      acceptedVideos: items.filter((i) => i.type === 'video').length,
-    });
-    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: videoMaxVideos }));
-    if (videoRefUnsupported && assets.some((a) => a.AssetType === 'Video')) parts.push('当前模型不支持视频素材参考，已跳过视频素材');
-    if (unique.length < eligible.length) parts.push('重复的素材已跳过');
-    if (parts.length > 0) showToast(parts.join('；'));
-    if (items.length === 0) return;
-    setRefFiles((prev) => [...prev, ...items]);
-  };
-
   /** 参考/附件卡点击：切换上传菜单（按卡片位置 fixed 定位） */
   const toggleRefMenu = (key: 'agent' | 'video' | 'image') => {
     if (refMenu === key) {
@@ -873,7 +800,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setRefMenu(key);
   };
 
-  /** 首尾帧槽位添加：按对应槽定位打开来源菜单（本地上传/资产/角色库） */
+  /** 首尾帧槽位添加：打开来源菜单（本地上传 / 从资产中选择） */
   const openKeyframeSlotMenu = (slot: 'first' | 'last') => {
     const el = slot === 'first' ? firstSlotRef.current : lastSlotRef.current;
     if (!el) return;
@@ -938,9 +865,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
 
     if (target === 'video') {
+      const unapproved = assets.filter((a) => isUnapprovedVideoMaterialStatus(a.material_status));
+      const approvedAssets = assets.filter((a) => !isUnapprovedVideoMaterialStatus(a.material_status));
+      if (unapproved.length > 0) {
+        showToast(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+      }
+      if (approvedAssets.length === 0) return;
       // 首尾帧模式：仅取一张图片写入目标槽
       if (isKeyframe) {
-        const image = assets.find((a) => a.type === 'image');
+        const image = approvedAssets.find((a) => a.type === 'image');
         if (image && slotTarget) {
           const item = { preview: image.url, type: 'image' as const, assetId: image.id };
           setKeyframeRefs((prev) =>
@@ -956,7 +889,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
       // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传路径同口径，不静默加入）
       const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
-      const eligible = assets
+      const eligible = approvedAssets
         .filter((a) => a.type === 'image' || a.type === 'video')
         .filter((a) => !(videoRefUnsupported && a.type === 'video'))
         .filter((a) => !existing.has(String(a.id)));
@@ -1111,6 +1044,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
                       return;
                     }
+                    setSlotTarget(null);
                     toggleRefMenu('video');
                   }}
                 >
@@ -1137,7 +1071,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
             </div>
 
-            {/* 隐藏的文件输入 */}
             <input
               ref={fileInputRef}
               type="file"
@@ -1664,7 +1597,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         </div>
       )}
 
-      {/* 参考/附件卡上传菜单：fixed 定位随卡片，portal 到 body 避免被滚动容器裁切 */}
+      {/* 参考/附件卡上传菜单：本地上传 + 从资产中选择（AI 视频无角色库） */}
       {refMenu && refMenuPos && createPortal(
         <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
           <button
@@ -1680,7 +1613,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             }}
           >
             <Upload size={14} strokeWidth={2} />
-            <span>本地上传</span>
+            <span>{refMenu === 'video' ? '从本地上传' : '本地上传'}</span>
           </button>
           <button
             className={styles.dropdownItem}
@@ -1693,23 +1626,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <FolderOpen size={14} strokeWidth={2} />
             <span>从资产中选择</span>
           </button>
-          {refMenu === 'video' && (
-            <button
-              className={styles.dropdownItem}
-              onClick={() => {
-                setRefMenu(null);
-                openCharacterLibrary();
-              }}
-            >
-              <User size={14} strokeWidth={2} />
-              <span>角色库</span>
-            </button>
-          )}
         </div>,
         document.body,
       )}
 
-      {/* 从资产中选择弹窗：按入口过滤类型（图片入口仅图片；智能体入口与上传一致含音频；视频入口图片+视频） */}
+      {/* 从资产中选择：视频入口 tab/类型过滤与画布视频 dock 一致 */}
       {assetsPickerTarget && (
         <AssetsPickerModal
           onClose={() => setAssetsPickerTarget(null)}
@@ -1719,18 +1640,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               ? ['image']
               : assetsPickerTarget === 'agent'
                 ? ['image', 'video', 'audio']
-                : ['image', 'video']
+                : isKeyframe || videoMode === 'text2video'
+                  ? ['image']
+                  : [...PANEL_REF_MEDIA_TYPES.videoAll.types]
           }
           confirmText="确定"
-        />
-      )}
-
-      {/* 角色库弹窗：AI视频 tab 专用（虚拟/真人人像库双 tab 多选，与画布视频入口一致） */}
-      {showCharacterLibrary && (
-        <CharacterLibraryModal
-          onClose={() => setShowCharacterLibrary(false)}
-          enableRealPersonTab
-          onSelectAssets={handleCharacterLibrarySelect}
+          showLivenessTab={assetsPickerTarget === 'video'}
+          showCharacterTab={assetsPickerTarget === 'video'}
+          rejectUnapprovedForVideo={assetsPickerTarget === 'video'}
         />
       )}
     </>

@@ -27,6 +27,7 @@ import {
 import { isApiError } from '@/api/http';
 import { toast } from 'sonner';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
 import styles from './index.module.css';
 
 /** Tab 定义（真人人像库 tab 仅视频入口启用，真人素材只用于视频生成） */
@@ -41,6 +42,8 @@ interface CharacterLibraryModalProps {
   onSelectAssets?: (assets: MaterialAsset[]) => void;
   /** 显示真人人像库 tab（真人素材仅用于视频生成，图片/资产卡入口不展示） */
   enableRealPersonTab?: boolean;
+  /** 视频参考入口：未通过素材点选即拦截（IKGK37 / REQ-D-204） */
+  rejectUnapprovedForVideo?: boolean;
 }
 
 /* ============================================
@@ -276,7 +279,7 @@ function AssetCardOverlays({
   );
 }
 
-export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab }: CharacterLibraryModalProps) {
+export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab, rejectUnapprovedForVideo }: CharacterLibraryModalProps) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['key']>('character');
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
@@ -405,7 +408,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
       return;
     }
     if (asset.Status === 'Failed') {
-      toast('素材处理失败，无法使用');
+      toast(rejectUnapprovedForVideo ? VIDEO_REFERENCE_NOT_APPROVED_MESSAGE : '素材处理失败，无法使用');
       return;
     }
     if (asset.AssetType === 'Audio') {
