@@ -149,6 +149,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           data-testid="video-enhance-btn"
         >
           <span className={styles.hdBadge}>HD</span>
+          <span>高清</span>
         </button>
       )}
       {toolbar.videoSubtitleErase && (

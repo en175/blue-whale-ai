@@ -78,7 +78,7 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
 
   it('视频卡保留 HD（首位）与智能去字幕与 @，隐藏「高清 ▾」，多音视频分离', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['HD', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['HD高清', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「重新编辑」「生成图片」「生成视频」不再渲染（IKH3WE：派生新卡走拖线类型菜单、原卡重跑走点卡片）', async () => {
@@ -550,14 +550,14 @@ describe('MediaNodeToolbar HD 高清入口（IKH3VG）', () => {
   it('HD 徽标为视频卡工具条首位（IKH3WE 三按钮撤除后 HD 继承第一位，ADR-0106 取代 ADR-0105 排位表述）', async () => {
     await renderToolbar('video');
     const order = labels();
-    expect(order[0]).toBe('HD');
-    expect(order.indexOf('HD')).toBeLessThan(order.indexOf('智能去字幕'));
+    expect(order[0]).toBe('HD高清');
+    expect(order.indexOf('HD高清')).toBeLessThan(order.indexOf('智能去字幕'));
   });
 
-  it('文字徽标形态：HD 文本 + 描边小方标类（非图标）', async () => {
+  it('徽标 icon + 中文功能名形态：HD 描边小方标 + 「高清」文字（家族「图标 + 文字」同构）', async () => {
     await renderToolbar('video');
-    expect(hdBtn().textContent).toBe('HD');
-    expect(hdBtn().querySelector(`.${styles.hdBadge}`)).toBeTruthy();
+    expect(hdBtn().querySelector(`.${styles.hdBadge}`)?.textContent).toBe('HD');
+    expect(hdBtn().textContent).toBe('HD高清');
   });
 
   it('点击派发 onVideoEnhance（携带节点 id）', async () => {
