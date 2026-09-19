@@ -51,6 +51,14 @@
   white-space: nowrap;
 }
 
+/* ---- ？帮助（IKH3OV 框选模式）：紧跟标题之后的无交互图标，悬停出框选效果说明 ---- */
+.helpHint {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  cursor: help;
+}
+
 /* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;

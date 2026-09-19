@@ -89,6 +89,7 @@ import {
   canUndoSubtitleBoxEdit,
   EMPTY_SUBTITLE_BOX_EDIT,
   redoSubtitleBoxEdit,
+  resetSubtitleBoxes,
   undoSubtitleBoxEdit,
   type SubtitleBoxEditState,
   type SubtitleBoxOp,
@@ -1228,6 +1229,13 @@ export default function CanvasPage() {
       height: typeof d.height === 'number' ? d.height : undefined,
     });
   })();
+  /** 框选模式必框（IKH3OV，ADR-0104 故事 18）：无检测框即拦发送——发送钮据此置灰并把原因
+   *  作 title，handleSubtitleEraseSend 据此守卫生效（组件置灰 + 处理器守卫双层，防其他路径绕过）；
+   *  智能模式恒 null（无框直发，不回落框选语义）。 */
+  const subtitleEraseSendBlockedReason =
+    subtitleEraseMode === 'box' && subtitleEraseBoxes.boxes.length === 0
+      ? '请先拉框：在画面上拉矩形框圈出要擦除的字幕区域'
+      : null;
   /** 抠图会话源图卡（IKGXMT）：工具栏跟随锚与发送链路的判定输入 */
   const cutoutSourceNode = cutoutNodeId
     ? mediaNodes.find((n) => n.id === cutoutNodeId) ?? null
@@ -5840,10 +5848,12 @@ export default function CanvasPage() {
   /** 去字幕发送（单条发送钮）：源素材身份 → 按框集合推导契约四键
    *  （buildVideoSubtitleEraseInput：detect_mode 两模式恒 subtitle_smart、erase_boxes 由
    *  框集合推导——智能模式入口零框选工具故恒空数组）→ 发任务。请求发出即返回；会话退出与
-   *  建卡在创建成功后由 startVideoSubtitleEraseJob 承担，失败停留会话（可重发）。 */
+   *  建卡在创建成功后由 startVideoSubtitleEraseJob 承担，失败停留会话（可重发）。
+   *  框选模式必框守卫（IKH3OV）：无框时不提交、不建卡、不回落智能语义（组件侧同条件置灰）。 */
   const handleSubtitleEraseSend = (): boolean => {
     const nodeId = subtitleEraseTargetNodeId;
     if (!nodeId) return false;
+    if (subtitleEraseSendBlockedReason) return false;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
     if (!node || !sourceAssetId) {
@@ -7270,6 +7280,8 @@ export default function CanvasPage() {
 
   const handleSubtitleBoxUndo = () => setSubtitleEraseBoxes((state) => undoSubtitleBoxEdit(state));
   const handleSubtitleBoxRedo = () => setSubtitleEraseBoxes((state) => redoSubtitleBoxEdit(state));
+  /** 重置（IKH3OV）：一键清空全部框，作为一步可撤销操作进 undo 栈（撤销整批还原） */
+  const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxes(state));
 
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
@@ -9623,9 +9635,9 @@ export default function CanvasPage() {
           />
         )}
 
-        {/* 去字幕会话单条（IKGZ83 双条 → IKH3OU 单条化，ADR-0104）：形态随 subtitleEraseMode
-            切换（smart=X|智能擦除|⚡0|↑，box=再加框选/撤销/重做）；检测框层经 MediaNode 的
-            subtitleEraseEditing 注入渲染在源视频卡上（视频暂停在当前帧）；
+        {/* 去字幕会话单条（IKGZ83 双条 → IKH3OU 单条化 → IKH3OV 框选必框与重置，ADR-0104）：
+            形态随 subtitleEraseMode 切换（smart=X|智能擦除|⚡0|↑，box=再加 ？|框选/撤销/重做/重置）；
+            检测框层经 MediaNode 的 subtitleEraseEditing 注入渲染在源视频卡上（视频暂停在当前帧）；
             四退出（X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃框状态不建卡不提交 */}
         {subtitleEraseTargetNodeId && (
           <VideoSubtitleEraseDialog
@@ -9634,10 +9646,13 @@ export default function CanvasPage() {
             onSend={handleSubtitleEraseSend}
             canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
             canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
+            canReset={subtitleEraseBoxes.boxes.length > 0}
             onUndo={handleSubtitleBoxUndo}
             onRedo={handleSubtitleBoxRedo}
+            onReset={handleSubtitleBoxReset}
             boxLimitReached={!canAddSubtitleBox(subtitleEraseBoxes)}
             submitting={subtitleEraseSubmitting}
+            sendBlockedReason={subtitleEraseSendBlockedReason}
             sendBarAnchor={subtitleEraseSendBarAnchor}
           />
         )}

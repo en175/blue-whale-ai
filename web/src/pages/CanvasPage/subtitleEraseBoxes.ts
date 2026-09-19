@@ -2,10 +2,11 @@
  * 去字幕框集合编辑纯逻辑（IKGZ83，IKGZ7V 波3）：零 React/DOM 依赖，
  * 打法对齐擦除遮罩纯逻辑层 eraseMask.ts（规格 Implementation Decisions
  * 「框集合为独立纯逻辑模块（参照擦除遮罩纯逻辑打法）」）。覆盖三块能力：
- *  1. 框图元模型与撤销/重做小栈：框记录显示坐标对角（相对视频显示区域左上角，
+ *  1. 框图元模型与撤销/重做步骤栈：框记录显示坐标对角（相对视频显示区域左上角，
  *     CSS 像素、未乘画布 zoom，拉框方向任意、换算时归一）；框落笔即固化，
  *     无活框选中态（规格故事 10「画错了撤销或重来」）；撤销/重做只作用于
- *     未发送的框编辑（与画布撤销无关的独立小栈）。
+ *     未发送的框编辑（与画布撤销无关的独立小栈），步骤两类——单框增删与重置整批
+ *     清空（IKH3OV：重置=一键清空全部框且一步可撤销，撤销后重做可再次清空）。
  *  2. 显示坐标 → [0,1] 归一化换算：框四键 top_left_x / top_left_y /
  *     bottom_right_x / bottom_right_y（契约 VIDEO_SUBTITLE_ERASE_BOX_KEYS），
  *     官方 Location 对象语义（官方 PDF「Location 对象」节）：归一化坐标系以
@@ -36,14 +37,22 @@ export interface SubtitleBoxOp {
   to: SubtitleBoxPoint;
 }
 
-/** 框编辑状态（不可变）：boxes=已固化框（撤销栈，末尾为最近落笔），redoStack=重做栈（末尾为最近撤销） */
+/** 框编辑步骤（IKH3OV 重置入栈）：box=单框增删（撤销/重做各作用于一个框）；
+ *  reset=整批清空（ops=清空前的框集合，撤销时整批还原，重做时再次清空）。 */
+export type SubtitleBoxEditStep =
+  | { kind: 'box'; op: SubtitleBoxOp }
+  | { kind: 'reset'; ops: readonly SubtitleBoxOp[] };
+
+/** 框编辑状态（不可变）：boxes=当前已固化框（渲染与发送的唯一数据源）；
+ *  undoStack=已应用步骤（末尾为最近一步：落框或重置）；redoStack=已撤销步骤（末尾为最近撤销）。 */
 export interface SubtitleBoxEditState {
   boxes: readonly SubtitleBoxOp[];
-  redoStack: readonly SubtitleBoxOp[];
+  undoStack: readonly SubtitleBoxEditStep[];
+  redoStack: readonly SubtitleBoxEditStep[];
 }
 
 /** 空编辑状态（初始/退出编辑态丢弃/发送后重置用） */
-export const EMPTY_SUBTITLE_BOX_EDIT: SubtitleBoxEditState = { boxes: [], redoStack: [] };
+export const EMPTY_SUBTITLE_BOX_EDIT: SubtitleBoxEditState = { boxes: [], undoStack: [], redoStack: [] };
 
 /* ============ 上限判定与撤销 / 重做（不可变小栈） ============ */
 
@@ -52,38 +61,63 @@ export function canAddSubtitleBox(state: SubtitleBoxEditState): boolean {
   return state.boxes.length < VIDEO_SUBTITLE_ERASE_MAX_BOXES;
 }
 
-/** 落一个新框：追加撤销栈并清空重做栈（撤销后再落新框则旧分支不可重做）；
+/** 落一个新框：追加一条 box 步骤并清空重做栈（撤销后再落新框则旧分支不可重做）；
  *  内置两道静默守卫——已达 20 个上限时原样返回（不崩不截断，UI 经 canAddSubtitleBox
  *  先行提示）；对角重合的零面积框（单击未拖拽的误触）原样丢弃不进栈。 */
 export function applySubtitleBox(state: SubtitleBoxEditState, op: SubtitleBoxOp): SubtitleBoxEditState {
   if (!canAddSubtitleBox(state)) return state;
   if (op.from.x === op.to.x && op.from.y === op.to.y) return state;
-  return { boxes: [...state.boxes, op], redoStack: [] };
-}
-
-/** 撤销最近一个框：弹撤销栈尾压重做栈；空栈时原样返回（不崩） */
-export function undoSubtitleBoxEdit(state: SubtitleBoxEditState): SubtitleBoxEditState {
-  if (state.boxes.length === 0) return state;
   return {
-    boxes: state.boxes.slice(0, -1),
-    redoStack: [...state.redoStack, state.boxes[state.boxes.length - 1]],
+    boxes: [...state.boxes, op],
+    undoStack: [...state.undoStack, { kind: 'box', op }],
+    redoStack: [],
   };
 }
 
-/** 重做最近撤销的框：弹重做栈尾压撤销栈；空栈时原样返回（不崩）。上限守卫同落笔
- *  （撤销后落新框会清空重做栈，正常到不了超限态，守卫仅防御异常序列）。 */
-export function redoSubtitleBoxEdit(state: SubtitleBoxEditState): SubtitleBoxEditState {
-  if (state.redoStack.length === 0 || !canAddSubtitleBox(state)) return state;
+/** 重置：一键清空全部检测框，并作为一步可撤销操作进 undo 栈（撤销把清空前的框集合
+ *  整批还原）；同时清空重做栈（重置即新分支）。无框时原样返回——没有可清空的内容
+ *  就不产生空步骤，避免撤销栈被无效操作污染。 */
+export function resetSubtitleBoxes(state: SubtitleBoxEditState): SubtitleBoxEditState {
+  if (state.boxes.length === 0) return state;
   return {
-    boxes: [...state.boxes, state.redoStack[state.redoStack.length - 1]],
+    boxes: [],
+    undoStack: [...state.undoStack, { kind: 'reset', ops: state.boxes }],
+    redoStack: [],
+  };
+}
+
+/** 撤销最近一步（落框或重置）：弹 undo 栈尾压 redo 栈；空栈时原样返回（不崩）。
+ *  box 步骤去掉末尾一个框，reset 步骤把清空前的框集合整批还原。 */
+export function undoSubtitleBoxEdit(state: SubtitleBoxEditState): SubtitleBoxEditState {
+  const step = state.undoStack[state.undoStack.length - 1];
+  if (!step) return state;
+  return {
+    boxes: step.kind === 'box' ? state.boxes.slice(0, -1) : step.ops,
+    undoStack: state.undoStack.slice(0, -1),
+    redoStack: [...state.redoStack, step],
+  };
+}
+
+/** 重做最近撤销的一步：弹 redo 栈尾压 undo 栈；空栈时原样返回（不崩）。box 步骤重新落框
+ *  （保留 20 上限守卫——撤销后落新框会清空重做栈，正常到不了超限态，守卫仅防御异常序列）；
+ *  reset 步骤再次清空（清空恒合法，无需上限判定）。 */
+export function redoSubtitleBoxEdit(state: SubtitleBoxEditState): SubtitleBoxEditState {
+  const step = state.redoStack[state.redoStack.length - 1];
+  if (!step) return state;
+  if (step.kind === 'box' && !canAddSubtitleBox(state)) return state;
+  return {
+    boxes: step.kind === 'box' ? [...state.boxes, step.op] : [],
+    undoStack: [...state.undoStack, step],
     redoStack: state.redoStack.slice(0, -1),
   };
 }
 
+/** 还有可撤销的步骤（落框或重置）——重置后 boxes 为空但撤销栈非空，仍可撤销 */
 export function canUndoSubtitleBoxEdit(state: SubtitleBoxEditState): boolean {
-  return state.boxes.length > 0;
+  return state.undoStack.length > 0;
 }
 
+/** 还有可重做的步骤（落框或重置） */
 export function canRedoSubtitleBoxEdit(state: SubtitleBoxEditState): boolean {
   return state.redoStack.length > 0;
 }
