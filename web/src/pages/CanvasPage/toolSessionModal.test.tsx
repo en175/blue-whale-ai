@@ -5,7 +5,10 @@
    会话期请求打开生成面板（左工具栏/点草稿卡等）先按四路退出口径退出会话（参数丢弃）再放行；
    选中联动不回弹面板；未发送草稿在隐藏期间保留、退出后原样回来；高清面板打开期间
    悬浮工具条同样隐藏；四方互斥无回归。渲染模式沿用 genPanelDismiss.test.tsx
-   （FlowCanvas/CanvasToolbar 打桩透出 props，面板真实渲染）。 */
+   （FlowCanvas/CanvasToolbar 打桩透出 props，面板真实渲染）。
+   IKH3ZJ 生成面板准入经 toolSessionCoordinator（exitAllToolSessions）后补齐守护：
+   面板准入矩阵扩到 erase/crop/outpaint/去字幕（此前仅 cutout×工具栏、crop×点草稿卡），
+   草稿往返补参考连线保持维度。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -305,6 +308,18 @@ const eraseSendBar = () => document.body.querySelector('[data-testid="erase-send
 const cropConfirm = () => document.body.querySelector('[data-testid="crop-confirm"]');
 const enhanceSend = () => document.body.querySelector('[data-testid="enhance-send-btn"]');
 
+/** 各会话进行中的外部可见工具 UI（出现=会话活跃、消失=已退出），testid 对齐
+ *  toolSessionSwitch 的 SESSION_UI_TESTID。 */
+const SESSION_UI_TESTID: Record<string, string> = {
+  erase: 'erase-send-bar',
+  cutout: 'cutout-toolbar',
+  crop: 'crop-confirm',
+  outpaint: 'outpaint-dialog',
+  subtitleErase: 'subtitle-erase-send-bar',
+};
+const sessionToolUi = (kind: keyof typeof SESSION_UI_TESTID) =>
+  document.body.querySelector(`[data-testid="${SESSION_UI_TESTID[kind]}"]`);
+
 async function pressEscape() {
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -370,6 +385,25 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await vi.waitFor(() => expect(imageOpen()).toBe(true));
     expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
   });
+
+  it('IKH3ZJ 草稿往返参考维度：进入会话→退出→重开草稿，参考连线原样保持', async () => {
+    // d1 预置一条参考连线（i1→d1）：会话进入/退出均不触碰 edges，往返后参考关系仍在
+    (canvasDocMock.current.doc as { edges: unknown[] }).edges = [
+      { id: 'e1', source: 'i1', target: 'd1' },
+    ];
+    await renderPage();
+    expect(flowProps.current.edges as unknown[]).toHaveLength(1);
+    await enterSession('erase');
+    expect(eraseSendBar()).toBeTruthy();
+    await pressEscape();
+    expect(eraseSendBar()).toBeNull();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
+    // 参考关系保持：往返后画布连线原样（无删除、无重复建线）
+    expect(flowProps.current.edges as unknown[]).toHaveLength(1);
+    expect((flowProps.current.edges as Array<{ id: string }>)[0]!.id).toBe('e1');
+  });
 });
 
 describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再放行', () => {
@@ -410,6 +444,60 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
     // 会话仍在（源卡本身选中不退出），面板不得回弹
     expect(eraseSendBar()).toBeTruthy();
     expect(imageOpen()).toBe(false);
+  });
+
+  /* IKH3ZJ 准入矩阵补齐：exitEditSessionForGenPanel 收口经 exitAllToolSessions 后，
+   * 每个会话的 target 快照都能正确驱动退出（cutout×工具栏已有上方用例，此处补
+   * erase/crop/outpaint 三图片工具 + 去字幕视频工具，共五工具 × 左工具栏入口）。 */
+  it.each(['erase', 'crop', 'outpaint'] as const)(
+    '左工具栏开图片面板（%s 会话）：会话退出后面板才出现',
+    async (kind) => {
+      await renderPage();
+      await enterSession(kind);
+      expect(sessionToolUi(kind)).toBeTruthy();
+      await act(async () => {
+        toolbarProps.current.onToggleImageDialog();
+      });
+      expect(sessionToolUi(kind)).toBeNull();
+      expect(soloToolbarHidden('i1')).toBe(false);
+      await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    },
+  );
+
+  it('左工具栏开图片面板（去字幕会话）：会话退出后面板才出现', async () => {
+    // 用例内局部追加视频源卡（去字幕工具的源卡），不扰动其他组的媒体卡数断言
+    (canvasDocMock.current.doc as { nodes: unknown[] }).nodes.push({
+      id: 'v1',
+      type: 'mediaNode',
+      position: { x: 600, y: 0 },
+      data: {
+        src: 'http://vid/v1.mp4',
+        mediaType: 'video',
+        fileName: '素材视频',
+        assetId: '6',
+        width: 1920,
+        height: 1080,
+        duration: 30,
+        mime: 'video/mp4',
+      },
+    });
+    (canvasDocMock.current.assets as Record<string, unknown>)[6] = {
+      asset_id: 6,
+      type: 'video',
+      access_url: 'http://vid/v1.mp4',
+      width: 1920,
+      height: 1080,
+    };
+    await renderPage();
+    await act(async () => {
+      (fullNode('v1').data as Record<string, (id: string, mode?: string) => void>).onVideoSubtitleErase('v1', 'smart');
+    });
+    expect(sessionToolUi('subtitleErase')).toBeTruthy();
+    await act(async () => {
+      toolbarProps.current.onToggleImageDialog();
+    });
+    expect(sessionToolUi('subtitleErase')).toBeNull();
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
   });
 });
 

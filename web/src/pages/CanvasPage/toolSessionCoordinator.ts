@@ -3,7 +3,8 @@
    关闭生成面板」这条知识只活在 module，六入口不再各自手列其他五种工具的退出清单。
    IKH3ZI 退出路径与画布事件消费规则接入本 module：四路退出（工具关闭钮 / 点画布空白 /
    点其他卡 node-click 拦截 / 选中规范化退出）与 Esc 六工具退出/让位顺序同样只活在
-   module，页面接线点不再逐工具 if。
+   module，页面接线点不再逐工具 if。IKH3ZJ 生成面板准入接入：打开生成面板前「退出全部
+   活跃会话」的判断与执行同样收进 module，页面准入前置不再手列六个 exit。
    约束：会话状态与完整退出动作的实现留在页面现有持有处（index.tsx），本 module 不持
    state、不建第二份「活动工具」事实源——活跃与否由调用方每次交互时从现有六会话
    target 装配快照传入。纯 in-process 依赖，无网络接口。 */
@@ -81,6 +82,16 @@ export interface ToolSessionDeps extends EnterToolSessionDeps {
  *  调用方无需再判活跃。 */
 export function exitToolSession(kind: ToolSessionKind, deps: ToolSessionDeps): void {
   deps.exits[kind]();
+}
+
+/** 退出全部活跃会话（IKH3ZJ 生成面板准入的统一前置）：遍历六会话快照，活跃即执行
+ *  其完整退出动作（未发送参数丢弃）；无活跃会话时空操作（幂等）。「哪些会话活跃、
+ *  逐个怎么退」的判断只活在 module，页面打开面板前不再手列六个 exit 清单。
+ *  六会话经 enterToolSession 互斥，同一快照至多一个活跃，遍历顺序不影响结果。 */
+export function exitAllToolSessions(deps: ToolSessionDeps): void {
+  for (const kind of TOOL_SESSION_KINDS) {
+    if (deps.activity[kind] != null) deps.exits[kind]();
+  }
 }
 
 /** 点画布空白（PaneClick）的会话处置：任一会话活跃即退出（退出即消费——本次点击

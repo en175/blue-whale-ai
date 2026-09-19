@@ -168,6 +168,7 @@ import CutoutToolbar from './components/CutoutToolbar';
 import {
   enterToolSession,
   escDefersToToolSessionHandler,
+  exitAllToolSessions,
   exitToolSession,
   exitToolSessionOnEsc,
   handleToolSessionNodeClick,
@@ -3252,15 +3253,11 @@ export default function CanvasPage() {
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
     || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null;
-  /** IKGZ5O 会话期打开生成面板的统一前置：按四路退出口径退出当前编辑会话（未发送
-   *  参数全部丢弃），面板随后放行打开；无会话时为幂等空操作（各 exit 幂等复位）。 */
+  /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
+   *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
+   *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
   const exitEditSessionForGenPanel = () => {
-    exitEraseEditing();
-    exitCutoutSession();
-    exitCropMode();
-    endOutpaintSession();
-    exitSubtitleEraseEditing();
-    exitAudioVideoSplitEditing();
+    exitAllToolSessions(buildToolSessionDeps());
   };
 
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
