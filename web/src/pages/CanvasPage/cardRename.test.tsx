@@ -413,6 +413,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
+  Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
 describe('IKFA8X 改名接线与独立性', () => {

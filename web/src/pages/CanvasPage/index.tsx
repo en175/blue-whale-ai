@@ -1736,7 +1736,6 @@ export default function CanvasPage() {
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -2604,7 +2603,6 @@ export default function CanvasPage() {
     cancelJob: (_id: string) => {},
     retryJob: (_id: string) => {},
     removeMediaNode: (_id: string) => {},
-    genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
     outpaintImage: (_id: string) => {},
     eraseImage: (_id: string) => {},
@@ -4033,7 +4031,6 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4076,7 +4073,6 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4127,7 +4123,6 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -4613,7 +4608,6 @@ export default function CanvasPage() {
       onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
       onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-      onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -5029,7 +5023,6 @@ export default function CanvasPage() {
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
@@ -5685,7 +5678,6 @@ export default function CanvasPage() {
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -6710,24 +6702,8 @@ export default function CanvasPage() {
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
   pollJobRef.current = pollJob;
 
-  /* ============ 节点动作实现：点卡片开面板/高清 ▾ 菜单/生成音频/详情下载（工具条生成类
+  /* ============ 节点动作实现：点卡片开面板/高清 ▾ 菜单/详情下载（工具条生成类
      按钮已撤，IKH3WE：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片） ============ */
-
-  /** 被点节点 → 对话框参考素材描述（素材已被删除的节点不可作为参考/下载来源） */
-  const nodeRefOf = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (node?.data?.assetMissing) {
-      showToast('warn', '素材已被删除');
-      return null;
-    }
-    const src = node?.data?.src as string | undefined;
-    if (!src) return null;
-    const type: 'image' | 'video' = node?.data?.mediaType === 'video' ? 'video' : 'image';
-    const name = (node?.data?.fileName as string) || id;
-    const prompt = typeof node?.data?.prompt === 'string' ? (node.data.prompt as string) : '';
-    const assetId = readNodeAssetId((node?.data ?? {}) as Record<string, unknown>);
-    return { src, type, name, prompt, assetId };
-  };
 
   /** 目标节点的文本附件（IKDLQF）：连线 target 为该节点、source 为 textNode 且 data.text 为 string；
    *  顺序即 edges 数组顺序（连入顺序），面板打开当下取快照 */
@@ -7630,23 +7606,6 @@ export default function CanvasPage() {
   /** 重置（IKH3OV）：一键清空全部框，作为一步可撤销操作进 undo 栈（撤销整批还原） */
   const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxEdit(state));
 
-  /** 生成音频：打开音频对话框 */
-  const handleNodeGenAudio = (id: string) => {
-    if (!canOpenEditor()) return;
-    const ref = nodeRefOf(id);
-    if (!ref) return;
-    setAudioSeed({ ts: Date.now() });
-    // IKFYH6：自由音频面板打开路径同样重置隐藏标记，否则选中变化关闭对该面板失效
-    audioPanelHiddenRef.current = false;
-    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
-    setShowAudioDialog(true);
-    setShowBottomDialog(false);
-    setShowImageDialog(false);
-    setShowMusicDialog(false);
-    setShowEnhanceDialog(false);
-    setShowVideoEnhanceDialog(false);
-  };
-
   /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
 
   /** 音视频分离任务发送核心：按所选格式 POST media-extractions；创建成功后先退编辑态再在
@@ -7907,7 +7866,6 @@ export default function CanvasPage() {
     setAssetDetailLoading(false);
   };
 
-  actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.outpaintImage = handleNodeOutpaintImage;
   actionsRef.current.eraseImage = handleNodeEraseImage;
@@ -8512,7 +8470,6 @@ export default function CanvasPage() {
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
               onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-              onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
