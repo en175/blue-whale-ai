@@ -117,6 +117,9 @@ export default function SubtitleEraseBoxesLayer({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      /* 落笔后浏览器派发的 click 必须截在层内：冒泡命中 NodeWrapper 的 onClick 会对
+         有生成记录的源卡触发 onNodeClick → 打开生成面板并退出编辑态（框选丢失） */
+      onClick={(event) => event.stopPropagation()}
     >
       <svg
         width="100%"
