@@ -11,12 +11,9 @@
   padding-top: 22.5px;
 }
 
-/* ---- 节点操作条：悬停/选中可见，与格式工具栏同处标题上方一层 ---- */
+/* ---- 节点操作条：唯一选中/悬停可见（IKGYYE 迁入钉屏幕层，由 FollowToolbarLayer
+   定位与显隐；此处仅保留条体布局，hover 显示语义由 JS 指针事件等价保持） ---- */
 .nodeBar {
-  position: absolute;
-  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
@@ -26,16 +23,6 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-overlay);
   white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition-fast);
-  z-index: 10;
-}
-
-.wrapper:hover .nodeBar,
-.nodeBarVisible {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .addToChatBtn {
@@ -57,13 +44,10 @@
 }
 
 /* ============================================
- * 浮动工具栏
+ * 浮动工具栏（IKGYYE 迁入钉屏幕层：定位/跟随由 FollowToolbarLayer 承担，
+ * 此处仅保留条体外观）
  * ============================================ */
 .toolbar {
-  position: absolute;
-  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -73,7 +57,6 @@
   border: 1px solid var(--color-border-overlay);
   box-shadow: var(--shadow-overlay);
   white-space: nowrap;
-  z-index: 10;
 }
 
 .toolBtn {

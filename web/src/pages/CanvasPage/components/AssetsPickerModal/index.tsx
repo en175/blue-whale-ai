@@ -22,12 +22,11 @@ import {
 } from '@/api/assets';
 import { isApiError } from '@/api/http';
 import {
-  createAsset as createMaterialAsset,
   type MaterialAsset,
   type MaterialAssetType,
 } from '@/api/material';
-import { isFileRejected } from '@/utils/fileSignature';
-import { uploadAssetFile } from '@/utils/upload';
+import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
 import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -73,6 +72,8 @@ export interface AssetsPickerModalProps {
   showLivenessTab?: boolean;
   /** 是否展示「虚拟人像库」tab（仅视频对话「从资产中选择」；画布工具栏入口不展示） */
   showCharacterTab?: boolean;
+  /** 视频参考入口：未通过素材不可勾选/确认（IKGK37 / REQ-D-204） */
+  rejectUnapprovedForVideo?: boolean;
 }
 
 function materialTypeToAssetType(assetType: MaterialAssetType): AssetType {
@@ -93,6 +94,10 @@ function materialToPickerRecord(asset: MaterialAsset, source: MaterialSource): A
     source,
     model: null,
     created_at: asset.CreateTime ?? null,
+    material_id: asset.Id,
+    material_status: asset.Status === 'Active' || asset.Status === 'Processing' || asset.Status === 'Failed'
+      ? asset.Status
+      : undefined,
   };
 }
 
@@ -103,6 +108,7 @@ export default function AssetsPickerModal({
   confirmText = '插入画布',
   showLivenessTab = false,
   showCharacterTab = false,
+  rejectUnapprovedForVideo = false,
 }: AssetsPickerModalProps) {
   /** 可展示的 tab：按入口可接受类型过滤；单类型时只剩一个 tab（渲染层隐藏 tab 栏，除非带人像库） */
   const visibleTabs = useMemo((): { key: PickerTabKey; label: string }[] => {
@@ -152,8 +158,6 @@ export default function AssetsPickerModal({
   const [materialPreviewOpen, setMaterialPreviewOpen] = useState(false);
   const previewAsset = usePreviewAsset(previewTarget);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const characterFileInputRef = useRef<HTMLInputElement>(null);
   const [livenessGroupId, setLivenessGroupId] = useState<string | null>(null);
   const [livenessRefreshTick, setLivenessRefreshTick] = useState(0);
   const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
@@ -227,85 +231,42 @@ export default function AssetsPickerModal({
     setLivenessGroupId(inDetail ? groupId : null);
   }, []);
 
-  const handleLivenessUpload = useCallback(() => {
-    if (uploading) return;
-    if (!livenessGroupId) {
-      toast.error('请先进入分组再上传');
-      return;
-    }
-    fileInputRef.current?.click();
-  }, [livenessGroupId, uploading]);
-
-  /** 虚拟库上传无分组前提，直接唤起文件选择 */
-  const handleCharacterUpload = useCallback(() => {
-    if (uploading) return;
-    characterFileInputRef.current?.click();
-  }, [uploading]);
-
-  /** 素材库上传核心：uploadAssetFile → createMaterialAsset（名称 30 字截断，仅图片/视频）；返回错误文案列表 */
+  /** 素材库上传：虚拟库不传分组、真人库落入当前详情分组；失败统一带回请重试 */
   const uploadMaterialFiles = useCallback(async (files: File[], groupId: string | null): Promise<string[]> => {
-    const errors: string[] = [];
-    for (const file of files) {
-      let assetKind: 'Image' | 'Video' | 'Audio';
-      if (file.type.startsWith('image/')) assetKind = 'Image';
-      else if (file.type.startsWith('video/')) assetKind = 'Video';
-      else {
-        errors.push(`${file.name}：仅支持图片和视频`);
-        continue;
-      }
-      try {
-        const uploadResult = await uploadAssetFile(file);
-        const rawName = file.name;
-        const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
-        if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
-        await createMaterialAsset({
-          // 真人库落入当前详情分组；虚拟库不传分组，后端自动归组（资产页同款口径）
-          ...(groupId ? { GroupId: groupId } : {}),
-          URL: uploadResult.url,
-          Name: finalName,
-          AssetType: assetKind,
-          SourceAssetId: String(uploadResult.asset_id),
-        });
-      } catch (err) {
-        if (isFileRejected(err)) errors.push(err.message);
-        else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
-      }
-    }
+    const { errors } = await uploadMaterialLibraryFiles(files, groupId);
     return errors;
   }, []);
 
-  /** 真人库上传：须先进分组（上传目标 = 当前详情分组） */
-  const handleLivenessFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || uploading) return;
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  /** 真人库：选档后直接入库当前详情分组（卡片内 label+input，不走隐藏 input 的 click()） */
+  const handleLivenessPickFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0 || uploading) return;
     if (!livenessGroupId) {
       toast.error('请先进入分组再上传');
       return;
     }
-
     setUploading(true);
-    const errors = await uploadMaterialFiles(Array.from(files), livenessGroupId);
+    const errors = await uploadMaterialFiles(files, livenessGroupId);
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
     setLivenessRefreshTick((tick) => tick + 1);
-  };
+  }, [livenessGroupId, uploading, uploadMaterialFiles]);
 
-  /** 虚拟库上传：不传分组，后端自动归组 */
-  const handleCharacterFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || uploading) return;
-    if (characterFileInputRef.current) characterFileInputRef.current.value = '';
-
+  /** 虚拟库：选档后入库，不传分组 */
+  const handleCharacterPickFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0 || uploading) return;
     setUploading(true);
-    const errors = await uploadMaterialFiles(Array.from(files), null);
+    const errors = await uploadMaterialFiles(files, null);
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
     setCharacterRefreshTick((tick) => tick + 1);
-  };
+  }, [uploading, uploadMaterialFiles]);
 
   /** 卡片点击切换勾选（保存完整记录，跨 tab 提交时不丢） */
   const handleToggleSelect = useCallback((asset: AssetRecord) => {
+    if (rejectUnapprovedForVideo && isUnapprovedVideoMaterialStatus(asset.material_status)) {
+      toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+      return;
+    }
     const id = String(asset.id);
     setSelectedMap((prev) => {
       const next = new Map(prev);
@@ -313,16 +274,24 @@ export default function AssetsPickerModal({
       else next.set(id, asset);
       return next;
     });
-  }, []);
+  }, [rejectUnapprovedForVideo]);
 
   /** 素材库条目勾选：转弹窗记录（保留来源标记），入口类型不符直接忽略 */
   const handleToggleMaterialAsset = useCallback((asset: MaterialAsset, source: MaterialSource) => {
+    if (asset.Status === 'Processing') {
+      toast('素材处理中，稍后可用');
+      return;
+    }
+    if (rejectUnapprovedForVideo && isUnapprovedVideoMaterialStatus(asset.Status)) {
+      toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+      return;
+    }
     const record = materialToPickerRecord(asset, source);
     if (mediaTypes && mediaTypes.length > 0 && !mediaTypes.includes(record.type as PickerMediaType)) {
       return;
     }
     handleToggleSelect(record);
-  }, [handleToggleSelect, mediaTypes]);
+  }, [handleToggleSelect, mediaTypes, rejectUnapprovedForVideo]);
 
   const handleToggleLivenessAsset = useCallback(
     (asset: MaterialAsset) => handleToggleMaterialAsset(asset, 'liveness'),
@@ -448,49 +417,31 @@ export default function AssetsPickerModal({
 
         <div ref={scrollRef} className={styles.body}>
           {isLivenessTab && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
-                className={styles.hiddenInput}
-                onChange={handleLivenessFileChange}
-              />
-              <CharacterLibrary
-                groupType="LivenessFace"
-                refreshTick={livenessRefreshTick}
-                onDetailViewChange={handleLivenessDetailViewChange}
-                onUpload={handleLivenessUpload}
-                pickerSelectedIds={selectedIds}
-                onPickerToggleAsset={handleToggleLivenessAsset}
-                pickerMediaTypes={mediaTypes}
-                onPickerAssetRemoved={handleMaterialAssetRemoved}
-                onPickerPreviewChange={setMaterialPreviewOpen}
-              />
-            </>
+            <CharacterLibrary
+              groupType="LivenessFace"
+              refreshTick={livenessRefreshTick}
+              onDetailViewChange={handleLivenessDetailViewChange}
+              onPickFiles={handleLivenessPickFiles}
+              pickerSelectedIds={selectedIds}
+              onPickerToggleAsset={handleToggleLivenessAsset}
+              onPickerBlockedAsset={rejectUnapprovedForVideo ? handleToggleLivenessAsset : undefined}
+              pickerMediaTypes={mediaTypes}
+              onPickerAssetRemoved={handleMaterialAssetRemoved}
+              onPickerPreviewChange={setMaterialPreviewOpen}
+            />
           )}
           {isCharacterTab && (
-            <>
-              <input
-                ref={characterFileInputRef}
-                type="file"
-                multiple
-                accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
-                className={styles.hiddenInput}
-                onChange={handleCharacterFileChange}
-              />
-              <CharacterLibrary
-                groupType="AIGC"
-                refreshTick={characterRefreshTick}
-                onUpload={handleCharacterUpload}
-                pickerSelectedIds={selectedIds}
-                onPickerToggleAsset={handleToggleCharacterAsset}
-                pickerMediaTypes={mediaTypes}
-                onPickerAssetRemoved={handleMaterialAssetRemoved}
-                onPickerPreviewChange={setMaterialPreviewOpen}
-              />
-            </>
+            <CharacterLibrary
+              groupType="AIGC"
+              refreshTick={characterRefreshTick}
+              onPickFiles={handleCharacterPickFiles}
+              pickerSelectedIds={selectedIds}
+              onPickerToggleAsset={handleToggleCharacterAsset}
+              onPickerBlockedAsset={rejectUnapprovedForVideo ? handleToggleCharacterAsset : undefined}
+              pickerMediaTypes={mediaTypes}
+              onPickerAssetRemoved={handleMaterialAssetRemoved}
+              onPickerPreviewChange={setMaterialPreviewOpen}
+            />
           )}
           {!isMaterialTab && loading && (
             <div className={assetStyles.skeletonGrid}>
@@ -545,7 +496,20 @@ export default function AssetsPickerModal({
             <button
               className={styles.confirmBtn}
               disabled={selectedAssets.length === 0}
-              onClick={() => onSelect(selectedAssets)}
+              onClick={() => {
+                if (!rejectUnapprovedForVideo) {
+                  onSelect(selectedAssets);
+                  return;
+                }
+                const allowed = selectedAssets.filter(
+                  (asset) => !isUnapprovedVideoMaterialStatus(asset.material_status),
+                );
+                if (allowed.length < selectedAssets.length) {
+                  toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+                }
+                if (allowed.length === 0) return;
+                onSelect(allowed);
+              }}
             >
               {confirmText}{selectedAssets.length > 0 ? `（${selectedAssets.length}）` : ''}
             </button>

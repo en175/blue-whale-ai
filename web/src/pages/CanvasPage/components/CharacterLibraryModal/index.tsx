@@ -3,7 +3,7 @@
  * 对接素材库 API（POST /api/material/{Action}）
  * 与 SharedAssetsModal 同尺寸（1000×680）
  * Tab: 虚拟人像库（AIGC 平铺去分组）/ 真人人像库（LivenessFace 分组浏览）
- * 弹窗仅做展示与选中使用；虚拟人像库单层平铺，真人人像库保留分组；素材管理归资产页
+ * 虚拟人像库单层平铺可选中，并支持弹窗内本地上传入库（REQ-D-303）；真人人像库保留分组
  * ============================================ */
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,6 +16,7 @@ import {
   Loader2,
   ScanFace,
   Music,
+  Plus,
 } from 'lucide-react';
 import {
   listAssetGroups,
@@ -25,6 +26,8 @@ import {
 } from '@/api/material';
 import { isApiError } from '@/api/http';
 import { toast } from 'sonner';
+import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
 import styles from './index.module.css';
 
 /** Tab 定义（真人人像库 tab 仅视频入口启用，真人素材只用于视频生成） */
@@ -39,6 +42,8 @@ interface CharacterLibraryModalProps {
   onSelectAssets?: (assets: MaterialAsset[]) => void;
   /** 显示真人人像库 tab（真人素材仅用于视频生成，图片/资产卡入口不展示） */
   enableRealPersonTab?: boolean;
+  /** 视频参考入口：未通过素材点选即拦截（IKGK37 / REQ-D-204） */
+  rejectUnapprovedForVideo?: boolean;
 }
 
 /* ============================================
@@ -108,13 +113,16 @@ function SelectableAssetGrid({
   assets,
   selectedIds,
   onToggleAsset,
+  leading,
 }: {
   assets: MaterialAsset[];
   selectedIds: Set<string>;
   onToggleAsset: (asset: MaterialAsset) => void;
+  leading?: ReactNode;
 }) {
   return (
     <div className={styles.assetGrid}>
+      {leading}
       {assets.map((asset) => {
         const selectable = isSelectableAsset(asset);
         const selectedFlag = selectedIds.has(asset.Id);
@@ -197,32 +205,47 @@ function AigcFlatSelectView({
   assets,
   selectedIds,
   onToggleAsset,
+  onPickFiles,
+  uploading,
 }: {
   assets: MaterialAsset[];
   selectedIds: Set<string>;
   onToggleAsset: (asset: MaterialAsset) => void;
+  onPickFiles: (files: File[]) => void;
+  uploading: boolean;
 }) {
-  if (assets.length === 0) {
-    return (
-      <div className={styles.emptyHint}>
-        <p>暂无素材</p>
-        <p>请前往资产页·虚拟人像库上传素材</p>
-        <button
-          className={styles.emptyActionBtn}
-          onClick={() => window.open('/library?type=aigc', '_blank')}
-        >
-          去资产页·虚拟人像库
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className={styles.detailView}>
       <SelectableAssetGrid
         assets={assets}
         selectedIds={selectedIds}
         onToggleAsset={onToggleAsset}
+        leading={(
+          <label
+            className={`${styles.assetCard} ${styles.uploadAssetCard}`}
+            aria-label="上传素材"
+            aria-disabled={uploading}
+          >
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              disabled={uploading}
+              className={styles.nativeFileInput}
+              onChange={(e) => {
+                if (uploading) return;
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                onPickFiles(Array.from(files));
+                e.target.value = '';
+              }}
+            />
+            <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
+              {uploading ? <Loader2 size={28} className={styles.spin} /> : <Plus size={28} strokeWidth={1.5} />}
+              <span className={styles.uploadCardLabel}>{uploading ? '上传中…' : '上传素材'}</span>
+            </div>
+          </label>
+        )}
       />
     </div>
   );
@@ -256,7 +279,7 @@ function AssetCardOverlays({
   );
 }
 
-export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab }: CharacterLibraryModalProps) {
+export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab, rejectUnapprovedForVideo }: CharacterLibraryModalProps) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['key']>('character');
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
@@ -264,6 +287,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const isRealTab = activeTab === 'real';
 
@@ -384,7 +408,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
       return;
     }
     if (asset.Status === 'Failed') {
-      toast('素材处理失败，无法使用');
+      toast(rejectUnapprovedForVideo ? VIDEO_REFERENCE_NOT_APPROVED_MESSAGE : '素材处理失败，无法使用');
       return;
     }
     if (asset.AssetType === 'Audio') {
@@ -397,6 +421,30 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
       else next.set(asset.Id, asset);
       return next;
     });
+  };
+
+  const handleCharacterPickFiles = async (files: File[]) => {
+    if (files.length === 0 || uploading) return;
+    setUploading(true);
+    const { errors, createdIds } = await uploadMaterialLibraryFiles(files, null);
+    if (errors.length) toast.error(errors.join('；'));
+    await loadFlatAssets({ silent: true });
+    if (createdIds.length > 0) {
+      const latest = await listAssets({
+        Filter: { GroupType: 'AIGC' },
+        PageNumber: 1,
+        PageSize: 100,
+      }).catch(() => null);
+      const created = latest?.Items.filter((item) => createdIds.includes(item.Id)) ?? [];
+      if (created.length > 0) {
+        setSelectedMap((prev) => {
+          const next = new Map(prev);
+          for (const asset of created) next.set(asset.Id, asset);
+          return next;
+        });
+      }
+    }
+    setUploading(false);
   };
 
   /** 素材多选确认（虚拟/真人人像库统一入口） */
@@ -450,6 +498,8 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
               assets={flatAssets}
               selectedIds={selectedIds}
               onToggleAsset={handleToggleAsset}
+              onPickFiles={handleCharacterPickFiles}
+              uploading={uploading}
             />
           )}
           {!loading && !loadError && activeTab === 'real' && (

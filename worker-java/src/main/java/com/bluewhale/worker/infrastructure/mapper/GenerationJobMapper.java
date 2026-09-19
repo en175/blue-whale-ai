@@ -693,4 +693,11 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources("image_outpaint",
                 List.of("image_outpaint"), limit, maxAgeMinutes);
     }
+
+    /** 图片抠图到点/孤儿（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
+     *  套 source 白名单（与 claim 同源，单源 image_cutout）。 */
+    default List<Long> listDueImageCutoutJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_cutout",
+                List.of("image_cutout"), limit, maxAgeMinutes);
+    }
 }

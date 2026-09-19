@@ -99,14 +99,20 @@ describe('IKGZ8B 卡悬浮工具条家族（ADR-0100：5 成员统一到浮层�
     expectNoHardcoded(block);
   });
 
-  it.each([
-    ['资产卡顶栏', assetCardNodeCss],
-    ['商品卡顶栏', productNodeCss],
-  ] as const)('%s topBar 带容器底且不再撑满卡宽', (_name, css) => {
-    const block = ruleBlockOf(css, '.topBar');
+  it('商品卡顶栏 topBar 带容器底且不再撑满卡宽', () => {
+    const block = ruleBlockOf(productNodeCss, '.topBar');
     expectOverlayContainer(block);
     expectNoHardcoded(block);
     expect(block).not.toContain('justify-content: space-between');
+    expect(block).toContain('width: fit-content');
+  });
+
+  it('资产卡顶栏 topBar 带容器底：保留 !742 钉屏幕口径（两端分布 + 320 锚回），fit-content 其上收紧', () => {
+    const block = ruleBlockOf(assetCardNodeCss, '.topBar');
+    expectOverlayContainer(block);
+    expectNoHardcoded(block);
+    expect(block).toContain('justify-content: space-between');
+    expect(block).toContain('min-width: 320px');
     expect(block).toContain('width: fit-content');
   });
 

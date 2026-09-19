@@ -5,20 +5,16 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, Crop, Maximize2 } from 'lucide-react';
+import { Image, Video, AudioLines, ImageOff, Plus, Check } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
-import { outpaintGateReason } from '../../imageOutpaint';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
-import { imageEraseGateReason } from '../../imageErase';
+import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import EraseMaskLayer from './EraseMaskLayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
-import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
-import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
-import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
@@ -54,7 +50,8 @@ const durationLabel = (duration?: number) =>
 /** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
 
-interface MediaNodeData {
+/** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
+export interface MediaNodeData {
   src?: string;
   fileName?: string;
   mediaType?: 'image' | 'video' | 'audio';
@@ -72,6 +69,9 @@ interface MediaNodeData {
   draftRatio?: string;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
+  /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
+   *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
+  imageCutout?: ImageCutoutIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -112,6 +112,11 @@ interface MediaNodeData {
   onLocateInputSource?: (sourceNodeId: string) => void;
   /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
   pickMarked?: boolean;
+  /** 会话期隐藏标记（IKGZ5O，渲染期派生注入，不持久化）：本卡为编辑会话（擦除/裁切/抠图/
+   *  扩图）源卡，或高清面板打开期间由 CanvasPage 注入。工具条迁出（IKGYYD）后本字段不再
+   *  控制渲染，退为可观测标记（集成测试断言会话进入/退出时序）；模态显隐由钉屏幕层 show 门
+   *  （!editSessionActive && !showEnhanceDialog）承担 */
+  soloToolbarHidden?: boolean;
   /** 视频选取会话中能力失效（如合规未通过）置灰 */
   pickBlocked?: boolean;
   /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
@@ -152,6 +157,8 @@ interface MediaNodeData {
   onOutpaintImage?: (id: string) => void;
   /** 裁切（IKGW1H）：把本卡置为裁切编辑态（「高清 ▾」下拉「裁切」项派发；无门槛恒可用） */
   onCropImage?: (id: string) => void;
+  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
+  onCutoutImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -170,7 +177,6 @@ interface MediaNodeData {
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
   const shellFileRef = useRef<HTMLInputElement>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
@@ -179,7 +185,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
-  const showSoloToolbar = useSoloNodeSelected(selected);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -264,34 +269,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   //   data.onSaveToAssets?.(id);
   // }, [data, id]);
 
-  /** 工具条操作（stopPropagation 避免触发节点拖拽/选中变化） */
-  const stop = (e: React.MouseEvent) => e.stopPropagation();
-  const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
-  const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
-  const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
-  const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
-  const handleOutpaintImage = useCallback(() => data.onOutpaintImage?.(id), [data, id]);
-  /** 扩图可用性预检（打开菜单时按当前源图快照判定）：置灰并悬停说明原因 */
-  const outpaintDisabledReason = outpaintGateReason(
-    typeof data.width === 'number' ? data.width : undefined,
-    typeof data.height === 'number' ? data.height : undefined,
-    typeof data.size === 'number' ? data.size : undefined,
-  );
-  const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
-  const handleExtractAudio = useCallback(async () => {
-    if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
-    setIsExtractSubmitting(true);
-    try {
-      await data.onExtractAudio(id);
-    } finally {
-      setIsExtractSubmitting(false);
-    }
-  }, [data, id, isExtractSubmitting]);
-  const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
-  const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
-  const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
-
   /** 浏览器实测尺寸回填：仅在缺失或与既有数据不一致时上报，避免回填抖动 */
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
@@ -313,45 +290,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
-  const toolbar = mediaNodeToolbarVisibility(data.mediaType);
-  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
-   *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
-   *  「扩图」（IKGOQ0）按 outpaintGateReason 门槛预检置灰；
-   *  「裁切」（IKGW1H）无置灰门槛恒可用；顺序高清、扩图、裁切、擦除 */
-  const qualityMenuItems: ImageQualityMenuItem[] = [
-    {
-      id: 'enhance',
-      label: '高清',
-      icon: Expand,
-      hint: '在右侧新建高清放大草稿卡',
-      disabledReason: null,
-      onSelect: handleEnhanceImage,
-    },
-    {
-      id: 'outpaint',
-      label: '扩图',
-      icon: Maximize2,
-      hint: '进入扩图模式，拖动边框向外扩展画面',
-      disabledReason: outpaintDisabledReason,
-      onSelect: handleOutpaintImage,
-    },
-    {
-      id: 'crop',
-      label: '裁切',
-      icon: Crop,
-      hint: '拖动裁切框，裁掉边缘保留选定区域',
-      disabledReason: null,
-      onSelect: handleCropImage,
-    },
-    {
-      id: 'erase',
-      label: '擦除',
-      icon: Eraser,
-      hint: '涂抹或框选抹掉图中不要的内容',
-      disabledReason: imageEraseGateReason(data),
-      onSelect: handleEraseImage,
-    },
-  ];
   const isDraft = data.genStatus === 'draft';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
@@ -460,55 +398,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       onContextMenu={handleContextMenu}
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
     >
-      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {showSoloToolbar && !data.genStatus && !data.assetMissing && !isEmptyShell && (
-        <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
-          <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
-            <RefreshCcw size={14} strokeWidth={2} />
-            <span>重新编辑</span>
-          </button>
-          {toolbar.genImage && (
-            <button className={styles.toolBtn} onClick={handleGenImage} title="新建图片草稿并以本图为参考">
-              <Sparkles size={14} strokeWidth={2} />
-              <span>生成图片</span>
-            </button>
-          )}
-          {toolbar.genVideo && (
-            <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
-              <Video size={14} strokeWidth={2} />
-              <span>生成视频</span>
-            </button>
-          )}
-          {toolbar.imageQuality && (
-            <ImageQualityMenu items={qualityMenuItems} />
-          )}
-          {data.mediaType === 'video' && (
-            <button
-              className={styles.toolBtn}
-              onClick={() => void handleExtractAudio()}
-              disabled={data.assetId == null || isExtractSubmitting}
-              title={data.assetId == null ? '当前视频尚未关联资产，无法提取音频' : '提取视频中的完整音轨'}
-            >
-              <AudioLines size={14} strokeWidth={2} />
-              <span>{isExtractSubmitting ? '提交中…' : '提取音频'}</span>
-            </button>
-          )}
-          <span className={styles.toolDivider} />
-          <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
-            <Info size={14} strokeWidth={2} />
-          </button>
-          <button className={styles.toolBtn} onClick={handleDownload} title="下载">
-            <Download size={14} strokeWidth={2} />
-          </button>
-          {toolbar.mention && (
-            <button className={styles.toolBtn} onClick={handleMention} title="添加到 Agent 聊天">
-              <AtSign size={14} strokeWidth={2} />
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形） */}
+      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形）。
+          选中态悬浮工具条已迁出（IKGYYD）：钉屏幕层由 CanvasPage 经 NodeFollowToolbar 渲染
+          MediaNodeToolbar（拖动/缩放实时跟随、屏幕尺寸恒定），不再位于节点卡 DOM 内。 */}
       <div className={styles.titleRow} data-testid="media-title">
         <div className={styles.titleLeft}>
           <Icon className={styles.titleIcon} strokeWidth={2} color="#888" />
@@ -641,6 +533,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           />
         ) : (
           <>
+            {/* 抠图结果卡棋盘格垫底层（IKGXMT）：垫在 img 之下的静态棋盘格，透出透明 png 的
+                透明区域（规格故事 21）；仅 imageCutout 标记卡渲染，aria-hidden 纯视觉 */}
+            {data.imageCutout && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="cutout-checkerboard" />
+            )}
             <img
               className={styles.mediaImage}
               src={data.src}

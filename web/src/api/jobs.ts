@@ -5,13 +5,14 @@
 import { apiRequest, isApiError, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
+import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取、高清放大、图片擦除与智能扩图任务（IKGM9O / IKGOT8 / IKGOR6）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图与抠图任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -284,6 +285,32 @@ export function createImageErase(
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/image-cutouts 请求体（键名与 backend/libs/contracts/image-cutout.ts 契约恒等；
+ *  按场景三键/七键，创建入口 strict zod 复核；通用场景不携带描边与裁剪参数（接口会忽略的字段不进请求体））。 */
+export type CreateImageCutoutPayload = ImageCutoutInput;
+
+/** 创建图片抠图任务返回（IKGXLS）；同高清放大/擦除：入队失败创建响应仍 200、任务随即 enqueue_failed 经轮询呈现。 */
+export interface ImageCutoutCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建图片抠图任务（IKGXLS）；免费口径同 image_enhance / image_erase——不带幂等头、无积分预估、不走余额拦截门。
+ *  抠图结果卡由前端在创建成功后本地插入（发送时才建卡，target_node_id 发送时生成传入），
+ *  产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。 */
+export function createImageCutout(
+  projectId: string,
+  payload: CreateImageCutoutPayload,
+): Promise<ImageCutoutCreatedData> {
+  return apiRequest<ImageCutoutCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
