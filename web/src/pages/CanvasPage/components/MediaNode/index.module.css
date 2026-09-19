@@ -592,25 +592,76 @@
   color: #888;
 }
 
-/* IKFM3S §4：「输入已更新」徽标——卡片标题行右上角显眼提示（橙色胶囊），点击定位来源文本卡 */
-.inputStaleBadge {
+/* 「输入已更新」徽标 + 下方操作菜单 */
+.inputStaleWrap {
   position: absolute;
   bottom: calc(100% + 2px);
   right: 0;
-  padding: 2px 8px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #fff;
-  background: #f97316;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(249, 115, 22, 0.45);
+  z-index: 40;
 }
 
-.inputStaleBadge:hover {
-  background: #ea680c;
+.inputStaleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  appearance: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #eab308;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inputStaleLabel:hover {
+  color: #facc15;
+}
+
+.inputStaleMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 132px;
+  padding: var(--spacing-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  z-index: 41;
+}
+
+.inputStaleMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inputStaleMenuItem:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.inputStaleMenuItem:disabled {
+  color: #666;
+  cursor: not-allowed;
 }
 
 /* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾 */

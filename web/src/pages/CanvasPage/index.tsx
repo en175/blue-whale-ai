@@ -180,6 +180,7 @@ import {
   renameProject,
   deleteProject,
   projectKeys,
+  type SnapshotAsset,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -956,64 +957,22 @@ export default function CanvasPage() {
     mediaBlocks?: SessionContentBlock[];
   } | null>(null);
 
-  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入。
-   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处上传得 assetId 构造
-   *  asset_ref 媒体块挂进 agentContext.mediaBlocks，复用 AgentPanel 既有的注入链路。 */
+  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框文本，随后清除导航状态避免刷新重复注入。
+   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处只负责打开 AgentPanel 与注入文本，
+   *  附件的落画布节点 + 挂会话引用改由下方「首页附件落画布」effect 在画布水合完成后处理——
+   *  避免在水合前 setMediaNodes 被水合 effect 覆盖，同时让本地上传的图与 Agent 侧边栏上传一致落节点。 */
   useEffect(() => {
     const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
     if (!state?.agentText && !state?.skillId) return;
-    const attachments = takeAgentHandoff();
-    const inject = async () => {
-      let mediaBlocks: SessionContentBlock[] | undefined;
-      if (attachments && attachments.length > 0) {
-        const blocks: SessionContentBlock[] = [];
-        for (const item of attachments) {
-          if (item.assetId != null) {
-            // 资产库选择项：已有 assetId，直接复用（不重复上传），preview 即永久 URL
-            rememberAssetUrl(String(item.assetId), item.preview);
-            blocks.push({
-              type: 'asset_ref',
-              url: item.preview,
-              name: item.name,
-              media_type: item.kind,
-              display_label: item.name,
-              asset_id: String(item.assetId),
-            });
-          } else if (item.file) {
-            const uploaded = await uploadFileToAsset(item.file, item.kind);
-            if (uploaded) {
-              // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
-              // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
-              rememberAssetUrl(uploaded.asset_id, uploaded.url);
-              blocks.push({
-                type: 'asset_ref',
-                url: uploaded.url,
-                name: item.name,
-                media_type: item.kind,
-                display_label: item.name,
-                asset_id: uploaded.asset_id,
-              });
-            } else {
-              console.warn('首页附件上传失败，已跳过:', item.name);
-            }
-            URL.revokeObjectURL(item.preview);
-          } else {
-            console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
-          }
-        }
-        mediaBlocks = blocks.length > 0 ? blocks : undefined;
-      }
-      setAgentContext({
-        text: state.agentText ?? '',
-        skillId: state.skillId ?? '',
-        skillName: state.skillName ?? '',
-        ts: Date.now(),
-        mediaBlocks,
-      });
-      setShowAgent(true);
-      navigate(location.pathname + location.search, { replace: true, state: null });
-    };
-    void inject();
+    setAgentContext({
+      text: state.agentText ?? '',
+      skillId: state.skillId ?? '',
+      skillName: state.skillName ?? '',
+      ts: Date.now(),
+      mediaBlocks: undefined,
+    });
+    setShowAgent(true);
+    navigate(location.pathname + location.search, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值）；
@@ -1201,8 +1160,8 @@ export default function CanvasPage() {
         dialogWidth: 320,
       })
     : null;
-  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。发送条复用 computeFollowAnchor
-   *  （恒锚节点下方）；工具条在节点上方，手动换算（工具条高约 42 + 间距 10）。 */
+  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。工具条在节点上方，手动换算
+   *  （工具条高约 42 + 间距 10）；发送条 IKH1WI 改中心点锚（同构 cutoutToolbarAnchor）。 */
   const eraseSourceNode = eraseTargetNodeId
     ? mediaNodes.find((n) => n.id === eraseTargetNodeId) ?? null
     : null;
@@ -1218,20 +1177,28 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const eraseSendBarAnchor = eraseSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: eraseSourceNode.position.x,
-        nodeY: eraseSourceNode.position.y,
-        nodeWidth: nodeBoxOf(eraseSourceNode).width,
-        nodeHeight: nodeBoxOf(eraseSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 240,
-      })
-    : null;
+  /** 擦除发送条跟随锚（IKGOTB；IKH1WI 改中心点锚）：left 传源卡中心 x——发送条自身
+   *  translateX(-50%) 真居中（口径同 cutoutToolbarAnchor），估宽 240 不再参与居中、
+   *  仅按钳制半宽保证条不出视口（旧估宽左上角语义会被 CSS translateX(-50%) 二次左移，
+   *  恒偏左 120px）；top 口径不变：源卡下方 + FOLLOW_GAP。 */
+  const eraseSendBarAnchor = (() => {
+    if (!eraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(eraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = eraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = eraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 120;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕编辑态跟随锚（IKGZ83，口径同擦除）：源视频卡上方工具条 / 下方发送条。
-   *  工具条手动换算（高约 42 + 间距 10）；发送条复用 computeFollowAnchor（恒锚节点下方）。 */
+   *  工具条手动换算（高约 42 + 间距 10）；发送条同 cutoutToolbarAnchor 中心点锚（IKH25A）——
+   *  发送条壳自身 translateX(-50%) 真居中，left 传源卡中心 x（估宽左上角语义叠加
+   *  translateX(-50%) 会恒偏左估宽一半 130px），估半宽 130 仅用于视口钳制；
+   *  top 同 computeFollowAnchor 的节点下方 + 16 间距（垂直口径不变）。 */
   const subtitleEraseSourceNode = subtitleEraseTargetNodeId
     ? mediaNodes.find((n) => n.id === subtitleEraseTargetNodeId) ?? null
     : null;
@@ -1247,18 +1214,20 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const subtitleEraseSendBarAnchor = subtitleEraseSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: subtitleEraseSourceNode.position.x,
-        nodeY: subtitleEraseSourceNode.position.y,
-        nodeWidth: nodeBoxOf(subtitleEraseSourceNode).width,
-        nodeHeight: nodeBoxOf(subtitleEraseSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 260,
-      })
-    : null;
+  const subtitleEraseSendBarAnchor = (() => {
+    if (!subtitleEraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(subtitleEraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = subtitleEraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = subtitleEraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    // 估半宽 = 估宽 260 的一半（IKH25A 前口径），仅用于视口钳制，不参与居中
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
@@ -1335,19 +1304,23 @@ export default function CanvasPage() {
   const cropSpace = cropSourceNode && cropBounds ? cropSpaceOf(cropSourceNode, cropBounds) : null;
   /** 64 自然像素下限换算到显示坐标系（分辨率缺失时 0=无下限） */
   const cropMinSide = cropSpace ? minCropSideDisplay(cropSpace) : 0;
-  /** 裁切面板跟随锚（IKGW1N）：源图卡下方（computeFollowAnchor 恒锚节点下方） */
-  const cropPanelAnchor = cropSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: cropSourceNode.position.x,
-        nodeY: cropSourceNode.position.y,
-        nodeWidth: nodeBoxOf(cropSourceNode).width,
-        nodeHeight: nodeBoxOf(cropSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 380,
-      })
-    : null;
+  /** 裁切面板跟随锚（IKGW1N；IKH1WI 改中心点锚）：left 传源卡中心 x——面板自身
+   *  translateX(-50%) 真居中（口径同 cutoutToolbarAnchor），估宽 380 不再参与居中、
+   *  仅按钳制半宽保证面板不出视口（旧估宽左上角语义会被 CSS translateX(-50%) 二次左移，
+   *  恒偏左 190px）；top 口径不变：源卡下方 + FOLLOW_GAP。 */
+  const cropPanelAnchor = (() => {
+    if (!cropSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(cropSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = cropSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = cropSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 190;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /* ---------- 扩图模式派生量（IKGOQX） ---------- */
   /** 源图卡与内容区矩形（扩展框与面板的锚定基准；内容区 = 节点左上角 + 标题偏移 + 内容盒） */
   const outpaintSourceNode = outpaintSessionActive
@@ -1447,6 +1420,10 @@ export default function CanvasPage() {
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
   const applyingRef = useRef(false);
+  const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
+  const onUpdateGenerate = useCallback((nodeId: string) => {
+    updateGenerateRef.current(nodeId);
+  }, []);
   const [applying, setApplying] = useState(false);
   const [saveEpoch, setSaveEpoch] = useState(0);
   const savePromiseRef = useRef<Promise<unknown> | null>(null);
@@ -1586,7 +1563,7 @@ export default function CanvasPage() {
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
 
@@ -2076,6 +2053,64 @@ export default function CanvasPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
+
+  /** 首页智能体附件落画布节点（IKFPOT）：画布水合完成后消费 handoff，
+   *  本地上传的 File 走 placeFileOnCanvas 立即落媒体节点（与 Agent 侧边栏「+」上传同链路），
+   *  资产库选择项（已有 assetId）直接构造 asset_ref；最终经 externalAssetPicks 通道挂进 AgentPanel 输入框，
+   *  不走 inputVersion 通道以避免重置用户已敲的输入文本。声明在水合 effect 之后，确保 doc 已初始化且
+   *  水合 setMediaNodes 先于本 effect 的 placeFileOnCanvas 执行，新节点不会被水合覆盖。 */
+  const homeHandoffDoneRef = useRef(false);
+  useEffect(() => {
+    if (!doc) return;
+    if (homeHandoffDoneRef.current) return;
+    const attachments = takeAgentHandoff();
+    if (!attachments || attachments.length === 0) return;
+    homeHandoffDoneRef.current = true;
+    let cancelled = false;
+    const inject = async () => {
+      const blocks: SessionContentBlock[] = [];
+      for (const item of attachments) {
+        if (item.assetId != null) {
+          // 资产库选择项：已有 assetId，直接复用（不重复上传），preview 即永久 URL
+          rememberAssetUrl(String(item.assetId), item.preview);
+          blocks.push({
+            type: 'asset_ref',
+            url: item.preview,
+            name: item.name,
+            media_type: item.kind,
+            display_label: item.name,
+            asset_id: String(item.assetId),
+          });
+        } else if (item.file) {
+          try {
+            // placeFileOnCanvas：先以 blob 预览落媒体节点，后台三步上传，成功后换永久 URL + assetId
+            const result = await placeFileOnCanvas(item.file);
+            if (cancelled) return;
+            rememberAssetUrl(result.asset_id, result.url);
+            blocks.push({
+              type: 'asset_ref',
+              url: result.url,
+              name: item.name,
+              media_type: item.kind,
+              display_label: item.name,
+              asset_id: result.asset_id,
+            });
+          } catch {
+            // placeFileOnCanvas 内部已 toast 失败并移除节点
+          }
+          URL.revokeObjectURL(item.preview);
+        } else {
+          console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
+        }
+      }
+      if (!cancelled && blocks.length > 0) {
+        setAgentAssetPicks({ ts: Date.now(), blocks });
+      }
+    };
+    void inject();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc]);
 
   /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
    *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
@@ -3182,6 +3217,17 @@ export default function CanvasPage() {
       const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
       if (mediaNode && (mediaData.draft === true || hasGenerationRecord(mediaNode))) {
         const mediaType = mediaData.mediaType;
+        // IKFXZD/IKDMQV：面板刚被显式关闭（发送成功即隐藏、空白点击）时处于 hidden 豁免期，
+        // 程序化选中不得经本路径回弹重开——口径同下方 syncPanelVisible 的 hiddenRef 拦截
+        //（发送路径「置 hidden 标记避免紧随的画布选中事件回弹重开」）；手动点卡经 onNodeClick
+        // 走 openXxxDraftDialog 重置豁免，照常重开。
+        const panelHidden = mediaType === 'video'
+          ? videoPanelHiddenRef.current
+          : mediaType === 'audio'
+            ? audioPanelHiddenRef.current
+            : mediaData.imageEnhance
+              ? enhancePanelHiddenRef.current
+              : imagePanelHiddenRef.current;
         const alreadyOpen = mediaType === 'video'
           ? showBottomDialog && videoDraftId === soloId
           : mediaType === 'audio'
@@ -3189,7 +3235,7 @@ export default function CanvasPage() {
             : mediaData.imageEnhance
               ? showEnhanceDialog && enhanceDraftId === soloId
               : showImageDialog && imageDraftId === soloId;
-        if (!alreadyOpen) {
+        if (!alreadyOpen && !panelHidden) {
           openMediaDraftDialog(soloId, mediaType);
           return;
         }
@@ -7641,6 +7687,30 @@ export default function CanvasPage() {
           // 连线已在本地补上；落盘失败留给后续编辑触发保存
         }
       }
+      // IKFPOT：应用方案卡后服务端已把来源素材关联进项目，但前端快照资产字典停留在打开画布时的旧状态，
+      // 水合 resolveNodeAssets 查不到会误标「素材已被删除」。这里从应用返回的节点里提取素材资产信息
+      // 增量并入字典（与 acceptDoc 同一批处理，水合 effect 重跑时字典已是最新，无中间闪烁）。
+      const newAssets: SnapshotAsset[] = [];
+      for (const n of nextNodes) {
+        if (n.type !== 'mediaNode') continue;
+        const d = (n.data ?? {}) as Record<string, unknown>;
+        const aid = d.assetId ?? d.asset_id ?? d.assetID;
+        if (aid == null || aid === '') continue;
+        const src = typeof d.src === 'string' ? d.src : '';
+        if (!src || src.startsWith('blob:')) continue;
+        const mediaType = d.mediaType;
+        if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') continue;
+        newAssets.push({
+          asset_id: Number(aid),
+          type: mediaType,
+          access_url: src,
+          width: typeof d.width === 'number' ? d.width : null,
+          height: typeof d.height === 'number' ? d.height : null,
+          material_id: null,
+          material_status: null,
+        });
+      }
+      upsertAssets(newAssets);
       acceptDoc({ id: result.canvas.id, version: nextVersion, nodes: nextNodes, edges: nextEdges, viewport: savedViewport ?? viewport });
       const target = result.node.position;
       setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
@@ -8647,6 +8717,226 @@ export default function CanvasPage() {
     }
   };
 
+  /** 「输入已更新 → 更新生成」：用节点已存参数 + 画布上最新文本输入，在当前卡原位重跑。 */
+  const handleUpdateGenerate = async (nodeId: string) => {
+    if (applyingRef.current) return;
+    if (saveBlocked || saveStatus === 'error') {
+      showToast('warn', '保存失败，请重试');
+      return;
+    }
+    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.type !== 'mediaNode') return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (data.genStatus === 'generating') {
+      showToast('warn', '正在生成中');
+      return;
+    }
+    const mediaType = data.mediaType;
+    if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') return;
+    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
+    if (!modelId) {
+      showToast('warn', '缺少模型参数，请先打开面板选择模型');
+      return;
+    }
+    const projectId = currentId;
+    if (!projectId) {
+      showToast('warn', '未选中项目，无法生成');
+      return;
+    }
+    const prompt = typeof data.prompt === 'string' ? data.prompt : '';
+    const promptDoc = restorePromptDoc(data.promptDoc, data.prompt);
+    const composedPrompt = composeImageSendPrompt(textAttachmentsOf(nodeId), prompt, promptDoc);
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
+
+    if (mediaType === 'image') {
+      const size = typeof data.draftSize === 'string' ? data.draftSize : '';
+      const ratio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
+      if (!size || !ratio) {
+        showToast('warn', '缺少分辨率或比例，请先打开面板确认参数');
+        return;
+      }
+      const syncError = imageTextIndexSendError(
+        nodeId,
+        edgesRef.current,
+        [...mediaNodesRef.current, ...textNodesRef.current],
+        DEFAULT_IMAGE_REFERENCE_LIMIT,
+      );
+      if (syncError) {
+        showToast('warn', syncError);
+        return;
+      }
+      applyingRef.current = true;
+      setSubmittingNodeId(nodeId);
+      try {
+        const inputAssetIds: string[] = [];
+        for (const ref of mergedImageRefsOf(nodeId, edgesRef.current, [...mediaNodesRef.current, ...textNodesRef.current])) {
+          if (!inputAssetIds.includes(ref.assetId)) inputAssetIds.push(ref.assetId);
+        }
+        if (!(await flushCanvasSave(projectId))) return;
+        if (activeProjectRef.current !== projectId) return;
+        const jobRefs = buildImageJobReferences(inputAssetIds);
+        const submitted = startGenerationJob(
+          'image',
+          { prompt, model_id: modelId, aspect_ratio: ratio, size },
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          nodeId,
+          undefined,
+          promptDoc,
+        );
+        if (submitted && imageDraftId === nodeId) {
+          imagePanelHiddenRef.current = true;
+          setShowImageDialog(false);
+        }
+      } catch (error) {
+        showToast('error', '保存或提交失败，请重试');
+        console.warn('更新生成失败:', error);
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
+      return;
+    }
+
+    if (mediaType === 'video') {
+      const aspectRatio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
+      const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
+      const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
+      if (!aspectRatio || !resolution || !Number.isFinite(duration) || duration <= 0) {
+        showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
+        return;
+      }
+      const syncError = videoTextIndexSendError(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      if (syncError) {
+        showToast('warn', syncError);
+        return;
+      }
+      const sourceDraftRefs = mergedVideoRefsWithTextIndex(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      const savedStripOrder = data.referenceStripOrder;
+      const draftRefs = {
+        ...sourceDraftRefs,
+        reference: orderRefStripItems(
+          sourceDraftRefs.reference,
+          videoRefStripKey,
+          Array.isArray(savedStripOrder) ? savedStripOrder : [],
+        ),
+      };
+      const conflict = videoRefConflict(draftRefs, {
+        firstFrame: true,
+        lastFrame: true,
+        firstLastFrame: true,
+        referenceImage: true,
+      });
+      if (conflict) {
+        showToast('warn', conflict);
+        return;
+      }
+      if (!supportsVideoReferenceModel(modelId) && draftRefs.reference.some((ref) => ref.mediaType !== 'image')) {
+        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+        return;
+      }
+      applyingRef.current = true;
+      setSubmittingNodeId(nodeId);
+      try {
+        if (!(await flushCanvasSave(projectId))) return;
+        if (activeProjectRef.current !== projectId) return;
+        const jobRefs = buildVideoJobReferences(draftRefs);
+        const submitted = startGenerationJob(
+          'video',
+          {
+            prompt,
+            model_id: modelId,
+            aspect_ratio: aspectRatio,
+            resolution,
+            duration,
+            generate_audio: typeof data.draftGenerateAudio === 'boolean' ? data.draftGenerateAudio : true,
+          },
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          nodeId,
+          undefined,
+          promptDoc,
+        );
+        if (submitted && videoDraftId === nodeId) {
+          videoPanelHiddenRef.current = true;
+          setShowBottomDialog(false);
+        }
+      } catch (error) {
+        showToast('error', '保存或提交失败，请重试');
+        console.warn('更新生成失败:', error);
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
+      return;
+    }
+
+    const syncError = audioTextIndexSendError(
+      nodeId,
+      edgesRef.current,
+      mediaNodesRef.current,
+      textNodesRef.current,
+    );
+    if (syncError) {
+      showToast('warn', syncError);
+      return;
+    }
+    applyingRef.current = true;
+    setSubmittingNodeId(nodeId);
+    try {
+      const { refs } = mergedAudioRefsWithTextIndex(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      const resolved = refs.filter((ref) => ref.assetId);
+      if (!(await flushCanvasSave(projectId))) return;
+      if (activeProjectRef.current !== projectId) return;
+      const submitted = startGenerationJob(
+        'audio',
+        { prompt, model_id: modelId },
+        undefined,
+        resolved.length
+          ? { references: resolved.map((ref) => ({
+              role: 'reference' as const,
+              type: ref.mediaType ?? 'audio',
+              asset_id: String(ref.assetId),
+            })) }
+          : undefined,
+        nodeId,
+        undefined,
+        promptDoc,
+      );
+      if (submitted && audioDraftId === nodeId) {
+        audioPanelHiddenRef.current = true;
+        setShowAudioDialog(false);
+      }
+    } catch (error) {
+      showToast('error', '保存或提交失败，请重试');
+      console.warn('更新生成失败:', error);
+    } finally {
+      applyingRef.current = false;
+      setSubmittingNodeId(null);
+    }
+  };
+  updateGenerateRef.current = (nodeId) => {
+    void handleUpdateGenerate(nodeId);
+  };
+
   /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
   const firePendingGen = () => {
     const handoff = pendingGenRef.current;
@@ -8936,6 +9226,7 @@ export default function CanvasPage() {
           onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onUpdateGenerate={onUpdateGenerate}
         />
         {connectMenu && (
           <ConnectTypeMenu

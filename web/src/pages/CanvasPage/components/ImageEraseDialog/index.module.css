@@ -130,9 +130,13 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* 跟随锚定（inline left/top 生效）：解除默认 bottom 定位避免 top/bottom 双侧拉伸 */
+/* 跟随锚定（IKH1WI 中心点锚，inline left/top 生效）：解除默认 bottom 定位避免 top/bottom
+   双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态 translateX(-50%)
+   以锚点（源卡中心 x）真居中。口径同 CutoutToolbar .dialogWrapFollow（彼处显式
+   重声明 transform，此处取继承，等价） */
 .sendBarFollow {
   bottom: auto;
+  left: 0;
 }
 
 .freeHint {
