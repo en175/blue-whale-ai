@@ -48,6 +48,7 @@ export const apiMocks = {
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   touchProjectLastOpened: vi.fn(async () => undefined),
+  pinProject: vi.fn(async () => undefined),
   fetchMe: vi.fn(async () => null),
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),

@@ -17,7 +17,9 @@ export interface ProjectRecord {
   previews: string[];
   /** 创建时间（ISO 字符串） */
   created_at: string;
+  /** 上次打开时间（ISO 字符串）；从未打开过为 null */
   last_opened_at: string | null;
+  /** 置顶时间（ISO 字符串）；非空即已置顶（组内按此倒序），未置顶为 null */
   pinned_at: string | null;
 }
 
@@ -61,7 +63,7 @@ export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
 }
 
 /** 打开即记 PUT /api/projects/:id/last-opened（IKH1YK）：失败静默由调用方 catch。 */
-export function touchProjectLastOpened(id: string | number): Promise<void> {
+export function touchProjectLastOpened(id: ProjectRecord['id']): Promise<void> {
   return apiRequest<void>(`/api/projects/${encodeURIComponent(String(id))}/last-opened`, {
     method: 'PUT',
     silent: true,
