@@ -661,3 +661,23 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     expect(mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]')).toBeNull();
   });
 });
+
+describe('MediaNode 音视频分离编辑态锁定层（IKH28U）', () => {
+  /** 视频卡注入 splitEditing 时：透明锁定层全覆盖内容区接管指针（nodrag/nopan 同框层口径）
+      且视频元素被暂停在当前帧；未注入（正常视频卡）不渲染。 */
+  it('注入 splitEditing：渲染锁定层并暂停视频；未注入不渲染', async () => {
+    // jsdom 不加载媒体：拦截 HTMLMediaElement.prototype.pause 验证编辑态注入即暂停在当前帧
+    const pauseSpy = vi.fn();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseSpy);
+    await renderNode('video', { data: { splitEditing: true } });
+    expect(pauseSpy).toHaveBeenCalled();
+    pause.mockRestore();
+    const layer = mountNode.querySelector('[data-testid="split-lock-layer"]');
+    expect(layer).toBeTruthy();
+    expect(layer!.className).toContain('nodrag');
+    expect(layer!.className).toContain('nopan');
+    // 未注入的正常视频卡不渲染锁定层
+    await renderNode('video', {});
+    expect(mountNode.querySelector('[data-testid="split-lock-layer"]')).toBeNull();
+  });
+});
