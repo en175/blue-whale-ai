@@ -709,4 +709,13 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 List.of(com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.SOURCE),
                 limit, maxAgeMinutes);
     }
+
+    /** 视频 HD 高清到点/孤儿（IKH3VF，父规格 IKH3VB）：套 source 白名单（与 claim 同源，
+     *  单源 video_enhance；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueVideoEnhanceJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                com.bluewhale.worker.domain.entity.VideoEnhanceContract.TAG,
+                List.of(com.bluewhale.worker.domain.entity.VideoEnhanceContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
 }

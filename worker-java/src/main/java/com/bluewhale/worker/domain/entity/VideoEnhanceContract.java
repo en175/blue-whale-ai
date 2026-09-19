@@ -73,6 +73,17 @@ public final class VideoEnhanceContract {
      *  无键即无值，故 fps 不设常量。 */
     public static final String BITRATE_LEVEL = "medium";
 
+    /** 目标分辨率档位 → 输出短边像素（文档出处：官方 PDF 附录「码率参考表」分辨率档位行——
+     *  1080p / 2K / 4K 行按行业口径短边 1080 / 1440 / 2160）。官方 result 只返回 resolution
+     *  档位字符串、不返回输出宽高像素——worker 按档位短边 + 源宽高比推导输出宽高入库
+     *  （assets 无 fps / resolution 列，帧率与档位字符串落 generation_job_logs payload）；
+     *  推导值同时支撑前端链式 HD 置灰判断（输出 2K/4K 卡短边超 1080 输入上限即置灰，
+     *  ADR-0105）。仅 worker 消费，不进 TS 契约（无跨进程字段）。 */
+    public static final java.util.Map<String, Integer> RESOLUTION_SHORT_SIDE_PX = java.util.Map.of(
+            "1080p", 1080,
+            "2k", 1440,
+            "4k", 2160);
+
     // ========== 输入限制（文档出处：官方 PDF video_url 参数「输入视频限制」节——「最高支持
     //            1080p。具体规格要求：短边范围 [360,1080]、长边范围 [360,1920]」；backend 复核
     //            + web 预检同源；宽高缺失的存量放行，交供应商按官方门槛拒；仅 SDR 无前置元数据，
@@ -92,4 +103,13 @@ public final class VideoEnhanceContract {
 
     // 格式面：官方支持 mp4 / flv / ts / avi / mov / wmv / mkv 等主流视频格式（开放式列举），
     // 不做格式预检白名单（我方上传面 video/* 全部在官方支持面内）——口径单源在 TS 契约注释。
+
+    // ========== 错误码（数值 1045 见 error-codes.ts ERROR_VIDEO_ENHANCE_FAILED；
+    //            1044 已由音视频分离占用） ==========
+
+    /** 执行兜底失败码：网关分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 /
+     *  提交超时 provider_timeout 1012）之外的火山任务 failed（含 SDR 限制、短边/长边超限等
+     *  供应商侧官方门槛拒绝）与结果下载转存失败统一归并本码，无 worker 级自动重试，
+     *  上游可读原因随 message 透传前端投影。 */
+    public static final String ERROR_VIDEO_ENHANCE_FAILED = "video_enhance_failed";
 }

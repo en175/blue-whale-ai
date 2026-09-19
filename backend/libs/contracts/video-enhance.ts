@@ -88,3 +88,13 @@ export const videoEnhanceInputSchema = z
   })
   .strict();
 export type VideoEnhanceInput = z.infer<typeof videoEnhanceInputSchema>;
+
+/** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_VIDEO_ENHANCE_FAILED=1045，
+ *  TS 侧常量单源在 error-codes.ts，本文件不重复定义——去字幕 / media-extract 同款）：
+ *  三类映射——① 网关错误（HTTP 非 2xx / 成功态 error 信封 / 提交 SocketTimeout）复用既有
+ *  通用码分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 / 提交超时
+ *  provider_timeout 1012，NewApiErrorClassifier 同款，不新码）；② 火山任务失败（轮询
+ *  status=failed——**含 SDR 限制、短边/长边超限等供应商侧官方门槛拒绝**，宽高缺失放行的
+ *  存量由上游拒，ADR-0105 任务失败口径兜底）与 ③ 转存失败（result.video_url 24h 临时链接
+ *  → 自家 TOS）统一归并本工具兜底码 video_enhance_failed（1045），无 worker 级自动重试，
+ *  上游可读原因随 message 透传前端投影，用户手动重试沿用冻结 input。 */

@@ -139,6 +139,11 @@ public class JobStateMachineService {
         return claimService.claimVideoSubtitleErase(jobId, workerId);
     }
 
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto> claimVideoEnhance(
+            String jobId, String workerId) {
+        return claimService.claimVideoEnhance(jobId, workerId);
+    }
+
     // ========== 终态收口（委托 JobFinalizer） ==========
 
     public boolean completeJob(String jobId, List<String> assetIds, String workerId, long fencingToken) {
@@ -243,6 +248,14 @@ public class JobStateMachineService {
     public boolean publishVideoSubtitleEraseResult(
             com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto input) {
         return finalizer.publishVideoSubtitleEraseResult(input);
+    }
+
+    // ========== video_enhance 直通（DTO 形态，VideoEnhanceJobProcessor 专用；
+    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
+
+    public boolean publishVideoEnhanceResult(
+            com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto input) {
+        return finalizer.publishVideoEnhanceResult(input);
     }
 
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========
