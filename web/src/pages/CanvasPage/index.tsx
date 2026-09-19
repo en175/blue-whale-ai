@@ -1175,8 +1175,8 @@ export default function CanvasPage() {
         dialogWidth: 320,
       })
     : null;
-  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。发送条复用 computeFollowAnchor
-   *  （恒锚节点下方）；工具条在节点上方，手动换算（工具条高约 42 + 间距 10）。 */
+  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。工具条在节点上方，手动换算
+   *  （工具条高约 42 + 间距 10）；发送条 IKH1WI 改中心点锚（同构 cutoutToolbarAnchor）。 */
   const eraseSourceNode = eraseTargetNodeId
     ? mediaNodes.find((n) => n.id === eraseTargetNodeId) ?? null
     : null;
@@ -1192,20 +1192,28 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const eraseSendBarAnchor = eraseSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: eraseSourceNode.position.x,
-        nodeY: eraseSourceNode.position.y,
-        nodeWidth: nodeBoxOf(eraseSourceNode).width,
-        nodeHeight: nodeBoxOf(eraseSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 240,
-      })
-    : null;
+  /** 擦除发送条跟随锚（IKGOTB；IKH1WI 改中心点锚）：left 传源卡中心 x——发送条自身
+   *  translateX(-50%) 真居中（口径同 cutoutToolbarAnchor），估宽 240 不再参与居中、
+   *  仅按钳制半宽保证条不出视口（旧估宽左上角语义会被 CSS translateX(-50%) 二次左移，
+   *  恒偏左 120px）；top 口径不变：源卡下方 + FOLLOW_GAP。 */
+  const eraseSendBarAnchor = (() => {
+    if (!eraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(eraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = eraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = eraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 120;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕编辑态跟随锚（IKGZ83，口径同擦除）：源视频卡上方工具条 / 下方发送条。
-   *  工具条手动换算（高约 42 + 间距 10）；发送条复用 computeFollowAnchor（恒锚节点下方）。 */
+   *  工具条手动换算（高约 42 + 间距 10）；发送条同 cutoutToolbarAnchor 中心点锚（IKH25A）——
+   *  发送条壳自身 translateX(-50%) 真居中，left 传源卡中心 x（估宽左上角语义叠加
+   *  translateX(-50%) 会恒偏左估宽一半 130px），估半宽 130 仅用于视口钳制；
+   *  top 同 computeFollowAnchor 的节点下方 + 16 间距（垂直口径不变）。 */
   const subtitleEraseSourceNode = subtitleEraseTargetNodeId
     ? mediaNodes.find((n) => n.id === subtitleEraseTargetNodeId) ?? null
     : null;
@@ -1221,20 +1229,23 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const subtitleEraseSendBarAnchor = subtitleEraseSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: subtitleEraseSourceNode.position.x,
-        nodeY: subtitleEraseSourceNode.position.y,
-        nodeWidth: nodeBoxOf(subtitleEraseSourceNode).width,
-        nodeHeight: nodeBoxOf(subtitleEraseSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 260,
-      })
-    : null;
-  /** 音视频分离编辑态跟随锚（IKH28U，口径同去字幕）：源视频卡上方工具条 / 下方占位发送条。
-   *  工具条手动换算（高约 42 + 间距 10）；发送条复用 computeFollowAnchor（恒锚节点下方）。 */
+  const subtitleEraseSendBarAnchor = (() => {
+    if (!subtitleEraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(subtitleEraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = subtitleEraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = subtitleEraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    // 估半宽 = 估宽 260 的一半（IKH25A 前口径），仅用于视口钳制，不参与居中
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
+  /** 音视频分离编辑态跟随锚（IKH28U，口径同去字幕）：源视频卡上方工具条 / 下方发送条。
+   *  工具条手动换算（高约 42 + 间距 10）；发送条走 IKH25A 中心点锚口径（left=源卡中心 x，
+   *  组件 translateX(-50%) 真居中；halfWidth 仅视口钳制不参与居中，恒偏左 130px 缺陷不复现）。 */
   const audioVideoSplitSourceNode = audioVideoSplitTargetNodeId
     ? mediaNodes.find((n) => n.id === audioVideoSplitTargetNodeId) ?? null
     : null;
@@ -1250,18 +1261,20 @@ export default function CanvasPage() {
       top: Math.round(Math.max(8, screenTop - 52)),
     };
   })();
-  const audioVideoSplitSendBarAnchor = audioVideoSplitSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: audioVideoSplitSourceNode.position.x,
-        nodeY: audioVideoSplitSourceNode.position.y,
-        nodeWidth: nodeBoxOf(audioVideoSplitSourceNode).width,
-        nodeHeight: nodeBoxOf(audioVideoSplitSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 260,
-      })
-    : null;
+  const audioVideoSplitSendBarAnchor = (() => {
+    if (!audioVideoSplitSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(audioVideoSplitSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = audioVideoSplitSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = audioVideoSplitSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    // 估半宽 = 估宽 260 的一半，仅用于视口钳制，不参与居中（对齐 IKH25A 中心点锚口径）
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
@@ -1338,19 +1351,23 @@ export default function CanvasPage() {
   const cropSpace = cropSourceNode && cropBounds ? cropSpaceOf(cropSourceNode, cropBounds) : null;
   /** 64 自然像素下限换算到显示坐标系（分辨率缺失时 0=无下限） */
   const cropMinSide = cropSpace ? minCropSideDisplay(cropSpace) : 0;
-  /** 裁切面板跟随锚（IKGW1N）：源图卡下方（computeFollowAnchor 恒锚节点下方） */
-  const cropPanelAnchor = cropSourceNode && wrapperSize.width > 0
-    ? computeFollowAnchor({
-        nodeX: cropSourceNode.position.x,
-        nodeY: cropSourceNode.position.y,
-        nodeWidth: nodeBoxOf(cropSourceNode).width,
-        nodeHeight: nodeBoxOf(cropSourceNode).height,
-        viewport: liveViewport,
-        containerWidth: wrapperSize.width,
-        containerHeight: wrapperSize.height,
-        dialogWidth: 380,
-      })
-    : null;
+  /** 裁切面板跟随锚（IKGW1N；IKH1WI 改中心点锚）：left 传源卡中心 x——面板自身
+   *  translateX(-50%) 真居中（口径同 cutoutToolbarAnchor），估宽 380 不再参与居中、
+   *  仅按钳制半宽保证面板不出视口（旧估宽左上角语义会被 CSS translateX(-50%) 二次左移，
+   *  恒偏左 190px）；top 口径不变：源卡下方 + FOLLOW_GAP。 */
+  const cropPanelAnchor = (() => {
+    if (!cropSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(cropSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = cropSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = cropSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 190;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
   /* ---------- 扩图模式派生量（IKGOQX） ---------- */
   /** 源图卡与内容区矩形（扩展框与面板的锚定基准；内容区 = 节点左上角 + 标题偏移 + 内容盒） */
   const outpaintSourceNode = outpaintSessionActive

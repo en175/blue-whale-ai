@@ -333,6 +333,12 @@ afterEach(async () => {
 const M1_DISPLAY_W = 280 * (16 / 9);
 const CROP_CARD_X = Math.round(400 + M1_DISPLAY_W + 60);
 
+/** jsdom 无布局：stub 视口尺寸让 wrapperSize 生效（跟随锚计算依赖 containerWidth） */
+function stubWrapperSize(width: number, height: number) {
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(height);
+}
+
 describe('IKGW1S 确认裁切：执行链路（离屏 canvas → 普通上传）', () => {
   it('默认全幅确认：canvas 按源图自然分辨率全幅裁切，产出 crop.png 普通上传（不带 assetSource）', async () => {
     await renderPage();
@@ -537,5 +543,30 @@ describe('IKGW1S 四退出丢弃复锁：无卡、无边、无状态残留', () 
       flowProps.current.onSelectionChange({ nodes: [fullNode('i2')] });
     });
     expectDiscardClean();
+  });
+});
+
+/* ===== IKH1WI 裁切面板中心点跟随锚：left = 源卡中心 x（面板自身 translateX(-50%) 真居中，
+   口径同 cutoutToolbarAnchor）。旧缺陷（估宽左上角语义）left = round(400 + 248.89 − 190) = 459，
+   恒偏左 190px；中心点锚 top 口径不变（节点下方 + 16）。 ===== */
+describe('IKH1WI 裁切面板中心点跟随锚', () => {
+  it('跟随锚 left = 源卡中心 x（649）、top = 源卡下方 + 16（340）：不再偏左估宽一半', async () => {
+    stubWrapperSize(1600, 900);
+    await renderPage();
+    await cropImage('i1');
+    const panel = document.body.querySelector('[data-testid="crop-dialog"]') as HTMLElement;
+    // 独立手算：screenLeft 400 + 内容宽 497.78/2 = 648.89 → round 649（旧缺陷值 459）
+    expect(panel.style.left).toBe('649px');
+    // 垂直行为不变：nodeBoxOf 高 280+44 → 下方 top = 324 + 16 = 340
+    expect(panel.style.top).toBe('340px');
+  });
+
+  it('贴边钳制：容器 700 宽时中心 x（649）被钳到右界 498，面板不出视口', async () => {
+    stubWrapperSize(700, 900);
+    await renderPage();
+    await cropImage('i1');
+    const panel = document.body.querySelector('[data-testid="crop-dialog"]') as HTMLElement;
+    // 独立手算：右界 = 700 − 钳制半宽 190 − FOLLOW_PAD 12 = 498；center 649 > 498 → 钳 498
+    expect(panel.style.left).toBe('498px');
   });
 });

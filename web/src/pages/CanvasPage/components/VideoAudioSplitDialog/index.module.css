@@ -62,9 +62,12 @@
   white-space: nowrap;
 }
 
-/* 跟随锚定（inline left/top 生效）：解除默认 bottom 定位避免 top/bottom 双侧拉伸 */
+/* 跟随锚定（IKH25A 中心点锚口径，inline left/top 生效）：解除默认 bottom 定位避免
+   top/bottom 双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态
+   translateX(-50%) 以锚点（源卡中心 x）真居中。口径同去字幕 sendBarFollow。 */
 .sendBarFollow {
   bottom: auto;
+  left: 0;
 }
 
 /* ---- 分离格式下拉（触发钮显当前所选格式；菜单向上弹出避开发送条下方视口边缘） ---- */
