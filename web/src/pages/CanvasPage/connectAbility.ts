@@ -70,18 +70,18 @@ export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   return null;
 }
 
-/** 音频生成是否可选：纯图置灰（音频面板不提供图片入口）；纯音频可选（IKFDFZ 音频参考
- *  走画布连线，参考音频是音频生成的核心输入）；图+视频、音频+图、音频+视频、三者混合可选
- *  （多选成员逐个判定，图片成员仍被拒）；文本卡作为创作上下文连入音频面板（IKFCKS），含文本的组合可选 */
+/** 音频生成是否可选（IKGRE3 能力集收敛为 5 组合）：组内不含视频，且图片与音频不同时出现。
+ *  可用组合仅五种：单图片 / 单音频 / 单文本 / 图片+文本 / 音频+文本，其余全部不可用。
+ *  旧结论作废：图+视频、音频+图、音频+视频、三者混合可选全部取消；
+ *  IKFCKS 文本上下文收窄为仅「单文本」「图片+文本」「音频+文本」三种；
+ *  IKFDFZ 纯音频仍可选（音频参考走画布连线），新增纯图片单独放行。 */
 export function isAudioGenEnabled(sourceKinds: ConnectSourceKind[]): boolean {
   const hasImage = sourceKinds.includes('image');
   const hasVideo = sourceKinds.includes('video');
   const hasAudio = sourceKinds.includes('audio');
-  const hasText = sourceKinds.includes('text');
-  if (hasAudio) return true;
-  if (hasVideo && hasImage) return true;
-  if (hasText) return true;
-  return false;
+  if (hasVideo) return false;
+  if (hasImage && hasAudio) return false;
+  return true;
 }
 
 export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {

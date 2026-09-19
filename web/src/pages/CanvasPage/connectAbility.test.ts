@@ -1,5 +1,5 @@
-/* IKFCKS：连线创作能力——文本卡作为创作上下文连入音频生成节点（isAudioGenEnabled 放行 text）；
- * 既有组合规则回归（纯图/纯音频/纯视频置灰，图+视频、音频+图、音频+视频可选） */
+/* IKGRE3：音频生成能力集收敛为 5 组合——组内不含视频，且图片与音频不同时出现。
+ * 可用组合仅：单图片 / 单音频 / 单文本 / 图片+文本 / 音频+文本，其余全部不可用。 */
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import {
@@ -23,27 +23,42 @@ function mediaNode(id: string, mediaType: 'image' | 'video' | 'audio'): Node {
   };
 }
 
-describe('isAudioGenEnabled（IKFCKS 文本上下文放行；IKFDFZ 纯音频放行）', () => {
-  it('既有组合规则回归：纯图/纯视频不可选（音频面板不提供图片入口）', () => {
-    expect(isAudioGenEnabled(['image'])).toBe(false);
+/** 成品素材卡（非草稿、带有效 src），可作为连线上游素材 */
+function sourceMediaNode(id: string, mediaType: 'image' | 'video' | 'audio'): Node {
+  return {
+    id,
+    type: 'mediaNode',
+    position: { x: 0, y: 0 },
+    data: { mediaType, src: `https://x/${id}` },
+  };
+}
+
+describe('isAudioGenEnabled（IKGRE3 收敛为 5 组合）', () => {
+  it('五种可用组合：单图片 / 单音频 / 单文本 / 图片+文本 / 音频+文本', () => {
+    expect(isAudioGenEnabled(['image'])).toBe(true);
+    expect(isAudioGenEnabled(['audio'])).toBe(true);
+    expect(isAudioGenEnabled(['text'])).toBe(true);
+    expect(isAudioGenEnabled(['image', 'text'])).toBe(true);
+    expect(isAudioGenEnabled(['audio', 'text'])).toBe(true);
+  });
+
+  it('单视频不可用', () => {
     expect(isAudioGenEnabled(['video'])).toBe(false);
   });
 
-  it('IKFDFZ：纯音频可选——参考音频是音频生成的核心输入，走画布连线', () => {
-    expect(isAudioGenEnabled(['audio'])).toBe(true);
+  it('组内含视频的组合全部不可用', () => {
+    expect(isAudioGenEnabled(['image', 'video'])).toBe(false);
+    expect(isAudioGenEnabled(['audio', 'video'])).toBe(false);
+    expect(isAudioGenEnabled(['video', 'text'])).toBe(false);
+    expect(isAudioGenEnabled(['image', 'video', 'audio'])).toBe(false);
+    expect(isAudioGenEnabled(['image', 'video', 'text'])).toBe(false);
+    expect(isAudioGenEnabled(['video', 'audio', 'text'])).toBe(false);
+    expect(isAudioGenEnabled(['image', 'video', 'audio', 'text'])).toBe(false);
   });
 
-  it('既有组合规则回归：图+视频、音频+图、音频+视频可选', () => {
-    expect(isAudioGenEnabled(['image', 'video'])).toBe(true);
-    expect(isAudioGenEnabled(['audio', 'image'])).toBe(true);
-    expect(isAudioGenEnabled(['audio', 'video'])).toBe(true);
-    expect(isAudioGenEnabled(['audio', 'image', 'video'])).toBe(true);
-  });
-
-  it('IKFCKS：含文本的组合可选音频生成（文本卡作为创作上下文）', () => {
-    expect(isAudioGenEnabled(['text'])).toBe(true);
-    expect(isAudioGenEnabled(['text', 'image'])).toBe(true);
-    expect(isAudioGenEnabled(['text', 'audio'])).toBe(true);
+  it('图片与音频同时出现的组合不可用', () => {
+    expect(isAudioGenEnabled(['image', 'audio'])).toBe(false);
+    expect(isAudioGenEnabled(['image', 'audio', 'text'])).toBe(false);
   });
 });
 
@@ -59,7 +74,11 @@ describe('canConnectSourcesToGen：文本卡 → 音频生成节点（IKFCKS）'
     expect(availableGenKinds([textNode('t1')]).has('audio')).toBe(true);
   });
 
-  it('回归：纯图组仍不含 audio', () => {
-    expect(availableGenKinds([mediaNode('i1', 'image')]).has('audio')).toBe(false);
+  it('IKGRE3：纯图组放开，生成类型集合含 audio', () => {
+    expect(availableGenKinds([sourceMediaNode('i1', 'image')]).has('audio')).toBe(true);
+  });
+
+  it('IKGRE3：图+音频组不含 audio', () => {
+    expect(availableGenKinds([sourceMediaNode('i1', 'image'), sourceMediaNode('a1', 'audio')]).has('audio')).toBe(false);
   });
 });
