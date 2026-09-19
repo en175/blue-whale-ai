@@ -173,12 +173,6 @@ export interface MediaNodeData {
   onRetryJob?: (id: string) => void;
   /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
   onTitleChange?: (id: string, name: string) => void;
-  /** 重新编辑：打开图片对话框并带入提示词与图片 */
-  onReEdit?: (id: string) => void;
-  /** 生成图片：打开图片对话框并带入图片 */
-  onGenImage?: (id: string) => void;
-  /** 生成视频：打开视频对话框并带入图片 */
-  onGenVideo?: (id: string) => void;
   /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（「高清 ▾」下拉「高清」项派发） */
   onEnhanceImage?: (id: string) => void;
   /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */

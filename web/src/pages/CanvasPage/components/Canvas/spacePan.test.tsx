@@ -68,7 +68,7 @@ beforeEach(async () => {
     mediaNodes: [{
       id: 'image-1', type: 'mediaNode', position: { x: 50, y: 60 },
       initialWidth: 200, initialHeight: 150, selected: true,
-      data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select', onReEdit: vi.fn() },
+      data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select' },
     }],
     viewport: { x: 0, y: 0, zoom: 1 },
     onDeleteNode: vi.fn(), onNodeDragStop: vi.fn(), onViewportChange: vi.fn(),
@@ -116,7 +116,6 @@ describe('Canvas space pan', () => {
     await mouse('click', title);
     await mouse('click', node());
     await mouse('click', pane());
-    expect(props.mediaNodes[0].data.onReEdit).not.toHaveBeenCalled();
     expect(props.onNodeClick).not.toHaveBeenCalled();
     expect(props.onPaneClick).not.toHaveBeenCalled();
     expect(node().classList.contains('selected')).toBe(true);

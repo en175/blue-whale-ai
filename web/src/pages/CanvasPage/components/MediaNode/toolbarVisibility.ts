@@ -5,12 +5,11 @@ export function mediaNodeToolbarVisibility(mediaType: CanvasMediaType | undefine
   const isVideo = mediaType === 'video';
   return {
     mention: !isAudio,
-    genImage: !isAudio && !isVideo,
-    genVideo: !isAudio,
-    /** 「高清 ▾」下拉（IKGOT7，原「高清放大」单按钮改造）：与「生成图片」同族，仅图片卡显示；
-     *  菜单项（高清/擦除，扩图后续插入中间位）随下拉整体出现 */
+    /** 「高清 ▾」下拉（IKGOT7，原「高清放大」单按钮改造）：仅图片卡显示；
+     *  菜单项（高清/擦除，扩图后续插入中间位）随下拉整体出现。
+     *  生成类按钮已撤（IKH3WE）：派生新卡唯一路径 = 拖线落空白类型菜单 */
     imageQuality: !isAudio && !isVideo,
-    /** 「智能去字幕」（IKGZ82）：独立按钮（渲染位置在「生成视频」之后），仅视频卡显示；
+    /** 「智能去字幕」（IKGZ82）：独立按钮（渲染位置在「音视频分离」之前），仅视频卡显示；
      *  门槛置灰见 videoSubtitleErase.ts */
     videoSubtitleErase: isVideo,
   };
