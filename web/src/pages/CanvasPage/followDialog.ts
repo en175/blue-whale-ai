@@ -37,8 +37,9 @@ export function computeFollowAnchor(opts: {
 
 /** 上方锚定默认抬升量（屏幕像素）：工具条估高约 42 + 与卡片顶边间距 10（口径同擦除上方工具条的 52） */
 export const FOLLOW_ABOVE_LIFT = 52;
-/** 上方锚定水平视口钳制默认估半宽（屏幕像素）：仅用于钳制边界，不参与居中 */
-export const FOLLOW_ABOVE_HALF_WIDTH = 200;
+/** 上方锚定水平视口钳制默认估半宽（屏幕像素）：仅用于钳制边界，不参与居中。
+ *  IKH3XZ 五画质工具横排后工具条实测 473px（真实半宽约 236），200→250 保证贴边不被裁。 */
+export const FOLLOW_ABOVE_HALF_WIDTH = 250;
 /** 上方锚定垂直钳顶保底（屏幕像素）：卡片顶到视口上方时工具条不被容器裁掉 */
 export const FOLLOW_ABOVE_MIN_TOP = 8;
 

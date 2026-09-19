@@ -2,7 +2,7 @@
 /* CutoutToolbar 抠图工具栏组件（IKGXMT）：横条结构（X/场景上拉/增强控件显隐/本期免费/
    发送钮——Dock 主发送钮同款图标钮，IKGZ5Q）、
    场景上拉开合与选择、描边上拉（启用开关+宽度滑杆实时生效+禁用态）、透明裁剪点亮开关、
-   发送置灰与 title 原因、X 关闭。渲染模式沿用 ImageQualityMenu.test.tsx（createRoot + act），
+   发送置灰与 title 原因、X 关闭。渲染模式 createRoot + act，
    只断言外部可见行为。 */
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

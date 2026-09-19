@@ -6,11 +6,15 @@
  * 本组件承担数据条件（生成流程卡 / 素材缺失 / 空壳上传卡不显）。
  * 工具条不再承载生成类入口（IKH3WE 撤除「重新编辑」「生成图片」「生成视频」）：
  * 派生新卡唯一路径 = 拖线落空白出类型菜单，原卡重跑唯一路径 = 点卡片打开绑定面板。
+ * IKH3XZ 五画质工具横排常显（ADR-0107）：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉，
+ * 直接以图标+文字按钮排在工具条上（复用 toolBtn）；「高清」图标 Expand→ZoomIn（与扩图
+ * Maximize2 并排撞脸）；点击派发、门槛预检、建卡口径不变，只改承载形态。触发钮最近工具
+ * 记忆（recentQualityTool）与悬浮展开/直启路径整套退役；视频卡「智能去字幕 ▾」下拉不受影响。
  * 工具条 DOM 不再位于节点卡内：点击按钮天然不触发节点拖拽/选中变化（原 nodrag/nopan 与
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
 import { useCallback } from 'react';
-import { AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles } from 'lucide-react';
+import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, type LucideIcon } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
@@ -18,10 +22,24 @@ import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
-import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
+
+/** 画质工具按钮配置（IKH3XZ 自 ImageQualityMenu.tsx 迁入：原「高清 ▾」下拉退役，五工具横排常显）。
+ *  id/label/图标/可用性判定由宿主数组驱动；置灰口径不变——aria-disabled 置灰保持渲染不隐藏，
+ *  title 悬停展示不可用原因，点击不派发。 */
+interface QualityToolItem {
+  /** 工具 id（'enhance' / 'outpaint' / 'crop' / 'erase' / 'cutout'） */
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  /** 可用时的悬停说明 */
+  hint?: string;
+  /** 置灰原因（null=可用；置灰项 title 展示原因且点击不派发，口径同 ImageEnhanceDialog guarded） */
+  disabledReason: string | null;
+  onSelect: () => void;
+}
 
 interface MediaNodeToolbarProps {
   id: string;
@@ -66,16 +84,16 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
-  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：顺序高清、扩图、裁切、擦除、抠图；
+  /** 画质工具按钮配置（IKGOT7 数组配置驱动，IKH3XZ 起横排直渲染）：顺序高清、扩图、裁切、擦除、抠图；
    *  擦除按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）、扩图按
    *  outpaintGateReason 门槛预检置灰、裁切无置灰门槛恒可用；
    *  抠图（IKGXLT/IKGXMT）在「擦除」之后追加，按 imageCutout 门槛预检置灰（无最小边判定，
    *  通用场景上限 10240/6000/40MP + 30MB；点击经 onCutoutImage 进入抠图工具栏） */
-  const qualityMenuItems: ImageQualityMenuItem[] = [
+  const qualityToolItems: QualityToolItem[] = [
     {
       id: 'enhance',
       label: '高清',
-      icon: Expand,
+      icon: ZoomIn,
       hint: '在右侧新建高清放大草稿卡',
       disabledReason: null,
       onSelect: handleEnhanceImage,
@@ -155,9 +173,27 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
       {toolbar.videoSubtitleErase && (
         <SubtitleEraseMenu items={subtitleEraseMenuItems} />
       )}
-      {toolbar.imageQuality && (
-        <ImageQualityMenu items={qualityMenuItems} />
-      )}
+      {toolbar.imageQuality && qualityToolItems.map((item) => {
+        const Icon = item.icon;
+        const disabled = item.disabledReason != null;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={styles.toolBtn}
+            onClick={() => {
+              if (disabled) return;
+              item.onSelect();
+            }}
+            title={item.disabledReason ?? item.hint}
+            aria-disabled={disabled || undefined}
+            data-testid={`quality-tool-${item.id}`}
+          >
+            <Icon size={14} strokeWidth={2} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
       {data.mediaType === 'video' && (
         <button
           className={styles.toolBtn}
