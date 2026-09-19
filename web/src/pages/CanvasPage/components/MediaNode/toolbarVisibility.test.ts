@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mediaNodeToolbarVisibility } from './toolbarVisibility';
+import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
   it('hides mention, generate-image, image-quality menu and generate-video on audio nodes', () => {
@@ -36,5 +36,28 @@ describe('mediaNodeToolbarVisibility', () => {
       genVideo: true,
       imageQuality: true,
     });
+  });
+});
+
+describe('mediaCardToolbarVisible（悬浮工具条数据门，CanvasPage 与 MediaNodeToolbar 共用）', () => {
+  it('普通成品卡显示', () => {
+    expect(mediaCardToolbarVisible({})).toBe(true);
+    expect(mediaCardToolbarVisible({ genStatus: undefined, assetMissing: undefined, emptyShell: undefined })).toBe(true);
+  });
+
+  it('生成流程卡（genStatus 有值）不显', () => {
+    for (const genStatus of ['draft', 'generating', 'failed', 'cancelled'] as const) {
+      expect(mediaCardToolbarVisible({ genStatus })).toBe(false);
+    }
+  });
+
+  it('素材缺失（assetMissing）不显', () => {
+    expect(mediaCardToolbarVisible({ assetMissing: true })).toBe(false);
+  });
+
+  it('空壳上传卡（emptyShell===true）不显；emptyShell falsy 不受影响', () => {
+    expect(mediaCardToolbarVisible({ emptyShell: true })).toBe(false);
+    expect(mediaCardToolbarVisible({ emptyShell: false })).toBe(true);
+    expect(mediaCardToolbarVisible({ emptyShell: undefined })).toBe(true);
   });
 });
