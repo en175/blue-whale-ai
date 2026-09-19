@@ -68,6 +68,8 @@ class StartupContractTest {
             .withBean(ImageEraseJobProcessor.class, () -> mock(ImageEraseJobProcessor.class))
             .withBean(ImageCutoutJobProcessor.class, () -> mock(ImageCutoutJobProcessor.class))
             .withBean(VideoJobProcessor.class, () -> mock(VideoJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class))
             .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
             .withPropertyValues("NEW_API_BASE_URL=http://new-api.invalid");
 
