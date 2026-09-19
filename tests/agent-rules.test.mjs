@@ -134,20 +134,26 @@ test("PR template requests the readable verification receipt summary", () => {
   }
 });
 
-test("pr skill keeps its body scaffolding in Chinese", () => {
+test("pr skill keeps its template scaffolding in Chinese while guidance stays upstream English", () => {
   const skill = read(".claude/skills/pr/SKILL.md");
   const mirror = read(".zcode/skills/pr/SKILL.md");
   const workflow = read("docs/agents/git-workflow.md");
 
   assert.equal(mirror, skill);
 
+  // 模板代码块骨架：结构性标签必须中文（指导段 ### 小节头是上游原文，允许英文）。
   for (const heading of ["## 概要", "## 验证证据", "## 合并风险", "**变更前：**", "**变更后：**", "**可逆性：**", "**影响半径：**"]) {
     assert.ok(skill.includes(heading), heading);
   }
-  for (const legacy of ["## Summary", "## Evidence", "## Merge Danger", "**Before:**", "**After:**", "**Door:**", "**Blast Radius:**"]) {
+  // 二级英文头仅允许出现在指导段的 ### 三级形态；粗体英文标签属于模板骨架，不得回潮。
+  assert.doesNotMatch(skill, /(?<!#)## (Summary|Evidence|Merge Danger)/m);
+  for (const legacy of ["**Before:**", "**After:**", "**Door:**", "**Blast Radius:**"]) {
     assert.ok(!skill.includes(legacy), legacy);
   }
-  assert.match(skill, /localization: "中文语言定制/);
+  // 指导段（## Sections 起）与上游保持一致：description 为上游原文，本地差异仅限模板骨架。
+  assert.match(skill, /^description: "Use when writing a PR body\."$/m);
+  assert.match(skill, /## Sections\n\nSkip all preambles/);
+  assert.match(skill, /localization: "模板骨架中文化/);
   assert.doesNotMatch(workflow, /Summary 图示|Merge Danger/);
 });
 
