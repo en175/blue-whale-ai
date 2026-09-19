@@ -1,11 +1,11 @@
 /* @ 素材引用菜单：主面板 + 右侧类型浮层 */
 
 .portal {
+  /* IKGMAF：外壳只包一级面板；二级菜单绝对定位，避免撑高后把一级菜单顶走 */
   position: fixed;
   z-index: 80;
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
+  width: max-content;
+  overflow: visible;
   pointer-events: none;
 }
 
@@ -29,7 +29,11 @@
 
 .flyoutWrap {
   pointer-events: auto;
+  position: absolute;
+  left: 100%;
+  top: 0;
   padding-left: 8px;
+  z-index: 1;
 }
 
 .flyout {
