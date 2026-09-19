@@ -75,9 +75,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多提取音频', async () => {
+  it('视频卡保留生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多音视频分离', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['重新编辑', '生成视频', '智能去字幕', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['重新编辑', '生成视频', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「高清 ▾」下拉排在生成视频之后（IKGM9F 位次不变）', async () => {
@@ -333,11 +333,11 @@ describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
   const eraseBtn = () => [...mountNode.querySelectorAll('button')]
     .find((b) => b.textContent?.trim() === '智能去字幕')!;
 
-  it('仅视频卡显示，位置在「生成视频」之后、「提取音频」之前', async () => {
+  it('仅视频卡显示，位置在「生成视频」之后、「音视频分离」之前', async () => {
     await renderToolbar('video');
     const order = labels();
     expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('智能去字幕'));
-    expect(order.indexOf('智能去字幕')).toBeLessThan(order.indexOf('提取音频'));
+    expect(order.indexOf('智能去字幕')).toBeLessThan(order.indexOf('音视频分离'));
     // 图片卡/音频卡不显示（精确数组用例「图片卡全显」「音频卡隐藏」已覆盖，此处再断不冗余出现）
     await renderToolbar('image');
     expect(labels().includes('智能去字幕')).toBe(false);
@@ -446,25 +446,26 @@ describe('MediaNodeToolbar 其余按钮回调（携带节点 id）', () => {
     expect(onAddToChat).toHaveBeenCalledWith('image-node');
   });
 
-  it('提取音频：无资产置灰；提交中禁用并显示「提交中…」；完成后恢复', async () => {
-    let release: (() => void) | undefined;
-    const onExtractAudio = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
-    await renderToolbar('video', { data: { onExtractAudio } });
+  it('音视频分离（IKH28U）：无资产置灰并悬停唯一原因；点击派发进入编辑态回调（不再一键直发、无提交中态）', async () => {
+    const onAudioVideoSplit = vi.fn();
+    await renderToolbar('video', { data: { onAudioVideoSplit } });
     const btn = () => [...mountNode.querySelectorAll('button')]
-      .find((b) => b.textContent?.includes('提取音频') || b.textContent?.includes('提交中'))!;
-    expect(btn().disabled).toBe(true); // 默认 fixture 无 assetId
-    await renderToolbar('video', { id: 'v2', data: { onExtractAudio, assetId: 'a1' } });
-    expect(btn().disabled).toBe(false);
+      .find((b) => b.textContent?.includes('音视频分离'))!;
+    expect(btn().disabled).toBe(true); // 默认 fixture 无 assetId（唯一置灰条件）
+    expect(btn().getAttribute('title')).toContain('尚未关联资产');
+    expect(btn().getAttribute('title')).not.toContain('仅音频'); // 置灰原因与可用态 hint 互斥（同一 title 通道）
     await act(async () => {
       btn().click();
     });
-    expect(onExtractAudio).toHaveBeenCalledWith('v2');
-    expect(btn().disabled).toBe(true); // 提交中
-    expect(btn().textContent).toContain('提交中');
-    await act(async () => {
-      release!();
-    });
+    expect(onAudioVideoSplit).not.toHaveBeenCalled(); // 置灰点击不派发
+
+    await renderToolbar('video', { id: 'v2', data: { onAudioVideoSplit, assetId: 'a1' } });
     expect(btn().disabled).toBe(false);
-    expect(btn().textContent).toContain('提取音频');
+    expect(btn().textContent).toContain('音视频分离');
+    expect(btn().getAttribute('title')).toContain('仅音频'); // 可用态悬停为效果边界一句
+    await act(async () => {
+      btn().click();
+    });
+    expect(onAudioVideoSplit).toHaveBeenCalledWith('v2'); // 同步进入会话派发，无「提交中…」中间态
   });
 });

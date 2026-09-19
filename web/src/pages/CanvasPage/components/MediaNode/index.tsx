@@ -140,6 +140,11 @@ export interface MediaNodeData {
     onBoxMove: (point: SubtitleBoxPoint) => void;
     onBoxEnd: () => void;
   };
+  /** 音视频分离编辑态标记（IKH28U，渲染期派生注入，不持久化）：本卡为音视频分离目标
+   *  源视频卡时由 CanvasPage 注入——视频暂停在当前帧并锁定播放控制（透明锁定层接管
+   *  指针，退出标记移除即恢复）；上方 X 工具条/下方占位发送条由 CanvasPage 浮出
+   *  （VideoAudioSplitDialog） */
+  splitEditing?: true;
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -174,10 +179,11 @@ export interface MediaNodeData {
   /** 智能去字幕（IKGZ82）：进入去字幕编辑态（本票入口占位未接线，IKGZ83 由 CanvasPage 接入；
    *  门槛预检见 videoSubtitleErase.ts） */
   onVideoSubtitleErase?: (id: string) => void;
+  /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
+   *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
+  onAudioVideoSplit?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
-  /** 视频整段提取音频；音频节点由后端注入画布。 */
-  onExtractAudio?: (id: string) => Promise<void> | void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -234,11 +240,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     };
   }, [contextMenu]);
 
-  /** 去字幕编辑态（IKGZ83）：视频暂停在当前帧——拉框对全片生效，画面定格便于精确框选；
-   *  依赖 subtitleEraseEditing 的注入/移除（对象引用变化即进入/退出编辑态） */
+  /** 去字幕/音视频分离编辑态（IKGZ83/IKH28U）：视频暂停在当前帧——去字幕便于精确框选，
+   *  分离为锁定态定格；依赖编辑态标记的注入/移除（对象引用变化或布尔翻转即进入/退出） */
   useEffect(() => {
-    if (data.subtitleEraseEditing) videoRef.current?.pause();
-  }, [data.subtitleEraseEditing]);
+    if (data.subtitleEraseEditing || data.splitEditing) videoRef.current?.pause();
+  }, [data.subtitleEraseEditing, data.splitEditing]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -567,6 +573,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                 onBoxStart={data.subtitleEraseEditing.onBoxStart}
                 onBoxMove={data.subtitleEraseEditing.onBoxMove}
                 onBoxEnd={data.subtitleEraseEditing.onBoxEnd}
+              />
+            )}
+            {/* 音视频分离编辑态锁定层（IKH28U）：透明全覆盖接管指针（无框层，先例=去字幕
+                框层全覆盖接管）——编辑态期间播放控制不可达、点视频不响应播放操作；
+                退出（标记移除）即恢复播放控制。nodrag/nopan 同框层口径（层上拖不动卡/画布） */}
+            {data.splitEditing && (
+              <div
+                className="nodrag nopan"
+                data-testid="split-lock-layer"
+                style={{ position: 'absolute', inset: 0, zIndex: 5, cursor: 'default', touchAction: 'none' }}
               />
             )}
           </>

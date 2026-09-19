@@ -217,6 +217,27 @@ describe('IKGZ83 去字幕编辑态工具条/发送条（容器三令牌 + 24px 
   });
 });
 
+/* ---- IKH28U 音视频分离编辑态浮条家族（2 成员，24px 胶囊对齐去字幕家族形态） ---- */
+
+describe('IKH28U 音视频分离编辑态工具条/发送条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
+  const splitDialogCss = readFileSync(
+    fileURLToPath(new URL('../pages/CanvasPage/components/VideoAudioSplitDialog/index.module.css', import.meta.url)),
+    'utf-8',
+  );
+
+  it.each([
+    ['源视频卡上方工具条', 'toolbar'],
+    ['源视频卡下方占位发送条', 'sendBar'],
+  ] as const)('%s 容器三件套引用令牌、圆角 24px 胶囊、无硬编码容器色值', (_name, container) => {
+    const block = ruleBlockOf(splitDialogCss, `.${container}`);
+    expect(block).toContain('background-color: var(--color-bg-overlay)');
+    expect(block).toContain('border: 1px solid var(--color-border-overlay)');
+    expect(block).toContain('border-radius: 24px');
+    expect(block).toContain('box-shadow: var(--shadow-overlay)');
+    expectNoHardcoded(block);
+  });
+});
+
 /* ---- IKGZ8C 浮层菜单家族（6 成员，浮条档 12px） ---- */
 describe('IKGZ8C 浮层菜单家族（ADR-0100：6 成员统一到浮层容器令牌）', () => {
   const memberCss = (component: string) =>
