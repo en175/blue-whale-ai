@@ -38,6 +38,7 @@ async function renderToolbar(
         mediaType,
         src: 'blob:test',
         fileName: `${mediaType}.bin`,
+        jobId: 'job-1',
         genStatus: extra?.genStatus,
         ...extra?.data,
       },

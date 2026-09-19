@@ -26,6 +26,13 @@
 | `scoped/operations` | 探针、隧道、一次性修复和维护工具 | `scripts/tests` 下的脚本单测 |
 | `full` | 产品构建、运行时、数据库、部署、整栈验收入口或显式高风险 | 当前影响面的定向检查 + `pnpm verify` |
 
+环境前提：`scoped/worker-java` 与 `full` 档会执行 `mvn -f worker-java/pom.xml -q test`，要求 PATH 上有 mvn；本机未装 Maven 时经容器执行同一命令（挂 worker-java 目录与 ~/.m2 缓存，勿跳过或标记与己无关）：
+
+```bash
+docker run --rm -v "$PWD/worker-java":/workspace -w /workspace \
+  -v "$HOME/.m2":/root/.m2 maven:3.9-eclipse-temurin-21 mvn -q test
+```
+
 验证分两个阶段：选择器默认**收口阶段（`--stage completion`）**；**PR 阶段（`--stage pr`）**继续按影响面选择验证，不再把所有代码 PR 无条件升级为 `full`。普通 Node/Web、治理、Hook 与工程控制面、运维工具改动保持 `scoped`；只有产品影响路径或显式 `--risk high` 才升级 `full`。纯文档保持 `docs`。
 
 `scripts/` 和其他可执行路径必须显式分类。新增脚本未命中分类时返回 `UNCLASSIFIED_PATH` 并停止，不运行全量，也不静默降级；维护者先补分类和对应定向测试。未知的非可执行路径仍由 PR 阶段兜底策略处理。

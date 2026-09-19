@@ -7,29 +7,30 @@ metadata:
     author: Dex Horthy
     organisation: Humanlayer
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
+  localization: "模板骨架中文化（结构性标签与占位符中文，代码与 diff 内容保留英文原样），由 tests/agent-rules.test.mjs 守护防回潮。指导文案与上游保持一致；同步 mattpocock 上游时仅保留模板骨架的中文定制。"
 ---
 
 Use this template for writing the PR body:
 
 ```markdown
-## Summary
+## 概要
 
-<diagram, diff-sketch, or tree>
+<图示、diff 速写或目录树>
 
-## Evidence
+## 验证证据
 
-- **Before:** <screenshot/output/failing test run>
-  **After:** <screenshot/output/passing test run>
+- **变更前：** <截图 / 输出 / 失败的测试运行>
+  **变更后：** <截图 / 输出 / 通过的测试运行>
 
-## Merge Danger
+## 合并风险
 
-**Door:** <one-way or two-way>
+**可逆性：** <单向门或双向门>
 
-<optional: description>
+<可选：说明>
 
-**Blast Radius:** <one-word description>
+**影响半径：** <一词概括>
 
-<optional: potential ramifications of merge>
+<可选：合并后可能的连带影响>
 ```
 
 ## Sections

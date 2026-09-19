@@ -6,10 +6,10 @@
 
 | 项 | 值 |
 |---|---|
-| superpowers | 6.1.1 |
-| 上游 tag | `v6.1.1` |
-| 上游 SHA | `c984ea2e7aeffdcc865784fd6c5e3ab75da0209a` |
-| 锁定日期 | 2026-07-13 |
+| superpowers | 6.4.1 |
+| 上游 tag | `v6.4.1` |
+| 上游 SHA | `5bf4e78011075bcfc0dc295f0724994cd123ee71` |
+| 锁定日期 | 2026-09-19 |
 | 协议 | MIT（见 `.superpowers/LICENSE`） |
 
 版本与 SHA 记录在 `.superpowers/VERSION`。

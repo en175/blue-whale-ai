@@ -134,6 +134,29 @@ test("PR template requests the readable verification receipt summary", () => {
   }
 });
 
+test("pr skill keeps its template scaffolding in Chinese while guidance stays upstream English", () => {
+  const skill = read(".claude/skills/pr/SKILL.md");
+  const mirror = read(".zcode/skills/pr/SKILL.md");
+  const workflow = read("docs/agents/git-workflow.md");
+
+  assert.equal(mirror, skill);
+
+  // 模板代码块骨架：结构性标签必须中文（指导段 ### 小节头是上游原文，允许英文）。
+  for (const heading of ["## 概要", "## 验证证据", "## 合并风险", "**变更前：**", "**变更后：**", "**可逆性：**", "**影响半径：**"]) {
+    assert.ok(skill.includes(heading), heading);
+  }
+  // 二级英文头仅允许出现在指导段的 ### 三级形态；粗体英文标签属于模板骨架，不得回潮。
+  assert.doesNotMatch(skill, /(?<!#)## (Summary|Evidence|Merge Danger)/m);
+  for (const legacy of ["**Before:**", "**After:**", "**Door:**", "**Blast Radius:**"]) {
+    assert.ok(!skill.includes(legacy), legacy);
+  }
+  // 指导段（## Sections 起）与上游保持一致：description 为上游原文，本地差异仅限模板骨架。
+  assert.match(skill, /^description: "Use when writing a PR body\."$/m);
+  assert.match(skill, /## Sections\n\nSkip all preambles/);
+  assert.match(skill, /localization: "模板骨架中文化/);
+  assert.doesNotMatch(workflow, /Summary 图示|Merge Danger/);
+});
+
 test("commit review rules link to the PR template instead of duplicating it", () => {
   const reviewRules = read("docs/agents/commit-and-review.md");
 
@@ -148,4 +171,13 @@ test("typecheck generates the Prisma client before compiling a fresh worktree", 
     packageJson.scripts.typecheck,
     /^pnpm --filter @blue-whale\/backend exec prisma generate && /,
   );
+});
+
+test("CBM exploration has one policy before worktree creation", () => {
+  assert.match(read('CLAUDE.md'), /agent-rules\/code-discovery.md/);
+  assert.match(read('AGENTS.md'), /agent-rules\/code-discovery.md/);
+  for (const path of ['CLAUDE.md', 'AGENTS.md']) {
+    assert.doesNotMatch(read(path), /first run `graphify/);
+  }
+  assert.doesNotMatch(read('docs/agents/worktree-workflow.md'), /MCP 不可用或索引失败时，必须停止/);
 });

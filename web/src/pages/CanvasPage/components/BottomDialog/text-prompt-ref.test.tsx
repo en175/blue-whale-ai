@@ -44,6 +44,7 @@ interface RenderOpts {
   videoMediaRefs?: VideoMediaRefs;
   attachments?: ImageTextAttachment[];
   initialDoc?: PromptDoc | null;
+  initialParams?: { mode?: string };
   onSend?: ReturnType<typeof vi.fn>;
 }
 
@@ -56,9 +57,10 @@ async function renderDialog(opts: RenderOpts = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
-        initialParams: { mode: 'all' },
         onSend,
         initialDoc: opts.initialDoc ?? null,
+        // IKFC1T：面板默认模式改为文生视频，本套用例为「有媒体参考」的全能参考场景
+        initialParams: opts.initialParams ?? { mode: 'all' },
         attachments: opts.attachments,
         videoDraftBinding: { onParamsChange: vi.fn() },
         videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
@@ -74,7 +76,6 @@ async function rerender(opts: RenderOpts = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
-        initialParams: { mode: 'all' },
         onSend: vi.fn(),
         attachments: opts.attachments,
         videoDraftBinding: { onParamsChange: vi.fn() },

@@ -27,10 +27,11 @@
 - 自动切换（唯一方向）：当前 `prompt` 且门控不再含 prompt（媒体成为参考）→ 自动切 `all` + toast「已根据当前素材切换生成模式」；保留提示词、文本附件与全部媒体引用。移除全部媒体参考只恢复 prompt 可选，**不自动切回**。首尾帧/图生视频等其他模式间行为维持现状，不被统一改为全能参考。
 - 覆盖全部已有参考接入路径：画布连线、资产库（落节点+连线）、角色库（draftMaterialRefs）、「到节点选择」暂存、@ 引用。不新增上传入口。
 
-## 3. 面板
+## 3. 面板与标签
 
 - 模式选项含文生视频（跟随态 `VIDEO_FOLLOW_MODE_ORDER` 首项；自由态 `dockModeOptions` 同步补齐且置首，默认值 = 首项 = 文生视频）。
 - 文生视频模式保留参考添加入口（添加后经 §2 自动切换）；防线下 `modeConflict` 增 prompt 分支「文生视频模式不支持媒体参考」，手动切换到 prompt 在存在媒体参考时被拒绝。
+- 正文素材标签有效性（`videoPromptRefs.modeAccepts`）：`prompt` 模式不接受任何媒体参考身份 → 全部媒体标签失效（C2 口径），与 all/keyframe/text2video 既有判定并列。
 
 ## 4. 提交边界
 
@@ -46,7 +47,7 @@
 
 ## 6. 验证与关联
 
-- 纯函数：`web/src/pages/CanvasPage/followDialog.test.ts`（门控新口径）、`videoMediaRefs.test.ts`（角色库参考读取）。
+- 纯函数：`web/src/pages/CanvasPage/followDialog.test.ts`（门控新口径）、`videoMediaRefs.test.ts`（角色库参考读取）、`videoPromptRefs.test.ts`（prompt 标签失效）。
 - 画布流程层：`web/src/pages/CanvasPage/videoDraft.test.tsx`（新建默认、仅提示词提交省略 references、文本附件不切换、连线/角色库/暂存触发自动切换、置灰与不切回、草稿恢复）；组件层 `videoRefArea.test.tsx` 维持来源菜单/角色槽覆盖。
 - 测试边界：供应商为替身，不声明真实视频生成或人工验收通过。
 - 关联：IKF93U（父需求）、IKDMQS/IKDMQU（草稿绑定与跟随输入框）、IKFC26（方案绑定模式同步）。

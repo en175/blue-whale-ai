@@ -1,3 +1,4 @@
+import { classifyChanges } from '../scripts/verification-policy.mjs';
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -472,6 +473,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "python3",
       "-m",
       "unittest",
+      "scripts.tests.test_cbm_context",
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
@@ -492,6 +494,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "python3",
       "-m",
       "unittest",
+      "scripts.tests.test_cbm_context",
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
@@ -638,7 +641,8 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "python3",
         "-m",
         "unittest",
-        "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_cbm_context",
+      "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
       ],
@@ -1496,4 +1500,10 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
   ], { stage: "pr" });
   assert.equal(classification.tier, "full");
   assert.ok(classification.areas.includes("skill-assets"));
+});
+
+test('CBM client adapters select control-plane verification', () => {
+  const result = classifyChanges(['.qoder/settings.json', '.kimi-code/hooks.toml', '.claude/settings.json', '.codex/hooks.json']);
+  assert.equal(result.tier, 'scoped');
+  assert.deepEqual(result.areas, ['control-plane']);
 });

@@ -73,11 +73,11 @@
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Grep|Glob|exec_command|Shell",
         "hooks": [
           {
             "type": "command",
-            "command": "graphify hook-check"
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-discovery-gate.sh"
           }
         ]
       }
@@ -124,6 +124,28 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" confirm-release-action.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
           }
         ]
       }

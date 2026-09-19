@@ -427,9 +427,9 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const customTitle = () => customCard.locator('[data-testid="media-title"]');
       const autoTitle = () => autoCard.locator('[data-testid="media-title"]');
 
-      // 独立发布沿用远程 release 的 textarea 输入框。
+      // 面板输入框为 PromptRefEditor 富文本编辑器（contenteditable），不再是 textarea（IKFA1M 起）。
       // 先全选清空再逐字键入，走浏览器真实输入路径
-      const promptEditor = () => page.locator('textarea').first();
+      const promptEditor = () => page.locator('[contenteditable="true"]').first();
       async function fillPrompt(text: string) {
         const editor = promptEditor();
         await editor.click();
