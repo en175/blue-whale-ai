@@ -1,7 +1,10 @@
 // IKARDY：媒体提取（视频→音频）建任务服务。校验视频资产归属 → 插 generation_jobs(type=media_extract)。
 // IKFS5W：不写画布——占位节点由前端建任务前本地插入，产物经 GET /api/jobs/:id 的 asset 回给前端落库。
 // IKH28T：output_format 枚举/默认值/拒绝口径单源到契约 @lib/contracts/media-extract（m4a 默认、
-// 非法值明确拒绝，静默回退口径随契约废除）；其余创建入口行为切换（凭证冻结等）由 IKH28V 承载。
+// 非法值明确拒绝，静默回退口径随契约废除）。
+// IKH28V：切火山网关前的创建入口行为补齐（契约 §18.5）——资产归属读法对齐去字幕
+// （findOwnedSource）、请求方 sk- 凭证冻结进 input.provider_credential（worker IKH28W 取用）。
+// 免费口径（同去字幕 / image-erasures）：不写成本预留、不接成本估算、不走余额拦截门。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
@@ -40,6 +43,9 @@ export class MediaExtractionsService {
     userId: string,
     projectId: string,
     body: { source_asset_id?: unknown; output_format?: unknown },
+    // 与去字幕同构（video-subtitle-erasures.service.ts 的 internal 形参）：请求方 sk- 凭证
+    // 冻结进 job input.provider_credential，worker 切网关后（IKH28W）直接取用；未携带/非 sk- 时不写键。
+    internal: { providerCredential?: string } = {},
   ) {
     const sourceAssetId =
       typeof body.source_asset_id === "number" ||
@@ -61,7 +67,11 @@ export class MediaExtractionsService {
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    const asset = await this.assets.findAccessible(sourceAssetId, userId);
+    // IKH28V：归属口径对齐去字幕先例（契约 §18.5）——findOwnedSource 按 user_id 归属过滤
+    // （status=normal 且未删除），非本人素材一律 404 不泄露存在性。与原 findAccessible 的
+    // where 条件逐字相同（id+user_id+normal+未删），切换无用户可见行为变化，仅换去字幕
+    // 同款源资产读法（富投影，切网关后口径单源）。
+    const asset = await this.assets.findOwnedSource(sourceAssetId, userId);
     if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
     if (asset.type !== "video") {
       return fail(FAILURE_CODE, "仅支持从视频资产提取音频");
@@ -79,6 +89,11 @@ export class MediaExtractionsService {
         input: {
           [MEDIA_EXTRACT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
           [MEDIA_EXTRACT_INPUT_KEYS.outputFormat]: outputFormat,
+          // provider_credential 是业务键之上的基础设施键（不进契约 zod——去字幕同构）：
+          // 请求方 sk- 明文冻结，worker 切网关后（IKH28W）直接取用；未携带/非 sk- 时不写键。
+          ...(internal.providerCredential
+            ? { provider_credential: internal.providerCredential }
+            : {}),
         },
         // 过去 60s：media_extract 即时消费无延迟，next_action_at 必须 ≤ now 才能被 claim。
         // DATETIME(0) 秒精度会把 new Date() 进位到下一秒 → 同秒 claim 的 lte now 判 false，任务悬挂（media_extract 无恢复扫描）。
