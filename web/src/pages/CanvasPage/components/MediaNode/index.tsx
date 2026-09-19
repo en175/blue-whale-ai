@@ -159,6 +159,9 @@ export interface MediaNodeData {
   onCropImage?: (id: string) => void;
   /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
+  /** 智能去字幕（IKGZ82）：进入去字幕编辑态（本票入口占位未接线，IKGZ83 由 CanvasPage 接入；
+   *  门槛预检见 videoSubtitleErase.ts） */
+  onVideoSubtitleErase?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
