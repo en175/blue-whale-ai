@@ -3182,6 +3182,17 @@ export default function CanvasPage() {
       const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
       if (mediaNode && (mediaData.draft === true || hasGenerationRecord(mediaNode))) {
         const mediaType = mediaData.mediaType;
+        // IKFXZD/IKDMQV：面板刚被显式关闭（发送成功即隐藏、空白点击）时处于 hidden 豁免期，
+        // 程序化选中不得经本路径回弹重开——口径同下方 syncPanelVisible 的 hiddenRef 拦截
+        //（发送路径「置 hidden 标记避免紧随的画布选中事件回弹重开」）；手动点卡经 onNodeClick
+        // 走 openXxxDraftDialog 重置豁免，照常重开。
+        const panelHidden = mediaType === 'video'
+          ? videoPanelHiddenRef.current
+          : mediaType === 'audio'
+            ? audioPanelHiddenRef.current
+            : mediaData.imageEnhance
+              ? enhancePanelHiddenRef.current
+              : imagePanelHiddenRef.current;
         const alreadyOpen = mediaType === 'video'
           ? showBottomDialog && videoDraftId === soloId
           : mediaType === 'audio'
@@ -3189,7 +3200,7 @@ export default function CanvasPage() {
             : mediaData.imageEnhance
               ? showEnhanceDialog && enhanceDraftId === soloId
               : showImageDialog && imageDraftId === soloId;
-        if (!alreadyOpen) {
+        if (!alreadyOpen && !panelHidden) {
           openMediaDraftDialog(soloId, mediaType);
           return;
         }
