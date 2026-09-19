@@ -41,11 +41,14 @@ function editor() {
   return content().querySelector<HTMLElement>('[contenteditable]')!;
 }
 
-/** 节点内可见操作（按钮文案或 title），用于断言操作条与格式工具栏的并存关系 */
+/** 节点内可见操作（按钮文案或 title），用于断言操作条与格式工具栏的并存关系。
+ *  IKGYYE 钉屏幕迁移后两条工具栏 portal 到 .react-flow 根（节点卡 DOM 外），查询范围并含钉屏幕层 */
 function actions() {
-  return [...node().querySelectorAll('button')].map(
-    (button) => button.textContent?.trim() || button.getAttribute('title') || '',
-  );
+  const buttons = [
+    ...node().querySelectorAll('button'),
+    ...container.querySelectorAll<HTMLElement>('[data-gen-panel-territory] button'),
+  ];
+  return buttons.map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
 
 async function mouse(type: string, target: EventTarget, x = 100, y = 100) {
@@ -110,10 +113,25 @@ async function startEditing() {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   // jsdom 不做布局；只补浏览器测量 API，React Flow 与文本卡片均使用真实实现。
+  // ResizeObserver 需在 observe 时即刻回调（同 edgesControl.test.tsx）：React Flow 靠它
+  // 测量容器与节点，否则 IKGYYE 钉屏幕层（订阅 width/measured）不渲染。
   vi.stubGlobal('ResizeObserver', class {
-    observe() {}
+    callback: ResizeObserverCallback;
+    constructor(cb: ResizeObserverCallback) { this.callback = cb; }
+    observe(target: Element) {
+      this.callback([{ target, contentRect: { width: 1000, height: 800 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
     unobserve() {}
     disconnect() {}
+  });
+  // jsdom 无 DOMMatrixReadOnly（ResizeObserver 即刻回调后 React Flow 走 d3-zoom transform
+  // 解析）；React Flow 仅从 m22 读取缩放倍率（xyflow 官方测试同款替身，同 edgesControl.test.tsx）
+  vi.stubGlobal('DOMMatrixReadOnly', class {
+    m22: number;
+    constructor(transform?: string) {
+      const scale = transform?.match(/scale\(([1-9.])\)/)?.[1];
+      this.m22 = scale !== undefined ? +scale : 1;
+    }
   });
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800);
@@ -174,7 +192,8 @@ describe('Canvas 文本节点卡片', () => {
   it('选中时“添加到对话”可达并触发原有回调', async () => {
     const callbacks = await renderText({ selected: true });
     expect(actions()).toContain('添加到对话');
-    const button = [...node().querySelectorAll('button')]
+    // IKGYYE：操作条按钮在钉屏幕层（container 内、节点卡 DOM 外）
+    const button = [...container.querySelectorAll('button')]
       .find((b) => (b.textContent ?? '').includes('添加到对话'))!;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(callbacks.onAddToChat).toHaveBeenCalledWith(TEXT_ID);

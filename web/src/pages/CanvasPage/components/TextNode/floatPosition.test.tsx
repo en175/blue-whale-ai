@@ -17,14 +17,27 @@ beforeAll(() => {
   }
 });
 
-const storeState = vi.hoisted(() => ({
-  nodes: [
+const storeState = vi.hoisted(() => {
+  const nodes = [
     { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: {} },
     { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { assetId: 'a1', mediaType: 'image', src: 'http://img/m1.png', fileName: '素材图一' } },
-  ],
-  edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
-  transform: [0, 0, 1],
-}));
+  ];
+  return {
+    nodes,
+    edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
+    transform: [0, 0, 1],
+    // IKGYYE 钉屏幕层（FollowToolbarLayer）订阅的字段：nodeLookup/width 必备，
+    // domNode 缺省 null（层在无 portal 宿主时不渲染，本文件不断言工具条）
+    width: 1200,
+    nodeLookup: new Map(
+      nodes.map((n) => [n.id, {
+        ...n,
+        internals: { positionAbsolute: { ...n.position } },
+        measured: { width: 360, height: 292 },
+      }]),
+    ),
+  };
+});
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
