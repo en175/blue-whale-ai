@@ -160,6 +160,7 @@ import {
   createProject,
   renameProject,
   deleteProject,
+  touchProjectLastOpened,
   projectKeys,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
@@ -240,6 +241,7 @@ import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } f
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
+  findLastOpenedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -1431,12 +1433,13 @@ export default function CanvasPage() {
     };
   }, [setQuota]);
 
-  // 加载项目列表；?project= 不在列表中时回退首项；无项目自动创建
+  // 加载项目列表；落点三级规则（IKH1YK）：?project= 合法值 > 上次打开 > 首项；无项目自动创建
   useEffect(() => {
     let alive = true;
     fetchProjects()
       .then(async (list) => {
         if (!alive) return;
+        const lastOpenedId = findLastOpenedProjectId(list);
         let mapped = list.map((p) => ({ id: String(p.id), name: p.name }));
         if (mapped.length === 0) {
           try {
@@ -1448,13 +1451,24 @@ export default function CanvasPage() {
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id)));
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId));
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
+
+  /** 打开即记（IKH1YK）：进入画布那一刻向服务端记一笔 last_opened_at，失败静默。
+   *  ref 去重：同一次进入（含 StrictMode 双挂载）只记一次；A→B→A 切换每次都记。 */
+  const lastTouchedProjectRef = useRef('');
+  useEffect(() => {
+    if (!currentId || lastTouchedProjectRef.current === currentId) return;
+    // projects 就绪且包含该 id 才记，防止记到无效 id
+    if (!projects.some((p) => p.id === currentId)) return;
+    lastTouchedProjectRef.current = currentId;
+    touchProjectLastOpened(currentId).catch(() => undefined);
+  }, [currentId, projects]);
 
   /** 地址栏改 query（含后退）时切回对应画布 */
   useEffect(() => {

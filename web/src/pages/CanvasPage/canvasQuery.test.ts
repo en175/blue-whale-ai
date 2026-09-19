@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_QUERY_KEY,
   canvasLocationSearch,
+  findLastOpenedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -54,6 +55,54 @@ describe('pickCanvasIdAfterLoad', () => {
 
   it('returns empty string when there are no canvases', () => {
     expect(pickCanvasIdAfterLoad('a', [])).toBe('');
+  });
+
+  it('falls back to the last opened canvas when the query is missing or unknown', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b', 'c'], 'b')).toBe('b');
+    expect(pickCanvasIdAfterLoad('gone', ['a', 'b', 'c'], 'b')).toBe('b');
+  });
+
+  it('falls back to the first canvas when the last opened canvas is gone', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b'], 'deleted')).toBe('a');
+  });
+
+  it('ignores an empty last opened id', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b'], '')).toBe('a');
+  });
+
+  it('keeps the existing two-level behaviour when no last opened id is given', () => {
+    expect(pickCanvasIdAfterLoad('', ['a', 'b'])).toBe('a');
+    expect(pickCanvasIdAfterLoad('gone', ['a', 'b'])).toBe('a');
+    expect(pickCanvasIdAfterLoad('', [])).toBe('');
+  });
+});
+
+describe('findLastOpenedProjectId', () => {
+  it('returns empty string when no project was ever opened', () => {
+    expect(
+      findLastOpenedProjectId([
+        { id: 'a', last_opened_at: null },
+        { id: 'b', last_opened_at: null },
+      ]),
+    ).toBe('');
+  });
+
+  it('returns the single opened project id', () => {
+    expect(findLastOpenedProjectId([{ id: 'a', last_opened_at: '2026-09-01T00:00:00Z' }])).toBe('a');
+  });
+
+  it('returns the most recently opened project id', () => {
+    expect(
+      findLastOpenedProjectId([
+        { id: 1, last_opened_at: '2026-09-01T00:00:00Z' },
+        { id: 'b', last_opened_at: '2026-09-10T00:00:00Z' },
+        { id: 'c', last_opened_at: '2026-09-05T00:00:00Z' },
+      ]),
+    ).toBe('b');
+  });
+
+  it('returns empty string for an empty list', () => {
+    expect(findLastOpenedProjectId([])).toBe('');
   });
 });
 
