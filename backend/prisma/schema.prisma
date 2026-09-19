@@ -221,16 +221,18 @@ model generation_model_capability {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model project {
-  id           BigInt   @id @default(autoincrement())
-  owner_id     BigInt
-  name         String   @db.VarChar(128)
-  thumb        String?  @db.VarChar(512)
-  purpose      String   @default("canvas") @db.VarChar(32)
-  inbox_guard  BigInt?  @unique(map: "uk_project_inbox_guard")
-  gmt_create   DateTime @default(now()) @db.DateTime(0)
-  gmt_modified DateTime @default(now()) @db.DateTime(0)
-  version      Int      @default(0)
-  is_delete    Int      @default(0) @db.TinyInt
+  id             BigInt    @id @default(autoincrement())
+  owner_id       BigInt
+  name           String    @db.VarChar(128)
+  thumb          String?   @db.VarChar(512)
+  purpose        String    @default("canvas") @db.VarChar(32)
+  inbox_guard    BigInt?   @unique(map: "uk_project_inbox_guard")
+  last_opened_at DateTime? @db.DateTime(0)
+  pinned_at      DateTime? @db.DateTime(0)
+  gmt_create     DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime  @default(now()) @db.DateTime(0)
+  version        Int       @default(0)
+  is_delete      Int       @default(0) @db.TinyInt
 
   @@index([owner_id], map: "idx_project_owner")
 }
