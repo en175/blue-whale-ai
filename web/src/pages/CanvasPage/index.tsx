@@ -6651,7 +6651,7 @@ export default function CanvasPage() {
    *  图片/视频参数与参考连线经 openXxxDraftDialog 恢复；音频此前落入图片分支，本切片补齐绑定 */
   const handleNodeReEdit = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
+    if (!node || node.type !== 'mediaNode' || !hasGenerationRecord(node)) return;
     openMediaDraftDialog(id, ((node.data ?? {}) as Record<string, unknown>).mediaType);
   };
 
