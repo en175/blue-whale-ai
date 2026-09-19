@@ -9,6 +9,7 @@ import {
   IMAGE_GENERATION_TAG,
   IMAGE_OUTPAINT_TAG,
   MEDIA_EXTRACT_TAG,
+  VIDEO_ENHANCE_TAG,
   VIDEO_GENERATION_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
 } from "./queue.constants.js";
@@ -23,6 +24,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueImageCutoutJob（tag=image_cutout，IKGXM1）
  *  / enqueueImageOutpaintJob（tag=image_outpaint，IKGOQV）
  *  / enqueueVideoSubtitleEraseJob（tag=video_subtitle_erase，IKGZ80）
+ *  / enqueueVideoEnhanceJob（tag=video_enhance，IKH3VE）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -231,6 +233,20 @@ export async function enqueueVideoSubtitleEraseJob(
   await createRocketMqVideoProducer(
     producer,
     VIDEO_SUBTITLE_ERASE_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 视频 HD 高清 job 入队（IKH3VE，契约 @lib/contracts/video-enhance）：
+ *  复用生成任务 topic/queue，用独立 tag「video_enhance」区分任务类型。 */
+export async function enqueueVideoEnhanceJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    VIDEO_ENHANCE_TAG,
   ).enqueue(jobId, options);
 }
 
