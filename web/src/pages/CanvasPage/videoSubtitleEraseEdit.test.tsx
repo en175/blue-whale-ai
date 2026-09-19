@@ -513,6 +513,47 @@ describe('IKGZ83 发送与结果闭环', () => {
   });
 });
 
+/* ===== IKH25A 去字幕发送条中心点跟随锚：left = 源卡中心 x（发送条自身 translateX(-50%) 真居中，
+   口径同 cutoutToolbarAnchor）。旧缺陷（估宽左上角语义）left = round(400 + 248.89 − 130) = 519，
+   恒偏左 130px；top 口径不变（节点下方 + 16）。上方工具条（走中心点锚的既有实现）位置防回归。 ===== */
+
+/** jsdom 无布局：stub 视口尺寸让 wrapperSize 生效（跟随锚计算依赖 containerWidth） */
+function stubWrapperSize(width: number, height: number) {
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(height);
+}
+
+describe('IKH25A 去字幕发送条中心点跟随锚', () => {
+  it('发送条 left = 源卡中心 x（649）、top = 源卡下方 + 16（340）：不再偏左估宽一半', async () => {
+    stubWrapperSize(1600, 900);
+    await renderPage();
+    await enterErase();
+    const sendBar = document.body.querySelector('[data-testid="subtitle-erase-send-bar"]') as HTMLElement;
+    // 独立手算：screenLeft 400 + 内容宽 497.78/2 = 648.89 → round 649（旧缺陷值 519）
+    expect(sendBar.style.left).toBe('649px');
+    // 垂直行为不变：nodeBoxOf 高 280+44 → 下方 top = 324 + 16 = 340
+    expect(sendBar.style.top).toBe('340px');
+  });
+
+  it('贴边钳制：容器 700 宽时中心 x（649）被钳到右界 558，发送条不出视口', async () => {
+    stubWrapperSize(700, 900);
+    await renderPage();
+    await enterErase();
+    const sendBar = document.body.querySelector('[data-testid="subtitle-erase-send-bar"]') as HTMLElement;
+    // 独立手算：右界 = 700 − 钳制半宽 130 − FOLLOW_PAD 12 = 558；center 649 > 558 → 钳 558
+    expect(sendBar.style.left).toBe('558px');
+  });
+
+  it('上方工具条位置防回归：left 同为中心 x（649）、top = 卡顶上方抬升（8）', async () => {
+    stubWrapperSize(1600, 900);
+    await renderPage();
+    await enterErase();
+    const bar = toolbar() as HTMLElement;
+    expect(bar.style.left).toBe('649px');
+    expect(bar.style.top).toBe('8px');
+  });
+});
+
 describe('IKGZ83 会话口径（!743 体系接入）', () => {
   it('进入编辑态注入 soloToolbarHidden（会话模态可观测标记）；重复进入重置编辑状态（干净起点）', async () => {
     await renderPage();
