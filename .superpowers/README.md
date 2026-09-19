@@ -4,7 +4,7 @@
 
 ## 版本
 
-- **superpowers**: 6.1.1（见 `VERSION`，tag `v6.1.1`，SHA `c984ea2`）
+- **superpowers**: 6.4.1（见 `VERSION`，tag `v6.4.1`，SHA `5bf4e78`）
 - 上游：https://github.com/obra/superpowers
 - 协议：MIT（见 `LICENSE`）
 
