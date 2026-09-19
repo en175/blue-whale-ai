@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-/* IKGYYD 媒体卡悬浮工具条（迁出 MediaNode、钉屏幕层内容组件 MediaNodeToolbar）测试：
-   用例自 MediaNode/index.test.tsx 迁移（按钮构成/顺序/文案/回调/置灰门槛不变）；
-   渲染模式沿用该文件（createRoot + act）；「唯一选中」门在 NodeFollowToolbar 容器
-   （index.test.tsx 已覆盖），本文件覆盖数据条件（生成中/素材缺失/空壳不显）与工具条本体。 */
+/* IKGYYD 媒体卡悬浮工具条（迁出 MediaNode/index.tsx、钉屏幕层内容组件 MediaNodeToolbar）测试：
+   用例自 MediaNode/index.test.tsx 迁移；渲染模式沿用该文件（createRoot + act）；
+   「唯一选中」门在 NodeFollowToolbar 容器（index.test.tsx 已覆盖），本文件覆盖数据条件
+   （生成中/素材缺失/空壳不显）与工具条本体。IKH3WE 撤除「重新编辑」「生成图片」「生成视频」
+   三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,15 +57,15 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () => {
-  it('音频卡隐藏 @、生成图片、「高清 ▾」与生成视频', async () => {
+describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮后）', () => {
+  it('音频卡只有详情与下载（@ 本就隐藏）', async () => {
     await renderToolbar('audio');
-    expect(labels()).toEqual(['重新编辑', '详情', '下载']);
+    expect(labels()).toEqual(['详情', '下载']);
   });
 
-  it('图片卡全显（重新编辑/生成图片/生成视频/高清▾/详情/下载/@）', async () => {
+  it('图片卡全显（高清▾/详情/下载/@）', async () => {
     await renderToolbar('image');
-    expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['高清', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('工具条容器底类存在，「添加到对话」为透明底 toolBtn 而非胶囊类（IKGZ8B）', async () => {
@@ -75,15 +76,29 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多音视频分离', async () => {
+  it('视频卡保留智能去字幕与 @，隐藏「高清 ▾」，多音视频分离', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['重新编辑', '生成视频', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
   });
 
-  it('「高清 ▾」下拉排在生成视频之后（IKGM9F 位次不变）', async () => {
+  it('「重新编辑」「生成图片」「生成视频」不再渲染（IKH3WE：派生新卡走拖线类型菜单、原卡重跑走点卡片）', async () => {
+    await renderToolbar('image');
+    expect(labels()).not.toContain('重新编辑');
+    expect(labels()).not.toContain('生成图片');
+    expect(labels()).not.toContain('生成视频');
+    await renderToolbar('video');
+    expect(labels()).not.toContain('重新编辑');
+    expect(labels()).not.toContain('生成图片');
+    expect(labels()).not.toContain('生成视频');
+    await renderToolbar('audio');
+    expect(labels()).not.toContain('重新编辑');
+    expect(labels()).not.toContain('生成图片');
+    expect(labels()).not.toContain('生成视频');
+  });
+
+  it('「高清 ▾」下拉在详情之前（IKGM9F 位次不变）', async () => {
     await renderToolbar('image');
     const order = labels();
-    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('高清'));
     expect(order.indexOf('高清')).toBeLessThan(order.indexOf('详情'));
   });
 
@@ -366,10 +381,9 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
     vi.useRealTimers();
   });
 
-  it('仅视频卡显示，位置在「生成视频」之后、「音视频分离」之前', async () => {
+  it('仅视频卡显示，位置在「音视频分离」之前', async () => {
     await renderToolbar('video');
     const order = labels();
-    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('智能去字幕'));
     expect(order.indexOf('智能去字幕')).toBeLessThan(order.indexOf('音视频分离'));
     // 图片卡/音频卡不显示（精确数组用例「图片卡全显」「音频卡隐藏」已覆盖，此处再断不冗余出现）
     await renderToolbar('image');
@@ -529,27 +543,6 @@ describe('MediaNodeToolbar 其余按钮回调（携带节点 id）', () => {
       btn.click();
     });
   }
-
-  it('重新编辑派发 onReEdit', async () => {
-    const onReEdit = vi.fn();
-    await renderToolbar('image', { data: { onReEdit } });
-    await clickButton('重新编辑');
-    expect(onReEdit).toHaveBeenCalledWith('image-node');
-  });
-
-  it('生成图片派发 onGenImage', async () => {
-    const onGenImage = vi.fn();
-    await renderToolbar('image', { data: { onGenImage } });
-    await clickButton('生成图片');
-    expect(onGenImage).toHaveBeenCalledWith('image-node');
-  });
-
-  it('生成视频派发 onGenVideo', async () => {
-    const onGenVideo = vi.fn();
-    await renderToolbar('image', { data: { onGenVideo } });
-    await clickButton('生成视频');
-    expect(onGenVideo).toHaveBeenCalledWith('image-node');
-  });
 
   it('详情与下载派发 onShowDetails / onDownload', async () => {
     const onShowDetails = vi.fn();

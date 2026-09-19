@@ -1697,10 +1697,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-          onReEdit: (id: string) => actionsRef.current.reEdit(id),
-          onGenImage: (id: string) => actionsRef.current.genImage(id),
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
@@ -2568,9 +2565,6 @@ export default function CanvasPage() {
     cancelJob: (_id: string) => {},
     retryJob: (_id: string) => {},
     removeMediaNode: (_id: string) => {},
-    reEdit: (_id: string) => {},
-    genImage: (_id: string) => {},
-    genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
     outpaintImage: (_id: string) => {},
@@ -3934,10 +3928,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -3979,10 +3970,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4033,10 +4021,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
@@ -4519,10 +4504,7 @@ export default function CanvasPage() {
       onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
       onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-      onReEdit: (id: string) => actionsRef.current.reEdit(id),
-      onGenImage: (id: string) => actionsRef.current.genImage(id),
       onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-      onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
@@ -4937,10 +4919,7 @@ export default function CanvasPage() {
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onReEdit: (id: string) => actionsRef.current.reEdit(id),
-          onGenImage: (id: string) => actionsRef.current.genImage(id),
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
@@ -5591,10 +5570,7 @@ export default function CanvasPage() {
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -6610,7 +6586,8 @@ export default function CanvasPage() {
   actionsRef.current.removeMediaNode = handleRemoveMediaNode;
   pollJobRef.current = pollJob;
 
-  /* ============ 节点工具条：重新编辑/生成图片/生成视频/生成音频/下载 ============ */
+  /* ============ 节点动作实现：点卡片开面板/高清 ▾ 菜单/生成音频/详情下载（工具条生成类
+     按钮已撤，IKH3WE：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片） ============ */
 
   /** 被点节点 → 对话框参考素材描述（素材已被删除的节点不可作为参考/下载来源） */
   const nodeRefOf = (id: string) => {
@@ -7074,30 +7051,6 @@ export default function CanvasPage() {
     });
   };
 
-  /** 重新编辑（IKDMQU）：三类媒体卡统一走绑定面板——编辑实时写回本卡、发送后原卡重新生成（Q1）；
-   *  图片/视频参数与参考连线经 openXxxDraftDialog 恢复；音频此前落入图片分支，本切片补齐绑定 */
-  const handleNodeReEdit = (id: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode' || !hasGenerationRecord(node)) return;
-    openMediaDraftDialog(id, ((node.data ?? {}) as Record<string, unknown>).mediaType);
-  };
-
-  /** 生成图片：与「生成视频」同口径——新建图片草稿卡，把当前节点自动连为参考（IKDMQR 关系即连线）。
-   *  不调 validateImageRefConnect（新草稿尚未进 ref，会跳过校验）；来源有效性预检后建卡建线。 */
-  const handleNodeGenImage = (id: string) => {
-    if (!canOpenEditor()) return;
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const err = imageRefSourceError(node);
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const draftId = createImageDraftCard();
-    addCanvasEdge(id, draftId);
-    openImageDraftDialog(draftId);
-  };
-
   /** 高清放大（IKGM9F/IKGM9O）：照搬「生成图片」建卡骨架——来源预检后在源卡右侧建「高清」草稿卡并自动选中；
    *  连线带 origin 标记为纯视觉来源边（不占参考位、不参与 @ 编号与媒体索引）。
    *  节点 data 写入高清身份标记（含源素材身份）供「重新编辑」分流与参数回填；
@@ -7452,28 +7405,6 @@ export default function CanvasPage() {
   /** 重置（IKH3OV）：一键清空全部框，作为一步可撤销操作进 undo 栈（撤销整批还原） */
   const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxEdit(state));
 
-  /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
-   *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
-   *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
-  const handleNodeGenVideo = (id: string) => {
-    if (!canOpenEditor()) return;
-    const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node || node.type !== 'mediaNode') return;
-    const d = (node.data ?? {}) as Record<string, unknown>;
-    if (d.mediaType === 'video' && hasGenerationRecord(node)) {
-      openVideoDraftDialog(id);
-      return;
-    }
-    const err = videoRefSourceError(node, 'reference');
-    if (err) {
-      showToast('warn', err);
-      return;
-    }
-    const draftId = createVideoDraftCard();
-    addCanvasEdge(id, draftId, 'reference');
-    openVideoDraftDialog(draftId);
-  };
-
   /** 生成音频：打开音频对话框 */
   const handleNodeGenAudio = (id: string) => {
     if (!canOpenEditor()) return;
@@ -7750,9 +7681,6 @@ export default function CanvasPage() {
     setAssetDetailLoading(false);
   };
 
-  actionsRef.current.reEdit = handleNodeReEdit;
-  actionsRef.current.genImage = handleNodeGenImage;
-  actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.outpaintImage = handleNodeOutpaintImage;
@@ -8356,10 +8284,7 @@ export default function CanvasPage() {
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-              onReEdit: (id: string) => actionsRef.current.reEdit(id),
-              onGenImage: (id: string) => actionsRef.current.genImage(id),
               onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
-              onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),

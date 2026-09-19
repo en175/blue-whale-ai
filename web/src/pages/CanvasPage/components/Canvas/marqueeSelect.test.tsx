@@ -94,7 +94,7 @@ beforeEach(async () => {
   const mediaNode = (id: string, x: number, y: number, selected = false) => ({
     id, type: 'mediaNode', position: { x, y },
     initialWidth: 200, initialHeight: 150, selected,
-    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select', onReEdit: vi.fn() },
+    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select' },
   });
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,

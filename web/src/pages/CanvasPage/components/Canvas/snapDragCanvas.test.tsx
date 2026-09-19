@@ -75,7 +75,7 @@ async function dragNodeTo(id: string, x: number, y: number) {
 function mediaNode(id: string, x: number, y: number, selected = false) {
   return {
     id, type: 'mediaNode', position: { x, y }, width: 200, height: 150, selected,
-    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select', onReEdit: vi.fn() },
+    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select' },
   };
 }
 
