@@ -74,11 +74,17 @@ export function applySubtitleBox(state: SubtitleBoxEditState, op: SubtitleBoxOp)
   };
 }
 
+/** 还有可清空的框（重置钮可用判定）：只看 boxes 非空，与 canUndoSubtitleBoxEdit 语义不同——
+ *  重置后 boxes 为空但 undoStack 非空（仍可撤销这次重置），两者不可互换，故不复用 canUndo。 */
+export function canResetSubtitleBoxEdit(state: SubtitleBoxEditState): boolean {
+  return state.boxes.length > 0;
+}
+
 /** 重置：一键清空全部检测框，并作为一步可撤销操作进 undo 栈（撤销把清空前的框集合
  *  整批还原）；同时清空重做栈（重置即新分支）。无框时原样返回——没有可清空的内容
  *  就不产生空步骤，避免撤销栈被无效操作污染。 */
-export function resetSubtitleBoxes(state: SubtitleBoxEditState): SubtitleBoxEditState {
-  if (state.boxes.length === 0) return state;
+export function resetSubtitleBoxEdit(state: SubtitleBoxEditState): SubtitleBoxEditState {
+  if (!canResetSubtitleBoxEdit(state)) return state;
   return {
     boxes: [],
     undoStack: [...state.undoStack, { kind: 'reset', ops: state.boxes }],

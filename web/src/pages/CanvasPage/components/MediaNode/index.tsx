@@ -214,6 +214,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+  /** 去字幕会话锁定（IKH3NP 审查修订）：框选（subtitleEraseEditing 注入）与智能（仅
+   *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
+   *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
+  const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -261,12 +265,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   }, [contextMenu]);
 
   /** 去字幕会话（IKGZ83）：视频暂停锁定在当前帧——拉框对全片生效、画面定格便于精确框选；
-   *  两个标记任一存在即停帧（IKH3OU 单条化后框层只在框选模式注入，智能模式借
-   *  subtitleErasePaused 停帧——不注入框层就没有盖在视频上的透明十字浮层）。 */
+   *  两模式共用会话锁定布尔（IKH3NP 审查修订：框层只在框选模式注入，智能模式借
+   *  subtitleErasePaused 停在当前帧）。依赖稳定布尔而非每次渲染新生的对象引用，
+   *  语义不变且不再靠引用变化反复重放。 */
   useEffect(() => {
-    if (!data.subtitleEraseEditing && !data.subtitleErasePaused) return;
+    if (!subtitleEraseLocked) return;
     videoRef.current?.pause();
-  }, [data.subtitleEraseEditing, data.subtitleErasePaused]);
+  }, [subtitleEraseLocked]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -602,13 +607,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               ref={videoRef}
               className={styles.mediaVideo}
               src={data.src}
-              controls={isSelect}
+              controls={isSelect && !subtitleEraseLocked}
               preload="metadata"
               disablePictureInPicture
               disableRemotePlayback
               controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
               onLoadedMetadata={handleVideoMetadata}
-              style={isSelect ? undefined : { pointerEvents: 'none' }}
+              style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
             />
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
                 仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}

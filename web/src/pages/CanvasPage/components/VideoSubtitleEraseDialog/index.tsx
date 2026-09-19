@@ -4,7 +4,7 @@
  *  - smart（智能擦除）：X | 智能擦除 | ⚡0 | ↑，零框选工具，点发送即提交（无框直发）；
  *  - box（框选擦除）：X | 框选擦除 ？ | 框选 / 撤销 / 重做 / 重置 | ⚡0 | ↑。
  * 框选模式的必框语义由父级经 sendBlockedReason 传入（非空即发送钮置灰并用它作 title）；
- * 重置=一键清空全部框且一步可撤销（纯逻辑 subtitleEraseBoxes.resetSubtitleBoxes）。
+ * 重置=一键清空全部框且一步可撤销（纯逻辑 subtitleEraseBoxes.resetSubtitleBoxEdit）。
  * 模式由入口下拉菜单决定、会话内不互切（换模式 = X 退出后重选），「全画面文字」开关与
  * 上方工具条一并退役；发送参数由 videoSubtitleErase.buildVideoSubtitleEraseInput 推导
  * （detect_mode 两模式恒 subtitle_smart，erase_boxes 由框集合推导）。

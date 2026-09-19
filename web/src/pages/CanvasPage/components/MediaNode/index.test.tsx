@@ -660,4 +660,38 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     await renderNode('video', {});
     expect(mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]')).toBeNull();
   });
+
+  /** 会话锁定播放控件（IKH3NP 审查修订）：会话期 toolMode 恒 select，原生 controls 必须自己
+      关掉（智能模式不再注入框层，没有 inset:0 覆盖层替视频挡控件），指针一并交还画布；
+      两模式都停帧；无会话标记的选中态视频卡维持原生控件不动。 */
+  it('会话锁定期关原生播放控件与指针，智能与框选两模式都生效；无标记时保留 controls', async () => {
+    const pauseSpy = vi.fn();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseSpy);
+    // 智能模式：只注入停帧标记（无框层），会话期 toolMode 仍为 select
+    await renderNode('video', { data: { toolMode: 'select', subtitleErasePaused: true } });
+    const smartVideo = mountNode.querySelector('video')!;
+    expect(smartVideo.hasAttribute('controls')).toBe(false);
+    expect(smartVideo.style.pointerEvents).toBe('none');
+    expect(pauseSpy).toHaveBeenCalled();
+    // 框选模式：注入框层（本改动对它同样生效，不再只靠框层遮挡）
+    pauseSpy.mockClear();
+    const editing = {
+      boxes: [],
+      liveBox: null,
+      onBoxStart: () => {},
+      onBoxMove: () => {},
+      onBoxEnd: () => {},
+    };
+    await renderNode('video', { data: { toolMode: 'select', subtitleEraseEditing: editing } });
+    const boxVideo = mountNode.querySelector('video')!;
+    expect(boxVideo.hasAttribute('controls')).toBe(false);
+    expect(boxVideo.style.pointerEvents).toBe('none');
+    expect(pauseSpy).toHaveBeenCalled();
+    // 回归：无会话标记的选中态视频卡保留原生控件且可交互
+    await renderNode('video', { data: { toolMode: 'select' } });
+    const normalVideo = mountNode.querySelector('video')!;
+    expect(normalVideo.hasAttribute('controls')).toBe(true);
+    expect(normalVideo.style.pointerEvents).toBe('');
+    pause.mockRestore();
+  });
 });

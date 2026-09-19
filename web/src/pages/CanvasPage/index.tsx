@@ -86,10 +86,11 @@ import {
   applySubtitleBox,
   canAddSubtitleBox,
   canRedoSubtitleBoxEdit,
+  canResetSubtitleBoxEdit,
   canUndoSubtitleBoxEdit,
   EMPTY_SUBTITLE_BOX_EDIT,
   redoSubtitleBoxEdit,
-  resetSubtitleBoxes,
+  resetSubtitleBoxEdit,
   undoSubtitleBoxEdit,
   type SubtitleBoxEditState,
   type SubtitleBoxOp,
@@ -7281,7 +7282,7 @@ export default function CanvasPage() {
   const handleSubtitleBoxUndo = () => setSubtitleEraseBoxes((state) => undoSubtitleBoxEdit(state));
   const handleSubtitleBoxRedo = () => setSubtitleEraseBoxes((state) => redoSubtitleBoxEdit(state));
   /** 重置（IKH3OV）：一键清空全部框，作为一步可撤销操作进 undo 栈（撤销整批还原） */
-  const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxes(state));
+  const handleSubtitleBoxReset = () => setSubtitleEraseBoxes((state) => resetSubtitleBoxEdit(state));
 
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
@@ -9646,7 +9647,7 @@ export default function CanvasPage() {
             onSend={handleSubtitleEraseSend}
             canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
             canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
-            canReset={subtitleEraseBoxes.boxes.length > 0}
+            canReset={canResetSubtitleBoxEdit(subtitleEraseBoxes)}
             onUndo={handleSubtitleBoxUndo}
             onRedo={handleSubtitleBoxRedo}
             onReset={handleSubtitleBoxReset}
