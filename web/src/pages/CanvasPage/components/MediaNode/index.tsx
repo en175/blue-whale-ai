@@ -205,8 +205,6 @@ export interface MediaNodeData {
   onCopyImage?: (id: string) => void;
   onComplianceCheck?: (id: string) => void;
   onFillEmptyShell?: (id: string, file: File) => void;
-  /** 图片生成节点：图生图上传本地素材 */
-  onImg2Img?: (id: string, file: File) => void;
 }
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
