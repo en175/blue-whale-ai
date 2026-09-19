@@ -40,7 +40,10 @@ public enum GenerationMqRoute {
     IMAGE_CUTOUT("generation-task", "image_cutout"),
 
     /** 智能扩图（IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts）。 */
-    IMAGE_OUTPAINT("generation-task", "image_outpaint");
+    IMAGE_OUTPAINT("generation-task", "image_outpaint"),
+
+    /** 视频智能去字幕（迁移契约 §17 / IKGZ7Z；契约 = backend/libs/contracts/video-subtitle-erase.ts）。 */
+    VIDEO_SUBTITLE_ERASE("generation-task", "video_subtitle_erase");
 
     private final String topic;
 
