@@ -134,6 +134,23 @@ test("PR template requests the readable verification receipt summary", () => {
   }
 });
 
+test("pr skill keeps its body scaffolding in Chinese", () => {
+  const skill = read(".claude/skills/pr/SKILL.md");
+  const mirror = read(".zcode/skills/pr/SKILL.md");
+  const workflow = read("docs/agents/git-workflow.md");
+
+  assert.equal(mirror, skill);
+
+  for (const heading of ["## 概要", "## 验证证据", "## 合并风险", "**变更前：**", "**变更后：**", "**可逆性：**", "**影响半径：**"]) {
+    assert.ok(skill.includes(heading), heading);
+  }
+  for (const legacy of ["## Summary", "## Evidence", "## Merge Danger", "**Before:**", "**After:**", "**Door:**", "**Blast Radius:**"]) {
+    assert.ok(!skill.includes(legacy), legacy);
+  }
+  assert.match(skill, /localization: "中文语言定制/);
+  assert.doesNotMatch(workflow, /Summary 图示|Merge Danger/);
+});
+
 test("commit review rules link to the PR template instead of duplicating it", () => {
   const reviewRules = read("docs/agents/commit-and-review.md");
 
