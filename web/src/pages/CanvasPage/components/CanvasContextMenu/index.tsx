@@ -104,9 +104,17 @@ export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: Ca
 
   useEffect(() => {
     const close = () => onClose();
+    // 节点拖动走 pointer 事件链，不会触发 click；捕获阶段在非菜单区域按下即关闭（IKG72F）
+    const closeIfOutside = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', closeIfOutside, true);
     document.addEventListener('click', close);
     document.addEventListener('contextmenu', close, true);
     return () => {
+      document.removeEventListener('pointerdown', closeIfOutside, true);
       document.removeEventListener('click', close);
       document.removeEventListener('contextmenu', close, true);
       if (closeSubTimer.current != null) window.clearTimeout(closeSubTimer.current);
@@ -118,6 +126,7 @@ export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: Ca
       ref={menuRef}
       className={styles.menu}
       style={{ top: pos.top, left: pos.left }}
+      onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
