@@ -411,3 +411,53 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
     },
   );
 });
+
+describe('IKH3ZI 无活动会话时三路事件交还原流程（module 返回 pass 不消费）', () => {
+  /** 图片生成面板打开的外部可见信号（PromptRefEditor 打桩元素，仅面板渲染时存在） */
+  const genPanelOpen = () => container.querySelector('[data-testid="chip-editor"]') !== null;
+
+  /** 真实手势时序：React Flow 的 selection 通知先于 click 到达 */
+  async function selectionChange(nodeIds: string[]) {
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: nodeIds.map((id) => ({ id })) });
+    });
+  }
+
+  /** 无会话打开生成面板的既有路径：单选成品卡 i3（有生成记录）经 IKFOHK 面板联动自动开图片面板 */
+  async function openPanelViaSoloSelect() {
+    await selectionChange(['i3']);
+    await vi.waitFor(() => expect(genPanelOpen()).toBe(true));
+  }
+
+  it('无会话点画布空白：paneClick 交还后落入选取/面板关闭链，面板关闭且不抛错', async () => {
+    seedDoc(true);
+    await renderPage();
+    await openPanelViaSoloSelect();
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(genPanelOpen()).toBe(false);
+  });
+
+  it('无会话 selection 变化：单选成品卡联动开绑定面板、单选其他卡联动关闭（原流程不被提前 return）', async () => {
+    seedDoc(true);
+    await renderPage();
+    // 单选成品卡：IKFOHK 面板联动自动开绑定面板（handleToolSessionSelectionChange 返回
+    // false 后不 return，无会话时不冻结联动）
+    await selectionChange(['i3']);
+    await vi.waitFor(() => expect(genPanelOpen()).toBe(true));
+    // 单选无生成记录的其他卡：绑定面板联动关闭
+    await selectionChange(['v1']);
+    expect(genPanelOpen()).toBe(false);
+  });
+
+  it('无会话按 Esc：公共链正常关面板（exitToolSessionOnEsc 交还后走 dismissAllGenPanels）', async () => {
+    seedDoc(true);
+    await renderPage();
+    await openPanelViaSoloSelect();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(genPanelOpen()).toBe(false);
+  });
+});

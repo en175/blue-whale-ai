@@ -1,9 +1,11 @@
 /* IKH3ZH 工具会话协调 module（进入路径）：画布六种编辑会话（擦除/抠图/裁切/扩图/
    去字幕/音视频分离）的跨工具互斥规则集中于此——「进入任一会话须退出其余活跃会话并
    关闭生成面板」这条知识只活在 module，六入口不再各自手列其他五种工具的退出清单。
-   IKH3ZI 退出路径与画布事件消费规则接入本 module：四路退出（工具关闭钮 / 点画布空白 /
-   点其他卡 node-click 拦截 / 选中规范化退出）与 Esc 六工具退出/让位顺序同样只活在
-   module，页面接线点不再逐工具 if。IKH3ZJ 生成面板准入接入：打开生成面板前「退出全部
+   IKH3ZI 退出路径与画布事件消费规则接入本 module：画布事件消费（点画布空白 / 点其他卡
+   node-click 拦截 / 选中规范化退出）与 Esc 六工具退出/让位顺序同样只活在 module，
+   页面接线点不再逐工具 if；工具关闭钮/框外暗区/专属 Esc 等定向入口直调页面各工具的
+   完整退出函数（定向退出经 module 纯转发无知识集中收益，IKH3ZE 审查裁决删中转层）。
+   IKH3ZJ 生成面板准入接入：打开生成面板前「退出全部
    活跃会话」的判断与执行同样收进 module，页面准入前置不再手列六个 exit。
    约束：会话状态与完整退出动作的实现留在页面现有持有处（index.tsx），本 module 不持
    state、不建第二份「活动工具」事实源——活跃与否由调用方每次交互时从现有六会话
@@ -74,14 +76,6 @@ export type ToolSessionEventDisposition = 'consumed' | 'pass';
 export interface ToolSessionDeps extends EnterToolSessionDeps {
   /** 程序化选中指定节点（node-click 拦截退出后选中新卡；页面 selectRequest 通道） */
   selectNode: (nodeId: string) => void;
-}
-
-/** 定向退出指定会话（工具关闭钮 / 裁切框外暗区 / 抠图与扩图专属 Esc 等定向入口）：
- *  执行该会话的完整清理动作。「哪个会话→用哪个完整清理」的映射只活在 module 的
- *  deps.exits，调用方只表达目标工具身份。关闭钮等 UI 仅在对应会话活跃时渲染，
- *  调用方无需再判活跃。 */
-export function exitToolSession(kind: ToolSessionKind, deps: ToolSessionDeps): void {
-  deps.exits[kind]();
 }
 
 /** 退出全部活跃会话（IKH3ZJ 生成面板准入的统一前置）：遍历六会话快照，活跃即执行

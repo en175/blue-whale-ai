@@ -169,7 +169,6 @@ import {
   enterToolSession,
   escDefersToToolSessionHandler,
   exitAllToolSessions,
-  exitToolSession,
   exitToolSessionOnEsc,
   handleToolSessionNodeClick,
   handleToolSessionPaneClick,
@@ -3217,7 +3216,8 @@ export default function CanvasPage() {
    *  以当轮渲染的最新六会话 target、六 exit、面板关闭与 selectRequest 通道装配快照交给
    *  module（函数每轮渲染重建、调用时才读取，无过期闭包、无第二份事实源）；六 exit 是
    *  const 且部分定义于文件后部，本函数必须保持「调用时才读」的函数形态（TDZ 安全）。
-   *  进入互斥、四路退出与画布事件消费规则全部只在 toolSessionCoordinator。 */
+   *  进入互斥、画布事件消费与 Esc 退出规则全部只在 toolSessionCoordinator；工具关闭钮/
+   *  框外暗区/专属 Esc 等定向入口不经本装配，直调各工具完整退出函数。 */
   const buildToolSessionDeps = (): ToolSessionDeps => ({
     activity: {
       erase: eraseTargetNodeId,
@@ -3241,11 +3241,6 @@ export default function CanvasPage() {
 
   const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
     enterToolSession(kind, buildToolSessionDeps(), init);
-
-  /** 定向退出指定工具会话（关闭钮/框外暗区/专属 Esc 等定向入口）：经协调 module 执行
-   *  该会话的完整清理（映射知识在 module 的 exits，页面只表达目标工具身份）。 */
-  const closeToolSession = (kind: ToolSessionKind) =>
-    exitToolSession(kind, buildToolSessionDeps());
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
    *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
@@ -3462,13 +3457,10 @@ export default function CanvasPage() {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      closeToolSession('cutout');
+      exitCutoutSession();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    // closeToolSession('cutout') 仅经稳定的 exitCutoutSession 生效（module 定向退出不读
-    // 其他会话快照），此处引用不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cutoutNodeId, exitCutoutSession]);
 
   /** 抠图会话绑定清理（IKGXMT）：源图卡被删除时结束会话（防工具栏悬挂），参数一并丢弃 */
@@ -3900,13 +3892,10 @@ export default function CanvasPage() {
       if (e.key !== 'Escape') return;
       if (isEditableKeyboardTarget(e.target)) return;
       e.preventDefault();
-      closeToolSession('outpaint');
+      endOutpaintSession();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    // closeToolSession('outpaint') 仅经稳定的 endOutpaintSession 生效（module 定向退出
-    // 不读其他会话快照），此处引用不随渲染变化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outpaintSessionActive, endOutpaintSession]);
 
   /** IKGOQX 扩图会话绑定清理：源图卡被删除时结束会话（其余退出路径见统一退出函数） */
@@ -9408,7 +9397,7 @@ export default function CanvasPage() {
                   preset: cropPreset,
                   minSide: cropMinSide,
                   onRectChange: setCropRect,
-                  onDarkAreaClick: () => closeToolSession('crop'),
+                  onDarkAreaClick: exitCropMode,
                 }
               : null
           }
@@ -9787,7 +9776,7 @@ export default function CanvasPage() {
         {/* 扩图参数面板（IKGOQX 骨架 / IKGOR6 发送闭环）：绑定源图卡，发送建结果卡后退出扩图模式 */}
         {outpaintSessionActive && outpaintRect && (
           <OutpaintDialog
-            onClose={() => closeToolSession('outpaint')}
+            onClose={endOutpaintSession}
             sourceSize={{ width: outpaintRect.width, height: outpaintRect.height }}
             expands={outpaintExpands}
             onPresetSelect={handleOutpaintPresetSelect}
@@ -9863,7 +9852,7 @@ export default function CanvasPage() {
             （X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃遮罩不建卡不提交 */}
         {eraseTargetNodeId && (
           <ImageEraseDialog
-            onClose={() => closeToolSession('erase')}
+            onClose={exitEraseEditing}
             onSendTextErase={handleEraseDialogSendText}
             onSendMask={handleEraseDialogSendMask}
             tool={eraseTool}
@@ -9890,7 +9879,7 @@ export default function CanvasPage() {
         {subtitleEraseTargetNodeId && (
           <VideoSubtitleEraseDialog
             mode={subtitleEraseMode}
-            onClose={() => closeToolSession('subtitleErase')}
+            onClose={exitSubtitleEraseEditing}
             onSend={handleSubtitleEraseSend}
             canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
             canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
@@ -9912,7 +9901,7 @@ export default function CanvasPage() {
             建任务（发送即先退编辑态再建占位卡） */}
         {audioVideoSplitTargetNodeId && (
           <VideoAudioSplitDialog
-            onClose={() => closeToolSession('audioVideoSplit')}
+            onClose={exitAudioVideoSplitEditing}
             format={audioVideoSplitFormat}
             onFormatChange={setAudioVideoSplitFormat}
             onSend={handleAudioVideoSplitSend}
@@ -9927,7 +9916,7 @@ export default function CanvasPage() {
             条件渲染挂载（cutoutNodeId 非空且源节点存在，源卡被删由绑定清理 effect 退会话） */}
         {cutoutNodeId && cutoutSourceNode && (
           <CutoutToolbar
-            onClose={() => closeToolSession('cutout')}
+            onClose={exitCutoutSession}
             scene={cutoutScene}
             onSceneChange={setCutoutScene}
             needContour={cutoutNeedContour}
@@ -9944,15 +9933,15 @@ export default function CanvasPage() {
         )}
 
         {/* 裁切面板（IKGW1N）：随 cropTargetNodeId 条件渲染（编辑态面板，不进 dismissAllGenPanels
-            名单，根元素打 data-gen-panel-territory）；取消经 closeToolSession('crop') 定向退出
-            （四退出之一，完整清理映射在 toolSessionCoordinator）；确认绑 handleCropConfirm
+            名单，根元素打 data-gen-panel-territory）；取消直调 exitCropMode 定向退出（四退出
+            之一，会话完整清理函数）；确认绑 handleCropConfirm
             （IKGW1S：裁切执行→上传→建卡闭环） */}
         {cropTargetNodeId && (
           <CropDialog
             preset={cropPreset}
             onPresetChange={handleCropPresetChange}
             onConfirm={handleCropConfirm}
-            onClose={() => closeToolSession('crop')}
+            onClose={exitCropMode}
             followAnchor={cropPanelAnchor}
           />
         )}
