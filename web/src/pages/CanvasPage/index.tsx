@@ -182,6 +182,8 @@ import {
   createProject,
   renameProject,
   deleteProject,
+  touchProjectLastOpened,
+  pinProject,
   projectKeys,
   type SnapshotAsset,
 } from '@/api/projects';
@@ -264,6 +266,8 @@ import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } f
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
+  findLastOpenedProjectId,
+  findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -1467,6 +1471,10 @@ export default function CanvasPage() {
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
   const applyingRef = useRef(false);
+  const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
+  const onUpdateGenerate = useCallback((nodeId: string) => {
+    updateGenerateRef.current(nodeId);
+  }, []);
   const [applying, setApplying] = useState(false);
   const [saveEpoch, setSaveEpoch] = useState(0);
   const savePromiseRef = useRef<Promise<unknown> | null>(null);
@@ -1527,30 +1535,43 @@ export default function CanvasPage() {
     };
   }, [setQuota]);
 
-  // 加载项目列表；?project= 不在列表中时回退首项；无项目自动创建
+  // 加载项目列表；落点三级规则（IKH1YK）：?project= 合法值 > 上次打开 > 首项；无项目自动创建
   useEffect(() => {
     let alive = true;
     fetchProjects()
       .then(async (list) => {
         if (!alive) return;
-        let mapped = list.map((p) => ({ id: String(p.id), name: p.name }));
+        const lastOpenedId = findLastOpenedProjectId(list);
+        const latestCreatedId = findLatestCreatedProjectId(list);
+        let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
         if (mapped.length === 0) {
           try {
             const created = await createProject('未命名项目');
             if (!alive) return;
-            mapped = [{ id: String(created.id), name: created.name }];
+            mapped = [{ id: String(created.id), name: created.name, pinned: false }];
           } catch {
             /* 创建失败静默降级：空项目列表 */
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id)));
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id), lastOpenedId, latestCreatedId));
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
+
+  /** 打开即记（IKH1YK）：进入画布那一刻向服务端记一笔 last_opened_at，失败静默。
+   *  ref 去重：同一次进入（含 StrictMode 双挂载）只记一次；A→B→A 切换每次都记。 */
+  const lastTouchedProjectRef = useRef('');
+  useEffect(() => {
+    if (!currentId || lastTouchedProjectRef.current === currentId) return;
+    // projects 就绪且包含该 id 才记，防止记到无效 id
+    if (!projects.some((p) => p.id === currentId)) return;
+    lastTouchedProjectRef.current = currentId;
+    touchProjectLastOpened(currentId).catch(() => undefined);
+  }, [currentId, projects]);
 
   /** 地址栏改 query（含后退）时切回对应画布 */
   useEffect(() => {
@@ -4423,6 +4444,18 @@ export default function CanvasPage() {
         setProjects((prev) =>
           prev.map((p) => (p.id === id ? { ...p, name: updated.name } : p)),
         );
+      })
+      .catch(() => undefined);
+  };
+
+  /** 置顶/取消置顶：成功后全量重拉列表（服务端排序直出），不动 currentId；并同步项目卡片页缓存 */
+  const handleToggleProjectPin = (id: string, pinned: boolean) => {
+    pinProject(id, pinned)
+      .then(() => fetchProjects())
+      .then((list) => {
+        setProjects(list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) })));
+        // 项目卡片页缓存需同步置顶口径；置顶失败不回滚本地，下次重拉自然校正。
+        queryClient.invalidateQueries({ queryKey: projectKeys.all });
       })
       .catch(() => undefined);
   };
@@ -8883,6 +8916,226 @@ export default function CanvasPage() {
     }
   };
 
+  /** 「输入已更新 → 更新生成」：用节点已存参数 + 画布上最新文本输入，在当前卡原位重跑。 */
+  const handleUpdateGenerate = async (nodeId: string) => {
+    if (applyingRef.current) return;
+    if (saveBlocked || saveStatus === 'error') {
+      showToast('warn', '保存失败，请重试');
+      return;
+    }
+    const node = mediaNodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.type !== 'mediaNode') return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (data.genStatus === 'generating') {
+      showToast('warn', '正在生成中');
+      return;
+    }
+    const mediaType = data.mediaType;
+    if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') return;
+    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
+    if (!modelId) {
+      showToast('warn', '缺少模型参数，请先打开面板选择模型');
+      return;
+    }
+    const projectId = currentId;
+    if (!projectId) {
+      showToast('warn', '未选中项目，无法生成');
+      return;
+    }
+    const prompt = typeof data.prompt === 'string' ? data.prompt : '';
+    const promptDoc = restorePromptDoc(data.promptDoc, data.prompt);
+    const composedPrompt = composeImageSendPrompt(textAttachmentsOf(nodeId), prompt, promptDoc);
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
+
+    if (mediaType === 'image') {
+      const size = typeof data.draftSize === 'string' ? data.draftSize : '';
+      const ratio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
+      if (!size || !ratio) {
+        showToast('warn', '缺少分辨率或比例，请先打开面板确认参数');
+        return;
+      }
+      const syncError = imageTextIndexSendError(
+        nodeId,
+        edgesRef.current,
+        [...mediaNodesRef.current, ...textNodesRef.current],
+        DEFAULT_IMAGE_REFERENCE_LIMIT,
+      );
+      if (syncError) {
+        showToast('warn', syncError);
+        return;
+      }
+      applyingRef.current = true;
+      setSubmittingNodeId(nodeId);
+      try {
+        const inputAssetIds: string[] = [];
+        for (const ref of mergedImageRefsOf(nodeId, edgesRef.current, [...mediaNodesRef.current, ...textNodesRef.current])) {
+          if (!inputAssetIds.includes(ref.assetId)) inputAssetIds.push(ref.assetId);
+        }
+        if (!(await flushCanvasSave(projectId))) return;
+        if (activeProjectRef.current !== projectId) return;
+        const jobRefs = buildImageJobReferences(inputAssetIds);
+        const submitted = startGenerationJob(
+          'image',
+          { prompt, model_id: modelId, aspect_ratio: ratio, size },
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          nodeId,
+          undefined,
+          promptDoc,
+        );
+        if (submitted && imageDraftId === nodeId) {
+          imagePanelHiddenRef.current = true;
+          setShowImageDialog(false);
+        }
+      } catch (error) {
+        showToast('error', '保存或提交失败，请重试');
+        console.warn('更新生成失败:', error);
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
+      return;
+    }
+
+    if (mediaType === 'video') {
+      const aspectRatio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
+      const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
+      const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
+      if (!aspectRatio || !resolution || !Number.isFinite(duration) || duration <= 0) {
+        showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
+        return;
+      }
+      const syncError = videoTextIndexSendError(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      if (syncError) {
+        showToast('warn', syncError);
+        return;
+      }
+      const sourceDraftRefs = mergedVideoRefsWithTextIndex(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      const savedStripOrder = data.referenceStripOrder;
+      const draftRefs = {
+        ...sourceDraftRefs,
+        reference: orderRefStripItems(
+          sourceDraftRefs.reference,
+          videoRefStripKey,
+          Array.isArray(savedStripOrder) ? savedStripOrder : [],
+        ),
+      };
+      const conflict = videoRefConflict(draftRefs, {
+        firstFrame: true,
+        lastFrame: true,
+        firstLastFrame: true,
+        referenceImage: true,
+      });
+      if (conflict) {
+        showToast('warn', conflict);
+        return;
+      }
+      if (!supportsVideoReferenceModel(modelId) && draftRefs.reference.some((ref) => ref.mediaType !== 'image')) {
+        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+        return;
+      }
+      applyingRef.current = true;
+      setSubmittingNodeId(nodeId);
+      try {
+        if (!(await flushCanvasSave(projectId))) return;
+        if (activeProjectRef.current !== projectId) return;
+        const jobRefs = buildVideoJobReferences(draftRefs);
+        const submitted = startGenerationJob(
+          'video',
+          {
+            prompt,
+            model_id: modelId,
+            aspect_ratio: aspectRatio,
+            resolution,
+            duration,
+            generate_audio: typeof data.draftGenerateAudio === 'boolean' ? data.draftGenerateAudio : true,
+          },
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          nodeId,
+          undefined,
+          promptDoc,
+        );
+        if (submitted && videoDraftId === nodeId) {
+          videoPanelHiddenRef.current = true;
+          setShowBottomDialog(false);
+        }
+      } catch (error) {
+        showToast('error', '保存或提交失败，请重试');
+        console.warn('更新生成失败:', error);
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
+      return;
+    }
+
+    const syncError = audioTextIndexSendError(
+      nodeId,
+      edgesRef.current,
+      mediaNodesRef.current,
+      textNodesRef.current,
+    );
+    if (syncError) {
+      showToast('warn', syncError);
+      return;
+    }
+    applyingRef.current = true;
+    setSubmittingNodeId(nodeId);
+    try {
+      const { refs } = mergedAudioRefsWithTextIndex(
+        nodeId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      );
+      const resolved = refs.filter((ref) => ref.assetId);
+      if (!(await flushCanvasSave(projectId))) return;
+      if (activeProjectRef.current !== projectId) return;
+      const submitted = startGenerationJob(
+        'audio',
+        { prompt, model_id: modelId },
+        undefined,
+        resolved.length
+          ? { references: resolved.map((ref) => ({
+              role: 'reference' as const,
+              type: ref.mediaType ?? 'audio',
+              asset_id: String(ref.assetId),
+            })) }
+          : undefined,
+        nodeId,
+        undefined,
+        promptDoc,
+      );
+      if (submitted && audioDraftId === nodeId) {
+        audioPanelHiddenRef.current = true;
+        setShowAudioDialog(false);
+      }
+    } catch (error) {
+      showToast('error', '保存或提交失败，请重试');
+      console.warn('更新生成失败:', error);
+    } finally {
+      applyingRef.current = false;
+      setSubmittingNodeId(null);
+    }
+  };
+  updateGenerateRef.current = (nodeId) => {
+    void handleUpdateGenerate(nodeId);
+  };
+
   /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
   const firePendingGen = () => {
     const handoff = pendingGenRef.current;
@@ -8985,6 +9238,7 @@ export default function CanvasPage() {
         onSelectProject={handleSelect}
         onRenameProject={handleRename}
         onDeleteProject={handleDelete}
+        onTogglePinProject={handleToggleProjectPin}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
         onShowLegacyHistory={legacyHistory && legacyHistory.length > 0 ? () => setShowLegacyHistory(true) : undefined}
@@ -9176,6 +9430,7 @@ export default function CanvasPage() {
           onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onUpdateGenerate={onUpdateGenerate}
         />
         {connectMenu && (
           <ConnectTypeMenu

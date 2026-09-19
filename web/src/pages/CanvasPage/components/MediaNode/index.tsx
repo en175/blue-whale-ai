@@ -5,7 +5,8 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, AudioLines, ImageOff, Plus, Check } from 'lucide-react';
+import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
@@ -112,6 +113,8 @@ export interface MediaNodeData {
   inputSourceNodeId?: string | null;
   /** IKFM3S §6：定位来源文本卡（平移居中 + 选中高亮） */
   onLocateInputSource?: (sourceNodeId: string) => void;
+  /** 「输入已更新」菜单：在当前节点用最新文本输入原位重新生成 */
+  onUpdateGenerate?: (id: string) => void;
   /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
   pickMarked?: boolean;
   /** 会话期隐藏标记（IKGZ5O，渲染期派生注入，不持久化）：本卡为编辑会话（擦除/裁切/抠图/
@@ -209,6 +212,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameError, setNameError] = useState('');
+  const [staleMenuOpen, setStaleMenuOpen] = useState(false);
+  const staleMenuRef = useRef<HTMLDivElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
@@ -231,6 +236,20 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     setNameError('');
     setNameEditing(false);
   }, [data.fileName]);
+
+  useDismissOnOutside([
+    { open: staleMenuOpen, ref: staleMenuRef, dismiss: () => setStaleMenuOpen(false) },
+  ]);
+
+  useEffect(() => {
+    if (!staleMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setStaleMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [staleMenuOpen]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -493,21 +512,47 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
-      {/* IKFM3S §4：文本输入更新徽标（卡片右上角显眼提示；点击定位来源文本卡）。
+      {/* 「输入已更新」徽标：点击在下方弹出操作，默认「更新生成」原位重跑最新输入。
           放标题行外层避免 titleRow overflow 裁剪。 */}
       {data.inputStale === true && (
-        <button
-          type="button"
-          className={`nodrag nopan ${styles.inputStaleBadge}`}
-          data-testid="input-stale-badge"
-          title="输入已更新：来源文本已修改，重新生成以使用最新输入"
-          onClick={(event) => {
-            event.stopPropagation();
-            if (data.inputSourceNodeId) data.onLocateInputSource?.(data.inputSourceNodeId);
-          }}
-        >
-          输入已更新
-        </button>
+        <div ref={staleMenuRef} className={`nodrag nopan ${styles.inputStaleWrap}`}>
+          <button
+            type="button"
+            className={styles.inputStaleLabel}
+            data-testid="input-stale-badge"
+            title="输入已更新：来源文本已修改"
+            aria-haspopup="menu"
+            aria-expanded={staleMenuOpen || undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              setStaleMenuOpen((open) => !open);
+            }}
+          >
+            输入已更新
+            <ChevronDown size={12} strokeWidth={2} />
+          </button>
+          {staleMenuOpen && (
+            <div className={styles.inputStaleMenu} role="menu" data-testid="input-stale-menu">
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.inputStaleMenuItem}
+                data-testid="input-stale-update-generate"
+                disabled={isGenerating}
+                title={isGenerating ? '正在生成中' : '在当前节点用最新输入重新生成'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (isGenerating) return;
+                  setStaleMenuOpen(false);
+                  data.onUpdateGenerate?.(id);
+                }}
+              >
+                <RefreshCw size={14} strokeWidth={2} />
+                <span>更新生成</span>
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {/* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾（纯展示不挡点击） */}
       {data.pickMarked === true && (
