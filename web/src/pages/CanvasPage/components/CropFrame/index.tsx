@@ -228,7 +228,7 @@ export default function CropFrame({ bounds, rect, preset, minSide, onRectChange,
     `nodrag nopan ${styles.edgeHit} ${extra}${locked ? ` ${styles.edgeHandleDisabled}` : ''}`;
 
   return (
-    <div className={styles.frameLayer} data-testid="crop-frame" ref={layerRef}>
+    <div className={styles.frameLayer} data-testid="crop-frame" data-crop-frame="" ref={layerRef}>
       {/* 框外暗区 4 带：视觉遮罩 + 点击退出；手势（wheel/拖拽平移）经转发直通画布 */}
       <div
         {...darkBandProps}
