@@ -485,3 +485,57 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **Z80（创建入口）**：backend 轻量创建路径（仿 image-erase 创建入口：凭证冻结——sk- 必须冻进 input.provider_credential；source=`video_subtitle_erase`）+ 参数复核（契约 zod、检测模式枚举、框列表 ≤20 与 [0,1] 坐标、源素材归属与媒体类型校验、§17.4 门槛复核含宽高/时长 null 放行）+ producer 入队函数（tag=`VIDEO_SUBTITLE_ERASE_TAG`）+ 入队失败回拨标记失败（`enqueue_failed` 终态口径）。
 - **Z81（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量（`generation-video-subtitle-erase-worker`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ `VideoSubtitleEraseJobProcessor`（MediaKit 网关客户端新增**异步提交 + 任务查询**两个端点 + §17.3 模式映射 + §17.5 轮询编排，复用视频生成轮询骨架）；④ claim 领取 SQL（type+source 白名单，复用 `findCandidateByTypeAndSources` 参数化）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例；任务来源白名单登记。
 - **前端（Z82/Z83）**：按钮门槛预检 import §17.4 常量（null 放行）、发送请求体按 §17.2 四键组装、来源边 `edge.data.origin = VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN`（纯视觉来源线，媒体引用推导跳过）。
+
+## 18. 冻结增量（2026-09-19，IKH28T）：media_extract（音视频分离）切火山执行路径的契约扩面
+
+media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继续有效，本节不改动），本节只冻结**切火山官方 API 执行路径**引入的增量：output_format 枚举面与火山执行路径错误码面。既定决策（ADR-0103）：**任务类型沿用 `media_extract`、input 字段结构不变、本地 ffmpeg 链路代码全保留**（双执行路径并存），本票不新建任务类型。本节是这些增量字段的**唯一事实源**：后续创建入口票（IKH28V）、worker 执行票（IKH28W）、网关票（IKH28Y）、前端票一律照抄本节与常量落点，**不得另行发明字段名**。常量落点（双端各一处，防漂移断言对账）：
+
+- TS 侧：`backend/libs/contracts/media-extract.ts`（含 zod schema）；MQ tag 复用 `queue.constants.ts` 的 `MEDIA_EXTRACT_TAG`（既有，值不变）
+- Java 侧：`worker-java/src/main/java/com/bluewhale/worker/domain/entity/MediaExtractContract.java`（本票新建；`JobType.MEDIA_EXTRACT` / `GenerationMqRoute.MEDIA_EXTRACT` / `MediaExtractError` 为既有注册，任务类型不变故不新增枚举项）
+- 防漂移断言：`backend/libs/contracts/media-extract.test.ts` 读 Java 源码文本与 TS 常量逐值对账（沿用 video-subtitle-erase.test.ts 同源断言模式），任一侧漂移即红
+- 供应商接口 = 火山引擎 AI MediaKit「提交音频提取任务 API」（**异步任务**：提交返 task_id、轮询查询取结果，`POST /api/v1/tools/extract-audio`；本仓经 new-api 网关调用）。**参数名以官方 PDF 为准**（出处逐条标注在契约常量注释），禁止引用二手信息。
+
+### 18.1 任务类型 / MQ / 来源（全部沿用既有，不变）
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `generation_jobs.type` | `media_extract` | 不变（ADR-0103 不新建任务类型） |
+| RocketMQ tag | `media_extract` | 不变（复用 topic `generation-task`） |
+| 任务来源 `source` | `dock` | 不变（media_extract 不套 claim source 白名单，§2/§7 既有口径） |
+| 消费者组 | `generation-extract-worker` | 不变 |
+| input 冻结键 | `source_asset_id` / `output_format` | 两键恒在、结构不变（§18.2 只扩 output_format 取值面） |
+
+### 18.2 output_format 枚举与默认值（文档出处 = 官方 PDF Body 参数 `format` 节）
+
+| 常量（TS / Java 同值） | 值 | 口径 |
+|---|---|---|
+| `MEDIA_EXTRACT_OUTPUT_FORMATS` / `SUPPORTED_OUTPUT_FORMATS` | `m4a / mp3 / ogg / flac / wav` | 官方 `format` 参数五值，**同名同值出站透传**（input 冻结键 `output_format` 出站映射官方 `format`，IKH28W 客户端落） |
+| `MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT` / `DEFAULT_OUTPUT_FORMAT` | `m4a` | 官方 PDF `format` 节**描述文字「默认值为 m4a」**——表格示例值列写 `mp3`，以描述文字为准（契约测试断言 m4a）；创建入口未传时落本值 |
+| （拒绝口径） | 非法值明确拒绝 | `output_format` 传了枚举外值 / 非字符串 / `null` → 创建入口明确拒绝（`fail(PARAM_MISSING_CODE, "output_format 仅支持 m4a / mp3 / ogg / flac / wav")`，对齐去字幕 zod 失败码口径）；**「静默回退 mp3」的旧口径随本节废除** |
+
+消费方 = backend 创建入口（IKH28V 权威复核：缺省补默认、非法拒绝——本票已随常量抽取先落 service，IKH28V 承载其余创建入口行为切换）+ worker 出站（IKH28W 客户端按冻结值透传 `format`）；web 前端格式选择面由前端票承接。
+
+### 18.3 火山端点路径（集中常量承载；网关侧实际路由待网关票 IKH28Y 确认）
+
+| 常量（TS / Java 同值） | 值 | 口径 |
+|---|---|---|
+| `MEDIA_EXTRACT_SUBMIT_PATH` / `SUBMIT_PATH` | `/api/v1/tools/extract-audio` | 官方 PDF「1. 提交音频提取任务 API」节**逐字**（提交端点） |
+| `MEDIA_EXTRACT_POLL_PATH_PREFIX` / `POLL_PATH_PREFIX` | `/v1/mediakit/async/tasks/` | **查询端点不在官方 PDF**——按家族先例落网关假设路径（去字幕 `NewApiMediaKitSubtitleEraseClient.POLL_PATH_PREFIX` 同款假设口径），**待网关票 IKH28Y 确认后定稿，有出入只改本常量** |
+
+### 18.4 火山执行路径错误码面（三类映射口径；网关错误 / 火山任务失败 / 转存失败）
+
+新用位一个：`media_extract_provider_failed` → 数值 **1044**（1043 已由去字幕占用，取下一空号；注册三处 = `error-codes.ts` 字符串码+数值表+文案表 / `MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED` 镜像 / `docs/api/generation-job-error.md` 数值表）。**与本地 ffmpeg 链路兜底 `media_extract_failed`(1020) 双码并存**——双执行路径并存期（ADR-0103）可从错误码区分失败来自哪条路径；本地链路细分码 `video_has_no_audio_track`(1023) / `video_download_failed`(1024) / `video_too_large`(1025) / `extract_failed`(1026) / `upload_failed`(1027) 保留给 ffmpeg 路径（含存量已落库任务投影），**火山路径不产生**（其语义由下列映射归并覆盖）。三类映射口径（IKH28W worker 实现时照抄，对齐去字幕 §17.5 模式）：
+
+1. **网关错误**（new-api 网关调用失败：HTTP 非 2xx / 成功态 `error` 信封 / 提交 `SocketTimeoutException`）→ **复用既有通用码分类链，不新码**（`NewApiErrorClassifier` 同款：版权 → `content_rejected_reference`(1038) → 内容政策 → `content_rejected`(1018) → 额度（HTTP 402 或欠费信号）→ `quota_exhausted`(1001) → 兜底 `provider_failed`(1011)；提交超时单独归 `provider_timeout`(1012) 终态不重试——宁可不重试也不双跑）。官方同步错误结构 `error{code,message,param,type}`（如 `InvalidParameter`/`BadRequest`）按此链分类，不透传英文原文。
+2. **火山任务失败**（轮询 `status=failed`）→ 上游 `error.code/message` 按分类链识别（版权 1038 / 内容 1018 / 额度 1001 保留既有码，上游可读原因随 message 透传前端投影）；**分类链外一律归并 `media_extract_provider_failed`(1044)**。轮询超时（超过上限次数）同样归并 1044。无音轨场景（原 1023 的用户语义「视频没有音轨」）在火山路径体现为上游任务 failed，不单独识别——归并 1044（是否从上游 message 精细识别留给 IKH28W 评估，不新增用位）。
+3. **转存失败**（`result.audio_url` 24h 临时链接 → 自家 TOS 下载/上传失败，或转存件未配置）→ **归并 `media_extract_provider_failed`(1044)**（对齐去字幕「TOS 强依赖不降级直存、失败归并工具兜底码」口径；`storage_failed`(1016) 不启用，与去字幕一致）。
+
+失败终态口径同家族：**无 worker 级自动重试**（轮询瞬时错误 429/5xx/网络抖动按去字幕 `isTransientPollError` 同语义续排，属轮询续排而非重试），用户在结果卡手动重试并沿用冻结 input；额度/内容政策信号识别沿用 §5。
+
+### 18.5 注册触点与工单分工
+
+- **本票（IKH28T）已落**：`MediaExtractContract` 常量类（tag/source/input 键/格式枚举/默认值/端点路径/兜底错误码）、`MediaExtractError` 镜像新码、TS 契约常量与 zod schema（`media-extract.ts`）、错误码 `media_extract_provider_failed`(1044) 三处注册、service 引用契约常量（缺省 m4a + 非法拒绝先落，常量单源）、`media-extract.test.ts` 防漂移断言、本节冻结。既有注册（`JobType` / `GenerationMqRoute` / `queue.constants` / `mq-route-parity` / `StartupContractTest`）任务类型不变，无需改动。
+- **IKH28V（创建入口）**：service/controller 行为语义切换的其余部分（凭证冻结 `provider_credential`、`findAccessible`→`findOwnedSource` 归属口径对齐去字幕等）、请求体 zod 完整复核收口。
+- **IKH28W（worker 执行）**：`NewApiMediaKitExtractAudioClient`（SUBMIT/POLL 用 §18.3 常量，`result.audio_url`/`duration` 消费）、`MediaExtractJobProcessor` 切异步轮询骨架、音频转存件（`TosVideoMediaRelay` 的 audio/ 变体）、错误映射按 §18.4 三类口径落。
+- **IKH28Y（网关）**：确认经 new-api 网关的实际提交/查询路由，回写 §18.3 两常量（有出入只改常量）。
+- **前端票**：格式选择面（五值 + 默认 m4a）、`(audio).mp3` 派生命名按格式扩展、失败文案按 1044 映射。
