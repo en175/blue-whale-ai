@@ -3,7 +3,8 @@
  * 按钮构成/顺序/文案/置灰门槛与迁移前完全一致；DOM 迁出节点卡后由通用钉屏幕容器
  * NodeFollowToolbar 承载（画布缩放层之外、任何缩放级别屏幕尺寸恒定、拖动/平移缩放实时跟随）。
  * 显隐分工：「唯一选中 + 画布无多选」在 NodeFollowToolbar 容器（useSoloNodeSelected 口径不变）；
- * 本组件承担数据条件（生成流程卡 / 素材缺失 / 空壳上传卡不显，同迁移前）。
+ * 本组件承担数据条件（生成流程卡 / 素材缺失 / 空壳上传卡不显；
+ * 「重新编辑」仅有生成记录的成品卡展示，IKGX5M）。
  * 工具条 DOM 不再位于节点卡内：点击按钮天然不触发节点拖拽/选中变化（原 nodrag/nopan 与
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
@@ -12,10 +13,17 @@ import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
+import { hasGenerationRecordData } from '../../mediaReEdit';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
+
+function reEditTooltip(mediaType: MediaNodeData['mediaType']): string {
+  if (mediaType === 'video') return '带入原提示词与参考，打开视频对话框';
+  if (mediaType === 'audio') return '带入原提示词与参考，打开音频对话框';
+  return '带入原提示词与图片，打开图片对话框';
+}
 
 interface MediaNodeToolbarProps {
   id: string;
@@ -53,6 +61,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
+  const showReEdit = hasGenerationRecordData(data);
   /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：顺序高清、扩图、裁切、擦除、抠图；
    *  擦除按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）、扩图按
    *  outpaintGateReason 门槛预检置灰、裁切无置灰门槛恒可用；
@@ -107,10 +116,12 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
 
   return (
     <div className={styles.toolbar}>
-      <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
-        <RefreshCcw size={14} strokeWidth={2} />
-        <span>重新编辑</span>
-      </button>
+      {showReEdit && (
+        <button className={styles.toolBtn} onClick={handleReEdit} title={reEditTooltip(data.mediaType)}>
+          <RefreshCcw size={14} strokeWidth={2} />
+          <span>重新编辑</span>
+        </button>
+      )}
       {toolbar.genImage && (
         <button className={styles.toolBtn} onClick={handleGenImage} title="新建图片草稿并以本图为参考">
           <Sparkles size={14} strokeWidth={2} />
