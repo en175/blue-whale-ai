@@ -214,7 +214,7 @@ function fullNode(id: string): Node {
   return found;
 }
 
-/** 走图片节点「高清 ▾」下拉「裁切」项的入口（回调挂在节点 data 上） */
+/** 走图片节点画质工具横排「裁切」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function cropImage(id: string) {
   const node = fullNode(id);
   await act(async () => {

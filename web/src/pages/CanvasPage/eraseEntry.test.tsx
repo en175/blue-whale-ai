@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* IKGOT7 图片卡「高清 ▾」下拉「擦除」入口：点「擦除」把目标图片卡置为擦除编辑态。
+/* IKGOT7 图片卡画质工具横排「擦除」入口（IKH3XZ）：点「擦除」把目标图片卡置为擦除编辑态。
    本票仅开关与占位呈现（CanvasPage eraseTargetNodeId state + 占位条）；完整编辑态
    （擦除工具条/发送条/指针接管/四退出）由 IKGOTB 交付。渲染模式沿用 imageEnhance.test.tsx。 */
 import { act, createElement } from 'react';
@@ -176,7 +176,7 @@ async function renderPage() {
   });
 }
 
-/** 走图片节点工具栏「高清 ▾」下拉「擦除」项的入口（回调挂在节点 data 上） */
+/** 走图片节点工具栏画质横排「擦除」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function eraseImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {

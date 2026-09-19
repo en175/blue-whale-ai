@@ -256,7 +256,7 @@ async function clickNode(id: string) {
   });
 }
 
-/** 进入编辑会话（「高清 ▾」下拉对应项派发的回调，四会话同构） */
+/** 进入编辑会话（画质工具横排对应按钮派发的回调，四会话同构，IKH3XZ） */
 async function enterSession(kind: 'cutout' | 'erase' | 'crop' | 'outpaint', id = 'i1') {
   const data = fullNode(id).data as Record<string, (nodeId: string) => void>;
   const handler = {

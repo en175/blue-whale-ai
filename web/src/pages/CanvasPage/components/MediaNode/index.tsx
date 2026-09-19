@@ -177,15 +177,15 @@ export interface MediaNodeData {
   onRetryJob?: (id: string) => void;
   /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
   onTitleChange?: (id: string, name: string) => void;
-  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（「高清 ▾」下拉「高清」项派发） */
+  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（画质工具横排「高清」按钮派发，IKH3XZ） */
   onEnhanceImage?: (id: string) => void;
-  /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
+  /** 擦除（IKGOT7）：把本卡置为擦除编辑态（画质工具横排「擦除」按钮派发，IKH3XZ；门槛见 imageErase.ts） */
   onEraseImage?: (id: string) => void;
   /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
   onOutpaintImage?: (id: string) => void;
-  /** 裁切（IKGW1H）：把本卡置为裁切编辑态（「高清 ▾」下拉「裁切」项派发；无门槛恒可用） */
+  /** 裁切（IKGW1H）：把本卡置为裁切编辑态（画质工具横排「裁切」按钮派发，IKH3XZ；无门槛恒可用） */
   onCropImage?: (id: string) => void;
-  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
+  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（画质工具横排「抠图」按钮派发，IKH3XZ；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
   /** 智能去字幕（IKGZ82 入口 / IKH3OU 交互重做）：进入去字幕会话；mode 由「智能去字幕 ▾」
    *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；

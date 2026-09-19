@@ -212,7 +212,7 @@ async function renderPage() {
   });
 }
 
-/** 进入抠图会话（「高清 ▾」下拉「抠图」项派发的回调） */
+/** 进入抠图会话（画质工具横排「抠图」按钮派发的回调，IKH3XZ） */
 async function cutoutImage() {
   const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
   await act(async () => {

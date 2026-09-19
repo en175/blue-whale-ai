@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* IKGW1H 图片卡「高清 ▾」下拉「裁切」入口与模式进出骨架：点「裁切」把目标图片卡置为裁切
+/* IKGW1H 图片卡画质工具横排「裁切」入口（IKH3XZ）与模式进出骨架：点「裁切」把目标图片卡置为裁切
    编辑态（CanvasPage cropTargetNodeId state + 源卡渲染期注入 cropEditing 标记）、进入时关闭
    生成面板、单目标、与擦除互斥；Esc / 点画布空白 / 点其他卡三路退出丢弃不留痕（面板取消路由
    面板 UI 由 IKGW1N 接 exitCropMode）。渲染模式沿用 genPanelDismiss.test.tsx（可真实开面板）。 */
@@ -373,7 +373,7 @@ async function clickNode(id: string) {
   });
 }
 
-/** 走图片节点「高清 ▾」下拉「裁切」项的入口（回调挂在节点 data 上） */
+/** 走图片节点画质工具横排「裁切」按钮的入口（回调挂在节点 data 上，IKH3XZ） */
 async function cropImage(id: string) {
   const node = fullNode(id);
   await act(async () => {

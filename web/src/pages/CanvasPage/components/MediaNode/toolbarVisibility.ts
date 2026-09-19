@@ -5,8 +5,8 @@ export function mediaNodeToolbarVisibility(mediaType: CanvasMediaType | undefine
   const isVideo = mediaType === 'video';
   return {
     mention: !isAudio,
-    /** 「高清 ▾」下拉（IKGOT7，原「高清放大」单按钮改造）：仅图片卡显示；
-     *  菜单项（高清/擦除，扩图后续插入中间位）随下拉整体出现。
+    /** 图片卡画质工具横排按钮（IKH3XZ，原「高清放大」单按钮→「高清 ▾」下拉→横排常显）：仅图片卡显示；
+     *  高清/扩图/裁切/擦除/抠图五工具随横排整体出现。
      *  生成类按钮已撤（IKH3WE）：派生新卡唯一路径 = 拖线落空白类型菜单 */
     imageQuality: !isAudio && !isVideo,
     /** 「智能去字幕」（IKGZ82）：独立按钮（渲染位置在「音视频分离」之前），仅视频卡显示；

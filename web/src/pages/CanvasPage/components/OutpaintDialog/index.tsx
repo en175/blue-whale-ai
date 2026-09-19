@@ -66,7 +66,7 @@ export default function OutpaintDialog({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  /** 点外关闭比例菜单（口径同 MediaNode 高清 ▾ 菜单：document pointerdown） */
+  /** 点外关闭比例菜单（点外关闭口径同 MediaNode SubtitleEraseMenu 下拉；document pointerdown + contains） */
   useEffect(() => {
     if (!menuOpen) return;
     const onPointerDown = (e: PointerEvent) => {
