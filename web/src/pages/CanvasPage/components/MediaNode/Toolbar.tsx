@@ -9,15 +9,16 @@
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
 import { useCallback } from 'react';
-import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles, Subtitles } from 'lucide-react';
+import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
-import { VIDEO_SUBTITLE_ERASE_ENTRY_HINT, videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
+import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { hasGenerationRecordData } from '../../mediaReEdit';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
+import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
 
@@ -36,7 +37,14 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleVideoSubtitleErase = useCallback(() => data.onVideoSubtitleErase?.(id), [data, id]);
+  const handleVideoSubtitleEraseSmart = useCallback(
+    () => data.onVideoSubtitleErase?.(id, 'smart'),
+    [data, id],
+  );
+  const handleVideoSubtitleEraseBox = useCallback(
+    () => data.onVideoSubtitleErase?.(id, 'box'),
+    [data, id],
+  );
   const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
   const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
   const handleOutpaintImage = useCallback(() => data.onOutpaintImage?.(id), [data, id]);
@@ -46,9 +54,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     typeof data.height === 'number' ? data.height : undefined,
     typeof data.size === 'number' ? data.size : undefined,
   );
-  /** 「智能去字幕」可用性预检（IKGZ82）：分辨率超 2K 或时长超 10 分钟置灰并悬停原因；
-   *  宽高/时长缺失不拦（null 放行，后端按权威数据复核）。可用态悬停为效果边界一句，
-   *  与置灰原因走同一 title 通道（互斥）。 */
+  /** 「智能去字幕 ▾」整卡可用性预检（IKGZ82，IKH3OU 起服务下拉菜单）：分辨率超 2K 或
+   *  时长超 10 分钟时整钮与两个菜单项一并置灰并悬停原因；宽高/时长缺失不拦（null 放行，
+   *  后端按权威数据复核）。可用态触发钮无默认悬停文案（旧效果边界句随「全画面文字」
+   *  开关废除，ADR-0104），置灰态在触发钮与两项各自 title 上展示。 */
   const videoSubtitleEraseDisabledReason = videoSubtitleEraseGateReason(data);
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
@@ -109,6 +118,26 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
       onSelect: handleCutoutImage,
     },
   ];
+  /** 「智能去字幕 ▾」下拉菜单项（IKH3OU，ADR-0104 模式前置到入口）：两项纯文字、
+   *  分别直启智能模式与框选模式会话，会话内不互切；门槛同源整卡预检（超 2K/超 10 分钟
+   *  两项一并置灰，点击无效），各项 title 恒为自己的 hint——置灰时仍能看两项说明，
+   *  以理解置灰是整卡门槛而非某一模式不可用（规格故事 7）。 */
+  const subtitleEraseMenuItems: SubtitleEraseMenuItem[] = [
+    {
+      id: 'smart',
+      label: '智能去字幕',
+      hint: '自动擦除画面下半字幕',
+      disabledReason: videoSubtitleEraseDisabledReason,
+      onSelect: handleVideoSubtitleEraseSmart,
+    },
+    {
+      id: 'box',
+      label: '框选去字幕',
+      hint: '拉框指定要擦的区域',
+      disabledReason: videoSubtitleEraseDisabledReason,
+      onSelect: handleVideoSubtitleEraseBox,
+    },
+  ];
 
   /* 数据门（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显；
    *  谓词与 CanvasPage 显隐门共用（mediaCardToolbarVisible，IKGYYB 审查消双实现） */
@@ -135,15 +164,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
         </button>
       )}
       {toolbar.videoSubtitleErase && (
-        <button
-          className={styles.toolBtn}
-          onClick={handleVideoSubtitleErase}
-          disabled={videoSubtitleEraseDisabledReason !== null}
-          title={videoSubtitleEraseDisabledReason ?? VIDEO_SUBTITLE_ERASE_ENTRY_HINT}
-        >
-          <Subtitles size={14} strokeWidth={2} />
-          <span>智能去字幕</span>
-        </button>
+        <SubtitleEraseMenu items={subtitleEraseMenuItems} />
       )}
       {toolbar.imageQuality && (
         <ImageQualityMenu items={qualityMenuItems} />

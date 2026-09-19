@@ -329,9 +329,42 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
   });
 });
 
-describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
-  const eraseBtn = () => [...mountNode.querySelectorAll('button')]
-    .find((b) => b.textContent?.trim() === '智能去字幕')!;
+/* IKH3OU（ADR-0104）：入口从单按钮改「智能去字幕 ▾」下拉触发钮，交互口径同图片「高清 ▾」
+   家族（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、整钮 aria-disabled 置灰但
+   hover 仍展开菜单看原因），差异是无最近工具记忆（文案固定）与菜单项纯文字无图标。
+   合成事件口径沿用 ImageQualityMenu.test.tsx（mouseover/mouseout + relatedTarget 在 wrap 外）。 */
+describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', () => {
+  const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="subtitle-erase-menu-trigger"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="subtitle-erase-menu"]');
+  const item = (id: string) =>
+    mountNode.querySelector<HTMLButtonElement>(`[data-testid="subtitle-erase-menu-item-${id}"]`);
+
+  async function hoverIn() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  async function hoverOut() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
+  async function settleHoverClose() {
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('仅视频卡显示，位置在「生成视频」之后、「音视频分离」之前', async () => {
     await renderToolbar('video');
@@ -343,27 +376,95 @@ describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
     expect(labels().includes('智能去字幕')).toBe(false);
   });
 
-  it('点击派发 onVideoSubtitleErase（携带节点 id）', async () => {
+  it('悬停自动展开两项纯文字菜单（无图标、无最近工具记忆，文案固定）', async () => {
+    await renderToolbar('video', { data: { onVideoSubtitleErase: vi.fn() } });
+    expect(trigger().textContent).toContain('智能去字幕');
+    expect(trigger().getAttribute('aria-haspopup')).toBe('menu');
+    // 默认收起
+    expect(menu()).toBeNull();
+    await hoverIn();
+    const rendered = [...mountNode.querySelectorAll('[data-testid^="subtitle-erase-menu-item-"]')];
+    expect(rendered.map((b) => b.textContent)).toEqual(['智能去字幕', '框选去字幕']);
+    // 纯文字：菜单项内不渲染图标（svg）
+    expect(rendered.every((b) => b.querySelector('svg') === null)).toBe(true);
+  });
+
+  it('移出触发钮延迟后关闭；延迟窗口内重新进入不关闭', async () => {
+    await renderToolbar('video', { data: { onVideoSubtitleErase: vi.fn() } });
+    await hoverIn();
+    await hoverOut();
+    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
+    expect(menu()).not.toBeNull();
+    await settleHoverClose();
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await hoverOut();
+    await hoverIn();
+    await settleHoverClose();
+    expect(menu()).not.toBeNull();
+  });
+
+  it('Esc 与点外立即关闭（不等待延迟窗口）', async () => {
+    await renderToolbar('video', { data: { onVideoSubtitleErase: vi.fn() } });
+    await hoverIn();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('菜单项直启两模式会话：智能去字幕派发 smart、框选去字幕派发 box（携带节点 id）', async () => {
+    const onVideoSubtitleErase = vi.fn();
+    await renderToolbar('video', { data: { onVideoSubtitleErase } });
+    await hoverIn();
+    await act(async () => {
+      item('box')!.click();
+    });
+    expect(onVideoSubtitleErase).toHaveBeenCalledWith('video-node', 'box');
+    // 选择后菜单收起
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      item('smart')!.click();
+    });
+    expect(onVideoSubtitleErase).toHaveBeenLastCalledWith('video-node', 'smart');
+  });
+
+  it('点击触发钮直启首项智能模式（文案固定无记忆，口径同家族触发钮直启所显示工具）', async () => {
     const onVideoSubtitleErase = vi.fn();
     await renderToolbar('video', { data: { onVideoSubtitleErase } });
     await act(async () => {
-      eraseBtn().click();
+      trigger().click();
     });
-    expect(onVideoSubtitleErase).toHaveBeenCalledWith('video-node');
+    expect(onVideoSubtitleErase).toHaveBeenCalledWith('video-node', 'smart');
   });
 
-  it('超 2K 置灰并悬停原因：长边>2560 或 短边>1440，点击不派发', async () => {
+  it('超 2K 置灰：整钮 aria-disabled + 悬停原因，点击不派发；竖屏短长边语义放行', async () => {
     const onVideoSubtitleErase = vi.fn();
     await renderToolbar('video', { data: { onVideoSubtitleErase, width: 2561, height: 1440 } });
-    const long = eraseBtn();
-    expect(long.disabled).toBe(true);
+    const long = trigger();
+    expect(long.getAttribute('aria-disabled')).toBe('true');
+    expect(long.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
     expect(long.getAttribute('title')).toContain('长边超过 2560');
+    await act(async () => {
+      long.click();
+    });
+    expect(onVideoSubtitleErase).not.toHaveBeenCalled();
+
     // 竖屏短长边语义：1440×2560 合法；短边 1441 超上限（横屏 2560×1441）
     await renderToolbar('video', { id: 'tall-node', data: { onVideoSubtitleErase, width: 1440, height: 2560 } });
-    expect(eraseBtn().disabled).toBe(false);
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
     await renderToolbar('video', { id: 'wide-node', data: { onVideoSubtitleErase, width: 2560, height: 1441 } });
-    const wide = eraseBtn();
-    expect(wide.disabled).toBe(true);
+    const wide = trigger();
+    expect(wide.getAttribute('aria-disabled')).toBe('true');
     expect(wide.getAttribute('title')).toContain('短边超过 1440');
     await act(async () => {
       wide.click();
@@ -371,31 +472,52 @@ describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
     expect(onVideoSubtitleErase).not.toHaveBeenCalled();
   });
 
-  it('时长超 10 分钟置灰并悬停原因；恰 10 分钟放行', async () => {
+  it('超 10 分钟置灰并悬停原因；恰 10 分钟放行', async () => {
     await renderToolbar('video', { data: { width: 1920, height: 1080, duration: 600.001 } });
-    const over = eraseBtn();
-    expect(over.disabled).toBe(true);
+    const over = trigger();
+    expect(over.getAttribute('aria-disabled')).toBe('true');
     expect(over.getAttribute('title')).toContain('10 分钟');
     await renderToolbar('video', { id: 'exact-node', data: { width: 1920, height: 1080, duration: 600 } });
-    expect(eraseBtn().disabled).toBe(false);
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
   });
 
-  it('宽高/时长缺失（null）放行不置灰（存量视频不误拦）', async () => {
+  it('宽高/时长缺失（null）放行不置灰（存量视频不误拦），触发钮无默认悬停文案', async () => {
     await renderToolbar('video');
-    const btn = eraseBtn();
-    expect(btn.disabled).toBe(false);
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    // 旧可用态效果边界句随「全画面文字」开关废除（ADR-0104），可用态不再有默认 title
+    expect(btn.getAttribute('title')).toBeNull();
   });
 
-  it('hint 两态互斥（同一 title 通道）：可用态为效果边界句，置灰态为原因', async () => {
-    await renderToolbar('video', { data: { width: 1920, height: 1080 } });
-    const enabled = eraseBtn();
-    expect(enabled.getAttribute('title')).toContain('白色中英文字幕');
-    expect(enabled.getAttribute('title')).toContain('全画面模式');
+  it('整卡置灰时 hover 仍展开菜单，两项各自 aria-disabled 且 title 保留自己的 hint', async () => {
+    const onVideoSubtitleErase = vi.fn();
+    await renderToolbar('video', { data: { onVideoSubtitleErase, width: 3840, height: 2160 } });
+    await hoverIn();
+    expect(menu()).not.toBeNull();
+    const smart = item('smart')!;
+    const box = item('box')!;
+    expect(smart.getAttribute('aria-disabled')).toBe('true');
+    expect(box.getAttribute('aria-disabled')).toBe('true');
+    // 故事 7：置灰时仍能看两项说明——title 恒为自己的 hint，不替换成整卡原因
+    expect(smart.getAttribute('title')).toBe('自动擦除画面下半字幕');
+    expect(box.getAttribute('title')).toBe('拉框指定要擦的区域');
+    await act(async () => {
+      smart.click();
+      box.click();
+    });
+    expect(onVideoSubtitleErase).not.toHaveBeenCalled();
+  });
 
-    await renderToolbar('video', { id: 'over-node', data: { width: 3840, height: 2160 } });
-    const disabled = eraseBtn();
-    expect(disabled.getAttribute('title')).toContain('无法智能去字幕');
-    expect(disabled.getAttribute('title')).not.toContain('白色中英文字幕');
+  it('门槛为空时两项均可点，title 各为自己的 hint', async () => {
+    const onVideoSubtitleErase = vi.fn();
+    await renderToolbar('video', { data: { onVideoSubtitleErase, width: 1920, height: 1080, duration: 30 } });
+    await hoverIn();
+    const smart = item('smart')!;
+    const box = item('box')!;
+    expect(smart.getAttribute('aria-disabled')).toBeNull();
+    expect(box.getAttribute('aria-disabled')).toBeNull();
+    expect(smart.getAttribute('title')).toBe('自动擦除画面下半字幕');
+    expect(box.getAttribute('title')).toBe('拉框指定要擦的区域');
   });
 });
 

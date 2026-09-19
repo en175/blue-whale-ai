@@ -1,28 +1,11 @@
 /* ============================================
- * VideoSubtitleEraseDialog 去字幕编辑态工具条/发送条（IKGZ83）
- * 跟随源视频卡浮出的两条横条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
+ * VideoSubtitleEraseDialog 去字幕会话单条（IKGZ83 双条 → IKH3OU 单条化）
+ * 跟随源视频卡下方浮出的唯一一条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
  * 24px 胶囊圆角（对齐 OutpaintDialog 统一后形态，无令牌档由
  * overlayContainer.test.ts 白名单锁 24px 字面量）；条内控件全走令牌，
  * 不复制体系外硬编码字面量写法。
+ * 上方工具条与「全画面文字」开关样式随形态退役（ADR-0104），已删除。
  * ============================================ */
-
-/* ---- 源视频卡上方工具条 ---- */
-.toolbar {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 52px;
-  z-index: 21;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background-color: var(--color-bg-overlay);
-  border: 1px solid var(--color-border-overlay);
-  border-radius: 24px;
-  box-shadow: var(--shadow-overlay);
-  white-space: nowrap;
-}
 
 .divider {
   width: 1px;
@@ -50,7 +33,7 @@
   background-color: var(--color-bg-hover);
 }
 
-/* 框选是编辑态唯一工具：恒激活指示（对齐先例工具激活态用主色） */
+/* 框选是框选模式唯一工具：恒激活指示（对齐先例工具激活态用主色） */
 .toolBtnActive {
   color: var(--color-accent-text);
   background-color: var(--color-accent-primary);
@@ -61,65 +44,22 @@
   cursor: not-allowed;
 }
 
-/* ---- 「全画面文字」开关（文本 + 胶囊 toggle，形态同 CutoutToolbar 描边开关） ---- */
-.fullTextToggle {
+/* ---- 会话标题（模式身份：智能擦除 / 框选擦除，纯文字无图标） ---- */
+.barTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* ---- ？帮助（IKH3OV 框选模式）：紧跟标题之后的无交互图标，悬停出框选效果说明 ---- */
+.helpHint {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
+  color: var(--color-text-tertiary);
+  cursor: help;
 }
 
-.fullTextToggle:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-}
-
-.fullTextToggleOn {
-  color: var(--color-text-primary);
-}
-
-.fullTextToggle:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.togglePill {
-  position: relative;
-  width: 26px;
-  height: 14px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-bg-active);
-  transition: background-color var(--transition-fast);
-}
-
-.toggleKnob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-text-secondary);
-  transition: transform var(--transition-fast), background-color var(--transition-fast);
-}
-
-.fullTextToggleOn .togglePill {
-  background-color: var(--color-accent-primary);
-}
-
-.fullTextToggleOn .toggleKnob {
-  transform: translateX(12px);
-  background-color: var(--color-accent-text);
-}
-
-/* ---- 源视频卡下方发送条 ---- */
+/* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;
@@ -145,17 +85,16 @@
   left: 0;
 }
 
-.freeHint {
+/* ---- ⚡0 积分徽标（取代「本期免费」文字，title 保留免费语义）：沿用绿色胶囊基调 ---- */
+.freeBadge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   font-size: var(--font-size-xs);
   color: var(--color-success);
   background-color: rgba(64, 192, 87, 0.1);
   border-radius: var(--radius-full);
   padding: 2px 8px;
-}
-
-.sendHint {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
 }
 
 /* ---- 发送钮：Dock 主发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
