@@ -306,6 +306,45 @@
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
+.detailView .uploadAssetCard {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  border: 1px dashed var(--color-border-hover);
+  background-color: var(--color-bg-secondary);
+}
+
+.detailView .nativeFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.detailView .uploadAssetCard:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-text-secondary);
+}
+
+.detailView .uploadThumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+}
+
+.detailView .uploadCardLabel {
+  font-size: var(--font-size-sm);
+  color: inherit;
+}
+
 .detailView .assetThumb {
   position: relative;
   aspect-ratio: 1;
@@ -557,7 +596,8 @@
   font-size: var(--font-size-md);
 }
 
-.loadingSpinner .spin {
+.loadingSpinner .spin,
+.spin {
   animation: spin 1s linear infinite;
   color: var(--color-text-primary);
 }
