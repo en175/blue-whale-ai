@@ -55,9 +55,14 @@ import { assetCardToolbarVisible } from './components/AssetCardNode/toolbarVisib
 import { mediaCardToolbarVisible } from './components/MediaNode/toolbarVisibility';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
+  MEDIA_EXTRACT_EDGE_ORIGIN,
+  buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
+  mediaExtractNodeId,
   mediaExtractTerminalPatch,
+  type MediaExtractIdentity,
 } from './mediaExtract';
+import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './audioVideoSplit';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
@@ -198,6 +203,7 @@ import {
   createImageCutout,
   createImageOutpaint,
   createVideoSubtitleErase,
+  createMediaExtraction,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -504,12 +510,18 @@ export default function CanvasPage() {
   const [subtitleEraseFullText, setSubtitleEraseFullText] = useState(false);
   /** 去字幕发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
   const [subtitleEraseSubmitting, setSubtitleEraseSubmitting] = useState(false);
-  /** 音视频分离编辑态（IKH28U）：处于音视频分离编辑的源视频卡 node id，null=未进入。
-   *  本票为编辑态骨架：视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
-   *  上方仅 X 工具条 + 下方占位发送条（VideoAudioSplitDialog）；分离格式与会话参数、
-   *  发送条三要素与发送闭环归 IKH28X（随其补会话状态，格式不跨会话=进入时重置）。
-   *  未发送退出（X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
+  /** 音视频分离编辑态（IKH28U 骨架 / IKH28X 发送闭环）：处于音视频分离编辑的源视频卡
+   *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
+   *  上方仅 X 工具条 + 下方发送条（格式下拉/本期免费/发送钮，VideoAudioSplitDialog）。
+   *  发送按所选格式建任务与音频占位卡；未发送退出（X/Esc/点其他卡/点画布空白）
+   *  不建任务不建卡。 */
   const [audioVideoSplitTargetNodeId, setAudioVideoSplitTargetNodeId] = useState<string | null>(null);
+  /** 分离格式（IKH28X，会话期交互态）：发送条下拉选择，m4a 默认。格式不跨会话记忆——
+   *  进入编辑态重置、退出复位（exitAudioVideoSplitEditing）；发送时随任务冻结进占位卡
+   *  身份（mediaExtract.lastInput），失败重试按冻结参数原样重发。 */
+  const [audioVideoSplitFormat, setAudioVideoSplitFormat] = useState<AudioVideoSplitFormat>(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+  /** 音视频分离发送中（创建请求飞行期防重复提交，口径同 subtitleEraseSubmitting） */
+  const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
   /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
    *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
    *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
@@ -6472,6 +6484,37 @@ export default function CanvasPage() {
       startImageOutpaintJob(nodeId, outpaintIdentity.lastParams);
       return;
     }
+    const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
+      | MediaExtractIdentity
+      | undefined;
+    if (mediaExtractIdentity?.lastInput) {
+      // 音视频分离卡分流（IKH28X，镜像去字幕/擦除）：契约无 retry 端点，重试 = 冻结 input
+      // 原样重发创建接口（源素材与格式随 lastInput 冻结，不从零再选）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法音视频分离');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createMediaExtraction(currentId, mediaExtractIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     if (!currentId || !jobId) return;
     // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
     if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
@@ -7087,11 +7130,13 @@ export default function CanvasPage() {
     setSubtitleEraseSubmitting(false);
   };
 
-  /** 退出音视频分离编辑态（IKH28U 四退出共用）：本票无会话参数（分离格式等状态随
-   *  IKH28X 发送条补），未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
+  /** 退出音视频分离编辑态（IKH28U 四退出共用）：会话参数（分离格式）与发送中复位——
+   *  格式不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
    *  自动恢复（MediaNode 承担）。 */
   const exitAudioVideoSplitEditing = () => {
     setAudioVideoSplitTargetNodeId(null);
+    setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+    setAudioVideoSplitSubmitting(false);
   };
 
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
@@ -7184,11 +7229,11 @@ export default function CanvasPage() {
     setSubtitleEraseFullText(false);
   };
 
-  /** 音视频分离（IKH28U 入口）：把目标视频卡置为音视频分离编辑态（原「提取音频」一键直发
-   *  入口退役为会话入口）。置灰门槛（assetId 缺失）已在工具条按钮置灰层完成
-   *  （audioVideoSplitGateReason），此处只管进入；进入时关闭五个生成面板（编辑态是独立
-   *  模式）并退出其余五个编辑会话（编辑模式互斥）、不动视角；视频随编辑态注入暂停并锁定
-   *  播放控制（MediaNode 承担）。发送条三要素与发送闭环归 IKH28X。 */
+  /** 音视频分离（IKH28U 入口 / IKH28X 格式状态）：把目标视频卡置为音视频分离编辑态
+   *  （原「提取音频」一键直发入口退役为会话入口）。置灰门槛（assetId 缺失）已在工具条
+   *  按钮置灰层完成（audioVideoSplitGateReason），此处只管进入；进入时关闭五个生成面板
+   *  （编辑态是独立模式）并退出其余五个编辑会话（编辑模式互斥）、不动视角；格式重置
+   *  m4a 默认（不跨会话记忆）；视频随编辑态注入暂停并锁定播放控制（MediaNode 承担）。 */
   const handleNodeAudioVideoSplit = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
@@ -7199,6 +7244,7 @@ export default function CanvasPage() {
     endOutpaintSession();
     exitSubtitleEraseEditing();
     dismissAllGenPanels();
+    setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
     setAudioVideoSplitTargetNodeId(id);
   };
 
@@ -7392,11 +7438,80 @@ export default function CanvasPage() {
     setShowEnhanceDialog(false);
   };
 
-  /** 视频整段提取音频的一键直发通道已随 IKH28U 退役：原 handleNodeExtractAudio
-   *  （createMediaExtraction + 占位卡 + 来源边 + 轮询，IKFS5W）迁移为音视频分离编辑态的
-   *  发送闭环，归 IKH28X 按新交互重建（进入会话见 handleNodeAudioVideoSplit；发送即退
-   *  编辑态对齐 startVideoSubtitleErase「先退再建卡」口径）。mediaExtract.ts 纯逻辑与
-   *  applyJobTerminal 的终态补丁链保留，供 IKH28X 复用与在途任务收敛。 */
+  /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
+
+  /** 音视频分离任务发送核心：按所选格式 POST media-extractions；创建成功后先退编辑态再在
+   *  源视频右侧建音频占位卡（node id = media-extract-{job_id}，展示名后缀跟随所选格式；
+   *  带 mediaExtract 身份——lastInput 供失败重试原样重发）、拉来源边（origin=media-extract，
+   *  参考推导跳过，源视频不占参考位不参与 @ 编号）、启动轮询（applyJobTerminal 的媒体提取
+   *  分支回填成品/失败）、立刻落盘（best-effort，防刚建任务就关页丢节点）。
+   *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，去字幕同口径）；入队失败创建
+   *  响应仍 200，任务经轮询呈现 enqueue_failed。免费口径同 image_enhance / image_erase：
+   *  无幂等头、无积分预估、不走余额拦截门。 */
+  const startAudioVideoSplitJob = async (
+    sourceNodeId: string,
+    payload: { source_asset_id: string; output_format: AudioVideoSplitFormat },
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法音视频分离');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法音视频分离');
+      return false;
+    }
+    try {
+      const created = await createMediaExtraction(currentId, payload);
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
+      exitAudioVideoSplitEditing();
+      const nodeId = mediaExtractNodeId(created.job_id);
+      const placeholder = attachCallbacks(
+        buildMediaExtractPlaceholderNode({
+          jobId: created.job_id,
+          outputFormat: payload.output_format,
+          sourceAssetId: payload.source_asset_id,
+          source: node,
+        }) as Node,
+      );
+      // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
+      // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条视频 → 音频的**来源边**（带 origin 标记）：说明音频是从这段视频分离来的；
+      // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
+      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+      pollJob(nodeId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
+      await flushCanvasSave(currentId).catch(() => {});
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '音视频分离任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** 音视频分离发送（发送条发送钮）：源素材身份 + 当前所选格式 → 建任务。
+   *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioVideoSplitJob 承担，
+   *  失败停留编辑态（格式可调后重发）。 */
+  const handleAudioVideoSplitSend = (): boolean => {
+    const nodeId = audioVideoSplitTargetNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '当前视频尚未关联资产，无法音视频分离');
+      return false;
+    }
+    setAudioVideoSplitSubmitting(true);
+    void startAudioVideoSplitJob(nodeId, {
+      source_asset_id: String(sourceAssetId),
+      output_format: audioVideoSplitFormat,
+    }).finally(() => setAudioVideoSplitSubmitting(false));
+    return true;
+  };
 
   /** 自由图片面板的文本附件按节点身份刷新标题与正文（IKFCX4）：来源改名/改文后再次预览即用当前值；
    *  草稿绑定分支（imageDraftAttachments）实时跟随连线，本视图兜底 imageDraftId 解绑后的快照窗口。 */
@@ -9465,13 +9580,18 @@ export default function CanvasPage() {
           />
         )}
 
-        {/* 音视频分离编辑态浮条（IKH28U）：上条仅 X 退出（本工具无画布操作）；下条为占位
-            发送条（分离格式下拉/本期免费/发送与发送闭环归 IKH28X）；视频暂停与播放控制
-            锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/点其他卡/点空白）由
-            本页承载，未发送退出不建任务不建卡 */}
+        {/* 音视频分离编辑态浮条（IKH28U 骨架 / IKH28X 发送闭环）：上条仅 X 退出（本工具
+            无画布操作）；下条 = 分离格式下拉（触发钮显当前格式）+ 本期免费 + 发送钮；
+            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
+            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送按当前所选格式
+            建任务（发送即先退编辑态再建占位卡） */}
         {audioVideoSplitTargetNodeId && (
           <VideoAudioSplitDialog
             onClose={exitAudioVideoSplitEditing}
+            format={audioVideoSplitFormat}
+            onFormatChange={setAudioVideoSplitFormat}
+            onSend={handleAudioVideoSplitSend}
+            submitting={audioVideoSplitSubmitting}
             toolbarAnchor={audioVideoSplitToolbarAnchor}
             sendBarAnchor={audioVideoSplitSendBarAnchor}
           />

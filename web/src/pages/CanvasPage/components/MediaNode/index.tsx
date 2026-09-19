@@ -6,7 +6,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check } from 'lucide-react';
-import { isMediaExtractNodeId } from '../../mediaExtract';
+import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
@@ -142,9 +142,13 @@ export interface MediaNodeData {
   };
   /** 音视频分离编辑态标记（IKH28U，渲染期派生注入，不持久化）：本卡为音视频分离目标
    *  源视频卡时由 CanvasPage 注入——视频暂停在当前帧并锁定播放控制（透明锁定层接管
-   *  指针，退出标记移除即恢复）；上方 X 工具条/下方占位发送条由 CanvasPage 浮出
+   *  指针，退出标记移除即恢复）；上方 X 工具条/下方发送条由 CanvasPage 浮出
    *  （VideoAudioSplitDialog） */
   splitEditing?: true;
+  /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
+   *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
+   *  失败卡无身份不渲染，口径同家族身份分流先例） */
+  mediaExtract?: MediaExtractIdentity;
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -399,11 +403,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       );
     }
     if (isGenDone) {
-      /* 失败/已取消：错误提示 + 重试 */
+      /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
+          才可重试——IKH28X 编辑态发送的失败卡原参数重发；存量直发时代失败卡无身份不渲染） */
+      const canRetry = data.genStatus === 'failed'
+        && (!isMediaExtraction || data.mediaExtract != null);
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
-          {data.genStatus === 'failed' && !isMediaExtraction && (
+          {canRetry && (
             <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
               重试
             </button>
@@ -631,7 +638,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isGenDone && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
-            {data.genStatus === 'failed' && !isMediaExtraction && (
+            {data.genStatus === 'failed'
+              && (!isMediaExtraction || data.mediaExtract != null) && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>

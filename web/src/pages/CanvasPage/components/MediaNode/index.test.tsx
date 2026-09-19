@@ -139,14 +139,14 @@ describe('MediaNode generating overlay', () => {
     expect(labels()).toEqual(['取消生成']);
   });
 
-  it('keeps extract progress copy and bar for audio extraction', async () => {
+  it('keeps extract progress copy and bar for audio video split (IKH28X 更名)', async () => {
     await renderNode('audio', {
       id: 'media-extract-job-1',
       genStatus: 'generating',
       progress: 42,
       selected: false,
     });
-    expect(mountNode.textContent).toContain('正在提取音频 42%');
+    expect(mountNode.textContent).toContain('音视频分离处理中 42%');
     expect(mountNode.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
     expect(labels()).not.toContain('取消生成');
   });
@@ -193,7 +193,30 @@ describe('MediaNode failed overlay', () => {
     });
     expect(mountNode.textContent).toContain('视频没有音轨');
     expect(mountNode.textContent).not.toContain('音频提取失败');
+    // 存量直发时代失败卡无 mediaExtract 身份：不渲染重试钮（IKH28X 身份分流）
     expect(labels()).not.toContain('重试');
+  });
+
+  it('IKH28X 带身份的失败提取卡渲染重试钮并派发 onRetryJob（原参数重发）', async () => {
+    const onRetryJob = vi.fn();
+    await renderNode('audio', {
+      id: 'media-extract-j9',
+      genStatus: 'failed',
+      errorText: '音频提取失败，请重试',
+      selected: false,
+      data: {
+        onRetryJob,
+        mediaExtract: {
+          sourceAssetId: '9',
+          lastInput: { source_asset_id: '9', output_format: 'wav' },
+        },
+      },
+    });
+    expect(labels()).toContain('重试');
+    await act(async () => {
+      [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.trim() === '重试')!.click();
+    });
+    expect(onRetryJob).toHaveBeenCalledWith('media-extract-j9');
   });
 });
 

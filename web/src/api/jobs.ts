@@ -142,10 +142,11 @@ export interface JobCreatedData {
   cursor: number;
 }
 
-/** POST /api/projects/:id/media-extractions 请求体。当前后端仅支持 MP3 整段提取。 */
+/** POST /api/projects/:id/media-extractions 请求体。output_format 五值（IKH28X，缺省 m4a；
+ *  产物文件名后缀与展示名跟随所选格式），与 CanvasPage/audioVideoSplit.ts 格式清单同源。 */
 export interface CreateMediaExtractionPayload {
   source_asset_id: string | number;
-  output_format?: 'mp3';
+  output_format?: 'm4a' | 'mp3' | 'ogg' | 'flac' | 'wav';
 }
 
 /** 创建媒体提取任务返回。 */
@@ -238,7 +239,8 @@ export function createGenerationJob(
   );
 }
 
-/** 视频整段提取音频；音频占位节点及最终节点由后端写入画布快照。 */
+/** 音视频分离建任务（原「提取音频」一键直发，IKH28X 编辑态发送闭环复用）；
+ *  音频占位节点与最终节点由前端写入画布快照。 */
 export function createMediaExtraction(
   projectId: string,
   payload: CreateMediaExtractionPayload,
