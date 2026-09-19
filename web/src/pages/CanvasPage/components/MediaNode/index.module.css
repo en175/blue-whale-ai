@@ -152,6 +152,25 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
+/* 视频 HD 高清入口文字徽标（IKH3VG）：描边小方标形态（非图标），随 toolBtn 继承前景色
+   与悬停高亮（hover 白字 + 浅底，徽标描边 currentColor 跟随变化）；外框高度对齐同排
+   lucide 图标（size 14 / strokeWidth 2），避免徽标在工具条里视觉重于图标 */
+.hdBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 14px;
+  padding: 0 2px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
 .toolBtn:disabled {
   color: #666;
   cursor: not-allowed;

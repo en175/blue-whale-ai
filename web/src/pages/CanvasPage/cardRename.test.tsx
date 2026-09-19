@@ -83,6 +83,7 @@ const apiMocks = vi.hoisted(() => ({
   }),
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(async (_projectId: string, _jobId: number | string) => ({ generation_job_id: 'j-retry-new', cursor: 2 })),
+  createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   /** 按能力返回模型目录：图片面板取 image，视频面板取 video（IKFA8Y 视频参考用例需要视频模型） */
@@ -181,6 +182,7 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
+  createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
   readJobFailText: apiMocks.readJobFailText,
 }));
@@ -411,6 +413,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
+  Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
 describe('IKFA8X 改名接线与独立性', () => {

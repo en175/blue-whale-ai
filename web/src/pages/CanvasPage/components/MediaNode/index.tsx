@@ -10,6 +10,7 @@ import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
+import type { VideoEnhanceIdentity } from '../../videoEnhance';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
@@ -73,6 +74,9 @@ export interface MediaNodeData {
   draftRatio?: string;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
+  /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
+   *  据此分流 HD 面板（不进视频生成面板），lastParams 随面板切换即时写卡 */
+  videoEnhance?: VideoEnhanceIdentity;
   /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
    *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
   imageCutout?: ImageCutoutIdentity;
@@ -187,11 +191,12 @@ export interface MediaNodeData {
    *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；
    *  门槛预检见 videoSubtitleErase.ts */
   onVideoSubtitleErase?: (id: string, mode: VideoSubtitleEraseMode) => void;
+  /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
+   *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
+  onVideoEnhance?: (id: string) => void;
   /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
    *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
-  /** 生成音频：打开音频对话框并带入图片 */
-  onGenAudio?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -395,9 +400,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       const isImageDraft = data.mediaType === 'image';
       const isVideoDraft = data.mediaType === 'video';
       // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
+      // 视频 HD 高清草稿（IKH3VG）同款专属占位；面板由本票接入
       const draftHint = isImageDraft && data.imageEnhance
         ? '配置参数生成高清图像'
-        : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
+        : isVideoDraft && data.videoEnhance
+          ? '配置参数生成高清视频'
+          : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}

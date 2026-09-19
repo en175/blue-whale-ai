@@ -70,6 +70,8 @@ class StartupContractTest {
             .withBean(VideoJobProcessor.class, () -> mock(VideoJobProcessor.class))
             .withBean(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class,
                     () -> mock(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class))
             .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
             .withPropertyValues("NEW_API_BASE_URL=http://new-api.invalid");
 
@@ -148,7 +150,7 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 九个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
         Map<GenerationMqRoute, String> expectedTags = Map.of(
                 GenerationMqRoute.VIDEO, "video",
@@ -159,7 +161,8 @@ class StartupContractTest {
                 GenerationMqRoute.IMAGE_ERASE, "image_erase",
                 GenerationMqRoute.IMAGE_CUTOUT, "image_cutout",
                 GenerationMqRoute.IMAGE_OUTPAINT, "image_outpaint",
-                GenerationMqRoute.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase");
+                GenerationMqRoute.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase",
+                GenerationMqRoute.VIDEO_ENHANCE, "video_enhance");
 
         assertThat(GenerationMqRoute.values()).hasSize(expectedTags.size());
         for (GenerationMqRoute route : GenerationMqRoute.values()) {
@@ -181,6 +184,7 @@ class StartupContractTest {
         assertThat(GenerationMqRoute.IMAGE_CUTOUT.tag()).isEqualTo(JobType.IMAGE_CUTOUT.value());
         assertThat(GenerationMqRoute.IMAGE_OUTPAINT.tag()).isEqualTo(JobType.IMAGE_OUTPAINT.value());
         assertThat(GenerationMqRoute.VIDEO_SUBTITLE_ERASE.tag()).isEqualTo(JobType.VIDEO_SUBTITLE_ERASE.value());
+        assertThat(GenerationMqRoute.VIDEO_ENHANCE.tag()).isEqualTo(JobType.VIDEO_ENHANCE.value());
     }
 
     /**

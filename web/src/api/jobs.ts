@@ -8,6 +8,7 @@ import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
+import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
@@ -361,6 +362,34 @@ export function createVideoSubtitleErase(
 ): Promise<VideoSubtitleEraseCreatedData> {
   return apiRequest<VideoSubtitleEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-enhancements 请求体（三键，键名与
+ *  backend/libs/contracts/video-enhance.ts 契约恒等；IKH3VE 创建入口 strict zod 复核：
+ *  source_asset_id 数字串、target_node_id 非空、resolution ∈ 1080p/2k/4k）。 */
+export type CreateVideoEnhancementPayload = VideoEnhanceInput;
+
+/** 创建视频 HD 高清任务返回（IKH3VH）；同高清放大/去字幕：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoEnhancementCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频 HD 高清任务（IKH3VH）；免费口径同 image_enhance / media_extract——不带幂等头、
+ *  无积分预估、不走余额拦截门。HD 草稿卡已由前端本地建好（target_node_id 指向它），
+ *  产物经 GET /api/jobs/:id 的 asset 回填。 */
+export function createVideoEnhancement(
+  projectId: string,
+  payload: CreateVideoEnhancementPayload,
+): Promise<VideoEnhancementCreatedData> {
+  return apiRequest<VideoEnhancementCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

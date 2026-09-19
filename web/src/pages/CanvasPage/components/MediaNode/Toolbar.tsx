@@ -1,6 +1,6 @@
 /* ============================================
  * MediaNodeToolbar 媒体卡悬浮工具条（IKGYYD 自 MediaNode/index.tsx 迁出）：
- * 按钮构成/顺序/文案/置灰门槛与迁移前完全一致；DOM 迁出节点卡后由通用钉屏幕容器
+ * 按钮构成/顺序/文案/置灰门槛除 IKH3WE 撤除的三个生成类按钮外与迁移前一致；DOM 迁出节点卡后由通用钉屏幕容器
  * NodeFollowToolbar 承载（画布缩放层之外、任何缩放级别屏幕尺寸恒定、拖动/平移缩放实时跟随）。
  * 显隐分工：「唯一选中 + 画布无多选」在 NodeFollowToolbar 容器（useSoloNodeSelected 口径不变）；
  * 本组件承担数据条件（生成流程卡 / 素材缺失 / 空壳上传卡不显）。
@@ -20,6 +20,7 @@ import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
+import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import type { MediaNodeData } from './index';
@@ -74,6 +75,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
+  /** 视频 HD 高清（IKH3VG）：点击在源卡右侧建 HD 草稿卡并弹出 HD 面板；置灰预检见
+   *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
+  const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
+  const videoEnhanceDisabledReason = videoEnhanceGateReason(data);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
@@ -153,6 +158,18 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
 
   return (
     <div className={styles.toolbar}>
+      {toolbar.videoEnhance && (
+        <button
+          className={styles.toolBtn}
+          onClick={handleVideoEnhance}
+          disabled={videoEnhanceDisabledReason !== null}
+          title={videoEnhanceDisabledReason ?? VIDEO_ENHANCE_ENTRY_HINT}
+          data-testid="video-enhance-btn"
+        >
+          <span className={styles.hdBadge}>HD</span>
+          <span>高清</span>
+        </button>
+      )}
       {toolbar.videoSubtitleErase && (
         <SubtitleEraseMenu items={subtitleEraseMenuItems} />
       )}

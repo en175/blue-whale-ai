@@ -33,6 +33,7 @@ beforeEach(() => {
 afterEach(async () => {
   await unmountPage();
   vi.clearAllMocks();
+  Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
 /** 最小可用模型（面板打开即列目录；参数细节由各面板自身测试覆盖） */
