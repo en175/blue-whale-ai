@@ -165,6 +165,7 @@ import {
 } from './imageCrop';
 import OutpaintDialog from './components/OutpaintDialog';
 import CutoutToolbar from './components/CutoutToolbar';
+import { enterToolSession, type ToolSessionKind } from './toolSessionCoordinator';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -3212,6 +3213,34 @@ export default function CanvasPage() {
     closeEnhanceDialog();
     closeVideoEnhanceDialog();
   };
+
+  /** 工具会话协调装配（IKH3ZH 进入路径）：每次调用时以当轮渲染的最新六会话 target 装配
+   *  快照交给 module（函数每轮渲染重建、不落长期 ref，无过期闭包、无第二份事实源）；
+   *  互斥清单知识只在 toolSessionCoordinator，六入口只表达目标工具与自身初始化。 */
+  const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
+    enterToolSession(
+      kind,
+      {
+        activity: {
+          erase: eraseTargetNodeId,
+          cutout: cutoutNodeId,
+          crop: cropTargetNodeId,
+          outpaint: outpaintNodeId,
+          subtitleErase: subtitleEraseTargetNodeId,
+          audioVideoSplit: audioVideoSplitTargetNodeId,
+        },
+        exits: {
+          erase: exitEraseEditing,
+          cutout: exitCutoutSession,
+          crop: exitCropMode,
+          outpaint: endOutpaintSession,
+          subtitleErase: exitSubtitleEraseEditing,
+          audioVideoSplit: exitAudioVideoSplitEditing,
+        },
+        dismissGenPanels: dismissAllGenPanels,
+      },
+      init,
+    );
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
    *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
@@ -7240,7 +7269,8 @@ export default function CanvasPage() {
   };
 
   /** 进入扩图模式（IKGOQX）：画质工具横排「扩图」按钮（IKH3XZ）——门槛预检后建立会话（不建卡不连线），
-   *  扩展量从零开始；进入时关其他生成面板与残留选取态，模式期间禁用框选与他卡拖动（Canvas refPickActive） */
+   *  扩展量从零开始；进入时经 toolSessionCoordinator 退出其余编辑会话与生成面板、并清理残留
+   *  选取态（仅本入口），模式期间禁用框选与他卡拖动（Canvas refPickActive） */
   const handleNodeOutpaintImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
@@ -7264,15 +7294,10 @@ export default function CanvasPage() {
       setPickProductId(null);
       setPickAssetId(null);
     }
-    dismissAllGenPanels();
-    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图/去字幕/音视频分离（整包合并后的交叉缝隙）
-    exitEraseEditing();
-    exitCutoutSession();
-    exitCropMode();
-    exitSubtitleEraseEditing();
-    exitAudioVideoSplitEditing();
-    setOutpaintExpands(ZERO_EXPANDS);
-    setOutpaintNodeId(id);
+    runToolSessionEntry('outpaint', () => {
+      setOutpaintExpands(ZERO_EXPANDS);
+      setOutpaintNodeId(id);
+    });
   };
 
   /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
@@ -7318,104 +7343,80 @@ export default function CanvasPage() {
 
   /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
    *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
-   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）并退出裁切模式（编辑模式互斥）。 */
+   *  其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（编辑态是独立模式，规格故事 7）。 */
   const handleNodeEraseImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    exitCutoutSession(); // 与抠图会话互斥（IKGXMT）：编辑态是排他模式
-    endOutpaintSession(); // 与扩图会话互斥（整包合并后的交叉缝隙）
-    dismissAllGenPanels();
-    exitCropMode();
-    exitSubtitleEraseEditing(); // 与去字幕编辑态互斥（IKGZ83）：编辑态是排他模式
-    exitAudioVideoSplitEditing(); // 与音视频分离编辑态互斥（IKH28U）：编辑态是排他模式
-    setEraseTargetNodeId(id);
-    setEraseMaskState(EMPTY_MASK_EDIT);
-    setEraseLiveOp(null);
-    eraseLiveOpRef.current = null;
-    eraseStrokePointsRef.current = [];
-    setEraseTool('brush');
+    runToolSessionEntry('erase', () => {
+      setEraseTargetNodeId(id);
+      setEraseMaskState(EMPTY_MASK_EDIT);
+      setEraseLiveOp(null);
+      eraseLiveOpRef.current = null;
+      eraseStrokePointsRef.current = [];
+      setEraseTool('brush');
+    });
   };
 
   /** 抠图（IKGXLT 入口 / IKGXMT 会话）：把目标图片卡置为抠图会话（源图卡下方浮出横条工具栏），
    *  参数重置默认（场景 general、描边关、宽度 10、透明裁剪关——规格故事 8/11/12 默认值）。
    *  门槛预检（格式/通用档尺寸/大小）已在菜单项置灰层完成，此处只管进入；
-   *  进入时关闭五个生成面板（会话是独立模式）并退出擦除编辑态（两会话互斥）、不动视角（规格故事 13）。 */
+   *  其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（会话是独立模式）、不动视角（规格故事 13）。 */
   const handleNodeCutoutImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图/去字幕/音视频分离（整包合并后的交叉缝隙）
-    exitEraseEditing();
-    exitCropMode();
-    endOutpaintSession();
-    exitSubtitleEraseEditing();
-    exitAudioVideoSplitEditing();
-    dismissAllGenPanels();
-    setCutoutNodeId(id);
-    setCutoutScene(cutoutDefaultParams.scene);
-    setCutoutNeedContour(cutoutDefaultParams.needContour);
-    setCutoutContourSize(cutoutDefaultParams.contourSize);
-    setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
+    runToolSessionEntry('cutout', () => {
+      setCutoutNodeId(id);
+      setCutoutScene(cutoutDefaultParams.scene);
+      setCutoutNeedContour(cutoutDefaultParams.needContour);
+      setCutoutContourSize(cutoutDefaultParams.contourSize);
+      setCutoutNeedCropBackground(cutoutDefaultParams.needCropBackground);
+    });
   };
 
   /** 裁切（IKGW1H 入口 / IKGW1N 补全默认态）：把目标图片卡置为裁切编辑态。无门槛预检
-   *  （菜单项恒可用）；进入时关闭五个生成面板（同擦除口径）并退出擦除编辑态（编辑模式互斥）；
+   *  （菜单项恒可用）；其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（同擦除口径）；
    *  默认自由比例、框为全幅（fullCropRect，干净起点不记忆上次状态）；单值 cropTargetNodeId
    *  即单目标——换目标卡自然替换。 */
   const handleNodeCropImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    dismissAllGenPanels();
-    exitEraseEditing();
-    // 全屏编辑模式互斥：进入裁切同时退出扩图会话、抠图会话、去字幕与音视频分离编辑态（整包合并后的交叉缝隙）
-    endOutpaintSession();
-    exitCutoutSession();
-    exitSubtitleEraseEditing();
-    exitAudioVideoSplitEditing();
-    const bounds = cropBoundsOf(node);
-    setCropPreset('free');
-    setCropRect(fullCropRect(bounds));
-    setCropTargetNodeId(id);
+    runToolSessionEntry('crop', () => {
+      const bounds = cropBoundsOf(node);
+      setCropPreset('free');
+      setCropRect(fullCropRect(bounds));
+      setCropTargetNodeId(id);
+    });
   };
 
   /** 智能去字幕（IKGZ82 入口 / IKGZ83 会话 / IKH3OU 模式前置）：把目标视频卡置为去字幕会话
    *  并重置框集合，会话模式由入口下拉菜单项传入（smart=智能模式零框选工具、box=框选模式）。
    *  门槛预检（超 2K/超 10 分钟）已在入口下拉层完成（videoSubtitleEraseGateReason），
-   *  此处只管进入；进入时关闭五个生成面板（会话是独立模式）并退出其余四个编辑会话
-   *  （编辑模式互斥）、不动视角；视频随会话态注入在当前帧暂停（MediaNode 承担）。 */
+   *  此处只管进入；其余编辑会话退出与生成面板关闭经 toolSessionCoordinator（会话是独立
+   *  模式）、不动视角；视频随会话态注入在当前帧暂停（MediaNode 承担）。 */
   const handleNodeVideoSubtitleErase = (id: string, mode: VideoSubtitleEraseMode) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入去字幕同时退出擦除/抠图/裁切/扩图/音视频分离（编辑态是排他模式）
-    exitEraseEditing();
-    exitCutoutSession();
-    exitCropMode();
-    endOutpaintSession();
-    exitAudioVideoSplitEditing();
-    dismissAllGenPanels();
-    setSubtitleEraseTargetNodeId(id);
-    setSubtitleEraseMode(mode);
-    setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
-    setSubtitleEraseLiveBox(null);
-    subtitleEraseLiveBoxRef.current = null;
+    runToolSessionEntry('subtitleErase', () => {
+      setSubtitleEraseTargetNodeId(id);
+      setSubtitleEraseMode(mode);
+      setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
+      setSubtitleEraseLiveBox(null);
+      subtitleEraseLiveBoxRef.current = null;
+    });
   };
 
   /** 音视频分离（IKH28U 入口 / IKH28X 格式状态）：把目标视频卡置为音视频分离编辑态
    *  （原「提取音频」一键直发入口退役为会话入口）。置灰门槛（assetId 缺失）已在工具条
-   *  按钮置灰层完成（audioVideoSplitGateReason），此处只管进入；进入时关闭五个生成面板
-   *  （编辑态是独立模式）并退出其余五个编辑会话（编辑模式互斥）、不动视角；格式重置
+   *  按钮置灰层完成（audioVideoSplitGateReason），此处只管进入；其余编辑会话退出与生成
+   *  面板关闭经 toolSessionCoordinator（编辑态是独立模式）、不动视角；格式重置
    *  m4a 默认（不跨会话记忆）；视频随编辑态注入暂停并锁定播放控制（MediaNode 承担）。 */
   const handleNodeAudioVideoSplit = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入音视频分离同时退出擦除/抠图/裁切/扩图/去字幕（编辑态是排他模式）
-    exitEraseEditing();
-    exitCutoutSession();
-    exitCropMode();
-    endOutpaintSession();
-    exitSubtitleEraseEditing();
-    dismissAllGenPanels();
-    setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
-    setAudioVideoSplitTargetNodeId(id);
+    runToolSessionEntry('audioVideoSplit', () => {
+      setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
+      setAudioVideoSplitTargetNodeId(id);
+    });
   };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
