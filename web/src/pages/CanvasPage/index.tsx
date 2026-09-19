@@ -180,6 +180,7 @@ import {
   renameProject,
   deleteProject,
   projectKeys,
+  type SnapshotAsset,
 } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -956,64 +957,22 @@ export default function CanvasPage() {
     mediaBlocks?: SessionContentBlock[];
   } | null>(null);
 
-  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入。
-   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处上传得 assetId 构造
-   *  asset_ref 媒体块挂进 agentContext.mediaBlocks，复用 AgentPanel 既有的注入链路。 */
+  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框文本，随后清除导航状态避免刷新重复注入。
+   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处只负责打开 AgentPanel 与注入文本，
+   *  附件的落画布节点 + 挂会话引用改由下方「首页附件落画布」effect 在画布水合完成后处理——
+   *  避免在水合前 setMediaNodes 被水合 effect 覆盖，同时让本地上传的图与 Agent 侧边栏上传一致落节点。 */
   useEffect(() => {
     const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
     if (!state?.agentText && !state?.skillId) return;
-    const attachments = takeAgentHandoff();
-    const inject = async () => {
-      let mediaBlocks: SessionContentBlock[] | undefined;
-      if (attachments && attachments.length > 0) {
-        const blocks: SessionContentBlock[] = [];
-        for (const item of attachments) {
-          if (item.assetId != null) {
-            // 资产库选择项：已有 assetId，直接复用（不重复上传），preview 即永久 URL
-            rememberAssetUrl(String(item.assetId), item.preview);
-            blocks.push({
-              type: 'asset_ref',
-              url: item.preview,
-              name: item.name,
-              media_type: item.kind,
-              display_label: item.name,
-              asset_id: String(item.assetId),
-            });
-          } else if (item.file) {
-            const uploaded = await uploadFileToAsset(item.file, item.kind);
-            if (uploaded) {
-              // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
-              // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
-              rememberAssetUrl(uploaded.asset_id, uploaded.url);
-              blocks.push({
-                type: 'asset_ref',
-                url: uploaded.url,
-                name: item.name,
-                media_type: item.kind,
-                display_label: item.name,
-                asset_id: uploaded.asset_id,
-              });
-            } else {
-              console.warn('首页附件上传失败，已跳过:', item.name);
-            }
-            URL.revokeObjectURL(item.preview);
-          } else {
-            console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
-          }
-        }
-        mediaBlocks = blocks.length > 0 ? blocks : undefined;
-      }
-      setAgentContext({
-        text: state.agentText ?? '',
-        skillId: state.skillId ?? '',
-        skillName: state.skillName ?? '',
-        ts: Date.now(),
-        mediaBlocks,
-      });
-      setShowAgent(true);
-      navigate(location.pathname + location.search, { replace: true, state: null });
-    };
-    void inject();
+    setAgentContext({
+      text: state.agentText ?? '',
+      skillId: state.skillId ?? '',
+      skillName: state.skillName ?? '',
+      ts: Date.now(),
+      mediaBlocks: undefined,
+    });
+    setShowAgent(true);
+    navigate(location.pathname + location.search, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值）；
@@ -1586,7 +1545,7 @@ export default function CanvasPage() {
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
 
@@ -2076,6 +2035,64 @@ export default function CanvasPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
+
+  /** 首页智能体附件落画布节点（IKFPOT）：画布水合完成后消费 handoff，
+   *  本地上传的 File 走 placeFileOnCanvas 立即落媒体节点（与 Agent 侧边栏「+」上传同链路），
+   *  资产库选择项（已有 assetId）直接构造 asset_ref；最终经 externalAssetPicks 通道挂进 AgentPanel 输入框，
+   *  不走 inputVersion 通道以避免重置用户已敲的输入文本。声明在水合 effect 之后，确保 doc 已初始化且
+   *  水合 setMediaNodes 先于本 effect 的 placeFileOnCanvas 执行，新节点不会被水合覆盖。 */
+  const homeHandoffDoneRef = useRef(false);
+  useEffect(() => {
+    if (!doc) return;
+    if (homeHandoffDoneRef.current) return;
+    const attachments = takeAgentHandoff();
+    if (!attachments || attachments.length === 0) return;
+    homeHandoffDoneRef.current = true;
+    let cancelled = false;
+    const inject = async () => {
+      const blocks: SessionContentBlock[] = [];
+      for (const item of attachments) {
+        if (item.assetId != null) {
+          // 资产库选择项：已有 assetId，直接复用（不重复上传），preview 即永久 URL
+          rememberAssetUrl(String(item.assetId), item.preview);
+          blocks.push({
+            type: 'asset_ref',
+            url: item.preview,
+            name: item.name,
+            media_type: item.kind,
+            display_label: item.name,
+            asset_id: String(item.assetId),
+          });
+        } else if (item.file) {
+          try {
+            // placeFileOnCanvas：先以 blob 预览落媒体节点，后台三步上传，成功后换永久 URL + assetId
+            const result = await placeFileOnCanvas(item.file);
+            if (cancelled) return;
+            rememberAssetUrl(result.asset_id, result.url);
+            blocks.push({
+              type: 'asset_ref',
+              url: result.url,
+              name: item.name,
+              media_type: item.kind,
+              display_label: item.name,
+              asset_id: result.asset_id,
+            });
+          } catch {
+            // placeFileOnCanvas 内部已 toast 失败并移除节点
+          }
+          URL.revokeObjectURL(item.preview);
+        } else {
+          console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
+        }
+      }
+      if (!cancelled && blocks.length > 0) {
+        setAgentAssetPicks({ ts: Date.now(), blocks });
+      }
+    };
+    void inject();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc]);
 
   /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
    *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
@@ -7652,6 +7669,30 @@ export default function CanvasPage() {
           // 连线已在本地补上；落盘失败留给后续编辑触发保存
         }
       }
+      // IKFPOT：应用方案卡后服务端已把来源素材关联进项目，但前端快照资产字典停留在打开画布时的旧状态，
+      // 水合 resolveNodeAssets 查不到会误标「素材已被删除」。这里从应用返回的节点里提取素材资产信息
+      // 增量并入字典（与 acceptDoc 同一批处理，水合 effect 重跑时字典已是最新，无中间闪烁）。
+      const newAssets: SnapshotAsset[] = [];
+      for (const n of nextNodes) {
+        if (n.type !== 'mediaNode') continue;
+        const d = (n.data ?? {}) as Record<string, unknown>;
+        const aid = d.assetId ?? d.asset_id ?? d.assetID;
+        if (aid == null || aid === '') continue;
+        const src = typeof d.src === 'string' ? d.src : '';
+        if (!src || src.startsWith('blob:')) continue;
+        const mediaType = d.mediaType;
+        if (mediaType !== 'image' && mediaType !== 'video' && mediaType !== 'audio') continue;
+        newAssets.push({
+          asset_id: Number(aid),
+          type: mediaType,
+          access_url: src,
+          width: typeof d.width === 'number' ? d.width : null,
+          height: typeof d.height === 'number' ? d.height : null,
+          material_id: null,
+          material_status: null,
+        });
+      }
+      upsertAssets(newAssets);
       acceptDoc({ id: result.canvas.id, version: nextVersion, nodes: nextNodes, edges: nextEdges, viewport: savedViewport ?? viewport });
       const target = result.node.position;
       setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
