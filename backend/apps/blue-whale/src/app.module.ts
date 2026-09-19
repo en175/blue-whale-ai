@@ -48,6 +48,7 @@ import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
+import { VideoSubtitleErasuresApiModule } from "./api/video-subtitle-erasures/video-subtitle-erasures.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
 
@@ -88,6 +89,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     ImageErasuresApiModule,
     ImageCutoutsApiModule,
     ImageOutpaintsApiModule,
+    VideoSubtitleErasuresApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,
