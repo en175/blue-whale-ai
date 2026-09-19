@@ -45,7 +45,7 @@ import {
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
-import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
+import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
@@ -75,6 +75,24 @@ import {
   type ImageEraseIdentity,
   type ImageEraseInput,
 } from './imageErase';
+import {
+  buildVideoSubtitleEraseInput,
+  type VideoSubtitleEraseIdentity,
+  type VideoSubtitleEraseInput,
+} from './videoSubtitleErase';
+import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
+import {
+  applySubtitleBox,
+  canAddSubtitleBox,
+  canRedoSubtitleBoxEdit,
+  canUndoSubtitleBoxEdit,
+  EMPTY_SUBTITLE_BOX_EDIT,
+  redoSubtitleBoxEdit,
+  undoSubtitleBoxEdit,
+  type SubtitleBoxEditState,
+  type SubtitleBoxOp,
+  type SubtitleBoxPoint,
+} from './subtitleEraseBoxes';
 import {
   buildImageCutoutRequest,
   imageCutoutSceneGateReason,
@@ -111,6 +129,7 @@ import {
 } from './imageOutpaint';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
+import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
@@ -180,6 +199,7 @@ import {
   createImageErase,
   createImageCutout,
   createImageOutpaint,
+  createVideoSubtitleErase,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -471,6 +491,21 @@ export default function CanvasPage() {
   const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
   /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
   const [eraseSubmitting, setEraseSubmitting] = useState(false);
+  /** 去字幕编辑态（IKGZ83）：处于去字幕编辑的源视频卡 node id，null=未进入。编辑态的
+   *  其余状态（框集合/活框/全画面开关/发送中）提升在本页——源视频卡内的
+   *  SubtitleEraseBoxesLayer 与浮出的工具条/发送条共享同一份；未发送退出
+   *  （X/Esc/点其他卡/点空白）框与开关状态全部丢弃，不建卡不提交。 */
+  const [subtitleEraseTargetNodeId, setSubtitleEraseTargetNodeId] = useState<string | null>(null);
+  /** 框集合（归一化前的显示坐标图元 + 撤销重做小栈，纯逻辑 subtitleEraseBoxes） */
+  const [subtitleEraseBoxes, setSubtitleEraseBoxes] = useState<SubtitleBoxEditState>(EMPTY_SUBTITLE_BOX_EDIT);
+  /** 拖拽进行中的活框预览（显示坐标，pointerup 才经 applySubtitleBox 固化；null=无拖拽） */
+  const [subtitleEraseLiveBox, setSubtitleEraseLiveBox] = useState<SubtitleBoxOp | null>(null);
+  /** 活框最新值（pointerup 回调读，避免闭包陈旧；对齐 eraseLiveOpRef 先例） */
+  const subtitleEraseLiveBoxRef = useRef<SubtitleBoxOp | null>(null);
+  /** 「全画面文字」开关（默认关，规格故事 12）：开=检测范围扩大到全画面文字 */
+  const [subtitleEraseFullText, setSubtitleEraseFullText] = useState(false);
+  /** 去字幕发送中（创建请求飞行期防重复提交，口径同 eraseSubmitting） */
+  const [subtitleEraseSubmitting, setSubtitleEraseSubmitting] = useState(false);
   /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
    *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
    *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
@@ -1195,6 +1230,47 @@ export default function CanvasPage() {
         dialogWidth: 240,
       })
     : null;
+  /** 去字幕编辑态跟随锚（IKGZ83，口径同擦除）：源视频卡上方工具条 / 下方发送条。
+   *  工具条手动换算（高约 42 + 间距 10）；发送条复用 computeFollowAnchor（恒锚节点下方）。 */
+  const subtitleEraseSourceNode = subtitleEraseTargetNodeId
+    ? mediaNodes.find((n) => n.id === subtitleEraseTargetNodeId) ?? null
+    : null;
+  const subtitleEraseToolbarAnchor = (() => {
+    if (!subtitleEraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(subtitleEraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = subtitleEraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = subtitleEraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    return {
+      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
+      top: Math.round(Math.max(8, screenTop - 52)),
+    };
+  })();
+  const subtitleEraseSendBarAnchor = subtitleEraseSourceNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: subtitleEraseSourceNode.position.x,
+        nodeY: subtitleEraseSourceNode.position.y,
+        nodeWidth: nodeBoxOf(subtitleEraseSourceNode).width,
+        nodeHeight: nodeBoxOf(subtitleEraseSourceNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 260,
+      })
+    : null;
+  /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
+   *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
+   *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
+  const subtitleEraseDisplayBox = (() => {
+    if (!subtitleEraseSourceNode) return null;
+    const d = (subtitleEraseSourceNode.data ?? {}) as Record<string, unknown>;
+    return mediaContentBox({
+      mediaType: 'video',
+      width: typeof d.width === 'number' ? d.width : undefined,
+      height: typeof d.height === 'number' ? d.height : undefined,
+    });
+  })();
   /** 抠图会话源图卡（IKGXMT）：工具栏跟随锚与发送链路的判定输入 */
   const cutoutSourceNode = cutoutNodeId
     ? mediaNodes.find((n) => n.id === cutoutNodeId) ?? null
@@ -1592,6 +1668,7 @@ export default function CanvasPage() {
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+          onVideoSubtitleErase: (id: string) => actionsRef.current.videoSubtitleErase(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
@@ -2406,6 +2483,10 @@ export default function CanvasPage() {
     /** 抠图（IKGXLT 通道 / IKGXMT 接线）：进入抠图工具栏会话（「高清 ▾」下拉「抠图」项派发）；
      *  首帧渲染前经由 actionsRef.current.cutoutImage 分派到 handleNodeCutoutImage */
     cutoutImage: (_id: string) => {},
+    /** 智能去字幕（IKGZ82 通道 / IKGZ83 接线）：进入去字幕编辑态（视频卡工具条「智能去字幕」
+     *  按钮派发）；首帧渲染前经由 actionsRef.current.videoSubtitleErase 分派到
+     *  handleNodeVideoSubtitleErase */
+    videoSubtitleErase: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2990,11 +3071,12 @@ export default function CanvasPage() {
     closeEnhanceDialog();
   };
 
-  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除任一会话
-   *  进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
+  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕任一
+   *  会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
    *  见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
   const editSessionActive =
-    eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null;
+    eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
+    || subtitleEraseTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置：按四路退出口径退出当前编辑会话（未发送
    *  参数全部丢弃），面板随后放行打开；无会话时为幂等空操作（各 exit 幂等复位）。 */
   const exitEditSessionForGenPanel = () => {
@@ -3002,6 +3084,7 @@ export default function CanvasPage() {
     exitCutoutSession();
     exitCropMode();
     endOutpaintSession();
+    exitSubtitleEraseEditing();
   };
 
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
@@ -3029,6 +3112,11 @@ export default function CanvasPage() {
     // IKGOQX 扩图模式：点画布空白退出（不留痕迹）
     if (outpaintSessionActive) {
       endOutpaintSession();
+      return;
+    }
+    // 去字幕编辑态（IKGZ83 四退出之一）：点画布空白退出并丢弃框与开关状态
+    if (subtitleEraseTargetNodeId) {
+      exitSubtitleEraseEditing();
       return;
     }
     if (imagePickSessionActive) { endImagePickSession(); return; }
@@ -3080,6 +3168,11 @@ export default function CanvasPage() {
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (cropTargetNodeId && ((soloId && soloId !== cropTargetNodeId) || candidates.length > 1)) {
       exitCropMode();
+    }
+    // 去字幕编辑态（IKGZ83 四退出之一）：点其他卡或多选时退出并丢弃框与开关状态
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (subtitleEraseTargetNodeId && ((soloId && soloId !== subtitleEraseTargetNodeId) || candidates.length > 1)) {
+      exitSubtitleEraseEditing();
     }
     // IKFOHK：单选草稿/成品生成卡时原子切换到对应对话框。选中变化经 React Flow
     // useEffect 到达，可能早于或代替 onNodeClick（nodeDragThreshold=1 时轻微位移会吞掉 click）。
@@ -3180,9 +3273,10 @@ export default function CanvasPage() {
 
   /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
    *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
-   *  （复用 isEditableKeyboardTarget）→ 擦除编辑态退出（IKGOTB，未发送丢弃遮罩）→ 其余情况关闭五面板。 */
+   *  （复用 isEditableKeyboardTarget）→ 擦除/去字幕编辑态退出（未发送丢弃遮罩/框与开关状态）
+   *  → 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId && !subtitleEraseTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
@@ -3200,6 +3294,10 @@ export default function CanvasPage() {
         exitEraseEditing();
         return;
       }
+      if (subtitleEraseTargetNodeId) {
+        exitSubtitleEraseEditing();
+        return;
+      }
       if (cropTargetNodeId) {
         exitCropMode();
         return;
@@ -3209,7 +3307,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -3513,6 +3611,15 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eraseTargetNodeId, mediaNodes]);
 
+  /** 去字幕编辑态绑定清理（IKGZ83）：目标源视频卡被删除时退出编辑态并丢弃框与开关状态，
+   *  防工具条/发送条悬挂（口径同擦除绑定清理） */
+  useEffect(() => {
+    if (!subtitleEraseTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === subtitleEraseTargetNodeId)) exitSubtitleEraseEditing();
+    // exitSubtitleEraseEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtitleEraseTargetNodeId, mediaNodes]);
+
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
     if (!cropTargetNodeId) return;
@@ -3800,6 +3907,7 @@ export default function CanvasPage() {
         onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
         onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+        onVideoSubtitleErase: (id: string) => actionsRef.current.videoSubtitleErase(id),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4273,6 +4381,7 @@ export default function CanvasPage() {
       onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
       onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+      onVideoSubtitleErase: (id: string) => actionsRef.current.videoSubtitleErase(id),
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
@@ -4690,6 +4799,7 @@ export default function CanvasPage() {
           onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+          onVideoSubtitleErase: (id: string) => actionsRef.current.videoSubtitleErase(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
@@ -5638,6 +5748,88 @@ export default function CanvasPage() {
     }
   };
 
+  /* ===== 去字幕发送链路（IKGZ83，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+
+  /** 去字幕任务发送核心：组装好的契约 input 直接 POST video-subtitle-erasures；创建成功后
+   *  先退编辑态再在源卡右侧建去字幕结果卡（node id = input.target_node_id，发送前已生成
+   *  冻结进任务；结果卡是视频占位卡——mediaType 覆盖为 video、带源卡分辨率撑出同比例内容区，
+   *  带 videoSubtitleErase 身份标记——lastInput 供失败重试原样重发）、拉纯视觉来源线
+   *  （origin=video-subtitle-erase，参考推导跳过，源视频不占参考位不参与 @ 编号）、
+   *  启动轮询（applyJobTerminal 回填成品/失败；成品是普通视频素材卡可再次去字幕）。
+   *  创建失败（门槛拒/网络）不建卡不退出编辑态（用户参数留在编辑态可调后重发，规格故事 21
+   *  「立即退出」指成功路径）；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
+   *  免费口径同 image_enhance / image_erase：无幂等头、无积分预估、不走余额拦截门。 */
+  const startVideoSubtitleEraseJob = async (
+    sourceNodeId: string,
+    input: VideoSubtitleEraseInput,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起视频去字幕');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法发起视频去字幕');
+      return false;
+    }
+    const targetNodeId = input.target_node_id;
+    const sourceData = (node.data ?? {}) as Record<string, unknown>;
+    try {
+      const created = await createVideoSubtitleErase(currentId, input);
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
+      exitSubtitleEraseEditing();
+      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '去字幕',
+        nodeId: targetNodeId,
+        data: {
+          mediaType: 'video',
+          ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
+          ...(typeof sourceData.height === 'number' ? { height: sourceData.height } : {}),
+          videoSubtitleErase: { sourceAssetId: input.source_asset_id, lastInput: input },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEraseJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(draftId, activeAtCreate);
+      patchMediaNode(draftId, { jobId: created.job_id });
+      pollJob(draftId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '创建去字幕任务失败，请重试');
+      return false;
+    }
+  };
+
+  /** 去字幕发送（发送条发送钮）：源素材身份 → 按「开关 + 框集合」推导契约四键
+   *  （buildVideoSubtitleEraseInput：detect_mode 由开关、erase_boxes 由框集合，一个发送
+   *  动作统一两种语义）→ 发任务。请求发出即返回；编辑态退出与建卡在创建成功后由
+   *  startVideoSubtitleEraseJob 承担，失败停留编辑态（参数可调后重发）。 */
+  const handleSubtitleEraseSend = (): boolean => {
+    const nodeId = subtitleEraseTargetNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起视频去字幕');
+      return false;
+    }
+    const displayBox = subtitleEraseDisplayBox;
+    const input = buildVideoSubtitleEraseInput({
+      sourceAssetId,
+      targetNodeId: newNodeId('media-draft'),
+      fullText: subtitleEraseFullText,
+      boxes: subtitleEraseBoxes.boxes,
+      displayWidth: displayBox?.width ?? MEDIA_CONTENT_SHORT_SIDE,
+      displayHeight: displayBox?.height ?? MEDIA_CONTENT_SHORT_SIDE,
+    });
+    setSubtitleEraseSubmitting(true);
+    void startVideoSubtitleEraseJob(nodeId, input).finally(() => setSubtitleEraseSubmitting(false));
+    return true;
+  };
+
   /* ===== 抠图发送链路（IKGXMT，镜像擦除 IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
 
   /** 抠图任务发送核心：组装好的契约 input 直接 POST image-cutouts；创建成功后先退会话再在
@@ -6107,6 +6299,37 @@ export default function CanvasPage() {
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
       createImageErase(currentId, eraseIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
+    const subtitleEraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoSubtitleErase as
+      | VideoSubtitleEraseIdentity
+      | undefined;
+    if (subtitleEraseIdentity?.lastInput) {
+      // 去字幕卡分流（IKGZ83，镜像擦除/抠图）：契约无 retry 端点，重试 = 冻结 input 原样重发
+      // 创建接口（检测模式与框集合随 lastInput 冻结，不从零再框）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法发起视频去字幕');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/抠图分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput)
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -6743,10 +6966,11 @@ export default function CanvasPage() {
       setPickAssetId(null);
     }
     dismissAllGenPanels();
-    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图（整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入扩图同时退出裁切/擦除/抠图/去字幕（整包合并后的交叉缝隙）
     exitEraseEditing();
     exitCutoutSession();
     exitCropMode();
+    exitSubtitleEraseEditing();
     setOutpaintExpands(ZERO_EXPANDS);
     setOutpaintNodeId(id);
   };
@@ -6761,6 +6985,17 @@ export default function CanvasPage() {
     eraseStrokePointsRef.current = [];
     setEraseTool('brush');
     setEraseSubmitting(false);
+  };
+
+  /** 退出去字幕编辑态（IKGZ83 四退出共用）：未发送的框与开关状态全部丢弃
+   *  （无卡、无边、无任务），活框与发送中标记一并复位（规格故事 16「退出后不留痕迹」）。 */
+  const exitSubtitleEraseEditing = () => {
+    setSubtitleEraseTargetNodeId(null);
+    setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
+    setSubtitleEraseLiveBox(null);
+    subtitleEraseLiveBoxRef.current = null;
+    setSubtitleEraseFullText(false);
+    setSubtitleEraseSubmitting(false);
   };
 
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
@@ -6781,6 +7016,7 @@ export default function CanvasPage() {
     endOutpaintSession(); // 与扩图会话互斥（整包合并后的交叉缝隙）
     dismissAllGenPanels();
     exitCropMode();
+    exitSubtitleEraseEditing(); // 与去字幕编辑态互斥（IKGZ83）：编辑态是排他模式
     setEraseTargetNodeId(id);
     setEraseMaskState(EMPTY_MASK_EDIT);
     setEraseLiveOp(null);
@@ -6796,10 +7032,11 @@ export default function CanvasPage() {
   const handleNodeCutoutImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
-    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图（三方整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入抠图同时退出擦除/裁切/扩图/去字幕（整包合并后的交叉缝隙）
     exitEraseEditing();
     exitCropMode();
     endOutpaintSession();
+    exitSubtitleEraseEditing();
     dismissAllGenPanels();
     setCutoutNodeId(id);
     setCutoutScene(cutoutDefaultParams.scene);
@@ -6817,13 +7054,34 @@ export default function CanvasPage() {
     if (!node || node.type !== 'mediaNode') return;
     dismissAllGenPanels();
     exitEraseEditing();
-    // 全屏编辑模式互斥：进入裁切同时退出扩图会话与抠图会话（整包合并后的交叉缝隙）
+    // 全屏编辑模式互斥：进入裁切同时退出扩图会话、抠图会话与去字幕编辑态（整包合并后的交叉缝隙）
     endOutpaintSession();
     exitCutoutSession();
+    exitSubtitleEraseEditing();
     const bounds = cropBoundsOf(node);
     setCropPreset('free');
     setCropRect(fullCropRect(bounds));
     setCropTargetNodeId(id);
+  };
+
+  /** 智能去字幕（IKGZ82 入口 / IKGZ83 编辑态）：把目标视频卡置为去字幕编辑态并重置框集合。
+   *  门槛预检（超 2K/超 10 分钟）已在工具条按钮置灰层完成（videoSubtitleEraseGateReason），
+   *  此处只管进入；进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）并退出其余四个
+   *  编辑会话（编辑模式互斥）、不动视角；视频随编辑态注入在当前帧暂停（MediaNode 承担）。 */
+  const handleNodeVideoSubtitleErase = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    // 全屏编辑模式互斥：进入去字幕同时退出擦除/抠图/裁切/扩图（编辑态是排他模式）
+    exitEraseEditing();
+    exitCutoutSession();
+    exitCropMode();
+    endOutpaintSession();
+    dismissAllGenPanels();
+    setSubtitleEraseTargetNodeId(id);
+    setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
+    setSubtitleEraseLiveBox(null);
+    subtitleEraseLiveBoxRef.current = null;
+    setSubtitleEraseFullText(false);
   };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
@@ -6945,6 +7203,38 @@ export default function CanvasPage() {
 
   const handleEraseUndo = () => setEraseMaskState((state) => undoMaskEdit(state));
   const handleEraseRedo = () => setEraseMaskState((state) => redoMaskEdit(state));
+
+  /* ===== 去字幕框指针交互（IKGZ83）：SubtitleEraseBoxesLayer 上抛显示坐标点，
+   *  此处经 subtitleEraseBoxes 纯逻辑落框；拉满 20 个上限时 toast 提示（规格故事 9） ===== */
+
+  const handleSubtitleBoxStart = (point: SubtitleBoxPoint) => {
+    if (!canAddSubtitleBox(subtitleEraseBoxes)) {
+      showToast('warn', '检测框最多 20 个，请先撤销后重试');
+      return;
+    }
+    const op: SubtitleBoxOp = { kind: 'box', from: point, to: point };
+    subtitleEraseLiveBoxRef.current = op;
+    setSubtitleEraseLiveBox(op);
+  };
+
+  const handleSubtitleBoxMove = (point: SubtitleBoxPoint) => {
+    const live = subtitleEraseLiveBoxRef.current;
+    if (!live) return;
+    const next: SubtitleBoxOp = { kind: 'box', from: live.from, to: point };
+    subtitleEraseLiveBoxRef.current = next;
+    setSubtitleEraseLiveBox(next);
+  };
+
+  const handleSubtitleBoxEnd = () => {
+    const live = subtitleEraseLiveBoxRef.current;
+    subtitleEraseLiveBoxRef.current = null;
+    setSubtitleEraseLiveBox(null);
+    if (!live) return;
+    setSubtitleEraseBoxes((state) => applySubtitleBox(state, live));
+  };
+
+  const handleSubtitleBoxUndo = () => setSubtitleEraseBoxes((state) => undoSubtitleBoxEdit(state));
+  const handleSubtitleBoxRedo = () => setSubtitleEraseBoxes((state) => redoSubtitleBoxEdit(state));
 
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
@@ -7222,6 +7512,7 @@ export default function CanvasPage() {
   actionsRef.current.eraseImage = handleNodeEraseImage;
   actionsRef.current.cutoutImage = handleNodeCutoutImage;
   actionsRef.current.cropImage = handleNodeCropImage;
+  actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -7803,6 +8094,7 @@ export default function CanvasPage() {
               onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
               onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
+              onVideoSubtitleErase: (id: string) => actionsRef.current.videoSubtitleErase(id),
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
@@ -8491,22 +8783,27 @@ export default function CanvasPage() {
             // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
             // 裁切编辑态（IKGW1H）：目标源图卡渲染期注入裁切标记（口径同上，不持久化）；
             //  两编辑态互斥（进入时互相退出），裁切框/面板（IKGW1N）据此识别编辑目标
+            // 去字幕编辑态（IKGZ83）：目标源视频卡渲染期注入框层 props（口径同上，不持久化）
+            //  ——SubtitleEraseBoxesLayer 与工具条/发送条共享本页编辑状态，视频暂停在当前帧
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图）或高清面板打开
-            // 期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕）或高清面板
+            // 打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
             // 集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showEnhanceDialog
+              || subtitleEraseTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     showEnhanceDialog
                     || n.id === eraseTargetNodeId
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
-                    || n.id === outpaintNodeId;
+                    || n.id === outpaintNodeId
+                    || n.id === subtitleEraseTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
+                    && n.id !== subtitleEraseTargetNodeId
                     && !hideToolbar
                   ) return n;
                   const data: Record<string, unknown> = { ...n.data };
@@ -8517,6 +8814,15 @@ export default function CanvasPage() {
                       onStrokeStart: handleEraseStrokeStart,
                       onStrokeMove: handleEraseStrokeMove,
                       onStrokeEnd: handleEraseStrokeEnd,
+                    };
+                  }
+                  if (n.id === subtitleEraseTargetNodeId) {
+                    data.subtitleEraseEditing = {
+                      boxes: subtitleEraseBoxes.boxes,
+                      liveBox: subtitleEraseLiveBox,
+                      onBoxStart: handleSubtitleBoxStart,
+                      onBoxMove: handleSubtitleBoxMove,
+                      onBoxEnd: handleSubtitleBoxEnd,
                     };
                   }
                   if (n.id === submittingNodeId) data.submitting = true;
@@ -9028,6 +9334,26 @@ export default function CanvasPage() {
             submitting={eraseSubmitting}
             toolbarAnchor={eraseToolbarAnchor}
             sendBarAnchor={eraseSendBarAnchor}
+          />
+        )}
+
+        {/* 去字幕编辑态工具条+发送条（IKGZ83）：框选/全画面文字开关/撤销重做/发送；检测框层
+            经 MediaNode 的 subtitleEraseEditing 注入渲染在源视频卡上（视频暂停在当前帧）；
+            四退出（X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃框与开关状态不建卡不提交 */}
+        {subtitleEraseTargetNodeId && (
+          <VideoSubtitleEraseDialog
+            onClose={exitSubtitleEraseEditing}
+            onSend={handleSubtitleEraseSend}
+            canUndo={canUndoSubtitleBoxEdit(subtitleEraseBoxes)}
+            canRedo={canRedoSubtitleBoxEdit(subtitleEraseBoxes)}
+            onUndo={handleSubtitleBoxUndo}
+            onRedo={handleSubtitleBoxRedo}
+            fullText={subtitleEraseFullText}
+            onFullTextChange={setSubtitleEraseFullText}
+            boxLimitReached={!canAddSubtitleBox(subtitleEraseBoxes)}
+            submitting={subtitleEraseSubmitting}
+            toolbarAnchor={subtitleEraseToolbarAnchor}
+            sendBarAnchor={subtitleEraseSendBarAnchor}
           />
         )}
 

@@ -281,6 +281,31 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * video_subtitle_erase（视频智能去字幕）consumer（迁移契约 §17 / IKGZ81；以 imageErase 接线为模板）。
+     * <p>
+     * consumer group = "generation-video-subtitle-erase-worker"（§17.1 冻结值）。
+     * topic / tag = {@link GenerationMqRoute#VIDEO_SUBTITLE_ERASE}。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VideoSubtitleEraseConsumer videoSubtitleEraseConsumer(
+            com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-video-subtitle-erase-worker";
+        int concurrency = workerProps.concurrency().videoSubtitleErase();
+
+        return new com.bluewhale.worker.application.consumer.VideoSubtitleEraseConsumer(
+                processor,
+                GenerationMqRoute.VIDEO_SUBTITLE_ERASE.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -297,7 +322,22 @@ public class RocketMqConfig {
                 GenerationMqRoute.VIDEO.tag());
     }
 
-    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，八类全部无条件装配。
+    /**
+     * 去字幕轮询自投生产者（迁移契约 §17 / IKGZ81；视频 generationMessageProducer 同款）。
+     * <p>
+     * VideoSubtitleEraseJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = video_subtitle_erase）——复用 video 的 producer 会把消息投到
+     * video tag，被视频消费者当成不认识的 jobId 静默丢进轮询死胡同。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoSubtitleEraseMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRoute.VIDEO_SUBTITLE_ERASE.topic(),
+                GenerationMqRoute.VIDEO_SUBTITLE_ERASE.tag());
+    }
+
+    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
@@ -339,6 +379,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageOutpaintRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_OUTPAINT);
+    }
+
+    /** recovery 重投 video_subtitle_erase（迁移契约 §17 / IKGZ81）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoSubtitleEraseRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.VIDEO_SUBTITLE_ERASE);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */

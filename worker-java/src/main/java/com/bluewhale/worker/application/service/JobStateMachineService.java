@@ -6,6 +6,7 @@ import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.JobStatus;
@@ -134,6 +135,10 @@ public class JobStateMachineService {
         return claimService.claimImageOutpaint(jobId, workerId);
     }
 
+    public Optional<ClaimedVideoSubtitleEraseJobDto> claimVideoSubtitleErase(String jobId, String workerId) {
+        return claimService.claimVideoSubtitleErase(jobId, workerId);
+    }
+
     // ========== 终态收口（委托 JobFinalizer） ==========
 
     public boolean completeJob(String jobId, List<String> assetIds, String workerId, long fencingToken) {
@@ -230,6 +235,14 @@ public class JobStateMachineService {
     public boolean publishImageOutpaintResult(
             com.bluewhale.worker.domain.dto.PublishImageOutpaintDto input) {
         return finalizer.publishImageOutpaintResult(input);
+    }
+
+    // ========== video_subtitle_erase 直通（DTO 形态，VideoSubtitleEraseJobProcessor 专用；
+    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
+
+    public boolean publishVideoSubtitleEraseResult(
+            com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto input) {
+        return finalizer.publishVideoSubtitleEraseResult(input);
     }
 
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========

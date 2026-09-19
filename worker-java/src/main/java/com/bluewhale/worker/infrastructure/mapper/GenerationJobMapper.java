@@ -700,4 +700,13 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources("image_cutout",
                 List.of("image_cutout"), limit, maxAgeMinutes);
     }
+
+    /** 视频去字幕到点/孤儿（迁移契约 §17 / IKGZ81）：套 source 白名单（与 claim 同源，
+     *  单源 video_subtitle_erase；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueVideoSubtitleEraseJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.TAG,
+                List.of(com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
 }

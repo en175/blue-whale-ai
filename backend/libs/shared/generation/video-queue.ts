@@ -10,6 +10,7 @@ import {
   IMAGE_OUTPAINT_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_TAG,
+  VIDEO_SUBTITLE_ERASE_TAG,
 } from "./queue.constants.js";
 import type { GenerationTag } from "./queue.constants.js";
 
@@ -21,6 +22,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueImageEraseJob（tag=image_erase，IKGOT4）
  *  / enqueueImageCutoutJob（tag=image_cutout，IKGXM1）
  *  / enqueueImageOutpaintJob（tag=image_outpaint，IKGOQV）
+ *  / enqueueVideoSubtitleEraseJob（tag=video_subtitle_erase，IKGZ80）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -215,6 +217,20 @@ export async function enqueueImageOutpaintJob(
   await createRocketMqVideoProducer(
     producer,
     IMAGE_OUTPAINT_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 视频智能去字幕 job 入队（IKGZ80，迁移契约 §17，契约 @lib/contracts/video-subtitle-erase）：
+ *  复用生成任务 topic/queue，用独立 tag「video_subtitle_erase」区分任务类型。 */
+export async function enqueueVideoSubtitleEraseJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    VIDEO_SUBTITLE_ERASE_TAG,
   ).enqueue(jobId, options);
 }
 

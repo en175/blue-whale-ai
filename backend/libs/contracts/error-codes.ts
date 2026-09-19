@@ -71,6 +71,8 @@ export const ERROR_IMAGE_ERASE_FAILED = "image_erase_failed";
 export const ERROR_IMAGE_OUTPAINT_FAILED = "image_outpaint_failed";
 /** IKGXLS：图片抠图（image_cutout）执行兜底失败码（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md，无 worker 级重试）。 */
 export const ERROR_IMAGE_CUTOUT_FAILED = "image_cutout_failed";
+/** IKGZ7Z：视频去字幕（video_subtitle_erase）执行兜底失败码（迁移契约 §17，异步任务轮询失败终态，无 worker 级重试）。 */
+export const ERROR_VIDEO_SUBTITLE_ERASE_FAILED = "video_subtitle_erase_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -143,6 +145,8 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_IMAGE_OUTPAINT_FAILED]: 1041,
   // IKGXLS 注：1041 已由 IKGOQR 扩图占用（!737 先入 release），抠图兜底码取下一空号 1042。
   [ERROR_IMAGE_CUTOUT_FAILED]: 1042,
+  // IKGZ7Z 注：1039-1042 已由高清放大/擦除/扩图/抠图占用，去字幕兜底码取下一空号 1043。
+  [ERROR_VIDEO_SUBTITLE_ERASE_FAILED]: 1043,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -423,6 +427,7 @@ export const ERROR_CODES: Record<number, string> = {
   1040: "图片擦除失败，请重试", // image_erase_failed
   1041: "扩图失败，请重试", // image_outpaint_failed
   1042: "抠图失败，请重试", // image_cutout_failed
+  1043: "去字幕失败，请重试", // video_subtitle_erase_failed
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

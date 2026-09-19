@@ -194,6 +194,26 @@ export {
   type ImageOutpaintInput,
 } from "./image-outpaint.js";
 export {
+  VIDEO_SUBTITLE_ERASE_JOB_TYPE,
+  VIDEO_SUBTITLE_ERASE_SOURCE,
+  VIDEO_SUBTITLE_ERASE_INPUT_KEYS,
+  VIDEO_SUBTITLE_ERASE_BOX_KEYS,
+  VIDEO_SUBTITLE_ERASE_DETECT_MODES,
+  VIDEO_SUBTITLE_ERASE_MODE,
+  VIDEO_SUBTITLE_ERASE_MAX_BOXES,
+  VIDEO_SUBTITLE_ERASE_MODEL_VERSION,
+  VIDEO_SUBTITLE_ERASE_OUTPUT_ENCODE_MODE,
+  VIDEO_SUBTITLE_ERASE_MAX_SHORT_SIDE_PX,
+  VIDEO_SUBTITLE_ERASE_MAX_LONG_SIDE_PX,
+  VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
+  VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN,
+  videoSubtitleEraseInputSchema,
+  type VideoSubtitleEraseDetectMode,
+  type VideoSubtitleEraseInput,
+  type VideoSubtitleEraseEraseBox,
+  type VideoSubtitleEraseTimeSegmentFilter,
+} from "./video-subtitle-erase.js";
+export {
   DomainError,
   assetError,
   skillError,
