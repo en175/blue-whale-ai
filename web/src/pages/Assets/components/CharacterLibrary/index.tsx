@@ -410,6 +410,7 @@ function AssetPickerCard({
   selectable,
   onPreview,
   onPickerToggle,
+  onPickerBlocked,
   onDeleteAsset,
   onClosePreview,
 }: {
@@ -419,6 +420,7 @@ function AssetPickerCard({
   selectable: boolean;
   onPreview: (asset: MaterialAsset) => void;
   onPickerToggle?: (asset: MaterialAsset) => void;
+  onPickerBlocked?: (asset: MaterialAsset) => void;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onClosePreview: () => void;
 }) {
@@ -444,6 +446,7 @@ function AssetPickerCard({
       onClick={() => {
         if (pickerMode) {
           if (selectable) onPickerToggle?.(asset);
+          else onPickerBlocked?.(asset);
           return;
         }
         onPreview(asset);
@@ -529,6 +532,7 @@ function GroupDetail({
   onPickFiles,
   pickerSelectedIds,
   onPickerToggleAsset,
+  onPickerBlockedAsset,
   pickerMediaTypes,
   onPickerPreviewChange,
 }: {
@@ -540,6 +544,7 @@ function GroupDetail({
   onPickFiles?: (files: File[]) => void;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
   /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
   onPickerPreviewChange?: (open: boolean) => void;
@@ -570,6 +575,7 @@ function GroupDetail({
             selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
             onPreview={setPreviewAsset}
             onPickerToggle={onPickerToggleAsset}
+            onPickerBlocked={onPickerBlockedAsset}
             onDeleteAsset={onDeleteAsset}
             onClosePreview={closePreview}
           />
@@ -622,6 +628,7 @@ function AigcFlatView({
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
+  onPickerBlockedAsset,
   pickerMediaTypes,
   onPickerAssetRemoved,
   onPickerPreviewChange,
@@ -631,6 +638,7 @@ function AigcFlatView({
   refreshTick?: number;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
   /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
   onPickerAssetRemoved?: (assetId: string) => void;
@@ -730,6 +738,7 @@ function AigcFlatView({
             selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
             onPreview={setPreviewAsset}
             onPickerToggle={onPickerToggleAsset}
+            onPickerBlocked={onPickerBlockedAsset}
             onDeleteAsset={handleDeleteAsset}
             onClosePreview={closePreview}
           />
@@ -781,6 +790,7 @@ export default function CharacterLibrary({
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
+  onPickerBlockedAsset,
   pickerMediaTypes,
   onPickerAssetRemoved,
   onPickerPreviewChange,
@@ -794,6 +804,7 @@ export default function CharacterLibrary({
   /** 画布资产选择弹窗：勾选素材（真人分组详情与虚拟平铺视图） */
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
   /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
   onPickerAssetRemoved?: (assetId: string) => void;
@@ -816,6 +827,7 @@ export default function CharacterLibrary({
         refreshTick={refreshTick}
         pickerSelectedIds={pickerSelectedIds}
         onPickerToggleAsset={onPickerToggleAsset}
+        onPickerBlockedAsset={onPickerBlockedAsset}
         pickerMediaTypes={pickerMediaTypes}
         onPickerAssetRemoved={onPickerAssetRemoved}
         onPickerPreviewChange={onPickerPreviewChange}
@@ -833,6 +845,7 @@ export default function CharacterLibrary({
       refreshTick={refreshTick}
       pickerSelectedIds={pickerSelectedIds}
       onPickerToggleAsset={onPickerToggleAsset}
+      onPickerBlockedAsset={onPickerBlockedAsset}
       pickerMediaTypes={pickerMediaTypes}
       onPickerAssetRemoved={onPickerAssetRemoved}
       onPickerPreviewChange={onPickerPreviewChange}
@@ -848,6 +861,7 @@ function LivenessLibrary({
   refreshTick,
   pickerSelectedIds,
   onPickerToggleAsset,
+  onPickerBlockedAsset,
   pickerMediaTypes,
   onPickerAssetRemoved,
   onPickerPreviewChange,
@@ -859,6 +873,7 @@ function LivenessLibrary({
   refreshTick?: number;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
   /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
   onPickerAssetRemoved?: (assetId: string) => void;
@@ -1135,6 +1150,7 @@ function LivenessLibrary({
           onPickFiles={onPickFiles}
           pickerSelectedIds={pickerSelectedIds}
           onPickerToggleAsset={onPickerToggleAsset}
+          onPickerBlockedAsset={onPickerBlockedAsset}
           pickerMediaTypes={pickerMediaTypes}
           onPickerPreviewChange={onPickerPreviewChange}
         />

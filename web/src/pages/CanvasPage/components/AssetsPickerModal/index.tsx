@@ -26,6 +26,7 @@ import {
   type MaterialAssetType,
 } from '@/api/material';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
 import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -71,6 +72,8 @@ export interface AssetsPickerModalProps {
   showLivenessTab?: boolean;
   /** 是否展示「虚拟人像库」tab（仅视频对话「从资产中选择」；画布工具栏入口不展示） */
   showCharacterTab?: boolean;
+  /** 视频参考入口：未通过素材不可勾选/确认（IKGK37 / REQ-D-204） */
+  rejectUnapprovedForVideo?: boolean;
 }
 
 function materialTypeToAssetType(assetType: MaterialAssetType): AssetType {
@@ -92,6 +95,9 @@ function materialToPickerRecord(asset: MaterialAsset, source: MaterialSource): A
     model: null,
     created_at: asset.CreateTime ?? null,
     material_id: asset.Id,
+    material_status: asset.Status === 'Active' || asset.Status === 'Processing' || asset.Status === 'Failed'
+      ? asset.Status
+      : undefined,
   };
 }
 
@@ -102,6 +108,7 @@ export default function AssetsPickerModal({
   confirmText = '插入画布',
   showLivenessTab = false,
   showCharacterTab = false,
+  rejectUnapprovedForVideo = false,
 }: AssetsPickerModalProps) {
   /** 可展示的 tab：按入口可接受类型过滤；单类型时只剩一个 tab（渲染层隐藏 tab 栏，除非带人像库） */
   const visibleTabs = useMemo((): { key: PickerTabKey; label: string }[] => {
@@ -256,6 +263,10 @@ export default function AssetsPickerModal({
 
   /** 卡片点击切换勾选（保存完整记录，跨 tab 提交时不丢） */
   const handleToggleSelect = useCallback((asset: AssetRecord) => {
+    if (rejectUnapprovedForVideo && isUnapprovedVideoMaterialStatus(asset.material_status)) {
+      toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+      return;
+    }
     const id = String(asset.id);
     setSelectedMap((prev) => {
       const next = new Map(prev);
@@ -263,16 +274,24 @@ export default function AssetsPickerModal({
       else next.set(id, asset);
       return next;
     });
-  }, []);
+  }, [rejectUnapprovedForVideo]);
 
   /** 素材库条目勾选：转弹窗记录（保留来源标记），入口类型不符直接忽略 */
   const handleToggleMaterialAsset = useCallback((asset: MaterialAsset, source: MaterialSource) => {
+    if (asset.Status === 'Processing') {
+      toast('素材处理中，稍后可用');
+      return;
+    }
+    if (rejectUnapprovedForVideo && isUnapprovedVideoMaterialStatus(asset.Status)) {
+      toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+      return;
+    }
     const record = materialToPickerRecord(asset, source);
     if (mediaTypes && mediaTypes.length > 0 && !mediaTypes.includes(record.type as PickerMediaType)) {
       return;
     }
     handleToggleSelect(record);
-  }, [handleToggleSelect, mediaTypes]);
+  }, [handleToggleSelect, mediaTypes, rejectUnapprovedForVideo]);
 
   const handleToggleLivenessAsset = useCallback(
     (asset: MaterialAsset) => handleToggleMaterialAsset(asset, 'liveness'),
@@ -405,6 +424,7 @@ export default function AssetsPickerModal({
               onPickFiles={handleLivenessPickFiles}
               pickerSelectedIds={selectedIds}
               onPickerToggleAsset={handleToggleLivenessAsset}
+              onPickerBlockedAsset={rejectUnapprovedForVideo ? handleToggleLivenessAsset : undefined}
               pickerMediaTypes={mediaTypes}
               onPickerAssetRemoved={handleMaterialAssetRemoved}
               onPickerPreviewChange={setMaterialPreviewOpen}
@@ -417,6 +437,7 @@ export default function AssetsPickerModal({
               onPickFiles={handleCharacterPickFiles}
               pickerSelectedIds={selectedIds}
               onPickerToggleAsset={handleToggleCharacterAsset}
+              onPickerBlockedAsset={rejectUnapprovedForVideo ? handleToggleCharacterAsset : undefined}
               pickerMediaTypes={mediaTypes}
               onPickerAssetRemoved={handleMaterialAssetRemoved}
               onPickerPreviewChange={setMaterialPreviewOpen}
@@ -475,7 +496,20 @@ export default function AssetsPickerModal({
             <button
               className={styles.confirmBtn}
               disabled={selectedAssets.length === 0}
-              onClick={() => onSelect(selectedAssets)}
+              onClick={() => {
+                if (!rejectUnapprovedForVideo) {
+                  onSelect(selectedAssets);
+                  return;
+                }
+                const allowed = selectedAssets.filter(
+                  (asset) => !isUnapprovedVideoMaterialStatus(asset.material_status),
+                );
+                if (allowed.length < selectedAssets.length) {
+                  toast.error(VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+                }
+                if (allowed.length === 0) return;
+                onSelect(allowed);
+              }}
             >
               {confirmText}{selectedAssets.length > 0 ? `（${selectedAssets.length}）` : ''}
             </button>

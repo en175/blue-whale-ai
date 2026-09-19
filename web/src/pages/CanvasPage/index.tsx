@@ -44,6 +44,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
@@ -4563,7 +4564,17 @@ export default function CanvasPage() {
       const materialId = fromLibrary
         ? id
         : (typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined);
+      if (isUnapprovedVideoMaterialStatus(asset.material_status)) {
+        return {
+          ...(materialId ? { materialId } : {}),
+          compliancePassed: false,
+          complianceFailed: true,
+        };
+      }
       if (asset.material_status !== 'Active' && !fromLibrary) return {};
+      if (fromLibrary && asset.material_status !== 'Active') {
+        return materialId ? { materialId } : {};
+      }
       return {
         ...(materialId ? { materialId } : {}),
         compliancePassed: true,
@@ -4694,6 +4705,12 @@ export default function CanvasPage() {
         ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
         : videoFreeRefs;
       let accepted = assets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
+      const unapproved = accepted.filter((a) => isUnapprovedVideoMaterialStatus(a.material_status));
+      if (unapproved.length > 0) {
+        showToast('warn', VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+        accepted = accepted.filter((a) => !isUnapprovedVideoMaterialStatus(a.material_status));
+        if (accepted.length === 0) return;
+      }
       if (role === 'first' || role === 'last') {
         if (refs[role]) {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
@@ -4737,7 +4754,9 @@ export default function CanvasPage() {
             showToast('error', '项目未就绪，请稍后重试');
             return;
           }
-          addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
+          if (validateVideoRefConnect(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role)) {
+            addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
+          }
         }
         return;
       }
@@ -4791,12 +4810,16 @@ export default function CanvasPage() {
         );
         return;
       }
-      const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
-      if (!nodeIds) {
-        showToast('error', '项目未就绪，请稍后重试');
-        return;
-      }
-      nodeIds.forEach((nid) => addCanvasEdge(nid, videoDraftId, role));
+        const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
+        if (!nodeIds) {
+          showToast('error', '项目未就绪，请稍后重试');
+          return;
+        }
+        nodeIds.forEach((nid) => {
+          if (validateVideoRefConnect(nid, videoDraftId, role)) {
+            addCanvasEdge(nid, videoDraftId, role);
+          }
+        });
       return;
     }
     if (target === 'audioDialog') {
@@ -9098,6 +9121,7 @@ export default function CanvasPage() {
           confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
           showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
           showCharacterTab={assetsPickerTarget === 'videoDraft'}
+          rejectUnapprovedForVideo={assetsPickerTarget === 'videoDraft'}
         />
       )}
 
