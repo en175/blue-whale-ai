@@ -79,6 +79,26 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('MediaNode 抠图结果卡渲染（IKGXMT）', () => {
+  it('抠图结果卡（imageCutout 标记）：成品图片区垫棋盘格底底层（IKGXMT，规格故事 21）；无标记卡不渲染', async () => {
+    await renderNode('image', {
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    const checker = mountNode.querySelector('[data-testid="cutout-checkerboard"]');
+    expect(checker).toBeTruthy();
+    expect(checker!.getAttribute('aria-hidden')).toBe('true');
+    // 无标记的普通图片卡不渲染棋盘格
+    await renderNode('image', { data: { mime: 'image/png' } });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
+    // 生成中占位态不渲染（棋盘格仅成品图片分支）
+    await renderNode('image', {
+      genStatus: 'generating',
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
+  });
+});
+
 describe('MediaNode draft overlay (IKDMQQ)', () => {
   it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {
     await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });

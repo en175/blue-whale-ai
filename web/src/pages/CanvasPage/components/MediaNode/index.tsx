@@ -8,6 +8,7 @@ import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
+import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import EraseMaskLayer from './EraseMaskLayer';
 import { commitCardName } from '../cardName';
@@ -68,6 +69,9 @@ export interface MediaNodeData {
   draftRatio?: string;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
+  /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
+   *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
+  imageCutout?: ImageCutoutIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -148,6 +152,8 @@ export interface MediaNodeData {
   onOutpaintImage?: (id: string) => void;
   /** 裁切（IKGW1H）：把本卡置为裁切编辑态（「高清 ▾」下拉「裁切」项派发；无门槛恒可用） */
   onCropImage?: (id: string) => void;
+  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
+  onCutoutImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -522,6 +528,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           />
         ) : (
           <>
+            {/* 抠图结果卡棋盘格垫底层（IKGXMT）：垫在 img 之下的静态棋盘格，透出透明 png 的
+                透明区域（规格故事 21）；仅 imageCutout 标记卡渲染，aria-hidden 纯视觉 */}
+            {data.imageCutout && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="cutout-checkerboard" />
+            )}
             <img
               className={styles.mediaImage}
               src={data.src}

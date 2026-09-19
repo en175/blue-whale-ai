@@ -127,11 +127,21 @@ describe('MediaNodeToolbar image-quality menu（高清 ▾）', () => {
     });
   }
 
-  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」四项（合并顺序）', async () => {
+  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」「抠图」五项（IKGW1H+IKGOQ0+IKGXLT 合并顺序）', async () => {
     await renderToolbar('image');
     await openQualityMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
-    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除']);
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除', '抠图']);
+  });
+
+  it('点「抠图」派发 onCutoutImage（携带节点 id）', async () => {
+    const onCutoutImage = vi.fn();
+    await renderToolbar('image', { data: { onCutoutImage, mime: 'image/png' } });
+    await openQualityMenu();
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-cutout"]')!.click();
+    });
+    expect(onCutoutImage).toHaveBeenCalledWith('image-node');
   });
 
   it('点「裁切」派发 onCropImage（携带节点 id）', async () => {

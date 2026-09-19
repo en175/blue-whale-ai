@@ -8,9 +8,10 @@
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * ============================================ */
 import { useState, useCallback } from 'react';
-import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2 } from 'lucide-react';
+import { Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, Expand, Eraser, Crop, Maximize2, WandSparkles } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
+import { imageCutoutGateReason } from '../../imageCutout';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import type { MediaNodeData } from './index';
@@ -37,6 +38,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     typeof data.size === 'number' ? data.size : undefined,
   );
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
+  const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -51,9 +53,11 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
-  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：顺序高清、扩图、裁切、擦除；
+  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：顺序高清、扩图、裁切、擦除、抠图；
    *  擦除按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）、扩图按
-   *  outpaintGateReason 门槛预检置灰、裁切无置灰门槛恒可用 */
+   *  outpaintGateReason 门槛预检置灰、裁切无置灰门槛恒可用；
+   *  抠图（IKGXLT/IKGXMT）在「擦除」之后追加，按 imageCutout 门槛预检置灰（无最小边判定，
+   *  通用场景上限 10240/6000/40MP + 30MB；点击经 onCutoutImage 进入抠图工具栏） */
   const qualityMenuItems: ImageQualityMenuItem[] = [
     {
       id: 'enhance',
@@ -86,6 +90,14 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
       hint: '涂抹或框选抹掉图中不要的内容',
       disabledReason: imageEraseGateReason(data),
       onSelect: handleEraseImage,
+    },
+    {
+      id: 'cutout',
+      label: '抠图',
+      icon: WandSparkles,
+      hint: '自动识别主体并移除背景',
+      disabledReason: imageCutoutGateReason(data),
+      onSelect: handleCutoutImage,
     },
   ];
 
