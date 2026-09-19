@@ -277,8 +277,8 @@ export function deleteAssetGroup(id: string, opts?: { silent?: boolean }) {
 /* ---------- 素材接口 ---------- */
 
 /** 上传素材（两段式：先通过 Asset 管道拿公网 URL，再调此接口） */
-export function createAsset(params: CreateAssetParams) {
-  return materialRequest<{ Id: string }>('CreateAsset', params);
+export function createAsset(params: CreateAssetParams, opts?: { silent?: boolean }) {
+  return materialRequest<{ Id: string }>('CreateAsset', params, opts);
 }
 
 /** 列出素材 */
