@@ -35,6 +35,37 @@ export function computeFollowAnchor(opts: {
   return { left: Math.round(left), top: Math.round(nodeBottom + FOLLOW_GAP) };
 }
 
+/** 上方锚定默认抬升量（屏幕像素）：工具条估高约 42 + 与卡片顶边间距 10（口径同擦除上方工具条的 52） */
+export const FOLLOW_ABOVE_LIFT = 52;
+/** 上方锚定水平视口钳制默认估半宽（屏幕像素）：仅用于钳制边界，不参与居中 */
+export const FOLLOW_ABOVE_HALF_WIDTH = 200;
+/** 上方锚定垂直钳顶保底（屏幕像素）：卡片顶到视口上方时工具条不被容器裁掉 */
+export const FOLLOW_ABOVE_MIN_TOP = 8;
+
+/** 卡片上方居中锚定（IKGYYD 钉屏幕工具栏基建）：将节点 flow 坐标换算为画布容器内的
+ *  工具栏屏幕坐标——left 是工具栏中心点 x（消费方容器 translateX(-50%) 完成真居中，
+ *  估半宽只用于视口钳制，不参与居中：工具条宽度随按钮显隐动态变化，估宽居中会跳位）；
+ *  top 是工具栏顶边 y（卡片顶边屏幕坐标 - 抬升量），垂直仅钳顶部保底、向下不钳制；
+ *  zoom 只参与位置换算，抬升量/半宽恒为屏幕像素（工具栏尺寸不随缩放变化）。 */
+export function computeFollowAnchorAbove(opts: {
+  nodeX: number;
+  nodeY: number;
+  nodeWidth: number;
+  viewport: { x: number; y: number; zoom: number };
+  containerWidth: number;
+  toolbarHalfWidth?: number;
+  toolbarLift?: number;
+}): FollowDialogAnchor {
+  const zoom = opts.viewport.zoom || 1;
+  const halfWidth = opts.toolbarHalfWidth ?? FOLLOW_ABOVE_HALF_WIDTH;
+  const lift = opts.toolbarLift ?? FOLLOW_ABOVE_LIFT;
+  const centerX = (opts.nodeX + opts.nodeWidth / 2) * zoom + opts.viewport.x;
+  const minLeft = FOLLOW_PAD + halfWidth;
+  const left = Math.max(minLeft, Math.min(centerX, Math.max(minLeft, opts.containerWidth - halfWidth - FOLLOW_PAD)));
+  const top = Math.max(FOLLOW_ABOVE_MIN_TOP, opts.nodeY * zoom + opts.viewport.y - lift);
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
 /** 视频跟随输入框四模式（文生视频单独于现有 text2video=图生视频） */
 export type VideoFollowMode = 'prompt' | 'all' | 'text2video' | 'keyframe';
 

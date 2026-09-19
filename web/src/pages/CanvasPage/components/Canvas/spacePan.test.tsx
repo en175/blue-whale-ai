@@ -111,8 +111,9 @@ describe('Canvas space pan', () => {
 
   it('does not activate card buttons or click callbacks while panning', async () => {
     await key('keydown');
-    const button = node().querySelector('button')!;
-    await mouse('click', button);
+    // IKGYYD 工具条迁出节点卡后，卡内交互元素探针改用标题行（按钮在钉屏幕层，不在卡内）
+    const title = node().querySelector('[data-testid="media-title"]')!;
+    await mouse('click', title);
     await mouse('click', node());
     await mouse('click', pane());
     expect(props.mediaNodes[0].data.onReEdit).not.toHaveBeenCalled();
@@ -267,7 +268,8 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     expect(title.textContent).toContain('1600×900');
     if (mediaType === 'video') expect(title.textContent).toContain('12s');
     expect(node().style.transform).toBe('translate(50px,60px)');
-    expect(node().querySelector('button')?.textContent).toBe('重新编辑');
+    // IKGYYD 工具条迁出节点卡：选中态探针由「重新编辑」按钮改为 React Flow selected class
+    expect(node().classList.contains('selected')).toBe(true);
 
     await mouse('mousedown', title);
     await mouse('mousemove', window, 120, 110);
@@ -286,7 +288,7 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     });
     expect(node().style.transform).toBe(draggedPosition);
     expect(title.textContent).toContain('1600×900');
-    expect(node().querySelector('button')?.textContent).toBe('重新编辑');
+    expect(node().classList.contains('selected')).toBe(true);
   });
 });
 
@@ -316,7 +318,8 @@ describe('Canvas media loading during interaction', () => {
     await mouse('mousemove', window, 160, 140);
     const draggedPosition = node().style.transform;
     expect(draggedPosition).not.toBe('translate(50px,60px)');
-    expect(node().querySelector('button[title="详情"]')).not.toBeNull();
+    // IKGYYD 工具条迁出节点卡：选中态探针由「详情」按钮改为 React Flow selected class
+    expect(node().classList.contains('selected')).toBe(true);
 
     const image = container.querySelector<HTMLImageElement>(`[data-id="${loadingId}"] img`)!;
     Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } });
@@ -325,7 +328,7 @@ describe('Canvas media loading during interaction', () => {
     expect(container.querySelector(`[data-id="${loadingId}"] [data-testid="media-title"]`)!.textContent)
       .toContain('1600×900');
     expect(node().style.transform).toBe(draggedPosition);
-    expect(node().querySelector('button[title="详情"]')).not.toBeNull();
+    expect(node().classList.contains('selected')).toBe(true);
     await finishGesture();
     expect(node().style.transform).toBe(draggedPosition);
     expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }), expect.any(Array));
