@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
@@ -24,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * 六条消费路由的接线断言（ADR-0084 修正六）：
+ * 七条消费路由的接线断言（ADR-0084 修正六）：
  * 部署环境里残留的 {@code ROCKETMQ_TOPIC=generation-video} / {@code ROCKETMQ_TAG=step}
  * **改不了任何消费者的订阅**——订阅的 topic / tag 只来自 {@link GenerationMqRoute}。
  * <p>
@@ -40,17 +41,18 @@ import static org.mockito.Mockito.mock;
  * 本用例要验的是「喂进订阅表达式的值」，与能不能连上 broker 无关。
  * <p>
  * 连接配置经唯一的 {@code rocketMqClientConfiguration(env)} 构建（修正六之后全类仅此一处绑定），
- * 再把产物注入六个 bean 方法——即生产装配的同一条路径。
+ * 再把产物注入七个 bean 方法——即生产装配的同一条路径。
  */
 class ConsumerRouteWiringTest {
 
-    /** 六个消费者按 {@link GenerationMqRoute} 的顺序对位。 */
+    /** 七个消费者按 {@link GenerationMqRoute} 的顺序对位。 */
     private static final List<GenerationMqRoute> ROUTES = List.of(
             GenerationMqRoute.MEDIA_EXTRACT,
             GenerationMqRoute.AUDIO,
             GenerationMqRoute.IMAGE,
             GenerationMqRoute.IMAGE_ENHANCE,
             GenerationMqRoute.IMAGE_ERASE,
+            GenerationMqRoute.IMAGE_CUTOUT,
             GenerationMqRoute.VIDEO);
 
     /** 残留旧名的部署环境（修正六之前的 topic / tag 取值）。 */
@@ -66,7 +68,7 @@ class ConsumerRouteWiringTest {
     }
 
     @Test
-    @DisplayName("残留 rocketmq.topic / rocketmq.tag 下，六个消费者仍订阅 GenerationMqRoute 的 topic / tag")
+    @DisplayName("残留 rocketmq.topic / rocketmq.tag 下，七个消费者仍订阅 GenerationMqRoute 的 topic / tag")
     void consumersSubscribeEnumRouteDespiteResidualOverrides() {
         RocketMqConfig config = new RocketMqConfig();
         WorkerProperties workerProps = new WorkerProperties(null);
@@ -74,7 +76,7 @@ class ConsumerRouteWiringTest {
         // 全类唯一的连接配置构建点：残留属性只喂到这里，且绑不到任何 topic / tag 分量。
         ClientConfiguration clientConfig = config.rocketMqClientConfiguration(env);
 
-        // 顺序与 ROUTES 对位：前五个走 workerProps 并发度，video 顺序消费不带并发度。
+        // 顺序与 ROUTES 对位：前六个走 workerProps 并发度，video 顺序消费不带并发度。
         List<AbstractGenerationConsumer> consumers = List.of(
                 config.mediaExtractConsumer(
                         mock(MediaExtractJobProcessor.class), workerProps, clientConfig),
@@ -84,6 +86,8 @@ class ConsumerRouteWiringTest {
                         mock(ImageEnhanceJobProcessor.class), workerProps, clientConfig),
                 config.imageEraseConsumer(
                         mock(ImageEraseJobProcessor.class), workerProps, clientConfig),
+                config.imageCutoutConsumer(
+                        mock(ImageCutoutJobProcessor.class), workerProps, clientConfig),
                 config.videoConsumer(mock(VideoJobProcessor.class), clientConfig));
 
         assertThat(consumers).hasSize(ROUTES.size());

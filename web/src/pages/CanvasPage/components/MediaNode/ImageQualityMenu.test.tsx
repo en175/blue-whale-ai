@@ -3,7 +3,7 @@
    点外关闭（useDismissOnOutside）、Esc 关闭。渲染模式沿用 useDismissOnOutside.test.tsx（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Eraser, Expand } from 'lucide-react';
+import { Eraser, Expand, WandSparkles } from 'lucide-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 
@@ -84,6 +84,71 @@ describe('ImageQualityMenu（高清 ▾ 下拉）', () => {
     await openMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
     expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '擦除']);
+  });
+
+  it('数组尾部追加第三项（抠图 IKGXLT 插入位）照常渲染，顺序由数组决定', async () => {
+    const menuItems = items();
+    menuItems.push({
+      id: 'cutout',
+      label: '抠图',
+      icon: WandSparkles,
+      hint: '自动识别主体并移除背景',
+      disabledReason: null,
+      onSelect: vi.fn(),
+    });
+    await renderMenu(menuItems);
+    await openMenu();
+    const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '擦除', '抠图']);
+    const cutout = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-cutout"]')!;
+    expect(cutout.getAttribute('title')).toBe('自动识别主体并移除背景');
+  });
+
+  it('追加的抠图项置灰：aria-disabled + title 悬停原因，点击不派发不收起', async () => {
+    const reason = 'webp 格式不支持抠图（支持 PNG / JPG / JPEG / HEIC）';
+    const menuItems = items();
+    menuItems.push({
+      id: 'cutout',
+      label: '抠图',
+      icon: WandSparkles,
+      disabledReason: reason,
+      onSelect: vi.fn(),
+    });
+    await renderMenu(menuItems);
+    await openMenu();
+    const cutout = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-cutout"]')!;
+    expect(cutout.getAttribute('aria-disabled')).toBe('true');
+    expect(cutout.getAttribute('title')).toBe(reason);
+    await act(async () => {
+      cutout.click();
+    });
+    expect(menuItems[2].onSelect).not.toHaveBeenCalled();
+    expect(mountNode.querySelector('[data-testid="image-quality-menu"]')).not.toBeNull();
+  });
+
+  it('追加第三项后不影响既有项（可用项派发收起、hint 悬停口径不变）', async () => {
+    const menuItems = items();
+    menuItems.push({
+      id: 'cutout',
+      label: '抠图',
+      icon: WandSparkles,
+      hint: '自动识别主体并移除背景',
+      disabledReason: null,
+      onSelect: vi.fn(),
+    });
+    await renderMenu(menuItems);
+    await openMenu();
+    expect(
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!.getAttribute('title'),
+    ).toBe('在右侧新建高清放大草稿卡');
+    expect(
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.getAttribute('aria-disabled'),
+    ).toBeNull();
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!.click();
+    });
+    expect(menuItems[0].onSelect).toHaveBeenCalledTimes(1);
+    expect(mountNode.querySelector('[data-testid="image-quality-menu"]')).toBeNull();
   });
 
   it('点可用菜单项：派发 onSelect 并收起菜单', async () => {

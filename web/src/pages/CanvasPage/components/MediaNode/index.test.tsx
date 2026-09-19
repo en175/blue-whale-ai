@@ -141,11 +141,11 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     });
   }
 
-  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」四项（IKGW1H+IKGOQ0 合并顺序）', async () => {
+  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」「抠图」五项（IKGW1H+IKGOQ0+IKGXLT 合并顺序）', async () => {
     await renderNode('image');
     await openQualityMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
-    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除']);
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除', '抠图']);
   });
 
   it('点「裁切」派发 onCropImage（携带节点 id）', async () => {
@@ -177,6 +177,24 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
       mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.click();
     });
     expect(onEraseImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('抠图结果卡（imageCutout 标记）：成品图片区垫棋盘格底底层（IKGXMT，规格故事 21）；无标记卡不渲染', async () => {
+    await renderNode('image', {
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    const checker = mountNode.querySelector('[data-testid="cutout-checkerboard"]');
+    expect(checker).toBeTruthy();
+    expect(checker!.getAttribute('aria-hidden')).toBe('true');
+    // 无标记的普通图片卡不渲染棋盘格
+    await renderNode('image', { data: { mime: 'image/png' } });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
+    // 生成中占位态不渲染（棋盘格仅成品图片分支）
+    await renderNode('image', {
+      genStatus: 'generating',
+      data: { mime: 'image/png', imageCutout: { sourceAssetId: '5' } },
+    });
+    expect(mountNode.querySelector('[data-testid="cutout-checkerboard"]')).toBeNull();
   });
 
   it('超尺寸（长边>2560 或短边>1440，短边/长边语义）：擦除置灰并悬停原因，高清项不受影响', async () => {
