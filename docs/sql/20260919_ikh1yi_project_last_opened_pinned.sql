@@ -8,8 +8,9 @@
 -- - 列表排序口径统一 [{ pinned_at: desc }, { gmt_create: desc }]：MySQL
 --   DESC 下 NULL 排最后，未置顶组天然在后，无需 nulls 参数（不支持）。
 --
--- 双轨：本文件与 backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql、
---       docs/sql/20260919_ikh1yi_project_last_opened_pinned.sql 内容需逐字一致
+-- 双轨：backend/prisma/schema/028_ikh1yi_project_last_opened_pinned.sql、
+--       backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql、
+--       docs/sql/20260919_ikh1yi_project_last_opened_pinned.sql 三处内容逐字一致
 --       （有 parity 测试断言）。
 
 SET NAMES utf8mb4;
