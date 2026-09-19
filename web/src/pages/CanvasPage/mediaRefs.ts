@@ -8,18 +8,20 @@ import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
 import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
 import { IMAGE_OUTPAINT_EDGE_ORIGIN } from './imageOutpaint';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
+import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 
 /** 纯视觉来源边标记集合（edge.data.origin）：这些边表达「目标卡由来源卡衍生而来」，
  *  是来源记录而非生成参考输入——参考推导跳过，源图不占参考位、不参与 @ 编号与媒体索引
  *  （高清放大 IKGOTB 前只有 image-enhance，IKGOTB 加入擦除 image-erase，IKGOR6 加入扩图
- *  image-outpaint，IKGW1S 加入裁切 image-crop，IKGXMT 加入抠图 image-cutout，口径同
- *  mediaExtract 来源边）。 */
+ *  image-outpaint，IKGW1S 加入裁切 image-crop，IKGXMT 加入抠图 image-cutout，IKGZ83 加入
+ *  去字幕 video-subtitle-erase——首个视频系来源边，常量单源在契约，口径同 mediaExtract 来源边）。 */
 const PURE_VISUAL_EDGE_ORIGINS: ReadonlySet<string> = new Set([
   IMAGE_ENHANCE_EDGE_ORIGIN,
   IMAGE_ERASE_EDGE_ORIGIN,
   IMAGE_OUTPAINT_EDGE_ORIGIN,
   IMAGE_CROP_EDGE_ORIGIN,
   IMAGE_CUTOUT_EDGE_ORIGIN,
+  VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN,
 ]);
 
 /** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 references[].asset_id。

@@ -634,3 +634,30 @@ describe('MediaNode card rename (IKFA8X)', () => {
     expect(onTitleChange).toHaveBeenCalledWith('video-node', '片头动画');
   });
 });
+
+describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
+  /** 视频卡注入 subtitleEraseEditing 时：内容区叠加检测框层（半透明矩形描边渲染层挂载、
+      指针接管 nodrag/nopan）且视频元素被暂停在当前帧；未注入（正常视频卡）不渲染。 */
+  it('注入 subtitleEraseEditing：渲染框层并暂停视频；未注入不渲染', async () => {
+    const editing = {
+      boxes: [{ kind: 'box' as const, from: { x: 10, y: 10 }, to: { x: 100, y: 60 } }],
+      liveBox: null,
+      onBoxStart: () => {},
+      onBoxMove: () => {},
+      onBoxEnd: () => {},
+    };
+    // jsdom 不加载媒体：拦截 HTMLMediaElement.prototype.pause 验证编辑态注入即暂停在当前帧
+    const pauseSpy = vi.fn();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseSpy);
+    await renderNode('video', { data: { subtitleEraseEditing: editing } });
+    expect(pauseSpy).toHaveBeenCalled();
+    pause.mockRestore();
+    const layer = mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]');
+    expect(layer).toBeTruthy();
+    expect(layer!.className).toContain('nodrag');
+    expect(layer!.className).toContain('nopan');
+    // 未注入的正常视频卡不渲染框层
+    await renderNode('video', {});
+    expect(mountNode.querySelector('[data-testid="subtitle-erase-boxes-layer"]')).toBeNull();
+  });
+});
