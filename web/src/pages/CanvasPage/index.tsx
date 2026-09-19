@@ -37,6 +37,8 @@ import {
   videoRefConflict,
   videoRefSourceError,
   checkAddVideoRef,
+  incomingVideoRefOccupied,
+  occupiedVideoRefIds,
   type VideoMediaRef,
   type VideoMediaRefs,
   type VideoRefRole,
@@ -596,9 +598,13 @@ export default function CanvasPage() {
       return false;
     }
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
-    const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video' | 'audio';
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs);
+    const sourceData = (source.data ?? {}) as Record<string, unknown>;
+    const assetId = readAssetId(sourceData);
+    const mediaType = sourceData.mediaType as 'image' | 'video' | 'audio';
+    const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
+      ? sourceData.materialId
+      : undefined;
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, undefined, [materialId]);
     if (msg) {
       showToast('warn', msg);
       return false;
@@ -2394,13 +2400,15 @@ export default function CanvasPage() {
       return null;
     }
     const current = role === 'first' ? refs.first : refs.last;
-    if (current?.assetId === assetId) return null;
+    const sourceMaterialId = typeof data.materialId === 'string' && data.materialId ? data.materialId : undefined;
+    if (current && incomingVideoRefOccupied({ reference: [current] }, [assetId, sourceMaterialId])) return null;
     // 已作为普通参考连入的同一素材：选尾帧/首帧时应改角色，不按「素材重复」拒绝
+    const sameIncoming = (r: VideoMediaRef) => incomingVideoRefOccupied({ reference: [r] }, [assetId, sourceMaterialId]);
     const slotCleared: VideoMediaRefs = {
       ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
-      reference: refs.reference.filter((r) => r.assetId !== assetId),
+      reference: refs.reference.filter((r) => !sameIncoming(r)),
     };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared);
+    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, undefined, [sourceMaterialId]);
     if (msg) {
       showToast('warn', msg);
       return null;
@@ -4564,8 +4572,8 @@ export default function CanvasPage() {
         return;
       }
       // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
-      // 缺省回落旧 9/3/3）；assetId 查重跳过
-      const known = new Set(refs.reference.map((r) => r.assetId));
+      // 缺省回落旧 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      const known = occupiedVideoRefIds(refs);
       let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
       let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
       let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
@@ -4573,7 +4581,8 @@ export default function CanvasPage() {
       let skippedDup = false;
       const filtered: AssetRecord[] = [];
       for (const a of accepted) {
-        if (known.has(String(a.id))) {
+        const materialId = typeof a.material_id === 'string' && a.material_id ? a.material_id : undefined;
+        if (known.has(String(a.id)) || (materialId && known.has(materialId))) {
           skippedDup = true;
           continue;
         }
@@ -4587,6 +4596,7 @@ export default function CanvasPage() {
         else if (isVideo) vidSlots -= 1;
         else audSlots -= 1;
         known.add(String(a.id));
+        if (materialId) known.add(materialId);
         filtered.push(a);
       }
       accepted = filtered;
@@ -6257,7 +6267,7 @@ export default function CanvasPage() {
    *  槽位占用/尾帧配首帧/查重/图9视频3上限；通过后写入本地 refs，不落画布不连线 */
   const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole): void => {
     const refs = videoFreeRefs;
-    const msg = checkAddVideoRef(role, item.mediaType, item.assetId, refs);
+    const msg = checkAddVideoRef(role, item.mediaType, item.assetId, refs, undefined, [item.materialId]);
     if (msg) {
       showToast('warn', msg);
       return;
