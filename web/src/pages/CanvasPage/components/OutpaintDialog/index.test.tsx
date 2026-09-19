@@ -151,14 +151,18 @@ describe('字段矩阵（张数 / 免费文案 / 发送钮）', () => {
     const send = btn('outpaint-send-btn');
     expect(send.disabled).toBe(true);
     expect(send.title).toContain('拖动扩展框');
+    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
+    expect(send.querySelector('svg.lucide-arrow-up')).toBeTruthy();
+    expect(send.className).not.toMatch(/sendBtnActive/);
     await click(send);
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('拖出扩展后发送钮可点：触发 onSend（工具栏关闭与退出模式由父级承接）', async () => {
+  it('拖出扩展后发送钮可点：激活态带 sendBtnActive，触发 onSend（工具栏关闭与退出模式由父级承接）', async () => {
     renderPanel({ expands: { top: 30, right: 60, bottom: 0, left: 0 } });
     const send = btn('outpaint-send-btn');
     expect(send.disabled).toBe(false);
+    expect(send.className).toMatch(/sendBtnActive/);
     expect(send.title).toBe('发送');
     await click(send);
     expect(sendMock).toHaveBeenCalledTimes(1);

@@ -158,6 +158,14 @@
   background: transparent;
 }
 
+/* 「高清 ▾」触发钮所显示工具对当前卡不可用（IKGZ5P）：aria-disabled 整钮置灰（非原生 disabled，
+   hover 仍可展开菜单改选），口径同 qualityMenuItem 置灰项 */
+.toolBtn[aria-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+  background: transparent;
+}
+
 .toolDivider {
   width: 1px;
   height: 16px;

@@ -44,6 +44,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
@@ -1322,6 +1323,8 @@ export default function CanvasPage() {
     : null;
   const showSoloMediaToolbar = soloMediaToolbarNode != null
     && mediaCardToolbarVisible(soloMediaToolbarNode.data ?? {});
+  // IKGZ5O 工具会话模态门不并入本谓词：editSessionActive 定义位置晚于此处（TDZ），
+  // 且会话态属调用方数据条件，按 NodeFollowToolbar 分工直接写在渲染处 show 表达式里
   /** IKGYYF 资产卡悬浮顶部操作条：hover 的资产卡优先（等价迁移前 .wrapper:hover），
    *  否则唯一选中的资产卡；渲染条件（生成卡恒显 / HIDE_ASSET_TOP_BAR 门控纯资产卡）
    *  与内容迁至 AssetCardToolbar，「唯一选中 + hover」门在 NodeFollowToolbar 容器。
@@ -2413,8 +2416,10 @@ export default function CanvasPage() {
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard };
 
-  /** 唤起底部图片对话框（工具栏图片图标 / 资产卡「生成图片」共用） */
+  /** 唤起底部图片对话框（工具栏图片图标 / 资产卡「生成图片」共用）；
+   *  IKGZ5O：会话期打开请求先退出编辑会话（参数丢弃）再放行 */
   const handleOpenImageDialog = () => {
+    exitEditSessionForGenPanel();
     imagePanelHiddenRef.current = false;
     setShowImageDialog(true);
     setShowBottomDialog(false);
@@ -2985,6 +2990,20 @@ export default function CanvasPage() {
     closeEnhanceDialog();
   };
 
+  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除任一会话
+   *  进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
+   *  见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
+  const editSessionActive =
+    eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null;
+  /** IKGZ5O 会话期打开生成面板的统一前置：按四路退出口径退出当前编辑会话（未发送
+   *  参数全部丢弃），面板随后放行打开；无会话时为幂等空操作（各 exit 幂等复位）。 */
+  const exitEditSessionForGenPanel = () => {
+    exitEraseEditing();
+    exitCutoutSession();
+    exitCropMode();
+    endOutpaintSession();
+  };
+
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
    *  IKFYH6 拍板 4——持续选取会话/单次选取进行中点空白只退选取，面板保留（再点一次空白才关）；
    *  否则五面板统一关闭（推翻视频面板「点空白不关」旧设计；面板编辑实时写回节点 data，隐藏不丢内容）。
@@ -3065,7 +3084,9 @@ export default function CanvasPage() {
       if (!boundId) return;
       if (submittingNodeId && boundId !== submittingNodeId) return;
       if (soloId && soloId === boundId) {
-        setShow(true); // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）
+        // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）；
+        // IKGZ5O 编辑会话期不回弹面板（工具状态模态，会话退出后按既有口径恢复）
+        if (!editSessionActive) setShow(true);
         return;
       }
       if (soloId || candidates.length > 1) setShow(false); // 单选其他卡或多选：隐藏
@@ -3369,6 +3390,7 @@ export default function CanvasPage() {
       },
       initialParams: identity?.lastParams ? restoreImageEnhanceParams(identity.lastParams) : null,
     });
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowBottomDialog(false);
     setShowImageDialog(false);
     setShowAudioDialog(false);
@@ -3599,6 +3621,7 @@ export default function CanvasPage() {
       attachments: textAttachmentsOf(nodeId),
     });
     warnStaleMediaRefs(nodeId, 'video');
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowBottomDialog(true);
     setShowImageDialog(false);
     setShowAudioDialog(false);
@@ -3825,6 +3848,7 @@ export default function CanvasPage() {
   const openTextGenDialog = (nodeId: string) => {
     skipTextGenOpenRef.current = false;
     setTextGenDraftId(nodeId);
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowTextGenDialog(true);
     setShowImageDialog(false);
     setShowBottomDialog(false);
@@ -4057,6 +4081,7 @@ export default function CanvasPage() {
       doc: restorePromptDoc(d.promptDoc, d.prompt),
       refs: [],
     });
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowAudioDialog(true);
     setShowBottomDialog(false);
     setShowImageDialog(false);
@@ -4563,7 +4588,17 @@ export default function CanvasPage() {
       const materialId = fromLibrary
         ? id
         : (typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined);
+      if (isUnapprovedVideoMaterialStatus(asset.material_status)) {
+        return {
+          ...(materialId ? { materialId } : {}),
+          compliancePassed: false,
+          complianceFailed: true,
+        };
+      }
       if (asset.material_status !== 'Active' && !fromLibrary) return {};
+      if (fromLibrary && asset.material_status !== 'Active') {
+        return materialId ? { materialId } : {};
+      }
       return {
         ...(materialId ? { materialId } : {}),
         compliancePassed: true,
@@ -4694,6 +4729,12 @@ export default function CanvasPage() {
         ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
         : videoFreeRefs;
       let accepted = assets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
+      const unapproved = accepted.filter((a) => isUnapprovedVideoMaterialStatus(a.material_status));
+      if (unapproved.length > 0) {
+        showToast('warn', VIDEO_REFERENCE_NOT_APPROVED_MESSAGE);
+        accepted = accepted.filter((a) => !isUnapprovedVideoMaterialStatus(a.material_status));
+        if (accepted.length === 0) return;
+      }
       if (role === 'first' || role === 'last') {
         if (refs[role]) {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
@@ -4737,7 +4778,9 @@ export default function CanvasPage() {
             showToast('error', '项目未就绪，请稍后重试');
             return;
           }
-          addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
+          if (validateVideoRefConnect(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role)) {
+            addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
+          }
         }
         return;
       }
@@ -4791,12 +4834,16 @@ export default function CanvasPage() {
         );
         return;
       }
-      const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
-      if (!nodeIds) {
-        showToast('error', '项目未就绪，请稍后重试');
-        return;
-      }
-      nodeIds.forEach((nid) => addCanvasEdge(nid, videoDraftId, role));
+        const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
+        if (!nodeIds) {
+          showToast('error', '项目未就绪，请稍后重试');
+          return;
+        }
+        nodeIds.forEach((nid) => {
+          if (validateVideoRefConnect(nid, videoDraftId, role)) {
+            addCanvasEdge(nid, videoDraftId, role);
+          }
+        });
       return;
     }
     if (target === 'audioDialog') {
@@ -6904,6 +6951,7 @@ export default function CanvasPage() {
     setAudioSeed({ ts: Date.now() });
     // IKFYH6：自由音频面板打开路径同样重置隐藏标记，否则选中变化关闭对该面板失效
     audioPanelHiddenRef.current = false;
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowAudioDialog(true);
     setShowBottomDialog(false);
     setShowImageDialog(false);
@@ -8420,9 +8468,22 @@ export default function CanvasPage() {
             //  两编辑态互斥（进入时互相退出），裁切框/面板（IKGW1N）据此识别编辑目标
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图）或高清面板打开
+            // 期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
+            // 集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
+              || cutoutNodeId || outpaintNodeId || showEnhanceDialog
               ? mediaNodes.map((n) => {
-                  if (n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId) return n;
+                  const hideToolbar =
+                    showEnhanceDialog
+                    || n.id === eraseTargetNodeId
+                    || n.id === cropTargetNodeId
+                    || n.id === cutoutNodeId
+                    || n.id === outpaintNodeId;
+                  if (
+                    n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
+                    && !hideToolbar
+                  ) return n;
                   const data: Record<string, unknown> = { ...n.data };
                   if (n.id === eraseTargetNodeId) {
                     data.eraseEditing = {
@@ -8435,6 +8496,7 @@ export default function CanvasPage() {
                   }
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
+                  if (hideToolbar) data.soloToolbarHidden = true;
                   return { ...n, data };
                 })
               : mediaNodes
@@ -8446,9 +8508,14 @@ export default function CanvasPage() {
           followToolbarLayer={
             <>
               {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
-                  内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随 */}
+                  内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随。
+                  IKGZ5O 工具会话模态：任一编辑会话激活或高清面板打开期间整条不渲染（词条「工具会话」
+                  模态口径；editSessionActive 与 showEnhanceDialog 为全局布尔，对全部媒体卡生效） */}
               {soloMediaToolbarNode ? (
-                <NodeFollowToolbar nodeId={soloMediaToolbarNode.id} show={showSoloMediaToolbar}>
+                <NodeFollowToolbar
+                  nodeId={soloMediaToolbarNode.id}
+                  show={showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog}
+                >
                   <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
                 </NodeFollowToolbar>
               ) : null}
@@ -9029,6 +9096,7 @@ export default function CanvasPage() {
               setAudioSeed({ ts: Date.now() });
               setAudioDraftId(null);
               setShowAudioDialog(false);
+              exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
               setShowMusicDialog(true);
             }}
           />
@@ -9045,6 +9113,7 @@ export default function CanvasPage() {
             externalPick={musicPickResult}
             onSwitchToAudio={() => {
               setShowMusicDialog(false);
+              exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
               setShowAudioDialog(true);
             }}
           />
@@ -9098,6 +9167,7 @@ export default function CanvasPage() {
           confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
           showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
           showCharacterTab={assetsPickerTarget === 'videoDraft'}
+          rejectUnapprovedForVideo={assetsPickerTarget === 'videoDraft'}
         />
       )}
 

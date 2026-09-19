@@ -5,6 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
 import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -213,7 +214,7 @@ export function videoRefSourceError(node: Node | undefined, role: VideoRefRole):
   const data = (node.data ?? {}) as Record<string, unknown>;
   if (role !== 'reference' && data.mediaType !== 'image') return '首尾帧仅支持图片素材';
   if (data.mediaType !== 'image' && data.mediaType !== 'video' && data.mediaType !== 'audio') return '视频参考仅支持图片、视频或音频素材';
-  if (data.complianceFailed === true) return '合规校验未通过，不可用于视频生成';
+  if (data.complianceFailed === true) return VIDEO_REFERENCE_NOT_APPROVED_MESSAGE;
   return baseSourceError(node);
 }
 

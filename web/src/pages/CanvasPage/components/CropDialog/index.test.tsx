@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /* 裁切面板组件测试（IKGW1N）：六选项（自由 + 五预设）按 CROP_PRESET_ORDER 渲染、
    比例项视觉复用共享 RatioIcon；点击预设派发 onPresetChange、当前项高亮；
-   确认派发 onConfirm、取消派发 onClose；根元素带 data-gen-panel-territory
+   确认派发 onConfirm、取消派发 onClose；确认钮为 Dock 主发送钮同款图标钮
+   （IKGZ5Q：白 ↑ 图标，title 保留「确认」文案）；根元素带 data-gen-panel-territory
    领土豁免标记；跟随锚定 inline left/top 生效。选项数据源自 imageCrop.ts 单源，不另造。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -101,6 +102,14 @@ describe('IKGW1N 裁切面板交互', () => {
     });
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onPresetChange).not.toHaveBeenCalled();
+  });
+
+  it('确认钮为 Dock 主发送钮同款图标钮：白 ↑ 图标（ArrowUp），title 保留「确认」文案，不再渲染文字（IKGZ5Q）', async () => {
+    await renderDialog();
+    const confirm = mountNode.querySelector('[data-testid="crop-confirm"]') as HTMLButtonElement;
+    expect(confirm.querySelector('svg.lucide-arrow-up')).toBeTruthy();
+    expect(confirm.getAttribute('title')).toBe('确认');
+    expect(confirm.textContent).not.toContain('确认');
   });
 
   it('点取消派发 onClose（CanvasPage 绑 exitCropMode）', async () => {

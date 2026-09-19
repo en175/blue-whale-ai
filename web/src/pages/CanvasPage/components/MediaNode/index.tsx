@@ -112,6 +112,11 @@ export interface MediaNodeData {
   onLocateInputSource?: (sourceNodeId: string) => void;
   /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
   pickMarked?: boolean;
+  /** 会话期隐藏标记（IKGZ5O，渲染期派生注入，不持久化）：本卡为编辑会话（擦除/裁切/抠图/
+   *  扩图）源卡，或高清面板打开期间由 CanvasPage 注入。工具条迁出（IKGYYD）后本字段不再
+   *  控制渲染，退为可观测标记（集成测试断言会话进入/退出时序）；模态显隐由钉屏幕层 show 门
+   *  （!editSessionActive && !showEnhanceDialog）承担 */
+  soloToolbarHidden?: boolean;
   /** 视频选取会话中能力失效（如合规未通过）置灰 */
   pickBlocked?: boolean;
   /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
