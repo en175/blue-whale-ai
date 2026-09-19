@@ -178,7 +178,7 @@ it('子菜单跟随触发它的分类行下移', async () => {
     await key('ArrowUp');
     expect(document.activeElement?.textContent).toBe('文本');
     // 「文本」行顶部相对面板 72 + 3×38 = 186
-    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+    expect(flyoutWrapEl().style.top).toBe('186px');
   } finally { spy.mockRestore(); }
 });
 
@@ -187,10 +187,10 @@ it('切换分类行时子菜单跟着那一行走', async () => {
   try {
     await render();
     await key('ArrowUp');
-    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+    expect(flyoutWrapEl().style.top).toBe('186px');
     await key('ArrowUp');
     expect(document.activeElement?.textContent).toBe('音频');
-    expect(flyoutWrapEl().style.marginTop).toBe('148px');
+    expect(flyoutWrapEl().style.top).toBe('148px');
   } finally { spy.mockRestore(); }
 });
 
@@ -199,7 +199,7 @@ it('子菜单下方放不下时上移贴住面板底部', async () => {
   try {
     await render();
     await key('ArrowUp');
-    expect(flyoutWrapEl().style.marginTop).toBe('10px');
+    expect(flyoutWrapEl().style.top).toBe('10px');
   } finally { spy.mockRestore(); }
 });
 
@@ -215,7 +215,7 @@ it('鼠标从分类行移到子菜单后子菜单仍在且位置不变', async (
       wrap.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: row }));
     });
     expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
-    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+    expect(flyoutWrapEl().style.top).toBe('186px');
   } finally { spy.mockRestore(); }
 });
 
