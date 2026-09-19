@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
-  it('hides mention, image-quality menu and subtitle-erase on audio nodes', () => {
+  it('hides mention, image-quality menu, video-enhance and subtitle-erase on audio nodes', () => {
     expect(mediaNodeToolbarVisibility('audio')).toEqual({
       mention: false,
       imageQuality: false,
+      videoEnhance: false,
       videoSubtitleErase: false,
     });
   });
@@ -14,14 +15,16 @@ describe('mediaNodeToolbarVisibility', () => {
     expect(mediaNodeToolbarVisibility('image')).toEqual({
       mention: true,
       imageQuality: true,
+      videoEnhance: false,
       videoSubtitleErase: false,
     });
   });
 
-  it('keeps mention and subtitle-erase on video nodes, still hides image-quality menu', () => {
+  it('keeps mention, video-enhance and subtitle-erase on video nodes, still hides image-quality menu', () => {
     expect(mediaNodeToolbarVisibility('video')).toEqual({
       mention: true,
       imageQuality: false,
+      videoEnhance: true,
       videoSubtitleErase: true,
     });
   });
@@ -30,6 +33,7 @@ describe('mediaNodeToolbarVisibility', () => {
     expect(mediaNodeToolbarVisibility(undefined)).toEqual({
       mention: true,
       imageQuality: true,
+      videoEnhance: false,
       videoSubtitleErase: false,
     });
   });

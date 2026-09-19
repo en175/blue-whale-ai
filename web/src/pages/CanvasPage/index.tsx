@@ -72,6 +72,16 @@ import {
   type ImageEnhancePanelParams,
 } from './imageEnhance';
 import {
+  VIDEO_ENHANCE_EDGE_ORIGIN,
+  buildVideoEnhanceInput,
+  restoreVideoEnhanceResolution,
+  videoEnhanceDraftPosition,
+  videoEnhanceErrorText,
+  videoEnhanceGateReason,
+  type VideoEnhanceIdentity,
+} from './videoEnhance';
+import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
+import {
   IMAGE_ERASE_EDGE_ORIGIN,
   maskHasPaintArea,
   type ImageEraseIdentity,
@@ -133,6 +143,7 @@ import {
   type SourceRect,
 } from './imageOutpaint';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
+import VideoEnhanceDialog from './components/VideoEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
 import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
@@ -208,6 +219,7 @@ import {
   createImageCutout,
   createImageOutpaint,
   createVideoSubtitleErase,
+  createVideoEnhancement,
   createMediaExtraction,
   readJobFailText,
   type ImageJobParameters,
@@ -487,6 +499,14 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
+  /** 视频 HD 高清面板（IKH3VG）：绑定 HD 卡（草稿或成品视频卡）的极简参数面板
+   *  （骨架与口径同 showEnhanceDialog 家族） */
+  const [showVideoEnhanceDialog, setShowVideoEnhanceDialog] = useState(false);
+  const [videoEnhanceDraftId, setVideoEnhanceDraftId] = useState<string | null>(null);
+  /** 面板种子（打开时快照）：lastParams 恢复的目标分辨率；ts 变化驱动面板重挂载重置 */
+  const [videoEnhanceSeed, setVideoEnhanceSeed] = useState<{ ts: number; initialResolution: VideoEnhanceResolution } | null>(null);
+  /** HD 面板隐藏豁免（口径同 enhancePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
+  const videoEnhancePanelHiddenRef = useRef(false);
   /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
    *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
    *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
@@ -529,6 +549,9 @@ export default function CanvasPage() {
   const [audioVideoSplitFormat, setAudioVideoSplitFormat] = useState<AudioVideoSplitFormat>(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
   /** 音视频分离发送中（创建请求飞行期防重复提交，口径同 subtitleEraseSubmitting） */
   const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
+  /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
+   *  创建失败复位（面板保留可调档重发） */
+  const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
   /** 抠图会话（IKGXMT，镜像扩图 outpaintNodeId 模式）：处于抠图工具栏会话的源图卡 node id，
    *  null=未进入。工具栏参数（场景/描边/透明裁剪）为会话期交互态——提升在本页、不落节点 data、
    *  不持久化，四路退出（X/Esc/点其他卡/点画布空白）全部丢弃；发送成功才经 buildImageCutoutRequest
@@ -1144,7 +1167,9 @@ export default function CanvasPage() {
     }
     return { x: n.position.x, y: n.position.y, width: 320, height: 340 };
   };
-  const followTargetId = showEnhanceDialog && enhanceDraftId
+  const followTargetId = showVideoEnhanceDialog && videoEnhanceDraftId
+    ? videoEnhanceDraftId
+    : showEnhanceDialog && enhanceDraftId
     ? enhanceDraftId
     : showImageDialog && imageDraftId
     ? imageDraftId
@@ -1171,6 +1196,19 @@ export default function CanvasPage() {
     : null;
   /** 高清面板跟随锚（IKGM9O）：轻量面板宽 320，与 740 宽的通用锚分开计算 */
   const enhanceFollowAnchor = followNode && showEnhanceDialog && enhanceDraftId && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: followNode.position.x,
+        nodeY: followNode.position.y,
+        nodeWidth: nodeBoxOf(followNode).width,
+        nodeHeight: nodeBoxOf(followNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 320,
+      })
+    : null;
+  /** HD 面板跟随锚（IKH3VG）：极简面板宽 320，口径同 enhanceFollowAnchor */
+  const videoEnhanceFollowAnchor = followNode && showVideoEnhanceDialog && videoEnhanceDraftId && wrapperSize.width > 0
     ? computeFollowAnchor({
         nodeX: followNode.position.x,
         nodeY: followNode.position.y,
@@ -1704,6 +1742,7 @@ export default function CanvasPage() {
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
           onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
+          onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
@@ -2581,6 +2620,10 @@ export default function CanvasPage() {
      *  按钮派发，原提取音频一键直发通道退役）；首帧渲染前经由
      *  actionsRef.current.audioVideoSplit 分派到 handleNodeAudioVideoSplit */
     audioVideoSplit: (_id: string) => {},
+    /** 视频 HD 高清（IKH3VG 通道/接线）：源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条
+     *  「HD」徽标按钮派发）；首帧渲染前经由 actionsRef.current.videoEnhance 分派到
+     *  handleNodeVideoEnhance */
+    videoEnhance: (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
@@ -2600,6 +2643,7 @@ export default function CanvasPage() {
     setShowAudioDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(false);
   };
 
   /** 节点选取时读取资产 ID：兼容 assetId/asset_id/assetID 三形态（后端写入节点为下划线形态） */
@@ -2977,7 +3021,9 @@ export default function CanvasPage() {
         else openImageDraftDialog(node.id);
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
-        openVideoDraftDialog(node.id);
+        // HD 草稿卡（IKH3VG）：点卡开 HD 面板（不再落视频生成面板）
+        if (data.videoEnhance) openVideoEnhanceDraftDialog(node.id);
+        else openVideoDraftDialog(node.id);
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
         openAudioDraftDialog(node.id);
@@ -3155,6 +3201,12 @@ export default function CanvasPage() {
     enhancePanelHiddenRef.current = true;
     setShowEnhanceDialog(false);
   };
+  /** HD 面板关闭（IKH3VG）：置隐藏豁免标记，紧随的选中变化不回弹重开（口径同高清面板）；
+   *  参数已随切换即时写卡，关闭不丢参数、草稿卡保留 */
+  const closeVideoEnhanceDialog = () => {
+    videoEnhancePanelHiddenRef.current = true;
+    setShowVideoEnhanceDialog(false);
+  };
   const dismissAllGenPanels = () => {
     closeVideoDialog();
     closeImageDialog();
@@ -3162,6 +3214,7 @@ export default function CanvasPage() {
     closeTextGenDialog();
     closeMusicDialog();
     closeEnhanceDialog();
+    closeVideoEnhanceDialog();
   };
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
@@ -3290,20 +3343,24 @@ export default function CanvasPage() {
         // 程序化选中不得经本路径回弹重开——口径同下方 syncPanelVisible 的 hiddenRef 拦截
         //（发送路径「置 hidden 标记避免紧随的画布选中事件回弹重开」）；手动点卡经 onNodeClick
         // 走 openXxxDraftDialog 重置豁免，照常重开。
-        const panelHidden = mediaType === 'video'
-          ? videoPanelHiddenRef.current
-          : mediaType === 'audio'
-            ? audioPanelHiddenRef.current
-            : mediaData.imageEnhance
-              ? enhancePanelHiddenRef.current
-              : imagePanelHiddenRef.current;
-        const alreadyOpen = mediaType === 'video'
-          ? showBottomDialog && videoDraftId === soloId
-          : mediaType === 'audio'
-            ? showAudioDialog && audioDraftId === soloId
-            : mediaData.imageEnhance
-              ? showEnhanceDialog && enhanceDraftId === soloId
-              : showImageDialog && imageDraftId === soloId;
+        const panelHidden = mediaData.videoEnhance
+          ? videoEnhancePanelHiddenRef.current
+          : mediaType === 'video'
+            ? videoPanelHiddenRef.current
+            : mediaType === 'audio'
+              ? audioPanelHiddenRef.current
+              : mediaData.imageEnhance
+                ? enhancePanelHiddenRef.current
+                : imagePanelHiddenRef.current;
+        const alreadyOpen = mediaData.videoEnhance
+          ? showVideoEnhanceDialog && videoEnhanceDraftId === soloId
+          : mediaType === 'video'
+            ? showBottomDialog && videoDraftId === soloId
+            : mediaType === 'audio'
+              ? showAudioDialog && audioDraftId === soloId
+              : mediaData.imageEnhance
+                ? showEnhanceDialog && enhanceDraftId === soloId
+                : showImageDialog && imageDraftId === soloId;
         if (!alreadyOpen && !panelHidden) {
           openMediaDraftDialog(soloId, mediaType);
           return;
@@ -3330,6 +3387,8 @@ export default function CanvasPage() {
     if (!audioPanelHiddenRef.current) syncPanelVisible(audioDraftId, setShowAudioDialog);
     // 高清面板（IKGM9O）同口径：单选命中绑定高清卡保持/恢复，单选其他卡或多选隐藏
     if (!enhancePanelHiddenRef.current) syncPanelVisible(enhanceDraftId, setShowEnhanceDialog);
+    // HD 面板（IKH3VG）同口径：单选命中绑定 HD 卡保持/恢复，单选其他卡或多选隐藏
+    if (!videoEnhancePanelHiddenRef.current) syncPanelVisible(videoEnhanceDraftId, setShowVideoEnhanceDialog);
     // IKFYH6：自由面板（无绑定草稿）与文本/音乐面板纳入同一关闭口径——单选其他卡或多选即关（只关不开，
     // 不做「命中恢复」）。hiddenRef 豁免沿用：到节点选择命中、@ 菜单选中素材后紧随的 selection 变化不误关
     //（openVideoDraftDialog 文本选取、视频自由/绑定选取、handleImageAtMention 等既有保护分支）。
@@ -3358,7 +3417,7 @@ export default function CanvasPage() {
    *  画布区域（.react-flow，空白归 PaneClick、节点归 selection sync）；右键/中键不关（button!==0）。
    *  用 click 不用 mousedown，并校验按下与抬起位移：拖拽平移/框选拖出画布边缘产生的 click 不算原地点击。 */
   const anyGenPanelOpen =
-    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog || showEnhanceDialog;
+    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog || showEnhanceDialog || showVideoEnhanceDialog;
   useEffect(() => {
     if (!anyGenPanelOpen) return;
     /** 原地点击与拖拽的分界：按下与抬起的像素位移超过该值即视为拖拽（平移/框选拖出画布边缘） */
@@ -3596,12 +3655,17 @@ export default function CanvasPage() {
   };
 
   /** 按媒体类型打开对应绑定面板（IKDMQU）：图片/视频/音频统一派发，编辑实时写回本卡；
-   *  高清卡（imageEnhance 标记）分流到高清放大面板并回填 lastParams（IKGM9O，规格故事 32） */
+   *  高清卡（imageEnhance 标记）分流到高清放大面板并回填 lastParams（IKGM9O，规格故事 32）；
+   *  HD 卡（videoEnhance 标记）分流到 HD 面板并恢复分辨率（IKH3VG，不进视频生成面板） */
   const openMediaDraftDialog = (nodeId: string, mediaType: unknown) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     if (mediaType !== 'video' && mediaType !== 'audio' && d.imageEnhance) {
       openEnhanceDraftDialog(nodeId);
+      return;
+    }
+    if (mediaType === 'video' && d.videoEnhance) {
+      openVideoEnhanceDraftDialog(nodeId);
       return;
     }
     if (mediaType === 'video') openVideoDraftDialog(nodeId);
@@ -3640,6 +3704,30 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
     setShowTextGenDialog(false);
     setShowEnhanceDialog(true);
+  };
+
+  /** 打开绑定 HD 卡的 HD 面板（IKH3VG）：lastParams 恢复目标分辨率（无持久化参数回落
+   *  契约默认档 1080P）；生成中重开为只读查看（generating 由挂载处按节点状态传入） */
+  const openVideoEnhanceDraftDialog = (nodeId: string) => {
+    if (!canOpenEditor(nodeId)) return;
+    videoEnhancePanelHiddenRef.current = false;
+    editingTargetRef.current = nodeId;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    const identity = d.videoEnhance as VideoEnhanceIdentity | undefined;
+    setVideoEnhanceDraftId(nodeId);
+    setVideoEnhanceSeed({
+      ts: Date.now(),
+      initialResolution: restoreVideoEnhanceResolution(identity?.lastParams),
+    });
+    exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
+    setShowBottomDialog(false);
+    setShowImageDialog(false);
+    setShowAudioDialog(false);
+    setShowMusicDialog(false);
+    setShowTextGenDialog(false);
+    setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(true);
   };
 
   /** 打开绑定指定草稿的图片面板（IKDMQQ）：带入草稿已保存的参数与当前连线文本附件；
@@ -3722,6 +3810,18 @@ export default function CanvasPage() {
       setShowEnhanceDialog(false);
     }
   }, [enhanceDraftId, mediaNodes]);
+
+  /** HD 面板绑定清理（IKH3VG，口径同高清面板绑定清理）：绑定目标被删除、或草稿身份结束且无
+   *  生成记录（异常态）时结束绑定并关闭面板；成品 HD 卡持续可绑定（重新编辑/再次发起） */
+  useEffect(() => {
+    if (!videoEnhanceDraftId) return;
+    const node = mediaNodes.find((n) => n.id === videoEnhanceDraftId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (!node || (d.draft !== true && !hasGenerationRecord(node)) || !d.videoEnhance) {
+      setVideoEnhanceDraftId(null);
+      setShowVideoEnhanceDialog(false);
+    }
+  }, [videoEnhanceDraftId, mediaNodes]);
 
   /** 擦除编辑态绑定清理（IKGOT7/IKGOTB）：目标源图卡被删除时退出编辑态并丢弃遮罩，防工具条悬挂 */
   useEffect(() => {
@@ -3889,9 +3989,12 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
     setShowTextGenDialog(false);
     setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(false);
   };
 
   /** 新建视频草稿卡（IKDMQS 统一入口共用）：seed 字段写入草稿 data 持久化键并自动选中，返回节点 id；
+   *  overrides（IKH3VG 视频 HD 复用同一骨架，口径同 createImageDraftCard）：fileName 覆盖初始
+   *  标题，data 附加节点身份字段（如 HD 标记）；
    *  草稿不进 pendingNodeIds 回滚集合——保存失败时草稿与当前编辑保留，随下次保存重试 */
   const createVideoDraftCard = (seed?: {
     modelId?: string;
@@ -3901,7 +4004,7 @@ export default function CanvasPage() {
     mode?: string;
     /** IKG0LP：是否带音频（随草稿 data 持久化） */
     generateAudio?: boolean;
-  }, position?: { x: number; y: number }): string => {
+  }, position?: { x: number; y: number }, overrides?: { fileName?: string; data?: Record<string, unknown> }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -3911,10 +4014,11 @@ export default function CanvasPage() {
       data: {
         src: '',
         mediaType: 'video',
-        fileName: '视频草稿',
+        fileName: overrides?.fileName ?? '视频草稿',
         genStatus: 'draft',
         draft: true,
         prompt: '',
+        ...(overrides?.data ?? {}),
         toolMode,
         ...(seed?.modelId != null ? { draftModelId: seed.modelId } : {}),
         ...(seed?.ratio != null ? { draftRatio: seed.ratio, targetRatio: seed.ratio } : {}),
@@ -3931,6 +4035,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4028,6 +4133,7 @@ export default function CanvasPage() {
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
         onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
         onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
+        onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4108,6 +4214,7 @@ export default function CanvasPage() {
     setShowAudioDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(false);
   };
 
   const handleTextGenSend = (text: string, modelId: string) => {
@@ -4340,6 +4447,7 @@ export default function CanvasPage() {
     setShowImageDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(false);
   };
 
   /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复。
@@ -4511,6 +4619,7 @@ export default function CanvasPage() {
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
       onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
       onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
+      onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
       onDownload: (id: string) => actionsRef.current.download(id),
@@ -4926,6 +5035,7 @@ export default function CanvasPage() {
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
           onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
+          onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
@@ -5373,7 +5483,11 @@ export default function CanvasPage() {
       }
       patchMediaNode(nodeId, {
         genStatus: 'failed',
-        errorText: readJobFailText(detail.error),
+        // HD 卡失败文案走家族映射（IKH3VH）：msg 为空时按 1045 兜底「视频画质增强失败，请重试」
+        //（含 SDR/超限供应商拒绝场景）；其余卡维持 msg 透传
+        errorText: ((node.data ?? {}) as Record<string, unknown>).videoEnhance
+          ? videoEnhanceErrorText(detail.error)
+          : readJobFailText(detail.error),
       });
       return 'terminal';
     }
@@ -6406,6 +6520,16 @@ export default function CanvasPage() {
       startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
       return;
     }
+    const videoEnhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as
+      | VideoEnhanceIdentity
+      | undefined;
+    if (videoEnhanceIdentity?.lastParams) {
+      // HD 卡分流（IKH3VH，镜像高清放大）：契约无 retry 端点，重试 = lastParams 原样重发
+      // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      void startVideoEnhanceJob(nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
+      return;
+    }
     const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
       | ImageEraseIdentity
       | undefined;
@@ -7072,6 +7196,107 @@ export default function CanvasPage() {
     openEnhanceDraftDialog(draftId);
   };
 
+  /** 视频 HD 高清（IKH3VG）：照搬「高清放大」建卡骨架——门槛预检（置灰层已完成，此处兜底）
+   *  后在源视频卡右侧建「HD」草稿卡并自动选中；连线带 origin 标记为纯视觉来源边
+   *  （不占参考位、不参与 @ 编号与媒体索引）。节点 data 写入 HD 身份标记（含源素材身份）
+   *  供点卡重开与「重新编辑」分流；建卡后自动弹出 HD 面板（发送任务接通归 IKH3VH） */
+  const handleNodeVideoEnhance = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const gate = videoEnhanceGateReason((node.data ?? {}) as Record<string, unknown>);
+    if (gate) {
+      showToast('warn', gate);
+      return;
+    }
+    const sourceData = (node.data ?? {}) as Record<string, unknown>;
+    const draftId = createVideoDraftCard(undefined, videoEnhanceDraftPosition(node), {
+      fileName: 'HD',
+      data: { videoEnhance: { sourceAssetId: readAssetId(sourceData) } },
+    });
+    addCanvasEdge(id, draftId, undefined, { origin: VIDEO_ENHANCE_EDGE_ORIGIN });
+    openVideoEnhanceDraftDialog(draftId);
+  };
+
+  /** HD 面板参数变更即时写卡（IKH3VG，「切换即时生效」）：resolution 随面板切换写入
+   *  node.data.videoEnhance.lastParams（契约单键形态），关闭/重开/重新编辑恢复同源，
+   *  随画布自动保存持久化 */
+  const handleVideoEnhanceParamsChange = (nodeId: string, resolution: VideoEnhanceResolution) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as VideoEnhanceIdentity | undefined;
+    patchMediaNode(nodeId, {
+      videoEnhance: { ...identity, lastParams: { resolution } },
+    });
+  };
+
+  /** 视频 HD 高清任务发送核心（IKH3VH，先例 startAudioVideoSplitJob 的 await 口径 + 高清放大
+   *  的原地承接）：契约三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、
+   *  resolution 面板所选档）经 buildVideoEnhanceInput 契约 zod 校验后 POST video-enhancements。
+   *  创建成功：HD 卡原地转生成中（lastParams 随提交写卡，重试/重新编辑回填同源）+ jobId 登记
+   *  + 启动轮询（applyJobTerminal 通用终态回填——成功回填 URL/mediaType/宽高/时长、失败文案走
+   *  videoEnhanceErrorText 家族映射），返回 true（面板据此自动关闭）。
+   *  创建失败（网络/门槛拒）：HD 卡保持原状（草稿不转生成中、不写 jobId），toast 可读原因，
+   *  返回 false（面板保留可调档重发——本票口径「创建失败面板保留可重试」，区别于图片高清的
+   *  异步失败收敛卡态）。免费口径（本期免费）：无积分预估、不走余额拦截门、无幂等头。 */
+  const startVideoEnhanceJob = async (
+    nodeId: string,
+    resolution: VideoEnhanceResolution,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起 HD 高清');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).videoEnhance as VideoEnhanceIdentity | undefined;
+    const sourceAssetId = identity?.sourceAssetId;
+    if (!sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起 HD 高清');
+      return false;
+    }
+    const input = buildVideoEnhanceInput(String(sourceAssetId), nodeId, resolution);
+    if (!input) {
+      showToast('warn', 'HD 高清参数不合法，请调整后重试');
+      return false;
+    }
+    try {
+      const created = await createVideoEnhancement(currentId, input);
+      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startImageEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      patchMediaNode(nodeId, {
+        genStatus: 'generating',
+        progress: 0,
+        errorText: undefined,
+        jobId: created.job_id,
+        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+        videoEnhance: { ...identity, lastParams: { resolution } },
+      });
+      pollJob(nodeId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : 'HD 高清任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** HD 面板发送（IKH3VH）：面板只交付目标分辨率档；创建成功才关面板（置隐藏标记避免紧随的
+   *  选中事件回弹重开——家族已知缺陷模式，口径同图片面板 handleEnhanceDialogSend），创建失败
+   *  面板保留可调档重发；创建往返期间 submitting 只读防重复提交。 */
+  const handleVideoEnhanceDialogSend = (resolution: VideoEnhanceResolution): boolean => {
+    const nodeId = videoEnhanceDraftId;
+    if (!nodeId || videoEnhanceSubmitting) return false;
+    setVideoEnhanceSubmitting(true);
+    void startVideoEnhanceJob(nodeId, resolution)
+      .then((issued) => {
+        if (issued) {
+          videoEnhancePanelHiddenRef.current = true;
+          setShowVideoEnhanceDialog(false);
+        }
+      })
+      .finally(() => setVideoEnhanceSubmitting(false));
+    return true;
+  };
+
   /** 进入扩图模式（IKGOQX）：「高清 ▾」菜单「扩图」项——门槛预检后建立会话（不建卡不连线），
    *  扩展量从零开始；进入时关其他生成面板与残留选取态，模式期间禁用框选与他卡拖动（Canvas refPickActive） */
   const handleNodeOutpaintImage = (id: string) => {
@@ -7419,6 +7644,7 @@ export default function CanvasPage() {
     setShowImageDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
+    setShowVideoEnhanceDialog(false);
   };
 
   /* ===== 音视频分离发送链路（IKH28X）：发送才建任务 + 音频占位卡 + 来源边 + 终态回填 ===== */
@@ -7689,6 +7915,7 @@ export default function CanvasPage() {
   actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
+  actionsRef.current.videoEnhance = handleNodeVideoEnhance;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
 
@@ -8291,6 +8518,7 @@ export default function CanvasPage() {
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
               onCutoutImage: (id: string) => actionsRef.current.cutoutImage(id),
               onVideoSubtitleErase: (id: string, mode: VideoSubtitleEraseMode) => actionsRef.current.videoSubtitleErase(id, mode),
+              onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
               onDownload: (id: string) => actionsRef.current.download(id),
@@ -9207,15 +9435,16 @@ export default function CanvasPage() {
             //  ——MediaNode 据此暂停视频并以透明锁定层接管指针，浮条由本页 VideoAudioSplitDialog 承担
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离）或高清面板
-            // 打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离）或高清面板/
+            // HD 面板打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
             // 集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
-              || cutoutNodeId || outpaintNodeId || showEnhanceDialog
+              || cutoutNodeId || outpaintNodeId || showEnhanceDialog || showVideoEnhanceDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     showEnhanceDialog
+                    || showVideoEnhanceDialog
                     || n.id === eraseTargetNodeId
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
@@ -9267,12 +9496,13 @@ export default function CanvasPage() {
             <>
               {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
                   内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随。
-                  IKGZ5O 工具会话模态：任一编辑会话激活或高清面板打开期间整条不渲染（词条「工具会话」
-                  模态口径；editSessionActive 与 showEnhanceDialog 为全局布尔，对全部媒体卡生效） */}
+                  IKGZ5O 工具会话模态：任一编辑会话激活或高清面板/HD 面板打开期间整条不渲染（词条
+                  「工具会话」模态口径；editSessionActive 与 showEnhanceDialog/showVideoEnhanceDialog
+                  为全局布尔，对全部媒体卡生效） */}
               {soloMediaToolbarNode ? (
                 <NodeFollowToolbar
                   nodeId={soloMediaToolbarNode.id}
-                  show={showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog}
+                  show={showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog && !showVideoEnhanceDialog}
                 >
                   <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
                 </NodeFollowToolbar>
@@ -9664,6 +9894,25 @@ export default function CanvasPage() {
             }
             submitting={submittingNodeId === enhanceDraftId}
             followAnchor={enhanceDraftId ? enhanceFollowAnchor : null}
+          />
+        )}
+        {/* 视频 HD 高清面板（IKH3VG 骨架 / IKH3VH 发送闭环）：绑定 HD 卡，极简骨架（ADR-0105）；
+            切换即时写卡，发送 POST video-enhancements（创建成功关面板、失败保留可重发） */}
+        {showVideoEnhanceDialog && (
+          <VideoEnhanceDialog
+            key={videoEnhanceSeed?.ts ?? 0}
+            onClose={closeVideoEnhanceDialog}
+            onSend={handleVideoEnhanceDialogSend}
+            onParamsChange={(resolution) => {
+              if (videoEnhanceDraftId) handleVideoEnhanceParamsChange(videoEnhanceDraftId, resolution);
+            }}
+            initialResolution={videoEnhanceSeed?.initialResolution ?? null}
+            generating={
+              ((mediaNodes.find((n) => n.id === videoEnhanceDraftId)?.data ?? {}) as Record<string, unknown>)
+                ?.genStatus === 'generating'
+            }
+            submitting={videoEnhanceSubmitting}
+            followAnchor={videoEnhanceDraftId ? videoEnhanceFollowAnchor : null}
           />
         )}
         {/* 扩图参数面板（IKGOQX 骨架 / IKGOR6 发送闭环）：绑定源图卡，发送建结果卡后退出扩图模式 */}

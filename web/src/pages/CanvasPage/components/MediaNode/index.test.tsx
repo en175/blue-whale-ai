@@ -120,6 +120,17 @@ describe('MediaNode draft overlay (IKDMQQ)', () => {
     // 标题可见且可双击改名（沿用既有改名链路）
     expect(titleRow().textContent).toContain('高清');
   });
+
+  it('HD 草稿（IKH3VG）：视频卡占位文案为「配置参数生成高清视频」', async () => {
+    await renderNode('video', {
+      genStatus: 'draft',
+      selected: false,
+      data: { src: '', draft: true, fileName: 'HD', videoEnhance: { sourceAssetId: 'a1' } },
+    });
+    expect(mountNode.textContent).toContain('配置参数生成高清视频');
+    expect(mountNode.textContent).not.toContain('视频生成');
+    expect(titleRow().textContent).toContain('HD');
+  });
 });
 
 describe('MediaNode generating overlay', () => {

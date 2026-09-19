@@ -55,7 +55,8 @@ class ConsumerRouteWiringTest {
             GenerationMqRoute.IMAGE_ERASE,
             GenerationMqRoute.IMAGE_CUTOUT,
             GenerationMqRoute.VIDEO,
-            GenerationMqRoute.VIDEO_SUBTITLE_ERASE);
+            GenerationMqRoute.VIDEO_SUBTITLE_ERASE,
+            GenerationMqRoute.VIDEO_ENHANCE);
 
     /** 残留旧名的部署环境（修正六之前的 topic / tag 取值）。 */
     private static StandardEnvironment residualOverrideEnvironment() {
@@ -92,7 +93,10 @@ class ConsumerRouteWiringTest {
                         mock(ImageCutoutJobProcessor.class), workerProps, clientConfig),
                 config.videoConsumer(mock(VideoJobProcessor.class), clientConfig),
                 config.videoSubtitleEraseConsumer(
-                        mock(VideoSubtitleEraseJobProcessor.class), workerProps, clientConfig));
+                        mock(VideoSubtitleEraseJobProcessor.class), workerProps, clientConfig),
+                config.videoEnhanceConsumer(
+                        mock(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class),
+                        workerProps, clientConfig));
 
         assertThat(consumers).hasSize(ROUTES.size());
 
