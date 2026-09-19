@@ -13,6 +13,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import NodeFollowToolbar from './components/NodeFollowToolbar';
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -270,6 +271,27 @@ function soloToolbarHidden(id: string): boolean {
   return (fullNode(id).data as Record<string, unknown>).soloToolbarHidden === true;
 }
 
+/** 钉屏幕媒体卡工具条容器 show 门（IKGZ5O×IKGYYD 缝合后的真实显隐控制点）：工具条迁出
+ *  MediaNode 后模态显隐由 followToolbarLayer 的 show 表达式承担（!editSessionActive &&
+ *  !showEnhanceDialog）；FlowCanvas 打桩不渲染钉屏幕层，从捕获的 JSX 结构读
+ *  NodeFollowToolbar.show 锁定「会话态传进了容器门」这一环。须先模拟唯一选中
+ *  （onSelectionChange）使 soloMediaToolbarNode 非空，否则容器不挂载、返回 undefined */
+function mediaFollowToolbarShow(): boolean | undefined {
+  const frag = flowProps.current.followToolbarLayer as { props?: { children?: unknown } } | undefined;
+  const children = frag?.props?.children;
+  const arr = Array.isArray(children) ? children : [children];
+  const el = arr.find((c) => (c as { type?: unknown } | null)?.type === NodeFollowToolbar) as
+    { props?: { show?: boolean } } | undefined;
+  return el?.props?.show;
+}
+
+/** 模拟 React Flow 唯一选中（打桩透出 onSelectionChange，soloId 回写使钉屏幕容器挂载） */
+async function selectSolo(id: string) {
+  await act(async () => {
+    flowProps.current.onSelectionChange?.({ nodes: [fullNode(id)] });
+  });
+}
+
 /** 面板开关标记（模型选择器文案仅在该面板打开时渲染，genPanelDismiss 同款） */
 const imageOpen = () => container.textContent!.includes('测试生图模型');
 const textGenOpen = () => container.textContent!.includes('文本生成 · 文生文');
@@ -310,6 +332,18 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await pressEscape();
     expect(cutoutToolbar()).toBeNull();
     expect(soloToolbarHidden('i1')).toBe(false);
+  });
+
+  it('会话模态门控钉屏幕工具条容器：唯一选中卡进入会话 show 关闭，退出恢复（IKGZ5O×IKGYYD 缝合）', async () => {
+    await renderPage();
+    await selectSolo('i1');
+    expect(mediaFollowToolbarShow()).toBe(true);
+    await enterSession('cutout');
+    expect(cutoutToolbar()).toBeTruthy();
+    expect(mediaFollowToolbarShow()).toBe(false);
+    await pressEscape();
+    expect(cutoutToolbar()).toBeNull();
+    expect(mediaFollowToolbarShow()).toBe(true);
   });
 
   it('进入会话关闭打开中的面板（维持现状全量 dismiss），未发送草稿原样保留', async () => {
@@ -378,10 +412,14 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
 describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
   it('高清会话（面板打开态）隐藏全部卡悬浮工具条，关闭后恢复', async () => {
     await renderPage();
+    await selectSolo('i1');
+    expect(mediaFollowToolbarShow()).toBe(true);
     await act(async () => {
       (fullNode('i1').data as Record<string, (id: string) => void>).onEnhanceImage('i1');
     });
     await vi.waitFor(() => expect(enhanceSend()).toBeTruthy());
+    // 钉屏幕容器 show 门随高清面板关闭（showEnhanceDialog 分支）
+    expect(mediaFollowToolbarShow()).toBe(false);
     const nodes = () => (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
     // 源卡、既有草稿卡与新建高清草稿卡的悬浮工具条一律隐藏
     expect(nodes().length).toBe(3);
@@ -394,6 +432,7 @@ describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
       closeBtn.click();
     });
     expect(enhanceSend()).toBeNull();
+    expect(mediaFollowToolbarShow()).toBe(true);
     for (const n of nodes()) {
       expect((n.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
     }

@@ -1322,6 +1322,8 @@ export default function CanvasPage() {
     : null;
   const showSoloMediaToolbar = soloMediaToolbarNode != null
     && mediaCardToolbarVisible(soloMediaToolbarNode.data ?? {});
+  // IKGZ5O 工具会话模态门不并入本谓词：editSessionActive 定义位置晚于此处（TDZ），
+  // 且会话态属调用方数据条件，按 NodeFollowToolbar 分工直接写在渲染处 show 表达式里
   /** IKGYYF 资产卡悬浮顶部操作条：hover 的资产卡优先（等价迁移前 .wrapper:hover），
    *  否则唯一选中的资产卡；渲染条件（生成卡恒显 / HIDE_ASSET_TOP_BAR 门控纯资产卡）
    *  与内容迁至 AssetCardToolbar，「唯一选中 + hover」门在 NodeFollowToolbar 容器。
@@ -8444,7 +8446,8 @@ export default function CanvasPage() {
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
             // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图）或高清面板打开
-            // 期间注入 soloToolbarHidden，MediaNode 悬浮工具条不渲染（其余显隐逻辑不变）
+            // 期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记不再控制渲染，退为
+            // 集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showEnhanceDialog
               ? mediaNodes.map((n) => {
@@ -8482,9 +8485,14 @@ export default function CanvasPage() {
           followToolbarLayer={
             <>
               {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
-                  内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随 */}
+                  内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随。
+                  IKGZ5O 工具会话模态：任一编辑会话激活或高清面板打开期间整条不渲染（词条「工具会话」
+                  模态口径；editSessionActive 与 showEnhanceDialog 为全局布尔，对全部媒体卡生效） */}
               {soloMediaToolbarNode ? (
-                <NodeFollowToolbar nodeId={soloMediaToolbarNode.id} show={showSoloMediaToolbar}>
+                <NodeFollowToolbar
+                  nodeId={soloMediaToolbarNode.id}
+                  show={showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog}
+                >
                   <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
                 </NodeFollowToolbar>
               ) : null}

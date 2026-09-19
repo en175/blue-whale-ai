@@ -82,8 +82,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
     await renderToolbar('image', { data: { onEnhanceImage } });
     const trigger = [...mountNode.querySelectorAll('button')]
       .find((b) => b.textContent?.trim() === '高清')!;
+    // IKGZ5P：悬浮展开（mouseover），点击触发钮改为直启所显示工具
     await act(async () => {
-      trigger.click();
+      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     });
     const item = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!;
     await act(async () => {
@@ -119,11 +120,11 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
 });
 
 describe('MediaNodeToolbar image-quality menu（高清 ▾）', () => {
-  /** 展开「高清 ▾」下拉 */
+  /** 展开「高清 ▾」下拉（IKGZ5P 悬浮展开：mouseover 合成 onMouseEnter） */
   async function openQualityMenu() {
     const trigger = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-trigger"]')!;
     await act(async () => {
-      trigger.click();
+      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     });
   }
 
@@ -227,9 +228,10 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
   const menu = () => mountNode.querySelector('[data-testid="image-quality-menu"]');
   const menuItem = (id: string) => mountNode.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
 
+  /** IKGZ5P 悬浮展开：mouseover 合成 onMouseEnter（点击触发钮已改为直启最近工具） */
   async function openMenu() {
     await act(async () => {
-      menuBtn().click();
+      menuBtn().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     });
     expect(menu()).toBeTruthy();
   }
@@ -273,7 +275,7 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
     expect(overLong.onOutpaintImage).not.toHaveBeenCalled();
     expect(menu()).toBeTruthy(); // 置灰点击不收菜单
     await act(async () => {
-      menuBtn().click();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
 
     // 文件超限
@@ -288,7 +290,7 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
     });
     expect(overSize.onOutpaintImage).not.toHaveBeenCalled();
     await act(async () => {
-      menuBtn().click();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
 
     // 真实宽高缺失

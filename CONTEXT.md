@@ -156,7 +156,7 @@ _Avoid_: 替换源卡素材、发送前建草稿卡
 ### 画质工具家族交互（IKGYZY 已实现）
 
 **画质工具家族（quality tool family）**:
-图片素材卡悬浮工具条「高清 ▾」下拉承载的五个画质工具：高清（enhance）、扩图（outpaint）、裁切（crop）、擦除（erase）、抠图（cutout）；菜单现序为高清/扩图/裁切/擦除/抠图（裁切位于擦除之前——ADR-0098 正文的排位记述系笔误，以代码 `qualityMenuItems` 顺序与 [ADR-0099](docs/adr/0099-quality-tool-family-interaction-alignment.md) 记录为准）。家族级交互规则（工具会话模态隐藏 chrome、最近工具触发钮、发送钮统一 Dock 主发送钮样式）见本节词条与 ADR-0099；各工具自身的参数承载、门槛与建卡口径仍以各工具 ADR（0092/0094/0095/0098）为准。
+图片素材卡悬浮工具条「高清 ▾」下拉承载的五个画质工具：高清（enhance）、扩图（outpaint）、裁切（crop）、擦除（erase）、抠图（cutout）；菜单现序为高清/扩图/裁切/擦除/抠图（裁切位于擦除之前——ADR-0098 正文的排位记述系笔误，以代码 `qualityMenuItems` 顺序与 [ADR-0101](docs/adr/0101-quality-tool-family-interaction-alignment.md) 记录为准）。家族级交互规则（工具会话模态隐藏 chrome、最近工具触发钮、发送钮统一 Dock 主发送钮样式）见本节词条与 ADR-0101；各工具自身的参数承载、门槛与建卡口径仍以各工具 ADR（0092/0094/0095/0098）为准。
 _Avoid_: 把「高清 ▾」当作高清放大独占入口（它承载五工具）、按 ADR-0098 的排位记述理解菜单顺序
 
 **工具会话（tool session）**:
@@ -332,7 +332,7 @@ Canvas 底部的生成工具面板，共六块：视频（BottomDialog）、图�
 点草稿卡、「高清 ▾」）与音频/音乐面板互切打开。它是**纯生成工具**：手填参数（模型、比例、
 分辨率、时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
 工具会话期间按模态隐藏 chrome 口径不可见不可开（见「工具会话」词条与
-[ADR-0099](docs/adr/0099-quality-tool-family-interaction-alignment.md)）。
+[ADR-0101](docs/adr/0101-quality-tool-family-interaction-alignment.md)）。
 
 **生图入口（职责边界不同，非同一功能）**:
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
