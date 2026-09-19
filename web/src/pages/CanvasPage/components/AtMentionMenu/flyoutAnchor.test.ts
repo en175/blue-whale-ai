@@ -30,11 +30,17 @@ describe('computeFlyoutOffset', () => {
     expect(offset + 232).toBe(panel.panelHeight);
   });
 
-  it('子菜单比面板还高时退回顶部对齐', () => {
-    expect(computeFlyoutOffset({ ...textRow, flyoutHeight: 300 })).toBe(0);
+  it('子菜单比面板还高时底部贴住面板、向上伸出', () => {
+    expect(computeFlyoutOffset({ ...textRow, flyoutHeight: 300 })).toBe(242 - 300);
   });
 
   it('触发行就在面板顶部时不需要偏移', () => {
     expect(computeFlyoutOffset({ ...panel, rowTop: 300, flyoutHeight: 56 })).toBe(0);
+  });
+
+  it('素材过多时子菜单贴住面板底部，不随分类行上下跳动', () => {
+    const tall = { ...panel, flyoutHeight: 300 };
+    expect(computeFlyoutOffset({ ...tall, rowTop: 372 })).toBe(242 - 300);
+    expect(computeFlyoutOffset({ ...tall, rowTop: 486 })).toBe(242 - 300);
   });
 });

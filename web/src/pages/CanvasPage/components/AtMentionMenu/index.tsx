@@ -131,8 +131,8 @@ export default function AtMentionMenu({
 
   const flyoutItems = hovered ? items.filter((item) => item.kind === hovered) : [];
 
-  // IKFO27：子菜单与触发它的分类行顶部对齐，鼠标从分类行水平移过去即可到达，
-  // 不再需要斜穿两者之间的空白区（那会让根容器的 onMouseLeave 提前关闭子菜单）。
+  // IKFO27：子菜单必须覆盖触发行，鼠标从分类行水平移过去即可到达。
+  // IKGMAF：子菜单绝对定位，优先吸附对话框底部，高度变化不再撑走一级菜单。
   useLayoutEffect(() => {
     const wrap = flyoutWrapRef.current;
     const panel = rootRef.current?.querySelector<HTMLElement>('[data-mention-main]');
@@ -144,11 +144,13 @@ export default function AtMentionMenu({
       return;
     }
     const panelRect = panel.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
     setFlyoutOffset(computeFlyoutOffset({
-      rowTop: row.getBoundingClientRect().top,
+      rowTop: rowRect.top,
       panelTop: panelRect.top,
       panelHeight: panelRect.height,
       flyoutHeight: wrap.getBoundingClientRect().height,
+      rowHeight: rowRect.height,
     }));
   }, [hovered, flyoutItems.length]);
 
@@ -301,7 +303,7 @@ export default function AtMentionMenu({
         <div
           ref={flyoutWrapRef}
           className={styles.flyoutWrap}
-          style={{ marginTop: flyoutOffset }}
+          style={{ top: flyoutOffset }}
           onMouseEnter={() => setHovered(hovered)}
         >
         <div className={styles.flyout} data-mention-flyout>

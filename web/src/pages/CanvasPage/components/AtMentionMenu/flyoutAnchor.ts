@@ -1,12 +1,11 @@
 /** 子菜单（flyout）相对主面板顶部的垂直偏移。
  *
- * IKFO27：子菜单改为与触发它的分类行顶部对齐。原先子菜单固定贴主面板顶部，
- * 而分类行位于面板中下部，鼠标从分类行斜向移向子菜单时会穿过两者之间的空白区，
- * 菜单根容器的 onMouseLeave 提前触发，子菜单在光标到达前关闭。
- * 对齐之后子菜单的垂直范围覆盖触发它的那一行，鼠标水平移过去即可到达。
+ * IKFO27：子菜单必须覆盖触发它的分类行，鼠标才能从分类行水平移过去；
+ * 否则会穿过空白区，根容器 onMouseLeave 提前关掉子菜单。
  *
- * 下方放不下时整体上移（贴主面板底部），保持子菜单不越出面板范围；
- * 子菜单比面板还高时退回顶部对齐，与既有表现一致。
+ * IKGMAF：一级菜单位置由主面板单独撑开，子菜单绝对定位、不参与外壳高度。
+ * 子菜单在保持与触发行连通的前提下，优先把底部贴住主面板（吸附对话框）；
+ * 素材过多、子菜单高于面板时允许向上伸出，而不是把一级菜单顶走。
  */
 export function computeFlyoutOffset(params: {
   /** 触发行的顶部（视口坐标） */
@@ -17,8 +16,14 @@ export function computeFlyoutOffset(params: {
   panelHeight: number;
   /** 子菜单自身高度 */
   flyoutHeight: number;
+  /** 触发行高度，缺省按分类行 38px */
+  rowHeight?: number;
 }): number {
-  const aligned = params.rowTop - params.panelTop;
-  const lowest = params.panelHeight - params.flyoutHeight;
-  return Math.max(0, Math.min(aligned, lowest));
+  const rowHeight = params.rowHeight ?? 38;
+  const rowOffset = params.rowTop - params.panelTop;
+  const rowBottom = rowOffset + rowHeight;
+  const snapToDialog = params.panelHeight - params.flyoutHeight;
+  const maxOffset = rowOffset;
+  const minOffset = rowBottom - params.flyoutHeight;
+  return Math.min(maxOffset, Math.max(minOffset, snapToDialog));
 }
