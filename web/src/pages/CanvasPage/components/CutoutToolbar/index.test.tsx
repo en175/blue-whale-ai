@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-/* CutoutToolbar 抠图工具栏组件（IKGXMT）：横条结构（X/场景上拉/增强控件显隐/本期免费/圆形发送）、
+/* CutoutToolbar 抠图工具栏组件（IKGXMT）：横条结构（X/场景上拉/增强控件显隐/本期免费/
+   发送钮——Dock 主发送钮同款图标钮，IKGZ5Q）、
    场景上拉开合与选择、描边上拉（启用开关+宽度滑杆实时生效+禁用态）、透明裁剪点亮开关、
    发送置灰与 title 原因、X 关闭。渲染模式沿用 ImageQualityMenu.test.tsx（createRoot + act），
    只断言外部可见行为。 */
@@ -85,7 +86,7 @@ afterEach(async () => {
 });
 
 describe('CutoutToolbar（抠图横条工具栏）', () => {
-  it('横条完整呈现：X、场景触发钮（显示当前场景）、本期免费、圆形发送；无标题字', async () => {
+  it('横条完整呈现：X、场景触发钮（显示当前场景）、本期免费、发送钮；无标题字', async () => {
     await renderToolbar();
     expect(btn('cutout-close')).toBeTruthy();
     expect(btn('cutout-scene-trigger').textContent).toContain('通用');
@@ -170,19 +171,23 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     expect(handlers.onNeedCropBackgroundChange).toHaveBeenCalledWith(true);
   });
 
-  it('发送钮：场景档超限置灰并 title 原因；可发时点击派发 onSend', async () => {
+  it('发送钮：Dock 主发送钮同款图标钮（白 ↑ 图标）+ 置灰/激活两态；场景档超限置灰并 title 原因；可发时点击派发 onSend', async () => {
     state.scene = 'human';
     await renderToolbar({ sendDisabledReason: '图片长边超过 7680 或短边超过 4320，无法以当前场景抠图' });
     const send = btn('cutout-send-btn');
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('title')).toContain('7680');
+    // Dock 同款形态：白 ↑ 图标（ArrowUp）；置灰态不带激活类（IKGZ5Q）
+    expect(send.querySelector('svg.lucide-arrow-up')).toBeTruthy();
+    expect(send.className).not.toMatch(/sendBtnActive/);
     await act(async () => {
       send.click();
     });
     expect(handlers.onSend).not.toHaveBeenCalled();
-    // 可发（精校通过）
+    // 可发（精校通过）：激活态带 sendBtnActive
     await renderToolbar({ sendDisabledReason: null });
     expect(btn('cutout-send-btn').disabled).toBe(false);
+    expect(btn('cutout-send-btn').className).toMatch(/sendBtnActive/);
     await click('cutout-send-btn');
     expect(handlers.onSend).toHaveBeenCalledTimes(1);
   });

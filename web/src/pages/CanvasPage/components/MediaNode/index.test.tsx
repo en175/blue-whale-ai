@@ -71,6 +71,7 @@ function titleRow(): HTMLElement {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear(); // IKGZ5P 触发钮显示全局记忆的最近工具，测试间清空回默认「高清」
 });
 
 afterEach(async () => {
