@@ -2,7 +2,10 @@ import type { Edge, Node } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import {
   canAddRefRole,
+  checkAddVideoRef,
+  incomingVideoRefOccupied,
   isVideoDraftNode,
+  mergeVideoMaterialRefs,
   readDraftMaterialRefs,
   readRefRole,
   videoMediaRefsOf,
@@ -139,6 +142,17 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
     expect(refs.reference[1]!.duration).toBeUndefined();
     expect(refs.reference[2]!.duration).toBeUndefined();
   });
+
+  it('TC_DG_205：数字资产与人像库 Asset- 前缀（相同 materialId）只保留首条', () => {
+    const nodes = [
+      readyImage('lib', 'Asset-image-1', { materialId: 'Asset-image-1' }),
+      readyImage('proj', '88421', { materialId: 'Asset-image-1' }),
+    ];
+    const edges = [edge('e1', 'lib', 'd1'), edge('e2', 'proj', 'd1')];
+    expect(videoMediaRefsOf('d1', edges, nodes).reference).toEqual([
+      { nodeId: 'lib', url: 'http://img/lib.png', name: '图lib', assetId: 'Asset-image-1', mediaType: 'image', materialId: 'Asset-image-1' },
+    ]);
+  });
 });
 
 describe('readDraftMaterialRefs 角色库草稿参考解析（IKFC1T 修复防回归）', () => {
@@ -218,5 +232,45 @@ describe('canAddRefRole 角色槽可用性', () => {
   it('普通参考槽：仅取决于参考图能力位', () => {
     expect(canAddRefRole('reference', { reference: [] }, allCaps)).toBe(true);
     expect(canAddRefRole('reference', { reference: [] }, { ...allCaps, referenceImage: false })).toBe(false);
+  });
+});
+
+describe('TC_DG_205 视频参考跨 ID 空间去重', () => {
+  const libraryRef: import('./videoMediaRefs').VideoMediaRef = {
+    nodeId: 'Asset-image-1',
+    url: 'http://img/same.png',
+    name: '角色立绘',
+    assetId: 'Asset-image-1',
+    mediaType: 'image',
+    materialId: 'Asset-image-1',
+  };
+  const projectRef: import('./videoMediaRefs').VideoMediaRef = {
+    nodeId: 'n-proj',
+    url: 'http://img/same.png',
+    name: '资产副本',
+    assetId: '88421',
+    mediaType: 'image',
+    materialId: 'Asset-image-1',
+  };
+
+  it('人像库 ID 与带同一 materialId 的项目资产互相占槽', () => {
+    expect(incomingVideoRefOccupied({ reference: [libraryRef] }, ['88421', 'Asset-image-1'])).toBe(true);
+    expect(incomingVideoRefOccupied({ reference: [projectRef] }, ['Asset-image-1'])).toBe(true);
+    expect(incomingVideoRefOccupied({ reference: [libraryRef] }, ['88422'])).toBe(false);
+  });
+
+  it('checkAddVideoRef 跨空间重复按普通参考跳过', () => {
+    expect(checkAddVideoRef('reference', 'image', '88421', { reference: [libraryRef] }, null, ['Asset-image-1']))
+      .toBe('重复的素材已跳过');
+    expect(checkAddVideoRef('reference', 'image', 'Asset-image-1', { reference: [projectRef] }))
+      .toBe('重复的素材已跳过');
+  });
+
+  it('mergeVideoMaterialRefs 不把已在边推导中的同一 material 再追加', () => {
+    const merged = mergeVideoMaterialRefs(
+      { reference: [projectRef] },
+      [{ materialId: 'Asset-image-1', url: libraryRef.url, name: libraryRef.name, mediaType: 'image', role: 'reference' }],
+    );
+    expect(merged.reference).toEqual([projectRef]);
   });
 });

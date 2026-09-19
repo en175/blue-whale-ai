@@ -93,6 +93,7 @@ function materialToPickerRecord(asset: MaterialAsset, source: MaterialSource): A
     source,
     model: null,
     created_at: asset.CreateTime ?? null,
+    material_id: asset.Id,
   };
 }
 
