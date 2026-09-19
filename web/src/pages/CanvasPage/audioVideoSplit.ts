@@ -1,21 +1,26 @@
 /* ============================================
  * 音视频分离（IKH28U）：「音视频分离」入口门槛预检与效果边界文案（纯逻辑，
  * 无 React 依赖，形状与判定口径对齐 videoSubtitleErase.ts 先例）。
- * 分离格式清单本地定义（m4a 默认 + mp3/ogg/flac/wav，出处 = CONTEXT.md「分离格式」词条
- * 与 ADR-0103 决策一）；后续整合票与 X 票（发送闭环）缝合时切 @lib/contracts 契约同源
- * （对齐 videoSubtitleErase.ts 契约常量引用先例，Z82）。
+ * 分离格式清单经 @lib/contracts/media-extract 与契约同源（整合缝合，数值不变仅换单源，
+ * 对齐 videoSubtitleErase.ts 契约常量引用先例 IKGZ7V）；效果边界文案出处 =
+ * CONTEXT.md「分离格式」词条与 ADR-0103 决策一。
  * ============================================ */
 
-/* ============ 分离格式（CONTEXT.md「分离格式」词条，默认 m4a） ============ */
+import {
+  MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT,
+  MEDIA_EXTRACT_OUTPUT_FORMATS,
+  type MediaExtractOutputFormat,
+} from '@lib/contracts/media-extract';
 
-/** 分离格式五值（随任务提交 output_format；产物文件名后缀与展示名跟随所选格式）。
- *  契约缝合点：X 票接发送闭环时与 jobs.ts output_format 类型同源（本票不动 jobs.ts）。 */
-export const AUDIO_VIDEO_SPLIT_FORMATS = ['m4a', 'mp3', 'ogg', 'flac', 'wav'] as const;
+/* ============ 分离格式（契约同源引用，出处见头注释） ============ */
 
-export type AudioVideoSplitFormat = (typeof AUDIO_VIDEO_SPLIT_FORMATS)[number];
+// 契约常量再导出供外部消费（本地旧名保持，消费方零改动；对齐 videoSubtitleErase.ts 再导出先例）。
+export const AUDIO_VIDEO_SPLIT_FORMATS = MEDIA_EXTRACT_OUTPUT_FORMATS;
+
+export type AudioVideoSplitFormat = MediaExtractOutputFormat;
 
 /** 默认分离格式（词条：m4a 默认；格式不跨会话记忆，进入编辑态重置） */
-export const AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT: AudioVideoSplitFormat = 'm4a';
+export const AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT: AudioVideoSplitFormat = MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT;
 
 /** 格式守卫（X 票发送条下拉受控值与终态文件名校验用）：仅接受清单内五值 */
 export function isAudioVideoSplitFormat(value: unknown): value is AudioVideoSplitFormat {
