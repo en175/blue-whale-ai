@@ -17,13 +17,15 @@
 
 - 资产卡顶部操作条保留文档流占位、仅视觉悬浮：隐藏时（opacity:0）仍占一行空间，卡片顶部恒留空隙（用户故事明确要求卡片顶部不再预留空隙）；否决。
 - 工具条套用半程补偿曲线（卡内 CSS 变量反算）：低于 0.75 倍时操作控件随卡缩小到不可点；否决。
-- 每类卡自建钉屏幕定位（不走 NodeFollowToolbar 容器）：横条宽度随按钮显隐动态变化，估宽居中会跳位（CutoutToolbar 先例已证，故容器锚定用中心点语义而非估宽），且拖动/缩放跟随的 store 订阅逻辑会四处分叉；否决，收敛进通用容器。
+- 回调可上提 CanvasPage 的卡类自建钉屏幕定位（不走 NodeFollowToolbar 容器）：横条宽度随按钮显隐动态变化，估宽居中会跳位（CutoutToolbar 先例已证，故容器锚定用中心点语义而非估宽），且拖动/缩放跟随的 store 订阅逻辑会四处分叉；否决，媒体卡与资产卡收敛进通用容器。文本卡自渲染层是记录在案的例外（分野判据见 Consequences），不属本否决项覆盖。
 - 工具条随画布缩放（不补偿、不迁层）：实现最省，但低倍率下按钮不可点、高倍率下横条撑出视口，与生成面板家族的既有口径相悖；否决。
 
 ## Consequences
 
 - 资产卡顶部空隙塌缩：拆除 topBar 文档流占位后卡片顶部不再预留空隙（规格明确要求，不补 padding），资产卡与媒体卡的「卡体之上无恒占空间」口径一致化。
 - 悬停显示语义由 JS 指针事件等价保持：工具条迁出后 CSS :hover 不再作用于卡外 DOM，卡片悬停态经指针事件上报后驱动工具条显隐，显示时机（悬停或唯一选中）与迁移前一致。
-- NodeFollowToolbar 成为卡片工具栏家族的唯一钉屏幕容器（nodeId / show / toolbarHalfWidth / toolbarLift / hovered）：「唯一选中 + 画布无多选」门（useSoloNodeSelected）收在容器，与节点内原口径同源；根元素自带 data-gen-panel-territory（画布外点击关闭生成面板的领土豁免）。hovered prop（IKGYYF）是资产卡带来的第一处扩展——资产卡 hover 显示语义是第一个需要绕过唯一选中门的迁移方（hovered=true 跳过 solo 门、show 数据门与几何条件照旧），媒体卡等「仅选中显示」的迁移方不传该 prop、行为不变。
+- NodeFollowToolbar 成为 CanvasPage 侧挂载路线的唯一钉屏幕容器（nodeId / show / toolbarHalfWidth / toolbarLift / hovered）：媒体卡与资产卡走此路线。「唯一选中 + 画布无多选」门（useSoloNodeSelected）收在容器，与节点内原口径同源；根元素自带 data-gen-panel-territory（画布外点击关闭生成面板的领土豁免）。hovered prop（IKGYYF）是资产卡带来的第一处扩展——资产卡 hover 显示语义是第一个需要绕过唯一选中门的迁移方（hovered=true 跳过 solo 门、show 数据门与几何条件照旧），媒体卡等「仅选中显示」的迁移方不传该 prop、行为不变。
+- 文本卡两条工具条走自渲染层（IKGYYE，FollowToolbarLayer）而非容器，是记录在案的双轨分野例外：显示门是组件自身状态——格式栏=编辑聚焦（isFocused，GroupOverlay 组穿透双击进入编辑时节点未必选中，与容器「唯一选中」硬门属不同领域），操作条=唯一选中或悬停；且按钮回调（execCmd/setHeading/editMaterial）闭包依赖 TextNode 内部 ref/state，无法提为 CanvasPage 侧内容组件。分野判据：回调可上提 CanvasPage 的卡类进 NodeFollowToolbar 容器，显示门/回调闭包在节点内部的走自渲染层（复用 computeFollowAnchorAbove 与同一 .toolbarLayer 定位类、层根同样带 territory 标记，portal 至 .react-flow 根、transform 层外，缩放恒定与实时跟随口径与容器一致）；后续新卡类按此判据二择一，不出现第三条路线。
+- 已知边缘差异（留待后续票裁决）：资产卡「悬停 A 卡 + 唯一选中 B 卡」并存时，CanvasPage 侧单例取悬停优先、B 卡工具条暂隐（指针移回 B 卡即恢复悬停显示）；迁移前 CSS 每卡独立判定可双显，文本卡路线（每卡自渲染、门=solo||hovered）亦可双显。属单例挂载的已知取舍非缺陷，产品若要求双显，再改双实例渲染。
 - 工具条 DOM 不再位于节点卡内：点击按钮不触发节点拖拽/选中变化（原 nodrag/nopan 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
 - HIDE_ASSET_TOP_BAR 临时隐藏机制随迁移保留在资产卡渲染条件内（当前值 false 不隐藏纯资产卡，生成卡不受影响），后续产品拍板恢复隐藏时只动该开关。
