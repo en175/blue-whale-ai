@@ -10,7 +10,9 @@ import { isMediaExtractNodeId } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
+import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import EraseMaskLayer from './EraseMaskLayer';
+import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
@@ -128,6 +130,16 @@ export interface MediaNodeData {
     onStrokeMove: (point: MaskPoint) => void;
     onStrokeEnd: () => void;
   };
+  /** 去字幕编辑态框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕目标源视频卡时由
+   *  CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针回调；仅正常视频内容区
+   *  渲染，层存在即视频暂停在当前帧（本期无播放控制，规格 Out of Scope） */
+  subtitleEraseEditing?: {
+    boxes: readonly SubtitleBoxOp[];
+    liveBox: SubtitleBoxOp | null;
+    onBoxStart: (point: SubtitleBoxPoint) => void;
+    onBoxMove: (point: SubtitleBoxPoint) => void;
+    onBoxEnd: () => void;
+  };
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -159,6 +171,9 @@ export interface MediaNodeData {
   onCropImage?: (id: string) => void;
   /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
+  /** 智能去字幕（IKGZ82）：进入去字幕编辑态（本票入口占位未接线，IKGZ83 由 CanvasPage 接入；
+   *  门槛预检见 videoSubtitleErase.ts） */
+  onVideoSubtitleErase?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -178,6 +193,8 @@ export interface MediaNodeData {
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const shellFileRef = useRef<HTMLInputElement>(null);
+  /** 源视频元素引用：去字幕编辑态注入时暂停在当前帧（IKGZ83，本期无播放控制） */
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -216,6 +233,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
+
+  /** 去字幕编辑态（IKGZ83）：视频暂停在当前帧——拉框对全片生效，画面定格便于精确框选；
+   *  依赖 subtitleEraseEditing 的注入/移除（对象引用变化即进入/退出编辑态） */
+  useEffect(() => {
+    if (data.subtitleEraseEditing) videoRef.current?.pause();
+  }, [data.subtitleEraseEditing]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -520,17 +543,33 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         ) : isAudio ? (
           <AudioPlayer src={data.src || ''} fileName={data.fileName} onDownload={() => data.onDownload?.(id)} />
         ) : data.mediaType === 'video' ? (
-          <video
-            className={styles.mediaVideo}
-            src={data.src}
-            controls={isSelect}
-            preload="metadata"
-            disablePictureInPicture
-            disableRemotePlayback
-            controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-            onLoadedMetadata={handleVideoMetadata}
-            style={isSelect ? undefined : { pointerEvents: 'none' }}
-          />
+          <>
+            <video
+              ref={videoRef}
+              className={styles.mediaVideo}
+              src={data.src}
+              controls={isSelect}
+              preload="metadata"
+              disablePictureInPicture
+              disableRemotePlayback
+              controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
+              onLoadedMetadata={handleVideoMetadata}
+              style={isSelect ? undefined : { pointerEvents: 'none' }}
+            />
+            {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
+                仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}
+            {data.subtitleEraseEditing && (
+              <SubtitleEraseBoxesLayer
+                boxes={data.subtitleEraseEditing.boxes}
+                liveBox={data.subtitleEraseEditing.liveBox}
+                displayWidth={contentBox.width}
+                displayHeight={contentBox.height}
+                onBoxStart={data.subtitleEraseEditing.onBoxStart}
+                onBoxMove={data.subtitleEraseEditing.onBoxMove}
+                onBoxEnd={data.subtitleEraseEditing.onBoxEnd}
+              />
+            )}
+          </>
         ) : (
           <>
             {/* 抠图结果卡棋盘格垫底层（IKGXMT）：垫在 img 之下的静态棋盘格，透出透明 png 的

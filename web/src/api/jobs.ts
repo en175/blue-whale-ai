@@ -7,12 +7,14 @@ import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
+import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图与抠图任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图与视频去字幕任务
+ *  （IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -327,6 +329,35 @@ export function createImageOutpaint(
 ): Promise<ImageOutpaintCreatedData> {
   return apiRequest<ImageOutpaintCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-outpaints`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-subtitle-erasures 请求体（四键，键名与
+ *  backend/libs/contracts/video-subtitle-erase.ts 契约恒等；IKGZ80 创建入口 strict zod 复核：
+ *  detect_mode 两值枚举、erase_boxes 空/≤20、框四键 ∈ [0,1] 归一化坐标）。 */
+export type CreateVideoSubtitleErasePayload = VideoSubtitleEraseInput;
+
+/** 创建视频去字幕任务返回（IKGZ83）；同高清放大/擦除/抠图：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoSubtitleEraseCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频智能去字幕任务（IKGZ83）；免费口径同 image_enhance / image_erase / image_cutout
+ *  ——不带幂等头、无积分预估、不走余额拦截门。去字幕结果卡由前端在创建成功后本地插入
+ *  （发送时才建卡，target_node_id 发送时生成传入），产物经 GET /api/jobs/:id 的 asset
+ *  按 target_node_id 回填（结果卡是普通视频素材卡，可再次去字幕）。 */
+export function createVideoSubtitleErase(
+  projectId: string,
+  payload: CreateVideoSubtitleErasePayload,
+): Promise<VideoSubtitleEraseCreatedData> {
+  return apiRequest<VideoSubtitleEraseCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

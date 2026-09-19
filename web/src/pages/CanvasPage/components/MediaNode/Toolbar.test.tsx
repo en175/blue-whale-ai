@@ -75,9 +75,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（迁移前后一致）', () =>
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留生成视频与 @，隐藏生成图片与「高清 ▾」，多提取音频', async () => {
+  it('视频卡保留生成视频与智能去字幕与 @，隐藏生成图片与「高清 ▾」，多提取音频', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['重新编辑', '生成视频', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['重新编辑', '生成视频', '智能去字幕', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「高清 ▾」下拉排在生成视频之后（IKGM9F 位次不变）', async () => {
@@ -326,6 +326,76 @@ describe('MediaNodeToolbar enhance dropdown menu 扩图项（IKGOQX）', () => {
       menuItem('image-quality-item-enhance').click();
     });
     expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
+  });
+});
+
+describe('MediaNodeToolbar 智能去字幕按钮（IKGZ82）', () => {
+  const eraseBtn = () => [...mountNode.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === '智能去字幕')!;
+
+  it('仅视频卡显示，位置在「生成视频」之后、「提取音频」之前', async () => {
+    await renderToolbar('video');
+    const order = labels();
+    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('智能去字幕'));
+    expect(order.indexOf('智能去字幕')).toBeLessThan(order.indexOf('提取音频'));
+    // 图片卡/音频卡不显示（精确数组用例「图片卡全显」「音频卡隐藏」已覆盖，此处再断不冗余出现）
+    await renderToolbar('image');
+    expect(labels().includes('智能去字幕')).toBe(false);
+  });
+
+  it('点击派发 onVideoSubtitleErase（携带节点 id）', async () => {
+    const onVideoSubtitleErase = vi.fn();
+    await renderToolbar('video', { data: { onVideoSubtitleErase } });
+    await act(async () => {
+      eraseBtn().click();
+    });
+    expect(onVideoSubtitleErase).toHaveBeenCalledWith('video-node');
+  });
+
+  it('超 2K 置灰并悬停原因：长边>2560 或 短边>1440，点击不派发', async () => {
+    const onVideoSubtitleErase = vi.fn();
+    await renderToolbar('video', { data: { onVideoSubtitleErase, width: 2561, height: 1440 } });
+    const long = eraseBtn();
+    expect(long.disabled).toBe(true);
+    expect(long.getAttribute('title')).toContain('长边超过 2560');
+    // 竖屏短长边语义：1440×2560 合法；短边 1441 超上限（横屏 2560×1441）
+    await renderToolbar('video', { id: 'tall-node', data: { onVideoSubtitleErase, width: 1440, height: 2560 } });
+    expect(eraseBtn().disabled).toBe(false);
+    await renderToolbar('video', { id: 'wide-node', data: { onVideoSubtitleErase, width: 2560, height: 1441 } });
+    const wide = eraseBtn();
+    expect(wide.disabled).toBe(true);
+    expect(wide.getAttribute('title')).toContain('短边超过 1440');
+    await act(async () => {
+      wide.click();
+    });
+    expect(onVideoSubtitleErase).not.toHaveBeenCalled();
+  });
+
+  it('时长超 10 分钟置灰并悬停原因；恰 10 分钟放行', async () => {
+    await renderToolbar('video', { data: { width: 1920, height: 1080, duration: 600.001 } });
+    const over = eraseBtn();
+    expect(over.disabled).toBe(true);
+    expect(over.getAttribute('title')).toContain('10 分钟');
+    await renderToolbar('video', { id: 'exact-node', data: { width: 1920, height: 1080, duration: 600 } });
+    expect(eraseBtn().disabled).toBe(false);
+  });
+
+  it('宽高/时长缺失（null）放行不置灰（存量视频不误拦）', async () => {
+    await renderToolbar('video');
+    const btn = eraseBtn();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it('hint 两态互斥（同一 title 通道）：可用态为效果边界句，置灰态为原因', async () => {
+    await renderToolbar('video', { data: { width: 1920, height: 1080 } });
+    const enabled = eraseBtn();
+    expect(enabled.getAttribute('title')).toContain('白色中英文字幕');
+    expect(enabled.getAttribute('title')).toContain('全画面模式');
+
+    await renderToolbar('video', { id: 'over-node', data: { width: 3840, height: 2160 } });
+    const disabled = eraseBtn();
+    expect(disabled.getAttribute('title')).toContain('无法智能去字幕');
+    expect(disabled.getAttribute('title')).not.toContain('白色中英文字幕');
   });
 });
 

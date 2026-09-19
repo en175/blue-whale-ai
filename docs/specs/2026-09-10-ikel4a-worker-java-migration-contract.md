@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五 + 修正六**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；修正六：2026-09-18 退役标签开关与命名对齐（详见 §16）——删除 `WORKER_ENABLED_TAGS` / `WORKER_GROUP_SUFFIX`，服务启动即消费全部 6 个 tag，topic `generation-video`→`generation-task`、tag `step`→`video`；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U；冻结增量 §15：2026-09-18 新增第 6 个生成类型 image_erase 图片擦除的跨进程字段冻结，IKGOT3；冻结增量 §17：2026-09-19 新增第 8 个生成类型 video_subtitle_erase 视频智能去字幕的跨进程字段冻结，IKGZ7Z——第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -421,3 +421,67 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - 风险 ③（火山流水线对 Java 镜像的构建部署支持）与 ⑥（刀②③④ 被 IKEF1K gate）在本修正后**仍未闭合**；TS 容器下线无任何记录，登记为**新风险 ⑧**。
 - 上线前置项（两项，与 ADR-0084 修正六 决策 7 同口径）：① broker 上已存在**可路由**的 topic `generation-task`——这是改名新建的 topic，而 `autoCreateTopicEnable` 只在**生产者首次发送**时建 topic，消费者订阅不触发，缺失时 worker 启动即失败（`No topic route info in name server`）而非静默；创建途径以生产 broker 实际形态为准；② 旧 TS worker 容器已停。工单 IKELHC 承接并补齐 runbook。
 - 对账用 TS 基线文件（§1 出处列、附录 A 行号）多为已删除文件，行号基线仅作历史取证，不得据此判断现行行为。
+
+## 17. 冻结增量（2026-09-19，IKGZ7Z）：video_subtitle_erase（视频智能去字幕）跨进程字段冻结
+
+第 8 个生成类型（附录 C 预告位；第 7 个 image_outpaint 契约独立在 `backend/libs/contracts/image-outpaint.ts`，未单开本文章节）。需求规格 = `docs/specs/2026-09-19-video-subtitle-erase-mediakit.md`，术语 = 根 CONTEXT.md「画布视频智能去字幕」。本节是 video_subtitle_erase 跨进程字段的**唯一事实源**：后续创建入口票（Z80）、worker 执行票（Z81）、前端票（Z82/Z83）一律照抄本节与常量落点，**不得另行发明字段名**。常量落点（双端各一处，防漂移断言对账）：
+
+- TS 侧：`backend/libs/contracts/video-subtitle-erase.ts`（含 zod schema）；MQ tag 复用 `queue.constants.ts` 的 `VIDEO_SUBTITLE_ERASE_TAG`
+- Java 侧：`worker-java/src/main/java/com/bluewhale/worker/domain/entity/VideoSubtitleEraseContract.java` + `JobType.VIDEO_SUBTITLE_ERASE` 枚举项
+- 防漂移断言：`backend/libs/contracts/video-subtitle-erase.test.ts` 读 Java 源码文本与 TS 常量逐值对账（沿用 image-cutout.test.ts 同源断言模式），任一侧漂移即红
+- 供应商接口 = 火山引擎 AI MediaKit「提交字幕擦除（精细化版）任务 API」（**异步任务**：提交返 task_id、轮询查询取结果，`POST /api/v1/tools/erase-video-subtitle-pro`；本仓经 new-api 网关调用，对客模型名 `mediakit-erase-video-subtitle-pro`——**家族内首个异步工具**，区别于 §14.5/§15.5 的同步路由）。**参数名以官方 PDF 为准**（出处逐条标注在契约常量注释），禁止引用二手信息。
+
+### 17.1 任务类型 / MQ / 来源
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `generation_jobs.type` | `video_subtitle_erase` | VARCHAR(32) 自由字符串，无 DB 迁移 |
+| RocketMQ tag | `video_subtitle_erase` | tag=type 口径同既有七类；复用 topic `generation-task`（修正六更名） |
+| 任务来源 `source` | `video_subtitle_erase` | 唯一创建入口 = 画布视频卡工具条「智能去字幕」（同 §15.1 专属来源值模式） |
+| claim source 白名单 | `source IN ('video_subtitle_erase')` | 单源白名单；Z81 落领取 SQL |
+| 消费者组 | `generation-video-subtitle-erase-worker`（字面量，修正六后无 groupSuffix） | 附录 C 触点①命名规则 |
+| 免费口径 | 无成本预留 / 无 provider 行 / 无素材合规门 / 无余额拦截 | 同 media_extract / image_enhance / image_erase 先例；本期网关 model_price 配 0 |
+| 错误码兜底 | `video_subtitle_erase_failed` → 数值 `1043` | `error-codes.ts` `ERROR_VIDEO_SUBTITLE_ERASE_FAILED`（1039-1042 已由高清/擦除/扩图/抠图占用）；无 worker 级自动重试 |
+
+### 17.2 input 冻结键名（四键恒在、值恒为合法枚举，strict 无多余键）
+
+| 键名 | 类型 / 取值 | 语义 |
+|---|---|---|
+| `source_asset_id` | string（Asset id，非 `0` 开头数字串） | 源素材身份：被去字幕的视频 Asset（命名沿用 media_extract） |
+| `target_node_id` | string（非空） | 目标节点身份：画布去字幕结果卡 node id；**发送时才建卡**（同 §15.2 擦除口径），node id 由前端生成传入；前端回填结果定位用，worker 不消费画布拓扑 |
+| `detect_mode` | `"subtitle_smart" \| "text_full"` | 检测模式（**本仓产品语义命名，非官方参数值**——出站经映射表换算官方 `mode`，见 §17.3） |
+| `erase_boxes` | Location 归一化矩形数组，≤20，**空数组合法** | 归一化框列表：空 = 不拉框走智能默认（出站不传 `erase_ratio_location`）；非空出站映射官方 `erase_ratio_location`。框内四键 `top_left_x` / `top_left_y` / `bottom_right_x` / `bottom_right_y` 与官方 Location 对象同名同值（[0,1]，画面左上角原点 (0,0)、右下角 (1,1)），出站原样透传 |
+
+**基础设施键 `provider_credential`**：业务键之上由创建侧冻结落库（同 §15.2 口径，worker 消费端校验 `provider_credential_missing`），不进契约 zod。
+
+### 17.3 检测模式映射与出站固定参数（单处定义、双端同源；文档出处 = 官方 PDF Body 参数节）
+
+- `detect_mode → mode` 映射：**subtitle_smart→Subtitle、text_full→Text**（TS `VIDEO_SUBTITLE_ERASE_MODE` / Java `MODE`）。Subtitle（官方默认）= OCR 检测字幕文本，默认仅画面下半（下方 50%），配置框后生效区 = 框与下半区交集；Text = 检测字幕及其他文本（人名、地名等，不含牌匾类场景文字），全画面检测，配置框后仅框内擦除——擦顶部字幕的途径。
+- `model_version`：**固定 `v5`**（官方默认 v4；v5 优化 AIGC 视频擦除后闪烁、带阴影字幕、误擦与速度；规格 Out of Scope 不开放选择）。
+- `output_encode_mode`：**固定 `Quality`**（官方默认画质优先；Size 为范围外）。
+- `erase_boxes` 出站规则：空数组**不传** `erase_ratio_location` 键（走官方默认行为）；非空原样透传（≤20，官方上限）。
+- `time_segment_filter`（分时间段擦除）：**本期不实现，仅留结构扩展位**（规格 Out of Scope，后续单独立项）——官方结构 = `{mode: skip|selected, segments: [{start_time: 秒≥0, end_time: 秒>start, erase_ratio_location?: Location[]（每段≤20，仅 selected）}]}`，分时段框与全局框互斥；类型占位 = TS `VideoSubtitleEraseTimeSegmentFilter`（不进 zod，strict schema 无此键、传入即拒）。
+- 任务形态：**异步两段式**——提交端点返 `task_id`，查询端点轮询 `status` 至 `completed` / `failed`；结果 `result.video_url` 24h 有效 + `result.duration`（秒）。
+
+### 17.4 输入限制常量（文档出处 = 官方 PDF `video_url` 参数「支持格式 / 输入分辨率限制」节 + 产品口径）
+
+| 常量（TS / Java 同值） | 值 | 口径 |
+|---|---|---|
+| `VIDEO_SUBTITLE_ERASE_MAX_SHORT_SIDE_PX` / `MAX_INPUT_SHORT_SIDE_PX` | `1440` | 官方仅「最高支持 2K 分辨率」**无像素值**——按工单预授权沿用图片系先例（IKGOSZ 修正后口径，竖屏合法）取 2K 档：短边 = min(宽,高) |
+| `VIDEO_SUBTITLE_ERASE_MAX_LONG_SIDE_PX` / `MAX_INPUT_LONG_SIDE_PX` | `2560` | 长边 = max(宽,高)，横竖屏同口径 |
+| `VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS` / `MAX_INPUT_DURATION_MS` | `10 * 60 * 1000` | 10 分钟**产品上限**（官方 API 无视频时长上限，规格故事 4 产品口径） |
+| （格式面，无常量） | mp4 / flv / ts / avi / mov / wmv / mkv 等 | 官方开放式列举「等主流视频格式」——**不做格式预检白名单**（规格：我方上传面 video/* 全部在官方支持面内），口径单源在 TS 契约注释 |
+
+消费方 = backend 创建入口复核（Z80，超 2K / 超 10 分钟拒，**宽高/时长缺失（存量 null）放行**交供应商按官方门槛拒）+ web 按钮门槛预检（Z82，import 契约常量做展示层判断）；worker-java 不做门槛复核（镜像常量仅对账用）。
+
+### 17.5 结果回填约定
+
+- **成功**：worker 调网关提交路由（`POST {NEW_API_BASE_URL}` 代理官方 `POST /api/v1/tools/erase-video-subtitle-pro`，对客模型名 `mediakit-erase-video-subtitle-pro`，鉴权同 §14.5：任务冻结的用户 sk- + `X-Trace-Id` + `X-Client-System: bluewhale`）→ 返 `task_id` → **复用视频生成的异步任务轮询骨架**（提交后 `markVideoSubmitted` 存 provider_task_id + 释放租约 + next+5s → `rescheduleVideoPoll` 周期轮询 → claim 按 `next_action_at` 领取，不新建任务状态机形态）→ 轮询至 `completed` 后**立即下载结果视频（URL 仅 24h 有效）**→ 落对象存储公开读 → 建 Asset（`type='video'` / `source='generated'` / `generation_job_id`）→ 终态 `succeeded`（免费工具无结算联动，同 §14.5 形态）→ 前端经 `GET /api/jobs/:id` 拿 Asset，按 `target_node_id` 回填去字幕结果卡（源卡不动；结果卡是普通视频素材卡，可再次去字幕、连线送生成）。
+- **失败**：提交失败 / 轮询超时 / 供应商错误统一终态 `failed` + `error={code,message}` 走既有错误码投影（兜底 `video_subtitle_erase_failed`，上游可读原因透传前端投影；额度/内容政策信号识别沿用 §5）；**不提供自动重试**（官方无取消端点，家族「发出不取消」口径），用户在结果卡手动重试，沿用冻结 input。
+
+### 17.6 注册触点与工单分工（附录 C 清单的 video_subtitle_erase 实例化）
+
+- **本票（IKGZ7Z）已落**：`JobType` 枚举项、`GenerationMqRoute` 路由项、`VideoSubtitleEraseContract` 常量类、`VideoSubtitleEraseError`（domain/error）、TS 契约常量与 zod schema、错误码 `video_subtitle_erase_failed`(1043)、`queue.constants.ts` tag（含 `GenerationTag` 联合类型扩项）、`StartupContractTest` 路由对账扩项、`mq-route-parity.test.ts` 登记、本节冻结。
+- **Z80（创建入口）**：backend 轻量创建路径（仿 image-erase 创建入口：凭证冻结——sk- 必须冻进 input.provider_credential；source=`video_subtitle_erase`）+ 参数复核（契约 zod、检测模式枚举、框列表 ≤20 与 [0,1] 坐标、源素材归属与媒体类型校验、§17.4 门槛复核含宽高/时长 null 放行）+ producer 入队函数（tag=`VIDEO_SUBTITLE_ERASE_TAG`）+ 入队失败回拨标记失败（`enqueue_failed` 终态口径）。
+- **Z81（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量（`generation-video-subtitle-erase-worker`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ `VideoSubtitleEraseJobProcessor`（MediaKit 网关客户端新增**异步提交 + 任务查询**两个端点 + §17.3 模式映射 + §17.5 轮询编排，复用视频生成轮询骨架）；④ claim 领取 SQL（type+source 白名单，复用 `findCandidateByTypeAndSources` 参数化）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例；任务来源白名单登记。
+- **前端（Z82/Z83）**：按钮门槛预检 import §17.4 常量（null 放行）、发送请求体按 §17.2 四键组装、来源边 `edge.data.origin = VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN`（纯视觉来源线，媒体引用推导跳过）。
