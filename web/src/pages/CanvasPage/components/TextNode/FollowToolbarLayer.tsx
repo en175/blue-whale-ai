@@ -6,9 +6,10 @@
  * GroupOverlay 组穿透双击进入编辑时节点未必选中）、操作条=唯一选中（useSoloNodeSelected
  * 口径）或悬停卡片（.wrapper:hover 的 JS 等价），且按钮回调（execCmd/setHeading/
  * editMaterial）闭包依赖 TextNode 内部 ref/state，无法提为 CanvasPage 侧内容组件。
- * 故由 TextNode 自渲染本层并 createPortal 到 React Flow store 的 domNode
- * （.react-flow 根、viewport transform 层外），与容器的 followToolbarLayer 同位同层：
- * 任何缩放级别（0.2~8）屏幕尺寸恒定，拖动卡片/平移缩放由 useStore 订阅实时跟随。
+ * 故由 TextNode 自渲染本层。坐标仍按 .react-flow 容器换算，但 portal 必须挂到
+ * document.body：.react-flow 是 React Flow 自己调和的祖先节点，往里插 portal
+ * 会在节点卸载 / 离页时和 React 抢 removeChild，整页 NotFoundError。
+ * 挂 body 后用 position:fixed + 容器 getBoundingClientRect 偏移，屏幕尺寸仍不随缩放变化。
  * ============================================ */
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -53,17 +54,23 @@ export default function FollowToolbarLayer({
     containerWidth,
     toolbarLift,
   });
+  const flowRect = flowDom.getBoundingClientRect();
 
   return createPortal(
     <div
       className={layerStyles.toolbarLayer}
       data-gen-panel-territory
-      style={{ left: anchor.left, top: anchor.top }}
+      style={{
+        position: 'fixed',
+        left: anchor.left + flowRect.left,
+        top: anchor.top + flowRect.top,
+        zIndex: 1,
+      }}
       onMouseEnter={onLayerMouseEnter}
       onMouseLeave={onLayerMouseLeave}
     >
       {children}
     </div>,
-    flowDom,
+    document.body,
   );
 }

@@ -760,9 +760,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       style={nodeTitleSizing(zoom)}
     >
       {/* IKGYYE 钉屏幕迁移：同一层操作位置的两条工具栏（编辑时格式工具栏、其余操作条，
-          两者互斥不叠成多行）迁出节点卡，经 FollowToolbarLayer portal 到 .react-flow 根
-          （viewport 变换层外）——任何缩放级别屏幕尺寸恒定、拖动/平移缩放实时跟随、
-          卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片。
+          两者互斥不叠成多行）迁出节点卡，经 FollowToolbarLayer portal 到 document.body
+          （fixed 钉屏幕，避开 React Flow 托管的 .react-flow 根）——任何缩放级别屏幕尺寸恒定、
+          拖动/平移缩放实时跟随、卡片上方居中。显示门与迁移前一致：格式栏=isFocused；操作条=唯一选中或悬停卡片。
           IKGYYB hover 桥接：层根 enter/leave 接入桥接 timer（穿间隙不闪卸） */}
       <FollowToolbarLayer
         nodeId={id}

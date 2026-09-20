@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /* IKGYYE 文本卡两条工具栏（格式工具栏 / 操作条）钉屏幕迁移测试：渲染模式沿用
    floatPosition.test.tsx（mock @xyflow/react + createRoot/act 渲染 TextNode）。
-   断言口径：两条工具条渲染在钉屏幕层（React Flow domNode = .react-flow 根之下、
-   不在节点卡 DOM 内），层根带 data-gen-panel-territory、锚点 = computeFollowAnchorAbove
-   换算值；出现时机与迁移前一致（格式栏=编辑聚焦、操作条=唯一选中或悬停卡片、非编辑）；
+   断言口径：两条工具条渲染在钉屏幕层（portal 到 document.body、不在节点卡 DOM 内），
+   层根带 data-gen-panel-territory、锚点 = computeFollowAnchorAbove 换算值；
+   出现时机与迁移前一致（格式栏=编辑聚焦、操作条=唯一选中或悬停卡片、非编辑）；
    按钮构成/顺序/回调不变；编辑态点工具条（焦点移入层内）不触发 blur 退出编辑。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -43,7 +43,7 @@ const storeState = vi.hoisted(() => {
     transform: [0, 0, 1] as [number, number, number],
     width: 1200,
     height: 800,
-    /** 钉屏幕层的 portal 目标（.react-flow 根；渲染前由 renderTextNode 注入） */
+    /** 画布容器（FollowToolbarLayer 用 getBoundingClientRect 换算 fixed 偏移） */
     domNode: null as HTMLElement | null,
     nodeLookup: new Map(
       nodes.map((n) => [
@@ -68,7 +68,7 @@ vi.mock('@xyflow/react', () => ({
 
 let root: Root;
 let container: HTMLDivElement;
-/** 钉屏幕层宿主（.react-flow 根）：两条工具条应 portal 到这里而不是留在节点卡内 */
+/** 画布容器 mock：定位仍依赖其 getBoundingClientRect，工具条 portal 到 document.body */
 let flowRoot: HTMLDivElement;
 
 interface RenderOptions {
@@ -150,9 +150,9 @@ async function leaveCard() {
   await act(async () => wrapper.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
 }
 
-/** 钉屏幕层根（data-gen-panel-territory 打在层根上） */
+/** 钉屏幕层根（data-gen-panel-territory 打在层根上，portal 在 document.body） */
 function layer(): HTMLElement | null {
-  return flowRoot.querySelector<HTMLElement>('[data-gen-panel-territory]');
+  return document.querySelector<HTMLElement>('[data-gen-panel-territory]');
 }
 
 /** 层内按钮 title 序列（divider 为 div 不计入） */
@@ -175,7 +175,7 @@ afterEach(async () => {
 });
 
 describe('IKGYYE 钉屏幕层渲染与出现时机', () => {
-  it('编辑聚焦：格式工具栏渲染在钉屏幕层（.react-flow 根下、节点卡 DOM 外），锚点=上方锚定换算', async () => {
+  it('编辑聚焦：格式工具栏渲染在钉屏幕层（document.body、节点卡 DOM 外），锚点=上方锚定换算', async () => {
     const editor = await renderTextNode();
     await enterEditing(editor);
     const bar = layer();
