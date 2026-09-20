@@ -1030,22 +1030,22 @@ function resolveVideoTextIndexReferences(
   };
 }
 
-/** 视频文本带入合并后的容量校验（契约 §10）：有能力行走既有 checkReferenceLimits
- *  分类上限；无能力行维持 validateVideo 旧口径（图/视频并集 ≤ 12，音频不占额）。 */
+/** 视频文本带入合并后的容量校验（契约 §10）：分类上限全部读能力行。
+ *
+ *  `features` 为空时**不判数量**——此前按写死的「图/视频并集 ≤ 12」判，那是一处「配置说了不算」：
+ *  运营把上限配到 12 以上会被它先拒掉。该分支实际不可达（调用链上游的白名单守卫要求模型必须
+ *  在启用目录内，未命中直接 400 MODEL_UNAVAILABLE，因此能力行必然已解析），留一个显式的
+ *  配置缺失出口，而不是一个看起来像规则的魔数。 */
 function videoReferenceLimitError(
   features: ModelFeatures | undefined,
   references: ReadonlyArray<ReferenceItemInput | TextProvidedVideoReference>,
 ): string | null {
+  if (!features) return null;
   const items = references.map((item) => ({
     type: item.type,
     duration: "duration" in item && typeof item.duration === "number" ? item.duration : undefined,
   }));
-  if (features) {
-    return checkReferenceLimits(features, items, "video");
-  }
-  return items.filter((item) => item.type !== "audio").length > 12
-    ? "参考素材最多 12 个"
-    : null;
+  return checkReferenceLimits(features, items, "video");
 }
 
 /** 音频目标的文本带入参考校验与并入（契约 §11 IKFM41）：失效索引 / 不支持类型（video）400；
