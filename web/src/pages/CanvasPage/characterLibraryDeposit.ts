@@ -1,8 +1,8 @@
 /* 画布节点合规校验：视为上传虚拟素材（CreateAsset 不传分组，由后端归组） */
 import { createAsset, waitAssetReady, MaterialAssetFailedError, type MaterialAssetType } from '@/api/material';
 
-export const COMPLIANCE_SUCCESS_TOAST = '校验通过，可用于seedance2.0视频生成';
-export const COMPLIANCE_FAILED_TOAST = 'seedance2.0合规校验失败，不可用于视频生成';
+export const COMPLIANCE_SUCCESS_TOAST = '校验通过，可用于seedance视频生成';
+export const COMPLIANCE_FAILED_TOAST = 'seedance合规校验失败，不可用于视频生成';
 
 export function isComplianceFailedError(err: unknown): boolean {
   return err instanceof MaterialAssetFailedError;

@@ -521,11 +521,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               <span className={styles.complianceSpinner} />
             </span>
           ) : data.compliancePassed ? (
-            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance2.0视频生成">
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance视频生成">
               <img src="/success.png" alt="" />
             </span>
           ) : data.complianceFailed ? (
-            <span className={`nodrag nopan ${styles.complianceFailedText}`} title="seedance2.0合规校验失败，不可用于视频生成">
+            <span className={`nodrag nopan ${styles.complianceFailedText}`} title="seedance合规校验失败，不可用于视频生成">
               审核失败
             </span>
           ) : null}

@@ -31,12 +31,15 @@ const BACKEND_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 export class ApiError extends Error {
   status: number;
   code: number | string;
+  /** 失败信封 data；画布 412 会带回 { version } 供刷新 If-Match */
+  data: unknown;
 
-  constructor(status: number, message: string, code: number | string = '') {
+  constructor(status: number, message: string, code: number | string = '', data: unknown = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -158,7 +161,8 @@ async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data
     const err = new ApiError(
       res.status,
       readApiErrorMessage(body, res.status),
-      body?.code ?? res.status
+      body?.code ?? res.status,
+      body?.data,
     );
     if (!silent && err.status !== 401) toast.error(err.message);
     throw err;

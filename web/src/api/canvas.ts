@@ -5,7 +5,7 @@ import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contract
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
-import { apiRequest } from './http';
+import { apiRequest, isApiError } from './http';
 import { queryOptions } from '@tanstack/react-query';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
@@ -201,12 +201,19 @@ export function serializeEdges(edges: Edge[]): string {
   );
 }
 
-/**
- * 保存画布 PUT /api/canvases/:projectId
- * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
- * @throws ApiError status=412 表示版本冲突，调用方需重新加载
- */
-export function saveCanvasDoc(
+const CANVAS_VERSION_CONFLICT_MSG = 'Canvas 版本冲突';
+const CANVAS_SAVE_CONFLICT_RETRIES = 2;
+
+/** 从「Canvas 版本冲突」信封读取服务端当前 version；对不上则返回 undefined。 */
+export function readCanvasConflictVersion(error: unknown): number | null | undefined {
+  if (!isApiError(error) || error.message !== CANVAS_VERSION_CONFLICT_MSG) return undefined;
+  const version = (error.data as { version?: unknown } | null | undefined)?.version;
+  if (version === null) return null;
+  if (typeof version === 'number' && Number.isInteger(version) && version >= 0) return version;
+  return undefined;
+}
+
+function putCanvasDoc(
   projectId: string,
   payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
   version: number | null,
@@ -221,4 +228,29 @@ export function saveCanvasDoc(
       edges: serializeEdges(payload.edges),
     }),
   });
+}
+
+/**
+ * 保存画布 PUT /api/canvases/:projectId
+ * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
+ * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）
+ */
+export async function saveCanvasDoc(
+  projectId: string,
+  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
+  version: number | null,
+): Promise<CanvasSaveData> {
+  let expected = version;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= CANVAS_SAVE_CONFLICT_RETRIES; attempt += 1) {
+    try {
+      return await putCanvasDoc(projectId, payload, expected);
+    } catch (error) {
+      lastError = error;
+      const recovered = readCanvasConflictVersion(error);
+      if (recovered === undefined) throw error;
+      expected = recovered;
+    }
+  }
+  throw lastError;
 }
