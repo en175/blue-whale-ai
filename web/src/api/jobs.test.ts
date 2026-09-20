@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './http';
 import {
   createMediaExtraction,
+  createVocalSplit,
   createVideoEnhancement,
   fetchJobStatus,
   isGenerationDomainError,
@@ -63,6 +64,34 @@ describe('createVideoEnhancement', () => {
       source_asset_id: '5',
       target_node_id: 'media-draft-1',
       resolution: '2k',
+    });
+  });
+});
+
+describe('createVocalSplit', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目人声背景分离端点提交源素材 + 场景 + 格式三键（IKHA2W，契约键名恒等）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '9012', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVocalSplit('p1', { source_asset_id: '5', scene: 'drama', output_format: 'flac' }),
+    ).resolves.toEqual({ job_id: '9012', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/vocal-splits');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '5',
+      scene: 'drama',
+      output_format: 'flac',
     });
   });
 });

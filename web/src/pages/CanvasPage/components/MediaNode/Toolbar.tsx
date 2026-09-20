@@ -19,7 +19,7 @@
  * 图片/视频分支的详情不变；音频不出现「替换」入口；@（mention）对音频保持隐藏。
  * ============================================ */
 import { useCallback } from 'react';
-import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, type LucideIcon } from 'lucide-react';
+import { Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, type LucideIcon } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
@@ -28,6 +28,7 @@ import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../a
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
+import AudioVideoSplitMenu, { type AudioVideoSplitMenuItem } from './AudioVideoSplitMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
 
@@ -89,10 +90,13 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const videoSubtitleEraseDisabledReason = videoSubtitleEraseGateReason(data);
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
-  /** 音视频分离（IKH28U）：点击进入编辑态（不再一键直发，发送闭环归 IKH28X），
-   *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
+  /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：点击触发钮直启首项「音视频分离」
+   *  进入编辑态，原单按钮直启链路零变化；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
+  /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
+   *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
+  const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
   /** 视频 HD 高清（IKH3VG）：点击在源卡右侧建 HD 草稿卡并弹出 HD 面板；置灰预检见
    *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
   const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
@@ -170,6 +174,27 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     },
   ];
 
+  /** 「音视频分离 ▾」下拉菜单项（IKHA2E）：首项保持原名「音视频分离」、直启原链路不变
+   *  （点击触发钮=直启首项）；第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）；
+   *  门槛同源整卡预检（未关联资产唯一置灰，点击无效但悬停仍可展开看两项说明与置灰原因），
+   *  各项 title 恒为自己的 hint。 */
+  const audioVideoSplitMenuItems: AudioVideoSplitMenuItem[] = [
+    {
+      id: 'split',
+      label: '音视频分离',
+      hint: AUDIO_VIDEO_SPLIT_ENTRY_HINT,
+      disabledReason: audioVideoSplitDisabledReason,
+      onSelect: handleAudioVideoSplit,
+    },
+    {
+      id: 'vocalBackground',
+      label: '人声背景分离',
+      hint: '把人声与背景音分离为多张音频卡',
+      disabledReason: audioVideoSplitDisabledReason,
+      onSelect: handleVocalBackgroundSplit,
+    },
+  ];
+
   /* 数据门（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显；
    *  谓词与 CanvasPage 显隐门共用（mediaCardToolbarVisible，IKGYYB 审查消双实现） */
   if (!mediaCardToolbarVisible(data)) return null;
@@ -213,15 +238,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
         );
       })}
       {data.mediaType === 'video' && (
-        <button
-          className={styles.toolBtn}
-          onClick={handleAudioVideoSplit}
-          disabled={audioVideoSplitDisabledReason !== null}
-          title={audioVideoSplitDisabledReason ?? AUDIO_VIDEO_SPLIT_ENTRY_HINT}
-        >
-          <AudioLines size={14} strokeWidth={2} />
-          <span>音视频分离</span>
-        </button>
+        <AudioVideoSplitMenu
+          items={audioVideoSplitMenuItems}
+          triggerHint={AUDIO_VIDEO_SPLIT_ENTRY_HINT}
+        />
       )}
       {/* 音频卡五功能占位（IKH8Q3）：aria-disabled 置灰保持渲染（口径同画质横排
           .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}
