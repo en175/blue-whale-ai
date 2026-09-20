@@ -1791,6 +1791,7 @@ export default function CanvasPage() {
           onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -2708,6 +2709,9 @@ export default function CanvasPage() {
      *  按钮派发，原提取音频一键直发通道退役）；首帧渲染前经由
      *  actionsRef.current.audioVideoSplit 分派到 handleNodeAudioVideoSplit */
     audioVideoSplit: (_id: string) => {},
+    /** 场景切分（IKH8BJ 通道/接线）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发）；
+     *  首帧渲染前经由 actionsRef.current.sceneSplit 分派到 handleNodeSceneSplit */
+    sceneSplit: (_id: string) => {},
     /** 视频 HD 高清（IKH3VG 通道/接线）：源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条
      *  「HD」徽标按钮派发）；首帧渲染前经由 actionsRef.current.videoEnhance 分派到
      *  handleNodeVideoEnhance */
@@ -4074,6 +4078,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4115,6 +4120,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4171,6 +4177,7 @@ export default function CanvasPage() {
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4655,6 +4662,7 @@ export default function CanvasPage() {
       onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+      onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
       onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5043,6 +5051,7 @@ export default function CanvasPage() {
           onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5701,6 +5710,7 @@ export default function CanvasPage() {
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -7447,6 +7457,12 @@ export default function CanvasPage() {
     });
   };
 
+  /** 场景切分（IKH8BJ 入口占位）：置灰门槛已在工具条按钮置灰层完成（sceneSplitGateReason），
+   *  此处只接通入口事件派发。TODO(IKH8BR)：编辑态本体（源卡锁定、切分粒度三档、积分与
+   *  发送、场景段卡扇出）由后续票交付，届时在此进入场景切分编辑会话
+   *  （工具会话口径对齐 handleNodeAudioVideoSplit 的 runToolSessionEntry 先例）。 */
+  const handleNodeSceneSplit = (_id: string) => {};
+
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
   const handleCropPresetChange = (key: CropPresetKey) => {
@@ -7868,6 +7884,7 @@ export default function CanvasPage() {
   actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
+  actionsRef.current.sceneSplit = handleNodeSceneSplit;
   actionsRef.current.videoEnhance = handleNodeVideoEnhance;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -8477,6 +8494,7 @@ export default function CanvasPage() {
               onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+              onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
