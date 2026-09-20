@@ -41,6 +41,7 @@
    - 既有 `max_reference_images`（图参考上限）与 `quantity_max`（单次输出数）保留复用
 2. **服务端校验全读 features**：`validateAudioReferences`（音频≤`audio_reference_max`、图≤`image_reference_max`、不可混用由能力位表达）、`validateVideo`（普通参考视频素材≤`video_reference_max`）、参考素材总时长≤`max_reference_duration_sec`、图参考≤`max_reference_images`。
 3. **前端同源**：删 `REF_LIMITS` / `MAX_VIDEO_REFS` / `supportsVideoReferenceModel`，面板读 `GenerationModel.features` 驱动数量/时长/视频参考门控。
+   - 补充（IKHBO）：本决定落地时 `supportsVideoReferenceModel` 只删了一半——函数体仍留着 `seedance-2` / `doubao-seedance-2-0` 前缀特判，且画布层（连线校验、资产库接纳槽位、资产卡参考图上限、提交防线）仍写死 `9/3/3` 与 `10`。该前缀特判对 Seedance 2.5 与 2.0 **恰好判反**（2.5 的 `video_reference=true` 被误拦、2.0 的 `false` 被误放），2.5 携带视频/音频参考的草稿在客户端无法提交。现已删除前缀特判，画布页改按**草稿卡绑定模型**（`draftModelId`）的能力行取值；模型未解析（能力列表未加载 / 卡上未绑定模型）时回落缺省值且**不阻断**，交服务端兜底，避免客户端假阴性。
 4. **任务类型比例/时长**：前端按现有 mode 映射（prompt→default、keyframe/text2video→first_frame/first_last_frame）读 `features.task_types` 约束渲染（自适应比例/自动时长钳制）。
 5. **数据**：种子 `002_seed.sql` 补全新字段 + 新增 Seedance 2.5 样例行；生产库数据由运营在后台按字段说明更新，不写生产 SQL。
 

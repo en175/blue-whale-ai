@@ -678,7 +678,9 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
     doc.edges.push({ id: 'image-video', source: 'source-image', target: 'v1', role: 'reference' });
     canvasDocMock.current.assets['101'] = { asset_id: 101, type: 'image', access_url: 'http://img/101.png', width: 100, height: 100 };
     const models = await apiMocks.fetchGenerationModels();
-    apiMocks.fetchGenerationModels.mockResolvedValueOnce(models.map(model => ({ ...model, features: { reference_image: true, max_reference_images: 9 } })));
+    // 常驻实现（不再 once）：画布页自身也要读模型能力（连线校验/资产接纳），
+    // once 队列会被画布的 video/image 能力调用提前吃掉，面板拿不到带能力的位置而误判冲突
+    apiMocks.fetchGenerationModels.mockResolvedValue(models.map(model => ({ ...model, features: { reference_image: true, max_reference_images: 9 } })));
     await renderPage();
     await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')));
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2));

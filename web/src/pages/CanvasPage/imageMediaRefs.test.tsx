@@ -87,7 +87,9 @@ const apiMocks = vi.hoisted(() => ({
       default_format: null,
       default_aspect_ratio: '1:1',
       default_duration: null,
-      features: { reference_image: true, max_reference_images: 9 },
+      // max_reference_images 是参考图上限的唯一口径（ADR-0086）：9 会让下方「连满 10 张」用例
+      // 变成连满 9 张，与用例名/断言的缺省能力行 10 自相矛盾
+      features: { reference_image: true, max_reference_images: 10 },
       version: 1,
       digest: '',
     },
