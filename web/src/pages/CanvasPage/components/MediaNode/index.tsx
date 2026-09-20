@@ -194,9 +194,13 @@ export interface MediaNodeData {
   /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
    *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
   onVideoEnhance?: (id: string) => void;
-  /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
-   *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
+  /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：进入音视频分离编辑态（「音视频分离 ▾」
+   *  下拉首项与触发钮直启派发，原单按钮链路不变；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
+  /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
+   *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
+   *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
+  onVocalBackgroundSplit?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
