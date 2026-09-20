@@ -6,9 +6,7 @@ import {
 import { createHash } from "node:crypto";
 
 import {
-  COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
-  COMPOSED_VIDEO_PROMPT_MAX_LENGTH,
-  COMPOSED_AUDIO_PROMPT_MAX_LENGTH,
+  resolvePromptMaxLength,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
@@ -1193,8 +1191,9 @@ async function resolveTargetSnapshot(args: {
   deps: Pick<GenerationDeps, "canvas">;
   /** 同次画布读取：文本附件与目标坐标系必须来自同一版本，不得二次读取。 */
   canvas?: Awaited<ReturnType<CanvasRepo["getByProject"]>>;
-  /** ADR-0085：所选模型的 raw prompt 上限；组合闸取 max(契约预算, 模型值)。 */
-  maxPromptLength: number;
+  /** ADR-0085 / IKH4B8：所选模型的 max_prompt_length 配置（未配置为 null）。
+   *  两道闸共用这一份配置、各自回落自己的缺省，故传**配置原值**而非 raw 闸的生效值。 */
+  promptLengthConfig: number | null;
   /** IKFM3S：图片目标的文本索引派生结果——附件冻结 media 映射用（缺省无媒体）。 */
   textIndex?: TargetTextIndex;
   referenceAssetIds: readonly string[];
@@ -1202,7 +1201,7 @@ async function resolveTargetSnapshot(args: {
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
 > {
-  const { type, body, promptText, projectId, deps, maxPromptLength } = args;
+  const { type, body, promptText, projectId, deps, promptLengthConfig } = args;
   const targetNodeId =
     isStr(body.target_node_id) && body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -1287,17 +1286,9 @@ async function resolveTargetSnapshot(args: {
         value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
       };
     }
-    // ADR-0085：模型 raw 上限可超过契约预算（image-2=32000），组合闸跟随取大，
-    // 否则配了大上限的模型一挂文本附件就先撞组合闸，配置形同虚设。
-    // IKFCXE：音频组合预算与图片/视频同值并列，取大逻辑一致。
-    const composedMaxLength = Math.max(
-      type === "video"
-        ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH
-        : type === "audio"
-          ? COMPOSED_AUDIO_PROMPT_MAX_LENGTH
-          : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
-      maxPromptLength,
-    );
+    // IKH4B8：组合闸改为**模型配置优先**，未配置才回落组合缺省（image/video/audio 均契约预算 30000）。
+    // 原 ADR-0085 的取大修掉了「大上限模型先撞组合闸」，但顺带把小于契约预算的配置也吞掉了。
+    const composedMaxLength = resolvePromptMaxLength("contract-budget", type, promptLengthConfig);
     if (composed.length > composedMaxLength) {
       return {
         ok: false,
@@ -1405,10 +1396,10 @@ export async function handleCreateGenerationJob(
     if (revalidated)
       return fail(400, revalidated.message, { code: revalidated.code });
   }
-  // ADR-0085（IKESD6）：raw prompt 长度上限跟随模型目录（image-2 配 32000），
-  // 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
-  const maxPromptLength =
-    capability?.features?.max_prompt_length ?? (type === "audio" ? 3000 : 4000);
+  // ADR-0085（IKESD6）/ IKH4B8：raw prompt 长度上限**模型配置优先**，
+  // 未配置才回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
+  const promptLengthConfig = capability?.features?.max_prompt_length ?? null;
+  const maxPromptLength = resolvePromptMaxLength("legacy-hardcode", type, promptLengthConfig);
   if (promptText.length > maxPromptLength)
     return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
@@ -1622,7 +1613,7 @@ export async function handleCreateGenerationJob(
     promptText,
     projectId,
     deps,
-    maxPromptLength,
+    promptLengthConfig,
     ...(textIndexRefs.value.index.refs.length > 0 || textIndexRefs.value.index.inputs.length > 0
       ? { textIndex: textIndexRefs.value.index }
       : {}),
