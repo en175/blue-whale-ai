@@ -220,11 +220,11 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     ];
     expect((await saveCanvas(projectId, nodes, reordered, canvas.version)).status).toBe(200);
 
-    const onFirst = await createJob(projectId, imageJobBody("media-1", ""));
+    const onFirst = await createJob(projectId, imageJobBody("media-1", "暮色"));
     expect(onFirst.code).toBe(200);
     expect(attachmentIds((await readJob(onFirst.data.generation_job_id))!.input)).toEqual(["text-c", "text-a"]);
 
-    const onSecond = await createJob(projectId, imageJobBody("media-2", ""));
+    const onSecond = await createJob(projectId, imageJobBody("media-2", "暮色"));
     expect(onSecond.code).toBe(200);
     expect(attachmentIds((await readJob(onSecond.data.generation_job_id))!.input)).toEqual(["text-a", "text-c"]);
   });
@@ -264,8 +264,9 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     expect(attachmentIds((await readJob(first.data.generation_job_id))!.input)).toEqual(["text-a", "text-b"]);
   });
 
-  it("图片多附件组合后超过 30000 字 → 明确失败、不创建任务、不截断附件", async () => {
-    const projectId = (await projects.create("987654", "IKDLQH image composed limit")).id;
+  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
+  it("图片多附件不额外计数：正文短、附件合计 40000 字 → 创建成功，连线与附件不被删改", async () => {
+    const projectId = (await projects.create("987654", "IKDLQH image attachments not counted")).id;
     const nodes = [
       mediaNode("media-1", "image"),
       textNode("text-a", "文".repeat(20_000)),
@@ -277,16 +278,16 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     ];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    const created = await createJob(projectId, imageJobBody("media-1", ""));
-    expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(await jobCount(projectId)).toBe(0);
+    const created = await createJob(projectId, imageJobBody("media-1", "暮色"));
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
     // 连线与附件不因超限被静默删除
     expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual(edges);
   });
 
-  it("视频多附件组合后超过 30000 字 → 明确失败、不创建任务、不截断附件", async () => {
-    const projectId = (await projects.create("987654", "IKDLQH video composed limit")).id;
+  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
+  it("视频多附件不额外计数：正文短、附件合计 40000 字 → 创建成功，连线与附件不被删改", async () => {
+    const projectId = (await projects.create("987654", "IKDLQH video attachments not counted")).id;
     const nodes = [
       mediaNode("media-v", "video"),
       textNode("text-a", "文".repeat(20_000)),
@@ -298,10 +299,9 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     ];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    const created = await createJob(projectId, videoJobBody("media-v", ""));
-    expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(await jobCount(projectId)).toBe(0);
+    const created = await createJob(projectId, videoJobBody("media-v", "暮色"));
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
     // 连线与附件不因超限被静默删除
     expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual(edges);
   });

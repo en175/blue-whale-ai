@@ -129,7 +129,9 @@ describe("handleListModels 消费端剥调用值", () => {
     expect(models[0]!.features.i2i_model_name).toBeUndefined();
   });
 
-  // IKH4B8：下发的是**已算好的生效值**——配了用配置，未配置回落缺省，消费端不必知道缺省口径。
+  // IKH8AU：下发的是**已算好的生效值**——配了用配置，未配置回落缺省，消费端不必知道缺省口径。
+  // 下列用例复用 imageView() 只是当「一条能力行」使：回落档由 handleListModels 的第一个参数
+  // （capability）决定，与夹具的 model_id / 标签无关。
   it("未配置时下发图片缺省上限 4000", async () => {
     const result = await handleListModels("image", {
       models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },

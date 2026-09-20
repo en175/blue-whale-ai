@@ -134,7 +134,7 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
       references: [
         { role: "first_frame", asset_id: firstAsset.id.toString(), type: "image" },
       ],
-      parameters: { prompt: "", model_id: MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
+      parameters: { prompt: "镜头缓推", model_id: MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
     });
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
@@ -148,7 +148,7 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
     expect(job!.input.references).toEqual([
       { role: "first_frame", asset_id: firstAsset.id.toString(), type: "image" },
     ]);
-    expect(job!.input.prompt).toBe("");
+    expect(job!.input.prompt).toBe("镜头缓推");
   });
 
   // 浏览器段（真实浏览器 + 真实业务 API + 隔离 MySQL）：视频面板完整操作至生成输入闭环。

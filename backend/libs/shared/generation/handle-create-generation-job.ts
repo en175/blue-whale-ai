@@ -1582,7 +1582,7 @@ export async function handleCreateGenerationJob(
   // 是 worker 的事，不在接纳层。
   // 产出即最终正文，下游（方案快照、strategy.composeInput → input.prompt）一律消费它。
   // 注意：长度闸在转移之前量的是带 &id& 的原文，而转移可能**变长**（`&1&` 3 字 → `@图片1` 4 字），
-  // 所以该闸不构成「最终正文不超限」的保证。实际不可达（面板输入上限 1000 + 组合预算 30,000）；
+  // 所以该闸不构成「最终正文不超限」的保证。实际不可达（正文由提交方给全，前端面板另有输入上限）；
   // 若要该不变式成立，需在转移之后复量一次。
   const markerItems = type === "image"
     ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))

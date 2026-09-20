@@ -71,7 +71,7 @@ prompt = prompt_plan_snapshot.providerPrompt ?? input.composed_prompt ?? 既有�
 - 文本身份复核、编号编译、目标检查、方案编译和最终文本冻结必须使用同一次画布读取。并发修改不允许造成正文编号与附件清单跨版本混用；下一次请求重新读取最新画布。
 - `text_ref.node_id` 必须在接纳当下推导的文本附件集合内；不在 → `400 invalid_reference`（同文案）。保存与提交之间的连线变化以接纳当下复核为准（D4）。
 - 带 `invalid_label` 的文本标签 → `400 invalid_reference`（存在已失效的素材标签，请删除后再提交；沿用既有文案）。
-- 编译后正文（含 `文本N` 字样）再次通过既有非空/长度/组合约束；组合长度上限沿用 `max(契约预算, 模型 raw 上限)`。
+- 编译后正文（含 `文本N` 字样）再次通过既有非空/长度约束；长度上限取**模型配置优先、未配置回落缺省**（图片/视频 4000）。~~组合长度上限沿用 `max(契约预算, 模型 raw 上限)`~~ —— 该组合档已由 **IKH8AU** 退役（服务端不再组合，附件正文已在正文里）。见 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)。
 - `type=audio` 携带 `prompt_doc` 拒绝规则不变（正文素材标签暂仅支持图片与视频生成）。
 
 ## 6. 前端行为
