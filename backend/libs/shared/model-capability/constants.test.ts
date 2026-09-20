@@ -124,6 +124,101 @@ describe("parseModelUpdateBody", () => {
     });
     expect(parsed.ok).toBe(false);
   });
+
+  // IKH BDO：更新是 diff 提交，没改过的 channel_parser 不在 body 里，映射校验
+  // 必须按**库中该行**的解析器判定，否则整段校验被跳过（脏值直接落库）。
+  it("库中 gpt 行：只改展示名（不带 mapping）→ 放行，且不提交 mapping", () => {
+    const parsed = parseModelUpdateBody(
+      { model_label: "新名字" },
+      { channel_parser: "gpt" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect("request_mapping" in parsed.value).toBe(false);
+  });
+
+  it("库中 gpt 行：显式清空 mapping（null）→ 拒绝", () => {
+    expect(
+      parseModelUpdateBody(
+        { request_mapping: null },
+        { channel_parser: "gpt" },
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("库中 gpt 行：空交叉格 {matrix:{}} → 拒绝（落库后该模型每次请求都 400）", () => {
+    expect(
+      parseModelUpdateBody(
+        { request_mapping: { matrix: {} } },
+        { channel_parser: "gpt" },
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("库中 seedream 行：mapping 传 null 视为「不改」，不透传给 repo", () => {
+    const parsed = parseModelUpdateBody(
+      { model_label: "x", request_mapping: null },
+      { channel_parser: "seedream" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect("request_mapping" in parsed.value).toBe(false);
+  });
+
+  it("库中 seedream 行：mapping 传对象 → 原样写入", () => {
+    const matrix = { matrix: { "1K": { "1:1": "1024x1024" } } };
+    const parsed = parseModelUpdateBody(
+      { request_mapping: matrix },
+      { channel_parser: "seedream" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.request_mapping).toEqual(matrix);
+  });
+
+  // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
+  it("features 闸门补键：脏类型 → 拒绝", () => {
+    const dirty = [
+      { max_reference_images: "abc" },
+      { max_reference_images: 1.5 },
+      { quantity_max: 1.5 },
+      { quantity_max: 0 },
+      { reference_image: "yes" },
+      { watermark: 1 },
+      { audio: "true" },
+      { tools: "no" },
+      { first_frame: 0 },
+      { last_frame: 1 },
+      { first_last_frame: [] },
+      { sequential_image_generation: "x" },
+      { stream: "x" },
+      { image_protocol: 42 },
+      { image_protocol: "  " },
+    ];
+    for (const features of dirty) {
+      expect(parseModelUpdateBody({ features }).ok).toBe(false);
+    }
+  });
+
+  it("features 闸门补键：合法值与 camelCase 键形 → 放行", () => {
+    expect(
+      parseModelUpdateBody({
+        features: {
+          max_reference_images: 14,
+          quantity_max: 10,
+          reference_image: true,
+          watermark: false,
+          audio: true,
+          tools: true,
+          first_frame: true,
+          first_last_frame: false,
+          sequential_image_generation: false,
+          stream: false,
+          image_protocol: "openai-images",
+          maxReferenceImages: 14,
+          quantityMax: 10,
+          imageProtocol: "inline-image",
+        },
+      }).ok,
+    ).toBe(true);
+  });
 });
 
 // IKESD6 / ADR-0085：features 扩展键写侧闸门（读侧宽容降级，写侧必须拒绝脏类型）。
