@@ -6,8 +6,11 @@
    三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
    IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
    「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。
-   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能置灰占位钮（截取/调速/混合/
-   音视频合成/转码，悬停「即将上线」、不绑定点击）+ 分隔线 + 下载，详情对音频退役。 */
+   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能占位钮（截取/调速/混合/
+   音视频合成/转码，悬停「即将上线」、不绑定点击）+ 分隔线 + 下载，详情对音频退役。
+   IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
+   悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
+   派发 onTrimAudio（编辑态行为归 IKHB7A）；其余四钮维持占位「即将上线」。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,7 +65,7 @@ afterEach(async () => {
 });
 
 describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮后）', () => {
-  it('音频卡五占位钮连排 + 分隔线 + 下载，详情退役、@ 隐藏（IKH8Q3）', async () => {
+  it('音频卡「截取」+四占位钮连排 + 分隔线 + 下载，详情退役、@ 隐藏（IKHB6Y/IKH8Q3）', async () => {
     await renderToolbar('audio');
     expect(labels()).toEqual(['截取', '调速', '混合', '音视频合成', '转码', '下载']);
   });
@@ -132,18 +135,23 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
   });
 });
 
-/* IKH8Q3（ADR-0109）：音频卡五功能占位钮——「截取、调速、混合、音视频合成、转码」图标加文字
-   横排（ADR-0107 家族口径），本期全部置灰占位：aria-disabled 置灰沿用画质横排先例
+/* IKHB6Y（父单 IKHB08）：音频卡首位「截取」从占位点亮——门槛见 audioTrim.ts（音频 URL
+   缺失、或时长缺失/为 0 置灰并悬停「音频时长缺失，无法截取」；截取手柄时间换算硬性
+   依赖时长，缺失即拦，不照搬家族「数据缺失不拦」口径）；达标可点派发 onTrimAudio，
+   点击后的编辑态行为归 IKHB7A，本套只验收回调被正确调用。IKH8Q3（ADR-0109）其余四钮
+   （调速/混合/音视频合成/转码）维持置灰占位：aria-disabled 置灰沿用画质横排先例
    （灰字/not-allowed/透明底，见 .toolBtn[aria-disabled='true']），悬停提示「即将上线」，
    不绑定任何点击行为；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
    不出现「替换」入口。 */
-describe('MediaNodeToolbar 音频卡五功能占位钮（IKH8Q3）', () => {
+describe('MediaNodeToolbar 音频卡「截取」点亮与四功能占位（IKHB6Y/IKH8Q3）', () => {
   const audioTool = (id: string) =>
     mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
-  const audioToolIds = ['trim', 'speed', 'mix', 'compose', 'transcode'] as const;
+  const trimBtn = () => audioTool('trim');
+  const placeholderIds = ['speed', 'mix', 'compose', 'transcode'] as const;
+  const audioToolIds = ['trim', ...placeholderIds];
   const audioToolLabels = ['截取', '调速', '混合', '音视频合成', '转码'];
 
-  it('五钮顺序截取/调速/混合/音视频合成/转码，图标加文字横排（复用透明底 toolBtn）', async () => {
+  it('五钮顺序截取/调速/混合/音视频合成/转码（截取仍首位），图标加文字横排（复用透明底 toolBtn）', async () => {
     await renderToolbar('audio');
     const rendered = audioToolIds.map(audioTool);
     expect(rendered.map((b) => b.textContent)).toEqual(audioToolLabels);
@@ -154,21 +162,81 @@ describe('MediaNodeToolbar 音频卡五功能占位钮（IKH8Q3）', () => {
     });
   });
 
-  it('五钮全部 aria-disabled 置灰（口径同画质横排）且悬停提示「即将上线」', async () => {
+  it('达标态「截取」可点：无 aria-disabled 且点击派发 onTrimAudio（携带节点 id）', async () => {
+    const onTrimAudio = vi.fn();
+    await renderToolbar('audio', { data: { onTrimAudio, duration: 12.5 } });
+    const btn = trimBtn();
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    await act(async () => {
+      btn.click();
+    });
+    expect(onTrimAudio).toHaveBeenCalledWith('audio-node');
+  });
+
+  it('达标态「截取」可用时无默认悬停文案（口径同智能去字幕触发钮）', async () => {
+    await renderToolbar('audio', { data: { duration: 12.5 } });
+    expect(trimBtn().getAttribute('title')).toBeNull();
+  });
+
+  it('门槛矩阵之 URL 缺失（undefined/null/空串）：截取置灰、悬停唯一原因、点击不派发', async () => {
+    const onTrimAudio = vi.fn();
+    // 默认 fixture 自带 src: 'blob:test'，须显式覆盖才能隔离「URL 缺失」单一条件
+    const cases: Array<Record<string, unknown>> = [
+      { src: undefined, duration: 12 },
+      { src: null, duration: 12 },
+      { src: '', duration: 12 },
+    ];
+    for (const data of cases) {
+      await renderToolbar('audio', { id: 'gate-node', data: { onTrimAudio, ...data } });
+      const btn = trimBtn();
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('音频时长缺失，无法截取');
+      await act(async () => {
+        btn.click();
+      });
+    }
+    expect(onTrimAudio).not.toHaveBeenCalled();
+  });
+
+  it('门槛矩阵之时长缺失或为 0（undefined/null/0）：截取置灰、悬停唯一原因、点击不派发', async () => {
+    const onTrimAudio = vi.fn();
     await renderToolbar('audio');
-    audioToolIds.map(audioTool).forEach((b) => {
+    expect(trimBtn().getAttribute('aria-disabled')).toBe('true');
+    expect(trimBtn().getAttribute('title')).toBe('音频时长缺失，无法截取');
+
+    const cases: Array<Record<string, unknown>> = [
+      { src: 'blob:test', duration: null },
+      { src: 'blob:test', duration: 0 },
+    ];
+    for (const data of cases) {
+      await renderToolbar('audio', { id: 'gate-node', data: { onTrimAudio, ...data } });
+      const btn = trimBtn();
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('音频时长缺失，无法截取');
+      await act(async () => {
+        btn.click();
+      });
+    }
+    expect(onTrimAudio).not.toHaveBeenCalled();
+  });
+
+  it('四占位钮（调速/混合/音视频合成/转码）维持置灰占位：aria-disabled 且悬停「即将上线」', async () => {
+    await renderToolbar('audio', { data: { duration: 12 } });
+    placeholderIds.map(audioTool).forEach((b) => {
       expect(b.getAttribute('aria-disabled')).toBe('true');
       expect(b.getAttribute('title')).toBe('即将上线');
     });
   });
 
-  it('五钮不绑定任何点击行为：点击不派发任何回调', async () => {
+  it('四占位钮不绑定任何点击行为：点击不派发任何回调（含 onTrimAudio）', async () => {
+    const onTrimAudio = vi.fn();
     const onShowDetails = vi.fn();
     const onDownload = vi.fn();
-    await renderToolbar('audio', { data: { onShowDetails, onDownload } });
+    await renderToolbar('audio', { data: { onTrimAudio, onShowDetails, onDownload, duration: 12 } });
     await act(async () => {
-      audioToolIds.map(audioTool).forEach((b) => b.click());
+      placeholderIds.map(audioTool).forEach((b) => b.click());
     });
+    expect(onTrimAudio).not.toHaveBeenCalled();
     expect(onShowDetails).not.toHaveBeenCalled();
     expect(onDownload).not.toHaveBeenCalled();
   });
