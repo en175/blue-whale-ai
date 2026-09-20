@@ -1,5 +1,6 @@
 /** 图片生成渠道解析器：从能力行目录映射 GPT / banana 请求字段。
- *  Seedream 不走本模块查表，仍由 seedream-image-size 代码表计算。 */
+ *  Seedream 不走本模块查表——尺寸由能力行 `request_mapping.matrix` 承载（IK629：原代码表
+ *  seedream-image-size.ts 已删，见 worker ImageChannelMapper.resolveSeedreamSize）。 */
 
 export const IMAGE_CHANNEL_PARSERS = ["seedream", "gpt", "banana"] as const;
 export type ImageChannelParserId = (typeof IMAGE_CHANNEL_PARSERS)[number];

@@ -687,15 +687,17 @@ describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", 
 });
 
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
-function buildVideoDeps() {
+function buildVideoDeps(modelRow: Record<string, unknown> = {}) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
     name: "项目",
     thumb: null,
     created_at: "2026-08-18T00:00:00.000Z",
   });
+  // IKHBDO：可选 modelRow 覆盖能力行（如 features.max_reference_images）——参考上限只认配置，
+  // 用例需要能给出「配到 12 / 配到 30」的行；缺省保持原先的无 features 行。
   const listEnabledByType = vi.fn().mockResolvedValue([
-    { model_id: "doubao-seedance-2-0-260128" },
+    { model_id: "doubao-seedance-2-0-260128", ...modelRow },
   ]);
   const createJob = vi.fn().mockResolvedValue({
     generation_job_id: "1",
@@ -895,8 +897,12 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     ]);
   });
 
-  it("素材库参考超 12 个 → 400 参考素材最多 12 个", async () => {
-    const { deps, createJob } = buildVideoDeps();
+  // IKHBDO：原先此处断言写死的「参考素材最多 12 个」。上限改由能力行判定后，同一条请求的
+  // 判词随配置走（12 上限 → 「参考图最多 12 张」），故断言改成配置口径，兼作「能力行生效」的证据。
+  it("素材库参考超能力行上限（max_reference_images=12）→ 400 参考图最多 12 张", async () => {
+    const { deps, createJob } = buildVideoDeps({
+      features: { max_reference_images: 12 },
+    });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       id: `Asset-ref-${i}`,
       type: "image" as const,
@@ -909,7 +915,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       deps,
     );
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -1139,8 +1145,11 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("references 普通参考超 12 个 → 400 参考素材最多 12 个", async () => {
-    const { deps, createJob } = buildVideoDeps();
+  // IKHBDO：同上一「素材库参考」用例——单数组 references 分支的判词同样只认能力行。
+  it("references 普通参考超能力行上限（max_reference_images=12）→ 400 参考图最多 12 张", async () => {
+    const { deps, createJob } = buildVideoDeps({
+      features: { max_reference_images: 12 },
+    });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       role: "reference" as const,
       material_id: `Asset-ref-${i}`,
@@ -1154,7 +1163,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       deps,
     );
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -2353,5 +2362,27 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     }, null, loose.deps);
     expect(accepted.code).toBe(200);
     expect(loose.createJob).toHaveBeenCalledTimes(1);
+  });
+
+  // IKHBDO：**配置必须赢**。白名单解析前的预检拿不到能力行，绝不能自带一个数量上限——
+  // 写死 12 会让「13 张 + 配 30」的模型永久卡死（本用例前半段就是该场景的回归）。
+  // 后半段是反向证据：上限确实随配置收紧，不是「一律放行」。
+  it('参考上限完全随能力行走：配 30 收下 13 张参考，配 5 在第 6 张拒绝', async () => {
+    const loose = videoDepsWithFeatures({ max_reference_images: 30 });
+    const accepted = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: Array.from({ length: 13 }, (_, i) => imageRef(i + 1)),
+    }, null, loose.deps);
+    expect(accepted.code).toBe(200);
+    expect(loose.createJob).toHaveBeenCalledTimes(1);
+
+    const strict = videoDepsWithFeatures({ max_reference_images: 5 });
+    const rejected = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: Array.from({ length: 6 }, (_, i) => imageRef(i + 1)),
+    }, null, strict.deps);
+    expect(rejected.code).toBe(400);
+    expect(rejected.msg).toContain('参考图最多 5 张');
+    expect(strict.createJob).not.toHaveBeenCalled();
   });
 });
