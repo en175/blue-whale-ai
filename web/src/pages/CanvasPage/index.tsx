@@ -67,9 +67,12 @@ import {
   VOCAL_SPLIT_DEFAULT_FORMAT,
   VOCAL_SPLIT_DEFAULT_SESSION_SCENE,
   VOCAL_SPLIT_EDGE_ORIGIN,
+  VOCAL_SPLIT_NODE_PREFIX,
   buildVocalSplitPlaceholderNode,
+  buildVocalSplitTrackNodes,
   isVocalSplitNodeId,
   vocalSplitNodeId,
+  vocalSplitSourceName,
   vocalSplitTerminalPatch,
   type VocalSplitFormat,
   type VocalSplitIdentity,
@@ -5460,6 +5463,60 @@ export default function CanvasPage() {
     mediaNodesRef.current.some((n) => n.id === nodeId) &&
     activeJobByNodeRef.current.get(nodeId) === String(jobId);
 
+  /** 人声背景分离成功扇出（IKHA30，本仓一对多扇出骨架首例——场景切分 ADR-0108 复用此形态）：
+   *  移除占位卡，按任务结果 tracks 在占位卡实时位置（建卡时已按源卡实际内容宽让位）纵向扇出
+   *  N 张普通音频成品卡（零样式改动：src/assetId/duration，可播放/下载/再作工具输入），各轨卡
+   *  对源卡拉来源边（origin=vocal-split，参考推导跳过）。轨卡 id 确定性（vocal-track-{jobId}-
+   *  {track}）+ 建卡判重：重复终态/重复水合幂等不重复建卡。tracks 缺失（契约上线前完成的
+   *  旧任务）防御性保留占位卡停生成中，不扇出不丢卡。 */
+  const fanOutVocalSplitTracks = (
+    placeholderNodeId: string,
+    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
+  ): void => {
+    const node = mediaNodesRef.current.find((n) => n.id === placeholderNodeId);
+    if (!node) return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const identity = data.vocalSplit as VocalSplitIdentity | undefined;
+    const outputFormat = identity?.lastInput.output_format ?? VOCAL_SPLIT_DEFAULT_FORMAT;
+    const tracks = detail.tracks ?? [];
+    if (tracks.length === 0) {
+      patchMediaNode(placeholderNodeId, { genStatus: undefined, progress: 100 });
+      return;
+    }
+    // 删除等待终态期间任务抢先成功：同通用成功分支口径，停止删除保留作品（轨卡）
+    if (pendingDeleteJobNodesRef.current.has(placeholderNodeId)) {
+      pendingDeleteJobNodesRef.current.delete(placeholderNodeId);
+      showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
+    }
+    // 来源边反查源卡（占位卡发送时拉的边）：扇出后各轨卡改拉 源卡→轨卡 来源边
+    const sourceNodeId = edgesRef.current.find((e) => e.target === placeholderNodeId)?.source;
+    const plan = buildVocalSplitTrackNodes({
+      jobId: placeholderNodeId.slice(VOCAL_SPLIT_NODE_PREFIX.length),
+      outputFormat,
+      tracks,
+      sourceName: vocalSplitSourceName(data.fileName),
+      anchor: node.position,
+    });
+    locallyRemovedGenerationNodesRef.current.add(placeholderNodeId);
+    const current = mediaNodesRef.current;
+    // 幂等判重：已存在的轨卡（重复终态/重复水合）不重建；占位卡移除（其连线由级联清理收走）
+    const fresh = plan.filter((item) => !current.some((n) => n.id === item.node.id));
+    const next = [
+      ...current.filter((n) => n.id !== placeholderNodeId),
+      ...fresh.map((item) => attachCallbacks(item.node as Node)),
+    ];
+    // 先同步写 ref 再 setState：来源边端点与后续落库都读 ref
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    if (sourceNodeId) {
+      fresh.forEach((item) =>
+        addCanvasEdge(sourceNodeId, item.node.id, undefined, { origin: VOCAL_SPLIT_EDGE_ORIGIN }),
+      );
+    }
+    // 立刻落库（best-effort）：占位移除 + 轨卡 + 来源边同一次保存，防刷新后占位卡复活
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  };
+
   /** 任务终态收敛（IKDMQW）：按任务权威状态落卡片终态，轮询 tick、普通取消与删除流程共用。
    *  返回 'terminal' 表示已终态（轮询应停），'processing' 表示未终态（调用方决定续链）。
    *  调用方需先过 jobResponseGuarded 防线。
@@ -5490,10 +5547,16 @@ export default function CanvasPage() {
         return 'terminal';
       }
     }
-    // 人声背景分离占位卡（IKHA2W）：终态收敛同源 vocalSplitTerminalPatch——failed 落失败态
-    // + 可读文案（重试按 lastInput 原样重发）；succeeded 本票最小处理 = 停生成中（多轨扇出
-    // 移除占位卡建轨卡归 IKHA30）；cancelled 落已取消。
+    // 人声背景分离占位卡（IKHA2W 建、IKHA30 收敛）：succeeded 移除占位卡按 tracks 扇出
+    // 轨卡（一对多骨架首例，见 fanOutVocalSplitTracks）；failed 落失败态 + 可读文案（重试按
+    // lastInput 原样重发）；cancelled 落已取消。
     if (isVocalSplitNodeId(nodeId)) {
+      if (detail.status === 'succeeded') {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        settledExtractNodesRef.current.add(nodeId);
+        fanOutVocalSplitTracks(nodeId, detail);
+        return 'terminal';
+      }
       const vocalPatch = vocalSplitTerminalPatch(detail);
       if (vocalPatch) {
         stopJobPolling(nodeId, jobTimersRef.current);
@@ -7783,7 +7846,7 @@ export default function CanvasPage() {
    *  再在源视频右侧建音频占位卡（node id = vocal-split-{job_id}，展示名 = 源名(人声背景分离)；
    *  带 vocalSplit 身份——lastInput 三键供失败重试原样重发）、拉来源边（origin=vocal-split，
    *  参考推导跳过，源视频不占参考位不参与 @ 编号）、启动轮询（applyJobTerminal 的人声分离
-   *  分支收敛终态：失败可读文案，成功本票最小处理 = 停生成中，多轨扇出归 IKHA30）、
+   *  分支收敛终态：失败可读文案，成功移除占位卡按 tracks 扇出轨卡（fanOutVocalSplitTracks））、
    *  立刻落盘（best-effort，防刚建任务就关页丢节点）。创建失败（网络）不建卡不退编辑态
    *  （用户可调参数后重发）；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
    *  免费口径同 media_extract：无幂等头、无积分预估、不走余额拦截门。 */

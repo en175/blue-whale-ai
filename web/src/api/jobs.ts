@@ -10,7 +10,7 @@ import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
-import type { VocalSplitInput } from '@lib/contracts/vocal-split';
+import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -209,6 +209,16 @@ export interface ImageOutpaintCreatedData {
   status: 'queued';
 }
 
+/** 人声背景分离单轨结果投影（IKHA2J 定死的多轨形状，轨类型枚举与契约同源）；
+ *  duration 后端投影可空（契约 VocalSplitTrackResult 为 number，传输面放宽为可空），
+ *  回填轨卡时长时判空跳过。 */
+export interface VocalSplitJobTrack {
+  track_type: VocalSplitTrackType;
+  asset_id: string;
+  url: string;
+  duration: number | null;
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -217,6 +227,10 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 人声背景分离多轨结果（IKHA2J）：仅 vocal_split 任务 succeeded 时有值，轨序恒 =
+   *  契约 VOCAL_SPLIT_SCENE_TRACKS[input.scene]（voice 恒首轨）；其余任务恒缺失。
+   *  既有 asset 单对象仍在（回首轨），多轨消费走本字段。 */
+  tracks?: VocalSplitJobTrack[] | null;
   /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
   text_input_signature?: string | null;
   error?: JobError | null;
