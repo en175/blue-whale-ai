@@ -210,6 +210,9 @@ export function validateRequestMapping(
     for (const value of Object.values(map)) {
       if (value == null || value === "") continue;
       if (typeof value !== "string") return "banana 映射值须为字符串";
+      // 运行期用 filled()（trim 判定）认空，这里必须同口径——
+      // 否则 {"1k": "  "} 能过闸门，请求期却恒 empty_mapping。
+      if (!filled(value)) continue;
       if (name === "quality") qualityFilled = true;
       else sizeFilled = true;
     }

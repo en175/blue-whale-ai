@@ -173,6 +173,21 @@ describe("parseModelUpdateBody", () => {
     if (parsed.ok) expect(parsed.value.request_mapping).toEqual(matrix);
   });
 
+  // 「null 视为不改」只对**本来就是 seedream** 的行成立。从 gpt 切到 seedream 时，
+  // 那个 null 就是「gpt 矩阵不再适用」的唯一表达——照「不改」处理会把上一族的矩阵
+  // 留在行里，worker 拿它去算 seedream 尺寸，而界面没有任何入口能清掉。
+  it("库中 gpt 行：切到 seedream 且 mapping 传 null → 照实清空，不留上一族的矩阵", () => {
+    const parsed = parseModelUpdateBody(
+      { channel_parser: "seedream", request_mapping: null },
+      { channel_parser: "gpt" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.channel_parser).toBe("seedream");
+      expect(parsed.value.request_mapping).toBeNull();
+    }
+  });
+
   // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
   it("features 闸门补键：脏类型 → 拒绝", () => {
     const dirty = [
