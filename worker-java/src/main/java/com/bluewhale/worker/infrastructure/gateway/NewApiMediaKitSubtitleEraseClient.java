@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract;
+import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
 import com.fasterxml.jackson.databind.JsonNode;

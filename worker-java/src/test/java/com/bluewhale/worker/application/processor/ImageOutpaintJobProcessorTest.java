@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ImageOutpaintContract;
+import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

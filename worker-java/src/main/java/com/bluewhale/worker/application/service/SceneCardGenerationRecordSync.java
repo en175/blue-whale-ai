@@ -2,7 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
-import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
 import org.springframework.stereotype.Service;
@@ -41,7 +41,7 @@ public class SceneCardGenerationRecordSync {
         List<GenerationOutputSlotEntity> slots = slotMapper.findBySceneCardRecordId(recordId);
         if (slots.isEmpty()) return;
 
-        String summary = JobStatus.aggregateSlotStatus(JobStatus.resolveLogicalSlots(slots));
+        String summary = JobStatusEnum.aggregateSlotStatus(JobStatusEnum.resolveLogicalSlots(slots));
         int affected = recordMapper.updateSummaryStatus(recordId, summary);
         if (affected != 1) return;
 

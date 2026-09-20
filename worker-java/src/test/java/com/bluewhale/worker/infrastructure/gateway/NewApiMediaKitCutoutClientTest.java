@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
 import com.sun.net.httpserver.HttpServer;
@@ -226,7 +227,7 @@ class NewApiMediaKitCutoutClientTest {
         Throwable thrown = catchThrowable(this::callGeneralScene);
 
         assertThat(((ImageCutoutError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
+                .isEqualTo(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
     }
 
     @Test
@@ -237,6 +238,6 @@ class NewApiMediaKitCutoutClientTest {
         Throwable thrown = catchThrowable(this::callGeneralScene);
 
         assertThat(((ImageCutoutError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
+                .isEqualTo(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
     }
 }

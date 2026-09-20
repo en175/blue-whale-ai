@@ -4,7 +4,7 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
-import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
@@ -13,7 +13,6 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -91,7 +90,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "音频已提取",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "音频已提取",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -143,7 +142,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "高清放大完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "高清放大完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -194,7 +193,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "图片擦除完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "图片擦除完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -246,7 +245,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "图片抠图完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "图片抠图完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -289,27 +288,27 @@ public class JobFinalizer {
         }
 
         List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobIdLong);
-        String finalStatus = JobStatus.SUCCEEDED.value();
+        String finalStatus = JobStatusEnum.SUCCEEDED.value();
         if (!slots.isEmpty()) {
             for (int i = 0; i < assetIds.size(); i++) {
                 if (i < slots.size()) {
-                    slotMapper.updateSlot(slots.get(i).getId(), JobStatus.SUCCEEDED.value(),
+                    slotMapper.updateSlot(slots.get(i).getId(), JobStatusEnum.SUCCEEDED.value(),
                             Long.parseLong(assetIds.get(i)));
                 }
             }
             for (int i = assetIds.size(); i < slots.size(); i++) {
-                slotMapper.updateSlotStatus(slots.get(i).getId(), JobStatus.FAILED.value());
+                slotMapper.updateSlotStatus(slots.get(i).getId(), JobStatusEnum.FAILED.value());
             }
             boolean allSucceeded = assetIds.size() >= slots.size();
             boolean anySucceeded = !assetIds.isEmpty();
             if (allSucceeded) {
-                finalStatus = JobStatus.SUCCEEDED.value();
+                finalStatus = JobStatusEnum.SUCCEEDED.value();
             } else if (anySucceeded) {
-                finalStatus = JobStatus.PARTIALLY_SUCCEEDED.value();
+                finalStatus = JobStatusEnum.PARTIALLY_SUCCEEDED.value();
             } else {
-                finalStatus = JobStatus.FAILED.value();
+                finalStatus = JobStatusEnum.FAILED.value();
             }
-            if (!JobStatus.SUCCEEDED.value().equals(finalStatus)) {
+            if (!JobStatusEnum.SUCCEEDED.value().equals(finalStatus)) {
                 jobMapper.updateJobStatus(jobIdLong, finalStatus);
             }
         }
@@ -344,7 +343,7 @@ public class JobFinalizer {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", slot != null ? slot.getId().toString() : "",
                             "slot_index", slotIndex,
-                            "status", JobStatus.SUCCEEDED.value(),
+                            "status", JobStatusEnum.SUCCEEDED.value(),
                             "asset_id", assetIds.get(i),
                             "retry_of_slot_id", slot != null && slot.getRetryOfSlotId() != null
                                     ? slot.getRetryOfSlotId().toString() : "",
@@ -358,7 +357,7 @@ public class JobFinalizer {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", slot.getId().toString(),
                             "slot_index", slot.getSlotIndex(),
-                            "status", JobStatus.FAILED.value(),
+                            "status", JobStatusEnum.FAILED.value(),
                             "asset_id", "",
                             "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                     ? slot.getRetryOfSlotId().toString() : "",
@@ -398,7 +397,7 @@ public class JobFinalizer {
 
         List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : slots) {
-            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
+            slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
         }
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -414,7 +413,7 @@ public class JobFinalizer {
         }
         previewSync.sync(jobIdLong);
 
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+        insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
 
@@ -434,7 +433,7 @@ public class JobFinalizer {
                         Map.of("job_id", job.getId().toString(),
                                 "slot_id", slot.getId().toString(),
                                 "slot_index", slot.getSlotIndex(),
-                                "status", JobStatus.FAILED.value(),
+                                "status", JobStatusEnum.FAILED.value(),
                                 "asset_id", "",
                                 "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                         ? slot.getRetryOfSlotId().toString() : "",
@@ -500,7 +499,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "视频生成完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "视频生成完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -525,7 +524,7 @@ public class JobFinalizer {
                 .filter(s -> s.getSlotIndex() != null && s.getSlotIndex() == 0)
                 .findFirst().orElse(null);
         if (videoSlot != null) {
-            slotMapper.updateSlot(videoSlot.getId(), JobStatus.SUCCEEDED.value(), asset.getId());
+            slotMapper.updateSlot(videoSlot.getId(), JobStatusEnum.SUCCEEDED.value(), asset.getId());
             if (videoSlot.getSceneCardGenerationRecordId() != null) {
                 recordSync.sync(videoSlot.getSceneCardGenerationRecordId());
             }
@@ -539,7 +538,7 @@ public class JobFinalizer {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", videoSlot != null ? videoSlot.getId().toString() : "",
                             "slot_index", videoSlot != null ? videoSlot.getSlotIndex() : 0,
-                            "status", JobStatus.SUCCEEDED.value(),
+                            "status", JobStatusEnum.SUCCEEDED.value(),
                             "asset_id", asset.getId().toString(),
                             "retry_of_slot_id", videoSlot != null && videoSlot.getRetryOfSlotId() != null
                                     ? videoSlot.getRetryOfSlotId().toString() : "",
@@ -573,12 +572,12 @@ public class JobFinalizer {
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : pendingSlots) {
-            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
+            slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
             if (slot.getSceneCardGenerationRecordId() != null) {
                 recordSync.sync(slot.getSceneCardGenerationRecordId());
             }
         }
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+        insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
         if (job != null && job.getProjectId() != null) {
@@ -597,7 +596,7 @@ public class JobFinalizer {
                         Map.of("job_id", job.getId().toString(),
                                 "slot_id", slot.getId().toString(),
                                 "slot_index", slot.getSlotIndex(),
-                                "status", JobStatus.FAILED.value(),
+                                "status", JobStatusEnum.FAILED.value(),
                                 "asset_id", "",
                                 "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                         ? slot.getRetryOfSlotId().toString() : "",
@@ -633,7 +632,7 @@ public class JobFinalizer {
             return false;
         }
 
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+        insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
 
@@ -678,7 +677,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "智能扩图完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "智能扩图完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -733,7 +732,7 @@ public class JobFinalizer {
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
 
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "视频去字幕完成",
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "视频去字幕完成",
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -797,7 +796,7 @@ public class JobFinalizer {
         if (input.fps() != null) {
             resultMeta.put("fps", input.fps());
         }
-        insertLog(jobIdLong, JobStatus.SUCCEEDED, "视频 HD 高清完成", resultMeta);
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "视频 HD 高清完成", resultMeta);
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         // 双事件同 extract/erase 的 project_id 守卫形态；前端按 input.target_node_id 回填
@@ -853,7 +852,7 @@ public class JobFinalizer {
         return asset;
     }
 
-    private void insertLog(Long jobIdLong, JobStatus status, String message,
+    private void insertLog(Long jobIdLong, JobStatusEnum status, String message,
                            Map<String, Object> payload) {
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);

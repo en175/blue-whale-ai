@@ -10,8 +10,8 @@ import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
-import com.bluewhale.worker.domain.entity.JobType;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
+import com.bluewhale.worker.domain.contract.JobTypeEnum;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -42,7 +42,7 @@ import static org.mockito.Mockito.mock;
  *   <li>缺 {@code ROCKETMQ_ENDPOINTS} → 启动中止且失败信息点名该变量；</li>
  *   <li>缺 {@code DATABASE_URL} → 启动中止且失败信息点名该变量；</li>
  *   <li>视频 tag 在「消费侧订阅值 / 处理器声明值 / 路由表」三处一致；</li>
- *   <li>{@link GenerationMqRoute} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
+ *   <li>{@link GenerationMqRouteEnum} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
  *   <li>退役的 {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 残留属性被忽略（不报错、不生效）。</li>
  * </ul>
  */
@@ -126,7 +126,7 @@ class StartupContractTest {
 
     /**
      * 视频 tag 的三处声明必须同值：消费侧订阅（{@link VideoConsumer#TAG}）、
-     * 处理器声明（{@link VideoJobProcessor#tag()}）、路由表（{@link GenerationMqRoute#VIDEO}）。
+     * 处理器声明（{@link VideoJobProcessor#tag()}）、路由表（{@link GenerationMqRouteEnum#VIDEO}）。
      * 三处错配不会报错，只会让视频消息无人消费——所以在此钉死。
      */
     @Test
@@ -142,30 +142,30 @@ class StartupContractTest {
 
         assertThat(VideoConsumer.TAG).isEqualTo("video");
         assertThat(processor.tag()).isEqualTo(VideoConsumer.TAG);
-        assertThat(GenerationMqRoute.VIDEO.tag()).isEqualTo(VideoConsumer.TAG);
+        assertThat(GenerationMqRouteEnum.VIDEO.tag()).isEqualTo(VideoConsumer.TAG);
     }
 
     /**
-     * topic / tag 是契约 §1 的冻结值，{@link GenerationMqRoute} 是其可执行定义：
+     * topic / tag 是契约 §1 的冻结值，{@link GenerationMqRouteEnum} 是其可执行定义：
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
     @DisplayName("GenerationMqRoute 十个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        Map<GenerationMqRoute, String> expectedTags = Map.of(
-                GenerationMqRoute.VIDEO, "video",
-                GenerationMqRoute.IMAGE, "image",
-                GenerationMqRoute.AUDIO, "audio",
-                GenerationMqRoute.MEDIA_EXTRACT, "media_extract",
-                GenerationMqRoute.IMAGE_ENHANCE, "image_enhance",
-                GenerationMqRoute.IMAGE_ERASE, "image_erase",
-                GenerationMqRoute.IMAGE_CUTOUT, "image_cutout",
-                GenerationMqRoute.IMAGE_OUTPAINT, "image_outpaint",
-                GenerationMqRoute.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase",
-                GenerationMqRoute.VIDEO_ENHANCE, "video_enhance");
+        Map<GenerationMqRouteEnum, String> expectedTags = Map.of(
+                GenerationMqRouteEnum.VIDEO, "video",
+                GenerationMqRouteEnum.IMAGE, "image",
+                GenerationMqRouteEnum.AUDIO, "audio",
+                GenerationMqRouteEnum.MEDIA_EXTRACT, "media_extract",
+                GenerationMqRouteEnum.IMAGE_ENHANCE, "image_enhance",
+                GenerationMqRouteEnum.IMAGE_ERASE, "image_erase",
+                GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout",
+                GenerationMqRouteEnum.IMAGE_OUTPAINT, "image_outpaint",
+                GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase",
+                GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance");
 
-        assertThat(GenerationMqRoute.values()).hasSize(expectedTags.size());
-        for (GenerationMqRoute route : GenerationMqRoute.values()) {
+        assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
+        for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
             assertThat(route.topic()).as("%s 的 topic", route).isEqualTo("generation-task");
             assertThat(route.tag()).as("%s 的 tag", route).isEqualTo(expectedTags.get(route));
         }
@@ -175,22 +175,22 @@ class StartupContractTest {
     @Test
     @DisplayName("GenerationMqRoute.tag() 与 JobType.value() 逐项同值")
     void mqRouteTagsMatchJobTypeValues() {
-        assertThat(GenerationMqRoute.VIDEO.tag()).isEqualTo(JobType.VIDEO.value());
-        assertThat(GenerationMqRoute.IMAGE.tag()).isEqualTo(JobType.IMAGE.value());
-        assertThat(GenerationMqRoute.AUDIO.tag()).isEqualTo(JobType.AUDIO.value());
-        assertThat(GenerationMqRoute.MEDIA_EXTRACT.tag()).isEqualTo(JobType.MEDIA_EXTRACT.value());
-        assertThat(GenerationMqRoute.IMAGE_ENHANCE.tag()).isEqualTo(JobType.IMAGE_ENHANCE.value());
-        assertThat(GenerationMqRoute.IMAGE_ERASE.tag()).isEqualTo(JobType.IMAGE_ERASE.value());
-        assertThat(GenerationMqRoute.IMAGE_CUTOUT.tag()).isEqualTo(JobType.IMAGE_CUTOUT.value());
-        assertThat(GenerationMqRoute.IMAGE_OUTPAINT.tag()).isEqualTo(JobType.IMAGE_OUTPAINT.value());
-        assertThat(GenerationMqRoute.VIDEO_SUBTITLE_ERASE.tag()).isEqualTo(JobType.VIDEO_SUBTITLE_ERASE.value());
-        assertThat(GenerationMqRoute.VIDEO_ENHANCE.tag()).isEqualTo(JobType.VIDEO_ENHANCE.value());
+        assertThat(GenerationMqRouteEnum.VIDEO.tag()).isEqualTo(JobTypeEnum.VIDEO.value());
+        assertThat(GenerationMqRouteEnum.IMAGE.tag()).isEqualTo(JobTypeEnum.IMAGE.value());
+        assertThat(GenerationMqRouteEnum.AUDIO.tag()).isEqualTo(JobTypeEnum.AUDIO.value());
+        assertThat(GenerationMqRouteEnum.MEDIA_EXTRACT.tag()).isEqualTo(JobTypeEnum.MEDIA_EXTRACT.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_ENHANCE.tag()).isEqualTo(JobTypeEnum.IMAGE_ENHANCE.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_ERASE.tag()).isEqualTo(JobTypeEnum.IMAGE_ERASE.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_CUTOUT.tag()).isEqualTo(JobTypeEnum.IMAGE_CUTOUT.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_OUTPAINT.tag()).isEqualTo(JobTypeEnum.IMAGE_OUTPAINT.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE.tag()).isEqualTo(JobTypeEnum.VIDEO_SUBTITLE_ERASE.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_ENHANCE.tag()).isEqualTo(JobTypeEnum.VIDEO_ENHANCE.value());
     }
 
     /**
      * 退役 {@code rocketmq.topic} / {@code rocketmq.tag} 的后果：部署环境里残留的
      * {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 不再有绑定目标——Spring 的宽松绑定忽略未知属性，
-     * 既不报错也不生效（路由值只来自 {@link GenerationMqRoute}）。
+     * 既不报错也不生效（路由值只来自 {@link GenerationMqRouteEnum}）。
      * <p>
      * 本用例钉住「属性层」这一半：绑定值只有连接参数，且记录形状里**没有** topic / tag 分量——
      * 谁把它们加回 {@link RocketMqConfig.RocketMqProperties}，这里立刻红。

@@ -4,12 +4,11 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
-import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
@@ -24,7 +23,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -146,7 +144,7 @@ public class VideoJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return GenerationMqRoute.VIDEO.tag();
+        return GenerationMqRouteEnum.VIDEO.tag();
     }
 
     /**

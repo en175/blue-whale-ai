@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
-import com.bluewhale.worker.domain.entity.VideoEnhanceContract;
+import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**

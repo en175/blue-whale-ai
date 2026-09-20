@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.sun.net.httpserver.HttpServer;
@@ -194,7 +195,7 @@ class NewApiMediaKitClientTest {
         Throwable thrown = catchThrowable(this::callMax);
 
         assertThat(((ImageEnhanceError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
+                .isEqualTo(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
     }
 
     @Test
@@ -205,6 +206,6 @@ class NewApiMediaKitClientTest {
         Throwable thrown = catchThrowable(this::callMax);
 
         assertThat(((ImageEnhanceError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
+                .isEqualTo(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
     }
 }

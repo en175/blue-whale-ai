@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ImageOutpaintContract;
+import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -14,7 +14,6 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitOutpaintClient;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;

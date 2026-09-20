@@ -2,7 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.entity.StoryboardPreviewEntity;
-import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import org.springframework.stereotype.Service;
@@ -45,7 +45,7 @@ public class StoryboardPreviewSync {
         List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobId);
         if (slots.isEmpty()) return;
 
-        String summary = JobStatus.aggregateSlotStatus(JobStatus.resolveLogicalSlots(slots));
+        String summary = JobStatusEnum.aggregateSlotStatus(JobStatusEnum.resolveLogicalSlots(slots));
         int affected = previewMapper.updateSummaryStatus(preview.getId(), summary);
         if (affected != 1) return;
 

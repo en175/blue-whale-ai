@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
 import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ImageCutoutContract;
+import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.VideoEnhanceContract;
+import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

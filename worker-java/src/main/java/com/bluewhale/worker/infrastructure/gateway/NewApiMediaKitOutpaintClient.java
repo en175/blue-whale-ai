@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.ImageOutpaintContract;
+import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import com.fasterxml.jackson.databind.JsonNode;

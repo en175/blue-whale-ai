@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import com.sun.net.httpserver.HttpServer;
@@ -178,7 +179,7 @@ class NewApiMediaKitOutpaintClientTest {
         Throwable thrown = catchThrowable(this::callExpand);
 
         assertThat(((ImageOutpaintError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
+                .isEqualTo(ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
     }
 
     @Test
@@ -189,6 +190,6 @@ class NewApiMediaKitOutpaintClientTest {
         Throwable thrown = catchThrowable(this::callExpand);
 
         assertThat(((ImageOutpaintError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
+                .isEqualTo(ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
     }
 }

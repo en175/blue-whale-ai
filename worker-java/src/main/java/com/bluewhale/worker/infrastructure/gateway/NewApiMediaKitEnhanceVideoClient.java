@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.VideoEnhanceContract;
+import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
 import com.fasterxml.jackson.databind.JsonNode;

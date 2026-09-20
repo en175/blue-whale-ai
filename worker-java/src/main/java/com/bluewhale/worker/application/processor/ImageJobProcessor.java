@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -21,21 +21,17 @@ import org.springframework.stereotype.Component;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.LinkedHashSet;
 
 /**
  * 图片作业处理器（generation-worker.ts:499-685 image 分支逐字移植）。
@@ -102,7 +98,7 @@ public class ImageJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return GenerationMqRoute.IMAGE.tag();
+        return GenerationMqRouteEnum.IMAGE.tag();
     }
 
     /**

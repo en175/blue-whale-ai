@@ -9,7 +9,7 @@ import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
-import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
@@ -339,11 +339,11 @@ public class JobStateMachineService {
 
     static java.util.List<GenerationOutputSlotEntity> resolveLogicalSlots(
             java.util.List<GenerationOutputSlotEntity> slots) {
-        return com.bluewhale.worker.domain.entity.JobStatus.resolveLogicalSlots(slots);
+        return JobStatusEnum.resolveLogicalSlots(slots);
     }
 
     static String aggregateSlotStatus(java.util.List<GenerationOutputSlotEntity> resolvedSlots) {
-        return com.bluewhale.worker.domain.entity.JobStatus.aggregateSlotStatus(resolvedSlots);
+        return JobStatusEnum.aggregateSlotStatus(resolvedSlots);
     }
 
     // ========== 日志 ==========

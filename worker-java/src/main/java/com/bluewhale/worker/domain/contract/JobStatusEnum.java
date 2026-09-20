@@ -1,4 +1,6 @@
-package com.bluewhale.worker.domain.entity;
+package com.bluewhale.worker.domain.contract;
+
+import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 
 /**
  * 生成作业状态枚举（契约 §2：generation_jobs.status 合法值）。
@@ -6,7 +8,7 @@ package com.bluewhale.worker.domain.entity;
  * 值语义与 TS / DB 逐字一致，双端对账不可改字符串。
  * 变化轴：契约 §2 状态机（queued → processing → succeeded/partially_succeeded/failed/cancelled）。
  */
-public enum JobStatus {
+public enum JobStatusEnum {
 
     /** 排队等待 claim（可被领取）。 */
     QUEUED("queued"),
@@ -28,7 +30,7 @@ public enum JobStatus {
 
     private final String value;
 
-    JobStatus(String value) {
+    JobStatusEnum(String value) {
         this.value = value;
     }
 

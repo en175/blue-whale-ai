@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract;
+import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

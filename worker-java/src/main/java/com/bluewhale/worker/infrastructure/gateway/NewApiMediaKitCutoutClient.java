@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.ImageCutoutContract;
+import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
 import com.fasterxml.jackson.databind.JsonNode;

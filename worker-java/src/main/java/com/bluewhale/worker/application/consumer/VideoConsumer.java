@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
@@ -19,8 +19,8 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class VideoConsumer extends AbstractGenerationConsumer {
 
-    /** tag = {@link GenerationMqRoute#VIDEO}（与 {@code generation_jobs.type} 同名；修正六由 "step" 更名）。 */
-    public static final String TAG = GenerationMqRoute.VIDEO.tag();
+    /** tag = {@link GenerationMqRouteEnum#VIDEO}（与 {@code generation_jobs.type} 同名；修正六由 "step" 更名）。 */
+    public static final String TAG = GenerationMqRouteEnum.VIDEO.tag();
 
     /** 视频顺序派发（并发度 1 ≈ TS for-await；契约 §1）。 */
     private static final int SEQUENTIAL_CONCURRENCY = 1;

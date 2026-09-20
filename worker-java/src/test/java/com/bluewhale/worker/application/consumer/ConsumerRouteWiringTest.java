@@ -10,7 +10,7 @@ import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor;
 import com.bluewhale.worker.config.RocketMqConfig;
 import com.bluewhale.worker.config.WorkerProperties;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.junit.jupiter.api.DisplayName;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.mock;
 /**
  * 七条消费路由的接线断言（ADR-0084 修正六）：
  * 部署环境里残留的 {@code ROCKETMQ_TOPIC=generation-video} / {@code ROCKETMQ_TAG=step}
- * **改不了任何消费者的订阅**——订阅的 topic / tag 只来自 {@link GenerationMqRoute}。
+ * **改不了任何消费者的订阅**——订阅的 topic / tag 只来自 {@link GenerationMqRouteEnum}。
  * <p>
  * 与 {@code com.bluewhale.worker.config.StartupContractTest#retiredTopicAndTagPropertiesAreIgnored}
  * 的分工：那边钉「属性层不报错、记录里没有 topic / tag 分量」，这边钉「不生效」。
@@ -46,17 +46,17 @@ import static org.mockito.Mockito.mock;
  */
 class ConsumerRouteWiringTest {
 
-    /** 各消费者按 {@link GenerationMqRoute} 的顺序对位（前七个走 workerProps 并发度，video 顺序消费）。 */
-    private static final List<GenerationMqRoute> ROUTES = List.of(
-            GenerationMqRoute.MEDIA_EXTRACT,
-            GenerationMqRoute.AUDIO,
-            GenerationMqRoute.IMAGE,
-            GenerationMqRoute.IMAGE_ENHANCE,
-            GenerationMqRoute.IMAGE_ERASE,
-            GenerationMqRoute.IMAGE_CUTOUT,
-            GenerationMqRoute.VIDEO,
-            GenerationMqRoute.VIDEO_SUBTITLE_ERASE,
-            GenerationMqRoute.VIDEO_ENHANCE);
+    /** 各消费者按 {@link GenerationMqRouteEnum} 的顺序对位（前七个走 workerProps 并发度，video 顺序消费）。 */
+    private static final List<GenerationMqRouteEnum> ROUTES = List.of(
+            GenerationMqRouteEnum.MEDIA_EXTRACT,
+            GenerationMqRouteEnum.AUDIO,
+            GenerationMqRouteEnum.IMAGE,
+            GenerationMqRouteEnum.IMAGE_ENHANCE,
+            GenerationMqRouteEnum.IMAGE_ERASE,
+            GenerationMqRouteEnum.IMAGE_CUTOUT,
+            GenerationMqRouteEnum.VIDEO,
+            GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE,
+            GenerationMqRouteEnum.VIDEO_ENHANCE);
 
     /** 残留旧名的部署环境（修正六之前的 topic / tag 取值）。 */
     private static StandardEnvironment residualOverrideEnvironment() {
@@ -101,7 +101,7 @@ class ConsumerRouteWiringTest {
         assertThat(consumers).hasSize(ROUTES.size());
 
         for (int i = 0; i < ROUTES.size(); i++) {
-            GenerationMqRoute route = ROUTES.get(i);
+            GenerationMqRouteEnum route = ROUTES.get(i);
             AbstractGenerationConsumer consumer = consumers.get(i);
 
             assertThat(consumer.topic()).as("%s 订阅的 topic", route).isEqualTo(route.topic());

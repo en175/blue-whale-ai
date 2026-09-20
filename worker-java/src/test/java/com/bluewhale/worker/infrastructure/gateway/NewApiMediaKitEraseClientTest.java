@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEraseError;
 import com.sun.net.httpserver.HttpServer;
@@ -193,7 +194,7 @@ class NewApiMediaKitEraseClientTest {
         Throwable thrown = catchThrowable(this::callTextScene);
 
         assertThat(((ImageEraseError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
+                .isEqualTo(ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
     }
 
     @Test
@@ -204,6 +205,6 @@ class NewApiMediaKitEraseClientTest {
         Throwable thrown = catchThrowable(this::callTextScene);
 
         assertThat(((ImageEraseError) thrown).getCode())
-                .isEqualTo(com.bluewhale.worker.domain.entity.ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
+                .isEqualTo(ImageEraseContract.ERROR_IMAGE_ERASE_FAILED);
     }
 }

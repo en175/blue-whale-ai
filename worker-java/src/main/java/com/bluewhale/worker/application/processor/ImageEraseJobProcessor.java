@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ImageEraseContract;
+import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEraseError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

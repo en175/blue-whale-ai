@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.ImageEraseContract;
+import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEraseError;
 import com.fasterxml.jackson.databind.JsonNode;

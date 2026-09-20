@@ -1,5 +1,8 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
+import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
+import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
@@ -9,7 +12,6 @@ import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
-import com.bluewhale.worker.domain.entity.JobStatus;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -91,7 +93,7 @@ public class JobClaimService {
             List.of("image_cutout");
     /** image_outpaint claim 的单源白名单（IKGOQW：唯一创建入口 = 画布图片卡「高清 ▾」菜单）。 */
     private static final List<String> IMAGE_OUTPAINT_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.entity.ImageOutpaintContract.SOURCE);
+            List.of(ImageOutpaintContract.SOURCE);
 
     /**
      * video_subtitle_erase 租约 420s（迁移契约 §17 / IKGZ81）：轮询到点步是短查询，但 completed
@@ -102,7 +104,7 @@ public class JobClaimService {
 
     /** video_subtitle_erase claim 的单源白名单（§17.1：唯一创建入口 = 画布视频卡工具条「智能去字幕」）。 */
     private static final List<String> VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.SOURCE);
+            List.of(VideoSubtitleEraseContract.SOURCE);
 
     /**
      * video_enhance 租约 420s（IKH3VF，父规格 IKH3VB）：轮询到点步是短查询，但 completed 步
@@ -113,7 +115,7 @@ public class JobClaimService {
 
     /** video_enhance claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「HD」单按钮）。 */
     private static final List<String> VIDEO_ENHANCE_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.entity.VideoEnhanceContract.SOURCE);
+            List.of(VideoEnhanceContract.SOURCE);
 
     /**
      * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
@@ -418,7 +420,7 @@ public class JobClaimService {
 
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
                 jobIdLong,
-                com.bluewhale.worker.domain.entity.ImageOutpaintContract.TAG,
+                ImageOutpaintContract.TAG,
                 IMAGE_OUTPAINT_CLAIM_SOURCES);
         if (candidate == null) {
             return Optional.empty();
@@ -457,7 +459,7 @@ public class JobClaimService {
 
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
                 jobIdLong,
-                com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract.TAG,
+                VideoSubtitleEraseContract.TAG,
                 VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES);
         if (candidate == null) {
             return Optional.empty();
@@ -500,7 +502,7 @@ public class JobClaimService {
 
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
                 jobIdLong,
-                com.bluewhale.worker.domain.entity.VideoEnhanceContract.TAG,
+                VideoEnhanceContract.TAG,
                 VIDEO_ENHANCE_CLAIM_SOURCES);
         if (candidate == null) {
             return Optional.empty();

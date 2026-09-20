@@ -5,7 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ImageEnhanceContract;
+import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;

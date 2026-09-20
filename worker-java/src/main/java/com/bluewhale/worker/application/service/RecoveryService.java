@@ -1,6 +1,6 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.slf4j.Logger;
@@ -108,25 +108,25 @@ public class RecoveryService {
     )
     public void recover() {
         try {
-            reenqueue(GenerationMqRoute.VIDEO, videoProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.VIDEO, videoProducer.getIfAvailable(),
                     jobMapper.listDueVideoJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.IMAGE, imageProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.IMAGE, imageProducer.getIfAvailable(),
                     jobMapper.listDueImageJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.MEDIA_EXTRACT, mediaExtractProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.MEDIA_EXTRACT, mediaExtractProducer.getIfAvailable(),
                     jobMapper.listDueMediaExtractJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.AUDIO, audioProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.AUDIO, audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),
                     jobMapper.listDueImageEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.IMAGE_ERASE, imageEraseProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.IMAGE_ERASE, imageEraseProducer.getIfAvailable(),
                     jobMapper.listDueImageEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.IMAGE_CUTOUT, imageCutoutProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.IMAGE_CUTOUT, imageCutoutProducer.getIfAvailable(),
                     jobMapper.listDueImageCutoutJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.IMAGE_OUTPAINT, imageOutpaintProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.IMAGE_OUTPAINT, imageOutpaintProducer.getIfAvailable(),
                     jobMapper.listDueImageOutpaintJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.VIDEO_SUBTITLE_ERASE, videoSubtitleEraseProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, videoSubtitleEraseProducer.getIfAvailable(),
                     jobMapper.listDueVideoSubtitleEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue(GenerationMqRoute.VIDEO_ENHANCE, videoEnhanceProducer.getIfAvailable(),
+            reenqueue(GenerationMqRouteEnum.VIDEO_ENHANCE, videoEnhanceProducer.getIfAvailable(),
                     jobMapper.listDueVideoEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
@@ -134,7 +134,7 @@ public class RecoveryService {
     }
 
     /** 单 tag 重投：生产者缺失即跳过（防御性判断，正常装配下六类生产者恒在）。 */
-    private void reenqueue(GenerationMqRoute route, GenerationMessageProducer producer, List<Long> jobIds) {
+    private void reenqueue(GenerationMqRouteEnum route, GenerationMessageProducer producer, List<Long> jobIds) {
         if (producer == null) {
             return;
         }

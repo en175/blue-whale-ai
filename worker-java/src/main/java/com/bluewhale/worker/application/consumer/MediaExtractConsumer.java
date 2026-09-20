@@ -1,13 +1,13 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
-import com.bluewhale.worker.domain.entity.GenerationMqRoute;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
  * media_extract 消费者（rocketmq-extract.consumer.ts 移植）。
  * <p>
- * tag = {@link GenerationMqRoute#MEDIA_EXTRACT}，digitGuard = false（extract 不做纯数字守卫）。
+ * tag = {@link GenerationMqRouteEnum#MEDIA_EXTRACT}，digitGuard = false（extract 不做纯数字守卫）。
  * consumer group = "generation-extract-worker"。
  * <p>
  * 与 TS 行为完全一致：
@@ -19,8 +19,8 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class MediaExtractConsumer extends AbstractGenerationConsumer {
 
-    /** tag（{@link GenerationMqRoute#MEDIA_EXTRACT}；= TS {@code MEDIA_EXTRACT_TAG}）。 */
-    private static final String TAG = GenerationMqRoute.MEDIA_EXTRACT.tag();
+    /** tag（{@link GenerationMqRouteEnum#MEDIA_EXTRACT}；= TS {@code MEDIA_EXTRACT_TAG}）。 */
+    private static final String TAG = GenerationMqRouteEnum.MEDIA_EXTRACT.tag();
 
     /**
      * extract 不做 digitGuard（rocketmq-extract.consumer.ts:143-144）：

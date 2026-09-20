@@ -1,6 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
-import com.bluewhale.worker.domain.entity.ImageEnhanceContract;
+import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.fasterxml.jackson.databind.JsonNode;

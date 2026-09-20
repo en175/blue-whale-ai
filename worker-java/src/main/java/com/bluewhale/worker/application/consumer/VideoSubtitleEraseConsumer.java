@@ -1,7 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
-import com.bluewhale.worker.domain.entity.VideoSubtitleEraseContract;
+import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**

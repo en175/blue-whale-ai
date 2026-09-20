@@ -1,4 +1,4 @@
-package com.bluewhale.worker.domain.entity;
+package com.bluewhale.worker.domain.contract;
 
 /**
  * 智能扩图（image_outpaint）跨进程任务契约常量（IKGOQR，契约先行红线）。

@@ -1,4 +1,4 @@
-package com.bluewhale.worker.domain.entity;
+package com.bluewhale.worker.domain.contract;
 
 /**
  * 生成作业类型枚举（契约 §2：generation_jobs.type 合法值）。
@@ -6,7 +6,7 @@ package com.bluewhale.worker.domain.entity;
  * 变化轴：MQ tag / Processor / payload 扩展（契约附录 C：新类型 = 注册一套）。
  * 第 5 个生成类型产品已规划——新增类型先加本枚举项与对应 payload。
  */
-public enum JobType {
+public enum JobTypeEnum {
 
     /** 图片生成（tag=image，Semaphore 20）。 */
     IMAGE("image"),
@@ -46,7 +46,7 @@ public enum JobType {
 
     private final String value;
 
-    JobType(String value) {
+    JobTypeEnum(String value) {
         this.value = value;
     }
 

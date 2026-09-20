@@ -1,4 +1,4 @@
-package com.bluewhale.worker.domain.entity;
+package com.bluewhale.worker.domain.contract;
 
 import java.util.List;
 
@@ -8,7 +8,7 @@ import java.util.List;
  * 变化轴：跨进程字段（TS 侧权威 = backend/libs/contracts/image-erase.ts；防漂移断言 =
  * backend/libs/contracts/image-erase.test.ts 直接读本文件源码文本对账，两处任一侧改动即红）。
  * <p>
- * MQ tag 的字面量已上移到 {@link GenerationMqRoute}（本类的 {@link #TAG} 只做转发）：
+ * MQ tag 的字面量已上移到 {@link GenerationMqRouteEnum}（本类的 {@link #TAG} 只做转发）：
  * 防漂移断言若要继续按源码文本对账 tag，须改读该枚举文件。
  * 契约先行红线：字段名在本类定死后 IKGOT4（创建入口）/ IKGOT6（消费者、处理器、领取 SQL、
  * 终态收口）一律引用本类，禁止另行发明字面量。
@@ -26,8 +26,8 @@ public final class ImageEraseContract {
     private ImageEraseContract() {
     }
 
-    /** MQ tag（= generation_jobs.type = JobType.IMAGE_ERASE）；值单处定义在 {@link GenerationMqRoute#IMAGE_ERASE}。 */
-    public static final String TAG = GenerationMqRoute.IMAGE_ERASE.tag();
+    /** MQ tag（= generation_jobs.type = JobType.IMAGE_ERASE）；值单处定义在 {@link GenerationMqRouteEnum#IMAGE_ERASE}。 */
+    public static final String TAG = GenerationMqRouteEnum.IMAGE_ERASE.tag();
 
     /** 任务来源值：唯一创建入口是画布图片卡工具条「擦除」，claim SQL 的 source 白名单仅含本值。 */
     public static final String SOURCE = "image_erase";

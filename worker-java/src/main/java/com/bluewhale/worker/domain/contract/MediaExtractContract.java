@@ -1,4 +1,4 @@
-package com.bluewhale.worker.domain.entity;
+package com.bluewhale.worker.domain.contract;
 
 import java.util.List;
 
@@ -23,8 +23,8 @@ public final class MediaExtractContract {
     private MediaExtractContract() {
     }
 
-    /** MQ tag（= generation_jobs.type = JobType.MEDIA_EXTRACT）；值单处定义在 {@link GenerationMqRoute#MEDIA_EXTRACT}。 */
-    public static final String TAG = GenerationMqRoute.MEDIA_EXTRACT.tag();
+    /** MQ tag（= generation_jobs.type = JobType.MEDIA_EXTRACT）；值单处定义在 {@link GenerationMqRouteEnum#MEDIA_EXTRACT}。 */
+    public static final String TAG = GenerationMqRouteEnum.MEDIA_EXTRACT.tag();
 
     /** 任务来源值：沿用既有唯一创建入口（画布视频卡工具条）的既有落库值 dock——media_extract
      *  不套 claim source 白名单（契约 §2/§7），值不变。 */
