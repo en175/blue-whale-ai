@@ -42,6 +42,8 @@ let container: HTMLDivElement;
 const CANVAS_REF: AudioRefItem = {
   id: 'n1',
   kind: 'audio',
+  // mediaType 随 canvas 参考推导落项（release tip 7f2c6e7cf 起），夹具补齐基线缺失字段（IKH8BR 收口顺手修复）
+  mediaType: 'audio',
   name: '雨声白噪音',
   src: 'https://x/rain.mp3',
   source: 'canvas',
