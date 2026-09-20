@@ -166,6 +166,24 @@
   color: #c9c9c9;
 }
 
+/* IKHBDO：排序号可直接编辑（两行号相同时上下移是空操作，需要手动改开）。 */
+.sortInput {
+  width: 72px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #232323;
+  color: #f5f5f5;
+  font-size: var(--font-size-md, 14px);
+  outline: none;
+  color-scheme: dark;
+}
+
+.sortInput:focus {
+  border-color: #555;
+}
+
 .cellTime {
   color: #9a9a9a;
   font-size: var(--font-size-sm, 13px);
@@ -314,7 +332,8 @@
 /* ============ 表单 ============ */
 .summaryBox {
   display: flex;
-  gap: 64px;
+  flex-wrap: wrap;
+  gap: 40px;
   padding: 16px 20px;
   margin-bottom: 24px;
   border-radius: 10px;
@@ -596,6 +615,38 @@
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+
+/* IKHBDO：尺寸行要放 id / label / api_value / 宽 / 高 五个输入 + 删除按钮。 */
+.sizeRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 80px 80px auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* 表格格子里的小号输入（seedream 矩阵 / task_types 比例）。 */
+.inputSm {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.taskRow {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.taskRow .chipList {
+  margin-bottom: 0;
+}
+
+.taskRow .addRowBtn {
+  margin: 0;
 }
 
 .addRowBtn {
