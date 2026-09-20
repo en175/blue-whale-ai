@@ -1653,6 +1653,25 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  // IKH4B8：音频组合闸同样「模型配置优先」。主提示词 1999 字（未越 raw 闸 2000）+
+  // 附件「赛博朋克」4 字 + 2 个换行连接符 = 组合 2005 → 越组合闸；旧 Math.max 会抬到 30000 放行。
+  it("模型配 2000：组合 2005 → 400 且文案取模型值（原取大闸会放行）", async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+    (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
+      .fn()
+      .mockResolvedValue([{ model_id: "audio-model", features: { max_prompt_length: 2_000 } }]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...AUDIO_TARGET_BODY, parameters: { prompt: "a".repeat(1999), model_id: "audio-model" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 2000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
   it("不携带 target_node_id 的音频创建 → 不读画布，input 不含 target_node_id，行为不变", async () => {
     const { deps, createJob, getByProject } = buildAudioTargetDeps(TARGET_CANVAS);
     const body = { ...AUDIO_TARGET_BODY } as Record<string, unknown>;
@@ -2149,8 +2168,8 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
   });
 });
 
-// IKESD6 / ADR-0085：组合闸取 max(契约预算 30000, 模型值)——配了 32000 的模型
-// 挂文本附件不应先撞 30000（否则配置形同虚设）。
+// IKESD6 / ADR-0085 / IKH4B8：组合闸**模型配置优先**，未配置才回落契约预算 30000。
+// 配 32000 的模型挂文本附件不应先撞 30000；配 2000 想收紧的模型也不应被抬回 30000。
 describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", () => {
   function buildTargetDepsWithPromptCap(opts: {
     maxPromptLength?: number;
@@ -2232,6 +2251,32 @@ describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", ()
     expect(result.code).toBe(400);
     expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
     expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("模型 2000：组合 2500 → 400 且文案取模型值（原取大闸会放行到 30000）", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 2_000,
+      attachLen: 1_249,
+    });
+
+    // 1249 × 2 + 2 个换行连接符 = 2500：配 2000 是要收紧，旧 Math.max 会抬到 30000 放行。
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 2000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("模型 2000：组合 1900 → 200 放行", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 2_000,
+      attachLen: 949,
+    });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
   });
 });
 
