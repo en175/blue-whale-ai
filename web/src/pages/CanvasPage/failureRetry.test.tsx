@@ -59,6 +59,7 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(async (_projectId: string, _jobId: number | string) => ({ generation_job_id: 'j9', cursor: 2 })),
   createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
+  createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async () => [
     {
@@ -129,6 +130,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
 

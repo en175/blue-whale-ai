@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-/* IKH3ZH 六工具会话两两切换（画布链路）：擦除/抠图/裁切/扩图/去字幕/音视频分离六种
-   编辑会话，任一会话进行中进入另一工具——旧会话按四路口径退出（未发送参数丢弃）、
+/* IKH3ZH 七工具会话两两切换（画布链路）：擦除/抠图/裁切/扩图/去字幕/音视频分离/音频截取
+   七种编辑会话，任一会话进行中进入另一工具——旧会话按四路口径退出（未发送参数丢弃）、
    新会话正常进入，全程不新建卡、不新建连线、不发起任何创建请求（无新增任务）。
    互斥与进入顺序的知识集中在 toolSessionCoordinator（本测试为该 module 的页面级
-   守护：删掉 module 后互斥清单散落回六入口，任一入口漏退即有向切换用例失败）。
-   六工具 × 去自身 = 30 组有向切换全覆盖。渲染模式沿用 toolSessionModal.test.tsx
+   守护：删掉 module 后互斥清单散落回各入口，任一入口漏退即有向切换用例失败）。
+   七工具 × 去自身 = 42 组有向切换全覆盖。渲染模式沿用 toolSessionModal.test.tsx
    （FlowCanvas 打桩透出 props，进入经 fullNode(id).data 的各工具 handler 派发——
-   去字幕/音视频分离挂点参考 videoSubtitleEraseEdit / audioVideoSplitEdit）。
+   去字幕/音视频分离/音频截取挂点参考 videoSubtitleEraseEdit / audioVideoSplitEdit /
+   audioTrimEdit）。IKHB7A 补第七 kind（音频截取，音视频分离同档）。
    IKH3ZI 追加四路退出与画布事件消费规则的守护：node-click 拦截（退出+选中+同次点击
    不开普通面板）、程序化选中让位（冻结不误关）、选中规范化退出（单选其他卡/多选）、
    同一手势多次通知无重复副作用（旧「会话活跃」门）。 */
@@ -90,6 +91,7 @@ const apiMocks = vi.hoisted(() => ({
   createImageErase: vi.fn(),
   createImageCutout: vi.fn(),
   createVideoSubtitleErase: vi.fn(),
+  createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async () => []),
   uploadAssetFile: vi.fn(),
@@ -141,6 +143,7 @@ vi.mock('@/api/jobs', () => ({
   createImageErase: apiMocks.createImageErase,
   createImageCutout: apiMocks.createImageCutout,
   createVideoSubtitleErase: apiMocks.createVideoSubtitleErase,
+  createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
@@ -158,7 +161,8 @@ const canvasDocMock = vi.hoisted(() => ({
 vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
 
 /** 画布：就绪图片卡 i1（1600×900 png，擦除/抠图/裁切/扩图四工具源卡）+
- *  就绪视频卡 v1（1920×1080 mp4，去字幕/音视频分离源卡）；无连线。
+ *  就绪视频卡 v1（1920×1080 mp4，去字幕/音视频分离源卡）+
+ *  就绪音频卡 a1（15 秒 mp3，音频截取源卡，IKHB7A）；无连线。
  *  withGenImage=true 追加成品图卡 i3（有生成记录——点卡本应开图片生成面板，
  *  供「同次点击不开普通面板 / 旧会话活跃门挡住自动开面板」断言）。 */
 function seedDoc(withGenImage = false) {
@@ -197,11 +201,24 @@ function seedDoc(withGenImage = false) {
             mime: 'video/mp4',
           },
         },
+        {
+          id: 'a1',
+          type: 'mediaNode',
+          position: { x: 800, y: 0 },
+          data: {
+            src: 'http://aud/a1.mp3',
+            mediaType: 'audio',
+            fileName: '播客片头.mp3',
+            assetId: '8',
+            duration: 15,
+            mime: 'audio/mpeg',
+          },
+        },
         ...(withGenImage
           ? [{
               id: 'i3',
               type: 'mediaNode',
-              position: { x: 800, y: 0 },
+              position: { x: 1200, y: 0 },
               data: {
                 src: 'http://img/i3.png',
                 mediaType: 'image',
@@ -221,6 +238,7 @@ function seedDoc(withGenImage = false) {
     assets: {
       5: { asset_id: 5, type: 'image', access_url: 'http://img/i1.png', width: 1600, height: 900 },
       6: { asset_id: 6, type: 'video', access_url: 'http://vid/v1.mp4', width: 1920, height: 1080 },
+      8: { asset_id: 8, type: 'audio', access_url: 'http://aud/a1.mp3', duration: 15 },
       ...(withGenImage
         ? { 7: { asset_id: 7, type: 'image', access_url: 'http://img/i3.png', width: 1200, height: 800 } }
         : {}),
@@ -254,21 +272,24 @@ function fullNode(id: string): Node {
   return found;
 }
 
-/** 六工具身份（与 toolSessionCoordinator 的 ToolSessionKind 同集合） */
-type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit';
+/** 七工具身份（与 toolSessionCoordinator 的 ToolSessionKind 同集合） */
+type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit' | 'audioTrim';
 
-/** 进入编辑会话：四图片工具经图片卡 data handler，去字幕/音视频分离经视频卡 data handler
- *  （挂点分别参考 toolSessionModal / videoSubtitleEraseEdit / audioVideoSplitEdit） */
+/** 进入编辑会话：四图片工具经图片卡 data handler，去字幕/音视频分离/音频截取经
+ *  视频卡/音频卡 data handler（挂点分别参考 toolSessionModal / videoSubtitleEraseEdit /
+ *  audioVideoSplitEdit / audioTrimEdit） */
 async function enterSession(kind: Kind) {
   const image = fullNode('i1').data as Record<string, (nodeId: string, mode?: string) => void>;
   const video = fullNode('v1').data as Record<string, (nodeId: string, mode?: string) => void>;
+  const audio = fullNode('a1').data as Record<string, (nodeId: string, mode?: string) => void>;
   await act(async () => {
     if (kind === 'erase') image.onEraseImage('i1');
     else if (kind === 'cutout') image.onCutoutImage('i1');
     else if (kind === 'crop') image.onCropImage('i1');
     else if (kind === 'outpaint') image.onOutpaintImage('i1');
     else if (kind === 'subtitleErase') video.onVideoSubtitleErase('v1', 'smart');
-    else video.onAudioVideoSplit('v1');
+    else if (kind === 'audioVideoSplit') video.onAudioVideoSplit('v1');
+    else audio.onTrimAudio('a1');
   });
 }
 
@@ -280,13 +301,14 @@ const SESSION_UI_TESTID: Record<Kind, string> = {
   outpaint: 'outpaint-dialog',
   subtitleErase: 'subtitle-erase-send-bar',
   audioVideoSplit: 'audio-video-split-toolbar',
+  audioTrim: 'audio-trim-send-bar',
 };
 
 const sessionUi = (kind: Kind) =>
   document.body.querySelector(`[data-testid="${SESSION_UI_TESTID[kind]}"]`);
 
-/** 30 组有向切换对：六工具 × 其余五工具 */
-const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit'];
+/** 42 组有向切换对：七工具 × 其余六工具 */
+const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit', 'audioTrim'];
 const PAIRS = KINDS.flatMap((from) =>
   KINDS.filter((to) => to !== from).map((to) => [from, to] as const),
 );
@@ -305,7 +327,7 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('IKH3ZH 六工具两两有向切换：旧会话退出、新会话进入、无新增卡/边/任务', () => {
+describe('IKH3ZH 七工具两两有向切换：旧会话退出、新会话进入、无新增卡/边/任务', () => {
   it.each(PAIRS)('%s → %s', async (from, to) => {
     await renderPage();
     await enterSession(from);
@@ -315,13 +337,14 @@ describe('IKH3ZH 六工具两两有向切换：旧会话退出、新会话进入
     expect(sessionUi(from), `切到 ${to} 后 ${from} 的工具 UI 应消失`).toBeNull();
     expect(sessionUi(to), `切到 ${to} 后其工具 UI 应出现`).toBeTruthy();
     // 未发送切换不留痕迹：无新增卡、无新增连线
-    expect(flowProps.current.mediaNodes as Node[]).toHaveLength(2);
+    expect(flowProps.current.mediaNodes as Node[]).toHaveLength(3);
     expect(flowProps.current.edges as unknown[]).toEqual([]);
     // 不发起任何创建请求（无新增任务）
     expect(apiMocks.createImageErase).not.toHaveBeenCalled();
     expect(apiMocks.createImageCutout).not.toHaveBeenCalled();
     expect(apiMocks.createVideoSubtitleErase).not.toHaveBeenCalled();
     expect(apiMocks.createMediaExtraction).not.toHaveBeenCalled();
+    expect(apiMocks.createAudioTrim).not.toHaveBeenCalled();
     expect(apiMocks.createVideoEnhancement).not.toHaveBeenCalled();
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
@@ -368,7 +391,7 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
     },
   );
 
-  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit'] as const)(
+  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim'] as const)(
     'B04 %s 会话多选退出（candidates.length > 1）',
     async (kind) => {
       await renderPage();
@@ -378,7 +401,7 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
     },
   );
 
-  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit'] as const)(
+  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim'] as const)(
     'B04 %s 会话单选其他卡：退出且同次通知不自动开该卡面板（旧会话活跃门）',
     async (kind) => {
       seedDoc(true);
@@ -392,20 +415,20 @@ describe('IKH3ZI 四路退出与画布事件消费（规则集中在 toolSession
     },
   );
 
-  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit'] as const)(
+  it.each(['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim'] as const)(
     'B04 %s 会话完整手势点无生成记录卡：退出、无面板、无新增卡/边（原流程正常交还）',
     async (kind) => {
       seedDoc(true);
       await renderPage();
       await enterSession(kind);
-      const otherId = kind === 'subtitleErase' || kind === 'audioVideoSplit' ? 'i1' : 'v1';
+      const otherId = kind === 'subtitleErase' || kind === 'audioVideoSplit' || kind === 'audioTrim' ? 'i1' : 'v1';
       await selectionChange([otherId]);
       await act(async () => {
         flowProps.current.onNodeClick({ id: otherId, type: 'mediaNode', data: {} });
       });
       expect(sessionUi(kind)).toBeNull();
       expect(genPanelOpen()).toBe(false);
-      expect(flowProps.current.mediaNodes as Node[]).toHaveLength(3);
+      expect(flowProps.current.mediaNodes as Node[]).toHaveLength(4);
       expect(flowProps.current.edges as unknown[]).toEqual([]);
       expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     },

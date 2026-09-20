@@ -1,0 +1,174 @@
+/* ============================================
+ * AudioTrimBar 截取发送条（IKHB7A）：钉屏幕浮层 24px 胶囊家族单条，容器视觉 =
+ * 浮层容器三令牌（背景/描边/阴影）+ 24px 胶囊圆角（对齐 VideoAudioSplitDialog
+ * 家族形态）；格式菜单浮层入 IKGZ8C 浮层菜单家族（12px 档）。条内控件全走令牌，
+ * 不复制体系外硬编码字面量写法。
+ * ============================================ */
+
+/* ---- 源音频卡下方发送条（单条：X + 标题 + 时间范围 + 格式下拉 + ⚡0 + 发送钮） ---- */
+.sendBar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--spacing-lg);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: 24px;
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+/* 跟随锚定（IKH25A 中心点锚口径，inline left/top 生效）：解除默认 bottom 定位，
+   transform 继承基础态 translateX(-50%) 以锚点（源卡中心 x）真居中。 */
+.sendBarFollow {
+  bottom: auto;
+  left: 0;
+}
+
+/* X 退出钮（家族关闭钮：28px 圆形，口径同 VideoAudioSplitDialog .toolBtn） */
+.closeBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.closeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 标题与时间范围（只读实时刷新） */
+.title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.range {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 格式下拉（触发钮显当前格式；菜单向上弹出避开发送条下方视口边缘） ---- */
+.formatWrap {
+  position: relative;
+}
+
+.formatTrigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-variant-numeric: tabular-nums;
+}
+
+.formatTrigger:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.formatTrigger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.formatMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 22;
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.formatMenuItem {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.formatMenuItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 当前所选格式：主色底白字指示（对齐分离 .formatMenuItemActive 先例） */
+.formatMenuItemActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-primary);
+}
+
+/* ---- ⚡0「本期免费」徽标（免费口径同分离/高清家族） ---- */
+.free {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
+}
+
+/* ---- 发送钮：家族发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
+ *    VideoAudioSplitDialog .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
+.sendBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-disabled);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: var(--color-border-hover);
+  filter: brightness(1.2);
+}

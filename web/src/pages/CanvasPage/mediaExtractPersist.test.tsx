@@ -68,6 +68,7 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(),
   createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(async () => ({ job_id: 'j1', status: 'queued' })),
+  createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
@@ -121,6 +122,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
