@@ -1,7 +1,7 @@
 /* ============================================
  * MediaNode 媒体节点：图片/视频/音频展示与操作手柄
  * 统一外部常驻标题 + 独立圆角内容主体
- * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 280×280 方形
+ * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 480×240 横矩形
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
@@ -473,7 +473,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       onContextMenu={handleContextMenu}
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
     >
-      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形）。
+      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒横矩形）。
           选中态悬浮工具条已迁出（IKGYYD）：钉屏幕层由 CanvasPage 经 NodeFollowToolbar 渲染
           MediaNodeToolbar（拖动/缩放实时跟随、屏幕尺寸恒定），不再位于节点卡 DOM 内。 */}
       <div className={styles.titleRow} data-testid="media-title">

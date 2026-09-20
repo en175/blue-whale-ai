@@ -5,7 +5,9 @@
    （生成中/素材缺失/空壳不显）与工具条本体。IKH3WE 撤除「重新编辑」「生成图片」「生成视频」
    三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
    IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
-   「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。 */
+   「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。
+   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能置灰占位钮（截取/调速/混合/
+   音视频合成/转码，悬停「即将上线」、不绑定点击）+ 分隔线 + 下载，详情对音频退役。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,9 +62,9 @@ afterEach(async () => {
 });
 
 describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮后）', () => {
-  it('音频卡只有详情与下载（@ 本就隐藏）', async () => {
+  it('音频卡五占位钮连排 + 分隔线 + 下载，详情退役、@ 隐藏（IKH8Q3）', async () => {
     await renderToolbar('audio');
-    expect(labels()).toEqual(['详情', '下载']);
+    expect(labels()).toEqual(['截取', '调速', '混合', '音视频合成', '转码', '下载']);
   });
 
   it('图片卡全显（五画质工具横排 + 详情/下载/@，IKH3XZ）', async () => {
@@ -127,6 +129,77 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
   it('空壳上传卡不显示工具条（数据条件，同迁移前）', async () => {
     await renderToolbar('image', { data: { emptyShell: true, src: '' } });
     expect(labels()).toEqual([]);
+  });
+});
+
+/* IKH8Q3（ADR-0109）：音频卡五功能占位钮——「截取、调速、混合、音视频合成、转码」图标加文字
+   横排（ADR-0107 家族口径），本期全部置灰占位：aria-disabled 置灰沿用画质横排先例
+   （灰字/not-allowed/透明底，见 .toolBtn[aria-disabled='true']），悬停提示「即将上线」，
+   不绑定任何点击行为；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
+   不出现「替换」入口。 */
+describe('MediaNodeToolbar 音频卡五功能占位钮（IKH8Q3）', () => {
+  const audioTool = (id: string) =>
+    mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
+  const audioToolIds = ['trim', 'speed', 'mix', 'compose', 'transcode'] as const;
+  const audioToolLabels = ['截取', '调速', '混合', '音视频合成', '转码'];
+
+  it('五钮顺序截取/调速/混合/音视频合成/转码，图标加文字横排（复用透明底 toolBtn）', async () => {
+    await renderToolbar('audio');
+    const rendered = audioToolIds.map(audioTool);
+    expect(rendered.map((b) => b.textContent)).toEqual(audioToolLabels);
+    rendered.forEach((b) => {
+      expect(b.querySelector('svg')).not.toBeNull();
+      expect(b.querySelector('span')).not.toBeNull();
+      expect(b.classList.contains(styles.toolBtn)).toBe(true);
+    });
+  });
+
+  it('五钮全部 aria-disabled 置灰（口径同画质横排）且悬停提示「即将上线」', async () => {
+    await renderToolbar('audio');
+    audioToolIds.map(audioTool).forEach((b) => {
+      expect(b.getAttribute('aria-disabled')).toBe('true');
+      expect(b.getAttribute('title')).toBe('即将上线');
+    });
+  });
+
+  it('五钮不绑定任何点击行为：点击不派发任何回调', async () => {
+    const onShowDetails = vi.fn();
+    const onDownload = vi.fn();
+    await renderToolbar('audio', { data: { onShowDetails, onDownload } });
+    await act(async () => {
+      audioToolIds.map(audioTool).forEach((b) => b.click());
+    });
+    expect(onShowDetails).not.toHaveBeenCalled();
+    expect(onDownload).not.toHaveBeenCalled();
+  });
+
+  it('竖直分隔线在「转码」之后、「下载」之前（分隔线后下载在最右）', async () => {
+    await renderToolbar('audio');
+    const toolbar = mountNode.querySelector(`.${styles.toolbar}`)!;
+    const seq = [...toolbar.children].map((el) =>
+      el.classList.contains(styles.toolDivider)
+        ? 'divider'
+        : (el.textContent?.trim() || el.getAttribute('title') || ''),
+    );
+    expect(seq).toEqual([...audioToolLabels, 'divider', '下载']);
+  });
+
+  it('详情钮退役、无「替换」入口（音频分支，图片/视频详情不受影响）', async () => {
+    await renderToolbar('audio');
+    expect(labels()).not.toContain('详情');
+    expect(labels()).not.toContain('替换');
+    expect(
+      [...mountNode.querySelectorAll('button')].some((b) => b.getAttribute('title') === '详情'),
+    ).toBe(false);
+  });
+
+  it('分隔线后「下载」可正常下载（派发 onDownload 携带节点 id）', async () => {
+    const onDownload = vi.fn();
+    await renderToolbar('audio', { data: { onDownload } });
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[title="下载"]')!.click();
+    });
+    expect(onDownload).toHaveBeenCalledWith('audio-node');
   });
 });
 

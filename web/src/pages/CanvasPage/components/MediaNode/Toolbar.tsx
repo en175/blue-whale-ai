@@ -12,9 +12,14 @@
  * 记忆（recentQualityTool）与悬浮展开/直启路径整套退役；视频卡「智能去字幕 ▾」下拉不受影响。
  * 工具条 DOM 不再位于节点卡内：点击按钮天然不触发节点拖拽/选中变化（原 nodrag/nopan 与
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
+ * IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支「详情+下载」改为「截取、调速、混合、
+ * 音视频合成、转码」五功能置灰占位钮 + 竖直分隔线 + 下载。五钮本期全部占位（aria-disabled
+ * 置灰沿用画质横排先例口径，悬停提示「即将上线」，不绑定任何点击行为），各功能交互由后续
+ * 独立任务逐个点亮；详情钮随改版对音频退役（信息稀薄，右键菜单与双击重命名已覆盖），
+ * 图片/视频分支的详情不变；音频不出现「替换」入口；@（mention）对音频保持隐藏。
  * ============================================ */
 import { useCallback } from 'react';
-import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, type LucideIcon } from 'lucide-react';
+import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, type LucideIcon } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
@@ -45,6 +50,19 @@ interface MediaNodeToolbarProps {
   id: string;
   data: MediaNodeData;
 }
+
+/** 音频卡五功能占位钮（IKH8Q3，ADR-0109）：本期全部置灰占位，无门槛、无回调依赖，
+ *  故为模块级静态配置（区别于画质横排的组件内数组）；顺序即 ADR-0109 拍板顺序，
+ *  图标按序：剪刀（截取）、仪表盘（调速）、层叠（混合）、场记板（音视频合成）、循环箭头（转码），
+ *  形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
+const AUDIO_TOOL_PLACEHOLDER_HINT = '即将上线';
+const audioToolItems: Array<{ id: string; label: string; icon: LucideIcon }> = [
+  { id: 'trim', label: '截取', icon: Scissors },
+  { id: 'speed', label: '调速', icon: Gauge },
+  { id: 'mix', label: '混合', icon: Layers },
+  { id: 'compose', label: '音视频合成', icon: Clapperboard },
+  { id: 'transcode', label: '转码', icon: Repeat },
+];
 
 export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleVideoSubtitleEraseSmart = useCallback(
@@ -205,10 +223,30 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <span>音视频分离</span>
         </button>
       )}
+      {/* 音频卡五功能占位（IKH8Q3）：aria-disabled 置灰保持渲染（口径同画质横排
+          .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}
+      {toolbar.audioTools && audioToolItems.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={styles.toolBtn}
+            title={AUDIO_TOOL_PLACEHOLDER_HINT}
+            aria-disabled="true"
+            data-testid={`audio-tool-${item.id}`}
+          >
+            <Icon size={14} strokeWidth={2} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
       <span className={styles.toolDivider} />
-      <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
-        <Info size={14} strokeWidth={2} />
-      </button>
+      {!toolbar.audioTools && (
+        <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
+          <Info size={14} strokeWidth={2} />
+        </button>
+      )}
       <button className={styles.toolBtn} onClick={handleDownload} title="下载">
         <Download size={14} strokeWidth={2} />
       </button>

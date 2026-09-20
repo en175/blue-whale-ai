@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
-  it('hides mention, image-quality menu, video-enhance and subtitle-erase on audio nodes', () => {
+  it('音频卡只显五功能占位（audioTools），mention/画质/视频工具全隐（IKH8Q3）', () => {
     expect(mediaNodeToolbarVisibility('audio')).toEqual({
       mention: false,
       imageQuality: false,
       videoEnhance: false,
       videoSubtitleErase: false,
+      audioTools: true,
     });
   });
 
@@ -17,6 +18,7 @@ describe('mediaNodeToolbarVisibility', () => {
       imageQuality: true,
       videoEnhance: false,
       videoSubtitleErase: false,
+      audioTools: false,
     });
   });
 
@@ -26,6 +28,7 @@ describe('mediaNodeToolbarVisibility', () => {
       imageQuality: false,
       videoEnhance: true,
       videoSubtitleErase: true,
+      audioTools: false,
     });
   });
 
@@ -35,6 +38,7 @@ describe('mediaNodeToolbarVisibility', () => {
       imageQuality: true,
       videoEnhance: false,
       videoSubtitleErase: false,
+      audioTools: false,
     });
   });
 });
