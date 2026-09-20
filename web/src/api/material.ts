@@ -326,7 +326,7 @@ export function getVisualValidateResult(bytedToken: string, opts?: { silent?: bo
 /** 上游素材 Status 为 Failed（合规未通过） */
 export class MaterialAssetFailedError extends Error {
   constructor() {
-    super('seedance2.0合规校验失败，不可用于视频生成');
+    super('seedance合规校验失败，不可用于视频生成');
     this.name = 'MaterialAssetFailedError';
   }
 }

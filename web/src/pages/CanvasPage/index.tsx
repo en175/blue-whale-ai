@@ -204,7 +204,7 @@ import {
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
+import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -1520,7 +1520,8 @@ export default function CanvasPage() {
   const [saveBlocked, setSaveBlocked] = useState(false);
   /** 最近一次保存成功时间（HH:mm） */
   const [savedAt, setSavedAt] = useState('');
-  /** 画布乐观锁版本号（来自快照；null 表示从未保存，If-Match 传 missing） */
+  /** 画布乐观锁版本号：打开时从快照写入，之后只跟保存接口返回的自增 version。
+   *  null 表示从未保存，If-Match 传 missing。不要从过期的 doc.version 回写。 */
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
@@ -2035,6 +2036,10 @@ export default function CanvasPage() {
     return node;
   };
 
+  /** 最近一次完整水合所用的 doc 引用。snapshotAssets 单独更新时不得整页重水合，
+   *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
+  const hydratedDocRef = useRef<typeof doc>(null);
+
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
   useEffect(() => {
     if (!doc) {
@@ -2046,7 +2051,21 @@ export default function CanvasPage() {
       setGroups([]);
       versionRef.current = null;
       lastSavedRef.current = '';
+      hydratedDocRef.current = null;
       setSaveStatus('idle');
+      return;
+    }
+    const docChanged = hydratedDocRef.current !== doc;
+    hydratedDocRef.current = doc;
+    if (!docChanged) {
+      // 仅资产字典变化：刷新节点 URL / 缺失标记，保留当前编辑与保存接口已确认的 version
+      const refresh = (prev: Node[]) => {
+        const next = prev.map(resolveNodeAssets);
+        return next.some((node, index) => node !== prev[index]) ? next : prev;
+      };
+      setMediaNodes(refresh);
+      setProductNodes(refresh);
+      setAssetNodes(refresh);
       return;
     }
     const t: Node[] = [];
@@ -2207,6 +2226,13 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc]);
 
+  const adoptCanvasConflictVersion = (error: unknown): boolean => {
+    const recovered = readCanvasConflictVersion(error);
+    if (recovered === undefined) return false;
+    versionRef.current = recovered;
+    return true;
+  };
+
   /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
    *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
    *  只有仍是「最新那个」时才清空，避免先完成的一方把后登记的那次抹掉。 */
@@ -2248,17 +2274,20 @@ export default function CanvasPage() {
             setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
           })
           .catch((e) => {
-            setSaveBlocked(true);
-            // 释放签名，允许下次变更时重试
+            // 释放签名，允许下次变更或「重试保存」用已对齐的 version 再写
             lastSavedRef.current = '';
-            // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
             const hadPendingAdds = pendingSnapshot.size > 0;
+            const aligned = adoptCanvasConflictVersion(e);
+            if (aligned) {
+              setSaveBlocked(true);
+              setSaveStatus('error');
+              return;
+            }
+            setSaveBlocked(true);
             if (isApiError(e) && e.status === 412) {
-              // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
               setSaveStatus('error');
               showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
             } else {
-              // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
               if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
               setSaveStatus('error');
               showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
@@ -7868,6 +7897,7 @@ export default function CanvasPage() {
           lastSavedRef.current = signature;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
+          adoptCanvasConflictVersion(error);
           setSaveBlocked(true);
           setSaveStatus('error');
           throw error;

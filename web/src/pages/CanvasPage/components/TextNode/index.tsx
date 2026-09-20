@@ -690,7 +690,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const now = performance.now();
     const prev = lastTextBodyPressAt.get(id) ?? 0;
     lastTextBodyPressAt.set(id, now);
-    if (now - prev > 0 && now - prev < TEXT_BODY_DOUBLE_PRESS_MS) {
+    // 下限避开成组后选中抬 zIndex 重绘触发的连发 pointerdown，避免单击误进编辑
+    if (now - prev >= 80 && now - prev < TEXT_BODY_DOUBLE_PRESS_MS) {
       e.stopPropagation();
       setEditing(true);
     }

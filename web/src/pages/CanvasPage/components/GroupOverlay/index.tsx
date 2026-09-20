@@ -191,6 +191,9 @@ export default function GroupOverlay({
   const paneRef = useRef<HTMLElement | null>(null);
   /** 拖组结束后需吞掉一次 click（避免冒泡到 pane 触发 onPaneClick 清空选中） */
   const clickSuppressRef = useRef(false);
+  /** 组框穿透点到内容卡：pointerdown 已补选中，必须吞掉随后打在 pane 上的 click，
+   *  否则 onPaneClick 会立刻清掉选中（与拖组吞 click 分开：组内编辑时拖组仍要放行 pane） */
+  const contentClickSuppressRef = useRef(false);
   /** 内容卡上的按下时刻：选中重绘会拆掉 dblclick，用间隔识别双击进编辑 */
   const lastContentPressRef = useRef({ id: '', at: 0 });
   const uiLayerRef = useCallback((el: HTMLDivElement | null) => {
@@ -399,12 +402,20 @@ export default function GroupOverlay({
           && !e.target.closest('.react-flow__node-groupFrame');
         const now = performance.now();
         const last = lastContentPressRef.current;
-        const isDouble = last.id === content.id && now - last.at > 0 && now - last.at < 350;
+        // 下限避开选中抬 zIndex 重绘触发的连发 pointerdown（~0–16ms），
+        // 否则单击会被当成双击进编辑，Backspace 只改正文删不掉节点。
+        const isDouble = last.id === content.id && now - last.at >= 80 && now - last.at < 350;
         lastContentPressRef.current = { id: content.id, at: now };
         // 事件已打在卡片上：放行走原有单击/拖拽/双击（媒体改名、节点放大等）
         if (onContentNode) return;
-        // 组框穿透到 pane：拦住框选；文本卡补一次进入编辑
+        // 组框穿透到 pane：拦住框选；单击补选中（否则后续 click 打在 pane 会清掉选中，
+        // Delete/Backspace 没有目标）；双击文本卡再进编辑。
         e.stopPropagation();
+        setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === content.id })));
+        contentClickSuppressRef.current = true;
+        window.setTimeout(() => {
+          contentClickSuppressRef.current = false;
+        }, 0);
         if (isDouble && content.type === 'textNode') {
           const editor = document.querySelector(
             `.react-flow__node[data-id="${CSS.escape(content.id)}"] [data-placeholder="输入内容..."]`,
@@ -421,6 +432,11 @@ export default function GroupOverlay({
     };
     // 拖组结束吞掉派发的 click；组内编辑中不吞——点组外空白的 click 需到达 pane 触发 onPaneClick 取消选中
     const onClick = (e: MouseEvent) => {
+      if (contentClickSuppressRef.current) {
+        e.stopPropagation();
+        e.preventDefault();
+        return;
+      }
       if (!clickSuppressRef.current || editGroupIdRef.current) return;
       e.stopPropagation();
       e.preventDefault();
@@ -453,7 +469,7 @@ export default function GroupOverlay({
       window.removeEventListener('click', onClick, true);
       window.removeEventListener('dblclick', onDblClick, true);
     };
-  }, [hitGroupAt, startFrameDrag, screenToFlowPosition]);
+  }, [hitGroupAt, startFrameDrag, screenToFlowPosition, setNodes]);
 
   /** 悬停组内空白区 → pane 光标 grab（恢复组框下沉后丢失的可拖拽提示） */
   useEffect(() => {
