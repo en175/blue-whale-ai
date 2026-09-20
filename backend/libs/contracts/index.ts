@@ -32,7 +32,7 @@ export {
   type TextAttachmentSnapshot,
   type TextAttachmentMedia,
 } from "./canvas-edges.js";
-export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, COMPOSED_AUDIO_PROMPT_MAX_LENGTH, RAW_PROMPT_MAX_LENGTH, RAW_AUDIO_PROMPT_MAX_LENGTH, resolvePromptMaxLength, type PromptLengthBudget, type PromptLengthType } from "./prompt-text-limits.js";
+export { PROMPT_TEXT_LIMITS, DEFAULT_PROMPT_MAX_LENGTH, DEFAULT_AUDIO_PROMPT_MAX_LENGTH, resolvePromptMaxLength, type PromptLengthType } from "./prompt-text-limits.js";
 export {
   videoRefLabel,
   buildReferenceMarkerLabels,

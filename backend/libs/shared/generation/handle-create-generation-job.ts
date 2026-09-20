@@ -47,7 +47,6 @@ import {
   type TextProvidedVideoReference,
 } from "@lib/contracts";
 import {
-  composeTextAttachmentPrompt,
   extractTextNodeText,
   transferReferenceMarkers,
 } from "@lib/core";
@@ -258,7 +257,7 @@ function validateCommon(
   }
   const params = body.parameters as GenerationParameters | undefined;
   // IKDLQF：携带 target_node_id 时 prompt 允许为空字符串（缺省按空串处理）；
-  // 全部有效文本（附件 + 提示词）为空的拒绝在 handler 读取画布快照后按 composeTextAttachmentPrompt 结果判定。
+  // 全部有效文本为空的拒绝在 handler 读取画布快照后按正文全文（promptText）判定。
   // ADR-0085（IKESD6）：长度上限不再在此硬编码——校验位点在能力行查出的地方按
   // features.max_prompt_length 判定（validateCommon 早于白名单查询，拿不到能力行）。
   if (
@@ -1191,9 +1190,6 @@ async function resolveTargetSnapshot(args: {
   deps: Pick<GenerationDeps, "canvas">;
   /** 同次画布读取：文本附件与目标坐标系必须来自同一版本，不得二次读取。 */
   canvas?: Awaited<ReturnType<CanvasRepo["getByProject"]>>;
-  /** ADR-0085 / IKH4B8：所选模型的 max_prompt_length 配置（未配置为 null）。
-   *  两道闸共用这一份配置、各自回落自己的缺省，故传**配置原值**而非 raw 闸的生效值。 */
-  promptLengthConfig: number | null;
   /** IKFM3S：图片目标的文本索引派生结果——附件冻结 media 映射用（缺省无媒体）。 */
   textIndex?: TargetTextIndex;
   referenceAssetIds: readonly string[];
@@ -1201,7 +1197,7 @@ async function resolveTargetSnapshot(args: {
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
 > {
-  const { type, body, promptText, projectId, deps, promptLengthConfig } = args;
+  const { type, body, promptText, projectId, deps } = args;
   const targetNodeId =
     isStr(body.target_node_id) && body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -1278,24 +1274,12 @@ async function resolveTargetSnapshot(args: {
         value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
       };
     }
-    // IKG6EK / ADR-0088：正文由提交方给全，附件不再由服务端组合——组合格式只剩一种。
-    const composed = composeTextAttachmentPrompt(textAttachments, promptText);
-    if (composed.trim() === "") {
+    // IKH4B8：正文由提交方给全（ADR-0088），服务端不再组合——长度闸已在入口按**正文全文**口径把关
+    // （原组合闸把附件前缀又加了一遍，等于重复计数）。这里只留「一处有效文本都没有」的拒绝。
+    if (promptText.trim() === "") {
       return {
         ok: false,
         value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
-      };
-    }
-    // IKH4B8：组合闸改为**模型配置优先**，未配置才回落组合缺省（image/video/audio 均契约预算 30000）。
-    // 原 ADR-0085 的取大修掉了「大上限模型先撞组合闸」，但顺带把小于契约预算的配置也吞掉了。
-    const composedMaxLength = resolvePromptMaxLength("contract-budget", type, promptLengthConfig);
-    if (composed.length > composedMaxLength) {
-      return {
-        ok: false,
-        value: {
-          message: `文本附件与提示词组合后超过 ${composedMaxLength} 字上限`,
-          code: ERROR_INVALID_INPUT,
-        },
       };
     }
   }
@@ -1396,10 +1380,10 @@ export async function handleCreateGenerationJob(
     if (revalidated)
       return fail(400, revalidated.message, { code: revalidated.code });
   }
-  // ADR-0085（IKESD6）/ IKH4B8：raw prompt 长度上限**模型配置优先**，
-  // 未配置才回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
-  const promptLengthConfig = capability?.features?.max_prompt_length ?? null;
-  const maxPromptLength = resolvePromptMaxLength("legacy-hardcode", type, promptLengthConfig);
+  // ADR-0085（IKESD6）/ IKH4B8：提示词长度上限**模型配置优先**，未配置回落缺省
+  // （图片/视频 4000、音频 3000）；错误码与旧 validateCommon 一致。
+  // 「提示词」= 提交上来的正文全文（ADR-0088：前端已把附件与输入拼好），故全仓只此一道闸。
+  const maxPromptLength = resolvePromptMaxLength(type, capability?.features?.max_prompt_length ?? null);
   if (promptText.length > maxPromptLength)
     return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
@@ -1613,7 +1597,6 @@ export async function handleCreateGenerationJob(
     promptText,
     projectId,
     deps,
-    promptLengthConfig,
     ...(textIndexRefs.value.index.refs.length > 0 || textIndexRefs.value.index.inputs.length > 0
       ? { textIndex: textIndexRefs.value.index }
       : {}),

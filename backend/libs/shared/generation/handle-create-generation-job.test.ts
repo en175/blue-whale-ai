@@ -1361,7 +1361,23 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("组合后超过 30000 字 → 400 明确失败，不建任务、不截断", async () => {
+  // IKH4B8：长度闸只看提交上来的正文全文——附件正文已由前端拼进 prompt（ADR-0088），
+  // 服务端不再二次叠加（原组合闸把它算了两遍）。所以「空 prompt + 长附件」不再是有效请求。
+  it("正文为空 → 400 prompt 无效，附件不再由服务端补正文", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("正文由提交方给全：附件很长也不额外计数，正文本身在上限内 → 200", async () => {
     const { deps, createJob } = buildTargetDeps({
       nodes: JSON.stringify([
         { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
@@ -1374,30 +1390,11 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       ]),
     });
 
-    const result = await handleCreateGenerationJob(
-      "u1", "p1",
-      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
-      null, deps,
-    );
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("仅附件正文、prompt 为空字符串 → 200，prompt 冻结为空串", async () => {
-    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
-
-    const result = await handleCreateGenerationJob(
-      "u1", "p1",
-      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
-      null, deps,
-    );
+    const result = await handleCreateGenerationJob("u1", "p1", IMAGE_TARGET_BODY, null, deps);
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    expect(cmdArg.input.prompt).toBe("");
-    expect(cmdArg.input.text_attachments).toHaveLength(3);
+    expect(cmdArg.input.text_attachments).toHaveLength(2);
   });
 
   it("附件全部空白且 prompt 为空 → 400 沿用 prompt 无效，不建任务", async () => {
@@ -1506,7 +1503,8 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("仅附件正文、prompt 为空字符串 → 200，prompt 冻结为空串", async () => {
+  // IKH4B8：视频同口径——正文由提交方给全，空正文即无效请求，附件不额外计数。
+  it("正文为空 → 400 prompt 无效，附件不再由服务端补正文", async () => {
     const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
 
     const result = await handleCreateGenerationJob(
@@ -1515,12 +1513,9 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(200);
-    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    expect(cmdArg.input.prompt).toBe("");
-    expect(cmdArg.input.text_attachments).toEqual([
-      { node_id: "text-a", title: "风格", text: "赛博朋克" },
-    ]);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   it("附件全部空白且 prompt 为空 → 400 沿用 prompt 无效，不建任务", async () => {
@@ -1540,30 +1535,6 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
 
     expect(result.code).toBe(400);
     expect(result.msg).toBe("prompt 无效");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("组合后超过 30000 字 → 400 明确失败，不建任务、不截断", async () => {
-    const { deps, createJob } = buildVideoTargetDeps({
-      nodes: JSON.stringify([
-        { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
-        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(20_000) } },
-        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(20_000) } },
-      ]),
-      edges: JSON.stringify([
-        { id: "e1", source: "text-a", target: "media-v" },
-        { id: "e2", source: "text-b", target: "media-v" },
-      ]),
-    });
-
-    const result = await handleCreateGenerationJob(
-      "u1", "p1",
-      { ...VIDEO_TARGET_BODY, target_node_id: "media-v", parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
-      null, deps,
-    );
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -1653,9 +1624,25 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  // IKH4B8：音频组合闸同样「模型配置优先」。主提示词 1999 字（未越 raw 闸 2000）+
-  // 附件「赛博朋克」4 字 + 2 个换行连接符 = 组合 2005 → 越组合闸；旧 Math.max 会抬到 30000 放行。
-  it("模型配 2000：组合 2005 → 400 且文案取模型值（原取大闸会放行）", async () => {
+  // IKH4B8：音频上限同样「模型配置优先」，且只量正文全文（附件不额外计数）。
+  it("模型配 2000：正文 2001 字 → 400", async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+    (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
+      .fn()
+      .mockResolvedValue([{ model_id: "audio-model", features: { max_prompt_length: 2_000 } }]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...AUDIO_TARGET_BODY, parameters: { prompt: "a".repeat(2001), model_id: "audio-model" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("模型配 2000：正文 1999 字 + 画布文本附件 → 200（附件不额外计数）", async () => {
     const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
     (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
       .fn()
@@ -1667,9 +1654,8 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 2000 字上限");
-    expect(createJob).not.toHaveBeenCalled();
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
   });
 
   it("不携带 target_node_id 的音频创建 → 不读画布，input 不含 target_node_id，行为不变", async () => {
@@ -1700,7 +1686,7 @@ describe("IKDL9U review: ordinary text and provenance", () => {
     });
     const result = await handleCreateGenerationJob("u1", "p1", {
       ...IMAGE_TARGET_BODY, type, target_node_id: "target",
-      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
+      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "夜景" },
     }, null, deps);
     expect(result.code).toBe(200);
     expect(createJob.mock.calls[0][0].input.text_attachments).toEqual([
@@ -2165,118 +2151,6 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
 
     expect(over.code).toBe(400);
     expect(exact.code).toBe(200);
-  });
-});
-
-// IKESD6 / ADR-0085 / IKH4B8：组合闸**模型配置优先**，未配置才回落契约预算 30000。
-// 配 32000 的模型挂文本附件不应先撞 30000；配 2000 想收紧的模型也不应被抬回 30000。
-describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", () => {
-  function buildTargetDepsWithPromptCap(opts: {
-    maxPromptLength?: number;
-    attachLen: number;
-  }) {
-    const findOwnedById = vi.fn().mockResolvedValue({ id: "1" });
-    const listEnabledByType = vi.fn().mockResolvedValue([
-      {
-        model_id: "seedream-5.0",
-        features: opts.maxPromptLength
-          ? { max_prompt_length: opts.maxPromptLength }
-          : undefined,
-      },
-    ]);
-    const createJob = vi.fn().mockResolvedValue({ generation_job_id: "1", cursor: 1 });
-    const getByProject = vi.fn().mockResolvedValue({
-      id: "9",
-      project_id: "1",
-      version: 3,
-      viewport: null,
-      nodes: JSON.stringify([
-        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
-        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(opts.attachLen) } },
-        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(opts.attachLen) } },
-      ]),
-      edges: JSON.stringify([
-        { id: "e1", source: "text-a", target: "media-1" },
-        { id: "e2", source: "text-b", target: "media-1" },
-      ]),
-    });
-    const deps = {
-      projects: { findOwnedById },
-      models: { listEnabledByType },
-      command: { createJob },
-      canvas: { getByProject },
-      assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
-    } as unknown as HandlerDeps;
-    return { deps, createJob };
-  }
-
-  function emptyPromptOnTarget() {
-    return {
-      ...IMAGE_TARGET_BODY,
-      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
-    };
-  }
-
-  it("模型 32000：组合 30002（>旧闸 30000，≤模型值）→ 200 放行", async () => {
-    const { deps, createJob } = buildTargetDepsWithPromptCap({
-      maxPromptLength: 32_000,
-      attachLen: 15_000,
-    });
-
-    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
-
-    // 30000 + 2 个换行连接符 = 30002：旧组合闸必拒，跟随模型值后放行。
-    expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalled();
-  });
-
-  it("模型 32000：组合 40002 超闸 → 400 且文案上限取模型值", async () => {
-    const { deps, createJob } = buildTargetDepsWithPromptCap({
-      maxPromptLength: 32_000,
-      attachLen: 20_000,
-    });
-
-    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 32000 字上限");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("未配置：30002 组合仍撞旧闸 30000（回归）", async () => {
-    const { deps, createJob } = buildTargetDepsWithPromptCap({ attachLen: 15_000 });
-
-    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("模型 2000：组合 2500 → 400 且文案取模型值（原取大闸会放行到 30000）", async () => {
-    const { deps, createJob } = buildTargetDepsWithPromptCap({
-      maxPromptLength: 2_000,
-      attachLen: 1_249,
-    });
-
-    // 1249 × 2 + 2 个换行连接符 = 2500：配 2000 是要收紧，旧 Math.max 会抬到 30000 放行。
-    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("文本附件与提示词组合后超过 2000 字上限");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("模型 2000：组合 1900 → 200 放行", async () => {
-    const { deps, createJob } = buildTargetDepsWithPromptCap({
-      maxPromptLength: 2_000,
-      attachLen: 949,
-    });
-
-    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
-
-    expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalled();
   });
 });
 
