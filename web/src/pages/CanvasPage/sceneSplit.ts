@@ -13,6 +13,7 @@ import {
 } from '@lib/contracts/video-scene-split';
 import { readJobFailText } from '@/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { overlaps, type SpawnBox } from './draftSpawn';
 
 /** 入口可用态悬停说明（效果边界，对齐 audioVideoSplit ENTRY_HINT 家族口径） */
 export const SCENE_SPLIT_ENTRY_HINT = '将视频按场景切分为多张片段卡片';
@@ -153,4 +154,107 @@ export function sceneSplitErrorText(
   error?: { code?: string | number; message?: string; msg?: string } | null,
 ): string {
   return readJobFailText(error) || '场景切分失败，请重试';
+}
+
+/* ============ 完成扇出（IKH8C1）：段卡标注与网格避让布局（纯函数） ============ */
+
+/** 秒 → 时钟标注：mm:ss（不足 1 小时，分秒两位补零）；≥1 小时 h:mm:ss（时不补零）。
+ *  向下取整防 59.6s 进位溢出成 00:60。 */
+function formatSceneSplitClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** 段卡标题（IKH8C1）：「第 N 段 起止时间」，如「第 2 段 00:15-00:46」；
+ *  起止任一 ≥1 小时用 h:mm:ss（如「第 1 段 1:00:05-1:01:15」）。
+ *  segment_index 直接采用任务返回的段序号（契约 1 起），不本地重算。 */
+export function sceneSplitSegmentLabel(
+  segmentIndex: number,
+  startTime: number,
+  endTime: number,
+): string {
+  return `第 ${segmentIndex} 段 ${formatSceneSplitClock(startTime)}-${formatSceneSplitClock(endTime)}`;
+}
+
+/** 段卡网格内卡与卡间距（px）：网格紧凑排布，节点级避让间距沿用 SCENE_SPLIT_NODE_GAP。 */
+export const SCENE_SPLIT_FANOUT_GRID_GAP = 24;
+
+/** 网格避让扫描上限：y 方向上下各试这么多步、x 方向最多右移这么多轮，
+ *  穷尽后回退理想位（画布无限大实际不可穷尽，防御兜底）。 */
+const SCENE_SPLIT_FANOUT_MAX_Y_STEPS = 200;
+const SCENE_SPLIT_FANOUT_MAX_X_ROUNDS = 50;
+
+export interface SceneSplitFanoutLayoutInput {
+  /** 锚点盒（源卡占位盒，flow 坐标，含标题余量）：网格从其右缘起排、垂直中心对齐 */
+  anchor: SpawnBox;
+  /** 段数 N（≥1，无上限；仅切出 1 段照常出 1 张） */
+  count: number;
+  /** 段卡占位盒（内容区 + 标题余量） */
+  segmentSize: { width: number; height: number };
+  /** 画布既有节点占位盒（调用方排除锚点卡与占位卡——二者不参与避让） */
+  occupied: SpawnBox[];
+}
+
+/** 段卡网格扇出落位（IKH8C1，纯函数）：列数 = ceil(√N)，行数按需；整片网格放源卡
+ *  右缘 + SCENE_SPLIT_NODE_GAP、与源卡垂直中心对齐；与画布既有节点重叠时按
+ *  「上下平移 → 整体右移一列」扫描首个无重叠位（保持扇出在源卡右侧的语义），
+ *  穷尽后回退理想位。返回 N 个节点 position（左上角，按段序——第 0 项在网格左上，
+ *  逐行排布），与 occupied 及彼此均不重叠（GAP 口径复用 draftSpawn.overlaps）。 */
+export function sceneSplitFanoutLayout(
+  input: SceneSplitFanoutLayoutInput,
+): Array<{ x: number; y: number }> {
+  const { anchor, count, segmentSize, occupied } = input;
+  const n = Math.max(1, Math.floor(count));
+  const w = segmentSize.width;
+  const h = segmentSize.height;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const rows = Math.ceil(n / cols);
+  const gridGap = SCENE_SPLIT_FANOUT_GRID_GAP;
+  const stepX = w + gridGap;
+  const stepY = h + gridGap;
+  const gridHeight = rows * h + (rows - 1) * gridGap;
+  const baseX = Math.round(anchor.x + anchor.width + SCENE_SPLIT_NODE_GAP);
+  const baseY = Math.round(anchor.y + anchor.height / 2 - gridHeight / 2);
+
+  const positionsAt = (x: number, y: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      x: Math.round(x + (i % cols) * stepX),
+      y: Math.round(y + Math.floor(i / cols) * stepY),
+    }));
+
+  const collides = (positions: Array<{ x: number; y: number }>) => {
+    const boxes: SpawnBox[] = positions.map((p) => ({ x: p.x, y: p.y, width: w, height: h }));
+    return occupied.some((o) => boxes.some((b) => overlaps(b, o)));
+  };
+
+  for (let xr = 0; xr <= SCENE_SPLIT_FANOUT_MAX_X_ROUNDS; xr += 1) {
+    const x = baseX + xr * stepX;
+    for (let yr = 0; yr <= SCENE_SPLIT_FANOUT_MAX_Y_STEPS; yr += 1) {
+      const yOffsets = yr === 0 ? [0] : [yr * stepY, -yr * stepY];
+      for (const dy of yOffsets) {
+        const positions = positionsAt(x, baseY + dy);
+        if (!collides(positions)) return positions;
+      }
+    }
+  }
+  return positionsAt(baseX, baseY);
+}
+
+/** 段卡占位盒（IKH8C1）：视频内容区（宽高优先，缺失回退 280 方形）+ 标题余量 44，
+ *  口径对齐 CanvasPage nodeBoxOf 的媒体节点分支。 */
+export function sceneSplitSegmentBox(size: { width?: number | null; height?: number | null }): {
+  width: number;
+  height: number;
+} {
+  const box = mediaContentBox({
+    mediaType: 'video',
+    width: typeof size.width === 'number' ? size.width : undefined,
+    height: typeof size.height === 'number' ? size.height : undefined,
+  });
+  return { width: box.width, height: box.height + 44 };
 }

@@ -178,6 +178,24 @@ export interface ImageOutpaintCreatedData {
   status: 'queued';
 }
 
+/** 场景切分任务结果形态（GET /api/jobs/:id 的 result 键，IKH8C1）：契约校验后的
+ *  切分结果——segments 按段序排列（segment_index 1 起）、起止秒 Number、
+ *  segment_asset_id 指向 output_assets 里的段资产。非场景切分任务或畸形 payload 为 null。 */
+export interface JobSceneSplitResult {
+  /** 源视频总时长（秒） */
+  duration: number;
+  segments: Array<{
+    /** 段序号（1 起） */
+    segment_index: number;
+    /** 段起点（秒） */
+    start_time: number;
+    /** 段终点（秒） */
+    end_time: number;
+    /** 段资产 id（对应 output_assets 里同 id 项） */
+    segment_asset_id: string;
+  }>;
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -186,6 +204,10 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 按 output_asset_ids 顺序的全量产出资源（场景切分扇出取段资产用，IKH8C1；其余任务缺省） */
+  output_assets?: JobAsset[];
+  /** 契约校验后的结果形态（场景切分：段起止与段资产 id，IKH8C1）；非场景切分任务或畸形 payload 为 null */
+  result?: JobSceneSplitResult | null;
   /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
   text_input_signature?: string | null;
   error?: JobError | null;

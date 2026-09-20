@@ -7,8 +7,12 @@
    Dock 面板准入与工具条隐藏走协调器口径。发送闭环：先退会话再建任务占位卡
    （target_node_id 取占位卡、粒度标注展示名、生成中骨架、sceneSplit 身份）、
    client_token 每次发送/重试新生成、job_id 回写后轮询、飞行期发送钮防重复提交；
-   任务失败占位卡转失败态，重试按钮按冻结参数原粒度重发。completed 分支的段卡扇出
-   归 IKH8C1（本文件不对 completed 行为断言）。渲染模式沿用 audioVideoSplitEdit.test.tsx
+   任务失败占位卡转失败态，重试按钮按冻结参数原粒度重发。完成扇出（IKH8C1）：
+   succeeded 移除占位卡、按 result.segments 返回顺序在源卡右侧网格建 N 张普通视频
+   段卡（「第 N 段 起止时间」标注、assetId 关联段资产、无生成态工具条立即可用）、
+   逐卡拉来源连线（origin=scene-split）、扇出即落盘；1 段不特判；跨会话恢复一致性
+   ——水合的 generating 占位卡恢复轮询（任务已完成时照常扇出），已扇出的画布无占位卡
+   天然幂等不重开轮询。渲染模式沿用 audioVideoSplitEdit.test.tsx
    （FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -556,5 +560,212 @@ describe('IKH8BR 轮询终态与失败重试', () => {
     expect(retried.data.genStatus).toBe('generating');
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j2');
     // completed 分支的行为断言（段卡扇出）归 IKH8C1，本文件不对 succeeded 终态断言
+  });
+});
+
+/* ===== IKH8C1 完成扇出与跨会话恢复 ===== */
+
+function segmentNodes(): Node[] {
+  return ((flowProps.current.mediaNodes as Node[]) ?? []).filter((n) =>
+    n.id.startsWith('scene-segment-'),
+  );
+}
+
+function sceneSplitSuccessDetail() {
+  return {
+    job_id: 'j1',
+    status: 'succeeded',
+    progress: 100,
+    asset: null,
+    output_assets: [
+      { id: '101', url: 'http://tos/seg1.mp4', type: 'video', width: 1920, height: 1080 },
+      { id: '102', url: 'http://tos/seg2.mp4', type: 'video', width: 1920, height: 1080 },
+      { id: '103', url: 'http://tos/seg3.mp4', type: 'video', width: 1920, height: 1080 },
+    ],
+    result: {
+      duration: 60,
+      segments: [
+        { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: '101' },
+        { segment_index: 2, start_time: 15, end_time: 46, segment_asset_id: '102' },
+        { segment_index: 3, start_time: 46, end_time: 60, segment_asset_id: '103' },
+      ],
+    },
+  };
+}
+
+/** 发送后首个轮询 tick 即返回给定终态（扇出在首 tick 收敛，无需等待续轮询） */
+async function sendThenSucceed(detail: Record<string, unknown>) {
+  apiMocks.createVideoSceneSplit.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+  apiMocks.fetchJobStatus.mockResolvedValue(detail);
+  await renderPage();
+  await enterSceneSplit();
+  await sendSceneSplit();
+}
+
+describe('IKH8C1 完成扇出（succeeded → 移除占位卡 + N 张段卡 + 来源连线）', () => {
+  it('3 段：占位卡移除、按返回顺序建 3 张普通视频段卡（标注/src/assetId/无生成态）、逐卡拉来源连线、扇出即落盘', async () => {
+    await sendThenSucceed(sceneSplitSuccessDetail());
+    const nodes = flowProps.current.mediaNodes as Node[];
+    const segments = segmentNodes();
+    expect(segments).toHaveLength(3);
+    // 任务占位卡移除
+    expect(nodes.find((n) => n.id.startsWith('scene-split-'))).toBeUndefined();
+    // 「第 N 段 起止时间」按 result.segments 返回顺序
+    expect(segments.map((n) => (n.data as Record<string, unknown>).fileName)).toEqual([
+      '第 1 段 00:00-00:15',
+      '第 2 段 00:15-00:46',
+      '第 3 段 00:46-01:00',
+    ]);
+    segments.forEach((n, i) => {
+      const d = n.data as Record<string, unknown>;
+      // 普通视频素材卡：段资产 url + assetId 关联 + 无 genStatus（悬浮工具条立即可用，
+      // 门槛走 BJ 已有 gate——assetId 已关联，全量工具含链式再切分自然成立）
+      expect(d.mediaType).toBe('video');
+      expect(d.src).toBe(`http://tos/seg${i + 1}.mp4`);
+      expect(d.assetId).toBe(String(101 + i));
+      expect(d.genStatus).toBeUndefined();
+      // jobId 保留（家族口径：成品卡不清 jobId）——MediaNode 生成宿主判定（target Handle）
+      // 依赖它，否则来源连线无法渲染
+      expect(d.jobId).toBe('j1');
+      expect(d.width).toBe(1920);
+      expect(d.height).toBe(1080);
+    });
+    // 每张段卡与源卡之间拉来源连线（纯视觉 origin=scene-split）
+    const edges = flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>;
+    segments.forEach((n) => {
+      const edge = edges.find((e) => e.target === n.id);
+      expect(edge?.source).toBe('v1');
+      expect(edge?.data).toEqual({ origin: SCENE_SPLIT_EDGE_ORIGIN });
+    });
+    // 网格落位：都在源卡右侧、彼此不重叠、不压既有图卡 i1
+    const boxes = segments.map((n) => ({
+      x: n.position.x,
+      y: n.position.y,
+      width: 498,
+      height: 324,
+    }));
+    boxes.forEach((b) => {
+      expect(b.x).toBeGreaterThanOrEqual(400 + 498); // v1 右缘（400 + 内容宽 497.78）之后
+      const i1 = { x: 0, y: 0, width: 320, height: 340 };
+      const noOverlap =
+        b.x >= i1.x + i1.width + 8 || i1.x >= b.x + b.width + 8 || b.y >= i1.y + i1.height + 8 || i1.y >= b.y + b.height + 8;
+      expect(noOverlap).toBe(true);
+    });
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const separated =
+          a.x >= b.x + b.width + 8 || b.x >= a.x + a.width + 8 || a.y >= b.y + b.height + 8 || b.y >= a.y + a.height + 8;
+        expect(separated).toBe(true);
+      }
+    }
+    // 扇出即落盘（不等 800ms 防抖，防完成即关页丢段卡）
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+  });
+
+  it('整片仅 1 段不特判：第 1 段、全程时间轴，照常出 1 张段卡并拉连线', async () => {
+    const detail = sceneSplitSuccessDetail();
+    (detail.result as { segments: unknown[] }).segments = [
+      { segment_index: 1, start_time: 0, end_time: 60, segment_asset_id: '101' },
+    ];
+    detail.output_assets = [detail.output_assets![0]!];
+    await sendThenSucceed(detail);
+    const segments = segmentNodes();
+    expect(segments).toHaveLength(1);
+    expect((segments[0]!.data as Record<string, unknown>).fileName).toBe('第 1 段 00:00-01:00');
+    const edges = flowProps.current.edges as Array<{ source: string; target: string }>;
+    expect(edges.find((e) => e.target === segments[0]!.id)?.source).toBe('v1');
+  });
+
+  it('超 1 小时段走 h:mm:ss 分支（时不补零）', async () => {
+    const detail = sceneSplitSuccessDetail();
+    detail.output_assets = [
+      { id: '201', url: 'http://tos/long.mp4', type: 'video', width: 3840, height: 2160 },
+    ];
+    detail.result = {
+      duration: 3675,
+      segments: [{ segment_index: 1, start_time: 3605, end_time: 3675, segment_asset_id: '201' }],
+    };
+    await sendThenSucceed(detail);
+    const segments = segmentNodes();
+    expect(segments).toHaveLength(1);
+    expect((segments[0]!.data as Record<string, unknown>).fileName).toBe('第 1 段 1:00:05-1:01:15');
+  });
+});
+
+describe('IKH8C1 跨会话恢复一致性（水合 → 恢复轮询 → 终态收敛）', () => {
+  /** 已保存画布（刷新/换设备回来）： generating 占位卡（jobId + sceneSplit 身份随画布保存） */
+  function seedDocWithGeneratingPlaceholder() {
+    seedDoc();
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    doc.nodes.push({
+      id: 'scene-split-kept',
+      type: 'mediaNode',
+      position: { x: 958, y: 0 },
+      data: {
+        src: '',
+        fileName: '场景切分 · 标准',
+        mediaType: 'video',
+        genStatus: 'generating',
+        progress: 60,
+        jobId: 'j9',
+        sceneSplit: {
+          sourceAssetId: '6',
+          lastInput: { source_asset_id: '6', target_node_id: 'scene-split-kept', granularity: 'standard' },
+        },
+      },
+    });
+  }
+
+  it('刷新回来任务进行中：恢复轮询仍生成中；已完成时照常扇出（段卡 + 连线 + 占位卡移除）', async () => {
+    seedDocWithGeneratingPlaceholder();
+    apiMocks.fetchJobStatus
+      .mockResolvedValueOnce({ job_id: 'j9', status: 'processing', progress: 80, asset: null })
+      .mockResolvedValue({ ...sceneSplitSuccessDetail(), job_id: 'j9' });
+    await renderPage();
+    // 水合恢复轮询：j9 被查询
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j9');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    // 首 tick processing：占位卡仍在生成中
+    const kept = (flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'scene-split-kept');
+    expect(kept?.data.genStatus).toBe('generating');
+    // 续 tick succeeded：扇出（mock 直接给 succeeded——第二次查询即终态）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2600));
+    });
+    const nodes = flowProps.current.mediaNodes as Node[];
+    expect(nodes.find((n) => n.id === 'scene-split-kept')).toBeUndefined();
+    expect(segmentNodes()).toHaveLength(3);
+    const edges = flowProps.current.edges as Array<{ source: string; target: string }>;
+    segmentNodes().forEach((n) => {
+      expect(edges.find((e) => e.target === n.id)?.source).toBe('v1');
+    });
+  }, 10000);
+
+  it('已扇出的画布（段卡为普通卡无生成态）水合不重开轮询——天然幂等', async () => {
+    seedDoc();
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    doc.nodes.push({
+      id: 'scene-segment-done',
+      type: 'mediaNode',
+      position: { x: 958, y: 0 },
+      data: {
+        src: 'http://tos/seg1.mp4',
+        fileName: '第 1 段 00:00-01:00',
+        mediaType: 'video',
+        assetId: '101',
+        width: 1920,
+        height: 1080,
+      },
+    });
+    await renderPage();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+    expect((flowProps.current.mediaNodes as Node[]).find((n) => n.id === 'scene-segment-done')).toBeTruthy();
   });
 });
