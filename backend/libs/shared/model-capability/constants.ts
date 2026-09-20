@@ -73,6 +73,14 @@ const MAX_PROMPT_LENGTH_LIMIT = 65_535;
 /** ADR-0086：参考素材限制键的上限（防运营误配海量值污染前端/校验）。 */
 const MAX_REFERENCE_COUNT = 1_000;
 
+/** 单次输出上限的量级闸门；上游 `expected_output_count` 另有 1–4 的硬校验。 */
+const MAX_QUANTITY_MAX = 100;
+
+/** snake_case → camelCase。读侧（toFeatures / worker-java）两种键形都认，写闸门同理。 */
+function camelKey(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
 /** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length；
  *  ADR-0086 追加参考素材限制键 video_reference / video_reference_max / audio_reference /
  *  audio_reference_max / image_reference_max / max_reference_duration_sec / task_types。
@@ -122,6 +130,50 @@ function featuresFieldErr(features: unknown): string | null {
   if (taskTypes !== undefined && taskTypes !== null) {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
+  }
+  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（max_reference_images /
+  // quantity_max / 各布尔位）任意类型都能入库——"abc" / 1.5 照收。读侧再宽容降级
+  // 也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。按同一原则补齐。
+  const maxRefImages = features.max_reference_images ?? features.maxReferenceImages;
+  if (maxRefImages !== undefined && maxRefImages !== null) {
+    if (
+      typeof maxRefImages !== "number" ||
+      !Number.isInteger(maxRefImages) ||
+      maxRefImages < 0 ||
+      maxRefImages > MAX_REFERENCE_COUNT
+    )
+      return `参考图上限(max_reference_images)须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
+  }
+  const quantityMax = features.quantity_max ?? features.quantityMax;
+  if (quantityMax !== undefined && quantityMax !== null) {
+    if (
+      typeof quantityMax !== "number" ||
+      !Number.isInteger(quantityMax) ||
+      quantityMax < 1 ||
+      quantityMax > MAX_QUANTITY_MAX
+    )
+      return `单次输出上限(quantity_max)须为 1–${MAX_QUANTITY_MAX} 的整数或 null`;
+  }
+  for (const key of [
+    "reference_image",
+    "watermark",
+    "audio",
+    "tools",
+    "first_frame",
+    "last_frame",
+    "first_last_frame",
+    "sequential_image_generation",
+    "stream",
+  ] as const) {
+    const v = features[key] ?? features[camelKey(key)];
+    if (v !== undefined && v !== null && typeof v !== "boolean")
+      return `${key}须为布尔值`;
+  }
+  // 出站图片协议名；未知取值 worker-java 回落 inline-image 并告警，故这里只卡类型。
+  const protocol = features.image_protocol ?? features.imageProtocol;
+  if (protocol !== undefined && protocol !== null) {
+    if (typeof protocol !== "string" || protocol.trim().length === 0)
+      return "图片协议(image_protocol)须为非空字符串或 null";
   }
   return null;
 }
@@ -222,6 +274,7 @@ function pickNullableString(v: unknown): string | null | undefined {
 function parseParserAndMapping(
   body: Record<string, unknown>,
   mode: "create" | "update",
+  currentParser?: unknown,
 ): ParseResult<{
   channel_parser?: ImageChannelParserId;
   request_mapping?: unknown;
@@ -232,12 +285,30 @@ function parseParserAndMapping(
       error: `生成渠道解析器只支持 ${IMAGE_CHANNEL_PARSERS.join(" / ")}`,
     };
   }
-  const parser = isImageChannelParserId(body.channel_parser)
-    ? body.channel_parser
+  // update 是 diff 提交——没改过的 channel_parser 不在请求体里。解析器必须回落到
+  // **库中该行**的值，否则下面整段映射校验会被跳过：GPT 行删空矩阵、Seedream 行
+  // 映射表被清空都是从这条缝漏过去的（解析器未知 ⇒ 不校验 ⇒ 脏值直接落库）。
+  const rawParser = body.channel_parser;
+  const parserExplicit = isImageChannelParserId(rawParser);
+  const parser: ImageChannelParserId = parserExplicit
+    ? rawParser
     : mode === "create"
       ? "seedream"
-      : undefined;
-  if (body.request_mapping !== undefined && body.request_mapping !== null) {
+      : isImageChannelParserId(currentParser)
+        ? currentParser
+        : "seedream";
+  // Seedream 行的映射表是 IK629 之后尺寸换算的唯一来源（worker-java hasSizeMatrix
+  // 判假即回退成「直传 provider size」，而那正是 024 迁移要修的 400 Invalid size）。
+  // 后台没有「清空矩阵」入口，所以客户端传的 null 不是运营意图、是 diff 提交的产物——
+  // 按「不改」处理。真因在前端表单，另单修。
+  const clearSeedreamMapping =
+    parser === "seedream" && body.request_mapping === null;
+  const mappingProvided = body.request_mapping !== undefined && !clearSeedreamMapping;
+  if (
+    mappingProvided &&
+    body.request_mapping !== null &&
+    body.request_mapping !== undefined
+  ) {
     const mappingTypeErr = jsonField(
       body.request_mapping,
       "映射(request_mapping)",
@@ -245,24 +316,22 @@ function parseParserAndMapping(
     );
     if (mappingTypeErr) return { ok: false, error: mappingTypeErr };
   }
-  if (parser) {
-    const mapping =
-      body.request_mapping === undefined && parser === "seedream"
-        ? null
-        : body.request_mapping;
-    if (parser !== "seedream" && mapping === undefined) {
-      return { ok: false, error: "request_mapping 不能为空" };
-    }
-    const mappingErr = validateRequestMapping(parser, mapping ?? null);
+  // 显式声明切到 gpt / banana 时必须同时给出映射表——否则切完是一张空表，
+  // 该模型每次请求都 empty_mapping。缺省不传 channel_parser 时表示「不改」，
+  // 那一行的映射表原样留在库里，由上面的 currentParser 兜底校验。
+  if (parserExplicit && parser !== "seedream" && !mappingProvided) {
+    return { ok: false, error: "request_mapping 不能为空" };
+  }
+  if (mappingProvided) {
+    const mappingErr = validateRequestMapping(parser, body.request_mapping);
     if (mappingErr) return { ok: false, error: mappingErr };
   }
   return {
     ok: true,
     value: {
-      ...(parser ? { channel_parser: parser } : {}),
-      ...(body.request_mapping !== undefined
-        ? { request_mapping: body.request_mapping }
-        : {}),
+      // 新建恒带解析器（缺省 seedream）；更新只在显式声明时才提交，否则会覆盖库里那一行。
+      ...(parserExplicit || mode === "create" ? { channel_parser: parser } : {}),
+      ...(mappingProvided ? { request_mapping: body.request_mapping } : {}),
     },
   };
 }
@@ -406,8 +475,14 @@ export function parseModelCreateBody(
   };
 }
 
+/** 校验管理端「更新模型」请求体。
+ *
+ *  `current` 是**库中当前那一行**（至少 `channel_parser`）。更新是 diff 提交，未变更的
+ *  字段不在请求体里，光看 body 推不出该用哪个解析器做映射校验——必须由调用方把行读出来
+ *  传进来。调用方须读库，**不得读缓存**：校验读到旧值等于没校验。 */
 export function parseModelUpdateBody(
   body: unknown,
+  current?: { channel_parser?: unknown },
 ): ParseResult<ModelUpdatePayload> {
   if (!isPlainObject(body)) return { ok: false, error: "请求体须为 JSON 对象" };
 
@@ -495,7 +570,7 @@ export function parseModelUpdateBody(
   const featuresErr = featuresFieldErr(body.features);
   if (featuresErr) return { ok: false, error: featuresErr };
 
-  const parsedMapping = parseParserAndMapping(body, "update");
+  const parsedMapping = parseParserAndMapping(body, "update", current?.channel_parser);
   if (!parsedMapping.ok) return parsedMapping;
 
   return {
