@@ -18,6 +18,9 @@ interface MentionChipPart {
   assetId: string;
   index: number;
   label: string;
+  /** IKH4EF：本 chip 覆盖的同区间 media 镜像（applyPreview 派生，IKG6EK）。
+   *  渲染不展示它，但序列化必须原样回吐——否则编辑一次就清空 mediaMentions，连带删掉 textIndex 关系线。 */
+  mirror?: MediaChipIdentity;
 }
 
 /** media 标签 chip 的身份：nodeId+assetId 显式绑定（契约 §1）；name/url 是展示快照 */
@@ -99,6 +102,14 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
   chip.dataset.promptAsset = part.assetId;
   chip.dataset.promptIndex = String(part.index);
   chip.dataset.promptLabel = part.label;
+  // 镜像身份挂在 prompt chip 上（独立 dataset 命名空间，不冒充 media chip），供序列化回吐
+  if (part.mirror) {
+    chip.dataset.promptMirrorNode = part.mirror.nodeId;
+    chip.dataset.promptMirrorAsset = part.mirror.assetId;
+    chip.dataset.promptMirrorType = part.mirror.mediaType;
+    chip.dataset.promptMirrorName = part.mirror.name;
+    chip.dataset.promptMirrorUrl = part.mirror.url;
+  }
   chip.title = `${part.label}（素材 #${part.index}）`;
   chip.setAttribute('aria-label', chip.title);
   chip.className = MEDIA_CHIP_CLASS;
@@ -185,6 +196,16 @@ export function renderPromptMentions(
   // mediaMentions 仅作画布内部接线（供 textIndexOfTarget 消费），不重复展示，
   // 避免图片后跟一个"已失效/图片N"多余标签
   const promptRanges = new Set(mentions.map(m => `${m.start}-${m.end}`));
+  // IKH4EF：与 prompt 绑定同区间的 media 是「镜像」，不渲染成 chip，但挂到覆盖它的那张 prompt chip 上，
+  // 让序列化把它连同新区间一起回吐。丢镜像会连带删掉 textIndex 关系线，目标的参考素材随之消失。
+  const mirrorsByRange = new Map<string, MediaMention[]>();
+  for (const mention of mediaMentions) {
+    const key = `${mention.start}-${mention.end}`;
+    if (!promptRanges.has(key)) continue;
+    const bucket = mirrorsByRange.get(key);
+    if (bucket) bucket.push(mention);
+    else mirrorsByRange.set(key, [mention]);
+  }
   const combined = [
     ...mentions.map(mention => ({ kind: 'prompt' as const, start: mention.start, end: mention.end, mention })),
     ...mediaMentions.filter(mention => !promptRanges.has(`${mention.start}-${mention.end}`))
@@ -209,9 +230,29 @@ export function renderPromptMentions(
     cursor = item.end;
   }
   masked += markdown.slice(cursor);
-  const chips: ChipQueueItem[] = combined.map(item => item.kind === 'prompt'
-    ? { kind: 'prompt', part: { assetId: item.mention.assetId, index: item.mention.index, label: markdown.slice(item.start, item.end) } }
-    : {
+  const chips: ChipQueueItem[] = combined.map(item => {
+    if (item.kind === 'prompt') {
+      const covered = mirrorsByRange.get(`${item.start}-${item.end}`)?.find(m => m.assetId === item.mention.assetId);
+      const ref = covered ? refByNode.get(covered.nodeId) : undefined;
+      return {
+        kind: 'prompt',
+        part: {
+          assetId: item.mention.assetId,
+          index: item.mention.index,
+          label: markdown.slice(item.start, item.end),
+          ...(covered ? {
+            mirror: {
+              nodeId: covered.nodeId,
+              assetId: covered.assetId,
+              mediaType: ref?.mediaType ?? 'image',
+              name: ref?.name ?? covered.nodeId,
+              url: ref?.url ?? '',
+            },
+          } : {}),
+        },
+      };
+    }
+    return {
       kind: 'media',
       part: {
         nodeId: item.mention.nodeId,
@@ -220,7 +261,8 @@ export function renderPromptMentions(
         name: refByNode.get(item.mention.nodeId)?.name ?? item.mention.nodeId,
         url: refByNode.get(item.mention.nodeId)?.url ?? '',
       },
-    });
+    };
+  });
 
   const blocks = parseMarkdownBlocks(masked);
   let index = 0;
@@ -278,7 +320,7 @@ export function applyMediaMentionState(editor: HTMLElement, isValid: (nodeId: st
 
 /** 序列化期 mention 草稿：chip 以占位符进入 Markdown 流，最终区间锚定规范化后的字符串 */
 type DraftMention =
-  | { kind: 'prompt'; label: string; assetId: string; index: number }
+  | { kind: 'prompt'; label: string; assetId: string; index: number; mirror?: MediaChipIdentity }
   | { kind: 'media'; identity: MediaChipIdentity };
 
 /** 行内序列化产物：Markdown 片段（chip 以占位符表示）+ 草稿序列 */
@@ -295,7 +337,22 @@ function serializeInline(node: Node, result: InlineResult) {
   }
   if (node instanceof HTMLElement && node.dataset.promptAsset) {
     result.markdown += MENTION_PLACEHOLDER;
-    result.mentions.push({ kind: 'prompt', label: node.dataset.promptLabel ?? '', assetId: node.dataset.promptAsset, index: Number(node.dataset.promptIndex) });
+    const mirrorNode = node.dataset.promptMirrorNode;
+    result.mentions.push({
+      kind: 'prompt',
+      label: node.dataset.promptLabel ?? '',
+      assetId: node.dataset.promptAsset,
+      index: Number(node.dataset.promptIndex),
+      ...(mirrorNode ? {
+        mirror: {
+          nodeId: mirrorNode,
+          assetId: node.dataset.promptMirrorAsset ?? '',
+          mediaType: (node.dataset.promptMirrorType ?? 'image') as MediaRef['mediaType'],
+          name: node.dataset.promptMirrorName ?? '',
+          url: node.dataset.promptMirrorUrl ?? '',
+        },
+      } : {}),
+    });
     return;
   }
   if (node instanceof HTMLElement && node.dataset.mediaNode) {
@@ -444,7 +501,12 @@ export function readPromptMentions(
   const normalized = parts.join('').replace(/\n{3,}/g, '\n\n').trim();
   // media 标签文本由契约派生（编号/失效），不信任 chip 的 DOM 残留文本
   const mediaDrafts = drafts.filter((draft): draft is Extract<DraftMention, { kind: 'media' }> => draft.kind === 'media');
-  const mediaRefs = dedupeMediaRefs(mediaDrafts.map(draft => draft.identity));
+  // IKH4EF：prompt chip 上挂的镜像身份与真 media chip 一并进 refs 快照，保证身份覆盖不缺口
+  const mirrorIdentities: MediaChipIdentity[] = [];
+  for (const draft of drafts) {
+    if (draft.kind === 'prompt' && draft.mirror) mirrorIdentities.push(draft.mirror);
+  }
+  const mediaRefs = dedupeMediaRefs([...mediaDrafts.map(draft => draft.identity), ...mirrorIdentities]);
   const mediaLabels = deriveMediaMentionLabelsInOrder(mediaDrafts.map(draft => draft.identity), mediaRefs, isValid);
   const mentions: PromptMention[] = [];
   const mediaMentions: MediaMention[] = [];
@@ -460,7 +522,10 @@ export function readPromptMentions(
     const start = text.length;
     if (draft.kind === 'prompt') {
       text += draft.label;
-      mentions.push({ start, end: text.length, assetId: draft.assetId, index: draft.index });
+      const end = text.length;
+      mentions.push({ start, end, assetId: draft.assetId, index: draft.index });
+      // 镜像锚定到 prompt 标签的当前区间：正文平移后跟随，不留旧区间（IKH4EF）
+      if (draft.mirror) mediaMentions.push({ start, end, nodeId: draft.mirror.nodeId, assetId: draft.mirror.assetId });
     } else {
       const label = mediaLabels.get(draft.identity.nodeId) ?? draft.identity.name;
       text += label;

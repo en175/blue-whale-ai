@@ -179,7 +179,7 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     expect(back.mediaMentions).toEqual(mediaMentions);
   });
 
-  it('应用生成卡的同区间双数组：渲染去重，序列化结果满足后端契约 §1（IKH4EF 回环）', () => {
+  it('应用生成卡的同区间双数组：渲染去重，但编辑序列化必须保住镜像索引（IKH4EF）', () => {
     const editor = mount();
     // applyPreview（IKG6EK）把方案绑定原地派生成同区间的 mediaMentions，节点落库即带两套同区间标签
     const md = '[素材][素材]';
@@ -191,15 +191,33 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
       { start: 0, end: 4, nodeId: 'media-i1', assetId: '101' },
       { start: 4, end: 8, nodeId: 'media-i1', assetId: '101' },
     ];
-    renderPromptMentions(editor, md, mentions, materials, mediaMentions, [mediaRef('media-i1', '101', 'image')], allValid);
+    const refs = [mediaRef('media-i1', '101', 'image')];
+    renderPromptMentions(editor, md, mentions, materials, mediaMentions, refs, allValid);
     // 渲染去重：每段只出一张 chip，且保留方案 #N 身份（IKG99G）
     expect(editor.querySelectorAll('[data-prompt-asset="101"]')).toHaveLength(2);
     expect(editor.querySelectorAll('[data-media-node="media-i1"]')).toHaveLength(0);
-    // 序列化回写后必须仍满足后端保存校验：媒体索引与方案绑定区间不部分重叠
+    // 序列化回写：镜像索引不得被清空（清空会连带删掉 textIndex 关系线，目标参考素材随之丢失）
     const back = readPromptMentions(editor, allValid);
     expect(back.text).toBe(md);
     expect(back.mentions).toEqual(mentions);
+    expect(back.mediaMentions).toEqual(mediaMentions);
+    expect(back.mediaRefs).toEqual(refs);
     expect(mediaAndPromptMentionsDisjoint(back.mediaMentions, back.mentions)).toBe(true);
+  });
+
+  it('在标签前插入文字：镜像区间跟随平移，不留旧区间（IKH4EF）', () => {
+    const editor = mount();
+    const md = '[素材]尾巴';
+    const mentions: PromptMention[] = [{ start: 0, end: 4, index: 1, assetId: '101' }];
+    const mediaMentions: MediaMention[] = [{ start: 0, end: 4, nodeId: 'media-i1', assetId: '101' }];
+    renderPromptMentions(editor, md, mentions, materials, mediaMentions, [mediaRef('media-i1', '101', 'image')], allValid);
+    // 模拟「打开卡片敲一次字」：在首段最前面插入一个字符
+    const block = editor.querySelector('p')!;
+    block.insertBefore(document.createTextNode('X'), block.firstChild);
+    const back = readPromptMentions(editor, allValid);
+    expect(back.text).toBe('X[素材]尾巴');
+    expect(back.mentions).toEqual([{ start: 1, end: 5, index: 1, assetId: '101' }]);
+    expect(back.mediaMentions).toEqual([{ start: 1, end: 5, nodeId: 'media-i1', assetId: '101' }]);
   });
 
   it('applyMediaMentionState 编辑中就地翻转失效态与编号', () => {
