@@ -332,7 +332,8 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
       });
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
-      expect(input.prompt).toBe("");
+      // IKH8AU：正文由提交方给全，附件正文已拼进 prompt（不再由服务端组合），故不为空串。
+      expect(input.prompt, "附件正文已由提交方拼进正文").toContain("雨后的巷子，猫在檐下躲雨");
       expect(input.text_attachments, "任务冻结移除后剩余附件的最新正文（连入边序：text-2 播种在先、text-3 新连在后）").toEqual([
         { node_id: "text-2", title: "雨夜", text: "雨后的巷子，猫在檐下躲雨" },
         { node_id: "text-3", title: "旁白草稿", text: "远处灯塔的光扫过海面" },

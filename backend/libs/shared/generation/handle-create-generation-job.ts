@@ -1266,15 +1266,7 @@ async function resolveTargetSnapshot(args: {
         return { ...attachment, text, media };
       });
     }
-    // IKFCXE：主提示词为空时保持既有音频校验（不引入"仅附件生成"），
-    // 附件正文不得单独充当音频输入；图片/视频仍允许非空白附件驱动。
-    if (type === "audio" && promptText.trim() === "") {
-      return {
-        ok: false,
-        value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
-      };
-    }
-    // IKH4B8：正文由提交方给全（ADR-0088），服务端不再组合——长度闸已在入口按**正文全文**口径把关
+    // IKH8AU：正文由提交方给全（ADR-0088），服务端不再组合——长度闸已在入口按**正文全文**口径把关
     // （原组合闸把附件前缀又加了一遍，等于重复计数）。这里只留「一处有效文本都没有」的拒绝。
     if (promptText.trim() === "") {
       return {
