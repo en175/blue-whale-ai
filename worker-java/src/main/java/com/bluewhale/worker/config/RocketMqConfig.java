@@ -329,6 +329,32 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * video_scene_split（视频场景切分，火山 MediaKit segment-scenes）consumer（IKH8BP，父规格
+     * IKH86V；以 videoEnhance 接线为模板）。
+     * <p>
+     * consumer group = "generation-video-scene-split-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#VIDEO_SCENE_SPLIT}（= TS `VIDEO_SCENE_SPLIT_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VideoSceneSplitConsumer videoSceneSplitConsumer(
+            com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-video-scene-split-worker";
+        int concurrency = workerProps.concurrency().videoSceneSplit();
+
+        return new com.bluewhale.worker.application.consumer.VideoSceneSplitConsumer(
+                processor,
+                GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -391,6 +417,21 @@ public class RocketMqConfig {
                 GenerationMqRouteEnum.VIDEO_ENHANCE.tag());
     }
 
+    /**
+     * video_scene_split 轮询自投生产者（IKH8BP；去字幕 videoSubtitleEraseMessageProducer 同款）。
+     * <p>
+     * VideoSceneSplitJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = video_scene_split）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoSceneSplitMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.topic(),
+                GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.tag());
+    }
+
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
@@ -445,6 +486,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoEnhanceRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_ENHANCE);
+    }
+
+    /** recovery 重投 video_scene_split（IKH8BP，父规格 IKH86V）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoSceneSplitRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_SCENE_SPLIT);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */

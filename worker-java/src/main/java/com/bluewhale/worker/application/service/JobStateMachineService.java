@@ -258,6 +258,19 @@ public class JobStateMachineService {
         return finalizer.publishVideoEnhanceResult(input);
     }
 
+    // ========== video_scene_split 直通（DTO 形态，VideoSceneSplitJobProcessor 专用；
+    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
+
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto> claimVideoSceneSplit(
+            String jobId, String workerId) {
+        return claimService.claimVideoSceneSplit(jobId, workerId);
+    }
+
+    public boolean publishVideoSceneSplitResult(
+            com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto input) {
+        return finalizer.publishVideoSceneSplitResult(input);
+    }
+
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========
 
     /**
