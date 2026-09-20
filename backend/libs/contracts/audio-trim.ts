@@ -20,6 +20,11 @@ import { z } from "zod";
  *  枚举表一一对应断言，本票不单侧先加）。 */
 export const AUDIO_TRIM_JOB_TYPE = "audio_trim";
 
+/** 任务来源值（IKHB6N 接线票定死补录，6F 契约注释预留位）：与 media_extract 同族同值——
+ *  画布卡片工具条创建入口的既有落库值 dock（generation_jobs.source 列默认值同值）；
+ *  audio_trim 不套 claim source 白名单（media_extract 同款口径，claim 只按 type 过滤）。 */
+export const AUDIO_TRIM_SOURCE = "dock";
+
 /** input 冻结键名（创建时定死，重试原样沿用）。
  *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 media-extract /
  *  video-subtitle-erase 先例，不进本 zod——它校验的是客户端 payload，凭证来自请求头冻结）。
