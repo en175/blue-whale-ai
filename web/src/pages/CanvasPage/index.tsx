@@ -66,8 +66,12 @@ import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './
 import {
   SCENE_SPLIT_DEFAULT_GRANULARITY,
   SCENE_SPLIT_EDGE_ORIGIN,
+  SCENE_SPLIT_NODE_GAP,
   buildSceneSplitPlaceholderNode,
   sceneSplitErrorText,
+  sceneSplitFanoutLayout,
+  sceneSplitSegmentBox,
+  sceneSplitSegmentLabel,
   type SceneSplitGranularity,
   type SceneSplitIdentity,
 } from './sceneSplit';
@@ -5493,6 +5497,96 @@ export default function CanvasPage() {
     mediaNodesRef.current.some((n) => n.id === nodeId) &&
     activeJobByNodeRef.current.get(nodeId) === String(jobId);
 
+  /** 场景切分完成扇出（IKH8C1）：移除任务占位卡，按 result.segments 返回顺序在源卡右侧
+   *  网格建 N 张普通视频段卡（「第 N 段 起止时间」标注、assetId 关联段资产——工具条门槛
+   *  走 BJ 已有 gate，全量工具可用含链式再切分），逐张拉来源连线（纯视觉 origin=scene-split），
+   *  立即落盘。段资产 = output_assets 里 id === segment_asset_id 项；段卡宽高随资产回填
+   *  （缺失回退源卡分辨率），1 段不特判（第 1 段、全程时间轴照常出 1 张）。
+   *  段卡 data 保留 jobId（家族口径同 applyJobTerminal 通用成功分支——成品卡不清 jobId）：
+   *  MediaNode 以 jobId≠null 判定生成宿主渲染 target Handle，缺它则来源连线无法渲染。
+   *  落位 sceneSplitFanoutLayout 纯函数自动避让画布既有节点（源卡与占位卡不参与避让
+   *  ——占位卡本步移除、扇出语义就在其右侧）。占位卡登记 locallyRemoved 防迟到响应复活。 */
+  const fanOutSceneSplitSegments = (
+    placeholderId: string,
+    jobId: number | string,
+    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
+  ) => {
+    const placeholder = mediaNodesRef.current.find((n) => n.id === placeholderId);
+    if (!placeholder) return;
+    const identity = ((placeholder.data ?? {}) as Record<string, unknown>).sceneSplit as
+      | SceneSplitIdentity
+      | undefined;
+    const segments = detail.result?.segments ?? [];
+    const outputAssets = detail.output_assets ?? [];
+    if (segments.length === 0) {
+      // 畸形 payload 防御（契约校验后 result 为 null）：成功却无段，占位卡按失败口径兜底
+      patchMediaNode(placeholderId, { progress: 100, genStatus: 'failed', errorText: sceneSplitErrorText(null) });
+      return;
+    }
+    const sourceAssetId = identity?.sourceAssetId;
+    const source = sourceAssetId != null
+      ? mediaNodesRef.current.find(
+          (n) => readAssetId((n.data ?? {}) as Record<string, unknown>) === sourceAssetId,
+        )
+      : undefined;
+    const sourceData = (source?.data ?? {}) as Record<string, unknown>;
+    const fallbackWidth = typeof sourceData.width === 'number' ? sourceData.width : undefined;
+    const fallbackHeight = typeof sourceData.height === 'number' ? sourceData.height : undefined;
+    const segAssetOf = (assetId: string) =>
+      outputAssets.find((a) => String(a.id) === String(assetId));
+    // 落位：锚点取源卡（缺失降级占位卡），既有节点排除源卡与占位卡
+    const anchor = nodeBoxOf(source ?? placeholder);
+    const occupied = [
+      ...mediaNodesRef.current,
+      ...textNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ]
+      .filter((n) => n.id !== placeholderId && n.id !== source?.id)
+      .map(nodeBoxOf);
+    const positions = sceneSplitFanoutLayout({
+      anchor,
+      count: segments.length,
+      segmentSize: sceneSplitSegmentBox({ width: fallbackWidth, height: fallbackHeight }),
+      occupied,
+    });
+    const fallbackPos = {
+      x: Math.round(anchor.x + anchor.width + SCENE_SPLIT_NODE_GAP),
+      y: Math.round(anchor.y),
+    };
+    const segmentNodes = segments.map((seg, i) => {
+      const asset = segAssetOf(seg.segment_asset_id);
+      const pos = positions[i] ?? fallbackPos;
+      return {
+        id: newNodeId('scene-segment'),
+        type: 'mediaNode' as const,
+        position: pos,
+        data: {
+          src: asset?.url ?? '',
+          fileName: sceneSplitSegmentLabel(seg.segment_index, seg.start_time, seg.end_time),
+          mediaType: 'video' as const,
+          assetId: String(seg.segment_asset_id),
+          width: asset?.width ?? fallbackWidth,
+          height: asset?.height ?? fallbackHeight,
+          jobId,
+        },
+      };
+    });
+    // 同步写 ref 再 setState（扇出后 flush 才能读到本轮节点，口径同 startSceneSplitJob）
+    const next = mediaNodesRef.current
+      .filter((n) => n.id !== placeholderId)
+      .concat(segmentNodes.map((n) => attachCallbacks(n as Node)));
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    locallyRemovedGenerationNodesRef.current.add(placeholderId);
+    if (source) {
+      for (const seg of segmentNodes) {
+        addCanvasEdge(source.id, seg.id, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
+      }
+    }
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  };
+
   /** 任务终态收敛（IKDMQW）：按任务权威状态落卡片终态，轮询 tick、普通取消与删除流程共用。
    *  返回 'terminal' 表示已终态（轮询应停），'processing' 表示未终态（调用方决定续链）。
    *  调用方需先过 jobResponseGuarded 防线。
@@ -5512,13 +5606,11 @@ export default function CanvasPage() {
       setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
     };
     if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
-      // 场景切分占位卡分流（IKH8BR，镜像 mediaExtract 分流）：按任务类型收敛终态。
+      // 场景切分占位卡分流（IKH8BR 建卡/失败，IKH8C1 完成扇出）：按任务类型收敛终态。
       if (detail.status === 'succeeded') {
-        // TODO(IKH8C1)：完成扇出——移除本占位卡、按 detail.result.segments 逐段在源卡右侧
-        // 网格建普通视频段卡（「第 N 段 起止时间」）并各拉来源连线（1 段不特判）。
-        // 本票（IKH8BR）不做扇出：停轮询收敛即可，占位卡暂留（行为断言由 IKH8C1 补）。
+        // 停轮询后扇出：移除占位卡、按返回顺序建 N 张段卡拉来源连线（1 段不特判）
         stopJobPolling(nodeId, jobTimersRef.current);
-        patchMediaNode(nodeId, { progress: 100 });
+        fanOutSceneSplitSegments(nodeId, jobId, detail);
         return 'terminal';
       }
       if (detail.status === 'failed') {
