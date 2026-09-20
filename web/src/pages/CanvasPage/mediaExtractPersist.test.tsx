@@ -121,6 +121,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
