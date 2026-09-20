@@ -5,6 +5,7 @@ import type { AssetRefMeta } from '../PromptRefEditor/AssetRefNode';
 import AtMentionMenu from '../AtMentionMenu';
 import type { AtMentionItem } from '../../atMention';
 import type { ImageTextAttachment } from '../ImageDialog';
+import { audioRefItemMediaTypeOf } from '../../audioMediaRefs';
 import type { AudioRefItem } from './index';
 
 interface Props {
@@ -33,10 +34,14 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
   const [replacement, setReplacement] = useState<string | null>(null);
   const labels = new Map<string, string>();
   const meta = new Map<string, AssetRefMeta>();
-  refs.forEach((r, i) => {
+  let audioIndex = 0;
+  let imageIndex = 0;
+  refs.forEach((r) => {
     if (!r.assetId) return;
-    labels.set(String(r.assetId), `音频${i + 1}`);
-    meta.set(String(r.assetId), { name: r.name, mediaType: 'audio', url: r.src });
+    const type = audioRefItemMediaTypeOf(r);
+    const n = type === 'image' ? ++imageIndex : ++audioIndex;
+    labels.set(String(r.assetId), type === 'image' ? `图片${n}` : `音频${n}`);
+    meta.set(String(r.assetId), { name: r.name, mediaType: type, url: r.src });
   });
   attachments.forEach((a, i) => {
     labels.set(a.nodeId, `文本${i + 1}`);
@@ -64,7 +69,13 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
   }));
   const items = useMemo(() => {
     const selected: AtMentionItem[] = [
-      ...refs.filter(r => r.assetId).map(r => ({ id: r.id, kind: 'audio' as const, name: r.name, thumbUrl: r.src, assetId: String(r.assetId) })),
+      ...refs.filter(r => r.assetId).map(r => ({
+        id: r.id,
+        kind: audioRefItemMediaTypeOf(r),
+        name: r.name,
+        thumbUrl: r.src,
+        assetId: String(r.assetId),
+      })),
       ...attachments.map(a => ({ id: a.nodeId, kind: 'text' as const, name: a.title })),
     ];
     return [...selected, ...mentionItems.filter(item => !selected.some(s => s.kind === item.kind && s.id === item.id))];
