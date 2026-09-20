@@ -299,10 +299,18 @@ function parseParserAndMapping(
         : "seedream";
   // Seedream 行的映射表是 IK629 之后尺寸换算的唯一来源（worker-java hasSizeMatrix
   // 判假即回退成「直传 provider size」，而那正是 024 迁移要修的 400 Invalid size）。
-  // 后台没有「清空矩阵」入口，所以客户端传的 null 不是运营意图、是 diff 提交的产物——
-  // 按「不改」处理。真因在前端表单，另单修。
+  // 后台没有「清空矩阵」入口，所以对一个**本来就是 seedream** 的行，客户端传的 null
+  // 不是运营意图、是 diff 提交的产物——按「不改」处理。
+  //
+  // 但「本来不是 seedream」的行不能这么办：把 gpt 行切到 seedream 时，前端同样只发
+  // null，而那个 null 就是「gpt 的矩阵不再适用」的唯一表达。当成「不改」会把上一族的
+  // 矩阵留在行里，worker 拿它去算 seedream 的尺寸，而界面上没有任何入口能再清掉它。
+  const currentParserIsSeedream =
+    isImageChannelParserId(currentParser) && currentParser === "seedream";
   const clearSeedreamMapping =
-    parser === "seedream" && body.request_mapping === null;
+    parser === "seedream" &&
+    body.request_mapping === null &&
+    currentParserIsSeedream;
   const mappingProvided = body.request_mapping !== undefined && !clearSeedreamMapping;
   if (
     mappingProvided &&
