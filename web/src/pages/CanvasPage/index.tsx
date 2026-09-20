@@ -39,6 +39,7 @@ import {
   checkAddVideoRef,
   incomingVideoRefOccupied,
   occupiedVideoRefIds,
+  videoRefIdentityIds,
   type VideoMediaRef,
   type VideoMediaRefs,
   type VideoRefRole,
@@ -6881,15 +6882,25 @@ export default function CanvasPage() {
       }
       return undefined;
     };
-    const videoRefs = videoSeed?.targetNodeId ? mergedVideoMediaRefsOf(videoSeed.targetNodeId, edges, mediaNodes) : { reference: [] };
+    // 与 Dock 展示 / 提交同源：直接参考 ∪ 文本索引带入（方案卡应用到画布后素材只挂在方案卡上，不直连视频草稿）
+    const videoRefs = videoSeed?.targetNodeId
+      ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
+      : { reference: [] };
+    const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
+      .flatMap((ref) => videoRefIdentityIds(ref));
     return {
-      image: forTarget(imageSeed?.targetNodeId, imageSeed?.targetNodeId ? imageMediaRefsOf(imageSeed.targetNodeId, edges, mediaNodes).map(ref => ref.assetId) : []),
+      image: forTarget(
+        imageSeed?.targetNodeId,
+        imageSeed?.targetNodeId
+          ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
+          : [],
+      ),
       videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
         const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
         const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
         return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
       }).join('、'),
-      video: forTarget(videoSeed?.targetNodeId, [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])].map(ref => ref.assetId)),
+      video: forTarget(videoSeed?.targetNodeId, videoAvailableIds),
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
 

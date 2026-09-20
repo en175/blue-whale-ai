@@ -323,7 +323,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       : selectedMode !== 'keyframe' && (videoMediaRefs.first || videoMediaRefs.last)
         ? '当前模式不支持首尾帧，请调整模式或引用' : null;
   const inputConflict = referenceConflict ?? modeConflict;
-  const conflict = inputConflict && planIndices ? `方案索引 ${planIndices}：${inputConflict}` : inputConflict;
+  // planReferenceError 已自带「方案索引 #N …」，再套 planIndices 会变成「方案索引 #1：方案索引 #1 …」
+  const conflict = inputConflict && planIndices && !inputConflict.startsWith('方案索引')
+    ? `方案索引 ${planIndices}：${inputConflict}`
+    : inputConflict;
   const canAddFirst = !!(caps && canAddRefRole('first', videoMediaRefs, caps));
   /** 尾帧占位：首尾帧模式下与首帧并排常显（未填即显示），不依赖模型能力位与是否已有首帧——
    *  模型是否支持尾帧 / 首尾帧组合由 conflict（videoRefConflict）在发送时兜底提示，避免占位缺失导致无法上传尾帧。 */
