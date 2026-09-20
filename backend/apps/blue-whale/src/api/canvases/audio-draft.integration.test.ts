@@ -639,9 +639,9 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFE8V assets")).id;
     const imageAsset = await prisma.client.assets.create({ data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/image.png", size: BigInt(100) } });
-    await prisma.client.assets.create({ data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "video", url: "https://example.com/video.mp4", size: BigInt(100) } });
+    const videoAsset = await prisma.client.assets.create({ data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "video", url: "https://example.com/video.mp4", size: BigInt(100) } });
     const assetId = await createAudioAsset(projectId, `https://example.com/ikfe8v-library-${projectId}.mp3`);
-    expect((await saveCanvas(projectId, [audioDraftNode("d1"), { ...audioDraftNode("d2"), position: { x: 940, y: 160 } }, { id: "image", type: "mediaNode", position: { x: 50, y: 500 }, data: { src: "https://example.com/image.png", mediaType: "image", assetId: imageAsset.id.toString(), fileName: "不支持的图片" } }, { id: "di", type: "mediaNode", position: { x: 50, y: 1000 }, data: { src: "", mediaType: "image", draft: true, genStatus: "draft", prompt: "" } }], [], "missing", JSON.stringify({ x: 0, y: 0, zoom: 0.7 }))).status).toBe(200);
+    expect((await saveCanvas(projectId, [audioDraftNode("d1"), { ...audioDraftNode("d2"), position: { x: 940, y: 160 } }, { id: "image", type: "mediaNode", position: { x: 50, y: 500 }, data: { src: "https://example.com/image.png", mediaType: "image", assetId: imageAsset.id.toString(), fileName: "参考图片" } }, { id: "video", type: "mediaNode", position: { x: 50, y: 750 }, data: { src: "https://example.com/video.mp4", mediaType: "video", assetId: videoAsset.id.toString(), fileName: "不支持的视频" } }, { id: "di", type: "mediaNode", position: { x: 50, y: 1000 }, data: { src: "", mediaType: "image", draft: true, genStatus: "draft", prompt: "" } }], [], "missing", JSON.stringify({ x: 0, y: 0, zoom: 0.7 }))).status).toBe(200);
     const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
     await vite.listen();
     const browser = await chromium.launch({ headless: true });
@@ -662,15 +662,15 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
         expect(await page.getByText("本地上传", { exact: true }).count()).toBe(0);
         await page.getByText("从资产中选择", { exact: true }).click();
         await page.getByRole("button", { name: "选择音频素材", exact: true }).first().waitFor();
-        expect(await page.getByRole("button", { name: "选择图片素材", exact: true }).count()).toBe(0);
+        expect(await page.getByRole("button", { name: "选择图片素材", exact: true }).count()).toBeGreaterThan(0);
         expect(await page.getByRole("button", { name: "选择视频素材", exact: true }).count()).toBe(0);
         await page.getByRole("button", { name: "选择音频素材", exact: true }).filter({ has: page.locator(`audio[src*="ikfe8v-library-${projectId}.mp3"]`) }).click();
         await page.getByRole("button", { name: "确定（1）", exact: true }).click();
       }
       await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
       await page.getByText("从节点添加素材", { exact: true }).click();
-      await node("image").dispatchEvent("click");
-      await page.getByText("音频参考仅支持音频素材", { exact: true }).waitFor();
+      await node("video").dispatchEvent("click");
+      await page.getByText("音频参考仅支持图片或音频素材", { exact: true }).waitFor();
       expect(await thumbs.count()).toBe(0);
       expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual([]);
       await pickAsset();

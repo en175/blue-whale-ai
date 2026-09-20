@@ -187,6 +187,7 @@ function seedDoc(extra?: {
       nodes: [
         { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
         { id: 'm1', type: 'mediaNode', position: { x: 0, y: 120 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '成品图', assetId: 'a-img' } },
+        { id: 'v1', type: 'mediaNode', position: { x: 0, y: 240 }, data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '成品视频', assetId: 'a-vid' } },
         { id: 'u1', type: 'mediaNode', position: { x: 300, y: 0 }, data: { src: 'http://aud/u1.mp3', mediaType: 'audio', fileName: '海浪声', assetId: 'a1' } },
         { id: 'u2', type: 'mediaNode', position: { x: 600, y: 0 }, data: { src: 'http://aud/u2.mp3', mediaType: 'audio', fileName: '风声', assetId: 'a2' } },
         { id: 'u3', type: 'mediaNode', position: { x: 900, y: 0 }, data: { src: 'http://aud/u3.mp3', mediaType: 'audio', fileName: '雨声', assetId: 'a3' } },
@@ -613,7 +614,7 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '备用']), { timeout: 3000 });
   });
 
-  it('画布拖线：音频→音频草稿建线持久化；图片→音频草稿不建线（音频面板不提供图片入口）', async () => {
+  it('画布拖线：音频→音频草稿建线持久化；已有音频时图片不可混入', async () => {
     await renderPage();
     await clickNode('d1');
     await waitModelReady();
@@ -628,6 +629,7 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     });
     expect(edgePairs()).toEqual(['u1->d1']);
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('音频与图片参考不可混用'));
   });
 
   it('发送：画布参考按连线顺序进入创建任务 references（role/type/asset_id），携带 target_node_id', async () => {
@@ -749,12 +751,12 @@ describe('IKFR4Z 音频参考持续选取与保存恢复闭环', () => {
     await waitModelReady();
 
     await startCanvasPick();
-    // 图片节点：音频面板类型边界（audioRefSourceError 同口径文案）
-    await clickNode('m1');
+    // 视频节点：音频面板类型边界（audioRefSourceError 同口径文案）
+    await clickNode('v1');
     expect(edgePairs()).toEqual([]);
     expect(pickLock()).toBe(true);
     expect(panelOpen()).toBe(true);
-    await vi.waitFor(() => expect(container.textContent).toContain('音频参考仅支持音频素材'));
+    await vi.waitFor(() => expect(container.textContent).toContain('音频参考仅支持图片或音频素材'));
 
     // 改选合法来源仍然生效，模式继续
     await clickNode('u1');
