@@ -19,6 +19,7 @@ import {
   VIDEO_GENERATION_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
   VIDEO_ENHANCE_TAG,
+  VOCAL_SPLIT_TAG,
 } from "../shared/generation/queue.constants.js";
 
 // 读 worker-java 侧路由表源码（对账基准；3 级 .. = 仓库根）。
@@ -30,7 +31,7 @@ const mqRouteJava = readFileSync(
   "utf8",
 );
 
-/** 十个入口 ↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
+/** 十一个入口 ↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
 const EXPECTED_ROUTES = [
   { entry: "VIDEO", tag: VIDEO_GENERATION_TAG },
   { entry: "IMAGE", tag: IMAGE_GENERATION_TAG },
@@ -42,16 +43,17 @@ const EXPECTED_ROUTES = [
   { entry: "IMAGE_OUTPAINT", tag: IMAGE_OUTPAINT_TAG },
   { entry: "VIDEO_SUBTITLE_ERASE", tag: VIDEO_SUBTITLE_ERASE_TAG },
   { entry: "VIDEO_ENHANCE", tag: VIDEO_ENHANCE_TAG },
+  { entry: "VOCAL_SPLIT", tag: VOCAL_SPLIT_TAG },
 ] as const;
 
 describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java 源码文本，防漂移）", () => {
-  it("十个入口逐项存在：topic = GENERATION_TASK_QUEUE，tag = TS 同名常量", () => {
+  it("十一个入口逐项存在：topic = GENERATION_TASK_QUEUE，tag = TS 同名常量", () => {
     for (const { entry, tag } of EXPECTED_ROUTES) {
       expect(mqRouteJava).toContain(`${entry}("${GENERATION_TASK_QUEUE}", "${tag}")`);
     }
   });
 
-  it("枚举常量表与 TS 十个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）", () => {
+  it("枚举常量表与 TS 十一个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）", () => {
     // 形如 `    VIDEO("generation-task", "video"),`（末项以 `;` 收尾）。
     // 缩进放宽为 `\s*`：纯格式化改动不该红；下面那条 length 断言负责把「正则没匹配上」
     // 变成一句可读的失败，而不是 `expected [] to equal [7 items]` 这种查不出原因的报错。
