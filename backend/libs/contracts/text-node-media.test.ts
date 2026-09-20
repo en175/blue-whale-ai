@@ -3,6 +3,7 @@ import {
   deriveMediaMentionLabels,
   deriveMediaMentionLabelsInOrder,
   invalidMediaMentionLabel,
+  mediaAndPromptMentionsDisjoint,
   mediaMentionSchema,
   mediaRefSchema,
   mediaRefsCoverMentions,
@@ -72,6 +73,33 @@ describe("mediaRefsCoverMentions", () => {
     expect(mediaRefsCoverMentions(mentions, [ref("media-a", "9001", "image"), ref("media-b", "9002", "video"), ref("media-c", "9003", "audio")])).toBe(false);
     expect(mediaRefsCoverMentions(mentions, [ref("media-a", "9001", "image"), ref("media-a", "9001", "image"), ref("media-b", "9002", "video")])).toBe(false);
     expect(mediaRefsCoverMentions(mentions, [ref("media-a", "9002", "image"), ref("media-b", "9002", "video")])).toBe(false);
+  });
+});
+
+describe("mediaAndPromptMentionsDisjoint", () => {
+  const binding = (start: number, end: number, assetId: string) => ({ start, end, assetId });
+
+  it("同区间且同 assetId 放行（applyPreview 派生的方案绑定镜像，IKG6EK）", () => {
+    const media = [mention(10, 13, "media-1", "9001"), mention(165, 168, "media-1", "9001")];
+    const bindings = [binding(10, 13, "9001"), binding(165, 168, "9001")];
+    expect(mediaAndPromptMentionsDisjoint(media, bindings)).toBe(true);
+    expect(mediaAndPromptMentionsDisjoint(bindings, media)).toBe(true);
+  });
+
+  it("仅 media、仅方案绑定、两者不重叠均放行", () => {
+    expect(mediaAndPromptMentionsDisjoint([mention(10, 13, "media-1", "9001")], [])).toBe(true);
+    expect(mediaAndPromptMentionsDisjoint([], [binding(10, 13, "9001")])).toBe(true);
+    expect(mediaAndPromptMentionsDisjoint([mention(10, 13, "media-1", "9001")], [binding(13, 16, "9002")])).toBe(true);
+  });
+
+  it("部分重叠拒绝（IKFM3Q 原契约不变）", () => {
+    expect(mediaAndPromptMentionsDisjoint([mention(10, 13, "media-1", "9001")], [binding(11, 14, "9001")])).toBe(false);
+    expect(mediaAndPromptMentionsDisjoint([mention(10, 20, "media-1", "9001")], [binding(12, 14, "9001")])).toBe(false);
+    expect(mediaAndPromptMentionsDisjoint([mention(12, 14, "media-1", "9001")], [binding(10, 20, "9001")])).toBe(false);
+  });
+
+  it("同区间但指向不同 assetId 拒绝（脏数据）", () => {
+    expect(mediaAndPromptMentionsDisjoint([mention(10, 13, "media-1", "9001")], [binding(10, 13, "9002")])).toBe(false);
   });
 });
 

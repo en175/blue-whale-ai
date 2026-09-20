@@ -10,12 +10,12 @@
 - 新增两个 textNode 字段：
   - `data.mediaMentions: MediaMention[]` —— 正文媒体标签区间，锚定 `data.text` 字符下标（区间语义同 v1 §3）。
   - `data.mediaRefs: MediaRef[]` —— 标签身份的展示元数据快照。
-- 形状（strict，packages/contracts/src/text-node-media.ts）：
+- 形状（strict，backend/libs/contracts/text-node-media.ts）：
   - `MediaMention = { start, end, nodeId, assetId }`；`assetId` 为数字字符串，`nodeId` 1–128 字符。
   - `MediaRef = { nodeId, assetId, mediaType: "image" | "video" | "audio", name, url }`；`name` 1–200 字符，`url` 为素材当时地址。
 - **身份 = (nodeId, assetId) 显式绑定**：nodeId 是画布来源节点身份，assetId 是素材身份。显示名称与编号都不是身份，不凭名称、位置或相似性推断对象。
 - `mediaRefs` 精确覆盖 `mediaMentions` 引用的身份：每个身份有且仅有一条 ref，每条 ref 至少被一个区间引用。**不保留未被引用的身份**——mediaRefs 是展示快照，不是引用权威，更不是隐藏的附件列表（IKFLZT 特别边界）。
-- 与 Agent 方案绑定共存：`promptMentions/promptMaterials` 语义与防伪造规则不变（v1 §3）；mediaMentions 是所有统一文本卡的正文媒体索引，不需要 `promptSource`。两套区间互不重叠（同一文本段不同时属于两套标签）。方案绑定是否迁移到本模型由任务 3 决定，本契约不提前定。
+- 与 Agent 方案绑定共存：`promptMentions/promptMaterials` 语义与防伪造规则不变（v1 §3）；mediaMentions 是所有统一文本卡的正文媒体索引，不需要 `promptSource`。**两套区间互不部分重叠**——区间完全相同且指向同一 `assetId` 时放行：应用生成卡时 `applyPreview` 把方案绑定原地派生成同区间的 mediaMentions（IKG6EK），两者是同一身份的两套标签，渲染按方案 `#N` 去重展示（IKG99G）。同区间指向不同素材仍属脏数据，拒绝（IKH4EF 修订，2026-09-20）。方案绑定是否迁移到本模型由任务 3 决定，本契约不提前定。
 
 ## 2. 编号（派生，不存储）
 
@@ -70,12 +70,13 @@ textNode 携带 `mediaMentions` 或 `mediaRefs` 时（缺省其一即拒绝，�
 
 1. `mediaMentionSchema` 校验 + `validMediaMentions`：区间不重叠、不越界、同 nodeId 恒同 assetId。
 2. mediaRefs 与 mentions 身份集合精确一致（§1）。
-3. **新增身份**（上一版本该节点 mediaRefs 中不存在）：
+3. **与方案绑定区间**（§1，IKH4EF 修订）：`mediaMentions` 与 `promptMentions` 互不**部分**重叠。区间完全相同且 `assetId` 一致时放行——`applyPreview` 派生的方案绑定镜像（IKG6EK）是合法形态；同区间指向不同 `assetId` 拒绝（脏数据）。
+4. **新增身份**（上一版本该节点 mediaRefs 中不存在）：
    - 素材真实可及：`assets` 存在、归属当前用户、`is_delete=false`、`status="normal"`、`type=mediaType`、`url` 与素材一致（防伪造核心，与 promptMaterials 新增校验同口径）；
    - 若 nodeId 节点在本次保存节点中存在：必须是 mediaNode，节点 assetId 与本身份一致，节点 mediaType 与 mediaType 一致（身份一致性；节点不存在即来源已删的失效身份，豁免）。
-4. **存量身份**：展示元数据不可变（nodeId/assetId/mediaType/name/url 逐项一致），引用可减不可伪造；失效身份（来源节点/连线/素材已不存在）允许继续携带并编辑正文。
-5. 非 textNode 携带这两字段拒绝。
-6. `promptSource` 防伪造规则不变（v1 §3）。节点与连线同一条件写入（saveIfVersion），保存要么全成要么全败。
+5. **存量身份**：展示元数据不可变（nodeId/assetId/mediaType/name/url 逐项一致），引用可减不可伪造；失效身份（来源节点/连线/素材已不存在）允许继续携带并编辑正文。
+6. 非 textNode 携带这两字段拒绝。
+7. `promptSource` 防伪造规则不变（v1 §3）。节点与连线同一条件写入（saveIfVersion），保存要么全成要么全败。
 
 ## 8. 恢复一致性（用户故事 36）
 
@@ -83,9 +84,9 @@ textNode 携带 `mediaMentions` 或 `mediaRefs` 时（缺省其一即拒绝，�
 
 ## 9. 测试接缝
 
-- 契约单测（packages/contracts）：schema、validMediaMentions、编号派生、失效标签文本、refs 覆盖判定。
-- 组件单测（web TextNode promptMentions 模块）：含 media 标签的渲染/序列化——编号复用与重排、失效文本、与 prompt 绑定混合。
-- 后端集成（隔离 MySQL，`IKFM3Q_DATABASE_URL` 门控，沿用 text-node-unified 模式）：合法新增落库、伪造身份/越界/refs 不覆盖/非 textNode 拒绝、存量失效身份豁免编辑。
+- 契约单测（backend/libs/contracts）：schema、validMediaMentions、编号派生、失效标签文本、refs 覆盖判定、`mediaAndPromptMentionsDisjoint` 跨集区间判定。
+- 组件单测（web TextNode promptMentions 模块）：含 media 标签的渲染/序列化——编号复用与重排、失效文本、与 prompt 绑定混合、同区间双数组渲染去重后的序列化结果仍满足 §1。
+- 后端集成（隔离 MySQL，`IKFM3Q_DATABASE_URL` 门控，沿用 text-node-unified 模式）：合法新增落库、伪造身份/越界/refs 不覆盖/非 textNode 拒绝、存量失效身份豁免编辑、跨集区间部分重叠拒绝、同区间同 assetId 放行（IKH4EF）。
 - 浏览器 e2e（Playwright + 动态画布夹具，沿用 text-node-layout 模式）：@ 插入三类、编号复用与重排、删最后标签除线、删线置失效不自动补回、删源节点置失效、重新绑定、悬停预览、点击定位、刷新恢复；核对 PUT body 的 nodes+edges 并截图。
 
 ## 10. 版本演进边界

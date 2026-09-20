@@ -26,14 +26,14 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/JobType.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/ImageOutpaintContract.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/ImageOutpaintContract.java",
     import.meta.url,
   ),
   "utf8",

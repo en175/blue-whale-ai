@@ -236,6 +236,73 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     expect(clean.status).toBe(200);
   });
 
+  it("同区间且同 assetId（applyPreview 派生的方案绑定镜像）：放行并落库", async () => {
+    const project = await createProject();
+    const url = "https://example.com/mirror.png";
+    const assetId = await createAsset(project.id, "image", url);
+    const promptSource = { sessionId: "ikh4ef-session", revisionId: "rev-1", shotNo: 1 };
+    // 现场形态：applyPreview 直写 DB 的生成卡，promptMentions 与派生的 mediaMentions 区间逐字相同
+    await prisma.client.canvas.create({ data: {
+      project_id: project.id,
+      nodes_json: [
+        mediaNode("media-1", assetId, "image", url),
+        { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
+          title: "方案卡", text: "参考素材#1尾巴", promptOriginalTitle: "原题", promptSource,
+          promptMentions: [{ start: 2, end: 6, index: 1, assetId }],
+          promptMaterials: [{ assetId, mediaType: "image", url }],
+        } },
+      ],
+      edges_json: [], viewport_json: {}, version: 1,
+    } });
+    const mirrored = await saveCanvas(project.id, [
+      mediaNode("media-1", assetId, "image", url),
+      { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
+        title: "方案卡", text: "参考素材#1尾巴", promptOriginalTitle: "原题", promptSource,
+        promptMentions: [{ start: 2, end: 6, index: 1, assetId }],
+        promptMaterials: [{ assetId, mediaType: "image", url }],
+        mediaMentions: [{ start: 2, end: 6, nodeId: "media-1", assetId }],
+        mediaRefs: [{ nodeId: "media-1", assetId, mediaType: "image", name: "图", url }],
+      } },
+    ], [indexEdge("media-1", "text-1")], 1);
+    expect(mirrored.status).toBe(200);
+    const persisted = parseNodes((await readCanvasRow(project.id))!).find(n => n.id === "text-1")!;
+    expect(persisted.data.mediaMentions).toEqual([{ start: 2, end: 6, nodeId: "media-1", assetId }]);
+    expect(persisted.data.promptMentions).toEqual([{ start: 2, end: 6, index: 1, assetId }]);
+  });
+
+  it("同区间但指向不同 assetId：仍 400（脏数据不被静默放过）", async () => {
+    const project = await createProject();
+    const urlA = "https://example.com/a.png";
+    const urlB = "https://example.com/b.png";
+    const assetA = await createAsset(project.id, "image", urlA);
+    const assetB = await createAsset(project.id, "image", urlB);
+    const promptSource = { sessionId: "ikh4ef-dirty", revisionId: "rev-1", shotNo: 1 };
+    await prisma.client.canvas.create({ data: {
+      project_id: project.id,
+      nodes_json: [
+        mediaNode("media-1", assetA, "image", urlA),
+        { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
+          title: "方案卡", text: "参考素材#1尾巴", promptOriginalTitle: "原题", promptSource,
+          promptMentions: [{ start: 2, end: 6, index: 1, assetId: assetA }],
+          promptMaterials: [{ assetId: assetA, mediaType: "image", url: urlA }],
+        } },
+      ],
+      edges_json: [], viewport_json: {}, version: 1,
+    } });
+    // 同区间，但 media 指向 assetA、方案绑定指向 assetB
+    const dirty = await saveCanvas(project.id, [
+      mediaNode("media-1", assetA, "image", urlA),
+      { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: {
+        title: "方案卡", text: "参考素材#1尾巴", promptOriginalTitle: "原题", promptSource,
+        promptMentions: [{ start: 2, end: 6, index: 1, assetId: assetB }],
+        promptMaterials: [{ assetId: assetB, mediaType: "image", url: urlB }],
+        mediaMentions: [{ start: 2, end: 6, nodeId: "media-1", assetId: assetA }],
+        mediaRefs: [{ nodeId: "media-1", assetId: assetA, mediaType: "image", name: "图", url: urlA }],
+      } },
+    ], [indexEdge("media-1", "text-1")], 1);
+    expect(dirty.status).toBe(400);
+  });
+
   it("失效身份重新绑定新素材后落库为有效索引", async () => {
     const project = await createProject();
     const urlA = "https://example.com/old.png";

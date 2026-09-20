@@ -64,6 +64,31 @@ export function mediaRefsCoverMentions(mentions: MediaMention[], refs: MediaRef[
   return true;
 }
 
+/** 契约 §1（IKH4EF 修订）：media 索引与 Agent 方案绑定区间互不**部分**重叠。
+ *  区间完全相同且指向同一 assetId 时放行——applyPreview 把方案绑定原地派生成同区间的
+ *  mediaMentions（IKG6EK），两者是同一身份的两套标签，不是脏数据；同区间异身份仍拒绝。 */
+export function mediaAndPromptMentionsDisjoint(
+  media: readonly MediaMention[],
+  bindings: ReadonlyArray<Pick<MediaMention, "start" | "end" | "assetId">>,
+): boolean {
+  const combined = [...media, ...bindings].sort((a, b) => a.start - b.start || a.end - b.end);
+  let coveredEnd = 0;
+  let coveredKey = "";
+  let coveredAssetId = "";
+  for (const range of combined) {
+    const key = `${range.start}-${range.end}`;
+    if (key === coveredKey) {
+      if (range.assetId === coveredAssetId) continue;
+      return false;
+    }
+    if (range.start < coveredEnd) return false;
+    coveredEnd = range.end;
+    coveredKey = key;
+    coveredAssetId = range.assetId;
+  }
+  return true;
+}
+
 export function invalidMediaMentionLabel(name: string): string {
   return `已失效：${name}`;
 }

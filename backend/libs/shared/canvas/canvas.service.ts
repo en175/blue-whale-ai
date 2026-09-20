@@ -12,7 +12,7 @@ import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE,
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
+import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
@@ -387,13 +387,11 @@ export class CanvasService {
       if (!mentions.success || !refs.success || !validMediaMentions(text, mentions.data) || !mediaRefsCoverMentions(mentions.data, refs.data)) {
         throw new BadRequestException("正文媒体索引无效，原内容未改动");
       }
-      // 契约 §1：media 索引与 Agent 方案绑定（promptMentions）区间互不重叠
+      // 契约 §1（IKH4EF 修订）：media 索引与 Agent 方案绑定区间互不部分重叠；
+      // 同区间同 assetId 放行——applyPreview 把方案绑定派生成同区间的 mediaMentions（IKG6EK）
       const promptMentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
-      const combined = [...mentions.data, ...(promptMentions.success ? promptMentions.data : [])].sort((a, b) => a.start - b.start);
-      let covered = 0;
-      for (const range of combined) {
-        if (range.start < covered) throw new BadRequestException("正文媒体索引与方案绑定区间重叠，原内容未改动");
-        covered = range.end;
+      if (!mediaAndPromptMentionsDisjoint(mentions.data, promptMentions.success ? promptMentions.data : [])) {
+        throw new BadRequestException("正文媒体索引与方案绑定区间重叠，原内容未改动");
       }
       const old = previous.find(item => item.id === node.id);
       const oldRefs = mediaRefSchema.array().safeParse(old?.data?.mediaRefs ?? []);

@@ -667,3 +667,25 @@ it('同编号多张素材标签删除，点第一张时锚点取第一张原位�
   await enterEditing(editor);
   expect(caretTextOffset(editor)).toBe(0);
 });
+
+/* IKH4EF：应用生成卡（IKG6EK 在 applyPreview 里派生出与方案绑定同区间的 mediaMentions）后，
+   用户打开卡片敲一次字，镜像索引不得被清空。清空会经 handleMediaIndexChange → syncTextIndexEdges
+   删掉 textIndex 关系线，目标面板的参考素材随之消失（mergedImageRefsOf 走的就是这些边）。 */
+it('应用生成卡后编辑一次：镜像索引不丢，不触发删线回调（IKH4EF）', async () => {
+  const { editor } = await renderNode({
+    promptSource: 'chat',
+    text: '参考素材#1尾巴',
+    promptMentions: [{ start: 2, end: 6, assetId: 'a1', index: 1 }],
+    promptMaterials: [{ assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' }],
+    mediaMentions: [{ start: 2, end: 6, nodeId: 'm1', assetId: 'a1' }],
+    mediaRefs: [{ nodeId: 'm1', assetId: 'a1', mediaType: 'image' as const, name: '素材图一', url: 'http://img/m1.png' }],
+    onPromptChange: vi.fn(),
+  });
+  // 渲染去重：该区间只出方案 #1 一张 chip，镜像不另起标签（IKG99G）
+  expect(editor.querySelectorAll('[data-prompt-index="1"]')).toHaveLength(1);
+  expect(editor.querySelectorAll('[data-media-node="m1"]')).toHaveLength(0);
+  await enterEditing(editor);
+  await dispatchInput(editor, 'insertText', 'X');
+  // 序列化回吐的镜像与节点数据逐字一致 ⇒ 无变更 ⇒ 不触发回调（被调用即意味着 m1 的线要被删）
+  expect(onMediaIndexChange).not.toHaveBeenCalled();
+});

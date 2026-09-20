@@ -16,7 +16,7 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 ## Steps
 
-1. Read the spec and tickets. Read enough to understand the task graph.
+1. Read the spec and tickets. Read enough to understand the task graph. 本仓适配：先解析工单拓扑——父规格单下通常已切分子工单（to-tickets 产物）。Gitee `search=<父单号>` 查不到子工单（子工单标题是 `【前端|后端】<标题>`，空结果不代表无子）；用 `list_enterprise_issues(project_id, state="open", per_page=100)` 客户端筛 `parent_id == 父单数字 id`（详见 `docs/agents/issue-tracker.md`「操作约定·查子工单」）。子工单是任务图节点：按其 `Blocked by` 声明确定 frontier 与串行依赖，不按父单正文自行切阶段；每张子工单独立实施、验证、留痕、流转状态。
 
 2. (optional) Use an **exploration subagent** to conduct any exploration required by the tickets - relevant codebase files or external documentation. Ensure the exploration subagent can save files - it should save its markdown notes in a directory outside the repo, accessible by all future subagents. This lets **implementer subagents** focus on implementation rather than exploration.
 
