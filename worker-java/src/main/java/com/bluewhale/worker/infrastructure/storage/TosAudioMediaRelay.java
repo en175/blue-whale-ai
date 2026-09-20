@@ -170,9 +170,11 @@ public class TosAudioMediaRelay {
                 ContentDigest.md5Hex(bytes));
     }
 
-    /** 响应缺 Content-Type 时的回退 mime（按任务所选格式推导）。 */
+    /** 响应缺 Content-Type 时的回退 mime（按任务所选格式推导；aac 供 vocal_split 五值枚举——
+     *  该工具枚举含 aac 而 media_extract 无，回退表补 aac 分支对既有调用无影响）。 */
     static String defaultMime(String outputFormat) {
         return switch (outputFormat) {
+            case "aac" -> "audio/aac";
             case "m4a" -> "audio/mp4";
             case "ogg" -> "audio/ogg";
             case "flac" -> "audio/flac";
