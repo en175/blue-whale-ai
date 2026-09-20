@@ -33,8 +33,8 @@
 ## 3. 接纳校验
 
 - 目标必须是 `mediaNode` 且 `mediaType === "audio"`，否则 400（沿用 IKDMQT 目标校验）。
-- 主提示词为空（trim 后）仍 400「prompt 无效」，即便附件正文非空——音频不引入仅附件生成；图片/视频既有的非空白附件驱动规则不变。
-- 组合长度闸：`composeTextAttachmentPrompt(附件, prompt)` 结果超过**生效上限** → 400。生效上限 = **模型配置优先、未配置才回落 `COMPOSED_AUDIO_PROMPT_MAX_LENGTH`**（30000，UTF-16 code units），定入 `backend/libs/contracts/prompt-text-limits.ts`，与图片/视频同值并列、取值口径一致。原「取 `max(30000, 模型值)`」已由 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md) 于 2026-09-20（IKH4B8）废止——取大会把小于 30000 的配置吞掉。
+- 主提示词为空（trim 后）仍 400「prompt 无效」，即便附件正文非空——音频不引入仅附件生成。**2026-09-20 修订（IKH8AU）**：图片/视频同口径——正文由提交方给全（附件正文已拼进 `prompt`），空正文即 400，**「非空白附件驱动」这条旧兜底已与组合档一并退役**。
+- 长度闸：正文全文超过**生效上限** → 400。生效上限 = 模型配置优先、未配置回落音频缺省（3000），定入 `backend/libs/contracts/prompt-text-limits.ts`。**2026-09-20（IKH4B8）**：本节的「组合长度闸」已退役——ADR-0088 起正文由提交方给全，附件正文就在 `prompt` 里，服务端不再二次叠加（原写法把附件算了两遍）；详见 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)。
 - IKFCXE 初始切片不新增音频正文索引标签编辑器，当时 `prompt_doc` 对音频一律拒绝；该历史限制已由 IKFCJG §10 授权扩展替代，最终按该节复核、编译并冻结音频 `prompt_doc`。
 
 ## 4. 执行消费（TS worker 与 worker-java 双端对齐）

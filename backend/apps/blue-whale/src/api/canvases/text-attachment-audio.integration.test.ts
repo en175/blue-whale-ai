@@ -199,16 +199,16 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect(job!.input.prompt).toBe("纯音乐，节奏轻快");
   });
 
-  it("组合后超过 30000 字 → 明确失败、不创建任务", async () => {
-    const projectId = (await projects.create("987654", "IKFCXE composed limit")).id;
+  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
+  it("长附件不额外计数：正文短、附件 31000 字 → 创建成功", async () => {
+    const projectId = (await projects.create("987654", "IKFCXE attachments not counted")).id;
     const nodes = [mediaNode("media-1", "audio"), textNode("text-1", "文".repeat(31_000))];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, audioJobBody("media-1", "读一下"));
-    expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(await jobCount(projectId)).toBe(0);
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
   });
 
   it("移除来源连线（仅断当前目标）后新任务不再消费该附件；其他目标关系保留；历史任务快照不改写", async () => {

@@ -203,29 +203,28 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(await jobCount(otherProject)).toBe(0);
   });
 
-  it("仅附件正文、prompt 为空字符串 → 创建成功，prompt 冻结为空串", async () => {
-    const projectId = (await projects.create("987654", "IKDLQG empty prompt")).id;
+  // IKH8AU：正文由提交方给全，空正文即无效请求（附件不再由服务端补正文）。
+  it("正文为空 → 400 prompt 无效，不创建任务", async () => {
+    const projectId = (await projects.create("987654", "IKDLQG empty prompt rejected")).id;
     const nodes = [mediaNode("media-1", "video"), textNode("text-1", "独立正文", "附件")];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, videoJobBody("media-1", ""));
-    expect(created.code).toBe(200);
-    const job = await readJob(created.data.generation_job_id);
-    expect(job!.input.prompt).toBe("");
-    expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "附件", text: "独立正文" }]);
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("prompt 无效");
+    expect(await jobCount(projectId)).toBe(0);
   });
 
-  it("组合后超过 30000 字 → 明确失败、不创建任务", async () => {
-    const projectId = (await projects.create("987654", "IKDLQG composed limit")).id;
+  it("长附件不额外计数：正文短、附件 31000 字 → 创建成功", async () => {
+    const projectId = (await projects.create("987654", "IKDLQG attachments not counted")).id;
     const nodes = [mediaNode("media-1", "video"), textNode("text-1", "文".repeat(31_000))];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    const created = await createJob(projectId, videoJobBody("media-1", ""));
-    expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(await jobCount(projectId)).toBe(0);
+    const created = await createJob(projectId, videoJobBody("media-1", "暮色"));
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
   });
 
   it("删除来源节点与边后新任务不再消费该附件，历史任务快照不改写", async () => {

@@ -437,9 +437,9 @@ describe("freezePromptPlans 素材库素材落成画布节点（IKG79Z）", () =
   });
 });
 
-// IKH4B8：方案卡闸的上限同样**模型配置优先**——原 Math.max 会把小于契约预算 30000 的配置吞掉。
+// IKH8AU：方案卡闸的上限与接纳闸同一口径——模型配置优先，未配置回落缺省（图片/视频 4000）。
 // 只覆盖 image/video：音频不经 freezePromptPlans（调用点已按 `type === "image" || "video"` 限定）。
-describe("freezePromptPlans 提示词上限配置优先（IKH4B8）", () => {
+describe("freezePromptPlans 提示词上限配置优先（IKH8AU）", () => {
   const longPrompt = (len: number) => "a".repeat(len);
 
   it("模型配 2000：2500 字 → 400（原取大闸会放行到 30000）", async () => {
@@ -459,8 +459,13 @@ describe("freezePromptPlans 提示词上限配置优先（IKH4B8）", () => {
     expect(snapshot).toBeDefined();
   });
 
-  it("未配置：2500 字 → 放行（回落契约预算 30000，行为不变）", async () => {
-    const snapshot = await callFreeze({ prompt: longPrompt(2500), model: makeModel({ max_prompt_length: null }) });
+  it("未配置：4500 字 → 400（回落缺省 4000）", async () => {
+    await expect(callFreeze({ prompt: longPrompt(4500), model: makeModel({ max_prompt_length: null }) }))
+      .rejects.toThrow("提示词为空或超限");
+  });
+
+  it("未配置：3500 字 → 放行", async () => {
+    const snapshot = await callFreeze({ prompt: longPrompt(3500), model: makeModel({ max_prompt_length: null }) });
 
     expect(snapshot).toBeDefined();
   });

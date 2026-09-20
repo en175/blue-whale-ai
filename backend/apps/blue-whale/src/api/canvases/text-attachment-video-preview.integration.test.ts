@@ -134,7 +134,7 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
       references: [
         { role: "first_frame", asset_id: firstAsset.id.toString(), type: "image" },
       ],
-      parameters: { prompt: "", model_id: MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
+      parameters: { prompt: "镜头缓推", model_id: MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
     });
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
@@ -148,7 +148,7 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
     expect(job!.input.references).toEqual([
       { role: "first_frame", asset_id: firstAsset.id.toString(), type: "image" },
     ]);
-    expect(job!.input.prompt).toBe("");
+    expect(job!.input.prompt).toBe("镜头缓推");
   });
 
   // 浏览器段（真实浏览器 + 真实业务 API + 隔离 MySQL）：视频面板完整操作至生成输入闭环。
@@ -332,7 +332,8 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
       });
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
-      expect(input.prompt).toBe("");
+      // IKH8AU：正文由提交方给全，附件正文已拼进 prompt（不再由服务端组合），故不为空串。
+      expect(input.prompt, "附件正文已由提交方拼进正文").toContain("雨后的巷子，猫在檐下躲雨");
       expect(input.text_attachments, "任务冻结移除后剩余附件的最新正文（连入边序：text-2 播种在先、text-3 新连在后）").toEqual([
         { node_id: "text-2", title: "雨夜", text: "雨后的巷子，猫在檐下躲雨" },
         { node_id: "text-3", title: "旁白草稿", text: "远处灯塔的光扫过海面" },

@@ -112,9 +112,8 @@ export async function freezePromptPlans(args: {
   // IKG6EK / ADR-0088：正文由提交方给全，引用标记转移已在接纳管线完成
   // （transfer-reference-markers.ts）——本函数不再组合 providerPrompt，附件正文也不再由
   // 服务端拼进正文。方案快照退为方案绑定校验与审计事实。
-  // IKH4B8：上限改为**模型配置优先**（原取大吞掉了小于契约预算的配置），未配置回落组合缺省。
-  // 本闸量的是方案卡正文自身，但缺省沿用组合口径（30000）——换 raw 档会把缺省砍到 4000。
-  const maxLength = resolvePromptMaxLength("contract-budget", args.type ?? "image", args.model?.features.max_prompt_length ?? null);
+  // IKH4B8：上限=模型配置优先，未配置回落缺省（图片/视频 4000、音频 3000）——与接纳闸同一口径。
+  const maxLength = resolvePromptMaxLength(args.type ?? "image", args.model?.features.max_prompt_length ?? null);
   if (!args.prompt.trim() || args.prompt.length > maxLength) planError(plans[0]!.nodeId, plans[0]!.bindings, "提示词为空或超限");
   return { canvasVersion: args.version, plans: plans.map(({ nodeId, text, mentions }) => ({ nodeId, text, mentions })),
     ...(videoReferences ? { videoReferences } : {}),

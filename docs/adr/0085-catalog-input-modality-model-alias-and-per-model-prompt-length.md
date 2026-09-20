@@ -1,8 +1,8 @@
 # 一档能力按参考图别名分流上游模型名 + 提示词长度目录化
 
-**状态**：accepted（2026-09-10，IKESD6 / IKESD9）；2026-09-11 经 IKF4LI **部分修订**（见文末「修订一」——gpt-image-2 侧改由出站协议分流，`i2i_model_name` 对 gpt-image-2 作废）；2026-09-20 经 IKH4B8 **修订**（见文末「修订二」——提示词上限取值改为配置优先）
+**状态**：accepted（2026-09-10，IKESD6 / IKESD9）；2026-09-11 经 IKF4LI **部分修订**（见文末「修订一」——gpt-image-2 侧改由出站协议分流，`i2i_model_name` 对 gpt-image-2 作废）；2026-09-20 经 IKH4B8 **修订**（见文末「修订二」——提示词上限收敛成一个：删组合闸、配置优先、消费端下发生效值）
 
-能力目录里上游模型按输入模态拆名的档位（gpt-image-2-text-to-image / gpt-image-2-edit、nano-banana-2-t2i / i2i），对用户合并为**一档能力**：主行 `model_id` 承载文生图上游名，`features.i2i_model_name` 承载图生图上游名，执行侧（worker-java image 链——IKESD6 二轮拍板：Node worker 退役中，分流不落旧版）在「行配了别名 且 本 job 带参考图」时换用别名；`features.max_prompt_length` 同时把提示词上限从三层硬编码改为目录可配（image-2 配 32000；组合上限的取值口径见文末「修订二」）。分流是纯数据驱动，无开关、无按模型特判——上游只暴露单一模型名的档位（seedream / banana 单名）不配别名即行为不变。
+能力目录里上游模型按输入模态拆名的档位（gpt-image-2-text-to-image / gpt-image-2-edit、nano-banana-2-t2i / i2i），对用户合并为**一档能力**：主行 `model_id` 承载文生图上游名，`features.i2i_model_name` 承载图生图上游名，执行侧（worker-java image 链——IKESD6 二轮拍板：Node worker 退役中，分流不落旧版）在「行配了别名 且 本 job 带参考图」时换用别名；`features.max_prompt_length` 同时把提示词上限从三层硬编码改为目录可配（image-2 配 32000；上限取值口径见文末「修订二」）。分流是纯数据驱动，无开关、无按模型特判——上游只暴露单一模型名的档位（seedream / banana 单名）不配别名即行为不变。
 
 ## Considered Options
 
@@ -30,26 +30,40 @@
 - **接受的代价**（用户 2026-09-11 拍板）：不加 `gpt-image-2-text-to-image → gpt-image-2` 兼容别名。老画布节点/历史 job 里存的旧 id 不再被解析，重跑会在白名单校验处 400，需重选模型——与本文档 Consequences 第 2 条对软删行接受的代价同类。
 - **同步**：契约 §11 第 3 条被 §12 收窄，明细见 [IKEL4A 迁移契约 §12](../specs/2026-09-10-ikel4a-worker-java-migration-contract.md)。
 
-## 修订二（2026-09-20，IKH4B8）：提示词上限改为「模型配置优先，否则取缺省」
+## 修订二（2026-09-20，IKH4B8 / IKH8AU）：提示词上限收敛成**一个**
 
-**触发**：本文档原来的组合闸取 `max(契约预算 30000, 模型值)`，理由是「否则配了大上限的模型一挂文本附件就先撞组合闸，配置形同虚设」。它解决了「配置 > 30000 被契约预算挡住」，但**顺带把「配置 < 30000」也吞掉了**——后台把某模型配成 2000 想收紧，实际生效仍是 30000；改小值不生效、改大值才生效，行为不可预期。
+> 本条跨两单：**IKH4B8**（PR !777，已合并）做「取值改配置优先」；**IKH8AU**（跟随本条的收口）做「删组合闸 + 消费端下发生效值」。
 
-**结论**：原文的「取大」改为**配置优先，未配置才回落缺省**——配置大用配置、配置小也用配置，两侧诉求同时满足。
+**触发**：本文档原来的组合闸取 `max(契约预算 30000, 模型值)`，理由是「否则配了大上限的模型一挂文本附件就先撞组合闸，配置形同虚设」。它解决了「配置 > 30000 被契约预算挡住」，但**顺带把「配置 < 30000」也吞掉了**——后台把某模型配成 2000 想收紧，实际生效仍是 30000。
 
-- **取值口径唯一化**：三道闸（raw prompt 闸、组合闸、方案卡闸）统一走 `resolvePromptMaxLength(budget, type, configured)`（`backend/libs/contracts/prompt-text-limits.ts`）。原来两处 `Math.max` 是**同形不同源**——一个的第二操作数是已含缺省的 raw 生效值，另一个是 `?? 0` 的配置原值——正是分叉的温床。
-- **两档缺省并存，故取值函数带 `budget` 参数，且该参数选的是「回落哪档」而非「量的是哪段字符串」**：`legacy-hardcode` = 旧硬编码（图片/视频 4000、音频 3000），只给 raw 闸；`contract-budget` = 契约预算 30000，组合闸与方案卡闸共用。方案卡闸量的是方案卡正文自身（其实是 raw 长度），但它从本文档起就沿用组合口径，换 raw 档会把缺省从 30000 砍到 4000，属行为回归——所以参数按「缺省档」命名，不按闸名。
-- **最容易踩的坑**：把 raw 闸的**生效值**（已含缺省 4000/3000）当装配配置读回去，会让未配置模型的组合上限从 30000 掉到 4000。传**配置原值**，回落交给取值函数。契约预算常量取值不变（仍 30000），只是从「取大的底」降级为「未配置时的缺省」。
-- **适用范围**：图片 / 视频 / 音频三类生成。音频只经 raw 闸与组合闸；方案卡闸的调用点已按 `type === "image" || "video"` 限定，音频不进入。注意**后台模型表单目前只对 image / video 放出该字段**（`web/src/admin/pages/ModelList/ModelFormModal.tsx` 的 `types: ['image','video']`），所以音频档位眼下只能经 API 配置——要放开是产品侧决定，不在本单。
-- **配置值的边界**由 admin 写入口把关（`parseModelCreateBody` / `parseModelUpdateBody`，1–65535 整数或 null）；取值函数另对 0 / 小数 / NaN 之类脏值自防（回落缺省）。本决策不在代码侧再加下限——再加一条下限就是重新造出「配了不生效」。
-- **行为影响**：未配置的模型零变化。仓库 migration 内配了 `max_prompt_length` 的只有 32000 两行——`gpt-image-2-text-to-image`（IKESD6 迁移写入）与 IKF4LI 迁回干净名后的 `gpt-image-2` 行（紧前一行在同批被软删）；32000 > 30000，改动前后都生效 32000，不变。
-- **上线前须实测，别只信上面的推断**：以上是**从仓库 migration 推断**的结论，不等于测试站 / 线上实际。后台手配过小于 30000 的值的模型改动后会开始拒绝此前放行的长提示词——用户可见且静默。部署前对每个环境跑一次（camelCase 键也要查，读取侧两键都认），查出的行就是生效上限会收紧的档位：
+顺着查下去，问题比「取大」更深：**组合闸本身已经没有对象了**。
+
+- 本文档时代的形态是「前端只发目标自己的提示词，服务端把附件拼进去」，所以「正文上限」与「附件 + 正文的合计上限」确实是真的不同的两个量。
+- ADR-0088 把拼装移到提交方（前端 `startGenerationJob` 把附件正文拼进 `parameters.prompt` 再发），但**只清了给上游的正文与 `providerPrompt`，没清接纳侧的校验**。
+- 于是接纳侧仍在算 `composeTextAttachmentPrompt(附件, prompt)`，而 `prompt` 里**已经含有同一批附件正文**——附件被算了两次，闸比它声称的量多出约一倍附件长度。仓库里所有组合闸用例都把 `parameters.prompt` 设成 `""`（那是本文档时代的形态），生产形态的重复计数因此没有用例能抓到。
+
+**结论**：**上限只留一个**。
+
+- 「提示词」= 提交上来的正文全文。ADR-0088 之后这是唯一有意义的量：全仓一道闸、一档缺省。
+- **删掉组合闸**（`handle-create-generation-job.ts` 里那次 `composeTextAttachmentPrompt` 前缀与随后的长度比较）——它与 raw 闸量的是同一段，重复计数随之消失。方案卡闸（`prompt-plan-snapshot.ts`）保留，但改用同一上限。
+- **取值口径**：`resolvePromptMaxLength(type, configured)`（`backend/libs/contracts/prompt-text-limits.ts`）——模型配置优先，未配置回落缺省（图片/视频 4000、音频 3000）。原 `COMPOSED_IMAGE/VIDEO/AUDIO_PROMPT_MAX_LENGTH` 三个契约预算常量随之退役：它们只在「服务端组合」存在时才有意义。
+- **行为变化的完整清单**（相对 ADR-0088 之前「只发目标提示词」的旧形态而言；**初版修订文写成「未配置模型行为不变」是错的**）：
+  1. **放宽，但按调用方分两种情形**：旧形态下组合闸把附件合计也计入。
+     - **UI 驱动**：前端 `startGenerationJob` 一直把附件正文拼进 `prompt`，正文本身就含附件，两侧口径一致 —— **行为不变**（本单验收「`gpt-image-2` 行为不变」成立的范围仅此）。
+     - **不自行组合正文的 API 调用方**：`prompt` 短、附件长时，旧形态判超限 400 → 现在只量正文全文 → 200。以配 32000 的档位为例，旧形态在「正文 + 附件合计 > 32000」时拒绝，现在只在「正文 > 32000」时拒绝。**这是一条真实的放宽。**
+  2. **收紧**：旧形态允许「空 prompt + 非空附件」由服务端补正文；现在空正文即无效请求（400 `prompt 无效`）。图片/视频与音频同口径（音频本来就拒绝空主提示词）。
+  3. **方案卡闸缺省下调（30000 → 4000）**：`freezePromptPlans` 量的是**引用标记转移之后**的正文，而接纳入口闸量的是**转移之前**的正文（转移可能变长：`&1&` 3 字 → `@图片1` 4 字）。正文刚好卡在上限又含会变长的标记时，现在会在方案卡闸 400「提示词为空或超限」——UI 路径不可达（面板另有输入上限），**API 调用方可达**。
+  4. **消费端已接线的三处会静默改变**：`ImageDialog:260`、`TextGenDialog:51`、`ChatBox:590` 都写 `?? DEFAULT_MAX_INPUT(=1000)`，而接口现在对未配置的图片/视频档位下发 4000（原来是 null）——它们的上限**静默从 1000 变 4000**；但各面板自己的合计闸仍是硬编码 `IMAGE_COMPOSED_PROMPT_LIMIT = 1000`，于是「计数器显示 n/4000、发送时超过 1000 仍被拒」。这不是新引入的错误，是本单**让既有接线改了行为**，须随 IKGXO7 一并收口。
+- **消费端下发的是生效值**：`GET /api/generation/models` 的 `features.max_prompt_length` 由「配置值（未配为 null）」改为**已算好的生效值**（配置优先、未配置回落缺省），消费端拿到即可直接用，不必知道缺省口径。`capability=text` 的档位不建生成任务、没有长度闸，不参与。
+- **配置值的边界**由 admin 写入口把关（`parseModelCreateBody` / `parseModelUpdateBody`，1–65535 整数或 null）；取值函数另对 0 / 小数 / NaN 之类脏值自防（回落缺省）。不加代码侧下限——再加一条就是重新造出「配了不生效」。
+- **上线前须实测**：后台手配过小于缺省值的档位，改动后会开始拒绝此前放行的长提示词（用户可见且静默）。仓库 migration 内只有 `gpt-image-2 = 32000`（大于缺省，前后都生效 32000），测试站 / 线上手配的值不在仓库里。部署前对每个环境跑一次（camelCase 键也要查，读取侧两键都认），逐行确认是否为有意收紧：
 
   ```sql
   SELECT provider_id, model_id, capability_type,
          JSON_UNQUOTE(JSON_EXTRACT(features,'$.max_prompt_length')) AS v
   FROM generation_model_capability
   WHERE is_delete = 0 AND enabled = 1
-    AND JSON_EXTRACT(features,'$.max_prompt_length') < 30000;
+    AND JSON_EXTRACT(features,'$.max_prompt_length') IS NOT NULL;
   ```
 
-- **前端**：`web/` 侧的 `features.max_prompt_length ?? DEFAULT_MAX_INPUT(=1000)` 本来就是「配置优先」口径，缺省值仍与后端不一致（前端 1000 / 后端 4000），收口另见 IKGXO7。
+- **前端不改，落 IKGXO7**：前端那层硬编码（`IMAGE_COMPOSED_PROMPT_LIMIT = 1000` 等 7 处）本单不碰；消费端接口已给出生效值，前端接上即可。

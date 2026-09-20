@@ -34,7 +34,9 @@
 ## 限长
 
 - 目标提示词 ≤4000 UTF-16 code units（现行校验不变）；单条附件正文 ≤100,000（IKDLQE 存储限制）。
-- 组合后的供应商 prompt ≤30,000 UTF-16 code units（新契约常量 `COMPOSED_VIDEO_PROMPT_MAX_LENGTH`，定义于 `packages/contracts/src/prompt-text-limits.ts`，与 `COMPOSED_IMAGE_PROMPT_MAX_LENGTH` 同值并列——两个常量各自承载本产品契约预算，日后模型能力表给出真实上限时分别对齐）。超出时接纳明确失败且不创建任务、不截断、不删除附件。前端面板不重复实现该校验：超限以后端权威拒绝（明确错误提示）为准。
+- 组合后的供应商 prompt ≤30,000 UTF-16 code units（新契约常量 `COMPOSED_VIDEO_PROMPT_MAX_LENGTH`，定义于 `packages/contracts/src/prompt-text-limits.ts`，与 `COMPOSED_IMAGE_PROMPT_MAX_LENGTH` 同值并列——两个常量各自承载本产品契约预算，日后模型能力表给出真实上限时分别对齐）。超出时接纳明确失败且不创建任务、不截断、不删除附件。
+
+  > **2026-09-20 修订（IKH8AU）**：本条已作废。`COMPOSED_VIDEO_PROMPT_MAX_LENGTH` / `COMPOSED_IMAGE_PROMPT_MAX_LENGTH` 均退役——ADR-0088 起正文由提交方给全，服务端不再组合，长度闸只按**正文全文**量一次；上限取**模型配置优先、未配置回落缺省**（图片/视频 4000）。见 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)。前端面板不重复实现该校验：超限以后端权威拒绝（明确错误提示）为准。
 - 面板在打开时展示当前附件列表（来源标题与正文预览，长文折叠），附件的增删通过画布连线的建立与断开进行，本切片不在面板内做排序或多选取舍。
 
 ## 前端目标面板

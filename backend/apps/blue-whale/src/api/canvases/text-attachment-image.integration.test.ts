@@ -250,29 +250,42 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(await jobCount(otherProject)).toBe(0);
   });
 
-  it("仅附件正文、prompt 为空字符串 → 创建成功，prompt 冻结为空串", async () => {
+  // IKH4B8：正文由提交方给全（ADR-0088），服务端不再组合——附件照实冻结供审计，
+  // 但长度与有效性都只看提交上来的正文全文。
+  it("正文由提交方给全：附件照实冻结，正文即提交内容", async () => {
     const projectId = (await projects.create("987654", "IKDLQF empty prompt")).id;
     const nodes = [mediaNode("media-1", "image"), textNode("text-1", "独立正文", "附件")];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    const created = await createJob(projectId, imageJobBody("media-1", ""));
+    const created = await createJob(projectId, imageJobBody("media-1", "暮色"));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    expect(job!.input.prompt).toBe("");
+    expect(job!.input.prompt).toBe("暮色");
     expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "附件", text: "独立正文" }]);
   });
 
-  it("组合后超过 30000 字 → 明确失败、不创建任务", async () => {
-    const projectId = (await projects.create("987654", "IKDLQF composed limit")).id;
-    const nodes = [mediaNode("media-1", "image"), textNode("text-1", "文".repeat(31_000))];
+  it("正文为空 → 明确失败、不创建任务（附件不再由服务端补正文）", async () => {
+    const projectId = (await projects.create("987654", "IKDLQF empty prompt rejected")).id;
+    const nodes = [mediaNode("media-1", "image"), textNode("text-1", "独立正文", "附件")];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, imageJobBody("media-1", ""));
     expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(created.msg).toBe("prompt 无效");
     expect(await jobCount(projectId)).toBe(0);
+  });
+
+  it("附件很长但不额外计数：正文在上限内 → 创建成功", async () => {
+    const projectId = (await projects.create("987654", "IKDLQF attachments not counted")).id;
+    const nodes = [mediaNode("media-1", "image"), textNode("text-1", "文".repeat(31_000))];
+    const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
+    expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
+
+    const created = await createJob(projectId, imageJobBody("media-1", "暮色"));
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
   });
 
   it("删除来源节点与边后新任务不再消费该附件，历史任务快照不改写", async () => {

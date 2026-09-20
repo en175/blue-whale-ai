@@ -166,8 +166,8 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 - `generation_model_capability.features` 新增两键（通用机制，任何 image 行可配，无开关）：
   - `i2i_model_name`（string，可选）：**上游模型名**（非行 id）。**分流由 Java image 链（刀③）在出站请求处实现**（IKESD6 拍板：Node worker 退役中，新功能不落旧版）：该行配了别名 **且** 本 job 带参考图（`input_asset_ids` 解析出的参考素材非空）→ HTTP body 的 `model` 用别名，否则用 `model_id`。未配别名的行行为与 §5 现状完全一致。**灰度含义**：image tag 仍在 TS 侧消费期间，别名不参与分流；切 Java 消费后自动生效。
-  - `max_prompt_length`（正整数，可选）：仅影响 **backend 创建时校验**，**模型配置优先、未配置才回落缺省**——raw prompt 上限缺省 image/video=4000、audio=3000，组合上限缺省契约预算 30000。**worker / Java 侧不消费**（worker 现状即不复校长度，见 §2 权威面），登记于此仅为表列语义完整。
-    - **2026-09-20 修订（IKH4B8）**：本键原写作「组合上限改为 `max(30000, 模型值)`」，该取大写法已废止——它把小于契约预算的配置一并吞掉（配 2000 想收紧，实际仍是 30000），改为上述「配置优先」。口径与取值函数见 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)。
+  - `max_prompt_length`（正整数，可选）：仅影响 **backend 创建时校验**——**模型配置优先、未配置回落缺省**（image/video=4000、audio=3000），提示词上限只此一个。**worker / Java 侧不消费**（worker 现状即不复校长度，见 §2 权威面），登记于此仅为表列语义完整。
+    - **2026-09-20 修订（IKH4B8）**：本键原写作「raw 上限…；组合上限改为 `max(30000, 模型值)`」。两处改动：① 取大废止，改配置优先（取大把小于 30000 的配置一并吞掉，配 2000 想收紧实际仍是 30000）；② **组合上限整体退役**——ADR-0088 起正文由提交方给全，服务端不再组合，接纳侧只按正文全文量一次（原写法把附件算了两遍）。口径与取值函数见 [ADR-0085 修订二](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)。
 - **canonical 语义（Java 必须逐字复刻）**：别名 swap 只发生在出站 HTTP body 的 `model` 字段；`generation_jobs.input.model_id` 恒为**目录主行 model_id**（白名单、重试沿用 frozen input、恢复重投、计费对账、日志全部不受影响）。禁止在创建时把别名写进 frozen input。
 - **读取时效**：别名每次执行按 `model_id` 现查能力行（对齐刀③ claim 后查能力的既有模式）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后灰度两侧行为分叉。
 - **消费端目录投影**：`/api/generation/models` 对前端**剥除** `i2i_model_name`（出站调用值，与像素/api_value 同哲学），仅透出 `max_prompt_length`。
