@@ -7,6 +7,7 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
+import type { BeforeApplicationShutdown } from "@nestjs/common";
 import type { Request, Response } from "express";
 import {
   TRACE_ID_HEADER,
@@ -39,6 +40,32 @@ const NEW_API_BASE_URL = process.env.NEW_API_BASE_URL?.trim() || "";
 const UPSTREAM_IDLE_TIMEOUT_MS = Number(process.env.AGENT_MODEL_IDLE_TIMEOUT_MS) || 90_000;
 /** 本控制器挂载的路由前缀（含全局 /api）。NewAPI 只认裸 `/v1/...`，转发前必须去掉这段。 */
 const ROUTE_PREFIX = "/api/internal/agent-model";
+
+/**
+ * 在途模型流的登记簿（IKHCJ2）。
+ *
+ * 本进程一重启，这些流全部当场断掉，Agent 那一侧只看到一个没有任何错误码的
+ * `terminated`——它只能推断"大概是我到网关这一段断的"，无从分辨是我们关门了、还是
+ * New API 关门了。2026-09-20 就是这样：一次后端部署打断了一轮已经跑到写卡的对话，
+ * 而库里记成 `model_error`「模型调用失败，请重试」，模型毫发无伤。
+ *
+ * 登记簿的唯一用途是：**关门前把话说清楚。** 见
+ * `blue-whale-agent` 仓 `docs/blueprint/断点归属与传输中断错误码.md`。
+ */
+const inFlightStreams = new Set<{
+  res: import("express").Response;
+  runId: string;
+  traceId: string;
+}>();
+
+/**
+ * 关门时写给在途流的那一帧，OpenAI 兼容的 SSE 错误形状。
+ *
+ * 用 `error.code` 而不是自定义字段：Agent 侧沿着 AI SDK 的错误链找 `code` / `type`，
+ * 这是唯一一种各家 provider adapter 都会保留的位置。值域与 agent 仓的 `GATEWAY_SIGNALS`
+ * 成对，一边加词而另一边不认，Agent 会当作"没说过"退回推断——两边必须同改。
+ */
+const SHUTDOWN_SIGNAL = "gateway_shutting_down";
 
 /** Agent 声明「这次调用属于哪个项目」。计费主体由本层查库解出，不接受 Agent 自报。 */
 const PROJECT_HEADER = "x-blue-whale-project-id";
@@ -166,8 +193,59 @@ function authorizedAgentService(header: string | undefined): boolean {
 @Public()
 @BypassTransform()
 @Controller("internal/agent-model")
-export class AgentModelGatewayController {
+export class AgentModelGatewayController implements BeforeApplicationShutdown {
   private readonly ownerCache = new OwnerCache();
+
+  /**
+   * 关门前对每一条在途流说一句话，而不是一声不吭地断掉（IKHCJ2）。
+   *
+   * 这一帧把「这次中断是部署造成的」从 Agent 的推断变成本层的陈述：它收到之后落
+   * `model_gateway_interrupted` / `break_reporter=gateway` / `break_segment_inferred=false`，
+   * 而不是把账记在模型头上。
+   *
+   * 写完就 `end()`，不等 Agent 回应——它也没法回应，SSE 是单向的。写失败一律吞掉：
+   * 对端可能已经先走了，而**停机流程不能被一条写不出去的流拖住**。
+   */
+  // **必须是 `beforeApplicationShutdown` 而不是 `onApplicationShutdown`。** Nest 的停机顺序是
+  // onModuleDestroy → beforeApplicationShutdown →（关掉 HTTP server、断开现有连接）→
+  // onApplicationShutdown。挂在最后那个上，轮到我们说话时 socket 已经没了——实测那一行
+  // 一次都没打出来，而 Agent 侧照旧只能推断。
+  beforeApplicationShutdown(): void {
+    if (inFlightStreams.size === 0) return;
+    const runIds: string[] = [];
+    for (const entry of inFlightStreams) {
+      runIds.push(entry.runId || "-");
+      try {
+        if (!entry.res.writableEnded) {
+          entry.res.write(
+            `data: ${JSON.stringify({
+              error: {
+                message: "模型网关正在停机，本次调用被中断",
+                type: SHUTDOWN_SIGNAL,
+                code: SHUTDOWN_SIGNAL,
+              },
+            })}\n\n`,
+          );
+          entry.res.end();
+        }
+      } catch {
+        // 对端先走了。这条流本来就没人收，没什么可补救的。
+      }
+    }
+    inFlightStreams.clear();
+    // 有了这一行，「这次部署打断了几轮对话」是可查的数字，而不是靠猜。此前后端对自己
+    // 害死了几条在途流毫无记录——四方各知道一小块，没有一方拼得出全貌。
+    logger.warn(
+      `[internal/agent-model] 停机中断在途模型流 ${runIds.length} 条: ${runIds.join(",")}`,
+      {
+        event: "model_gateway.shutdown_abort",
+        aborted_streams: runIds.length,
+        run_ids: runIds.join(","),
+        break_segment: "agent_to_gateway",
+        break_reporter: "gateway",
+      },
+    );
+  }
 
   constructor(private readonly project: ProjectService) {}
 
@@ -298,13 +376,34 @@ export class AgentModelGatewayController {
       const stream = Readable.fromWeb(
         upstream.body as import("node:stream/web").ReadableStream,
       );
+      // 登记进在途簿：停机时要对它说一句话再走（IKHCJ2）。与下面三个收尾事件成对，
+      // 任何一条路径结束都注销——登记簿漏一条，停机时就会往一条已经结束的流上写。
+      const inFlight = {
+        res,
+        runId: runId ?? "",
+        traceId: headers[TRACE_ID_HEADER] ?? "",
+      };
+      inFlightStreams.add(inFlight);
+      const unregister = (): void => {
+        inFlightStreams.delete(inFlight);
+      };
       // 每来一段字节就把闸往后推。`data` 与 `pipe` 同一个同步块内挂上，中间不可能漏掉一段
       // ——流的事件是异步发的。
       stream.on("data", () => idle.touch());
-      stream.on("end", () => idle.clear());
-      stream.on("close", () => idle.clear());
+      stream.on("end", () => {
+        idle.clear();
+        unregister();
+      });
+      stream.on("close", () => {
+        idle.clear();
+        unregister();
+      });
+      // 客户端（Agent）自己走了也要注销：否则这条流会一直挂在簿上，直到停机时被当成
+      // 「我们害死的」记一笔——那是冤枉自己，而错误的归属和没有归属一样坏。
+      res.on("close", unregister);
       stream.on("error", (error) => {
         idle.clear();
+        unregister();
         logger.error(
           `[internal/agent-model] upstream stream error: ${idle.expired ? `空闲超过 ${idleSeconds()} 秒` : error instanceof Error ? error.message : String(error)}`,
         );
