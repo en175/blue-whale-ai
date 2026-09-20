@@ -1180,3 +1180,72 @@ describe('IKFR4Y 视频参考持续选取与首尾帧连续替换', () => {
     expect(edgePairs().some((p: string) => p.endsWith('->d1'))).toBe(false);
   });
 });
+
+/* IKHBO 能力行驱动的视频/音频参考门控：此前画布提交防线走 supportsVideoReferenceModel 的
+   seedance-2 前缀特判（只认 'seedance-2' 与 ^doubao-seedance-2-0），与能力行恰好相反——
+   2.5（video_reference=true）被误拦、2.0（false）被误放。用例特意用真实 2.5/2.0 模型 id，
+   不再用命中前缀捷径的 'seedance-2'，否则回归照不到。 */
+describe('IKHBO 视频/音频参考门控读能力行（不按模型名前缀）', () => {
+  // 前序用例可能把保存 mock 成永久失败（保存失败链路，file 级 afterEach 只清调用不还原实现），
+  // 本组验证的是能力行门控，恢复保存成功以避免被保存链路挡在提交之前
+  beforeEach(() => {
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+  });
+
+  /** 把草稿卡绑定到指定模型 id（模型列表由用例注入） */
+  function bindDraftModel(modelId: string) {
+    const doc = canvasDocMock.current.doc as { nodes: Array<{ id: string; data: Record<string, unknown> }> };
+    doc.nodes.find((n) => n.id === 'd1')!.data.draftModelId = modelId;
+  }
+
+  it('Seedance 2.5（video_reference=true）携带视频参考可提交，references 按连线提交', async () => {
+    const model25 = videoModel('doubao-seedance-2-5-260628', 'Seedance 2.5', {
+      video_reference: true,
+      audio_reference: true,
+      video_reference_max: 3,
+      audio_reference_max: 3,
+    });
+    apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [model25]);
+    bindDraftModel('doubao-seedance-2-5-260628');
+    await renderPage();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(container.textContent).toContain('Seedance 2.5'));
+
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['参考视频']));
+    await pressEscape();
+    await typePrompt('参考视频再生成');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.parameters.model_id).toBe('doubao-seedance-2-5-260628');
+    expect(payload.references).toEqual([{ asset_id: 'a3', type: 'video', role: 'reference' }]);
+  });
+
+  it('Seedance 2.0（video_reference=false）携带视频参考被拒绝且不发起任务', async () => {
+    const model20 = videoModel('doubao-seedance-2-0-260128', 'Seedance 2.0', {
+      video_reference: false,
+      audio_reference: false,
+      video_reference_max: 3,
+      audio_reference_max: 3,
+    });
+    apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [model20]);
+    bindDraftModel('doubao-seedance-2-0-260128');
+    await renderPage();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(container.textContent).toContain('Seedance 2.0'));
+
+    // 连线阶段不按能力位拦截（保留用户输入），拒绝出现在发送侧
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['参考视频']));
+    await pressEscape();
+    await typePrompt('参考视频再生成');
+
+    await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持视频素材参考'));
+    expect(sendButton().disabled).toBe(true);
+    await act(async () => { sendButton().click(); });
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+});
