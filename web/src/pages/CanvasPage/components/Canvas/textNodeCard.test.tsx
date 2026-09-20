@@ -42,11 +42,11 @@ function editor() {
 }
 
 /** 节点内可见操作（按钮文案或 title），用于断言操作条与格式工具栏的并存关系。
- *  IKGYYE 钉屏幕迁移后两条工具栏 portal 到 .react-flow 根（节点卡 DOM 外），查询范围并含钉屏幕层 */
+ *  IKGYYE 钉屏幕迁移后两条工具栏 portal 出节点卡；!782 起宿主改为 document.body */
 function actions() {
   const buttons = [
     ...node().querySelectorAll('button'),
-    ...container.querySelectorAll<HTMLElement>('[data-gen-panel-territory] button'),
+    ...document.querySelectorAll<HTMLElement>('[data-gen-panel-territory] button'),
   ];
   return buttons.map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
@@ -192,8 +192,8 @@ describe('Canvas 文本节点卡片', () => {
   it('选中时“添加到对话”可达并触发原有回调', async () => {
     const callbacks = await renderText({ selected: true });
     expect(actions()).toContain('添加到对话');
-    // IKGYYE：操作条按钮在钉屏幕层（container 内、节点卡 DOM 外）
-    const button = [...container.querySelectorAll('button')]
+    // IKGYYE / !782：操作条按钮 portal 在 document.body（节点卡 DOM 外）
+    const button = [...document.querySelectorAll('button')]
       .find((b) => (b.textContent ?? '').includes('添加到对话'))!;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(callbacks.onAddToChat).toHaveBeenCalledWith(TEXT_ID);
