@@ -1951,6 +1951,7 @@ export default function CanvasPage() {
     data: Record<string, unknown>,
     snapshotMaterialId?: string | null,
     snapshotMaterialStatus?: string | null,
+    fromHistory = false,
   ): Record<string, unknown> => {
     if (data.mediaType === 'audio') return {};
     const verifiedId = resolveCharacterLibraryMaterialId({
@@ -1963,12 +1964,21 @@ export default function CanvasPage() {
     } else if (data.materialId) {
       patch.materialId = undefined;
     }
-    if (snapshotMaterialStatus !== undefined) {
-      const passed = snapshotMaterialStatus === 'Active';
-      const failed = snapshotMaterialStatus === 'Failed';
-      if (data.compliancePassed !== passed) patch.compliancePassed = passed;
-      if (data.complianceFailed !== failed) patch.complianceFailed = failed;
+    const passed = snapshotMaterialStatus === 'Active';
+    if (!fromHistory) {
+      // 会话内字典刷新：只把已是 Active 的镜像对齐为已校验，不打断进行中的校验
+      if (passed) {
+        if (data.complianceBusy) patch.complianceBusy = undefined;
+        if (data.compliancePassed !== true) patch.compliancePassed = true;
+        if (data.complianceFailed) patch.complianceFailed = undefined;
+      }
+      return patch;
     }
+    // 二次进入历史画布：合规 UI 只从 data-assets.material_status 派生。
+    // Active = 已校验；Processing / Failed / null = 未校验（不恢复校验中 loading）
+    if (data.complianceBusy) patch.complianceBusy = undefined;
+    if (data.compliancePassed !== passed) patch.compliancePassed = passed;
+    if (data.complianceFailed) patch.complianceFailed = undefined;
     return patch;
   };
 
@@ -1976,7 +1986,7 @@ export default function CanvasPage() {
    *  - 命中 → src 替换为 access_url；material_status === Active 视为已通过合规校验
    *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
    *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
-  const resolveNodeAssets = (node: Node): Node => {
+  const resolveNodeAssets = (node: Node, fromHistory = false): Node => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (node.type === 'mediaNode') {
       if (data.genStatus && readAssetId(data) === undefined) return node;
@@ -1988,6 +1998,7 @@ export default function CanvasPage() {
         if (src && !src.startsWith('blob:')) {
           const patch: Record<string, unknown> = {};
           if (data.assetMissing) patch.assetMissing = undefined;
+          if (fromHistory && data.complianceBusy) patch.complianceBusy = undefined;
           return Object.keys(patch).length === 0 ? node : { ...node, data: { ...data, ...patch } };
         }
       }
@@ -1998,10 +2009,14 @@ export default function CanvasPage() {
         const fill: Record<string, number> = {};
         if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
         if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
-        const verified = characterLibraryVerifiedPatch(data, asset.material_id, asset.material_status ?? null);
+        const verified = characterLibraryVerifiedPatch(data, asset.material_id, asset.material_status ?? null, fromHistory);
         return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
           ? node
           : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
+      }
+      if (fromHistory) {
+        if (data.assetMissing && !data.complianceBusy) return node;
+        return { ...node, data: { ...data, assetMissing: true, complianceBusy: undefined } };
       }
       return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
     }
@@ -2072,7 +2087,7 @@ export default function CanvasPage() {
     if (!docChanged) {
       // 仅资产字典变化：刷新节点 URL / 缺失标记，保留当前编辑与保存接口已确认的 version
       const refresh = (prev: Node[]) => {
-        const next = prev.map(resolveNodeAssets);
+        const next = prev.map((node) => resolveNodeAssets(node));
         return next.some((node, index) => node !== prev[index]) ? next : prev;
       };
       setMediaNodes(refresh);
@@ -2088,14 +2103,14 @@ export default function CanvasPage() {
     const { groups: hydratedGroups, contentNodes } = parseGroupsFromNodes(doc.nodes);
     contentNodes.forEach((node) => {
       if (node.type === 'textNode') t.push(attachCallbacks(node));
-      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node)));
+      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node, true)));
       else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node)));
       else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node)));
       else {
         // 后端节点类型（reference 参考卡 / text 等）：映射为本地节点后归类（映射内部已按资产字典解析/标缺失）
         const mapped = mapBackendNode(node);
         if (mapped) {
-          const attached = attachCallbacks(resolveNodeAssets(mapped));
+          const attached = attachCallbacks(resolveNodeAssets(mapped, true));
           if (mapped.type === 'assetNode') a.push(attached);
           else if (mapped.type === 'textNode') t.push(attached);
           else m.push(attached);

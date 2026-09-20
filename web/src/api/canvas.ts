@@ -175,6 +175,8 @@ export function serializeNodes(nodes: Node[]): string {
       if (typeof v === 'function') return;
       // 派生标记不持久化：重新进画布时按 snapshot 资产字典重新计算
       if (k === 'assetMissing') return;
+      // 校验中 loading 不落盘：二次进入按 snapshot assets.material_status 重算，避免卡在校验中
+      if (k === 'complianceBusy') return;
       // 运行期上下文不持久化：水合时由 CanvasPage 按当前项目重新注入
       if (k === 'projectId') return;
       if ((k === 'images' || k === 'initialRefs') && Array.isArray(v)) {
