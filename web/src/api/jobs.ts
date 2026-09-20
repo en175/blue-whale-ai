@@ -10,6 +10,7 @@ import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
+import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -390,6 +391,42 @@ export function createVideoEnhancement(
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-scene-splits 请求体（四键，业务键名与
+ *  backend/libs/contracts/video-scene-split.ts 契约恒等；IKH8BO 创建入口 strict 复核：
+ *  source_asset_id 正整数字符串、target_node_id 非空（发送前本地建的占位卡节点 id）、
+ *  granularity ∈ fine/standard/coarse；client_token 为幂等基础设施键（≤64 可打印 ASCII），
+ *  每次发送、每次失败重试都新生成——同 token 只会重放旧任务，禁复用）。 */
+export interface CreateVideoSceneSplitPayload {
+  source_asset_id: string;
+  target_node_id: string;
+  granularity: VideoSceneSplitGranularity;
+  client_token: string;
+}
+
+/** 创建视频场景切分任务返回（IKH8BR）；同家族：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoSceneSplitCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频场景切分任务（IKH8BR）；免费口径同 image_enhance / media_extract——不带幂等头
+ *  （幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡由前端在发送前
+ *  本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id 轮询至终态
+ *  （completed 分支的段卡扇出归 IKH8C1）。 */
+export function createVideoSceneSplit(
+  projectId: string,
+  payload: CreateVideoSceneSplitPayload,
+): Promise<VideoSceneSplitCreatedData> {
+  return apiRequest<VideoSceneSplitCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-scene-splits`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

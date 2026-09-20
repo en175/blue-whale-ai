@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SCENE_SPLIT_DEFAULT_GRANULARITY,
+  SCENE_SPLIT_EDGE_ORIGIN,
   SCENE_SPLIT_ENTRY_HINT,
+  SCENE_SPLIT_GRANULARITIES,
+  SCENE_SPLIT_GRANULARITY_LABELS,
   SCENE_SPLIT_MAX_DURATION_SECONDS,
   SCENE_SPLIT_MISSING_ASSET_REASON,
   SCENE_SPLIT_OVER_DURATION_REASON,
+  buildSceneSplitPlaceholderNode,
+  sceneSplitDisplayName,
+  sceneSplitErrorText,
   sceneSplitGateReason,
 } from './sceneSplit';
 
@@ -54,5 +61,86 @@ describe('sceneSplitGateReason（场景切分门槛预检，IKH8BJ）', () => {
   it('入口效果边界 hint 常量（可用态悬停文案：切分为片段卡）', () => {
     expect(SCENE_SPLIT_ENTRY_HINT).toContain('场景');
     expect(SCENE_SPLIT_ENTRY_HINT).toContain('片段');
+  });
+});
+
+describe('切分粒度三档（IKH8BR，契约同源）', () => {
+  it('三档枚举 = 契约 fine/standard/coarse，默认档 standard（官方推荐值 10 档）', () => {
+    expect(SCENE_SPLIT_GRANULARITIES).toEqual(['fine', 'standard', 'coarse']);
+    expect(SCENE_SPLIT_DEFAULT_GRANULARITY).toBe('standard');
+  });
+
+  it('三档中文标签映射（分段控件与占位卡标注共用，仅 UI 不进任务参数）', () => {
+    expect(SCENE_SPLIT_GRANULARITY_LABELS).toEqual({ fine: '细', standard: '标准', coarse: '粗' });
+    expect(sceneSplitDisplayName('standard')).toBe('场景切分 · 标准');
+    expect(sceneSplitDisplayName('fine')).toBe('场景切分 · 细');
+    expect(sceneSplitDisplayName('coarse')).toBe('场景切分 · 粗');
+  });
+});
+
+describe('buildSceneSplitPlaceholderNode（IKH8BR 发送前本地建占位卡）', () => {
+  const source = {
+    position: { x: 400, y: 0 },
+    data: { mediaType: 'video', width: 1920, height: 1080 },
+  };
+
+  it('node id 用调用方传入的本地 id（target_node_id 先于请求存在）、落位源卡右侧让开一格', () => {
+    const node = buildSceneSplitPlaceholderNode({
+      nodeId: 'scene-split-1',
+      granularity: 'standard',
+      sourceAssetId: '5',
+      source,
+    });
+    expect(node.id).toBe('scene-split-1');
+    expect(node.type).toBe('mediaNode');
+    // 16:9 内容区宽 498（280×16/9）→ x = 400 + 498 + 60
+    expect(node.position).toEqual({ x: 958, y: 0 });
+  });
+
+  it('生成中骨架 + 标题「场景切分」标注粒度档 + video 媒体类型（段卡家族形态）', () => {
+    const node = buildSceneSplitPlaceholderNode({
+      nodeId: 'scene-split-1',
+      granularity: 'fine',
+      sourceAssetId: '5',
+      source,
+    });
+    expect(node.data.genStatus).toBe('generating');
+    expect(node.data.progress).toBe(0);
+    expect(node.data.mediaType).toBe('video');
+    expect(node.data.fileName).toBe('场景切分 · 细');
+    expect(node.data.src).toBe('');
+  });
+
+  it('sceneSplit 身份冻结源素材/占位卡 id/粒度（失败重试原参数原粒度；client_token 不冻结）', () => {
+    const node = buildSceneSplitPlaceholderNode({
+      nodeId: 'scene-split-9',
+      granularity: 'coarse',
+      sourceAssetId: '12',
+      source,
+    });
+    expect(node.data.sceneSplit).toEqual({
+      sourceAssetId: '12',
+      lastInput: {
+        source_asset_id: '12',
+        target_node_id: 'scene-split-9',
+        granularity: 'coarse',
+      },
+    });
+  });
+
+  it('来源边 origin 常量（参考推导跳过口径）', () => {
+    expect(SCENE_SPLIT_EDGE_ORIGIN).toBe('scene-split');
+  });
+});
+
+describe('sceneSplitErrorText（IKH8BR 任务失败文案）', () => {
+  it('优先服务端 msg（1046 契约文案经顶层 msg 透传）', () => {
+    expect(sceneSplitErrorText({ code: 1046, msg: '场景切分失败，请重试' })).toBe('场景切分失败，请重试');
+    expect(sceneSplitErrorText({ msg: '视频超过 2 小时' })).toBe('视频超过 2 小时');
+  });
+
+  it('msg 缺失时本地兜底同文案', () => {
+    expect(sceneSplitErrorText(null)).toBe('场景切分失败，请重试');
+    expect(sceneSplitErrorText({ code: 1046 })).toBe('场景切分失败，请重试');
   });
 });

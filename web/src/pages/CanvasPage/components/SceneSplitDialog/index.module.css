@@ -1,0 +1,140 @@
+/* ============================================
+ * SceneSplitDialog 场景切分会话单条（IKH8BR）
+ * 跟随源视频卡下方浮出的唯一一条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
+ * 24px 胶囊圆角（对齐去字幕家族形态，无令牌档由
+ * overlayContainer.test.ts 白名单锁 24px 字面量）；条内控件全走令牌，
+ * 不复制体系外硬编码字面量写法。
+ * ============================================ */
+
+.toolBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.toolBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- 会话标题（工具身份：场景切分，纯文字无图标） ---- */
+.barTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* ---- 粒度三档分段控件（细 / 标准 / 粗）：胶囊组内分段，激活档高亮 ---- */
+.segmentGroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-hover);
+}
+
+.segmentBtn {
+  height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.segmentBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.segmentBtnActive {
+  background-color: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.segmentBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- 源视频卡下方单条 ---- */
+.sendBar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--spacing-lg);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: 24px;
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+/* 跟随锚定（IKH25A 中心点锚，inline left/top 生效）：解除默认 bottom 定位避免 top/bottom
+   双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态 translateX(-50%)
+   以锚点（源卡中心 x）真居中。口径同去字幕单条 .sendBarFollow */
+.sendBarFollow {
+  bottom: auto;
+  left: 0;
+}
+
+/* ---- ⚡0 积分徽标（「本期免费」语义，title 保留）：沿用绿色胶囊基调 ---- */
+.freeBadge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-success);
+  background-color: rgba(64, 192, 87, 0.1);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+
+/* ---- 发送钮：Dock 主发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
+ *    VideoSubtitleEraseDialog .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
+.sendBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-disabled);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: var(--color-border-hover);
+  filter: brightness(1.2);
+}

@@ -64,6 +64,14 @@ import {
 } from './mediaExtract';
 import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './audioVideoSplit';
 import {
+  SCENE_SPLIT_DEFAULT_GRANULARITY,
+  SCENE_SPLIT_EDGE_ORIGIN,
+  buildSceneSplitPlaceholderNode,
+  sceneSplitErrorText,
+  type SceneSplitGranularity,
+  type SceneSplitIdentity,
+} from './sceneSplit';
+import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
   imageEnhanceDraftPosition,
@@ -147,6 +155,7 @@ import VideoEnhanceDialog from './components/VideoEnhanceDialog';
 import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
 import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
+import SceneSplitDialog from './components/SceneSplitDialog';
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
@@ -234,6 +243,8 @@ import {
   createVideoSubtitleErase,
   createVideoEnhancement,
   createMediaExtraction,
+  createVideoSceneSplit,
+  newIdempotencyKey,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -562,6 +573,20 @@ export default function CanvasPage() {
   const [audioVideoSplitFormat, setAudioVideoSplitFormat] = useState<AudioVideoSplitFormat>(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
   /** 音视频分离发送中（创建请求飞行期防重复提交，口径同 subtitleEraseSubmitting） */
   const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
+  /** 场景切分编辑会话（IKH8BR，第七工具会话）：处于场景切分编辑的源视频卡 node id，
+   *  null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
+   *  卡下方浮出单条（X/标题/粒度三档/⚡0/发送，SceneSplitDialog）；发送先退会话再建
+   *  任务占位卡；未发送退出（X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
+  const [sceneSplitTargetNodeId, setSceneSplitTargetNodeId] = useState<string | null>(null);
+  /** 切分粒度（IKH8BR，会话期交互态）：三档分段控件选择，standard 默认。粒度不跨会话
+   *  记忆——进入编辑态重置、退出复位（exitSceneSplitEditing）；发送时随任务冻结进占位卡
+   *  身份（sceneSplit.lastInput），失败重试按冻结粒度原样重发。 */
+  const [sceneSplitGranularity, setSceneSplitGranularity] = useState<SceneSplitGranularity>(SCENE_SPLIT_DEFAULT_GRANULARITY);
+  /** 场景切分发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
+  const [sceneSplitSubmitting, setSceneSplitSubmitting] = useState(false);
+  /** 发送同步锁（IKH8BR）：发送先退会话（条随即卸载），submitting 状态防不住同一事件
+   *  循环内的双击——ref 锁按 cropSubmittingRef 先例兜底（连点只发一次请求）。 */
+  const sceneSplitSendingRef = useRef(false);
   /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
    *  创建失败复位（面板保留可调档重发） */
   const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
@@ -1348,6 +1373,25 @@ export default function CanvasPage() {
     const screenTop = audioVideoSplitSourceNode.position.y * zoom + liveViewport.y;
     const center = Math.round(screenLeft + (box.width * zoom) / 2);
     // 估半宽 = 估宽 260 的一半，仅用于视口钳制，不参与居中（对齐 IKH25A 中心点锚口径）
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
+  /** 场景切分会话跟随锚（IKH8BR，口径同去字幕/分离）：源视频卡下方单条（SceneSplitDialog）。
+   *  IKH25A 中心点锚——条壳自身 translateX(-50%) 真居中，left 传源卡中心 x，
+   *  估半宽 130 仅用于视口钳制；top 同家族节点下方 + 16 间距。 */
+  const sceneSplitSourceNode = sceneSplitTargetNodeId
+    ? mediaNodes.find((n) => n.id === sceneSplitTargetNodeId) ?? null
+    : null;
+  const sceneSplitSendBarAnchor = (() => {
+    if (!sceneSplitSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(sceneSplitSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = sceneSplitSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = sceneSplitSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
     const halfWidth = 130;
     return {
       left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
@@ -3311,6 +3355,7 @@ export default function CanvasPage() {
       outpaint: outpaintNodeId,
       subtitleErase: subtitleEraseTargetNodeId,
       audioVideoSplit: audioVideoSplitTargetNodeId,
+      sceneSplit: sceneSplitTargetNodeId,
     },
     exits: {
       erase: exitEraseEditing,
@@ -3319,6 +3364,7 @@ export default function CanvasPage() {
       outpaint: endOutpaintSession,
       subtitleErase: exitSubtitleEraseEditing,
       audioVideoSplit: exitAudioVideoSplitEditing,
+      sceneSplit: exitSceneSplitEditing,
     },
     dismissGenPanels: dismissAllGenPanels,
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
@@ -3327,12 +3373,13 @@ export default function CanvasPage() {
   const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
     enterToolSession(kind, buildToolSessionDeps(), init);
 
-  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
-   *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
-   *  见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
+  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离/
+   *  场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话
+   *  再放行，见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
-    || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null;
+    || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null
+    || sceneSplitTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
    *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
@@ -3531,7 +3578,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, sceneSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -3893,6 +3940,15 @@ export default function CanvasPage() {
     // exitAudioVideoSplitEditing 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioVideoSplitTargetNodeId, mediaNodes]);
+
+  /** 场景切分编辑会话绑定清理（IKH8BR）：目标源视频卡被删除时退出会话，防浮条悬挂
+   *  （口径同去字幕/分离绑定清理） */
+  useEffect(() => {
+    if (!sceneSplitTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === sceneSplitTargetNodeId)) exitSceneSplitEditing();
+    // exitSceneSplitEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneSplitTargetNodeId, mediaNodes]);
 
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
@@ -5455,6 +5511,27 @@ export default function CanvasPage() {
       stopJobPolling(nodeId, jobTimersRef.current);
       setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
     };
+    if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
+      // 场景切分占位卡分流（IKH8BR，镜像 mediaExtract 分流）：按任务类型收敛终态。
+      if (detail.status === 'succeeded') {
+        // TODO(IKH8C1)：完成扇出——移除本占位卡、按 detail.result.segments 逐段在源卡右侧
+        // 网格建普通视频段卡（「第 N 段 起止时间」）并各拉来源连线（1 段不特判）。
+        // 本票（IKH8BR）不做扇出：停轮询收敛即可，占位卡暂留（行为断言由 IKH8C1 补）。
+        stopJobPolling(nodeId, jobTimersRef.current);
+        patchMediaNode(nodeId, { progress: 100 });
+        return 'terminal';
+      }
+      if (detail.status === 'failed') {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        patchMediaNode(nodeId, {
+          genStatus: 'failed',
+          // 失败文案走场景切分家族映射（1046 兜底「场景切分失败，请重试」）
+          errorText: sceneSplitErrorText(detail.error),
+        });
+        return 'terminal';
+      }
+      // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
+    }
     if (isMediaExtractNodeId(nodeId)) {
       const extractPatch = mediaExtractTerminalPatch(
         detail,
@@ -6656,6 +6733,38 @@ export default function CanvasPage() {
       startImageOutpaintJob(nodeId, outpaintIdentity.lastParams);
       return;
     }
+    const sceneSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).sceneSplit as
+      | SceneSplitIdentity
+      | undefined;
+    if (sceneSplitIdentity?.lastInput) {
+      // 场景切分卡分流（IKH8BR，镜像去字幕/分离）：契约无 retry 端点，重试 = 冻结业务参数
+      // 原样重发创建接口（源素材/占位卡绑定/粒度随 lastInput 冻结）；client_token 每次重试
+      // 都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法场景切分');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() })
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
       | MediaExtractIdentity
       | undefined;
@@ -7371,6 +7480,15 @@ export default function CanvasPage() {
     setAudioVideoSplitSubmitting(false);
   };
 
+  /** 退出场景切分编辑会话（IKH8BR 四退出共用）：会话参数（切分粒度）与发送中复位——
+   *  粒度不跨会话记忆（每次进入重置 standard），未发送退出无卡无边无任务；播放控制随
+   *  splitEditing 标记移除自动恢复（MediaNode 承担）。 */
+  const exitSceneSplitEditing = () => {
+    setSceneSplitTargetNodeId(null);
+    setSceneSplitGranularity(SCENE_SPLIT_DEFAULT_GRANULARITY);
+    setSceneSplitSubmitting(false);
+  };
+
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
    *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
   const exitCropMode = () => {
@@ -7457,11 +7575,19 @@ export default function CanvasPage() {
     });
   };
 
-  /** 场景切分（IKH8BJ 入口占位）：置灰门槛已在工具条按钮置灰层完成（sceneSplitGateReason），
-   *  此处只接通入口事件派发。TODO(IKH8BR)：编辑态本体（源卡锁定、切分粒度三档、积分与
-   *  发送、场景段卡扇出）由后续票交付，届时在此进入场景切分编辑会话
-   *  （工具会话口径对齐 handleNodeAudioVideoSplit 的 runToolSessionEntry 先例）。 */
-  const handleNodeSceneSplit = (_id: string) => {};
+  /** 场景切分（IKH8BJ 入口 / IKH8BR 编辑会话）：把目标视频卡置为场景切分编辑会话并重置
+   *  粒度 standard（不跨会话记忆）。置灰门槛（资产缺失/超 2 小时）已在工具条按钮置灰层
+   *  完成（sceneSplitGateReason），此处只管进入；互斥退出与生成面板关闭经
+   *  toolSessionCoordinator（第七会话，口径对齐 handleNodeAudioVideoSplit）、不动视角；
+   *  视频随会话态注入在当前帧暂停并锁定播放控制（MediaNode splitEditing 承担）。 */
+  const handleNodeSceneSplit = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    runToolSessionEntry('sceneSplit', () => {
+      setSceneSplitGranularity(SCENE_SPLIT_DEFAULT_GRANULARITY);
+      setSceneSplitTargetNodeId(id);
+    });
+  };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
@@ -7689,6 +7815,101 @@ export default function CanvasPage() {
       source_asset_id: String(sourceAssetId),
       output_format: audioVideoSplitFormat,
     }).finally(() => setAudioVideoSplitSubmitting(false));
+    return true;
+  };
+
+  /* ===== 场景切分发送链路（IKH8BR，镜像去字幕/HD 家族）：先退会话 → 本地建任务占位卡
+     （target_node_id 取该卡）→ POST video-scene-splits → job_id 回写占位卡 → 轮询终态 ===== */
+
+  /** 场景切分任务发送核心：按所选粒度 POST video-scene-splits（client_token 每次新生成
+   *  ——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
+   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——
+   *  先建卡后发请求，IKH8BO 契约；展示名标注粒度档、生成中骨架、sceneSplit 身份
+   *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
+   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
+   *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
+   *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
+   *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
+   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
+   *  无积分预估、不走余额拦截门。 */
+  const startSceneSplitJob = async (
+    sourceNodeId: string,
+    payload: { source_asset_id: string; target_node_id: string; granularity: SceneSplitGranularity },
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法场景切分');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法场景切分');
+      return false;
+    }
+    // 发送即退会话（BO 定死顺序：先退再建卡——占位卡节点 id 要作为 target_node_id 发送）
+    exitSceneSplitEditing();
+    const placeholderId = payload.target_node_id;
+    const placeholder = attachCallbacks(
+      buildSceneSplitPlaceholderNode({
+        nodeId: placeholderId,
+        granularity: payload.granularity,
+        sourceAssetId: payload.source_asset_id,
+        source: node,
+      }) as Node,
+    );
+    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
+    // 登记：占位卡身份以 sceneSplit 身份标记为准，失败由卡上重试收敛）
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
+    try {
+      const created = await createVideoSceneSplit(currentId, {
+        ...payload,
+        client_token: newIdempotencyKey(),
+      });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
+      stopJobPolling(placeholderId, jobTimersRef.current);
+      patchMediaNode(placeholderId, { jobId: created.job_id });
+      pollJob(placeholderId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
+      await flushCanvasSave(currentId).catch(() => {});
+      return true;
+    } catch (e: unknown) {
+      // 创建失败：占位卡转失败态（卡上重试原参数原粒度重发，client_token 重试时另生成）
+      patchMediaNode(placeholderId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
+      });
+      showToast('error', isApiError(e) ? e.message : '场景切分任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** 场景切分发送（单条发送钮）：源素材身份 + 当前所选粒度 → 先退会话再建占位卡发任务。
+   *  请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛由
+   *  startSceneSplitJob 承担。 */
+  const handleSceneSplitSend = (): boolean => {
+    const nodeId = sceneSplitTargetNodeId;
+    if (!nodeId || sceneSplitSubmitting || sceneSplitSendingRef.current) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '当前视频尚未关联资产，无法场景切分');
+      return false;
+    }
+    sceneSplitSendingRef.current = true;
+    setSceneSplitSubmitting(true);
+    void startSceneSplitJob(nodeId, {
+      source_asset_id: String(sourceAssetId),
+      target_node_id: newNodeId('scene-split'),
+      granularity: sceneSplitGranularity,
+    }).finally(() => {
+      sceneSplitSendingRef.current = false;
+      setSceneSplitSubmitting(false);
+    });
     return true;
   };
 
@@ -9433,6 +9654,7 @@ export default function CanvasPage() {
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showEnhanceDialog || showVideoEnhanceDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
+              || sceneSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     showEnhanceDialog
@@ -9442,7 +9664,8 @@ export default function CanvasPage() {
                     || n.id === cutoutNodeId
                     || n.id === outpaintNodeId
                     || n.id === subtitleEraseTargetNodeId
-                    || n.id === audioVideoSplitTargetNodeId;
+                    || n.id === audioVideoSplitTargetNodeId
+                    || n.id === sceneSplitTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
                     && n.id !== subtitleEraseTargetNodeId
@@ -9473,6 +9696,9 @@ export default function CanvasPage() {
                     }
                   }
                   if (n.id === audioVideoSplitTargetNodeId) data.splitEditing = true;
+                  // 场景切分会话（IKH8BR）：源视频卡同款停帧 + 播放控制锁定（复用 splitEditing
+                  // 标记，MediaNode 承担）；浮条由本页 SceneSplitDialog 承担
+                  if (n.id === sceneSplitTargetNodeId) data.splitEditing = true;
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
                   if (hideToolbar) data.soloToolbarHidden = true;
@@ -10042,6 +10268,22 @@ export default function CanvasPage() {
             submitting={audioVideoSplitSubmitting}
             toolbarAnchor={audioVideoSplitToolbarAnchor}
             sendBarAnchor={audioVideoSplitSendBarAnchor}
+          />
+        )}
+
+        {/* 场景切分编辑态单条（IKH8BR）：源卡下方唯一一条 = X + 标题 + 粒度三档分段
+            （细/标准/粗，standard 默认）+ ⚡0 徽标 + 发送钮（对齐去字幕单条家族形态）；
+            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
+            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送先退会话再建
+            任务占位卡（粒度随任务冻结，飞行期防重复提交） */}
+        {sceneSplitTargetNodeId && (
+          <SceneSplitDialog
+            onClose={exitSceneSplitEditing}
+            granularity={sceneSplitGranularity}
+            onGranularityChange={setSceneSplitGranularity}
+            onSend={handleSceneSplitSend}
+            submitting={sceneSplitSubmitting}
+            sendBarAnchor={sceneSplitSendBarAnchor}
           />
         )}
 
