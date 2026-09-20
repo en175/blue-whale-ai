@@ -285,21 +285,21 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   // 未知尺寸节点：先 280×280 占位，浏览器实测回填后按真实 16:9 更新
   await expectBox(page, 'n-unknown', 497.78, 280, measurements);
   await expectBox(page, 'n-video', 497.78, 280, measurements);
-  // 音频：内容区恒 280×280 方形，时长已知/未知都不变形（IKDIDR）
-  await expectBox(page, 'n-audio', 280, 280, measurements);
-  await expectBox(page, 'n-audio-nodur', 280, 280, measurements);
+  // 音频：内容区恒 480×240 横矩形，时长已知/未知都不变形（IKDIDR→IKH8PU）
+  await expectBox(page, 'n-audio', 480, 240, measurements);
+  await expectBox(page, 'n-audio-nodur', 480, 240, measurements);
 
   // 生成中按目标比例占位；轮询转失败后保形、真实错误文案与「重试」可达
   await expect(node(page, 'n-gen')).toContainText('账户余额不足，请充值后重试');
   await expect(node(page, 'n-gen').getByRole('button', { name: '重试' })).toBeVisible();
   await expectBox(page, 'n-gen', 497.78, 280, measurements);
 
-  // 音频生成中→失败：真实轮询转失败后仍方形，真实错误文案与「重试」可达；素材缺失同样方形
+  // 音频生成中→失败：真实轮询转失败后仍横矩形，真实错误文案与「重试」可达；素材缺失同样横矩形
   await expect(node(page, 'n-audio-gen')).toContainText('音频生成失败：模型超时');
   await expect(node(page, 'n-audio-gen').getByRole('button', { name: '重试' })).toBeVisible();
-  await expectBox(page, 'n-audio-gen', 280, 280, measurements);
+  await expectBox(page, 'n-audio-gen', 480, 240, measurements);
   await expect(node(page, 'n-audio-missing')).toContainText('素材已被删除');
-  await expectBox(page, 'n-audio-missing', 280, 280, measurements);
+  await expectBox(page, 'n-audio-missing', 480, 240, measurements);
 
   // 外部标题：真实分辨率/时长；文件大小不出现；目标比例不伪装为分辨率
   await expect(title(page, 'n-landscape')).toContainText('1600×900');
@@ -653,8 +653,8 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   expect(await nodeTranslate('n-square')).toContain(`translate(${Number(dragX)}px, ${Number(dragY)}px)`);
   expect(await nodeTranslate('n-audio')).toContain(`translate(${Number(audioX)}px, ${Number(audioY)}px)`);
   const audioAfterReload = (await card(page, 'n-audio').boundingBox())!;
-  expect(Math.abs(audioAfterReload.width - 280)).toBeLessThanOrEqual(1.5);
-  expect(Math.abs(audioAfterReload.height - 280)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(audioAfterReload.width - 480)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(audioAfterReload.height - 240)).toBeLessThanOrEqual(1.5);
 
   // 4) 删除：选中后 Delete 键移除节点，后续保存体不再含该节点
   await title(page, 'n-small').click();

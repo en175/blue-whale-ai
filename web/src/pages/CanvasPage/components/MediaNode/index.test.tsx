@@ -413,10 +413,10 @@ describe('MediaNode audio layout', () => {
     expect(meta.trim()).toBe('');
   });
 
-  it('keeps the content body square regardless of dims or target ratio', async () => {
+  it('keeps the content body landscape regardless of dims or target ratio (IKH8PU)', async () => {
     await renderNode('audio', { selected: false, data: { width: 1600, height: 900, targetRatio: '16:9' } });
-    expect(parseFloat(contentCard().style.width)).toBe(280);
-    expect(parseFloat(contentCard().style.height)).toBe(280);
+    expect(parseFloat(contentCard().style.width)).toBe(480);
+    expect(parseFloat(contentCard().style.height)).toBe(240);
   });
 
   it('keeps player controls reachable and out of the node drag path', async () => {
@@ -457,18 +457,29 @@ describe('MediaNode audio layout', () => {
     expect(audio!.currentTime).toBe(50);
   });
 
-  it('keeps the square body for generating, failed and missing audio', async () => {
+  it('keeps the landscape body for generating, failed and missing audio (IKH8PU)', async () => {
     await renderNode('audio', { selected: false, genStatus: 'generating', progress: 0 });
-    expect(parseFloat(contentCard().style.width)).toBe(280);
-    expect(parseFloat(contentCard().style.height)).toBe(280);
+    expect(parseFloat(contentCard().style.width)).toBe(480);
+    expect(parseFloat(contentCard().style.height)).toBe(240);
 
     await renderNode('audio', { selected: false, genStatus: 'failed', errorText: '视频没有音轨' });
     expect(mountNode.textContent).toContain('视频没有音轨');
-    expect(parseFloat(contentCard().style.height)).toBe(280);
+    expect(parseFloat(contentCard().style.height)).toBe(240);
 
     await renderNode('audio', { selected: false, data: { assetMissing: true } });
     expect(mountNode.textContent).toContain('素材已被删除');
-    expect(parseFloat(contentCard().style.height)).toBe(280);
+    expect(parseFloat(contentCard().style.height)).toBe(240);
+  });
+
+  it('renders the densified waveform structure inside the seek track (IKH8PU)', async () => {
+    await renderNode('audio', { selected: false, data: { toolMode: 'select' } });
+    // 横矩形成品卡：波形区为唯一主区，seek 轨道（nodrag nopan）内含
+    // 72 根竖条（条容器 + playhead 两个直接子 div）——只锁结构不锁像素。
+    const track = mountNode.querySelector<HTMLElement>('audio')!.parentElement!.querySelector<HTMLElement>('div.nodrag.nopan')!;
+    expect(track).toBeTruthy();
+    expect(track.querySelectorAll('span').length).toBe(72);
+    const directDivs = [...track.children].filter((el) => el.tagName === 'DIV');
+    expect(directDivs.length).toBe(2);
   });
 });
 
