@@ -720,4 +720,13 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 List.of(VideoEnhanceContract.SOURCE),
                 limit, maxAgeMinutes);
     }
+
+    /** 视频场景切分到点/孤儿（IKH8BP，父规格 IKH86V）：套 source 白名单（与 claim 同源，
+     *  单源 video_scene_split；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueVideoSceneSplitJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
+                List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
 }
