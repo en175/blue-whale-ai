@@ -118,6 +118,8 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
+  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
+  readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
