@@ -37,9 +37,9 @@ describe('audioRefSourceError 来源有效性校验', () => {
     expect(audioRefSourceError(mediaNode('u3', { src: '', mediaType: 'audio' }))).toBe('素材已被删除');
   });
 
-  it('图片/视频节点不能作为音频参考（音频面板不提供图片入口）', () => {
-    expect(audioRefSourceError(readyAudio('m1', 'a9', { mediaType: 'image', src: 'http://img/m1.png' }))).toBe('音频参考仅支持音频素材');
-    expect(audioRefSourceError(readyAudio('v1', 'a8', { mediaType: 'video', src: 'http://vid/v1.mp4' }))).toBe('音频参考仅支持音频素材');
+  it('图片节点可作为音频参考，视频节点不能', () => {
+    expect(audioRefSourceError(readyAudio('m1', 'a9', { mediaType: 'image', src: 'http://img/m1.png' }))).toBeNull();
+    expect(audioRefSourceError(readyAudio('v1', 'a8', { mediaType: 'video', src: 'http://vid/v1.mp4' }))).toBe('音频参考仅支持图片或音频素材');
   });
 
   it('无 assetId 的来源被拒绝（连线语义需要资产身份）', () => {
@@ -79,13 +79,13 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     { id: 'e6', source: 'missing-node', target: 'd1' },
   ] as Edge[];
 
-  it('按连线顺序推导目标的有效音频参考；非音频来源与失效来源进 invalid 并保留原因；悬空/其他目标连线跳过', () => {
+  it('按连线顺序推导目标的有效图片/音频参考；视频与失效来源进 invalid 并保留原因；悬空/其他目标连线跳过', () => {
     expect(audioMediaRefsOf('d1', edges, nodes).refs).toEqual([
       { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },
+      { nodeId: 'pic', url: 'http://img/pic.png', name: '音pic', assetId: 'a9', mediaType: 'image' },
       { nodeId: 'u1', url: 'http://aud/u1.mp3', name: '音u1', assetId: 'a1', mediaType: 'audio' },
     ]);
     const invalid = audioMediaRefsOf('d1', edges, nodes).invalid;
-    expect(invalid).toContainEqual({ nodeId: 'pic', name: '音pic', reason: '音频参考仅支持音频素材' });
     expect(invalid).toContainEqual({ nodeId: 'gone', name: '音gone', reason: '素材已被删除' });
   });
 
@@ -110,7 +110,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     const dangling = [{ id: 'x', type: 'mediaNode', position: { x: 0, y: 0 } }] as Node[];
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).refs).toEqual([]);
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).invalid)
-      .toEqual([{ nodeId: 'x', name: 'x', reason: '音频参考仅支持音频素材' }]);
+      .toEqual([{ nodeId: 'x', name: 'x', reason: '音频参考仅支持图片或音频素材' }]);
   });
 
   it('提取来源边（origin 标记）既不算参考、也不进 invalid（IKFS5W）', () => {
@@ -143,5 +143,13 @@ describe('checkAddAudioRef 统一添加校验', () => {
   it('合法添加返回 null（无重复且未达上限）', () => {
     expect(checkAddAudioRef('a3', [ref('u1', 'a1'), ref('u2', 'a2')])).toBeNull();
     expect(checkAddAudioRef(undefined, [])).toBeNull();
+    expect(checkAddAudioRef('img1', [], 0, 'image')).toBeNull();
+  });
+
+  it('图片与音频不可混用，图片上限 1 个', () => {
+    const imageRef = { nodeId: 'p1', url: 'http://img/p1.png', name: '图', assetId: 'img1', mediaType: 'image' as const };
+    expect(checkAddAudioRef('a1', [imageRef], 0, 'audio')).toBe('音频与图片参考不可混用');
+    expect(checkAddAudioRef('img2', [imageRef], 0, 'image')).toBe('参考图最多 1 个');
+    expect(checkAddAudioRef('img1', [ref('u1', 'a1')], 0, 'image')).toBe('音频与图片参考不可混用');
   });
 });

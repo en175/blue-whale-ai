@@ -118,6 +118,8 @@ vi.mock('@/api/canvas', () => ({
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
+  // !779 起保存 catch 会调这个函数对齐 412 version；缺省则 throw，失败提示出不来
+  readCanvasConflictVersion: () => undefined,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
@@ -553,7 +555,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     expect(uploadMocks.uploadAssetFile).not.toHaveBeenCalled();
   });
 
-  it('IKGB82：音频面板点「资产库」直接打开同一资产库弹窗，按面板过滤仅音频', async () => {
+  it('IKGB82：音频面板点「资产库」直接打开同一资产库弹窗，按面板过滤图片和音频', async () => {
     await renderPage();
     await clickNode('da1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
@@ -564,7 +566,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await act(async () => {
       entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(pickerProps.current.mediaTypes).toEqual(['audio']);
+    expect(pickerProps.current.mediaTypes).toEqual(['image', 'audio']);
   });
 
   it('音频资产选择成功后关闭重开原目标：参考经连线完整恢复，不恢复选取模式', async () => {
