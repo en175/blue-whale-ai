@@ -52,11 +52,11 @@ describe('mediaContentBox', () => {
     expectBox({ ratio: '' }, 280, 280);
   });
 
-  it('keeps audio square regardless of dims or target ratio', () => {
-    expectBox({ mediaType: 'audio' }, 280, 280);
-    expectBox({ mediaType: 'audio', width: 1600, height: 900 }, 280, 280);
-    expectBox({ mediaType: 'audio', ratio: '16:9' }, 280, 280);
-    expectBox({ mediaType: 'audio', width: 100, height: 1000, ratio: '9:16' }, 280, 280);
+  it('keeps audio landscape regardless of dims or target ratio (IKH8PU)', () => {
+    expectBox({ mediaType: 'audio' }, 480, 240);
+    expectBox({ mediaType: 'audio', width: 1600, height: 900 }, 480, 240);
+    expectBox({ mediaType: 'audio', ratio: '16:9' }, 480, 240);
+    expectBox({ mediaType: 'audio', width: 100, height: 1000, ratio: '9:16' }, 480, 240);
   });
 
   it('still scales image/video when mediaType is given', () => {

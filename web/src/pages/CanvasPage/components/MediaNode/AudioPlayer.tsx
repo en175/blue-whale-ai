@@ -21,7 +21,8 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const BARS = 24;
+/** 波形竖条数：480×240 横矩形下 72 根细密观感（IKH8PU，对齐原型 audio-card-landscape） */
+const BARS = 72;
 
 /** 从真实音频解码数据生成波形条高度百分比（RMS 归一化） */
 async function computeWaveform(src: string, bars: number, signal: AbortSignal): Promise<number[]> {
