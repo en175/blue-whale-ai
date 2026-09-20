@@ -30,7 +30,7 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/MediaExtractContract.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/MediaExtractContract.java",
     import.meta.url,
   ),
   "utf8",
@@ -44,7 +44,7 @@ const mediaExtractErrorJava = readFileSync(
 );
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/JobType.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -52,7 +52,7 @@ const jobTypeJava = readFileSync(
 // tag 字面量单处定义在 GenerationMqRoute（MediaExtractContract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/GenerationMqRoute.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -131,7 +131,7 @@ describe("media_extract 双端一致性（读 worker-java 源码文本，防漂�
   });
 
   it("MediaExtractContract：tag / source 与 TS 同值", () => {
-    expect(contractJava).toContain("String TAG = GenerationMqRoute.MEDIA_EXTRACT.tag();");
+    expect(contractJava).toContain("String TAG = GenerationMqRouteEnum.MEDIA_EXTRACT.tag();");
     expect(contractJava).toContain('String SOURCE = "dock";');
   });
 

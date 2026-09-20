@@ -34,14 +34,14 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/VideoEnhanceContract.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/VideoEnhanceContract.java",
     import.meta.url,
   ),
   "utf8",
 );
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/JobType.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -49,7 +49,7 @@ const jobTypeJava = readFileSync(
 // tag 字面量单处定义在 GenerationMqRoute（VideoEnhanceContract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/GenerationMqRoute.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -142,7 +142,7 @@ describe("video_enhance 双端一致性（读 worker-java 源码文本，防漂�
   });
 
   it("VideoEnhanceContract：tag / source 与 TS 同值", () => {
-    expect(contractJava).toContain("String TAG = GenerationMqRoute.VIDEO_ENHANCE.tag();");
+    expect(contractJava).toContain("String TAG = GenerationMqRouteEnum.VIDEO_ENHANCE.tag();");
     expect(contractJava).toContain('String SOURCE = "video_enhance";');
   });
 
