@@ -304,8 +304,8 @@ describe("audio_trim 双端一致性（读 worker-java 源码文本，防漂移�
     expect(audioTrimErrorJava).toContain('String AUDIO_TRIM_FAILED = "audio_trim_failed";');
   });
 
-  it("接线前哨兵：两侧枚举暂不含 audio_trim（接线票落地时本条转红，须把 Java TAG 字面量上移 GenerationMqRouteEnum 并同步本文件断言）", () => {
-    expect(jobTypeJava).not.toContain("audio_trim");
-    expect(mqRouteJava).not.toContain("audio_trim");
+  it("已接线：两侧枚举含 audio_trim（IKHB6N 创建入口注册 JobTypeEnum / GenerationMqRouteEnum；Java TAG 字面量上移 GenerationMqRouteEnum 由 IKHB6S 落地）", () => {
+    expect(jobTypeJava).toContain("audio_trim");
+    expect(mqRouteJava).toContain("audio_trim");
   });
 });

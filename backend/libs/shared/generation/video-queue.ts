@@ -2,6 +2,7 @@ import { Producer } from "rocketmq-client-nodejs";
 
 import {
   AUDIO_GENERATION_TAG,
+  AUDIO_TRIM_TAG,
   GENERATION_TASK_QUEUE,
   IMAGE_CUTOUT_TAG,
   IMAGE_ENHANCE_TAG,
@@ -25,6 +26,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueImageOutpaintJob（tag=image_outpaint，IKGOQV）
  *  / enqueueVideoSubtitleEraseJob（tag=video_subtitle_erase，IKGZ80）
  *  / enqueueVideoEnhanceJob（tag=video_enhance，IKH3VE）
+ *  / enqueueAudioTrimJob（tag=audio_trim，IKHB6N）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -141,6 +143,20 @@ export async function enqueueMediaExtractJob(
   await createRocketMqVideoProducer(
     producer,
     MEDIA_EXTRACT_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 音频截取 job 入队（IKHB6N，契约 = @lib/contracts/audio-trim）：复用生成任务 topic/queue，
+ *  用独立 tag「audio_trim」区分任务类型。 */
+export async function enqueueAudioTrimJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    AUDIO_TRIM_TAG,
   ).enqueue(jobId, options);
 }
 
