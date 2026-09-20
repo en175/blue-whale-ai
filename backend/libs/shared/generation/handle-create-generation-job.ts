@@ -1,4 +1,5 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
+import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
 import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
@@ -297,63 +298,10 @@ function validateCommon(
   return null;
 }
 
-/** ADR-0086：参考素材分类上限校验（读能力行 features）。服务端与前端同源（后端透出 features 全键）。
- *  返回 null 表示通过，否则为用户可读失败原因（含真实上限）。 */
-export function checkReferenceLimits(
-  features: Pick<
-    ModelFeatures,
-    | "max_reference_images"
-    | "video_reference"
-    | "video_reference_max"
-    | "audio_reference"
-    | "audio_reference_max"
-    | "image_reference_max"
-    | "max_reference_duration_sec"
-  >,
-  references: Array<{ type: "image" | "video" | "audio"; duration?: number | undefined }>,
-  kind: "image" | "video" | "audio",
-): string | null {
-  // 图生成：只收图片参考，上限 max_reference_images。
-  if (kind === "image") {
-    const imageCount = references.filter((r) => r.type === "image").length;
-    if (imageCount > features.max_reference_images)
-      return `参考图最多 ${features.max_reference_images} 张`;
-    return null;
-  }
-  // 音频生成：只收 audio/image，不可混用，音频≤audio_reference_max、图≤image_reference_max。
-  if (kind === "audio") {
-    const audioCount = references.filter((r) => r.type === "audio").length;
-    const imageCount = references.filter((r) => r.type === "image").length;
-    if (audioCount > features.audio_reference_max)
-      return `参考音频最多 ${features.audio_reference_max} 个`;
-    if (imageCount > features.image_reference_max)
-      return `参考图最多 ${features.image_reference_max} 个`;
-    if (audioCount > 0 && imageCount > 0)
-      return "音频与图片参考不可混用";
-    return null;
-  }
-  // 视频生成：普通参考按类型分类上限（图/视频/音频各自上限）；视频素材需 video_reference 位、
-  // 音频素材需 audio_reference 位；总时长（所有参考素材之和）≤ max_reference_duration_sec。
-  const imageRefs = references.filter((r) => r.type === "image");
-  const videoRefs = references.filter((r) => r.type === "video");
-  const audioRefs = references.filter((r) => r.type === "audio");
-  if (imageRefs.length > features.max_reference_images)
-    return `参考图最多 ${features.max_reference_images} 张`;
-  if (videoRefs.length > 0 && !features.video_reference)
-    return "当前模型不支持视频素材参考";
-  if (audioRefs.length > 0 && !features.audio_reference)
-    return "当前模型不支持音频素材参考";
-  if (videoRefs.length > features.video_reference_max)
-    return `参考视频最多 ${features.video_reference_max} 个`;
-  if (audioRefs.length > features.audio_reference_max)
-    return `参考音频最多 ${features.audio_reference_max} 个`;
-  if (features.max_reference_duration_sec != null) {
-    const total = references.reduce((sum, r) => sum + (r.duration ?? 0), 0);
-    if (total > features.max_reference_duration_sec)
-      return `参考素材总时长超过 ${features.max_reference_duration_sec} 秒，请减少素材`;
-  }
-  return null;
-}
+/** IKHBDO：参考素材分类上限判定已下沉到 `generation-runtime/reference-limits.ts`，
+ *  由接纳侧与 SceneCard 再生成（scene-card-generation-repo）共用同一份实现，避免第三份副本漂移。
+ *  此处转出保持既有导入面不变。 */
+export { checkReferenceLimits };
 
 /** IKE4GC：音频生成参考素材——仅接受单数组 references（audio|image，role 强制 reference）。
  *  音频/图片生成无首尾帧概念；分类上限由能力行（features.audio_reference_max / image_reference_max）驱动

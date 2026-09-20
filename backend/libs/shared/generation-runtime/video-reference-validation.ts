@@ -7,17 +7,21 @@ import type { MaterialReference } from "./material-reference.js";
 import { VideoInputError } from "./material-reference.js";
 import type { VideoWorkerInputAsset, VideoReference } from "./video-job-types.js";
 
-// 物理/平台约束——**不是模型知识**，能力行里没有对应字段（运营改不了）：
+// 平台物理约束——**不是模型知识，能力行里没有对应字段**（运营改不了，也不会为它们新增配置列）：
 // 单视频字节 / 单边像素 / 总像素 / 宽高比 / 单视频最短时长 / mime 白名单。
-const MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
-const MIN_REFERENCE_VIDEO_SECONDS = 2;
-const MIN_REFERENCE_VIDEO_SIDE = 300;
-const MAX_REFERENCE_VIDEO_SIDE = 6000;
-const MIN_REFERENCE_VIDEO_PIXELS = 409_600;
-const MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
-const MIN_REFERENCE_VIDEO_RATIO = 0.4;
-const MAX_REFERENCE_VIDEO_RATIO = 2.5;
-const REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
+//
+// DEFAULT_* 语义：**无配置可读时的缺省**，不是「配置的兜底」——没有配置字段，所以无条件生效，
+// 这是设计如此（对齐 model-capability-repo 的 DEFAULT_MAX_REFERENCE_IMAGES 家族）。
+// 命名与 Java 镜像常量（worker-java VideoJobProcessor 同名 DEFAULT_*）保持一致。
+const DEFAULT_MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
+const DEFAULT_MIN_REFERENCE_VIDEO_SECONDS = 2;
+const DEFAULT_MIN_REFERENCE_VIDEO_SIDE = 300;
+const DEFAULT_MAX_REFERENCE_VIDEO_SIDE = 6000;
+const DEFAULT_MIN_REFERENCE_VIDEO_PIXELS = 409_600;
+const DEFAULT_MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
+const DEFAULT_MIN_REFERENCE_VIDEO_RATIO = 0.4;
+const DEFAULT_MAX_REFERENCE_VIDEO_RATIO = 2.5;
+const DEFAULT_REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
 
 /** 参考素材上限——**全部来自模型能力行 features**（ADR-0086），程序里不写死任何一条。
  *  字段名与 ModelFeatures 同名，调用方可直接传 `model.features`（结构类型）。
@@ -158,7 +162,7 @@ function validateReferenceVideo(
   maxDurationSec: number | null,
 ): void {
   const mime = asset.mime?.split(";", 1)[0]?.trim().toLowerCase();
-  if (mime && !REFERENCE_VIDEO_MIMES.has(mime)) {
+  if (mime && !DEFAULT_REFERENCE_VIDEO_MIMES.has(mime)) {
     throw new VideoInputError(ERROR_INVALID_REFERENCE_MEDIA, "参考视频只支持 MP4 或 MOV");
   }
   if (
@@ -166,7 +170,7 @@ function validateReferenceVideo(
     asset.size !== undefined &&
     (!Number.isFinite(asset.size) ||
       asset.size <= 0 ||
-      asset.size > MAX_REFERENCE_VIDEO_BYTES)
+      asset.size > DEFAULT_MAX_REFERENCE_VIDEO_BYTES)
   ) {
     throw new VideoInputError(
       ERROR_INVALID_REFERENCE_MEDIA,
@@ -177,15 +181,15 @@ function validateReferenceVideo(
     asset.duration !== null &&
     asset.duration !== undefined &&
     (!Number.isFinite(asset.duration) ||
-      asset.duration < MIN_REFERENCE_VIDEO_SECONDS ||
+      asset.duration < DEFAULT_MIN_REFERENCE_VIDEO_SECONDS ||
       (maxDurationSec !== null && asset.duration > maxDurationSec))
   ) {
     // 最短 2 秒是素材平台约束（能力行无字段）；上限读能力行。
     throw new VideoInputError(
       ERROR_INVALID_REFERENCE_MEDIA,
       maxDurationSec === null
-        ? `单个参考视频时长不能少于 ${MIN_REFERENCE_VIDEO_SECONDS} 秒`
-        : `单个参考视频时长必须为 ${MIN_REFERENCE_VIDEO_SECONDS} 至 ${maxDurationSec} 秒`,
+        ? `单个参考视频时长不能少于 ${DEFAULT_MIN_REFERENCE_VIDEO_SECONDS} 秒`
+        : `单个参考视频时长必须为 ${DEFAULT_MIN_REFERENCE_VIDEO_SECONDS} 至 ${maxDurationSec} 秒`,
     );
   }
   validateReferenceVideoDimensions(asset);
@@ -201,8 +205,8 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
     knownSides.some(
       (side) =>
         !Number.isInteger(side) ||
-        side < MIN_REFERENCE_VIDEO_SIDE ||
-        side > MAX_REFERENCE_VIDEO_SIDE,
+        side < DEFAULT_MIN_REFERENCE_VIDEO_SIDE ||
+        side > DEFAULT_MAX_REFERENCE_VIDEO_SIDE,
     )
   ) {
     throw new VideoInputError(
@@ -216,10 +220,10 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
   const pixels = width * height;
   const ratio = width / height;
   if (
-    pixels < MIN_REFERENCE_VIDEO_PIXELS ||
-    pixels > MAX_REFERENCE_VIDEO_PIXELS ||
-    ratio < MIN_REFERENCE_VIDEO_RATIO ||
-    ratio > MAX_REFERENCE_VIDEO_RATIO
+    pixels < DEFAULT_MIN_REFERENCE_VIDEO_PIXELS ||
+    pixels > DEFAULT_MAX_REFERENCE_VIDEO_PIXELS ||
+    ratio < DEFAULT_MIN_REFERENCE_VIDEO_RATIO ||
+    ratio > DEFAULT_MAX_REFERENCE_VIDEO_RATIO
   ) {
     throw new VideoInputError(
       ERROR_INVALID_REFERENCE_MEDIA,

@@ -74,18 +74,23 @@ public class VideoJobProcessor implements JobProcessor {
     public static final int MAX_VIDEO_POLLS = 720;
 
     // ========== 参考视频校验常量（video-reference-validation.ts） ==========
-    // 物理/平台约束——**不是模型知识**，能力行无对应字段：单视频字节 / 单边像素 / 总像素 /
-    // 宽高比 / 单视频最短时长 / mime 白名单。参考数量与时长上限全部读能力行（见下）。
+    // 平台物理约束——**不是模型知识，能力行无对应字段**（运营改不了，也不会为它们新增配置列）：
+    // 单视频字节 / 单边像素 / 总像素 / 宽高比 / 单视频最短时长 / mime 白名单。
+    //
+    // DEFAULT_* 语义：**无配置可读时的缺省**，不是「配置的兜底」——没有配置字段，所以无条件
+    // 生效，这是设计如此。命名与 TS 镜像（generation-runtime/video-reference-validation.ts
+    // 同名 DEFAULT_*）保持一致。
+    // 参考数量与时长上限全部读能力行（见下）。
 
-    static final long MAX_REFERENCE_VIDEO_BYTES = 200L * 1024 * 1024;
-    static final int MIN_REFERENCE_VIDEO_SECONDS = 2;
-    static final int MIN_REFERENCE_VIDEO_SIDE = 300;
-    static final int MAX_REFERENCE_VIDEO_SIDE = 6000;
-    static final int MIN_REFERENCE_VIDEO_PIXELS = 409_600;
-    static final int MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
-    static final double MIN_REFERENCE_VIDEO_RATIO = 0.4;
-    static final double MAX_REFERENCE_VIDEO_RATIO = 2.5;
-    static final Set<String> REFERENCE_VIDEO_MIMES = Set.of("video/mp4", "video/quicktime");
+    static final long DEFAULT_MAX_REFERENCE_VIDEO_BYTES = 200L * 1024 * 1024;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_SECONDS = 2;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_SIDE = 300;
+    static final int DEFAULT_MAX_REFERENCE_VIDEO_SIDE = 6000;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_PIXELS = 409_600;
+    static final int DEFAULT_MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
+    static final double DEFAULT_MIN_REFERENCE_VIDEO_RATIO = 0.4;
+    static final double DEFAULT_MAX_REFERENCE_VIDEO_RATIO = 2.5;
+    static final Set<String> DEFAULT_REFERENCE_VIDEO_MIMES = Set.of("video/mp4", "video/quicktime");
 
     /**
      * IKHBDO 迁移兜底：旧在飞 job 的 input 里没有冻结的 {@code reference_limits}（本次变更前创建），
@@ -810,7 +815,7 @@ public class VideoJobProcessor implements JobProcessor {
         // mime
         if (asset.getMime() != null) {
             String mime = asset.getMime().split(";", 2)[0].trim().toLowerCase();
-            if (!REFERENCE_VIDEO_MIMES.contains(mime)) {
+            if (!DEFAULT_REFERENCE_VIDEO_MIMES.contains(mime)) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                         "参考视频只支持 MP4 或 MOV");
             }
@@ -818,7 +823,7 @@ public class VideoJobProcessor implements JobProcessor {
 
         // size：>200MB 失败 → 200MB 恰好通过（`>` 非 `>=`）
         if (asset.getSize() != null
-                && (asset.getSize() <= 0 || asset.getSize() > MAX_REFERENCE_VIDEO_BYTES)) {
+                && (asset.getSize() <= 0 || asset.getSize() > DEFAULT_MAX_REFERENCE_VIDEO_BYTES)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "单个参考视频不能超过 200 MB");
         }
@@ -826,12 +831,12 @@ public class VideoJobProcessor implements JobProcessor {
         // duration：下限 2s 是素材平台约束（能力行无字段）；上限读能力行
         if (asset.getDurationMs() != null) {
             double durationSec = asset.getDurationMs() / 1000.0;
-            if (durationSec < MIN_REFERENCE_VIDEO_SECONDS
+            if (durationSec < DEFAULT_MIN_REFERENCE_VIDEO_SECONDS
                     || (maxDurationSec != null && durationSec > maxDurationSec)) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                         maxDurationSec == null
-                                ? "单个参考视频时长不能少于 " + MIN_REFERENCE_VIDEO_SECONDS + " 秒"
-                                : "单个参考视频时长必须为 " + MIN_REFERENCE_VIDEO_SECONDS
+                                ? "单个参考视频时长不能少于 " + DEFAULT_MIN_REFERENCE_VIDEO_SECONDS + " 秒"
+                                : "单个参考视频时长必须为 " + DEFAULT_MIN_REFERENCE_VIDEO_SECONDS
                                         + " 至 " + maxDurationSec + " 秒");
             }
         }
@@ -840,11 +845,11 @@ public class VideoJobProcessor implements JobProcessor {
         Integer width = asset.getWidth();
         Integer height = asset.getHeight();
 
-        if (width != null && (width < MIN_REFERENCE_VIDEO_SIDE || width > MAX_REFERENCE_VIDEO_SIDE)) {
+        if (width != null && (width < DEFAULT_MIN_REFERENCE_VIDEO_SIDE || width > DEFAULT_MAX_REFERENCE_VIDEO_SIDE)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "参考视频单边像素必须为 300 至 6000");
         }
-        if (height != null && (height < MIN_REFERENCE_VIDEO_SIDE || height > MAX_REFERENCE_VIDEO_SIDE)) {
+        if (height != null && (height < DEFAULT_MIN_REFERENCE_VIDEO_SIDE || height > DEFAULT_MAX_REFERENCE_VIDEO_SIDE)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "参考视频单边像素必须为 300 至 6000");
         }
@@ -852,8 +857,8 @@ public class VideoJobProcessor implements JobProcessor {
         if (width != null && height != null) {
             long pixels = (long) width * height;
             double ratio = (double) width / height;
-            if (pixels < MIN_REFERENCE_VIDEO_PIXELS || pixels > MAX_REFERENCE_VIDEO_PIXELS
-                    || ratio < MIN_REFERENCE_VIDEO_RATIO || ratio > MAX_REFERENCE_VIDEO_RATIO) {
+            if (pixels < DEFAULT_MIN_REFERENCE_VIDEO_PIXELS || pixels > DEFAULT_MAX_REFERENCE_VIDEO_PIXELS
+                    || ratio < DEFAULT_MIN_REFERENCE_VIDEO_RATIO || ratio > DEFAULT_MAX_REFERENCE_VIDEO_RATIO) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                         "参考视频宽高比或总像素不满足要求");
             }

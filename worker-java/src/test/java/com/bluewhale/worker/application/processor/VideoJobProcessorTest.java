@@ -758,6 +758,32 @@ class VideoJobProcessorTest {
         assertThat(error.getMessage()).contains("参考图最多 14 张");
     }
 
+    @Test
+    @DisplayName("scene_card 路径冻结的 video_reference_max 决定执行期上限（旧常量 3 拦不住第 4 条）")
+    void frozenVideoLimitDrivesSceneCardPath() {
+        // scene_card job 的参考走扁平 reference_asset_ids（无单数组 references），素材是视频。
+        doAnswer(inv -> {
+            List<String> ids = inv.getArgument(0);
+            Map<String, AssetEntity> map = new HashMap<>();
+            for (String id : ids) {
+                map.put(id, videoRefAsset(2));
+            }
+            return map;
+        }).when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+        // 冻结 video_reference_max=5：4 条参考视频必须放行（旧 LEGACY 3 会把第 4 条拒掉）
+        assertThat(processor.buildSubmitRequest(
+                videoClaim("501", false, null, 0, 0, null, inputWithFlatVideoRefs(4, 5)))
+                .references()).hasSize(4);
+
+        // 同一份请求，冻结值配 3 → 执行期按配置拒，判词带配置值
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.buildSubmitRequest(
+                        videoClaim("502", false, null, 0, 0, null, inputWithFlatVideoRefs(4, 3))));
+        assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        assertThat(error.getMessage()).contains("参考视频最多 3 个");
+    }
+
     // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========
 
     @Nested
@@ -1203,6 +1229,22 @@ class VideoJobProcessorTest {
         input.put("reference_limits", Map.of(
                 "max_reference_images", configuredMax,
                 "video_reference_max", 3,
+                "audio_reference_max", 3,
+                "max_reference_duration_sec", 15));
+        return input;
+    }
+
+    /** scene_card 路径的 job 形态：扁平 reference_asset_ids + 冻结的 video_reference_max。 */
+    private Map<String, Object> inputWithFlatVideoRefs(int n, int configuredVideoMax) {
+        Map<String, Object> input = baseInput();
+        List<String> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= n; i++) {
+            ids.add(String.valueOf(i));
+        }
+        input.put("reference_asset_ids", ids);
+        input.put("reference_limits", Map.of(
+                "max_reference_images", 9,
+                "video_reference_max", configuredVideoMax,
                 "audio_reference_max", 3,
                 "max_reference_duration_sec", 15));
         return input;

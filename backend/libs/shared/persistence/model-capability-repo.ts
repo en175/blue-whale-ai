@@ -207,7 +207,12 @@ function pickTaskTypes(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function toFeatures(json: unknown): ModelFeatures {
+/** 能力行 features JSON → 归一化的 {@link ModelFeatures}。
+ *
+ *  导出原因（IKHBDO）：scene-card 再生成拿到的 features 是**库中原始 JSON**（历史行可能仍是
+ *  camelCase 形态），冻结参考上限前必须先走同一条归一，否则 camelCase 行冻结不出任何字段 →
+ *  worker 回落旧常量 → 配置输给写死的缺省。接纳侧经 ModelCapabilityRepo 读出的已是归一结果。 */
+export function toFeatures(json: unknown): ModelFeatures {
   const f = (json ?? {}) as FeaturesJson;
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
