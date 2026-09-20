@@ -8,6 +8,7 @@ import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
+import { isAudioTrimNodeId } from '../../audioTrim';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
@@ -16,6 +17,8 @@ import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
+import AudioTrimOverlay from './AudioTrimOverlay';
+import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
@@ -158,6 +161,16 @@ export interface MediaNodeData {
    *  指针，退出标记移除即恢复）；上方 X 工具条/下方发送条由 CanvasPage 浮出
    *  （VideoAudioSplitDialog） */
   splitEditing?: true;
+  /** 音频截取编辑态标记（IKHB7A，渲染期派生注入，不持久化）：本卡为截取会话源音频卡
+   *  时由 CanvasPage 注入——波形区叠加截取遮罩四件套（AudioTrimOverlay：选区框/抓手/
+   *  暗区/秒数胶囊，接管指针不冒泡开音频面板），AudioPlayer 按选区钳制试听；发送条
+   *  （AudioTrimBar）由 CanvasPage 浮出。选区（秒）与全长为遮罩几何与发送参数唯一
+   *  数据源，抓手拖拽实时上抛 CanvasPage（发送条时间范围联动）。 */
+  trimEditing?: {
+    selection: { start: number; end: number };
+    duration: number;
+    onSelectionChange: (selection: { start: number; end: number }) => void;
+  };
   /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
    *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
    *  失败卡无身份不渲染，口径同家族身份分流先例） */
@@ -290,6 +303,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     videoRef.current?.pause();
   }, [data.splitEditing]);
 
+  /** 截取遮罩定位条 → AudioPlayer 命令式桥（IKHB7A）：按下暂停记 wasPlaying、松手按
+   *  wasPlaying 与「未拖到选区尾」续播（拖到尾停终点）；hook 细节见 AudioPlayer.tsx。 */
+  const trimSeekBridge = useAudioTrimSeekBridge();
+
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
     data.draft === true
@@ -371,6 +388,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const hasMediaSrc =
     typeof data.src === 'string' && data.src !== '' && !data.src.startsWith('blob:');
   const isMediaExtraction = isMediaExtractNodeId(id);
+  /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
+  const isAudioTrimCard = isAudioTrimNodeId(id);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
   const failHeadline = mediaNodeFailHeadline({
     genStatus: data.genStatus,
@@ -447,9 +466,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     }
     if (isGenDone) {
       /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
-          才可重试——IKH28X 编辑态发送的失败卡原参数重发；存量直发时代失败卡无身份不渲染） */
+          才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
+          重试——IKHB7A lastInput 原参数重发；存量无身份失败卡不渲染） */
       const canRetry = data.genStatus === 'failed'
-        && (!isMediaExtraction || data.mediaExtract != null);
+        && (!isMediaExtraction || data.mediaExtract != null)
+        && (!isAudioTrimCard || data.audioTrim != null);
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
@@ -624,10 +645,24 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           renderPlaceholder()
         ) : isAudio ? (
           <AudioPlayer
+            ref={trimSeekBridge.playerRef}
             src={data.src || ''}
             fileName={data.fileName}
             duration={typeof data.duration === 'number' ? data.duration : undefined}
             onDownload={() => data.onDownload?.(id)}
+            trimSelection={data.trimEditing ? { ...data.trimEditing.selection } : null}
+            trimOverlay={
+              data.trimEditing ? (
+                <AudioTrimOverlay
+                  selection={data.trimEditing.selection}
+                  duration={data.trimEditing.duration}
+                  onSelectionChange={data.trimEditing.onSelectionChange}
+                  onSeekStart={trimSeekBridge.onSeekStart}
+                  onSeek={trimSeekBridge.onSeek}
+                  onSeekEnd={(time) => trimSeekBridge.onSeekEnd(time, data.trimEditing?.selection.end)}
+                />
+              ) : undefined
+            }
           />
         ) : data.mediaType === 'video' ? (
           <>
@@ -713,7 +748,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
             {data.genStatus === 'failed'
-              && (!isMediaExtraction || data.mediaExtract != null) && (
+              && (!isMediaExtraction || data.mediaExtract != null)
+              && (!isAudioTrimCard || data.audioTrim != null) && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>
