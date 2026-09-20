@@ -394,6 +394,174 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
     }
 
+    // ========== audio_trim golden mirrors（IKHB6S；media_extract 条目一对一平移） ==========
+
+    @Test
+    @DisplayName("claimAudioTrim: no candidate → empty")
+    void claimAudioTrim_noCandidate() {
+        when(jobMapper.findCandidateByTypeAndSources(300L, "audio_trim", List.of())).thenReturn(null);
+
+        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
+                service.claimAudioTrim("300", "worker-1");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("claimAudioTrim: CAS rejected → empty")
+    void claimAudioTrim_casRejected() {
+        GenerationJobEntity candidate = new GenerationJobEntity();
+        candidate.setId(300L);
+        candidate.setFencingToken(4L);
+        candidate.setStatus("queued");
+
+        when(jobMapper.findCandidateByTypeAndSources(300L, "audio_trim", List.of())).thenReturn(candidate);
+        when(jobMapper.claimImageCas(
+                eq(300L),
+                eq("worker-1"),
+                any(LocalDateTime.class),
+                eq(4L),
+                eq("queued")
+        )).thenReturn(0); // CAS rejected
+
+        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
+                service.claimAudioTrim("300", "worker-1");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("publishAudioTrimResult: happy path with asset + logs + events（duration 取官方秒换算 ms）")
+    void publishAudioTrimResult_happyPath() {
+        // given
+        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+
+        when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
+            AssetEntity asset = (AssetEntity) invocation.getArgument(0);
+            asset.setId(999L); // 模拟 DB 自增
+            return 1;
+        });
+
+        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio_trim", "succeeded", 100));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        com.bluewhale.worker.domain.dto.PublishAudioTrimDto input =
+                new com.bluewhale.worker.domain.dto.PublishAudioTrimDto(
+                        "300", "42", "9", "worker-1", 5L,
+                        "https://example.com/trimmed.mp3", "generated/9/audio/abc123.mp3",
+                        "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 120.25
+                );
+
+        // when
+        boolean result = service.publishAudioTrimResult(input);
+
+        // then
+        assertThat(result).isTrue();
+
+        // 断言 asset 插入（type=audio、duration_ms = 官方 120.25 秒换算）
+        ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
+        verify(assetMapper).insert(assetCaptor.capture());
+        AssetEntity capturedAsset = assetCaptor.getValue();
+        assertThat(capturedAsset.getType()).isEqualTo("audio");
+        assertThat(capturedAsset.getDurationMs()).isEqualTo(120250); // 120.25s * 1000
+
+        // 断言 output_asset_ids 更新
+        verify(jobMapper).updateOutputAssetIds(300L, "[999]");
+
+        // 断言 log 插入
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(jobLogMapper).insert(logCaptor.capture());
+        GenerationJobLogEntity capturedLog = logCaptor.getValue();
+        assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
+        assertThat(capturedLog.getMessage()).isEqualTo("音频已截取");
+
+        // 断言 project_events 插入（asset.created + generation_job.status_changed）
+        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
+        verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
+    }
+
+    @Test
+    @DisplayName("publishAudioTrimResult: stale token → false")
+    void publishAudioTrimResult_staleToken() {
+        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+
+        com.bluewhale.worker.domain.dto.PublishAudioTrimDto input =
+                new com.bluewhale.worker.domain.dto.PublishAudioTrimDto(
+                        "300", "42", "9", "worker-1", 5L,
+                        "https://example.com/trimmed.mp3", "generated/9/audio/abc123.mp3",
+                        "audio/mpeg", 1024L, null, null
+                );
+
+        boolean result = service.publishAudioTrimResult(input);
+
+        assertThat(result).isFalse();
+        verify(assetMapper, never()).insert(any(AssetEntity.class));
+    }
+
+    @Test
+    @DisplayName("failAudioTrimJob: happy path with logs + events")
+    void failAudioTrimJob_happyPath() {
+        // given
+        when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
+        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio_trim", "failed", 0));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        com.bluewhale.worker.domain.dto.FailAudioTrimDto input =
+                new com.bluewhale.worker.domain.dto.FailAudioTrimDto(
+                        "300", "worker-1", 5L,
+                        "audio_trim_failed", "The parameter `end_time` must be less than audio duration.",
+                        Map.of("raw", "The parameter `end_time` must be less than audio duration.")
+                );
+
+        // when
+        boolean result = service.failAudioTrimJob(input);
+
+        // then
+        assertThat(result).isTrue();
+
+        // 断言 error JSON 含 details
+        ArgumentCaptor<String> errorJsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jobMapper).failMediaExtractGuard(
+                anyLong(),
+                anyString(),
+                anyLong(),
+                errorJsonCaptor.capture()
+        );
+        String errorJson = errorJsonCaptor.getValue();
+        assertThat(errorJson).contains("\"code\":\"audio_trim_failed\"");
+        assertThat(errorJson).contains("\"details\"");
+
+        // 断言 log 插入
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(jobLogMapper).insert(logCaptor.capture());
+        GenerationJobLogEntity capturedLog = logCaptor.getValue();
+        assertThat(capturedLog.getEvent()).isEqualTo("failed");
+        assertThat(capturedLog.getMessage())
+                .isEqualTo("audio_trim_failed: The parameter `end_time` must be less than audio duration.");
+
+        // 断言 project_events 插入（generation_job.status_changed）
+        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
+        verify(projectEventMapper, times(1)).insert(eventCaptor.capture());
+    }
+
+    @Test
+    @DisplayName("failAudioTrimJob: stale token → false")
+    void failAudioTrimJob_staleToken() {
+        when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(0);
+
+        com.bluewhale.worker.domain.dto.FailAudioTrimDto input =
+                new com.bluewhale.worker.domain.dto.FailAudioTrimDto(
+                        "300", "worker-1", 5L,
+                        "audio_trim_failed", "音频转存存储未配置",
+                        null
+                );
+
+        boolean result = service.failAudioTrimJob(input);
+
+        assertThat(result).isFalse();
+        verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
+    }
+
     // ========== Blade-② audio golden mirrors ==========
 
     @Test

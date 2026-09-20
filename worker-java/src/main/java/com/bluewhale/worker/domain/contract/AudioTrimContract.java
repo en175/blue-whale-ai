@@ -11,11 +11,10 @@ import java.util.List;
  * 契约先行红线：字段名在本类定死后消费方接线票（IKHB6N / IKHB6Y / IKHB7A）一律引用本类，
  * 禁止另行发明字面量。
  * <p>
- * MQ tag 字面量暂由本类自持（{@link #TAG} 直写，不进 {@link GenerationMqRouteEnum} /
- * {@link JobTypeEnum}）：TS 侧生产端 queue.constants.ts 的 AUDIO_TRIM_TAG 与两侧枚举注册均由
- * 接线票落地，而 mq-route-parity.test.ts 对枚举表与 TS tag 做一一对应断言（多一个也红）——
- * 接线票落地时把字面量上移 GenerationMqRouteEnum（本类 TAG 改转发，video_enhance 先例），
- * 并同步 audio-trim.test.ts 的 tag 防漂移断言改读该枚举。
+ * MQ tag 的字面量已上移到 {@link GenerationMqRouteEnum}（本类的 {@link #TAG} 只做转发，
+ * video_enhance 先例）：TS 侧生产端 queue.constants.ts 的 AUDIO_TRIM_TAG 与两侧枚举注册
+ * 已随接线票（IKHB6S）落地，mq-route-parity.test.ts 对枚举表与 TS tag 做一一对应断言，
+ * audio-trim.test.ts 的 tag 防漂移断言读该枚举。
  * <p>
  * 供应商接口 = 火山引擎 AI MediaKit「提交音频裁剪任务 API」（**异步任务**：提交返 task_id，
  * 轮询查询取 result.audio_url（24h 临时链接）/ result.duration），火山上游
@@ -28,9 +27,8 @@ public final class AudioTrimContract {
     private AudioTrimContract() {
     }
 
-    /** MQ tag（= generation_jobs.type = JobType.AUDIO_TRIM〔接线票注册〕）。
-     *  字面量暂由本类自持，见类注释。 */
-    public static final String TAG = "audio_trim";
+    /** MQ tag（= generation_jobs.type = JobType.AUDIO_TRIM）；值单处定义在 {@link GenerationMqRouteEnum#AUDIO_TRIM}。 */
+    public static final String TAG = GenerationMqRouteEnum.AUDIO_TRIM.tag();
 
     // ========== input 冻结键名（创建时定死，重试原样沿用） ==========
     // provider_credential 是业务键之上的基础设施键（创建侧冻结落库，同 MediaExtractContract 口径）。

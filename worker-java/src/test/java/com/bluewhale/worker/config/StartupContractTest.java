@@ -150,19 +150,21 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 十个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十一个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        Map<GenerationMqRouteEnum, String> expectedTags = Map.of(
-                GenerationMqRouteEnum.VIDEO, "video",
-                GenerationMqRouteEnum.IMAGE, "image",
-                GenerationMqRouteEnum.AUDIO, "audio",
-                GenerationMqRouteEnum.MEDIA_EXTRACT, "media_extract",
-                GenerationMqRouteEnum.IMAGE_ENHANCE, "image_enhance",
-                GenerationMqRouteEnum.IMAGE_ERASE, "image_erase",
-                GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout",
-                GenerationMqRouteEnum.IMAGE_OUTPAINT, "image_outpaint",
-                GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase",
-                GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance");
+        // Map.of 最多 10 对，11 入口用 Map.ofEntries（entry 静态导入见文件头）。
+        Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
+                Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
+                Map.entry(GenerationMqRouteEnum.IMAGE, "image"),
+                Map.entry(GenerationMqRouteEnum.AUDIO, "audio"),
+                Map.entry(GenerationMqRouteEnum.MEDIA_EXTRACT, "media_extract"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_TRIM, "audio_trim"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_ENHANCE, "image_enhance"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_ERASE, "image_erase"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_OUTPAINT, "image_outpaint"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance"));
 
         assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
         for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
@@ -179,6 +181,7 @@ class StartupContractTest {
         assertThat(GenerationMqRouteEnum.IMAGE.tag()).isEqualTo(JobTypeEnum.IMAGE.value());
         assertThat(GenerationMqRouteEnum.AUDIO.tag()).isEqualTo(JobTypeEnum.AUDIO.value());
         assertThat(GenerationMqRouteEnum.MEDIA_EXTRACT.tag()).isEqualTo(JobTypeEnum.MEDIA_EXTRACT.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_TRIM.tag()).isEqualTo(JobTypeEnum.AUDIO_TRIM.value());
         assertThat(GenerationMqRouteEnum.IMAGE_ENHANCE.tag()).isEqualTo(JobTypeEnum.IMAGE_ENHANCE.value());
         assertThat(GenerationMqRouteEnum.IMAGE_ERASE.tag()).isEqualTo(JobTypeEnum.IMAGE_ERASE.value());
         assertThat(GenerationMqRouteEnum.IMAGE_CUTOUT.tag()).isEqualTo(JobTypeEnum.IMAGE_CUTOUT.value());

@@ -36,6 +36,7 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> imageProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> audioProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> extractProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> audioTrimProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEnhanceProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEraseProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageCutoutProvider;
@@ -46,6 +47,7 @@ class RecoveryServiceTest {
     @Mock private GenerationMessageProducer imageProducer;
     @Mock private GenerationMessageProducer audioProducer;
     @Mock private GenerationMessageProducer extractProducer;
+    @Mock private GenerationMessageProducer audioTrimProducer;
     @Mock private GenerationMessageProducer imageEnhanceProducer;
     @Mock private GenerationMessageProducer imageEraseProducer;
     @Mock private GenerationMessageProducer imageCutoutProducer;
@@ -61,6 +63,7 @@ class RecoveryServiceTest {
         when(imageProvider.getIfAvailable()).thenReturn(imageProducer);
         when(audioProvider.getIfAvailable()).thenReturn(audioProducer);
         when(extractProvider.getIfAvailable()).thenReturn(extractProducer);
+        when(audioTrimProvider.getIfAvailable()).thenReturn(audioTrimProducer);
         when(imageEnhanceProvider.getIfAvailable()).thenReturn(imageEnhanceProducer);
         when(imageEraseProvider.getIfAvailable()).thenReturn(imageEraseProducer);
         when(imageCutoutProvider.getIfAvailable()).thenReturn(imageCutoutProducer);
@@ -71,6 +74,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueMediaExtractJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueAudioTrimJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEraseJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageCutoutJobIds(anyInt(), anyInt())).thenReturn(List.of());
@@ -78,9 +82,9 @@ class RecoveryServiceTest {
         when(jobMapper.listDueVideoSubtitleEraseJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVideoEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, imageEnhanceProvider, imageEraseProvider,
-                imageCutoutProvider, imageOutpaintProvider, videoSubtitleEraseProvider,
-                videoEnhanceProvider, MAX_AGE_MINUTES);
+                audioProvider, extractProvider, audioTrimProvider, imageEnhanceProvider,
+                imageEraseProvider, imageCutoutProvider, imageOutpaintProvider,
+                videoSubtitleEraseProvider, videoEnhanceProvider, MAX_AGE_MINUTES);
     }
 
     @Test
@@ -106,6 +110,7 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueImageJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueAudioJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueMediaExtractJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueAudioTrimJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEnhanceJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEraseJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageCutoutJobIds(100, MAX_AGE_MINUTES);

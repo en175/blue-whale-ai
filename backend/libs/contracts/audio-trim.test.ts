@@ -279,8 +279,10 @@ describe("执行面兜底码（error-codes.ts 注册）", () => {
 });
 
 describe("audio_trim 双端一致性（读 worker-java 源码文本，防漂移）", () => {
-  it("AudioTrimContract：tag 与 TS 任务类型同值（接线前字面量自持，见 Java 类注释）", () => {
-    expect(contractJava).toContain(`String TAG = "${AUDIO_TRIM_JOB_TYPE}";`);
+  it("AudioTrimContract：tag 转发 GenerationMqRouteEnum.AUDIO_TRIM（字面量单处在该枚举，video_enhance 先例）", () => {
+    expect(contractJava).toContain(
+      "String TAG = GenerationMqRouteEnum.AUDIO_TRIM.tag();",
+    );
   });
 
   it("AudioTrimContract：四 input 键名与 TS 同值", () => {
@@ -304,8 +306,8 @@ describe("audio_trim 双端一致性（读 worker-java 源码文本，防漂移�
     expect(audioTrimErrorJava).toContain('String AUDIO_TRIM_FAILED = "audio_trim_failed";');
   });
 
-  it("接线前哨兵：两侧枚举暂不含 audio_trim（接线票落地时本条转红，须把 Java TAG 字面量上移 GenerationMqRouteEnum 并同步本文件断言）", () => {
-    expect(jobTypeJava).not.toContain("audio_trim");
-    expect(mqRouteJava).not.toContain("audio_trim");
+  it("已接线：两侧枚举注册 audio_trim（JobTypeEnum 与 GenerationMqRouteEnum，tag = TS 任务类型同值）", () => {
+    expect(jobTypeJava).toContain("audio_trim");
+    expect(mqRouteJava).toContain(`("${"generation-task"}", "${AUDIO_TRIM_JOB_TYPE}")`);
   });
 });

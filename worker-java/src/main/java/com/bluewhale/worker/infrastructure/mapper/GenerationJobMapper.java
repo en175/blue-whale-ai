@@ -678,6 +678,13 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources("media_extract", List.of(), limit, maxAgeMinutes);
     }
 
+    /** 音频截取到点/孤儿（IKHB6S，父单 IKHB08）：**不套 source 白名单**（claim 同形态——
+     *  任务来源值随接线票定死后补录，套了漏真卡任务，IKC9EJ 教训；轮询自投消息丢失时
+     *  由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueAudioTrimJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit, maxAgeMinutes);
+    }
+
     /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
     default List<Long> listDueImageEnhanceJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_enhance",

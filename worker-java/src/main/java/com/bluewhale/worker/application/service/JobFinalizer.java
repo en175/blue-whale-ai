@@ -115,6 +115,107 @@ public class JobFinalizer {
         return true;
     }
 
+    // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
+    //            publishMediaExtractGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
+    //            语义 = 单槽免费工具轮询型任务终态收口） ==========
+
+    /**
+     * 发布 audio_trim 结果（IKHB6S）。
+     * <p>
+     * 同 publishMediaExtractResult 形态（单槽单 asset、双事件），差异仅文案；Asset
+     * type='audio'、duration_ms 取官方 result.duration 秒换算（截取片段时长 ≠ 源全长，
+     * **不做源时长回落**——media_extract 的回落口径建立在「整轨提取 ≈ 源时长」之上，
+     * 截取语义不成立，官方值缺失即 null，ADR-0111「产物时长以火山返回 duration 写回
+     * 服务端权威时长」）。
+     */
+    @Transactional
+    public boolean publishAudioTrimResult(
+            com.bluewhale.worker.domain.dto.PublishAudioTrimDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("[audio_trim] publishAudioTrimResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "audio",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                null, null,
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null);
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "音频已截取",
+                Map.of("asset_ids", List.of(asset.getId().toString())));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        // 双事件同 extract 的 project_id 守卫形态；前端按 generation_job 轮询回填截取结果卡。
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+        return true;
+    }
+
+    /**
+     * 失败 audio_trim 作业（IKHB6S；failMediaExtractJob 同款守卫——轮询型任务失败多清
+     * next_poll_at，details.raw 透传原始原因）。
+     */
+    @Transactional
+    public boolean failAudioTrimJob(
+            com.bluewhale.worker.domain.dto.FailAudioTrimDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", input.code());
+        errorObj.put("message", input.message());
+        if (input.details() != null) {
+            errorObj.put("details", input.details());
+        }
+        String errorJson = toJson(errorObj);
+
+        int guardAffected = jobMapper.failMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken(), errorJson);
+        if (guardAffected != 1) {
+            log.warn("[audio_trim] failAudioTrimJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        insertLog(jobIdLong, JobStatusEnum.FAILED, input.code() + ": " + input.message(),
+                Map.of("code", input.code(), "message", input.message(),
+                        "details", input.details() != null ? input.details() : Map.of()));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", input.code(), "message", input.message())));
+        }
+        return true;
+    }
+
     /**
      * 发布 image_enhance 结果（契约 §14.5 / IKGM9D，附录 C 触点⑤）。
      * <p>
