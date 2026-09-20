@@ -105,6 +105,10 @@ export class JobsService {
       asset: job.asset,
       // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
       text_input_signature: job.text_input_signature,
+      // IKHA2J：vocal_split 多轨结果（契约 VocalSplitTrackResult：track_type / asset_id /
+      // url / duration，轨序 = 契约 SCENE_TRACKS[scene]）；其他任务类型恒 null，asset 单对象
+      // 投影不动（既有单 asset 消费者不受影响）。
+      tracks: job.tracks,
     });
   }
 }

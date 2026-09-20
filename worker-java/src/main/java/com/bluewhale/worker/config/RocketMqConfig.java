@@ -329,6 +329,31 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * vocal_split（人声背景分离，火山 MediaKit）consumer（IKHA2J；以 videoEnhance 接线为模板）。
+     * <p>
+     * consumer group = "generation-vocal-split-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#VOCAL_SPLIT}（= TS `VOCAL_SPLIT_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VocalSplitConsumer vocalSplitConsumer(
+            com.bluewhale.worker.application.processor.VocalSplitJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-vocal-split-worker";
+        int concurrency = workerProps.concurrency().vocalSplit();
+
+        return new com.bluewhale.worker.application.consumer.VocalSplitConsumer(
+                processor,
+                GenerationMqRouteEnum.VOCAL_SPLIT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -391,6 +416,21 @@ public class RocketMqConfig {
                 GenerationMqRouteEnum.VIDEO_ENHANCE.tag());
     }
 
+    /**
+     * vocal_split 轮询自投生产者（IKHA2J；去字幕 videoSubtitleEraseMessageProducer 同款）。
+     * <p>
+     * VocalSplitJobProcessor 火山异步链 submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = vocal_split）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer vocalSplitMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.VOCAL_SPLIT.topic(),
+                GenerationMqRouteEnum.VOCAL_SPLIT.tag());
+    }
+
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
@@ -445,6 +485,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoEnhanceRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_ENHANCE);
+    }
+
+    /** recovery 重投 vocal_split（IKHA2J）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer vocalSplitRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.VOCAL_SPLIT);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */
