@@ -621,41 +621,21 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== Seedance 2.0 识别 ==========
+    // ========== 参考视频/音频的模型门控 ==========
 
     @Test
-    @DisplayName("seedance-2 → true")
-    void seedance2_match() {
-        assertThat(VideoJobProcessor.isSeedance2Model("seedance-2")).isTrue();
-    }
-
-    @Test
-    @DisplayName("doubao-seedance-2-0 → true")
-    void seedance2_doubao_match() {
-        assertThat(VideoJobProcessor.isSeedance2Model("doubao-seedance-2-0")).isTrue();
-    }
-
-    @Test
-    @DisplayName("doubao-seedance-2-0-lite → true")
-    void seedance2_doubao_lite_match() {
-        assertThat(VideoJobProcessor.isSeedance2Model("doubao-seedance-2-0-lite")).isTrue();
-    }
-
-    @Test
-    @DisplayName("seedream-3 → false")
-    void seedance2_noMatch() {
-        assertThat(VideoJobProcessor.isSeedance2Model("seedream-3")).isFalse();
+    @DisplayName("Seedance 2.5 + 视频参考：worker 不再按模型名拒绝")
+    void seedance25_withVideoRef_accepted() {
+        AssetEntity videoRef = videoAsset(1024L, 5000, 1280, 720, "video/mp4");
+        // 支持与否由接纳侧按能力行 features.video_reference 判定（2.5 = true，且是默认模型）。
+        // 此前 worker 这里另有一份 `isSeedance2Model` 前缀特判（从已退役的 node worker 逐字移植），
+        // 把 2.5 误拒成 unsupported_input「只有 Seedance 2.0 支持参考视频和参考音频」，
+        // 而给能力行为 false 的 2.0 放行 —— 与数据恰好相反。该特判已删除。
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> processor.validateReferences("doubao-seedance-2-5-260628", List.of(videoRef)));
     }
 
     // ========== validateReferences ==========
-
-    @Test
-    @DisplayName("G69: 非 Seedance 2.0 模型 + 视频参考 → unsupported_input")
-    void nonSeedance2_withVideoRef_fails() {
-        AssetEntity videoRef = videoAsset(1024L, 5000, 640, 480, "video/mp4");
-        org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                () -> processor.validateReferences("seedream-3", List.of(videoRef)));
-    }
 
     @Test
     @DisplayName("G70: 参考图片 >9 → reference_limit_exceeded")

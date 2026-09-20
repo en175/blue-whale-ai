@@ -87,10 +87,6 @@ public class VideoJobProcessor implements JobProcessor {
     static final double MAX_REFERENCE_VIDEO_RATIO = 2.5;
     static final Set<String> REFERENCE_VIDEO_MIMES = Set.of("video/mp4", "video/quicktime");
 
-    /** Seedance 2.0 模型识别（video-reference-validation.ts:166-168）。 */
-    static final Pattern SEEDANCE2_PATTERN = Pattern.compile(
-            "^seedance-2$|^doubao-seedance-2-0(?:-|$)");
-
     /** 素材库素材 id 形态（material-reference.ts:57 `^[Aa]sset-.{1,128}$`，大小写不敏感前缀）。 */
     static final Pattern MATERIAL_ID_PATTERN = Pattern.compile("^[Aa]sset-.{1,128}$");
 
@@ -710,11 +706,15 @@ public class VideoJobProcessor implements JobProcessor {
                     "Seedance 2.0 最多支持 3 个参考音频");
         }
 
-        // Seedance 2.0 约束（:82-87）
-        if ((videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)) {
-            throw new VideoInputError(GenerationError.ERROR_UNSUPPORTED_INPUT,
-                    "只有 Seedance 2.0 支持参考视频和参考音频");
-        }
+        // 参考视频 / 参考音频的「模型是否支持」**不在这里判**。
+        // 这条规则曾经是本文件里的 `isSeedance2Model(SEEDANCE2_PATTERN)` 前缀特判，
+        // 逐个字从已退役的 node worker 移植而来，与能力行数据相反：
+        //   - 它给 Seedance 2.0 放行，而能力行 features.video_reference = false
+        //   - 它把 Seedance 2.5 拒掉（抛 unsupported_input「只有 Seedance 2.0 支持…」），
+        //     而能力行 features.video_reference = true，2.5 还正是默认选中模型
+        // 接纳侧（backend handle-create-generation-job）已按能力行校验过（video_reference /
+        // audio_reference），此处再按模型名推一遍只会把正确的请求拦掉。
+        // 模型名会随目录新增而失效，能力位不会——因此只留上游那一道闸门。
 
         // 视频时长累计校验（:88-93）
         if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
@@ -934,9 +934,6 @@ public class VideoJobProcessor implements JobProcessor {
         return 0;
     }
 
-    static boolean isSeedance2Model(String model) {
-        return model != null && SEEDANCE2_PATTERN.matcher(model).find();
-    }
 
     /** 素材 id 解析（material-reference.ts:52-57 readAssetId）：接受 JSON 数字与纯数字串形态。 */
     private static String readAssetId(Object value) {
