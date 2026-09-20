@@ -92,11 +92,11 @@ export interface MediaNodeData {
   materialId?: string;
   /** 空壳占位：待用户上传，不连线不成组无右键 */
   emptyShell?: boolean;
-  /** 合规校验进行中 */
+  /** 合规校验进行中（会话内 UI，不随画布持久化） */
   complianceBusy?: boolean;
-  /** 合规校验已通过（展示成功角标，随画布持久化） */
+  /** 合规校验已通过：历史画布只认 snapshot assets.material_status === Active */
   compliancePassed?: boolean;
-  /** 合规校验未通过（展示失败角标，随画布持久化） */
+  /** 合规校验未通过（当前会话内失败角标；二次进入不从节点 JSON 恢复） */
   complianceFailed?: boolean;
   /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
   assetMissing?: boolean;
