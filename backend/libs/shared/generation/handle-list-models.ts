@@ -26,7 +26,8 @@ export async function handleListModels(
   return ok(models.map((model) => toConsumerModel(model, lengthType)));
 }
 
-/** text 档不建 GenerationJob、没有提示词长度闸，不参与上限下发。 */
+/** text 档不建 GenerationJob、没有提示词长度闸：不解析缺省，`max_prompt_length` 原样透出
+ *  （行里真配了值也照传）。 */
 function asPromptLengthType(capability: string): PromptLengthType | null {
   return capability === "image" || capability === "video" || capability === "audio"
     ? capability

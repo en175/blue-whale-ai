@@ -1,6 +1,9 @@
 import { composeTextAttachmentPrompt } from "./compose-text-attachment-prompt.js";
 
 /**
+ * **已退役（IKE5G8 / ADR-0088 / IKH8AU）：无生产调用者，不要再接回接纳或出站链路。**
+ * 见 `compose-text-attachment-prompt.ts` 顶部说明。
+ *
  * Deterministically compose the provider prompt from ordered text attachments
  * and the target prompt (IKDLQF contract). Blank-only attachment texts are
  * skipped; a non-blank target prompt is appended last. No rewriting.

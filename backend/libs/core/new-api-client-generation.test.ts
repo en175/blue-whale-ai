@@ -510,7 +510,8 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(task.quota).toBe(880000);
   });
 
-  // IKDLQF：供应商线路收到的 prompt 必须与冻结快照按 composeImagePrompt 精确对应。
+  // IKH8AU：ADR-0088 起服务端不再组合正文——执行侧原样发送 `input.prompt`。本条只验证
+  // 「出站 prompt 与传入值逐字一致」，传入值怎么来的不再由本测试负责（composeImagePrompt 已退役）。
   it("delivers the composed text-attachment prompt verbatim to the image endpoint", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({

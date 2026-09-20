@@ -439,7 +439,7 @@ describe("freezePromptPlans 素材库素材落成画布节点（IKG79Z）", () =
 
 // IKH8AU：方案卡闸的上限与接纳闸同一口径——模型配置优先，未配置回落缺省（图片/视频 4000）。
 // 只覆盖 image/video：音频不经 freezePromptPlans（调用点已按 `type === "image" || "video"` 限定）。
-describe("freezePromptPlans 提示词上限配置优先（IKH4B8）", () => {
+describe("freezePromptPlans 提示词上限配置优先（IKH8AU）", () => {
   const longPrompt = (len: number) => "a".repeat(len);
 
   it("模型配 2000：2500 字 → 400（原取大闸会放行到 30000）", async () => {

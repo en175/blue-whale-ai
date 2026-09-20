@@ -1316,7 +1316,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
     expect(cmdArg.input.target_node_id).toBe("media-1");
     expect(cmdArg.input.prompt).toBe("海边日落");
-    // 顺序即 edges 数组顺序；缺 title 缺省 ""；空白正文照实冻结（组合时才忽略）；
+    // 顺序即 edges 数组顺序；缺 title 缺省 ""；空白正文照实冻结（长度闸只量提交上来的正文，不影响冻结）；
     // 指向其他目标的 e4 与非 textNode 来源的 e5 不进入快照。
     expect(cmdArg.input.text_attachments).toEqual([
       { node_id: "text-b", title: "", text: "雨夜" },
