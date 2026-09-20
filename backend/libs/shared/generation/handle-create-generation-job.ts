@@ -70,10 +70,6 @@ import {
   parseStoredImageRequestMapping,
 } from "./image-channel-parser.js";
 
-const VIDEO_MODEL_ALIASES: Readonly<Record<string, string>> = {
-  "seedance-2": "doubao-seedance-2-0-260128",
-};
-
 export interface GenerationParameters {
   prompt?: unknown;
   aspect_ratio?: unknown;
@@ -721,12 +717,20 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
 
 // ---- pipeline 阶段 ----
 
+/** 模型 id 原样取用，不做任何改写。
+ *
+ *  这里曾有一张 `VIDEO_MODEL_ALIASES = { "seedance-2": "doubao-seedance-2-0-260128" }` 的旧前端
+ *  兼容表，在**白名单查询之前**改写 model_id。按「配置永远第一」，它是个反例：运营若真配一行
+ *  model_id 就叫 `seedance-2`，请求会被改写成 2.0 那行，那一行永远赢不了。故删除。
+ *
+ *  删除依据：当前前端产品代码只发真实目录 id；本地画布草稿清点 `"seedance-2"` 零命中，
+ *  存的都是 `doubao-seedance-2-0-260128` / `doubao-seedance-2-5-260628`。若有老客户端仍发别名，
+ *  会在下面过白名单时以 400 MODEL_UNAVAILABLE 明确失败，而不是被静默改写。
+ *
+ *  最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400（IK6T90）。 */
 function resolveModelId(type: GenerationType, modelId: unknown): string {
-  // 白名单（IK6T90）：先解析视频模型名别名，再对解析后的最终 model_id 校验——
-  // 别名不能绕过白名单。最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400。
-  return type === "video"
-    ? String(VIDEO_MODEL_ALIASES[modelId as string] ?? modelId)
-    : String(modelId);
+  void type;
+  return String(modelId);
 }
 
 /** 参考图字段语义统一（IKA72G）：image 参考图 = input_asset_ids（与前端契约/worker 对齐），

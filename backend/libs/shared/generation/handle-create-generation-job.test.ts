@@ -718,7 +718,7 @@ const VIDEO_BODY = {
   expected_output_count: 1,
   parameters: {
     prompt: "人物走过街角",
-    model_id: "seedance-2",
+    model_id: "doubao-seedance-2-0-260128",
     aspect_ratio: "16:9",
     resolution: "720p",
     duration: 8,
@@ -1457,7 +1457,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
 // 快照形状与图片同构；视频既有冻结字段（resolution/duration/参考引用）保持。
 function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
-  // seedance-2 经别名解析为 doubao-seedance-2-0-260128，白名单按解析后 id 校验
+  // 白名单按请求里的真实目录 id 校验（旧 seedance-2 别名已删除）
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
     .fn()
     .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
