@@ -17,7 +17,7 @@
  * 取决于本次 references 里该素材是以什么身份提交的**——转成 material_id 再调上游是
  * worker 的事，不在接纳层。
  *
- * core 不反向依赖 contracts，入参只取纯数据（同 compose-text-attachment-prompt.ts 先例）。
+ * core 不反向依赖 contracts，入参只取纯数据。
  */
 
 /** 引用标记语法：`&<正整数 asset_id>&` 或 `&<asset- 前缀素材库 id>&`——扫描与替换共用的唯一定义。
