@@ -39,11 +39,16 @@ public final class VideoSceneSplitContract {
     /** 任务来源值：唯一创建入口是画布视频卡工具条「场景切分」单按钮，claim SQL 的 source 白名单仅含本值。 */
     public static final String SOURCE = "video_scene_split";
 
-    // ========== input 冻结键名（两键恒在、值恒为合法枚举，创建时定死，重试原样沿用） ==========
-    // provider_credential 是业务键之上的基础设施键（创建侧冻结落库，同 VideoEnhanceContract 口径）。
+    // ========== input 冻结键名（三键恒在、粒度恒为合法枚举，创建时定死，重试原样沿用）==========
+    // provider_credential（请求头冻结）与 client_token（提交幂等键，消费方是 command_idempotency
+    // 表）是业务键之上的基础设施键，创建侧处理，不进 input（同 VideoEnhanceContract 口径）。
 
     /** 源素材身份（被切分的视频 Asset id）。 */
     public static final String INPUT_KEY_SOURCE_ASSET_ID = "source_asset_id";
+
+    /** 画布任务占位卡节点绑定（IKH8BO 扩展；前端本地建占位卡后随请求传入，前端按本键把
+     *  job 映射到占位卡——画布单写入方架构下后端不写 nodes_json，绑定随任务 input 落库）。 */
+    public static final String INPUT_KEY_TARGET_NODE_ID = "target_node_id";
 
     /** 切分粒度档（本仓产品语义值，出站经 SEGMENT_THRESHOLD 映射官方 segment_threshold 数值）。 */
     public static final String INPUT_KEY_GRANULARITY = "granularity";
