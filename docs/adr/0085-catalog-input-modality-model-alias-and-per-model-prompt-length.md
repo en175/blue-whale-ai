@@ -36,9 +36,20 @@
 
 **结论**：原文的「取大」改为**配置优先，未配置才回落缺省**——配置大用配置、配置小也用配置，两侧诉求同时满足。
 
-- **取值口径唯一化**：三道闸（raw prompt 闸、组合闸、方案卡闸）统一走 `resolvePromptMaxLength(gate, type, configured)`（`backend/libs/contracts/prompt-text-limits.ts`）。原来两处 `Math.max` 是逐字复制的，正是分叉的温床。
-- **两道闸缺省不同，故取值函数必须带 `gate` 参数**：raw 闸沿用旧硬编码（图片/视频 4000、音频 3000），组合闸回落契约预算 30000。把 raw 闸的**生效值**（已含缺省）当组合闸的配置读回去，会让未配置模型的组合上限从 30000 掉到 4000——本次改动最容易踩的坑。契约预算常量取值不变（仍 30000），只是从「取大的底」降级为「未配置时的缺省」。
-- **适用范围**：图片 / 视频 / 音频三类生成。音频只经 raw 闸与组合闸；方案卡闸的调用点已按 `type === "image" || "video"` 限定，音频不进入。
-- **配置值的边界**由 admin 写入口把关（`parseModelCreateBody` / `parseModelUpdateBody`，1–65535 整数或 null）。本决策不在代码侧再加下限——再加一条下限就是重新造出「配了不生效」。
-- **行为影响**：未配置的模型零变化。仓库 migration 内配了 `max_prompt_length` 的只有 gpt-image-2 = 32000（> 30000），改动前后都生效 32000，同样不变。会变的只有后台手配了小于 30000 的值的模型——这类值不在仓库 migration 里（同期工单正文点名的「gpt-image-2 配 16000」「doubao-seedance-2-5 配 3000」在仓库内查无实据）。
+- **取值口径唯一化**：三道闸（raw prompt 闸、组合闸、方案卡闸）统一走 `resolvePromptMaxLength(budget, type, configured)`（`backend/libs/contracts/prompt-text-limits.ts`）。原来两处 `Math.max` 是**同形不同源**——一个的第二操作数是已含缺省的 raw 生效值，另一个是 `?? 0` 的配置原值——正是分叉的温床。
+- **两档缺省并存，故取值函数带 `budget` 参数，且该参数选的是「回落哪档」而非「量的是哪段字符串」**：`legacy-hardcode` = 旧硬编码（图片/视频 4000、音频 3000），只给 raw 闸；`contract-budget` = 契约预算 30000，组合闸与方案卡闸共用。方案卡闸量的是方案卡正文自身（其实是 raw 长度），但它从本文档起就沿用组合口径，换 raw 档会把缺省从 30000 砍到 4000，属行为回归——所以参数按「缺省档」命名，不按闸名。
+- **最容易踩的坑**：把 raw 闸的**生效值**（已含缺省 4000/3000）当装配配置读回去，会让未配置模型的组合上限从 30000 掉到 4000。传**配置原值**，回落交给取值函数。契约预算常量取值不变（仍 30000），只是从「取大的底」降级为「未配置时的缺省」。
+- **适用范围**：图片 / 视频 / 音频三类生成。音频只经 raw 闸与组合闸；方案卡闸的调用点已按 `type === "image" || "video"` 限定，音频不进入。注意**后台模型表单目前只对 image / video 放出该字段**（`web/src/admin/pages/ModelList/ModelFormModal.tsx` 的 `types: ['image','video']`），所以音频档位眼下只能经 API 配置——要放开是产品侧决定，不在本单。
+- **配置值的边界**由 admin 写入口把关（`parseModelCreateBody` / `parseModelUpdateBody`，1–65535 整数或 null）；取值函数另对 0 / 小数 / NaN 之类脏值自防（回落缺省）。本决策不在代码侧再加下限——再加一条下限就是重新造出「配了不生效」。
+- **行为影响**：未配置的模型零变化。仓库 migration 内配了 `max_prompt_length` 的只有 32000 两行——`gpt-image-2-text-to-image`（IKESD6 迁移写入）与 IKF4LI 迁回干净名后的 `gpt-image-2` 行（紧前一行在同批被软删）；32000 > 30000，改动前后都生效 32000，不变。
+- **上线前须实测，别只信上面的推断**：以上是**从仓库 migration 推断**的结论，不等于测试站 / 线上实际。后台手配过小于 30000 的值的模型改动后会开始拒绝此前放行的长提示词——用户可见且静默。部署前对每个环境跑一次（camelCase 键也要查，读取侧两键都认），查出的行就是生效上限会收紧的档位：
+
+  ```sql
+  SELECT provider_id, model_id, capability_type,
+         JSON_UNQUOTE(JSON_EXTRACT(features,'$.max_prompt_length')) AS v
+  FROM generation_model_capability
+  WHERE is_delete = 0 AND enabled = 1
+    AND JSON_EXTRACT(features,'$.max_prompt_length') < 30000;
+  ```
+
 - **前端**：`web/` 侧的 `features.max_prompt_length ?? DEFAULT_MAX_INPUT(=1000)` 本来就是「配置优先」口径，缺省值仍与后端不一致（前端 1000 / 后端 4000），收口另见 IKGXO7。

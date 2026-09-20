@@ -1288,7 +1288,7 @@ async function resolveTargetSnapshot(args: {
     }
     // IKH4B8：组合闸改为**模型配置优先**，未配置才回落组合缺省（image/video/audio 均契约预算 30000）。
     // 原 ADR-0085 的取大修掉了「大上限模型先撞组合闸」，但顺带把小于契约预算的配置也吞掉了。
-    const composedMaxLength = resolvePromptMaxLength("composed", type, promptLengthConfig);
+    const composedMaxLength = resolvePromptMaxLength("contract-budget", type, promptLengthConfig);
     if (composed.length > composedMaxLength) {
       return {
         ok: false,
@@ -1399,7 +1399,7 @@ export async function handleCreateGenerationJob(
   // ADR-0085（IKESD6）/ IKH4B8：raw prompt 长度上限**模型配置优先**，
   // 未配置才回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
   const promptLengthConfig = capability?.features?.max_prompt_length ?? null;
-  const maxPromptLength = resolvePromptMaxLength("raw", type, promptLengthConfig);
+  const maxPromptLength = resolvePromptMaxLength("legacy-hardcode", type, promptLengthConfig);
   if (promptText.length > maxPromptLength)
     return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
