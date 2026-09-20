@@ -170,7 +170,7 @@ describe('IKGB82 两类点击分派（等价退役菜单两项）', () => {
     expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
     expect(onPickFromAssets).not.toHaveBeenCalled();
     // startCanvasPick 既有行为：面板内画布选择列表同时打开
-    expect(container.textContent).toContain('从画布选择音频');
+    expect(container.textContent).toContain('从画布选择素材');
 
     await click(pickAssetsBtn());
     expect(onPickFromAssets).toHaveBeenCalledTimes(1);

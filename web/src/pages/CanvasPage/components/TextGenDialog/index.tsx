@@ -2,12 +2,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { promptMaxLengthOf } from '@/lib/prompt-max-length';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { FollowDialogAnchor } from '../../followDialog';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
-
-const DEFAULT_MAX_INPUT = 1000;
 
 interface TextGenDialogProps {
   onClose: () => void;
@@ -48,7 +47,7 @@ export default function TextGenDialog({
   }, []);
 
   const currentModel = modelList.find((item) => item.model_id === selectedModel);
-  const maxInput = currentModel?.features?.max_prompt_length ?? DEFAULT_MAX_INPUT;
+  const maxInput = promptMaxLengthOf(currentModel?.features?.max_prompt_length);
   const hasAttachmentText = (attachments ?? []).some((item) => item.text.trim().length > 0);
   const canSend = (inputValue.trim().length > 0 || hasAttachmentText) && Boolean(selectedModel);
 
@@ -88,9 +87,9 @@ export default function TextGenDialog({
             className={styles.textarea}
             placeholder="描述你希望生成的文案，可结合连入的参考。"
             value={inputValue}
-            maxLength={maxInput}
+            maxLength={maxInput ?? undefined}
             onChange={(e) => {
-              const next = e.target.value.slice(0, maxInput);
+              const next = maxInput != null ? e.target.value.slice(0, maxInput) : e.target.value;
               setInputValue(next);
               onParamsChange?.({ prompt: next });
             }}

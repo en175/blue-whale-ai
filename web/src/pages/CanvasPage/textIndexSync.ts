@@ -20,7 +20,7 @@ import {
   type TextProvidedRef,
 } from '@lib/contracts/text-index-sync';
 import { imageMediaRefsOf, type ImageMediaRef } from './mediaRefs';
-import { audioMediaRefsOf, type AudioMediaRef } from './audioMediaRefs';
+import { audioMediaRefsOf, audioMergedRefsError, type AudioMediaRef } from './audioMediaRefs';
 import { mergedVideoMediaRefsOf, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
 
 /** 图片参考缺省上限（= 后端 DEFAULT_MAX_REFERENCE_IMAGES；模型未配 features.max_reference_images
@@ -195,7 +195,7 @@ export function videoTextIndexSendError(
 /* ---- 音频目标（契约 §11，IKFM41）：同一来源模型与并入/签名实现，恒普通参考无角色槽 ---- */
 
 /** 音频目标的合并参考（契约 §11）：直接参考（连线推导）在前、文本带入参考追加尾部
- *  （同 assetId 去重保首见，mediaType 保留——image 素材仅经文本带入进入音频参考）。
+ *  （同 assetId 去重保首见，mediaType 保留——直接参考与文本带入均可为 audio / image）。
  *  Dock 展示与生成提交共用（显示输入 = 实际任务输入）。 */
 export function mergedAudioRefsWithTextIndex(
   targetNodeId: string,
@@ -224,8 +224,7 @@ export function mergedAudioRefsWithTextIndex(
 }
 
 /** 音频目标发送前校验（契约 §11，与业务 API 同口径）：失效索引 / 不支持类型（video）
- *  阻止发送。容量与 audio/image 混用由后端 400 权威（checkReferenceLimits("audio") 文案），
- *  返回 null 放行。 */
+ *  / 图音频混用与分类上限均阻止发送。 */
 export function audioTextIndexSendError(
   targetNodeId: string,
   edges: Edge[],
@@ -233,12 +232,16 @@ export function audioTextIndexSendError(
   textNodes: Node[],
 ): string | null {
   const index = textIndexOfTarget(canvasOf([...mediaNodes, ...textNodes]), edges, targetNodeId);
-  if (index.refs.length === 0 && index.invalid.length === 0) return null;
+  if (index.refs.length === 0 && index.invalid.length === 0) {
+    return audioMergedRefsError(audioMediaRefsOf(targetNodeId, edges, mediaNodes).refs);
+  }
   const error = checkAudioTextIndexSyncInput({
     index,
     acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   });
-  if (!error) return null;
-  if (error.kind === 'invalid_index') return TEXT_INDEX_INVALID_MESSAGE;
-  return TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE;
+  if (error?.kind === 'invalid_index') return TEXT_INDEX_INVALID_MESSAGE;
+  if (error) return TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE;
+  return audioMergedRefsError(
+    mergedAudioRefsWithTextIndex(targetNodeId, edges, mediaNodes, textNodes).refs,
+  );
 }

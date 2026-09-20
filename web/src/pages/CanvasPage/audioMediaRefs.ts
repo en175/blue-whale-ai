@@ -6,14 +6,15 @@
 import type { Edge, Node } from '@xyflow/react';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
+import { panelCanvasRefError } from './refSourceTypes';
 
-/** 参考音频上限（与服务端 seed-audio 契约一致：音频 ≤3、图片 ≤1、不可混用；
- *  前端音频面板不提供图片入口——后端图片能力不等于新增入口） */
+/** 参考音频上限（与服务端 seed-audio 契约一致：音频 ≤3、图片 ≤1、不可混用） */
 export const MAX_AUDIO_MEDIA_REFS = 3;
+export const MAX_AUDIO_IMAGE_REFS = 1;
 
 /** 音频媒体参考项：nodeId 用于面板移除时断开对应连线；assetId 进入 references[].asset_id。
- *  mediaType：直接参考恒 audio；IKFM41 §11 文本带入参考可为 image（文本带入是图片素材进入
- *  音频参考的唯一通道）。textNodeId 标记锁定来源文本卡（锁定条目不渲染移除入口）。 */
+ *  mediaType：直接参考与文本带入均可为 audio / image（二者不可混用，视频不接受）。
+ *  textNodeId 标记锁定来源文本卡（锁定条目不渲染移除入口）。 */
 export interface AudioMediaRef {
   nodeId: string;
   url: string;
@@ -23,6 +24,28 @@ export interface AudioMediaRef {
   textNodeId?: string;
 }
 
+export function audioRefMediaTypeOf(data: Record<string, unknown>): 'audio' | 'image' | null {
+  if (data.mediaType === 'image') return 'image';
+  if (data.mediaType === 'audio') return 'audio';
+  return null;
+}
+
+/** 面板参考项的实际媒体类型（kind 为缺省 audio 时以 mediaType 为准）。 */
+export function audioRefItemMediaTypeOf(item: { mediaType?: string; kind?: string }): 'audio' | 'image' {
+  if (item.mediaType === 'image' || item.kind === 'image') return 'image';
+  return 'audio';
+}
+
+/** 已合并参考清单的混用/分类上限（存量边与文本带入并入后的发送防线）。 */
+export function audioMergedRefsError(refs: AudioMediaRef[]): string | null {
+  const audioCount = refs.filter((r) => r.mediaType !== 'image').length;
+  const imageCount = refs.filter((r) => r.mediaType === 'image').length;
+  if (audioCount > 0 && imageCount > 0) return '音频与图片参考不可混用';
+  if (audioCount > MAX_AUDIO_MEDIA_REFS) return `参考音频最多 ${MAX_AUDIO_MEDIA_REFS} 段`;
+  if (imageCount > MAX_AUDIO_IMAGE_REFS) return `参考图最多 ${MAX_AUDIO_IMAGE_REFS} 个`;
+  return null;
+}
+
 /** 音频草稿身份判定（IKDMQQ 约定延伸）：draft 标记 + 音频媒体类型 */
 export function isAudioDraftNode(node: Node | undefined): boolean {
   if (!node || node.type !== 'mediaNode') return false;
@@ -30,13 +53,13 @@ export function isAudioDraftNode(node: Node | undefined): boolean {
   return data.draft === true && data.mediaType === 'audio';
 }
 
-/** 来源有效性：与图片/视频参考同口径（仅有效媒体结果，baseSourceError 共享）；音频参考仅
- *  接受音频素材——服务端契约允许单图片参考，但音频面板不提供图片入口（画布选取/@/面板列表/
- *  拖线均不放行），非音频来源给出用户可读拒绝原因，不静默丢弃。 */
+/** 来源有效性：与图片/视频参考同口径（仅有效媒体结果，baseSourceError 共享）；
+ *  音频参考接受图片或音频，不接受视频；类型不匹配给出用户可读拒绝原因，不静默丢弃。 */
 export function audioRefSourceError(node: Node | undefined): string | null {
   if (!node) return '素材不存在';
   const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.mediaType !== 'audio') return '音频参考仅支持音频素材';
+  const typeErr = panelCanvasRefError('audio', data.mediaType);
+  if (typeErr) return typeErr;
   return baseSourceError(node);
 }
 
@@ -72,24 +95,32 @@ export function audioMediaRefsOf(
       url: data.src as string,
       name: cardNameOfNode(source)!,
       assetId,
-      mediaType: 'audio',
+      mediaType: audioRefMediaTypeOf(data) ?? 'audio',
     });
   }
   return { refs, invalid };
 }
 
-/** 统一校验「向音频草稿添加参考音频」：重复素材 / 超上限——所有添加入口（画布选取 / @ /
- *  面板「从画布选择」列表 / 拖线）必须调本函数，禁止各自复制 guard。
- *  existing 为连线推导的当前参考；extraLocalCount 为面板本地上传项数量（共同计入上限）。
+/** 统一校验「向音频草稿添加媒体参考」：重复素材 / 图音频混用 / 分类上限——所有添加入口
+ *  （画布选取 / @ / 面板「从画布选择」列表 / 拖线 / 资产库）必须调本函数，禁止各自复制 guard。
+ *  existing 为连线推导的当前参考；extraLocalCount 为面板本地上传音频项数量（计入音频上限）。
  *  返回 null 表示可添加；否则为用户可读的拒绝原因。 */
 export function checkAddAudioRef(
   assetId: string | undefined,
   existing: AudioMediaRef[],
   extraLocalCount = 0,
+  incomingType: 'audio' | 'image' = 'audio',
 ): string | null {
   if (assetId && existing.some((r) => r.assetId === assetId)) return '重复的素材已跳过';
-  if (existing.length + extraLocalCount >= MAX_AUDIO_MEDIA_REFS) {
+  const existingAudioCount = existing.filter((r) => r.mediaType !== 'image').length + extraLocalCount;
+  const existingImageCount = existing.filter((r) => r.mediaType === 'image').length;
+  if (incomingType === 'image' && existingAudioCount > 0) return '音频与图片参考不可混用';
+  if (incomingType === 'audio' && existingImageCount > 0) return '音频与图片参考不可混用';
+  if (incomingType === 'audio' && existingAudioCount >= MAX_AUDIO_MEDIA_REFS) {
     return `参考音频最多 ${MAX_AUDIO_MEDIA_REFS} 段`;
+  }
+  if (incomingType === 'image' && existingImageCount >= MAX_AUDIO_IMAGE_REFS) {
+    return `参考图最多 ${MAX_AUDIO_IMAGE_REFS} 个`;
   }
   return null;
 }

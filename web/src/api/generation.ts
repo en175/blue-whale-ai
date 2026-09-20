@@ -33,7 +33,7 @@ export interface ModelFeatures {
   last_frame: boolean;
   first_last_frame: boolean;
   audio: boolean;
-  /** 每模型 prompt 上限（ADR-0085）；null/缺省 = 未配置，前端回落默认。
+  /** 每模型 prompt 上限；null/缺省 = 前端不设限。
    *  i2i_model_name 属出站调用值，后端已从消费端剥除，不在此类型。 */
   max_prompt_length?: number | null;
   /** ADR-0086：视频生成是否接受视频素材作普通参考（替代旧 seedance-2 前缀特判）。 */
