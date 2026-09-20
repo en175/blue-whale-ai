@@ -87,10 +87,6 @@ export {
   type CostReservationVersions,
 } from "./generation-cost.js";
 export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
-export { composeImagePrompt } from "./compose-image-prompt.js";
-export {
-  composeTextAttachmentPrompt,
-} from "./compose-text-attachment-prompt.js";
 export { transferReferenceMarkers } from "./transfer-reference-markers.js";
 export {
   issueAccessToken,

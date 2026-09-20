@@ -17,14 +17,18 @@
  * 置灰沿用画质横排先例口径，悬停提示「即将上线」，不绑定任何点击行为），各功能交互由后续
  * 独立任务逐个点亮；详情钮随改版对音频退役（信息稀薄，右键菜单与双击重命名已覆盖），
  * 图片/视频分支的详情不变；音频不出现「替换」入口；@（mention）对音频保持隐藏。
+ * IKH8BJ 视频卡追加「场景切分」入口：图标+文字单按钮（无下拉），形态同「音视频分离」，
+ * 落其之后、分隔线之前；置灰门槛见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据），
+ * 点击派发 onSceneSplit 进入编辑态（编辑态本体由 IKH8BR 交付）。
  * ============================================ */
 import { useCallback } from 'react';
-import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, type LucideIcon } from 'lucide-react';
+import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, Film, type LucideIcon } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
+import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
@@ -93,6 +97,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
+  /** 场景切分（IKH8BJ）：点击进入场景切分编辑态（编辑态本体归 IKH8BR）；
+   *  置灰预检见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据，缺失放行） */
+  const handleSceneSplit = useCallback(() => data.onSceneSplit?.(id), [data, id]);
+  const sceneSplitDisabledReason = sceneSplitGateReason(data);
   /** 视频 HD 高清（IKH3VG）：点击在源卡右侧建 HD 草稿卡并弹出 HD 面板；置灰预检见
    *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
   const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
@@ -221,6 +229,19 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
         >
           <AudioLines size={14} strokeWidth={2} />
           <span>音视频分离</span>
+        </button>
+      )}
+      {/* 场景切分（IKH8BJ）：仅视频卡显示，落「音视频分离」之后、分隔线之前；同音视频分离
+          形态（图标+文字单按钮、native disabled 置灰 + title 悬停原因/可用态 hint） */}
+      {data.mediaType === 'video' && (
+        <button
+          className={styles.toolBtn}
+          onClick={handleSceneSplit}
+          disabled={sceneSplitDisabledReason !== null}
+          title={sceneSplitDisabledReason ?? SCENE_SPLIT_ENTRY_HINT}
+        >
+          <Film size={14} strokeWidth={2} />
+          <span>场景切分</span>
         </button>
       )}
       {/* 音频卡五功能占位（IKH8Q3）：aria-disabled 置灰保持渲染（口径同画质横排

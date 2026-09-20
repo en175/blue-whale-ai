@@ -510,9 +510,9 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(task.quota).toBe(880000);
   });
 
-  // IKH8AU：ADR-0088 起服务端不再组合正文——执行侧原样发送 `input.prompt`。本条只验证
-  // 「出站 prompt 与传入值逐字一致」，传入值怎么来的不再由本测试负责（composeImagePrompt 已退役）。
-  it("delivers the composed text-attachment prompt verbatim to the image endpoint", async () => {
+  // IKH8AU（IKH9NU）：ADR-0088 起服务端不再组合正文——执行侧原样发送 `input.prompt`。本条只验证
+  // 「出站 prompt 与传入值逐字一致」，传入值怎么来的不再由本测试负责（组合助手已退役删除）。
+  it("delivers the frozen provider prompt verbatim to the image endpoint", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
@@ -521,23 +521,17 @@ describe("new-api client —— 图片与视频生成", () => {
         return jsonResponse({ data: [{ url: "https://cdn.test/out.png" }] });
       },
     });
-    const { composeImagePrompt } = await import("./compose-image-prompt.js");
-    const frozenSnapshot = {
-      text_attachments: [
-        { node_id: "text-1", title: "背景", text: "雨夜" },
-        { node_id: "text-2", title: "风格", text: "赛博朋克" },
-      ],
-      prompt: "暮色",
-    };
+    // 冻结快照里的正文由提交方给全；取值任意（本条只验透传，不代表任何组合格式）。
+    const frozenProviderPrompt = "frozen-prompt-body";
 
     await client.generateImages("sk-test", {
       model: "image-model",
-      prompt: composeImagePrompt(frozenSnapshot.text_attachments, frozenSnapshot.prompt),
+      prompt: frozenProviderPrompt,
       n: 1,
     });
 
     expect(requests[0]?.url).toBe("http://new-api.test/v1/images/generations");
-    expect(JSON.parse(String(requests[0]?.init.body)).prompt).toBe("雨夜\n\n赛博朋克\n\n暮色");
+    expect(JSON.parse(String(requests[0]?.init.body)).prompt).toBe("frozen-prompt-body");
   });
 
   // ---- native topup（Model B：结算复用 Go 原生 new-api 充值）----

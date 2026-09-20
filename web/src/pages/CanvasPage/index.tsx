@@ -22,7 +22,7 @@ import {
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
-import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
+import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, audioMergedRefsError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
@@ -182,7 +182,8 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
-import ImageDialog, { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
@@ -773,9 +774,8 @@ export default function CanvasPage() {
     return true;
   };
   /** 音频草稿参考连线校验（IKFDFZ）：仅当目标是音频草稿且来源是媒体节点时介入——
-   *  仅有效音频媒体结果可连入（服务端契约允许单图片参考，但音频面板不提供图片入口）；
-   *  重复素材（按 assetId 归一）与超上限明确拒绝，不静默丢弃输入。
-   *  文本卡等来源与非草稿目标沿用既有语义（文本附件），本函数放行。 */
+   *  有效图片或音频可连入（二者不可混用，视频拒绝）；重复素材与分类上限明确拒绝。
+   *  文本卡走 validateAudioTextConnect。 */
   const validateAudioRefConnect = (sourceId: string, targetId: string): boolean => {
     const target = mediaNodesRef.current.find((n) => n.id === targetId);
     if (!isAudioDraftNode(target)) return true;
@@ -790,9 +790,42 @@ export default function CanvasPage() {
       showToast('warn', err);
       return false;
     }
-    const refs = audioMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current).refs;
-    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
-    const msg = checkAddAudioRef(assetId, refs);
+    const sourceData = (source.data ?? {}) as Record<string, unknown>;
+    const incomingType = audioRefMediaTypeOf(sourceData) ?? 'audio';
+    const refs = mergedAudioRefsWithTextIndex(
+      targetId,
+      edgesRef.current,
+      mediaNodesRef.current,
+      textNodesRef.current,
+    ).refs;
+    const assetId = readAssetId(sourceData);
+    const msg = checkAddAudioRef(assetId, refs, 0, incomingType);
+    if (msg) {
+      showToast('warn', msg);
+      return false;
+    }
+    return true;
+  };
+  /** 音频草稿挂文本附件：模拟并入后若图+音频混用或超分类上限则拒绝（点选/@/拖线同一道门）。 */
+  const validateAudioTextConnect = (textNodeId: string, targetId: string): boolean => {
+    const target = mediaNodesRef.current.find((n) => n.id === targetId);
+    if (!isAudioDraftNode(target)) return true;
+    if (isGeneratingNode(targetId)) {
+      showToast('warn', '生成中，输入连线只读');
+      return false;
+    }
+    const alreadyLinked = edgesRef.current.some((e) => e.source === textNodeId && e.target === targetId);
+    const hypoEdges = alreadyLinked
+      ? edgesRef.current
+      : [...edgesRef.current, { id: `hypo-audio-text-${textNodeId}`, source: textNodeId, target: targetId }];
+    const msg = audioMergedRefsError(
+      mergedAudioRefsWithTextIndex(
+        targetId,
+        hypoEdges,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      ).refs,
+    );
     if (msg) {
       showToast('warn', msg);
       return false;
@@ -858,7 +891,9 @@ export default function CanvasPage() {
         }
       }
       if (!validateVideoRefConnect(source, target, videoRole ?? 'reference')) return false;
-      if (!validateAudioRefConnect(source, target)) return false;
+      if (sourceNode.type === 'textNode') {
+        if (!validateAudioTextConnect(source, target)) return false;
+      } else if (!validateAudioRefConnect(source, target)) return false;
     }
     addCanvasEdge(source, target, videoRole);
     return true;
@@ -1756,6 +1791,7 @@ export default function CanvasPage() {
           onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -2673,6 +2709,9 @@ export default function CanvasPage() {
      *  按钮派发，原提取音频一键直发通道退役）；首帧渲染前经由
      *  actionsRef.current.audioVideoSplit 分派到 handleNodeAudioVideoSplit */
     audioVideoSplit: (_id: string) => {},
+    /** 场景切分（IKH8BJ 通道/接线）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发）；
+     *  首帧渲染前经由 actionsRef.current.sceneSplit 分派到 handleNodeSceneSplit */
+    sceneSplit: (_id: string) => {},
     /** 视频 HD 高清（IKH3VG 通道/接线）：源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条
      *  「HD」徽标按钮派发）；首帧渲染前经由 actionsRef.current.videoEnhance 分派到
      *  handleNodeVideoEnhance */
@@ -2956,7 +2995,7 @@ export default function CanvasPage() {
         return;
       }
       if (node.type === 'textNode') {
-        // 与旧单次选取同一准入路径（普通文本/方案卡均可建附件边），addCanvasEdge 幂等去重
+        if (!validateAudioTextConnect(node.id, audioPickSession)) return;
         addCanvasEdge(node.id, audioPickSession);
         return;
       }
@@ -2967,7 +3006,7 @@ export default function CanvasPage() {
         }
         return;
       }
-      showToast('warn', '音频参考仅支持音频素材');
+      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
       return;
     }
     // 自由面板会话（无草稿绑定）：文本参考无绑定目标，与旧单次语义同口径提示
@@ -2976,20 +3015,22 @@ export default function CanvasPage() {
       return;
     }
     if (node.type !== 'mediaNode') {
-      showToast('warn', '音频参考仅支持音频素材');
+      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
       return;
     }
-    // 自由面板注入沿用 externalPick 通道，面板 addRef 内统一去重与上限提示
+    // 自由面板注入沿用 externalPick 通道，面板 addRef 内统一去重、混用与上限提示
     const err = audioRefSourceError(node);
     if (err) {
       showToast('warn', err);
       return;
     }
+    const incomingType = audioRefMediaTypeOf(data) ?? 'audio';
     setAudioPickResult({
       ts: Date.now(),
       item: {
         id: node.id,
-        kind: 'audio',
+        kind: incomingType,
+        mediaType: incomingType,
         name: (data.fileName as string) || node.id,
         src: data.src as string,
         source: 'canvas',
@@ -4037,6 +4078,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4078,6 +4120,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4134,6 +4177,7 @@ export default function CanvasPage() {
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4618,6 +4662,7 @@ export default function CanvasPage() {
       onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+      onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
       onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5006,6 +5051,7 @@ export default function CanvasPage() {
           onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5189,21 +5235,32 @@ export default function CanvasPage() {
       // 弹窗确认只能接纳到打开时的面板，切换/关闭/生成中均不创建来源或连线。
       if (!showAudioDialog || !audioAssetPickTarget || audioAssetPickTarget.nodeId !== audioDraftId
         || audioAssetPickTarget.seed !== audioSeed?.ts || (audioDraftId && isGeneratingNode(audioDraftId))) return;
-      const audios = assets.filter(a => a.type === 'audio');
+      const mediaAssets = assets.filter(a => a.type === 'audio' || a.type === 'image');
       if (!audioDraftId) {
-        setAudioAssetPickResult({ ts: Date.now(), items: audios.map(a => ({
-          id: `asset-${a.id}`, kind: 'audio', name: assetDisplayName(a), src: a.url,
-          source: 'canvas', assetId: a.id,
-        })) });
+        setAudioAssetPickResult({ ts: Date.now(), items: mediaAssets.map(a => {
+          const kind = audioRefItemMediaTypeOf({ kind: a.type });
+          return {
+          id: `asset-${a.id}`,
+          kind,
+          mediaType: kind,
+          name: assetDisplayName(a), src: a.url,
+          source: 'canvas' as const, assetId: a.id,
+        }; }) });
         return;
       }
-      const current = [...audioMediaRefsOf(audioDraftId, edgesRef.current, mediaNodesRef.current).refs];
+      const current = [...mergedAudioRefsWithTextIndex(
+        audioDraftId,
+        edgesRef.current,
+        mediaNodesRef.current,
+        textNodesRef.current,
+      ).refs];
       const accepted: AssetRecord[] = [];
-      for (const asset of audios) {
+      for (const asset of mediaAssets) {
         const id = String(asset.id);
-        const error = checkAddAudioRef(id, current);
+        const incomingType = audioRefItemMediaTypeOf({ kind: asset.type });
+        const error = checkAddAudioRef(id, current, 0, incomingType);
         if (error) { showToast('warn', error); continue; }
-        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset), mediaType: 'audio' });
+        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset), mediaType: incomingType });
         accepted.push(asset);
       }
       if (!accepted.length) return;
@@ -5653,6 +5710,7 @@ export default function CanvasPage() {
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -6986,12 +7044,13 @@ export default function CanvasPage() {
   const audioDraftRefItems: AudioRefItem[] | undefined = audioDraftMediaRefs
     ? audioDraftMediaRefs.refs.map((r) => ({
       id: r.nodeId,
-      kind: 'audio' as const,
+      kind: r.mediaType,
       name: r.name,
       src: r.url,
       source: 'canvas' as const,
       assetId: r.assetId,
-      ...(r.textNodeId != null ? { textNodeId: r.textNodeId, mediaType: r.mediaType } : {}),
+      mediaType: r.mediaType,
+      ...(r.textNodeId != null ? { textNodeId: r.textNodeId } : {}),
     }))
     : undefined;
 
@@ -7397,6 +7456,12 @@ export default function CanvasPage() {
       setAudioVideoSplitTargetNodeId(id);
     });
   };
+
+  /** 场景切分（IKH8BJ 入口占位）：置灰门槛已在工具条按钮置灰层完成（sceneSplitGateReason），
+   *  此处只接通入口事件派发。TODO(IKH8BR)：编辑态本体（源卡锁定、切分粒度三档、积分与
+   *  发送、场景段卡扇出）由后续票交付，届时在此进入场景切分编辑会话
+   *  （工具会话口径对齐 handleNodeAudioVideoSplit 的 runToolSessionEntry 先例）。 */
+  const handleNodeSceneSplit = (_id: string) => {};
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
@@ -7819,6 +7884,7 @@ export default function CanvasPage() {
   actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
+  actionsRef.current.sceneSplit = handleNodeSceneSplit;
   actionsRef.current.videoEnhance = handleNodeVideoEnhance;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -7999,8 +8065,12 @@ export default function CanvasPage() {
       text,
       promptDoc,
     );
-    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const videoPromptLimitError = composedPromptLimitError(
+      composedPrompt,
+      await promptMaxLengthOfModel('video', opts.modelId),
+    );
+    if (videoPromptLimitError) {
+      showToast('warn', videoPromptLimitError);
       return;
     }
     if (targetNodeId && currentId) {
@@ -8424,6 +8494,7 @@ export default function CanvasPage() {
               onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
+              onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -8700,15 +8771,15 @@ export default function CanvasPage() {
     appendVideoFreeRef(refItem, freeRole);
   };
 
-  /** 音频面板 @ 选中：音频写入参考，文本连入当前目标。 */
+  /** 音频面板 @ 选中：图片或音频写入参考（不可混用），文本连入当前目标。 */
   const handleAudioAtMention = (item: AtMentionItem) => {
     if (item.kind === 'text') {
       if (audioDraftId) connectPair(item.id, audioDraftId);
       else showToast('warn', '文本参考需要绑定生成节点');
       return;
     }
-    if (item.kind !== 'audio' || !item.thumbUrl) {
-      showToast('warn', '音频生成仅支持引用音频素材');
+    if ((item.kind !== 'audio' && item.kind !== 'image') || !item.thumbUrl) {
+      showToast('warn', PANEL_REF_MEDIA_TYPES.audio.canvasRefError);
       return;
     }
     // IKFDFZ：@ 选取与画布选取同一语义——草稿校验通过立即建连线并自动保存；自由模式注入面板本地列表
@@ -8722,7 +8793,8 @@ export default function CanvasPage() {
       ts: Date.now(),
       item: {
         id: item.id,
-        kind: 'audio',
+        kind: item.kind,
+        mediaType: item.kind,
         name: item.name,
         src: item.thumbUrl,
         source: 'canvas',
@@ -8763,8 +8835,12 @@ export default function CanvasPage() {
       text,
       promptDoc,
     );
-    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const audioPromptLimitError = composedPromptLimitError(
+      composedPrompt,
+      await promptMaxLengthOfModel('audio', modelId),
+    );
+    if (audioPromptLimitError) {
+      showToast('warn', audioPromptLimitError);
       return;
     }
     applyingRef.current = true;
@@ -8787,18 +8863,23 @@ export default function CanvasPage() {
       const resolved: AudioRefItem[] = [];
       for (const ref of refs) {
         if (ref.assetId) { resolved.push(ref); continue; }
-        const file = ref.file ?? await fetchUrlAsFile(ref.src, ref.name, 'audio/mpeg');
-        const uploaded = file ? await uploadFileToAsset(file, 'audio') : null;
-        if (!uploaded) { showToast('error', '参考音频上传失败，请重试'); return; }
-        resolved.push({ ...ref, assetId: uploaded.asset_id, src: uploaded.url, file: undefined });
+        const mediaType = audioRefItemMediaTypeOf(ref);
+        const mime = mediaType === 'image' ? 'image/png' : 'audio/mpeg';
+        const file = ref.file ?? await fetchUrlAsFile(ref.src, ref.name, mime);
+        const uploaded = file ? await uploadFileToAsset(file, mediaType) : null;
+        if (!uploaded) {
+          showToast('error', mediaType === 'image' ? '参考图上传失败，请重试' : '参考音频上传失败，请重试');
+          return;
+        }
+        resolved.push({ ...ref, assetId: uploaded.asset_id, src: uploaded.url, file: undefined, kind: mediaType, mediaType });
       }
       if (targetNodeId) {
         handleAudioDraftParamsChange(targetNodeId, { prompt: text, promptDoc });
         if (!(await flushCanvasSave(projectId))) return;
       }
-      // IKFM41 §11：references 类型按实际媒体类型提交（文本带入可为 image；直接/本地上传恒 audio）
+      // IKFM41：references 类型按实际媒体类型提交（直接参考与文本带入均可为 audio / image）
       const submitted = startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
-        resolved.length ? { references: resolved.map(ref => ({ role: 'reference' as const, type: ref.mediaType ?? 'audio', asset_id: String(ref.assetId) })) } : undefined,
+        resolved.length ? { references: resolved.map(ref => ({ role: 'reference' as const, type: audioRefItemMediaTypeOf(ref), asset_id: String(ref.assetId) })) } : undefined,
         targetNodeId, undefined, promptDoc);
       // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
       // 置 hidden 标记避免紧随的画布选中事件回弹重开
@@ -8941,8 +9022,12 @@ export default function CanvasPage() {
       text,
       promptDoc,
     );
-    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const imagePromptLimitError = composedPromptLimitError(
+      composedPrompt,
+      await promptMaxLengthOfModel('image', modelId),
+    );
+    if (imagePromptLimitError) {
+      showToast('warn', imagePromptLimitError);
       return;
     }
     applyingRef.current = true;
@@ -9003,8 +9088,12 @@ export default function CanvasPage() {
     const prompt = typeof data.prompt === 'string' ? data.prompt : '';
     const promptDoc = restorePromptDoc(data.promptDoc, data.prompt);
     const composedPrompt = composeImageSendPrompt(textAttachmentsOf(nodeId), prompt, promptDoc);
-    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const updatePromptLimitError = composedPromptLimitError(
+      composedPrompt,
+      await promptMaxLengthOfModel(mediaType, modelId),
+    );
+    if (updatePromptLimitError) {
+      showToast('warn', updatePromptLimitError);
       return;
     }
 
@@ -9170,7 +9259,7 @@ export default function CanvasPage() {
         resolved.length
           ? { references: resolved.map((ref) => ({
               role: 'reference' as const,
-              type: ref.mediaType ?? 'audio',
+              type: ref.mediaType,
               asset_id: String(ref.assetId),
             })) }
           : undefined,
@@ -9876,7 +9965,7 @@ export default function CanvasPage() {
             </div>
           ) : audioPickSessionActive ? (
             <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
-              <span>从节点添加素材：连续点击画布中的音频节点或文本卡带入参考；点击空白、按 Esc 或点「完成选取」结束选取</span>
+              <span>从节点添加素材：连续点击画布中的图片或音频节点带入参考，点击文本卡带入创作上下文；点击空白、按 Esc 或点「完成选取」结束选取</span>
               <button type="button" className={styles.pickHintFinish} onClick={endAudioPickSession}>完成选取</button>
             </div>
           ) : (
@@ -9885,7 +9974,7 @@ export default function CanvasPage() {
               ? '从节点添加素材：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
               : '从节点添加素材：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
             {pickMode === 'video' && '从节点添加素材：点击画布中的图片、视频或音频节点带入参考，点击空白处取消'}
-            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击文本卡带入创作上下文，点击空白处取消'}
+            {pickMode === 'audio' && '到节点选择：点击画布中的图片或音频节点带入参考，点击文本卡带入创作上下文，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
           </div>

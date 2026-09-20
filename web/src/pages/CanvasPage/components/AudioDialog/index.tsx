@@ -9,7 +9,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { checkReferenceLimits } from '@/lib/model-reference-limits';
+import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
+import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOf } from '@/lib/model-reference-limits';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
@@ -20,11 +21,14 @@ import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEd
 import RefThumbnail from '../RefThumbnail';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
-import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt, type ImageTextAttachment } from '../ImageDialog';
+import {
+  composedPromptLimitError,
+  isPromptOverLimit,
+  promptCharCountLabel,
+  promptMaxLengthOf,
+} from '@/lib/prompt-max-length';
 import styles from './index.module.css';
-
-/** 输入框字数上限 */
-const MAX_INPUT = 1000;
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
 
@@ -41,7 +45,7 @@ export interface AudioRefItem {
   file?: File;
   /** IKFM41 §11：文本带入参考标记——携带即为锁定条目（不渲染移除入口），提交 type 按实际类型 */
   textNodeId?: string;
-  /** IKFM41 §11：实际媒体类型（文本带入可为 image；直接/本地上传恒 audio 缺省） */
+  /** IKFM41：实际媒体类型（直接参考与文本带入均可为 image / audio） */
   mediaType?: 'audio' | 'image';
 }
 
@@ -74,7 +78,7 @@ export interface AudioDialogProps extends RefStripOrderProps {
   };
   /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
-  /** 画布媒体节点：供「从画布选择」参考音频 */
+  /** 画布媒体节点：供「从画布选择」参考图片或音频 */
   canvasMedia?: CanvasPickItem[];
   /** 触发「从画布选择」模式：父级应设置 pickMode */
   onPickFromCanvas?: () => void;
@@ -209,8 +213,9 @@ export default function AudioDialog({
 
   const currentModel = models.find((m) => m.model_id === modelId);
   const modelUnavailable = modelsLoaded && !currentModel;
+  const maxInput = promptMaxLengthOf(currentModel?.features?.max_prompt_length);
   /** 参考音频上限（ADR-0086：读能力行 audio_reference_max，缺省 3；与后端 validateAudioReferences 同源） */
-  const maxAudioRefs = currentModel?.features?.audio_reference_max ?? 3;
+  const maxAudioRefs = audioReferenceMaxOf(currentModel?.features);
   /** 草稿绑定生成中（IKDMQT）：描述/模型/发送只读，保留查看与画布上的取消入口 */
   const readOnly = draftBinding?.submitting || draftBinding?.status === 'generating';
   /** IKFR4Z 持续选取会话锁定：模式中隔离提示词编辑、模型切换与生成（须先完成选取）；
@@ -223,14 +228,19 @@ export default function AudioDialog({
     draftBinding?.onParamsChange({ modelId: id });
   };
 
-  /** 画布参考（连线推导）+ 本地上传/自由拾取的合计上限口径 */
-  const totalRefCount = (draftRefs?.length ?? 0) + refs.length;
+  const audioRefCount = [...(draftRefs ?? []), ...refs].filter((r) => audioRefItemMediaTypeOf(r) !== 'image').length;
+  const imageRefCount = [...(draftRefs ?? []), ...refs].filter((r) => audioRefItemMediaTypeOf(r) === 'image').length;
+  const maxImageRefs = imageReferenceMaxOf(currentModel?.features);
+  /** 媒体参考无法再添加时的原因（混用 / 分类上限）；文本卡仍可从画布点选。 */
+  const mediaLimitReason = imageRefCount > 0 && audioRefCount > 0 ? '音频与图片参考不可混用'
+    : imageRefCount >= maxImageRefs ? `参考图最多 ${maxImageRefs} 个`
+    : audioRefCount >= maxAudioRefs ? `参考音频最多 ${maxAudioRefs} 段`
+    : null;
   /** 生成中只读原因（操作条悬停原因与只读提示条同一文案来源） */
   const readOnlyReason = '生成中，参数只读；可在画布卡片上取消生成';
-  /** 附件操作条禁用原因（IKGB82：常显置灰 + 悬停说明，替代旧「入口消失」口径）：
-   *  生成中只读优先，其次参考达数量上限（与旧栏尾「+」的隐藏门控一一对应） */
+  /** 附件操作条禁用原因：生成中只读优先；音频件数达上限时置灰（图片上限不挡文本选取）。 */
   const actionBarDisabledReason = readOnly ? readOnlyReason
-    : totalRefCount >= maxAudioRefs ? `参考音频最多 ${maxAudioRefs} 段，已达上限`
+    : audioRefCount >= maxAudioRefs ? `参考音频最多 ${maxAudioRefs} 段，已达上限`
     : null;
 
   const startCanvasPick = () => {
@@ -238,18 +248,32 @@ export default function AudioDialog({
     onPickFromCanvas?.();
   };
 
-  /** 添加参考项（去重 + 上限合计口径，超限明确提示不静默丢弃），画布选择后关闭面板 */
+  /** 添加参考项（去重 + 图音频混用/分类上限，超限明确提示不静默丢弃），画布选择后关闭面板 */
   const addRef = (item: AudioRefItem) => {
     if (refs.some((r) => (r.id === item.id && r.source === item.source) || (r.assetId != null && item.assetId != null && String(r.assetId) === String(item.assetId)))) {
       setPickerOpen(false);
       return;
     }
-    if (totalRefCount >= maxAudioRefs) {
-      onToast?.('warn', `参考音频最多 ${maxAudioRefs} 段已超出`);
+    const incomingType = audioRefItemMediaTypeOf(item);
+    const existing = [...(draftRefs ?? []), ...refs].map((r) => ({
+      nodeId: r.id,
+      url: r.src,
+      name: r.name,
+      assetId: String(r.assetId ?? ''),
+      mediaType: audioRefItemMediaTypeOf(r),
+    }));
+    const msg = checkAddAudioRef(
+      item.assetId != null ? String(item.assetId) : undefined,
+      existing,
+      0,
+      incomingType,
+    );
+    if (msg) {
+      onToast?.('warn', msg);
       setPickerOpen(false);
       return;
     }
-    setRefs((prev) => [...prev, item]);
+    setRefs((prev) => [...prev, { ...item, kind: incomingType, mediaType: incomingType }]);
     setPickerOpen(false);
   };
 
@@ -266,11 +290,25 @@ export default function AudioDialog({
       const next = [...refs];
       for (const item of externalAssetPick.items) {
         if (next.some(ref => String(ref.assetId) === String(item.assetId))) continue;
-        if (next.length >= maxAudioRefs) {
-          onToast?.('warn', `参考音频最多 ${maxAudioRefs} 段已超出`);
-          break;
+        const incomingType = audioRefItemMediaTypeOf(item);
+        const existing = next.map((r) => ({
+          nodeId: r.id,
+          url: r.src,
+          name: r.name,
+          assetId: String(r.assetId ?? ''),
+          mediaType: audioRefItemMediaTypeOf(r),
+        }));
+        const error = checkAddAudioRef(
+          item.assetId != null ? String(item.assetId) : undefined,
+          existing,
+          0,
+          incomingType,
+        );
+        if (error) {
+          onToast?.('warn', error);
+          continue;
         }
-        next.push(item);
+        next.push({ ...item, kind: incomingType, mediaType: incomingType });
       }
       setRefs(next);
     }
@@ -285,9 +323,9 @@ export default function AudioDialog({
     if (!pickMode) setPickerOpen(false);
   }, [pickMode]);
 
-  const canvasAudios = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio');
+  const canvasPickItems = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio' || m.mediaType === 'image');
   const namedRefs = refs.map((ref) => {
-    const node = ref.source === 'canvas' ? canvasAudios.find((item) => item.id === ref.id) : undefined;
+    const node = ref.source === 'canvas' ? canvasPickItems.find((item) => item.id === ref.id) : undefined;
     return node && node.name !== ref.name ? { ...ref, name: node.name } : ref;
   });
   /** 面板展示/提交的完整参考：画布参考（draftRefs，父级连线推导，名称随来源节点即时刷新）
@@ -315,7 +353,7 @@ export default function AudioDialog({
   const mixedStrip = useMixedRefStrip(allRefs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
   const currentRefs = orderRefStripItems(allRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
   const orderedAttachments = orderRefStripItems(attachments ?? [], a => `text:${a.nodeId}`, mixedStrip.order);
-  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || text.length > MAX_INPUT;
+  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || isPromptOverLimit(text, maxInput);
   const handleStripReorder = (from: number, to: number) => {
     const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
     if (refChanged) {
@@ -344,13 +382,17 @@ export default function AudioDialog({
   const textIndexBlocked = Boolean(textIndexError);
   /** 按最终参考的实际类型校验分类上限与混用，随模型和来源变化重算。 */
   const referenceLimitError = checkReferenceLimits(
-    currentModel?.features, currentRefs.map((ref) => ({ type: ref.mediaType ?? 'audio' })), 'audio',
+    currentModel?.features, currentRefs.map((ref) => ({ type: audioRefItemMediaTypeOf(ref) })), 'audio',
   );
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
-    if (composeImageSendPrompt(attachments, text.trim(), promptDocToSend).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const composedOverLimit = composedPromptLimitError(
+      composeImageSendPrompt(attachments, text.trim(), promptDocToSend),
+      maxInput,
+    );
+    if (composedOverLimit) {
+      onToast?.('warn', composedOverLimit);
       return;
     }
     onSend(text.trim(), modelId, currentRefs, promptDocToSend);
@@ -400,35 +442,40 @@ export default function AudioDialog({
       {/* 画布选择面板锚点（startCanvasPick 既有行为保留）：独立于附件栏空态渲染，
           面板从操作条下方弹出；达上限后不提供入口（与旧栏尾分支同口径） */}
       <div className={styles.refWrap} ref={sourceWrapRef}>
-        {pickerOpen && totalRefCount < maxAudioRefs && (
+        {pickerOpen && !mediaLimitReason && (
           <div className={styles.pickerPanel} onClick={(e) => e.stopPropagation()}>
             <div className={styles.pickerHead}>
-              <span>从画布选择音频</span>
+              <span>从画布选择素材</span>
               <button className={styles.pickerClose} onClick={() => setPickerOpen(false)} title="关闭">
                 <X size={12} strokeWidth={2} />
               </button>
             </div>
-            {canvasAudios.length === 0 ? (
-              <div className={styles.pickerEmpty}>画布暂无可选音频</div>
+            {canvasPickItems.length === 0 ? (
+              <div className={styles.pickerEmpty}>画布暂无可选图片或音频</div>
             ) : (
               <div className={styles.pickerList}>
-                {canvasAudios.map((it) => (
+                {canvasPickItems.map((it) => (
                   <button
                     key={it.id}
                     className={styles.pickerItem}
                     onClick={() => {
                       // 草稿模式经父级校验后建连线（IKFDFZ）；自由模式注入面板本地列表
+                      const kind = audioRefItemMediaTypeOf({ mediaType: it.mediaType });
                       if (onAddCanvasRef) {
                         onAddCanvasRef(it.id);
                         setPickerOpen(false);
                         return;
                       }
-                      addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId });
+                      addRef({ id: it.id, kind, mediaType: kind, name: it.name, src: it.src, source: 'canvas', assetId: it.assetId });
                     }}
                   >
-                    <div className={styles.pickerAudio}>
-                      <AudioLines size={14} strokeWidth={2} />
-                    </div>
+                    {it.mediaType === 'image' ? (
+                      <img className={styles.pickerThumb} src={it.src} alt="" />
+                    ) : (
+                      <div className={styles.pickerAudio}>
+                        <AudioLines size={14} strokeWidth={2} />
+                      </div>
+                    )}
                     <span className={styles.pickerName}>{it.name || it.id}</span>
                   </button>
                 ))}
@@ -447,12 +494,12 @@ export default function AudioDialog({
       <div className={styles.topRow}>
         {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL；
             @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。
-            IKFM41 §11：文本带入条目锁定（不渲染 ×、渲染定位来源入口），kind 按实际类型（image 仅经文本带入）。 */}
+            IKFM41：文本带入条目锁定（不渲染 ×、渲染定位来源入口），kind 按实际类型。 */}
         {mixedStrip.render(allRefs.map((r, i) => (
           <RefThumbnail
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
-            kind={r.mediaType ?? 'audio'}
+            kind={audioRefItemMediaTypeOf(r)}
             url={r.src}
             name={r.name}
             number={currentRefs.findIndex(ref => ref.id === r.id && ref.source === r.source) + 1}
@@ -484,8 +531,8 @@ export default function AudioDialog({
           />
         )))}
         <div className={styles.refWrap}>
-          {totalRefCount >= maxAudioRefs && (
-            <span className={styles.refCount} title={`参考音频最多 ${maxAudioRefs} 段`}>
+          {mediaLimitReason && (
+            <span className={styles.refCount} title={mediaLimitReason}>
               已达上限
             </span>
           )}
@@ -565,8 +612,8 @@ export default function AudioDialog({
             <span className={styles.readOnlyHint}>{readOnlyReason}</span>
           )}
           {/* 字数统计 */}
-          <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-            {text.length}/{MAX_INPUT}
+          <div className={`${styles.charCount} ${maxInput != null && text.length >= maxInput ? styles.charCountWarn : ''}`}>
+            {promptCharCountLabel(text.length, maxInput)}
           </div>
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}

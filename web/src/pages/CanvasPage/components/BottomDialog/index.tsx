@@ -43,7 +43,12 @@ import RefSourceMenu from '../RefSourceMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
-import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt, type ImageTextAttachment } from '../ImageDialog';
+import {
+  composedPromptLimitError,
+  promptCharCountLabel,
+  promptMaxLengthOf,
+} from '@/lib/prompt-max-length';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
@@ -81,9 +86,6 @@ const dockModeOptions = [
   { key: 'keyframe', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
 ];
-
-/** 输入框字数上限 */
-const MAX_INPUT = 1000;
 
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {
@@ -258,6 +260,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   ]);
 
   const currentModel = modelList.find((m) => m.model_id === selectedModel) ?? null;
+  const maxInput = promptMaxLengthOf(currentModel?.features?.max_prompt_length);
   /** IKG0LP：该模型是否允许生成带音频（能力位 features.audio）。不允许则不提供用户选择。 */
   const supportsAudio = currentModel?.features?.audio === true;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
@@ -648,8 +651,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       onToast?.('warn', conflict);
       return;
     }
-    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const composedOverLimit = composedPromptLimitError(
+      composeImageSendPrompt(attachments, flatValue, promptDoc),
+      maxInput,
+    );
+    if (composedOverLimit) {
+      onToast?.('warn', composedOverLimit);
       return;
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
@@ -1206,8 +1213,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
           {/* 字数统计 */}
-          <div className={`${styles.charCount} ${flatValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-            {flatValue.length}/{MAX_INPUT}
+          <div className={`${styles.charCount} ${maxInput != null && flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+            {promptCharCountLabel(flatValue.length, maxInput)}
           </div>
           <button
             data-testid="video-send"

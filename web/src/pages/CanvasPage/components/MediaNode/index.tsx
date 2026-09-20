@@ -197,6 +197,9 @@ export interface MediaNodeData {
   /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
    *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
+  /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
+   *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
+  onSceneSplit?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */

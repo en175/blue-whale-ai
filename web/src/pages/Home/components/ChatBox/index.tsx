@@ -21,10 +21,11 @@ import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
 import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOfCap, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { promptCharCountLabel, promptMaxLengthOf } from '@/lib/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
-import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
+import { limitPromptInput } from './promptInput';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -39,9 +40,6 @@ const videoModes = [
   { key: 'firstlast', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
 ];
-
-/** 输入框字数上限（与画布对话框一致） */
-const MAX_INPUT = MAX_PROMPT_INPUT_LENGTH;
 
 /** AI视频首尾帧槽位素材项（仅图片；普通参考与槽位互转时复用） */
 type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
@@ -89,7 +87,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
    *  用 ts 驱动重复点击同一张卡也能注入，不把 text/mediaType 放进依赖。 */
   useEffect(() => {
     if (draft?.ts) {
-      setInputValue(draft.text.slice(0, MAX_INPUT));
+      setInputValue(draft.text);
       setActiveTab(draft.mediaType === 'video' ? 'video' : 'image');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,7 +474,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         dispatchByTab(resume.text);
         return;
       case 'restore-text':
-        setInputValue(resume.text.slice(0, MAX_INPUT));
+        setInputValue(resume.text);
         return;
       default:
         return;
@@ -554,7 +552,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleInputChange = (value: string) => {
     const next = limitPromptInput(value, inputValue, activePromptCap);
     setInputValue(next.value);
-    if (next.reachedLimit) showToast(`输入内容最多 ${activePromptCap} 个字符`);
+    if (next.reachedLimit && activePromptCap != null) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
   /** 三个 textarea 共用的 composition 事件处理 */
@@ -586,9 +584,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
-  // ADR-0085（IKESD9）：生图 tab 的 prompt 上限跟随所选模型目录配置，其余 tab 保持默认
-  const imagePromptCap = selectedImageModel?.features?.max_prompt_length ?? MAX_INPUT;
-  const activePromptCap = isImageTab ? imagePromptCap : MAX_INPUT;
   const imageRatioKeys = selectedImageModel
     ? ratiosForSelectedSize(selectedImageModel, imageResolution)
     : [];
@@ -610,6 +605,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
    *  （max_reference_images / video_reference_max / audio_reference_max） */
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
+  const selectedPromptModel = isImageTab
+    ? selectedImageModel
+    : isVideoTab
+      ? selectedVideoModel
+      : selectedCreationModel;
+  const activePromptCap = promptMaxLengthOf(selectedPromptModel?.features?.max_prompt_length);
+  const imagePromptCap = promptMaxLengthOf(selectedImageModel?.features?.max_prompt_length);
   const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 0;
   const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
   const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
@@ -1066,8 +1068,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   rows={2}
+                  maxLength={activePromptCap ?? undefined}
                 />
-                <span className={styles.textareaCount}>{inputValue.length}/{MAX_INPUT}</span>
+                <span className={styles.textareaCount}>{promptCharCountLabel(inputValue.length, activePromptCap)}</span>
               </div>
             </div>
 
@@ -1281,9 +1284,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   rows={2}
-                  maxLength={imagePromptCap}
+                  maxLength={imagePromptCap ?? undefined}
                 />
-                <span className={styles.textareaCount}>{inputValue.length}/{imagePromptCap}</span>
+                <span className={styles.textareaCount}>{promptCharCountLabel(inputValue.length, imagePromptCap)}</span>
               </div>
             </div>
 
@@ -1474,8 +1477,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   rows={2}
+                  maxLength={activePromptCap ?? undefined}
                 />
-                <span className={styles.textareaCount}>{inputValue.length}/{MAX_INPUT}</span>
+                <span className={styles.textareaCount}>{promptCharCountLabel(inputValue.length, activePromptCap)}</span>
               </div>
             </div>
 

@@ -13,6 +13,12 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { videoReferenceMaxOf } from '@/lib/model-reference-limits';
+import {
+  composedPromptLimitError,
+  promptCharCountLabel,
+  promptMaxLengthOf,
+} from '@/lib/prompt-max-length';
 import RatioIcon from '@/components/RatioIcon';
 import {
   PROMPT_DOC_VERSION,
@@ -45,12 +51,6 @@ import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 
-/** 输入框默认字数上限（模型目录未配 max_prompt_length 时沿用旧行为，ADR-0085） */
-const DEFAULT_MAX_INPUT = 1000;
-/** 参考文本与输入文本拼接后的提交上限 */
-export const IMAGE_COMPOSED_PROMPT_LIMIT = 1000;
-export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超出1000字限制，请重新编辑。';
-
 /** 参考文本在前、输入文本在后直接拼接，中间不加空行。
  *  生成框若只是文本附件里已经有的 &素材id&，不再追加，避免同一个 @ 拼两次。 */
 export function composeImageSendPrompt(
@@ -65,10 +65,6 @@ export function composeImageSendPrompt(
   if (input.trim().length > 0 && !promptCoveredByAttachmentParts(input, parts)) parts.push(input);
   return parts.join('');
 }
-
-/** 图片面板普通参考中视频素材上限（ADR-0086：读能力行 video_reference_max，缺省 3；
- *  旧写死 MAX_VIDEOS=3 退役）。 */
-export const MAX_VIDEOS = 3;
 
 export interface UploadedFile {
   id: string;
@@ -207,6 +203,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
+  const currentGen = modelList.find((m) => m.model_id === selectedModel);
+  const maxInput = promptMaxLengthOf(currentGen?.features?.max_prompt_length);
+  const maxImages = currentGen?.features?.max_reference_images ?? 10;
+  const maxVideos = videoReferenceMaxOf(currentGen?.features);
+
   /** 快照参考项名称刷新（IKFA8Y）：自由模式的参考名称取自选取当刻，卡片改名后按画布节点 id
    *  重新取当前名称（只改展示名称；上传项与资产库项无画布节点，保持原名）。 */
   useEffect(() => {
@@ -238,9 +239,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
         for (const file of externalPick.files) {
           const imgCount = next.filter((f) => f.type === 'image').length;
           const vidCount = next.filter((f) => f.type === 'video').length;
-          const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
+          const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= maxVideos;
           if (full) {
-            onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
+            onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: maxVideos }));
             break;
           }
           if (next.some((f) => f.id === file.id)) continue;
@@ -255,9 +256,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
 
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
-  const currentGen = modelList.find((m) => m.model_id === selectedModel);
-  // ADR-0085（IKESD9）：prompt 上限跟随所选模型的目录配置，未下发回落默认
-  const maxInput = currentGen?.features?.max_prompt_length ?? DEFAULT_MAX_INPUT;
   const resolutionOptions = currentGen?.supported_sizes?.length
     ? currentGen.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
     : [];
@@ -266,9 +264,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const currentResolutionLabel =
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
   const imageCount = files.filter((f) => f.type === 'image').length;
-  /** 参考图上限（ADR-0086：读能力行 features.max_reference_images，缺省回落 DEFAULT_MAX_REFERENCE_IMAGES=10；
-   *  旧写死 9 张退役）。连线绑定模式仍以服务端 max_reference_images 校验兜底。 */
-  const maxImages = currentGen?.features?.max_reference_images ?? 10;
   /** 连线绑定模式（IKDMQR）：参考区渲染连线推导的 mediaRefs；否则渲染面板本地 files */
   const edgeRefs = mediaRefs ?? null;
   const mixedStrip = useMixedRefStrip(
@@ -384,7 +379,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
       ? '参考图片数量超过模型支持上限，请调整参考'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
-    : flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
+    : maxInput != null && flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
     : null;
   const canSend = !uploading && !readOnly && !pickLocked && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
 
@@ -553,8 +548,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       console.warn('图片模型能力加载中，请稍后重试');
       return;
     }
-    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
-      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+    const composedOverLimit = composedPromptLimitError(
+      composeImageSendPrompt(attachments, flatValue, promptDoc),
+      maxInput,
+    );
+    if (composedOverLimit) {
+      onToast?.('warn', composedOverLimit);
       return;
     }
     setUploading(true);
@@ -872,8 +871,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
             {/* 字数统计 */}
-            <div className={`${styles.charCount} ${flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
-              {flatValue.length}/{maxInput}
+            <div className={`${styles.charCount} ${maxInput != null && flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+              {promptCharCountLabel(flatValue.length, maxInput)}
             </div>
             <button
               className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

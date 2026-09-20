@@ -27,9 +27,11 @@
 
 ## 供应商请求组合（确定性）
 
-- 图片与视频共用同一条确定性组合规则，落在 packages/core 纯函数 `composeTextAttachmentPrompt(attachments, prompt)`：取附件正文按序排列，忽略仅含空白的正文，以 `"\n\n"` 连接；`prompt` 去除首尾空白后非空时再在其后以 `"\n\n"` 追加。无附件时原样返回 `prompt`。不做任何改写、翻译或模型侧加工。
-- 既有 `composeImagePrompt` 语义不变，实现上委托 `composeTextAttachmentPrompt`（名称保留，IKDLQF 契约与调用点不动）。
-- video-job-runner 在 `buildSubmitRequest` 组织 `provider.submit` 的 prompt 时调用该函数：快照含 `text_attachments`（数组）时以冻结附件 + 冻结 `prompt` 组合；快照无该字段（存量任务、plan/scene_card 形态）时行为逐字节不变。供应商替身测试中记录的实际请求 prompt 必须能与冻结快照按此函数精确对应。
+- ~~图片与视频共用同一条确定性组合规则，落在 packages/core 纯函数 `composeTextAttachmentPrompt(attachments, prompt)`：取附件正文按序排列，忽略仅含空白的正文，以 `"\n\n"` 连接；`prompt` 去除首尾空白后非空时再在其后以 `"\n\n"` 追加。无附件时原样返回 `prompt`。不做任何改写、翻译或模型侧加工。~~
+- ~~既有 `composeImagePrompt` 语义不变，实现上委托 `composeTextAttachmentPrompt`（名称保留，IKDLQF 契约与调用点不动）。~~
+- ~~video-job-runner 在 `buildSubmitRequest` 组织 `provider.submit` 的 prompt 时调用该函数：快照含 `text_attachments`（数组）时以冻结附件 + 冻结 `prompt` 组合；快照无该字段（存量任务、plan/scene_card 形态）时行为逐字节不变。供应商替身测试中记录的实际请求 prompt 必须能与冻结快照按此函数精确对应。~~
+
+  > **2026-09-20 修订（IKH9NU）**：本节机制已**退役删除**。ADR-0088 起正文由提交方给全、服务端不再组合，`composeTextAttachmentPrompt` / `composeImagePrompt` 已无生产调用者，源码与 `@lib/core` 导出一并移除。执行侧只读 `input.prompt`；供应商替身测试只断言「出站 prompt 与传入值逐字一致」，不再按组合函数对应冻结快照。
 
 ## 限长
 
