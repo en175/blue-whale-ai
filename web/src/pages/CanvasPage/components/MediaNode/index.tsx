@@ -197,6 +197,10 @@ export interface MediaNodeData {
   /** 音视频分离（IKH28U）：进入音视频分离编辑态（视频卡工具条「音视频分离」按钮派发，
    *  原提取音频一键直发通道退役；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
+  /** 音频截取（IKHB6Y，父单 IKHB08）：音频卡工具条首位「截取」入口点亮派发（进入遮罩选段
+   *  编辑态归 IKHB7A，本票只透出回调；置灰门槛见 audioTrim.ts——音频 URL 缺失或时长
+   *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
+  onTrimAudio?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
