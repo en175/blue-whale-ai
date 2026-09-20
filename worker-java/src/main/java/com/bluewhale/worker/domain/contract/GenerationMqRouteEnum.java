@@ -46,7 +46,10 @@ public enum GenerationMqRouteEnum {
     VIDEO_SUBTITLE_ERASE("generation-task", "video_subtitle_erase"),
 
     /** 视频 HD 高清（IKH3VE，父规格 IKH3VB；契约 = backend/libs/contracts/video-enhance.ts）。 */
-    VIDEO_ENHANCE("generation-task", "video_enhance");
+    VIDEO_ENHANCE("generation-task", "video_enhance"),
+
+    /** 视频场景切分（IKH8BH，父规格 IKH86V；契约 = backend/libs/contracts/video-scene-split.ts）。 */
+    VIDEO_SCENE_SPLIT("generation-task", "video_scene_split");
 
     private final String topic;
 

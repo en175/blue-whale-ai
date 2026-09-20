@@ -42,7 +42,12 @@ public enum JobTypeEnum {
     /** 视频 HD 高清（tag=video_enhance，IKH3VE，父规格 IKH3VB；契约 =
      *  backend/libs/contracts/video-enhance.ts，火山 MediaKit 画质增强大模型版）；
      *  消费者与处理器由 worker 票按附录 C 触点注册。 */
-    VIDEO_ENHANCE("video_enhance");
+    VIDEO_ENHANCE("video_enhance"),
+
+    /** 视频场景切分（tag=video_scene_split，IKH8BH，父规格 IKH86V；契约 =
+     *  backend/libs/contracts/video-scene-split.ts，火山 MediaKit segment-scenes
+     *  一对多逐段扇出，设计定案 ADR-0108）；消费者与处理器由 worker 票按附录 C 触点注册。 */
+    VIDEO_SCENE_SPLIT("video_scene_split");
 
     private final String value;
 
