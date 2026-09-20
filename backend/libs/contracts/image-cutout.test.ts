@@ -32,14 +32,14 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/JobType.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/ImageCutoutContract.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/ImageCutoutContract.java",
     import.meta.url,
   ),
   "utf8",
@@ -47,7 +47,7 @@ const contractJava = readFileSync(
 // tag 字面量已上移到 GenerationMqRoute（ImageCutoutContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/GenerationMqRoute.java",
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -187,7 +187,7 @@ describe("image_cutout 双端一致性（读 worker-java 源码文本，防漂�
 
   it("ImageCutoutContract：tag / source 与 TS 同值", () => {
     expect(mqRouteJava).toContain(`IMAGE_CUTOUT("generation-task", "${IMAGE_CUTOUT_TAG}")`);
-    expect(contractJava).toContain("String TAG = GenerationMqRoute.IMAGE_CUTOUT.tag();");
+    expect(contractJava).toContain("String TAG = GenerationMqRouteEnum.IMAGE_CUTOUT.tag();");
     expect(contractJava).toContain('String SOURCE = "image_cutout";');
   });
 
