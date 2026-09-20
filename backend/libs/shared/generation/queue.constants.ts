@@ -4,8 +4,9 @@ export const GENERATION_TASK_QUEUE = "generation-task";
 /** 媒体提取（视频→音频）任务 tag/jobName（IKARDY）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。 */
 export const MEDIA_EXTRACT_TAG = "media_extract";
 
-/** 音频截取任务 tag（IKHB6N，契约 = backend/libs/contracts/audio-trim）：复用 GENERATION_TASK_QUEUE，
- *  用独立 tag 区分任务类型；与 generation_jobs.type / AUDIO_TRIM_JOB_TYPE（@lib/contracts）保持一致。 */
+/** 音频截取（音频卡「截取」，火山 MediaKit trim-audio）任务 tag（IKHB6S，契约见
+ *  @lib/contracts/audio-trim）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / AUDIO_TRIM_JOB_TYPE（@lib/contracts）保持一致。 */
 export const AUDIO_TRIM_TAG = "audio_trim";
 
 /** 图片生成任务 tag（IKBGKA）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。 */

@@ -1,6 +1,7 @@
 package com.bluewhale.worker.config;
 
 import com.bluewhale.worker.application.consumer.AudioConsumer;
+import com.bluewhale.worker.application.consumer.AudioTrimConsumer;
 import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.ImageEnhanceConsumer;
 import com.bluewhale.worker.application.consumer.ImageCutoutConsumer;
@@ -8,6 +9,7 @@ import com.bluewhale.worker.application.consumer.ImageEraseConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.AudioTrimJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
 import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
@@ -122,6 +124,31 @@ public class RocketMqConfig {
         return new MediaExtractConsumer(
                 processor,
                 GenerationMqRouteEnum.MEDIA_EXTRACT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
+     * audio_trim（音频截取，画布音频卡「截取」）consumer（IKHB6S，父单 IKHB08）。
+     * <p>
+     * consumer group = "generation-audio-trim-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#AUDIO_TRIM}（= TS `AUDIO_TRIM_TAG`）。
+     * digitGuard = false（MediaExtractConsumer 同款，不做纯数字守卫）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public AudioTrimConsumer audioTrimConsumer(
+            AudioTrimJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-audio-trim-worker";
+        int concurrency = workerProps.concurrency().audioTrim();
+
+        return new AudioTrimConsumer(
+                processor,
+                GenerationMqRouteEnum.AUDIO_TRIM.topic(),
                 clientConfig,
                 consumerGroup,
                 concurrency
@@ -377,6 +404,21 @@ public class RocketMqConfig {
     }
 
     /**
+     * audio_trim 轮询自投生产者（IKHB6S；mediaExtractMessageProducer 同款）。
+     * <p>
+     * AudioTrimJobProcessor 火山异步链 submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = audio_trim）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioTrimMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.AUDIO_TRIM.topic(),
+                GenerationMqRouteEnum.AUDIO_TRIM.tag());
+    }
+
+    /**
      * video_enhance 轮询自投生产者（IKH3VF；去字幕 videoSubtitleEraseMessageProducer 同款）。
      * <p>
      * VideoEnhanceJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
@@ -409,6 +451,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer mediaExtractRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.MEDIA_EXTRACT);
+    }
+
+    /** recovery 重投 audio_trim（IKHB6S，父单 IKHB08；轮询自投消息丢失时由扫描兜底重投）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioTrimRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_TRIM);
     }
 
     /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */

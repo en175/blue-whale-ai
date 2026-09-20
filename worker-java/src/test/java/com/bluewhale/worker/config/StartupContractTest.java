@@ -152,7 +152,7 @@ class StartupContractTest {
     @Test
     @DisplayName("GenerationMqRoute 十一个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        // Map.of 上限 10 对，audio_trim 注册后共 11 对，改用 Map.ofEntries（IKHB6N）。
+        // Map.of 最多 10 对，11 入口用 Map.ofEntries（entry 静态导入见文件头）。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
                 Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
                 Map.entry(GenerationMqRouteEnum.IMAGE, "image"),

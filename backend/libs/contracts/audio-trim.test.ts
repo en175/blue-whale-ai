@@ -279,8 +279,10 @@ describe("执行面兜底码（error-codes.ts 注册）", () => {
 });
 
 describe("audio_trim 双端一致性（读 worker-java 源码文本，防漂移）", () => {
-  it("AudioTrimContract：tag 与 TS 任务类型同值（接线前字面量自持，见 Java 类注释）", () => {
-    expect(contractJava).toContain(`String TAG = "${AUDIO_TRIM_JOB_TYPE}";`);
+  it("AudioTrimContract：tag 转发 GenerationMqRouteEnum.AUDIO_TRIM（字面量单处在该枚举，video_enhance 先例）", () => {
+    expect(contractJava).toContain(
+      "String TAG = GenerationMqRouteEnum.AUDIO_TRIM.tag();",
+    );
   });
 
   it("AudioTrimContract：四 input 键名与 TS 同值", () => {
@@ -304,8 +306,14 @@ describe("audio_trim 双端一致性（读 worker-java 源码文本，防漂移�
     expect(audioTrimErrorJava).toContain('String AUDIO_TRIM_FAILED = "audio_trim_failed";');
   });
 
+<<<<<<< HEAD
   it("已接线：两侧枚举含 audio_trim（IKHB6N 创建入口注册 JobTypeEnum / GenerationMqRouteEnum；Java TAG 字面量上移 GenerationMqRouteEnum 由 IKHB6S 落地）", () => {
     expect(jobTypeJava).toContain("audio_trim");
     expect(mqRouteJava).toContain("audio_trim");
+=======
+  it("已接线：两侧枚举注册 audio_trim（JobTypeEnum 与 GenerationMqRouteEnum，tag = TS 任务类型同值）", () => {
+    expect(jobTypeJava).toContain("audio_trim");
+    expect(mqRouteJava).toContain(`("${"generation-task"}", "${AUDIO_TRIM_JOB_TYPE}")`);
+>>>>>>> feature/IKHB6S-worker音频截取执行回填
   });
 });

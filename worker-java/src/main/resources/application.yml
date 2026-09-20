@@ -22,6 +22,7 @@ worker:
     image: ${IMAGE_CONCURRENCY:20}
     audio: ${AUDIO_CONCURRENCY:5}
     media-extract: ${MEDIA_EXTRACT_CONCURRENCY:2}
+    audio-trim: ${AUDIO_TRIM_CONCURRENCY:2}
     image-enhance: ${IMAGE_ENHANCE_CONCURRENCY:5}
     image-erase: ${IMAGE_ERASE_CONCURRENCY:5}
     image-cutout: ${IMAGE_CUTOUT_CONCURRENCY:5}
