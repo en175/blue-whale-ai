@@ -85,15 +85,16 @@ describe("video_scene_split 契约不变量（官方 PDF 口径，TS 侧）", ()
     expect(VIDEO_SCENE_SPLIT_MODEL_NAME).toBe("mediakit-segment-scenes");
   });
 
-  it("input 键名冻结：source_asset_id / granularity", () => {
+  it("input 键名冻结：source_asset_id / target_node_id / granularity（IKH8BO 扩展占位卡绑定键）", () => {
     expect(Object.values(VIDEO_SCENE_SPLIT_INPUT_KEYS)).toEqual([
       "source_asset_id",
+      "target_node_id",
       "granularity",
     ]);
   });
 
-  it("input schema：两键合法样本过、strict 多余键拒、source_asset_id 非 id 串拒、枚举外粒度拒", () => {
-    const valid = { source_asset_id: "88", granularity: "standard" };
+  it("input schema：三键合法样本过、strict 多余键拒、source_asset_id 非 id 串拒、枚举外粒度拒、占位卡绑定缺失/空拒", () => {
+    const valid = { source_asset_id: "88", target_node_id: "node-1", granularity: "standard" };
     expect(videoSceneSplitInputSchema.parse(valid)).toEqual(valid);
     expect(videoSceneSplitInputSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
     expect(videoSceneSplitInputSchema.safeParse({ ...valid, source_asset_id: "abc" }).success).toBe(
@@ -105,10 +106,22 @@ describe("video_scene_split 契约不变量（官方 PDF 口径，TS 侧）", ()
     expect(videoSceneSplitInputSchema.safeParse({ ...valid, granularity: "10" }).success).toBe(
       false,
     );
+    // 占位卡绑定键：缺失与空串都拒（前端发送前本地建占位卡，节点 id 恒有值）。
+    expect(
+      videoSceneSplitInputSchema.safeParse({ source_asset_id: "88", granularity: "standard" })
+        .success,
+    ).toBe(false);
+    expect(
+      videoSceneSplitInputSchema.safeParse({ ...valid, target_node_id: "" }).success,
+    ).toBe(false);
     // 三档全过（threshold 是产品语义档位，非 API 原生值——数值 5/10/20 不进输入键）。
     for (const granularity of VIDEO_SCENE_SPLIT_GRANULARITIES) {
       expect(
-        videoSceneSplitInputSchema.safeParse({ source_asset_id: "88", granularity }).success,
+        videoSceneSplitInputSchema.safeParse({
+          source_asset_id: "88",
+          target_node_id: "node-1",
+          granularity,
+        }).success,
       ).toBe(true);
     }
   });
@@ -206,7 +219,7 @@ describe("video_scene_split 双端一致性（读 worker-java 源码文本，防
     expect(contractJava).toContain('String SOURCE = "video_scene_split";');
   });
 
-  it("VideoSceneSplitContract：两 input 键名与 TS 同值", () => {
+  it("VideoSceneSplitContract：三 input 键名与 TS 同值", () => {
     for (const key of Object.values(VIDEO_SCENE_SPLIT_INPUT_KEYS)) {
       expect(contractJava).toContain(`= "${key}";`);
     }
