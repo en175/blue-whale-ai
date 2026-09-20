@@ -10,6 +10,7 @@ import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
+import type { VocalSplitInput } from '@lib/contracts/vocal-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -155,6 +156,37 @@ export interface CreateMediaExtractionPayload {
 export interface MediaExtractionCreatedData {
   job_id: string;
   status: 'queued';
+}
+
+/** POST /api/projects/:id/vocal-splits 请求体（键名与 backend/libs/contracts/vocal-split.ts
+ *  契约恒等；source_asset_id 恒传、scene/output_format 缺省后端补 audio/aac——与契约
+ *  「冻结后三键恒在」的分工：请求体可选、创建入口补默认后冻结，IKHA2W 编辑态两参数恒显式携带）。 */
+export interface CreateVocalSplitPayload {
+  source_asset_id: string | number;
+  scene?: VocalSplitInput['scene'];
+  output_format?: VocalSplitInput['output_format'];
+}
+
+/** 创建人声背景分离任务返回（IKHA2W）；同音视频分离：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现「任务入队失败，请重试」。 */
+export interface VocalSplitCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——不带幂等头、无积分预估、
+ *  不走余额拦截门。占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。 */
+export function createVocalSplit(
+  projectId: string,
+  payload: CreateVocalSplitPayload,
+): Promise<VocalSplitCreatedData> {
+  return apiRequest<VocalSplitCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 /** POST /api/projects/:id/image-enhancements 请求体（六键，键名与 backend/libs/contracts/image-enhance.ts 契约恒等）。
