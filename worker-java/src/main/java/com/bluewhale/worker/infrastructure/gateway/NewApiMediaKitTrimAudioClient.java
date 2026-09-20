@@ -267,8 +267,14 @@ public class NewApiMediaKitTrimAudioClient {
             }
 
             if ("completed".equals(normalized)) {
-                JsonNode audioUrl = data.path("result").path("audio_url");
-                JsonNode duration = data.path("result").path("duration");
+                // 官方 PDF 自相矛盾：正文表格写 result.*、「最终的完整任务信息示例」JSON 却是
+                // output.*——result 优先、output 兜底双读，防 completed 被误读成无结果
+                JsonNode result = data.path("result");
+                JsonNode output = data.path("output");
+                JsonNode audioUrl = result.hasNonNull("audio_url")
+                        ? result.path("audio_url") : output.path("audio_url");
+                JsonNode duration = result.hasNonNull("duration")
+                        ? result.path("duration") : output.path("duration");
                 return new TrimAudioTaskObservation("succeeded",
                         audioUrl.isTextual() ? audioUrl.asText() : null,
                         duration.isNumber() ? duration.asDouble() : null,

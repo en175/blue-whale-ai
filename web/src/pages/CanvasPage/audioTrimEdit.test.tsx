@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* IKHB7A 截取编辑态与发送结果闭环（画布链路）：点「截取」进入编辑态（trimEditing/
    soloToolbarHidden 渲染期注入；进入即暂停+播放头归零+默认全选由 AudioPlayer/
-   MediaNode 承担，见 MediaNode/AudioPlayer 组件测试）+ 发送条五要素（X/截取/时间
+   MediaNode 承担，试听钳制见 MediaNode/AudioPlayer.test.tsx）+ 发送条五要素（X/截取/时间
    范围实时刷新/格式下拉默认跟随源格式/⚡0/发送钮）；与其他工具编辑会话互斥（分离
    先例口径）；四退出（X/Esc/点其他卡/点画布空白）未发送无痕迹。发送闭环：贴边省略
    与两位小数、先退编辑态再建占位卡（audio-trim-{jobId}、名「源名(截取).{格式}」）、

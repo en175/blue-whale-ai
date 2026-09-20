@@ -230,6 +230,28 @@ class NewApiMediaKitTrimAudioClientTest {
     }
 
     @Test
+    @DisplayName("poll completed 示例 JSON 形态（output.*）：result 缺失时 output 兜底双读，不误判")
+    void pollCompletedReadsOutputFallback() {
+        // 官方 PDF 正文表格写 result、「最终的完整任务信息示例」JSON 却是 output.*（文档
+        // 自相矛盾）——网关若按示例形状返回，result 读取落空须兜底 output，防 completed
+        // 被读成无 audio_url 的成功
+        responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-trim-audio-1399300\","
+                + "\"request_id\":\"20260324140000B9CF8E68B9A4F28F1EC0\","
+                + "\"status\":\"completed\","
+                + "\"output\":{\"audio_url\":\"https://example.volcvideo.com/trimmed_output.m4a"
+                + "?auth_key=1774504841-...\",\"duration\":120.25},"
+                + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
+
+        TrimAudioTaskObservation observation =
+                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-trim-audio-1399300");
+
+        assertThat(observation.status()).isEqualTo("succeeded");
+        assertThat(observation.audioUrl())
+                .isEqualTo("https://example.volcvideo.com/trimmed_output.m4a?auth_key=1774504841-...");
+        assertThat(observation.durationSec()).isEqualTo(120.25);
+    }
+
+    @Test
     @DisplayName("poll 中间态（queued）→ processing，无结果字段")
     void pollQueuedIsProcessing() {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-1\",\"status\":\"queued\","

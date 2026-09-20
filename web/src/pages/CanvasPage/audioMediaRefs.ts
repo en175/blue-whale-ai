@@ -4,6 +4,7 @@
  * 音频参考无角色槽（服务端契约 role 恒 reference），随连线顺序持久化（服务端零改动）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
+import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
 import { panelCanvasRefError } from './refSourceTypes';
@@ -78,7 +79,10 @@ export function audioMediaRefsOf(
     if (edge.target !== targetNodeId) continue;
     // IKFS5W：提取产物卡上的「来源边」（这段音频取自哪段视频）不是参考输入，跳过——
     // 否则该视频会被判成非法音频参考，卡住音频面板的发送。
-    if ((edge.data as { origin?: string } | undefined)?.origin === MEDIA_EXTRACT_EDGE_ORIGIN) continue;
+    // IKHB08：截取产物卡的来源边（origin=audio-trim）同口径跳过——源音频是合法音频
+    // 素材，不跳过会被静默列为参考占位（防参考污染，见 audioTrim.ts 常量注释）。
+    const origin = (edge.data as { origin?: string } | undefined)?.origin;
+    if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const reason = audioRefSourceError(source);
