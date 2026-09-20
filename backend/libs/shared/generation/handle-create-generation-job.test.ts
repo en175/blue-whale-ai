@@ -2310,4 +2310,48 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(result.msg).toContain('参考素材总时长超过 15 秒');
     expect(createJob).not.toHaveBeenCalled();
   });
+
+  // IKHBDO：参考上限由接纳侧按能力行冻结进 job.input.reference_limits —— worker 不含模型知识，
+  // 执行期只读这份快照（对齐 generate_audio 的冻结口径）。
+  it('参考上限按能力行冻结进 job.input.reference_limits', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({
+      max_reference_images: 14,
+      video_reference_max: 5,
+      audio_reference_max: 2,
+      max_reference_duration_sec: 30,
+    });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [imageRef(1)],
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(input.reference_limits).toEqual({
+      max_reference_images: 14,
+      video_reference_max: 5,
+      audio_reference_max: 2,
+      max_reference_duration_sec: 30,
+    });
+  });
+
+  it('同一份 4 张参考图：能力行配 3 时 400、配 5 时 200（上限随配置而非固定常量）', async () => {
+    const refs = Array.from({ length: 4 }, (_, i) => imageRef(i + 1));
+
+    const strict = videoDepsWithFeatures({ max_reference_images: 3 });
+    const rejected = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: refs,
+    }, null, strict.deps);
+    expect(rejected.code).toBe(400);
+    expect(rejected.msg).toContain('参考图最多 3 张');
+    expect(strict.createJob).not.toHaveBeenCalled();
+
+    const loose = videoDepsWithFeatures({ max_reference_images: 5 });
+    const accepted = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: refs,
+    }, null, loose.deps);
+    expect(accepted.code).toBe(200);
+    expect(loose.createJob).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,4 +1,5 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
+import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -700,6 +701,12 @@ const videoStrategy: GenerationTypeStrategy = {
     // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
     if (capability?.features?.audio === true) {
       input.generate_audio = params.generate_audio !== false;
+    }
+    // IKHBDO：参考素材上限（图/视频/音频数量 + 总时长）从能力行冻结进快照——
+    // worker 不含任何模型知识，执行期只读这份配置（对齐上面 generate_audio 的冻结口径）。
+    // 接纳侧仍按同一份 features 先判一次（checkReferenceLimits），冻结值只用于执行期复核。
+    if (capability?.features) {
+      input.reference_limits = freezeReferenceLimits(capability.features);
     }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);

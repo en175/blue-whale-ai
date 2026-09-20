@@ -43,7 +43,7 @@ import static org.mockito.Mockito.*;
  *   <li>submit 路径：providerTaskId==null → buildSubmit → submit → markSubmitted → scheduleNext</li>
  *   <li>poll 路径：providerTaskId!=null → poll → transient/timeout/succeeded/failed</li>
  *   <li>parent-reuse 防双扣：parentProviderTaskId → poll parent → SUCCESS publish without submit</li>
- *   <li>参考校验：视频物理边界（2s/15s/200MB 包含性）+ Seedance 2.0 约束</li>
+ *   <li>参考校验：视频物理边界（2s/200MB 包含性）+ 参考数量/时长上限（读能力行冻结值）</li>
  * </ul>
  * <p>
  * 修正一：无 cost_reservations / actual_amount_fen / release_note 测试。
@@ -501,7 +501,7 @@ class VideoJobProcessorTest {
         @DisplayName("G60: 200MB 恰好通过（>200MB 失败，边界包含）")
         void videoSize_200MB_exactlyPasses() {
             AssetEntity asset = videoAsset(200L * 1024 * 1024, null, null, null, "video/mp4");
-            processor.validateReferenceVideo(asset); // 不抛异常
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC); // 不抛异常
         }
 
         @Test
@@ -509,21 +509,21 @@ class VideoJobProcessorTest {
         void videoSize_over200MB_fails() {
             AssetEntity asset = videoAsset(200L * 1024 * 1024 + 1, null, null, null, "video/mp4");
             org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.validateReferenceVideo(asset));
+                    () -> processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC));
         }
 
         @Test
         @DisplayName("G62: 2s 恰好通过（<2 失败，边界包含）")
         void videoDuration_2s_exactlyPasses() {
             AssetEntity asset = videoAsset(1024L, 2000, null, null, "video/mp4");
-            processor.validateReferenceVideo(asset);
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
 
         @Test
         @DisplayName("G63: 15s 恰好通过（>15 失败，边界包含）")
         void videoDuration_15s_exactlyPasses() {
             AssetEntity asset = videoAsset(1024L, 15000, null, null, "video/mp4");
-            processor.validateReferenceVideo(asset);
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
 
         @Test
@@ -531,7 +531,7 @@ class VideoJobProcessorTest {
         void videoDuration_under2s_fails() {
             AssetEntity asset = videoAsset(1024L, 1999, null, null, "video/mp4");
             org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.validateReferenceVideo(asset));
+                    () -> processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC));
         }
 
         @Test
@@ -539,7 +539,7 @@ class VideoJobProcessorTest {
         void videoSide_300px_exactlyPasses() {
             // 854x480: side ≥300 ✓, pixels=409,920 ∈ [409600,8295044] ✓, ratio=1.779 ∈ [0.4,2.5] ✓
             AssetEntity asset = videoAsset(1024L, 5000, 854, 480, "video/mp4");
-            processor.validateReferenceVideo(asset);
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
 
         @Test
@@ -555,7 +555,7 @@ class VideoJobProcessorTest {
             // 结论：6000px 单边在 Seedance 2.0 约束下不可达，此测试改为验证上限侧的合理最大尺寸。
             // 2880x2490: pixels=7,171,200 ✓, ratio=1.157 ✓, 两边均 ∈ [300,6000] ✓
             AssetEntity asset = videoAsset(1024L, 5000, 2880, 2490, "video/mp4");
-            processor.validateReferenceVideo(asset);
+            processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC);
         }
 
         @Test
@@ -563,7 +563,7 @@ class VideoJobProcessorTest {
         void videoSide_299px_fails() {
             AssetEntity asset = videoAsset(1024L, 5000, 299, 800, "video/mp4");
             org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.validateReferenceVideo(asset));
+                    () -> processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC));
         }
 
         @Test
@@ -571,7 +571,7 @@ class VideoJobProcessorTest {
         void videoMime_invalid() {
             AssetEntity asset = videoAsset(1024L, 5000, 640, 480, "video/avi");
             org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.validateReferenceVideo(asset));
+                    () -> processor.validateReferenceVideo(asset, REF_MAX_DURATION_SEC));
         }
     }
 
@@ -621,34 +621,141 @@ class VideoJobProcessorTest {
         }
     }
 
-    // ========== 参考视频/音频的模型门控 ==========
+    // ========== 参考上限（IKHBDO：全部读能力行冻结值，程序不含模型知识）==========
 
     @Test
-    @DisplayName("Seedance 2.5 + 视频参考：worker 不再按模型名拒绝")
-    void seedance25_withVideoRef_accepted() {
+    @DisplayName("旧 job（快照无 reference_limits）→ 回落旧常量，在途任务不被上线打断")
+    void legacyJobWithoutFrozenLimits() {
         AssetEntity videoRef = videoAsset(1024L, 5000, 1280, 720, "video/mp4");
-        // 支持与否由接纳侧按能力行 features.video_reference 判定（2.5 = true，且是默认模型）。
-        // 此前 worker 这里另有一份 `isSeedance2Model` 前缀特判（从已退役的 node worker 逐字移植），
-        // 把 2.5 误拒成 unsupported_input「只有 Seedance 2.0 支持参考视频和参考音频」，
-        // 而给能力行为 false 的 2.0 放行 —— 与数据恰好相反。该特判已删除。
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(
-                () -> processor.validateReferences("doubao-seedance-2-5-260628", List.of(videoRef)));
+                () -> processor.validateReferences(
+                        VideoJobProcessor.referenceLimitsOf(baseInput()), List.of(videoRef)));
     }
 
-    // ========== validateReferences ==========
+    @Test
+    @DisplayName("G70: 参考图片超过能力行上限 → reference_limit_exceeded，文案带真实上限（不再写 9）")
+    void tooManyImages_fails() {
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.validateReferences(
+                        VideoJobProcessor.LEGACY_REFERENCE_LIMITS, imageAssets(10)));
+        assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        assertThat(error.getMessage()).contains("参考图最多 9 张");
+    }
 
     @Test
-    @DisplayName("G70: 参考图片 >9 → reference_limit_exceeded")
-    void tooManyImages_fails() {
-        List<AssetEntity> images = new java.util.ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            AssetEntity a = new AssetEntity();
-            a.setType("image");
-            a.setUrl("http://img/" + i);
-            images.add(a);
-        }
+    @DisplayName("能力行 max_reference_images=14：14 张放行、15 张拒绝（上限真由配置驱动，不固定 9）")
+    void maxImagesFromConfig() {
+        VideoJobProcessor.ReferenceLimits limits =
+                new VideoJobProcessor.ReferenceLimits(14, 3, 3, 15);
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> processor.validateReferences(limits, imageAssets(14)));
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.validateReferences(limits, imageAssets(15)));
+        assertThat(error.getMessage()).contains("参考图最多 14 张");
+    }
+
+    @Test
+    @DisplayName("能力行 video_reference_max=5：5 个参考视频放行、6 个拒绝")
+    void maxVideosFromConfig() {
+        // maxDurationSec=null（能力行未配）→ 只验数量，时长不参与
+        VideoJobProcessor.ReferenceLimits limits =
+                new VideoJobProcessor.ReferenceLimits(14, 5, 5, null);
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> processor.validateReferences(limits, referenceVideos(5)));
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.validateReferences(limits, referenceVideos(6)));
+        assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        assertThat(error.getMessage()).contains("参考视频最多 5 个");
+    }
+
+    @Test
+    @DisplayName("能力行 audio_reference_max=0：能力行把音频参考关掉后，1 个也拒")
+    void maxAudiosFromConfig() {
+        VideoJobProcessor.ReferenceLimits noAudio =
+                new VideoJobProcessor.ReferenceLimits(9, 3, 0, 15);
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.validateReferences(noAudio, List.of(audioAsset())));
+        assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        assertThat(error.getMessage()).contains("参考音频最多 0 个");
+
+        // 同一份素材，能力行配 3 → 放行：行为差异只能来自配置
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> processor.validateReferences(
+                        new VideoJobProcessor.ReferenceLimits(9, 3, 3, 15),
+                        List.of(audioAsset())));
+    }
+
+    @Test
+    @DisplayName("能力行 max_reference_duration_sec：30 → 两条 15s 共 30s 放行；31s 拒绝")
+    void maxDurationFromConfig() {
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> processor.validateReferences(
+                        new VideoJobProcessor.ReferenceLimits(9, 3, 3, 30),
+                        List.of(videoRefAsset(15), videoRefAsset(15))));
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.validateReferences(
+                        new VideoJobProcessor.ReferenceLimits(9, 3, 3, 30),
+                        List.of(videoRefAsset(16), videoRefAsset(15))));
+        assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE_MEDIA);
+        assertThat(error.getMessage()).contains("参考视频已知总时长不能超过 30 秒");
+
+        // 旧 15s 口径下同样两条就超限：差异同样只来自配置
         org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                () -> processor.validateReferences("seedance-2", images));
+                () -> processor.validateReferences(
+                        VideoJobProcessor.LEGACY_REFERENCE_LIMITS,
+                        List.of(videoRefAsset(15), videoRefAsset(15))));
+    }
+
+    @Test
+    @DisplayName("referenceLimitsOf：读冻结值；整字段/单字段缺失回落旧常量；显式 null = 不限")
+    void referenceLimitsOfParsing() {
+        // 旧 job：input 里没有 reference_limits → 全回落旧常量
+        assertThat(VideoJobProcessor.referenceLimitsOf(baseInput()))
+                .isEqualTo(VideoJobProcessor.LEGACY_REFERENCE_LIMITS);
+
+        // 单字段缺失 → 该字段回落，其余读冻结值
+        Map<String, Object> partial = baseInput();
+        partial.put("reference_limits", Map.of("max_reference_images", 14));
+        VideoJobProcessor.ReferenceLimits parsed = VideoJobProcessor.referenceLimitsOf(partial);
+        assertThat(parsed.maxImages()).isEqualTo(14);
+        assertThat(parsed.maxVideos()).isEqualTo(VideoJobProcessor.LEGACY_MAX_REFERENCE_VIDEOS);
+        assertThat(parsed.maxDurationSec())
+                .isEqualTo(VideoJobProcessor.LEGACY_MAX_REFERENCE_VIDEO_SECONDS);
+
+        // 显式 null（能力行未配上限）≠ 缺失 → 不限，不回落旧 15
+        Map<String, Object> explicitNull = new HashMap<>();
+        explicitNull.put("max_reference_images", 14);
+        explicitNull.put("video_reference_max", 3);
+        explicitNull.put("audio_reference_max", 3);
+        explicitNull.put("max_reference_duration_sec", null);
+        Map<String, Object> input = baseInput();
+        input.put("reference_limits", explicitNull);
+        assertThat(VideoJobProcessor.referenceLimitsOf(input).maxDurationSec()).isNull();
+    }
+
+    @Test
+    @DisplayName("冻结上限经 buildSubmitRequest 全链路生效（旧硬编码 9 不再拦得住 14 张）")
+    void frozenLimitsDriveSubmitRequest() {
+        // 归属查询按请求 id 返回同 id 图片素材（数量必须与请求一致，否则被判「素材不存在」）
+        doAnswer(inv -> {
+            List<String> ids = inv.getArgument(0);
+            Map<String, AssetEntity> map = new HashMap<>();
+            for (String id : ids) {
+                map.put(id, imageAsset(id, "https://tos.test/" + id + ".png"));
+            }
+            return map;
+        }).when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+        assertThat(processor.buildSubmitRequest(
+                videoClaim("401", false, null, 0, 0, null, inputWithImageRefs(14, 14)))
+                .references()).hasSize(14);
+
+        VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                () -> processor.buildSubmitRequest(
+                        videoClaim("402", false, null, 0, 0, null, inputWithImageRefs(15, 14))));
+        assertThat(error.getMessage()).contains("参考图最多 14 张");
     }
 
     // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========
@@ -1049,6 +1156,57 @@ class VideoJobProcessorTest {
     }
 
     // ========== 工具方法 ==========
+
+    /** 边界用例里的参考时长上限（等同于能力行 Seedance 2.0 的配置值，IKHBDO 后由能力行注入）。 */
+    private static final int REF_MAX_DURATION_SEC = 15;
+
+    /** n 条本地图片参考（无 mime/size/尺寸，只验数量上限）。 */
+    private List<AssetEntity> imageAssets(int n) {
+        List<AssetEntity> images = new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            AssetEntity a = new AssetEntity();
+            a.setType("image");
+            a.setUrl("http://img/" + i);
+            images.add(a);
+        }
+        return images;
+    }
+
+    /** 单个合法参考视频（1280x720 / mp4 / 指定秒数）。 */
+    private AssetEntity videoRefAsset(int seconds) {
+        return videoAsset(1024L, seconds * 1000, 1280, 720, "video/mp4");
+    }
+
+    private List<AssetEntity> referenceVideos(int n) {
+        List<AssetEntity> videos = new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            videos.add(videoRefAsset(2));
+        }
+        return videos;
+    }
+
+    private AssetEntity audioAsset() {
+        AssetEntity a = new AssetEntity();
+        a.setType("audio");
+        a.setUrl("http://audio.mp3");
+        return a;
+    }
+
+    /** baseInput + n 条图片参考 + 冻结的参考上限快照（max_reference_images = configuredMax）。 */
+    private Map<String, Object> inputWithImageRefs(int n, int configuredMax) {
+        Map<String, Object> input = baseInput();
+        List<Map<String, Object>> refs = new java.util.ArrayList<>();
+        for (int i = 1; i <= n; i++) {
+            refs.add(Map.of("role", "reference", "type", "image", "asset_id", String.valueOf(i)));
+        }
+        input.put("references", refs);
+        input.put("reference_limits", Map.of(
+                "max_reference_images", configuredMax,
+                "video_reference_max", 3,
+                "audio_reference_max", 3,
+                "max_reference_duration_sec", 15));
+        return input;
+    }
 
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
                                            String providerTaskId, int pollCount,
