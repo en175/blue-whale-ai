@@ -25,13 +25,14 @@ import java.util.UUID;
  * {@link NewApiMediaKitExtractAudioClient} 为模板——家族内 MediaKit 异步任务：提交返
  * task_id + 查询端点轮询取 result.video_url / duration / resolution / fps）。
  * <p>
- * 端点（官方 PDF「提交画质增强（大模型版）任务 API」POST /api/v1/tools/enhance-video-generative；
+ * 端点（网关**对客**路径；网关内部转发火山上游 POST /api/v1/tools/enhance-video-generative。
  * 路径常量单源在 {@link VideoEnhanceContract}，契约票 IKH3VE 已冻结）：
  * <ul>
  *   <li>submit：POST {SUBMIT_PATH}（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——官方 PDF 无查询端点文档，
- *       按家族假设值承载（契约票口径：待网关票确认后只改契约常量）</li>
+ *   <li>poll：GET {POLL_PATH_PREFIX}{task_id}（10s 超时）——三个 MediaKit 异步工具共用
+ *       同一条查询路由，路径不含 async 段（IKH67T 实测校准）</li>
  * </ul>
+ * ⚠️ 网关路径 ≠ 火山上游路径：混用即 404 Invalid URL，任务卡在提交相（IKH67T）。
  * 鉴权与家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的用户 sk-
  * （processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id +
  * X-Client-System: bluewhale。

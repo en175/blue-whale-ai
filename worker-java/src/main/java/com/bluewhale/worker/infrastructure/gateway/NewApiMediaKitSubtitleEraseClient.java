@@ -26,14 +26,14 @@ import java.util.UUID;
  * 为模板，差异 = **家族内首个异步任务**：提交返 task_id + 查询端点轮询取结果，区别于
  * 高清/擦除/抠图的单次同步路由）。
  * <p>
- * 端点（网关代理官方 POST /api/v1/tools/erase-video-subtitle-pro；参数名与响应形状以火山
- * 官方 PDF「提交字幕擦除（精细化版）任务 API」为准）：
+ * 端点（网关**对客**路由；网关内部转发火山上游 POST /api/v1/tools/erase-video-subtitle-pro，
+ * 参数名与响应形状以火山官方 PDF「提交字幕擦除（精细化版）任务 API」为准）：
  * <ul>
- *   <li>submit：POST /v1/mediakit/async/erase-video-subtitle-pro（30s 超时，异步提交秒级入队）</li>
- *   <li>poll：GET /v1/mediakit/async/tasks/{task_id}（10s 超时，视频轮询同窗口）</li>
+ *   <li>submit：POST /v1/mediakit/erase-video-subtitle-pro（30s 超时，异步提交秒级入队）</li>
+ *   <li>poll：GET /v1/mediakit/tasks/{task_id}（10s 超时，视频轮询同窗口）</li>
  * </ul>
- * 路径是网关侧路由落地前的**假设值**（规格 Further Notes：网关异步路由是上线前置、
- * 配置单阶段确认）；确认后有出入只改本类两个常量。
+ * ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。
+ * 三个 MediaKit 异步工具共用同一条查询路由 /v1/mediakit/tasks/，路径**不含 async 段**。
  * <p>
  * 鉴权与同步家族同构（契约 §5 / ADR-0080）：Authorization: Bearer 任务冻结的用户 sk-
  * （processor 从 job.input.provider_credential 取出传入）+ X-Trace-Id + X-Client-System: bluewhale。
@@ -65,11 +65,12 @@ public class NewApiMediaKitSubtitleEraseClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** 网关异步提交路由路径（假设值，见类注释）。 */
-    static final String SUBMIT_PATH = "/v1/mediakit/async/erase-video-subtitle-pro";
+    /** 网关异步提交路由路径（对客；网关按路径末段决定工具，见类注释）。 */
+    static final String SUBMIT_PATH = "/v1/mediakit/erase-video-subtitle-pro";
 
-    /** 网关异步任务查询路由路径前缀（假设值，见类注释；拼 taskId）。 */
-    static final String POLL_PATH_PREFIX = "/v1/mediakit/async/tasks/";
+    /** 网关异步任务查询路由路径前缀（拼 taskId）：三个 MediaKit 异步工具共用同一条查询
+     *  路由，路径不含 async 段。 */
+    static final String POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
     /** 对客模型名（§17.1：网关渠道路由 + model_price 配 0 免费口径）。 */
     static final String MODEL = "mediakit-erase-video-subtitle-pro";

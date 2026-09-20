@@ -41,15 +41,15 @@ export type MediaExtractOutputFormat = (typeof MEDIA_EXTRACT_OUTPUT_FORMATS)[num
  *  传了非法值（枚举外 / 非字符串 / null）明确拒绝，不再静默回退（回退口径随本契约废除）。 */
 export const MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT: MediaExtractOutputFormat = "m4a";
 
-/** 火山官方提交端点路径（文档出处：官方 PDF「1. 提交音频提取任务 API」节
- *  POST /api/v1/tools/extract-audio，逐字）。本仓经 new-api 网关调用的实际路由由网关票
- *  IKH28Y 确认，有出入只改本常量（去字幕 SUBMIT_PATH 先例：集中常量单点换）。 */
-export const MEDIA_EXTRACT_SUBMIT_PATH = "/api/v1/tools/extract-audio";
+/** 网关异步提交路由（对客）：POST {MEDIA_EXTRACT_SUBMIT_PATH}，网关按路径末段决定工具。
+ *  火山上游侧对应官方 PDF「1. 提交音频提取任务 API」节逐字
+ *  POST /api/v1/tools/extract-audio，由网关内部转发，本仓不直连上游。
+ *  ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。 */
+export const MEDIA_EXTRACT_SUBMIT_PATH = "/v1/mediakit/extract-audio";
 
-/** 任务查询端点路径前缀（拼 taskId）：官方「提交音频提取任务 API」PDF **未包含**查询端点
- *  文档——暂按家族先例落网关假设路径（去字幕 NewApiMediaKitSubtitleEraseClient
- *  POLL_PATH_PREFIX 同款假设口径），**待网关票 IKH28Y 确认后定稿，有出入只改本常量**。 */
-export const MEDIA_EXTRACT_POLL_PATH_PREFIX = "/v1/mediakit/async/tasks/";
+/** 网关异步任务查询路由前缀（拼 taskId）：GET {前缀}{task_id}。三个 MediaKit 异步工具
+ *  （去字幕 / 视频 HD / 音视频分离）共用同一条查询路由，路径**不含 async 段**。 */
+export const MEDIA_EXTRACT_POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
 /** input 冻结结构（创建入口复核与重试沿用都用本 schema；strict 防多余键）。
  *  注意：这是**冻结后**形态（output_format 已填默认值、两键恒在）；创建请求体里

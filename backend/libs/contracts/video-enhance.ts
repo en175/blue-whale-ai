@@ -47,15 +47,15 @@ export type VideoEnhanceResolution = (typeof VIDEO_ENHANCE_RESOLUTIONS)[number];
  *  是产品默认档单源（前端面板默认选中与此同源）。 */
 export const VIDEO_ENHANCE_DEFAULT_RESOLUTION: VideoEnhanceResolution = "1080p";
 
-/** 火山官方提交端点路径（文档出处：官方 PDF「1. 提交画质增强（大模型版）任务 API」节
- *  POST /api/v1/tools/enhance-video-generative，逐字）。本仓经 new-api 网关调用的实际路由
- *  由网关票确认，有出入只改本常量（去字幕 / media_extract SUBMIT_PATH 先例：集中常量单点换）。 */
-export const VIDEO_ENHANCE_SUBMIT_PATH = "/api/v1/tools/enhance-video-generative";
+/** 网关异步提交路由（对客）：POST {VIDEO_ENHANCE_SUBMIT_PATH}，网关按路径末段决定工具。
+ *  火山上游侧对应官方 PDF「1. 提交画质增强（大模型版）任务 API」节逐字
+ *  POST /api/v1/tools/enhance-video-generative，由网关内部转发，本仓不直连上游。
+ *  ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。 */
+export const VIDEO_ENHANCE_SUBMIT_PATH = "/v1/mediakit/enhance-video-generative";
 
-/** 任务查询端点路径前缀（拼 taskId）：官方「提交画质增强（大模型版）任务 API」PDF 未包含
- *  查询端点文档——暂按家族先例落网关假设路径（video-subtitle-erase / media-extract 的
- *  POLL_PATH_PREFIX 同款假设口径），待网关票确认后定稿，有出入只改本常量。 */
-export const VIDEO_ENHANCE_POLL_PATH_PREFIX = "/v1/mediakit/async/tasks/";
+/** 网关异步任务查询路由前缀（拼 taskId）：GET {前缀}{task_id}。三个 MediaKit 异步工具
+ *  共用同一条查询路由，路径**不含 async 段**。 */
+export const VIDEO_ENHANCE_POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
 /** 出站固定码率档位 medium（文档出处：官方 PDF Body 参数 bitrate_level 节——low / medium
  *  （推荐）/ high，默认 medium）。服务端常量、不进契约输入键与面板参数（ADR-0105「码率固定

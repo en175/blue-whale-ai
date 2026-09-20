@@ -70,10 +70,10 @@ describe("media_extract 契约不变量（官方 PDF 口径，TS 侧）", () => 
     expect(MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT).toBe("m4a");
   });
 
-  it("火山端点：提交路径 = 官方 PDF 逐字 /api/v1/tools/extract-audio；查询前缀按家族假设值承载", () => {
-    expect(MEDIA_EXTRACT_SUBMIT_PATH).toBe("/api/v1/tools/extract-audio");
-    // 查询端点不在官方 PDF——假设值待网关票 IKH28Y 确认（去字幕 POLL_PATH_PREFIX 先例）。
-    expect(MEDIA_EXTRACT_POLL_PATH_PREFIX).toBe("/v1/mediakit/async/tasks/");
+  it("网关端点：提交 /v1/mediakit/{tool}、查询 /v1/mediakit/tasks/（IKH67T 实测校准）", () => {
+    expect(MEDIA_EXTRACT_SUBMIT_PATH).toBe("/v1/mediakit/extract-audio");
+    // 三个 MediaKit 异步工具共用同一条查询路由；网关路径 ≠ 火山上游路径（混用即 404）。
+    expect(MEDIA_EXTRACT_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
   it("input 键名冻结：source_asset_id / output_format（结构不变 ADR-0103）", () => {

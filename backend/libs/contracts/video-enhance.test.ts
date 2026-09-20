@@ -67,10 +67,10 @@ describe("video_enhance 契约不变量（官方 PDF 口径，TS 侧）", () => 
     expect(VIDEO_ENHANCE_DEFAULT_RESOLUTION).toBe("1080p");
   });
 
-  it("火山端点：提交路径 = 官方 PDF 逐字 /api/v1/tools/enhance-video-generative；查询前缀按家族假设值承载", () => {
-    expect(VIDEO_ENHANCE_SUBMIT_PATH).toBe("/api/v1/tools/enhance-video-generative");
-    // 查询端点不在官方 PDF——假设值待网关票确认（去字幕 / media_extract POLL_PATH_PREFIX 先例）。
-    expect(VIDEO_ENHANCE_POLL_PATH_PREFIX).toBe("/v1/mediakit/async/tasks/");
+  it("网关端点：提交 /v1/mediakit/{tool}、查询 /v1/mediakit/tasks/（IKH67T 实测校准）", () => {
+    expect(VIDEO_ENHANCE_SUBMIT_PATH).toBe("/v1/mediakit/enhance-video-generative");
+    // 三个 MediaKit 异步工具共用同一条查询路由；网关路径 ≠ 火山上游路径（混用即 404）。
+    expect(VIDEO_ENHANCE_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
   it("input 键名冻结：source_asset_id / target_node_id / resolution", () => {

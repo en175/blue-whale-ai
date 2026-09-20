@@ -16,7 +16,8 @@ import java.util.List;
  * <p>
  * 供应商接口 = 火山引擎 AI MediaKit「提交画质增强（大模型版）任务 API」（**异步任务**：
  * 提交返 task_id，轮询查询取 result.video_url（24h 临时链接）/ duration / resolution / fps），
- * POST /api/v1/tools/enhance-video-generative；本仓经 new-api 网关调用（参数名以官方 PDF
+ * 火山上游 POST /api/v1/tools/enhance-video-generative；本仓经 new-api 网关调用，网关
+ * **对客**路径单源在下方 SUBMIT_PATH / POLL_PATH_PREFIX（参数名以官方 PDF
  * 为准，出处逐条标注在常量注释，禁止引用二手信息）。⚠️ 官方文档内部矛盾：失败示例报错
  * 文案写 resolution 仅 [720p,1080p]，以 Body 参数表（720p 默认 / 1080p / 2k / 4k）与附录
  * 码率参考表（含 2K/4K 行）为准。
@@ -56,15 +57,16 @@ public final class VideoEnhanceContract {
     /** 缺省目标分辨率 1080p（产品口径 ADR-0105「默认 1080P」——**不是官方默认 720p**）。 */
     public static final String DEFAULT_RESOLUTION = "1080p";
 
-    // ========== 火山端点路径（网关侧实际路由待网关票确认，有出入只改本组常量——
-    //            去字幕 / media_extract SUBMIT_PATH / POLL_PATH_PREFIX 先例） ==========
+    // ========== 网关对客端点路径（IKH67T：网关路由 ≠ 火山上游路径，混用即 404 Invalid URL） ==========
 
-    /** 火山官方提交端点路径（文档出处：官方 PDF「1. 提交画质增强（大模型版）任务 API」节，逐字）。 */
-    public static final String SUBMIT_PATH = "/api/v1/tools/enhance-video-generative";
+    /** 网关异步提交路由：POST {SUBMIT_PATH}（网关按路径末段决定工具）。火山上游侧对应
+     *  POST /api/v1/tools/enhance-video-generative（官方 PDF「1. 提交画质增强（大模型版）
+     *  任务 API」节逐字），由网关内部转发，本仓不直连上游。 */
+    public static final String SUBMIT_PATH = "/v1/mediakit/enhance-video-generative";
 
-    /** 任务查询端点路径前缀（拼 taskId）：官方「提交画质增强（大模型版）任务 API」PDF 未包含
-     *  查询端点文档——暂按家族先例落网关假设路径，待网关票确认。 */
-    public static final String POLL_PATH_PREFIX = "/v1/mediakit/async/tasks/";
+    /** 网关异步任务查询路由前缀（拼 taskId）：GET {POLL_PATH_PREFIX}{task_id}。三个 MediaKit
+     *  异步工具共用同一条查询路由，路径**不含 async 段**。 */
+    public static final String POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
     // ========== 出站固定参数（单处定义，出站请求处引用；服务端常量不从前端传入——ADR-0105） ==========
 

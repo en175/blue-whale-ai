@@ -100,7 +100,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
         String taskId = callSubmit("subtitle_smart", List.of());
 
         assertThat(taskId).isEqualTo("amk-tool-erase-video-subtitle-pro-123");
-        assertThat(lastPath.get()).isEqualTo("/v1/mediakit/async/erase-video-subtitle-pro");
+        assertThat(lastPath.get()).isEqualTo("/v1/mediakit/erase-video-subtitle-pro");
         String body = lastBody.get();
         assertThat(body).contains("\"model\":\"mediakit-erase-video-subtitle-pro\"");
         assertThat(body).contains("\"video_url\":\"https://example.com/src.mp4\"");
@@ -245,7 +245,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
-        assertThat(lastPath.get()).isEqualTo("/v1/mediakit/async/tasks/amk-task-1");
+        assertThat(lastPath.get()).isEqualTo("/v1/mediakit/tasks/amk-task-1");
         assertThat(lastAuthorization.get()).isEqualTo("Bearer sk-token");
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.videoUrl())
