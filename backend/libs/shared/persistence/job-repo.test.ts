@@ -59,3 +59,113 @@ describe("createJobRepo.listByUser", () => {
     expect(page.records[0]).toMatchObject({ job_id: "2", status: "processing" });
   });
 });
+
+describe("createJobRepo.findByIdForUser", () => {
+  const assetRows = [
+    { id: 11n, url: "https://tos/seg-1.mp4", type: "video", width: 1920, height: 1080 },
+    { id: 12n, url: "https://tos/seg-2.mp4", type: "video", width: 1920, height: 1080 },
+  ];
+
+  function buildPrisma(overrides: Record<string, unknown> = {}) {
+    return {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "video_scene_split",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [11, 12],
+          error: null,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+      generation_job_logs: {
+        findFirst: vi.fn().mockResolvedValue({
+          payload: {
+            asset_ids: ["11", "12"],
+            duration: 61.5,
+            segments: [
+              { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: "11" },
+              { segment_index: 2, start_time: 15, end_time: 61.5, segment_asset_id: "12" },
+            ],
+          },
+        }),
+      },
+      ...overrides,
+    } as never;
+  }
+
+  it("场景切分成功任务：output_assets 按 output_asset_ids 顺序、result 取终态日志 payload", async () => {
+    const prisma = buildPrisma();
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+
+    expect(view?.asset).toEqual({ id: "11", url: "https://tos/seg-1.mp4", type: "video" });
+    expect(view?.output_assets).toEqual([
+      { id: "11", url: "https://tos/seg-1.mp4", type: "video", width: 1920, height: 1080 },
+      { id: "12", url: "https://tos/seg-2.mp4", type: "video", width: 1920, height: 1080 },
+    ]);
+    expect(view?.result).toEqual({
+      asset_ids: ["11", "12"],
+      duration: 61.5,
+      segments: [
+        { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: "11" },
+        { segment_index: 2, start_time: 15, end_time: 61.5, segment_asset_id: "12" },
+      ],
+    });
+    expect(prisma.generation_job_logs.findFirst).toHaveBeenCalledWith({
+      where: { generation_job_id: 5n, status: "succeeded" },
+      orderBy: { occurred_at: "desc" },
+      select: { payload: true },
+    });
+  });
+
+  it("非场景切分任务：不查终态日志（result 恒 null），output_assets 照常投影", async () => {
+    const prisma = buildPrisma({
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "media_extract",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [11],
+          error: null,
+        }),
+      },
+    });
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+
+    expect(view?.result).toBeNull();
+    expect(prisma.generation_job_logs.findFirst).not.toHaveBeenCalled();
+    expect(view?.output_assets).toEqual([
+      { id: "11", url: "https://tos/seg-1.mp4", type: "video", width: 1920, height: 1080 },
+    ]);
+  });
+
+  it("进行中任务：output_assets 为空、asset 为 null、不查日志", async () => {
+    const prisma = buildPrisma({
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "video_scene_split",
+          status: "processing",
+          progress: 40,
+          input: null,
+          output_asset_ids: [],
+          error: null,
+        }),
+      },
+    });
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+
+    expect(view?.asset).toBeNull();
+    expect(view?.output_assets).toEqual([]);
+    expect(view?.result).toBeNull();
+    expect(prisma.generation_job_logs.findFirst).not.toHaveBeenCalled();
+    expect(prisma.assets.findMany).not.toHaveBeenCalled();
+  });
+});

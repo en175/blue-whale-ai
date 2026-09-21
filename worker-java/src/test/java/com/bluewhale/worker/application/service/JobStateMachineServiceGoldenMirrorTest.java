@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
+import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -938,6 +939,95 @@ class JobStateMachineServiceGoldenMirrorTest {
         slot.setStatus(status);
         slot.setAssetId(assetId);
         return slot;
+    }
+
+    @Test
+    @DisplayName("publishVideoSceneSplitResult: 多段资产落库 + 契约 result 跨进程回传（IKH8BP）")
+    void publishVideoSceneSplitResult_happyPath() {
+        // given
+        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+
+        final long[] seq = {900L};
+        when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
+            AssetEntity asset = (AssetEntity) invocation.getArgument(0);
+            asset.setId(seq[0]++); // 模拟 DB 自增：900 / 901
+            return 1;
+        });
+
+        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "video_scene_split", "succeeded", 100));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        PublishVideoSceneSplitDto input = new PublishVideoSceneSplitDto(
+                "300", "42", "9", "worker-1", 5L, 95.5,
+                List.of(
+                        new PublishVideoSceneSplitDto.Segment(1, 0.0, 31.2,
+                                "https://tos/seg1.mp4", "generated/9/video/seg1.mp4",
+                                "video/mp4", 1024L, "md5-1", 1920, 1080),
+                        new PublishVideoSceneSplitDto.Segment(2, 31.2, 95.5,
+                                "https://tos/seg2.mp4", "generated/9/video/seg2.mp4",
+                                "video/mp4", 2048L, "md5-2", 1920, 1080)));
+
+        // when
+        boolean result = service.publishVideoSceneSplitResult(input);
+
+        // then
+        assertThat(result).isTrue();
+
+        // 断言逐段 asset 插入：type=video / duration_ms = 段时长
+        ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
+        verify(assetMapper, times(2)).insert(assetCaptor.capture());
+        AssetEntity first = assetCaptor.getAllValues().get(0);
+        assertThat(first.getType()).isEqualTo("video");
+        assertThat(first.getSource()).isEqualTo("generated");
+        assertThat(first.getDurationMs()).isEqualTo(31200); // (31.2 - 0.0) * 1000
+        AssetEntity second = assetCaptor.getAllValues().get(1);
+        assertThat(second.getDurationMs()).isEqualTo(64300); // (95.5 - 31.2) * 1000
+
+        // 断言 output_asset_ids 更新（全部段资产 id 数组，1 段与 N 段同构）
+        verify(jobMapper).updateOutputAssetIds(300L, "[900,901]");
+
+        // 断言终态日志 payload 带契约 result 形态（段序/起止秒/段资产引用/总时长）
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(jobLogMapper).insert(logCaptor.capture());
+        GenerationJobLogEntity capturedLog = logCaptor.getValue();
+        assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
+        assertThat(capturedLog.getMessage()).isEqualTo("场景切分完成");
+        assertThat(capturedLog.getPayload())
+                .contains("\"segment_index\":1")
+                .contains("\"start_time\":0.0")
+                .contains("\"end_time\":31.2")
+                .contains("\"segment_asset_id\":\"900\"")
+                .contains("\"segment_index\":2")
+                .contains("\"segment_asset_id\":\"901\"")
+                .contains("\"duration\":95.5");
+
+        // 断言 project_events 插入：每段一条 asset.created + 一条 status_changed（payload 带 result）
+        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
+        verify(projectEventMapper, times(3)).insert(eventCaptor.capture());
+        ProjectEventEntity statusChanged = eventCaptor.getAllValues().stream()
+                .filter(e -> "generation_job.status_changed".equals(e.getEventType()))
+                .findFirst().orElseThrow();
+        assertThat(statusChanged.getPayload())
+                .contains("\"result\":{\"duration\":95.5")
+                .contains("\"segments\":[")
+                .contains("\"segment_index\":2");
+    }
+
+    @Test
+    @DisplayName("publishVideoSceneSplitResult: stale token → false（无段资产落库）")
+    void publishVideoSceneSplitResult_staleToken() {
+        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+
+        PublishVideoSceneSplitDto input = new PublishVideoSceneSplitDto(
+                "300", "42", "9", "worker-1", 5L, 95.0,
+                List.of(new PublishVideoSceneSplitDto.Segment(1, 0.0, 95.0,
+                        "https://tos/seg.mp4", "generated/9/video/seg.mp4",
+                        "video/mp4", 1024L, "md5", 1920, 1080)));
+
+        boolean result = service.publishVideoSceneSplitResult(input);
+
+        assertThat(result).isFalse();
+        verify(assetMapper, never()).insert(any(AssetEntity.class));
     }
 
     private GenerationJobEntity createJob(Long id, Long projectId, String type, String status, int progress) {
