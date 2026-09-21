@@ -3,14 +3,14 @@ package com.bluewhale.worker.domain.contract;
 /**
  * 生成任务 MQ 路由表（topic + tag 单处定义；契约 §1 / ADR-0084 修正六）。
  * <p>
- * 七个入口一一对应七个消费者。{@link #tag()} 恒等于 {@code generation_jobs.type}
+ * 每个入口一一对应一个消费者（入口数以枚举项为准，不在此写死数字）。{@link #tag()} 恒等于 {@code generation_jobs.type}
  * （即 {@link JobTypeEnum#value()}），取值是契约 §1 冻结的字面量——本枚举是该契约的可执行定义，
  * 生产侧（backend 的 queue.constants.ts）与消费侧都必须与它同值。
  * <p>
  * 错配即静默滞留：生产者的 tag 与消费者的 tag 不一致时，MQ 不报错、进程不报错、{@code /ready}
  * 也不报错——消息只是永远无人消费。故路由一律经本枚举取值，禁止在别处发明字面量。
  * <p>
- * {@link #topic()} 刻意逐入口声明而非抽成全局常量：当前七个 tag 共用同一个 topic，
+ * {@link #topic()} 刻意逐入口声明而非抽成全局常量：当前各 tag 共用同一个 topic，
  * 将来按类型拆 topic 时只改各入口的构造实参，不动结构。
  * <p>
  * 消费者组名（{@code generation-<type>-worker}）不在本枚举：组名与 topic/tag 的变化轴不同
@@ -66,7 +66,7 @@ public enum GenerationMqRouteEnum {
         this.tag = tag;
     }
 
-    /** MQ topic（当前七个入口共用 {@code generation-task}）。 */
+    /** MQ topic（当前各入口共用 {@code generation-task}）。 */
     public String topic() {
         return topic;
     }
