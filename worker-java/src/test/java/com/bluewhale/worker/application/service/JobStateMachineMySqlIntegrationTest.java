@@ -46,7 +46,6 @@ import org.testcontainers.utility.MountableFile;
 
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +103,10 @@ class JobStateMachineMySqlIntegrationTest {
             cfg.setUsername(mysql.getUsername());
             cfg.setPassword(mysql.getPassword());
             cfg.setMaximumPoolSize(5);
+            // 时间口径（IKHJ0Q）：与生产 DataSourceConfig 同款。集成测试手工装配 Hikari，不扫 autoconfig——
+            // 不补这一条就会在 UTC 会话下跑而生产跑在 +08:00，而所有到期判断都在 SQL 里对 NOW()，
+            // 「窗口静默失效」这类 bug 一条都测不出来。容器默认时区仍留 +00:00 是刻意的：正好证明它能覆盖服务端默认值。
+            cfg.setConnectionInitSql("SET time_zone='+08:00'");
             return new HikariDataSource(cfg);
         }
 
@@ -230,7 +233,7 @@ class JobStateMachineMySqlIntegrationTest {
     /** 插 processing + 已领取态 job（用于测 fence guard / 终态写入）。 */
     private long seedClaimedJob(long userId, String type, String source,
                                 String workerId, long token) {
-        LocalDateTime future = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10);
+        LocalDateTime future = WorkerClock.now().plusMinutes(10);
         jdbc.update("""
                 INSERT INTO generation_jobs
                   (user_id, type, source, status, lease_owner, lease_expires_at,
@@ -303,7 +306,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G03: 图片 claim CAS 成功 → 投影 fencingToken=old+1，DB 状态 processing")
         void claimImage_success() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -326,7 +329,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G07: 并发第二次 claim 同一 job → Optional.empty（CAS 0 行守卫）")
         void claimImage_concurrentSecond_null() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
 
             Optional<ClaimedJobDto> first = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -341,13 +344,13 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("错误状态（processing 且未过期）→ 候选查询无命中 → empty")
         void claim_wrongStatus_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "processing", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             // 设置未过期租约，使其不构成孤儿
             jdbc.update("""
                     UPDATE generation_jobs SET lease_owner='other', lease_expires_at=?
                     WHERE id=?
                     """,
-                    LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5), id);
+                    WorkerClock.now().plusMinutes(5), id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -359,7 +362,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
         void claim_futureNextAction_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5));
+                    WorkerClock.now().plusMinutes(5));
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-1");
@@ -371,7 +374,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("is_delete=true → 候选过滤排除 → empty")
         void claim_deleted_empty() {
             long id = seedJob(7L, "image", "bottom_dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET is_delete=true WHERE id=?", id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
@@ -385,7 +388,7 @@ class JobStateMachineMySqlIntegrationTest {
         void claim_imageSourceNotWhitelisted_empty() {
             // source='dock' 不在图片白名单 [bottom_dock, plan_apply, storyboard_preview]
             long id = seedJob(7L, "image", "dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
 
             assertThat(service.claimImageJobById(String.valueOf(id), "w")).isEmpty();
         }
@@ -401,7 +404,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G05: video processing + lease_expires_at=null → 孤儿接管，token+1")
         void orphan_video_nullLease() {
             long id = seedJob(9L, "video", "bottom_dock", "processing", 4L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             // lease_expires_at 留 null（种子默认 null），lease_owner 设为旧 worker
             jdbc.update("UPDATE generation_jobs SET lease_owner='old-worker' WHERE id=?", id);
 
@@ -419,13 +422,13 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G06: image processing + lease 已过期 → 孤儿接管，token+1")
         void orphan_image_expiredLease() {
             long id = seedJob(9L, "image", "bottom_dock", "processing", 2L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs
                     SET lease_owner='stale', lease_expires_at=?
                     WHERE id=?
                     """,
-                    LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), id);
+                    WorkerClock.now().minusMinutes(1), id);
 
             Optional<ClaimedJobDto> result = service.claimImageJobById(
                     String.valueOf(id), "worker-fresh");
@@ -438,7 +441,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("media_extract 孤儿（processing + lease null）→ claimMediaExtract 接管")
         void orphan_mediaExtract() {
             long id = seedJob(9L, "media_extract", "dock", "processing", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
 
             Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract(
@@ -564,11 +567,11 @@ class JobStateMachineMySqlIntegrationTest {
         void leaseRenewal() {
             long id = seedClaimedJob(9L, "media_extract", "dock", "worker-1", 1L);
 
-            LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
+            LocalDateTime before = WorkerClock.now();
             service.updateMediaExtractProgress(
                     new UpdateMediaExtractProgressDto(
                             String.valueOf(id), "worker-1", 1L, 50));
-            LocalDateTime after = LocalDateTime.now(ZoneOffset.UTC);
+            LocalDateTime after = WorkerClock.now();
 
             GenerationJobEntity row = readJob(id);
             assertThat(row.getProgress()).isEqualTo(50);
@@ -745,7 +748,7 @@ class JobStateMachineMySqlIntegrationTest {
         void requeue_happy() {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             // 秒级对齐 + 预留 ≥1s 余量（MySQL DATETIME 截秒，避免 now+30 恰好落在下一秒造成毫秒进位）
-            LocalDateTime next = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
+            LocalDateTime next = WorkerClock.now().plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
 
             boolean ok = service.requeueImageJobForRetry(String.valueOf(jobId), next);
 
@@ -764,11 +767,11 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G14: 非 processing（queued）→ false")
         void requeue_notProcessing_false() {
             long jobId = seedJob(9L, "image", "bottom_dock", "queued", 1L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
 
             boolean ok = service.requeueImageJobForRetry(
                     String.valueOf(jobId),
-                    LocalDateTime.now(ZoneOffset.UTC).plusSeconds(30));
+                    WorkerClock.now().plusSeconds(30));
 
             assertThat(ok).isFalse();
         }
@@ -785,10 +788,10 @@ class JobStateMachineMySqlIntegrationTest {
         void markVideoSubmitted_happy() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
+            LocalDateTime before = WorkerClock.now();
             boolean ok = service.markVideoSubmitted(
                     String.valueOf(id), "worker-1", 5L, "provider-task-1");
-            LocalDateTime after = LocalDateTime.now(ZoneOffset.UTC);
+            LocalDateTime after = WorkerClock.now();
 
             assertThat(ok).isTrue();
             GenerationJobEntity row = readJob(id);
@@ -881,7 +884,7 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("claimVideoJobById → 投影含 pollCount/progress/providerTaskId")
         void claimVideo_projection() {
             long id = seedJob(9L, "video", "bottom_dock", "queued", 0L,
-                    LocalDateTime.now(ZoneOffset.UTC).minusSeconds(10));
+                    WorkerClock.now().minusSeconds(10));
             jdbc.update("""
                     UPDATE generation_jobs SET poll_count=7, progress=33,
                       provider_task_id='pt-42', input='{"prompt":"hi"}'

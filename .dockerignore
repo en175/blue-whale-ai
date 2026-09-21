@@ -13,6 +13,10 @@
 !packages/**
 !backend/
 !backend/**
+# IKHJ0Q：pnpm-workspace.yaml 的 patchedDependencies 指向 patches/，而 pnpm install 在
+# backend/Dockerfile:25 就要跑——补丁文件不进 context 会直接 ENOENT、镜像构建失败。
+!patches/
+!patches/**
 # 前端镜像改为仓库根 context 后，必须放行 web/（否则 COPY web/... 是空的）。
 !web/
 !web/**

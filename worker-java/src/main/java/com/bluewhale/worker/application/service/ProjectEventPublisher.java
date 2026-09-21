@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
 
@@ -46,7 +45,7 @@ public class ProjectEventPublisher {
         event.setAggregateId(aggregateId);
         event.setAggregateVersion(aggregateVersion);
         event.setCorrelationId(correlationId);
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime now = WorkerClock.now();
         event.setOccurredAt(now);
         event.setPayload(toJson(payload));
         event.setGmtCreate(now);

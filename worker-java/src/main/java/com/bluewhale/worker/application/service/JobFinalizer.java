@@ -20,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -1128,7 +1127,7 @@ public class JobFinalizer {
         }
         asset.setSource("generated");
         asset.setStatus("normal");
-        LocalDateTime now = nowUtc();
+        LocalDateTime now = WorkerClock.now();
         asset.setGmtCreate(now);
         asset.setGmtModified(now);
         asset.setVersion(0);
@@ -1146,12 +1145,8 @@ public class JobFinalizer {
         if (payload != null) {
             logEntry.setPayload(toJson(payload));
         }
-        logEntry.setOccurredAt(nowUtc());
+        logEntry.setOccurredAt(WorkerClock.now());
         jobLogMapper.insert(logEntry);
-    }
-
-    private static LocalDateTime nowUtc() {
-        return LocalDateTime.now(ZoneOffset.UTC);
     }
 
     private String toJson(Object obj) {

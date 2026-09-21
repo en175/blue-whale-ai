@@ -1,9 +1,3 @@
-export {
-  createMySqlPool,
-  createMySqlReadinessProbe,
-  loadMySqlConfig,
-  type MySqlConfig,
-} from "./mysql.js";
 export { getPrismaClient, type PrismaClient } from "./db.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
 export {

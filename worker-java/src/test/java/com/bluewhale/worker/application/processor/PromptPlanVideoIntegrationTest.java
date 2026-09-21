@@ -34,6 +34,10 @@ class PromptPlanVideoIntegrationTest {
             source.setJdbcUrl(System.getenv("IKETSX_JDBC_URL"));
             source.setUsername("root");
             source.setMaximumPoolSize(3);
+            // 时间口径（IKHJ0Q）：与生产 DataSourceConfig 同款。集成测试手工装配 Hikari，不扫 autoconfig——
+            // 不补这一条就会在 UTC 会话下跑而生产跑在 +08:00，而所有到期判断都在 SQL 里对 NOW()，
+            // 「窗口静默失效」这类 bug 一条都测不出来。容器默认时区仍留 +00:00 是刻意的：正好证明它能覆盖服务端默认值。
+            source.setConnectionInitSql("SET time_zone='+08:00'");
             return source;
         }
         @Bean
