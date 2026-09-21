@@ -11,6 +11,7 @@ import { uploadAssetFile } from '@/utils/upload';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
+import { useAssetImageRefLimit } from '../../modelCaps';
 import { KIND_META, assetCardKindOf, type AssetCardKind } from './toolbarVisibility';
 import styles from './index.module.css';
 
@@ -76,8 +77,7 @@ export interface AssetCardNodeData {
   generationCard?: GenerationCardNodeData;
 }
 
-/** 资产卡图片/音频限制常量 */
-const MAX_IMAGE_REFS = 9;
+/** 资产卡音色限制常量（参考图上限走能力行，见下方 useAssetImageRefLimit） */
 const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15; // 秒
 
@@ -85,6 +85,8 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   // 水合容错（脏 kind 降级 custom，口径合一于 toolbarVisibility.ts 的 assetCardKindOf）
   const kind: AssetCardKind = assetCardKindOf(data.kind);
   const meta = KIND_META[kind];
+  /** 参考图上限（ADR-0086）：画布页按图片能力行注入；未注入时用能力缺省值，不再写死 9 */
+  const MAX_IMAGE_REFS = useAssetImageRefLimit();
   const [refs, setRefs] = useState<CanvasGalleryRef[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);

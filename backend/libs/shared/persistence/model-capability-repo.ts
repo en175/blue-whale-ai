@@ -1,5 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
+import {
+  getModelCapabilityList,
+  setModelCapabilityList,
+} from "./model-capability-cache.js";
 
 /** 模型能力只读 repo（Prisma-backed），复用 generation_model_capability 表。
  *  对齐 Java GenerationModelCapabilityService.listCapabilities：查启用项 + DTO 整形。
@@ -203,7 +207,12 @@ function pickTaskTypes(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function toFeatures(json: unknown): ModelFeatures {
+/** 能力行 features JSON → 归一化的 {@link ModelFeatures}。
+ *
+ *  导出原因（IKHBDO）：scene-card 再生成拿到的 features 是**库中原始 JSON**（历史行可能仍是
+ *  camelCase 形态），冻结参考上限前必须先走同一条归一，否则 camelCase 行冻结不出任何字段 →
+ *  worker 回落旧常量 → 配置输给写死的缺省。接纳侧经 ModelCapabilityRepo 读出的已是归一结果。 */
+export function toFeatures(json: unknown): ModelFeatures {
   const f = (json ?? {}) as FeaturesJson;
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
@@ -278,11 +287,16 @@ function toDurationRange(json: unknown): ModelDurationRange | null {
 export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapabilityRepo {
   return {
     async listEnabledByType(capabilityType) {
+      // IKH BDO：cache-aside。这是生成链路每次建任务都要走的白名单查询，
+      // 而配置极低频——缓存把热路径从「每次查库」降成「每 5 分钟查一次」。
+      // 失效由管理端各写方法显式触发（见 model-capability-admin-repo）。
+      const cached = await getModelCapabilityList(capabilityType);
+      if (cached) return cached;
       const rows = await prisma.generation_model_capability.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
       });
-      return rows.map((cap) => ({
+      const views = rows.map((cap) => ({
         model_id: cap.model_id,
         provider_id: cap.provider_id,
         model_label: cap.model_label,
@@ -305,6 +319,8 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         version: cap.version,
         digest: capabilityDigestFromModelCapability(cap),
       }));
+      await setModelCapabilityList(capabilityType, views);
+      return views;
     },
   };
 }

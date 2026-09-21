@@ -73,23 +73,82 @@ public class VideoJobProcessor implements JobProcessor {
     /** 视频轮询超限（video-job-runner.ts:38 MAX_VIDEO_POLLS = 720 ≈ 60 分钟）。 */
     public static final int MAX_VIDEO_POLLS = 720;
 
-    // ========== 参考视频校验常量（video-reference-validation.ts:11-21） ==========
+    // ========== 参考视频校验常量（video-reference-validation.ts） ==========
+    // 平台物理约束——**不是模型知识，能力行无对应字段**（运营改不了，也不会为它们新增配置列）：
+    // 单视频字节 / 单边像素 / 总像素 / 宽高比 / 单视频最短时长 / mime 白名单。
+    //
+    // DEFAULT_* 语义：**无配置可读时的缺省**，不是「配置的兜底」——没有配置字段，所以无条件
+    // 生效，这是设计如此。命名与 TS 镜像（generation-runtime/video-reference-validation.ts
+    // 同名 DEFAULT_*）保持一致。
+    // 参考数量与时长上限全部读能力行（见下）。
 
-    static final int MAX_REFERENCE_IMAGES = 9;
-    static final int MAX_REFERENCE_VIDEOS = 3;
-    static final long MAX_REFERENCE_VIDEO_BYTES = 200L * 1024 * 1024;
-    static final int MAX_REFERENCE_VIDEO_SECONDS = 15;
-    static final int MIN_REFERENCE_VIDEO_SIDE = 300;
-    static final int MAX_REFERENCE_VIDEO_SIDE = 6000;
-    static final int MIN_REFERENCE_VIDEO_PIXELS = 409_600;
-    static final int MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
-    static final double MIN_REFERENCE_VIDEO_RATIO = 0.4;
-    static final double MAX_REFERENCE_VIDEO_RATIO = 2.5;
-    static final Set<String> REFERENCE_VIDEO_MIMES = Set.of("video/mp4", "video/quicktime");
+    static final long DEFAULT_MAX_REFERENCE_VIDEO_BYTES = 200L * 1024 * 1024;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_SECONDS = 2;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_SIDE = 300;
+    static final int DEFAULT_MAX_REFERENCE_VIDEO_SIDE = 6000;
+    static final int DEFAULT_MIN_REFERENCE_VIDEO_PIXELS = 409_600;
+    static final int DEFAULT_MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
+    static final double DEFAULT_MIN_REFERENCE_VIDEO_RATIO = 0.4;
+    static final double DEFAULT_MAX_REFERENCE_VIDEO_RATIO = 2.5;
+    static final Set<String> DEFAULT_REFERENCE_VIDEO_MIMES = Set.of("video/mp4", "video/quicktime");
 
-    /** Seedance 2.0 模型识别（video-reference-validation.ts:166-168）。 */
-    static final Pattern SEEDANCE2_PATTERN = Pattern.compile(
-            "^seedance-2$|^doubao-seedance-2-0(?:-|$)");
+    /**
+     * IKHBDO 迁移兜底：旧在飞 job 的 input 里没有冻结的 {@code reference_limits}（本次变更前创建），
+     * 此时按旧常量判定，保证上线不打断在途任务。
+     * <p>
+     * ⚠️ 这三个常量**不是真相来源**——新 job 一律读接纳侧冻结的能力行值
+     * （{@code backend} handle-create-generation-job videoStrategy.composeInput）。
+     */
+    static final int LEGACY_MAX_REFERENCE_IMAGES = 9;
+    static final int LEGACY_MAX_REFERENCE_VIDEOS = 3;
+    static final int LEGACY_MAX_REFERENCE_VIDEO_SECONDS = 15;
+
+    /**
+     * 参考素材上限（全部来自能力行 features，接纳侧冻结进 {@code input.reference_limits}）。
+     *
+     * @param maxDurationSec 能力行 max_reference_duration_sec；null = 未配置 → 不限。
+     */
+    record ReferenceLimits(int maxImages, int maxVideos, int maxAudios, Integer maxDurationSec) {}
+
+    /** 旧 job 兜底（无冻结快照时按旧常量判定）。 */
+    static final ReferenceLimits LEGACY_REFERENCE_LIMITS = new ReferenceLimits(
+            LEGACY_MAX_REFERENCE_IMAGES, LEGACY_MAX_REFERENCE_VIDEOS,
+            LEGACY_MAX_REFERENCE_VIDEOS, LEGACY_MAX_REFERENCE_VIDEO_SECONDS);
+
+    /**
+     * 读冻结的参考上限（IKHBDO）：{@code input.reference_limits} 由接纳侧按能力行写入，
+     * 本进程只读、不含任何模型知识。
+     * <p>
+     * 兜底口径（只服务旧在飞 job，不作为真相来源）：整字段缺失 → 全部回落旧常量；
+     * 单字段缺失 → 该字段回落旧常量；{@code max_reference_duration_sec} 显式 null → 不限
+     * （能力行没配上限），只有 key 都不存在时才回落旧 15 秒。
+     */
+    static ReferenceLimits referenceLimitsOf(Map<String, Object> input) {
+        if (!(input.get("reference_limits") instanceof Map<?, ?> raw)) {
+            return LEGACY_REFERENCE_LIMITS;
+        }
+        Map<String, Object> limits = castMap(raw);
+        // 不能用三元：int 分支会触发 Integer 拆箱，显式 null 时 NPE。
+        Integer maxDurationSec = LEGACY_MAX_REFERENCE_VIDEO_SECONDS;
+        if (limits.containsKey("max_reference_duration_sec")) {
+            maxDurationSec = positiveIntOrNull(limits.get("max_reference_duration_sec"));
+        }
+        return new ReferenceLimits(
+                intOr(limits.get("max_reference_images"), LEGACY_MAX_REFERENCE_IMAGES),
+                intOr(limits.get("video_reference_max"), LEGACY_MAX_REFERENCE_VIDEOS),
+                intOr(limits.get("audio_reference_max"), LEGACY_MAX_REFERENCE_VIDEOS),
+                maxDurationSec);
+    }
+
+    /** 非负整数（含 0，参考上限允许显式 0）；非法/缺失回落 fallback。 */
+    private static int intOr(Object value, int fallback) {
+        return value instanceof Number n && n.intValue() >= 0 ? n.intValue() : fallback;
+    }
+
+    /** 正数；非法/缺失/null 一律 null（= 不限）。 */
+    private static Integer positiveIntOrNull(Object value) {
+        return value instanceof Number n && n.intValue() > 0 ? n.intValue() : null;
+    }
 
     /** 素材库素材 id 形态（material-reference.ts:57 `^[Aa]sset-.{1,128}$`，大小写不敏感前缀）。 */
     static final Pattern MATERIAL_ID_PATTERN = Pattern.compile("^[Aa]sset-.{1,128}$");
@@ -607,7 +666,7 @@ public class VideoJobProcessor implements JobProcessor {
         allMaterials.addAll(materialRefsFromAssets);
         List<MaterialRef> mergedMaterials = uniqueMaterialRefs(allMaterials);
 
-        // 参考素材校验（:765-775 validateReferences）：本地 Asset + 素材库引用的数量并集
+        // 参考素材校验：本地 Asset + 素材库引用的数量并集；上限读接纳侧冻结的能力行值（IKHBDO）
         List<AssetEntity> referenceAssets = new ArrayList<>();
         for (String id : unlinkedReferenceAssetIds) {
             AssetEntity asset = assetsMap.get(id);
@@ -617,7 +676,8 @@ public class VideoJobProcessor implements JobProcessor {
             }
             referenceAssets.add(asset);
         }
-        List<VideoReference> references = validateReferences(model, referenceAssets, mergedMaterials);
+        List<VideoReference> references = validateReferences(
+                referenceLimitsOf(input), referenceAssets, mergedMaterials);
 
         // 构建请求（:789-829）：本地帧解析 TOS URL，素材库帧走 asset:// 载体。
         String resolution = input.get("resolution") instanceof String s ? s
@@ -652,14 +712,15 @@ public class VideoJobProcessor implements JobProcessor {
         );
     }
 
-    // ========== validateReferences（video-reference-validation.ts:23-95）==========
+    // ========== validateReferences（video-reference-validation.ts validateReferences）==========
 
     /**
-     * 参考素材校验（video-reference-validation.ts:23-95 validateReferences 逐字移植）。
+     * 参考素材校验（video-reference-validation.ts validateReferences 逐字移植）。
      * <p>
-     * 图片/视频/音频计数 + 视频物理校验 + Seedance 2.0 约束。
+     * 图片/视频/音频计数 + 视频物理校验。上限全部来自 {@code limits}（能力行冻结值，IKHBDO）——
+     * 本方法不含任何按模型名推导的规则。
      */
-    List<VideoReference> validateReferences(String model, List<AssetEntity> assets,
+    List<VideoReference> validateReferences(ReferenceLimits limits, List<AssetEntity> assets,
                                             List<MaterialRef> materials) {
         int imageCount = 0;
         int videoCount = 0;
@@ -676,7 +737,7 @@ public class VideoJobProcessor implements JobProcessor {
                 references.add(new VideoReference("audio", asset.getUrl()));
             } else if ("video".equals(asset.getType())) {
                 videoCount++;
-                validateReferenceVideo(asset);
+                validateReferenceVideo(asset, limits.maxDurationSec());
                 if (asset.getDurationMs() != null) {
                     knownVideoDuration += asset.getDurationMs() / 1000.0;
                 }
@@ -687,8 +748,8 @@ public class VideoJobProcessor implements JobProcessor {
             }
         }
 
-        // 素材库引用：并入图/视频/音频数量并集与 Seedance 2.0 约束；
-        // 物理校验只作用于本地 Asset（素材库素材由上游强校验）。(video-reference-validation.ts:56-67)
+        // 素材库引用：并入图/视频/音频数量并集与能力行上限；
+        // 物理校验只作用于本地 Asset（素材库素材由上游强校验）。
         for (MaterialRef material : materials) {
             if ("image".equals(material.type())) {
                 imageCount++;
@@ -700,81 +761,95 @@ public class VideoJobProcessor implements JobProcessor {
             references.add(new VideoReference(material.type(), "asset://" + material.id()));
         }
 
-        // 计数校验（:69-81）
-        if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
+        // 计数校验：上限读能力行，文案与判定顺序对齐接纳侧 checkReferenceLimits。
+        if (imageCount > limits.maxImages()) {
             throw new VideoInputError(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED,
-                    "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频");
+                    "参考图最多 " + limits.maxImages() + " 张");
         }
-        if (audioCount > MAX_REFERENCE_VIDEOS) {
+        if (videoCount > limits.maxVideos()) {
             throw new VideoInputError(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED,
-                    "Seedance 2.0 最多支持 3 个参考音频");
+                    "参考视频最多 " + limits.maxVideos() + " 个");
+        }
+        if (audioCount > limits.maxAudios()) {
+            throw new VideoInputError(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED,
+                    "参考音频最多 " + limits.maxAudios() + " 个");
         }
 
-        // Seedance 2.0 约束（:82-87）
-        if ((videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)) {
-            throw new VideoInputError(GenerationError.ERROR_UNSUPPORTED_INPUT,
-                    "只有 Seedance 2.0 支持参考视频和参考音频");
-        }
+        // 参考视频 / 参考音频的「模型是否支持」**不在这里判**。
+        // 这条规则曾经是本文件里的 `isSeedance2Model(SEEDANCE2_PATTERN)` 前缀特判，
+        // 逐个字从已退役的 node worker 移植而来，与能力行数据相反：
+        //   - 它给 Seedance 2.0 放行，而能力行 features.video_reference = false
+        //   - 它把 Seedance 2.5 拒掉（抛 unsupported_input「只有 Seedance 2.0 支持…」），
+        //     而能力行 features.video_reference = true，2.5 还正是默认选中模型
+        // 接纳侧（backend handle-create-generation-job）已按能力行校验过（video_reference /
+        // audio_reference），此处再按模型名推一遍只会把正确的请求拦掉。
+        // 模型名会随目录新增而失效，能力位不会——因此只留上游那一道闸门。
 
-        // 视频时长累计校验（:88-93）
-        if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
+        // 视频时长累计校验：上限读能力行（未配 = 不限）
+        if (limits.maxDurationSec() != null && knownVideoDuration > limits.maxDurationSec()) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
-                    "参考视频已知总时长不能超过 15 秒");
+                    "参考视频已知总时长不能超过 " + limits.maxDurationSec() + " 秒");
         }
 
         return references;
     }
 
     /** 便捷重载：无素材库引用时只校验本地 Asset（materials 传空表）。 */
-    List<VideoReference> validateReferences(String model, List<AssetEntity> assets) {
-        return validateReferences(model, assets, List.of());
+    List<VideoReference> validateReferences(ReferenceLimits limits, List<AssetEntity> assets) {
+        return validateReferences(limits, assets, List.of());
     }
 
     /**
-     * 单个参考视频物理校验（video-reference-validation.ts:97-127 validateReferenceVideo）。
+     * 单个参考视频物理校验（video-reference-validation.ts validateReferenceVideo）。
      * <p>
      * 边界包含性（与 TS 逐字一致）：
      * size: &gt;200MB 失败 → 200MB 恰好通过
-     * duration: &lt;2 或 &gt;15 失败 → 2s/15s 恰好通过
+     * duration: &lt;2 或 &gt;maxDurationSec 失败 → 边界恰好通过（maxDurationSec=null → 只卡下限）
      * side: &lt;300 或 &gt;6000 → 300/6000 恰好通过
      * pixels: &lt;409600 或 &gt;8295044 → 边界恰好通过
      * ratio: &lt;0.4 或 &gt;2.5 → 边界恰好通过
+     *
+     * @param maxDurationSec 能力行 max_reference_duration_sec（冻结值）；null = 未配 → 不设上限。
      */
-    void validateReferenceVideo(AssetEntity asset) {
-        // mime（:98-101）
+    void validateReferenceVideo(AssetEntity asset, Integer maxDurationSec) {
+        // mime
         if (asset.getMime() != null) {
             String mime = asset.getMime().split(";", 2)[0].trim().toLowerCase();
-            if (!REFERENCE_VIDEO_MIMES.contains(mime)) {
+            if (!DEFAULT_REFERENCE_VIDEO_MIMES.contains(mime)) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                         "参考视频只支持 MP4 或 MOV");
             }
         }
 
-        // size（:102-113）：>200MB 失败 → 200MB 恰好通过（`>` 非 `>=`）
+        // size：>200MB 失败 → 200MB 恰好通过（`>` 非 `>=`）
         if (asset.getSize() != null
-                && (asset.getSize() <= 0 || asset.getSize() > MAX_REFERENCE_VIDEO_BYTES)) {
+                && (asset.getSize() <= 0 || asset.getSize() > DEFAULT_MAX_REFERENCE_VIDEO_BYTES)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "单个参考视频不能超过 200 MB");
         }
 
-        // duration（:114-126）：<2 或 >15 失败 → 2s/15s 恰好通过
+        // duration：下限 2s 是素材平台约束（能力行无字段）；上限读能力行
         if (asset.getDurationMs() != null) {
             double durationSec = asset.getDurationMs() / 1000.0;
-            if (durationSec < 2 || durationSec > MAX_REFERENCE_VIDEO_SECONDS) {
+            if (durationSec < DEFAULT_MIN_REFERENCE_VIDEO_SECONDS
+                    || (maxDurationSec != null && durationSec > maxDurationSec)) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
-                        "单个参考视频时长必须为 2 至 15 秒");
+                        maxDurationSec == null
+                                ? "单个参考视频时长不能少于 " + DEFAULT_MIN_REFERENCE_VIDEO_SECONDS + " 秒"
+                                : "单个参考视频时长必须为 " + DEFAULT_MIN_REFERENCE_VIDEO_SECONDS
+                                        + " 至 " + maxDurationSec + " 秒");
             }
         }
 
-        // dimensions（:129-163 validateReferenceVideoDimensions）
+        // dimensions（validateReferenceVideoDimensions）
         Integer width = asset.getWidth();
         Integer height = asset.getHeight();
 
-        if (width != null && (width < MIN_REFERENCE_VIDEO_SIDE || width > MAX_REFERENCE_VIDEO_SIDE)) {
+        if (width != null && (width < DEFAULT_MIN_REFERENCE_VIDEO_SIDE || width > DEFAULT_MAX_REFERENCE_VIDEO_SIDE)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "参考视频单边像素必须为 300 至 6000");
         }
-        if (height != null && (height < MIN_REFERENCE_VIDEO_SIDE || height > MAX_REFERENCE_VIDEO_SIDE)) {
+        if (height != null && (height < DEFAULT_MIN_REFERENCE_VIDEO_SIDE || height > DEFAULT_MAX_REFERENCE_VIDEO_SIDE)) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
                     "参考视频单边像素必须为 300 至 6000");
         }
@@ -782,10 +857,10 @@ public class VideoJobProcessor implements JobProcessor {
         if (width != null && height != null) {
             long pixels = (long) width * height;
             double ratio = (double) width / height;
-            if (pixels < MIN_REFERENCE_VIDEO_PIXELS || pixels > MAX_REFERENCE_VIDEO_PIXELS
-                    || ratio < MIN_REFERENCE_VIDEO_RATIO || ratio > MAX_REFERENCE_VIDEO_RATIO) {
+            if (pixels < DEFAULT_MIN_REFERENCE_VIDEO_PIXELS || pixels > DEFAULT_MAX_REFERENCE_VIDEO_PIXELS
+                    || ratio < DEFAULT_MIN_REFERENCE_VIDEO_RATIO || ratio > DEFAULT_MAX_REFERENCE_VIDEO_RATIO) {
                 throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_MEDIA,
-                        "参考视频宽高比或总像素不满足 Seedance 2.0 要求");
+                        "参考视频宽高比或总像素不满足要求");
             }
         }
     }
@@ -934,9 +1009,6 @@ public class VideoJobProcessor implements JobProcessor {
         return 0;
     }
 
-    static boolean isSeedance2Model(String model) {
-        return model != null && SEEDANCE2_PATTERN.matcher(model).find();
-    }
 
     /** 素材 id 解析（material-reference.ts:52-57 readAssetId）：接受 JSON 数字与纯数字串形态。 */
     private static String readAssetId(Object value) {

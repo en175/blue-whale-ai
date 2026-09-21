@@ -1,4 +1,6 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
+import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
+import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -67,10 +69,6 @@ import {
   mapImageChannelRequest,
   parseStoredImageRequestMapping,
 } from "./image-channel-parser.js";
-
-const VIDEO_MODEL_ALIASES: Readonly<Record<string, string>> = {
-  "seedance-2": "doubao-seedance-2-0-260128",
-};
 
 export interface GenerationParameters {
   prompt?: unknown;
@@ -296,63 +294,10 @@ function validateCommon(
   return null;
 }
 
-/** ADR-0086：参考素材分类上限校验（读能力行 features）。服务端与前端同源（后端透出 features 全键）。
- *  返回 null 表示通过，否则为用户可读失败原因（含真实上限）。 */
-export function checkReferenceLimits(
-  features: Pick<
-    ModelFeatures,
-    | "max_reference_images"
-    | "video_reference"
-    | "video_reference_max"
-    | "audio_reference"
-    | "audio_reference_max"
-    | "image_reference_max"
-    | "max_reference_duration_sec"
-  >,
-  references: Array<{ type: "image" | "video" | "audio"; duration?: number | undefined }>,
-  kind: "image" | "video" | "audio",
-): string | null {
-  // 图生成：只收图片参考，上限 max_reference_images。
-  if (kind === "image") {
-    const imageCount = references.filter((r) => r.type === "image").length;
-    if (imageCount > features.max_reference_images)
-      return `参考图最多 ${features.max_reference_images} 张`;
-    return null;
-  }
-  // 音频生成：只收 audio/image，不可混用，音频≤audio_reference_max、图≤image_reference_max。
-  if (kind === "audio") {
-    const audioCount = references.filter((r) => r.type === "audio").length;
-    const imageCount = references.filter((r) => r.type === "image").length;
-    if (audioCount > features.audio_reference_max)
-      return `参考音频最多 ${features.audio_reference_max} 个`;
-    if (imageCount > features.image_reference_max)
-      return `参考图最多 ${features.image_reference_max} 个`;
-    if (audioCount > 0 && imageCount > 0)
-      return "音频与图片参考不可混用";
-    return null;
-  }
-  // 视频生成：普通参考按类型分类上限（图/视频/音频各自上限）；视频素材需 video_reference 位、
-  // 音频素材需 audio_reference 位；总时长（所有参考素材之和）≤ max_reference_duration_sec。
-  const imageRefs = references.filter((r) => r.type === "image");
-  const videoRefs = references.filter((r) => r.type === "video");
-  const audioRefs = references.filter((r) => r.type === "audio");
-  if (imageRefs.length > features.max_reference_images)
-    return `参考图最多 ${features.max_reference_images} 张`;
-  if (videoRefs.length > 0 && !features.video_reference)
-    return "当前模型不支持视频素材参考";
-  if (audioRefs.length > 0 && !features.audio_reference)
-    return "当前模型不支持音频素材参考";
-  if (videoRefs.length > features.video_reference_max)
-    return `参考视频最多 ${features.video_reference_max} 个`;
-  if (audioRefs.length > features.audio_reference_max)
-    return `参考音频最多 ${features.audio_reference_max} 个`;
-  if (features.max_reference_duration_sec != null) {
-    const total = references.reduce((sum, r) => sum + (r.duration ?? 0), 0);
-    if (total > features.max_reference_duration_sec)
-      return `参考素材总时长超过 ${features.max_reference_duration_sec} 秒，请减少素材`;
-  }
-  return null;
-}
+/** IKHBDO：参考素材分类上限判定已下沉到 `generation-runtime/reference-limits.ts`，
+ *  由接纳侧与 SceneCard 再生成（scene-card-generation-repo）共用同一份实现，避免第三份副本漂移。
+ *  此处转出保持既有导入面不变。 */
+export { checkReferenceLimits };
 
 /** IKE4GC：音频生成参考素材——仅接受单数组 references（audio|image，role 强制 reference）。
  *  音频/图片生成无首尾帧概念；分类上限由能力行（features.audio_reference_max / image_reference_max）驱动
@@ -523,20 +468,23 @@ function validateVideo(
     }
     const roleErr = validateReferenceRoles(parsed.items);
     if (roleErr) return { code: ERROR_INVALID_REFERENCE, message: roleErr };
-    // ADR-0086：普通参考按类型分类上限（能力行驱动）。视频素材需 video_reference 位、音频需
-    // audio_reference 位、总时长 ≤ max_reference_duration_sec；缺省能力行时回落旧 12 上限。
-    const limitErr = features
-      ? checkReferenceLimits(
-          features,
-          parsed.items
-            .filter((r) => r.role === "reference")
-            .map((r) => ({ type: r.type, duration: r.duration })),
-          "video",
-        )
-      : parsed.items.filter((r) => r.role === "reference" && r.type !== "audio").length > 12
-        ? "参考素材最多 12 个"
-        : null;
-    if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+    // ADR-0086 / IKHBDO：普通参考按类型分类上限**只认能力行**——视频素材需 video_reference 位、
+    // 音频需 audio_reference 位、图/视频/音频各自数量上限与总时长（≤ max_reference_duration_sec）。
+    // 本函数有两个调用形态：白名单解析**前**的策略预检（capability 缺省）与解析**后**的重跑
+    // （handleCreateGenerationJob 内的 capability 复核 + effectiveBody 复核，两处都带 capability）。
+    // 预检拿不到能力行，故此处**不判任何参考数量**：写死一个上限会先于配置生效，把把上限配到
+    // 阈值以上的模型（如 max_reference_images: 30）永久卡死。数量是能力行的职责，由带 capability
+    // 的重跑用 checkReferenceLimits 判定；预检只保留与模型无关的结构性校验。
+    if (features) {
+      const limitErr = checkReferenceLimits(
+        features,
+        parsed.items
+          .filter((r) => r.role === "reference")
+          .map((r) => ({ type: r.type, duration: r.duration })),
+        "video",
+      );
+      if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+    }
     // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，输出跟随首帧图）。
     // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时强制（2.0/2.5 均含；未配 adaptive 的第三方档位不适用）。
     if (
@@ -589,11 +537,8 @@ function validateVideo(
       message: "首尾帧模式不能与普通参考素材混用",
     };
   }
-  // IKDJNZ：参考音频不占图/视频额度——12 上限只计图/视频并集；音频引用单独统计。
-  // ADR-0086：视频素材上限由能力行驱动（video_reference_max），缺省回落旧 12（图/视频并集）。
-  const imageVideoRefCount = uniqueRefs.filter(
-    (r) => r.type !== "audio",
-  ).length;
+  // IKHBDO：与上方单数组分支同一口径——参考数量只在有能力行时判（本调用形态的预检无 capability，
+  // 由白名单解析后的重跑以 checkReferenceLimits 补齐）。
   const videoRefCount = uniqueRefs.filter((r) => r.type === "video").length;
   const audioRefCount = uniqueRefs.filter((r) => r.type === "audio").length;
   if (features) {
@@ -603,8 +548,6 @@ function validateVideo(
       "video",
     );
     if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
-  } else if (imageVideoRefCount > 12) {
-    return { code: ERROR_INVALID_REFERENCE, message: "参考素材最多 12 个" };
   }
   // ADR-0086：音频参考能力位（features.audio_reference 关 → 拒绝音频素材）；缺省能力行保留旧行为。
   if (features && !features.audio_reference && audioRefCount > 0) {
@@ -701,6 +644,12 @@ const videoStrategy: GenerationTypeStrategy = {
     if (capability?.features?.audio === true) {
       input.generate_audio = params.generate_audio !== false;
     }
+    // IKHBDO：参考素材上限（图/视频/音频数量 + 总时长）从能力行冻结进快照——
+    // worker 不含任何模型知识，执行期只读这份配置（对齐上面 generate_audio 的冻结口径）。
+    // 接纳侧仍按同一份 features 先判一次（checkReferenceLimits），冻结值只用于执行期复核。
+    if (capability?.features) {
+      input.reference_limits = freezeReferenceLimits(capability.features);
+    }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") {
@@ -768,12 +717,20 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
 
 // ---- pipeline 阶段 ----
 
+/** 模型 id 原样取用，不做任何改写。
+ *
+ *  这里曾有一张 `VIDEO_MODEL_ALIASES = { "seedance-2": "doubao-seedance-2-0-260128" }` 的旧前端
+ *  兼容表，在**白名单查询之前**改写 model_id。按「配置永远第一」，它是个反例：运营若真配一行
+ *  model_id 就叫 `seedance-2`，请求会被改写成 2.0 那行，那一行永远赢不了。故删除。
+ *
+ *  删除依据：当前前端产品代码只发真实目录 id；本地画布草稿清点 `"seedance-2"` 零命中，
+ *  存的都是 `doubao-seedance-2-0-260128` / `doubao-seedance-2-5-260628`。若有老客户端仍发别名，
+ *  会在下面过白名单时以 400 MODEL_UNAVAILABLE 明确失败，而不是被静默改写。
+ *
+ *  最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400（IK6T90）。 */
 function resolveModelId(type: GenerationType, modelId: unknown): string {
-  // 白名单（IK6T90）：先解析视频模型名别名，再对解析后的最终 model_id 校验——
-  // 别名不能绕过白名单。最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400。
-  return type === "video"
-    ? String(VIDEO_MODEL_ALIASES[modelId as string] ?? modelId)
-    : String(modelId);
+  void type;
+  return String(modelId);
 }
 
 /** 参考图字段语义统一（IKA72G）：image 参考图 = input_asset_ids（与前端契约/worker 对齐），
@@ -1077,22 +1034,22 @@ function resolveVideoTextIndexReferences(
   };
 }
 
-/** 视频文本带入合并后的容量校验（契约 §10）：有能力行走既有 checkReferenceLimits
- *  分类上限；无能力行维持 validateVideo 旧口径（图/视频并集 ≤ 12，音频不占额）。 */
+/** 视频文本带入合并后的容量校验（契约 §10）：分类上限全部读能力行。
+ *
+ *  `features` 为空时**不判数量**——此前按写死的「图/视频并集 ≤ 12」判，那是一处「配置说了不算」：
+ *  运营把上限配到 12 以上会被它先拒掉。该分支实际不可达（调用链上游的白名单守卫要求模型必须
+ *  在启用目录内，未命中直接 400 MODEL_UNAVAILABLE，因此能力行必然已解析），留一个显式的
+ *  配置缺失出口，而不是一个看起来像规则的魔数。 */
 function videoReferenceLimitError(
   features: ModelFeatures | undefined,
   references: ReadonlyArray<ReferenceItemInput | TextProvidedVideoReference>,
 ): string | null {
+  if (!features) return null;
   const items = references.map((item) => ({
     type: item.type,
     duration: "duration" in item && typeof item.duration === "number" ? item.duration : undefined,
   }));
-  if (features) {
-    return checkReferenceLimits(features, items, "video");
-  }
-  return items.filter((item) => item.type !== "audio").length > 12
-    ? "参考素材最多 12 个"
-    : null;
+  return checkReferenceLimits(features, items, "video");
 }
 
 /** 音频目标的文本带入参考校验与并入（契约 §11 IKFM41）：失效索引 / 不支持类型（video）400；
@@ -1362,8 +1319,12 @@ export async function handleCreateGenerationJob(
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const maxReferenceImages =
     capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
-  // ADR-0086：视频/音频参考分类限制校验读能力行 features——strategy.validate 前以旧默认值兜底，
-  // 此处拿到白名单 capability 后以真实 features 重跑（超限在接纳当下 400，含模型真实上限文案）。
+  // ADR-0086 / IKHBDO：视频/音频参考限制**只认能力行 features**。上方 strategy.validate 的预检
+  // 发生在白名单解析之前，拿不到 capability，因此它不判参考数量（见 validateVideo 注释）；数量在
+  // 此处以真实 features 判定（超限在接纳当下 400，含模型真实上限文案）。
+  // 不变式：`capability` 对本行之后的所有代码恒有值——它取自已通过上方白名单校验的同一个
+  // `whitelist`（`some(m => m.model_id === resolvedModelId)` 为真 ⇒ 同谓词的 `find` 必命中），
+  // 白名单未命中的请求已在上面 400 返回。故 `type === "video" | "audio"` 的请求**必然**走到这次重跑。
   if (capability && (type === "video" || type === "audio")) {
     const revalidated =
       type === "video"

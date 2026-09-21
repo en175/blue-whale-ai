@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
+import { invalidateModelCapabilityCache } from "./model-capability-cache.js";
 
 /** generation_model_capability 管理端 repo（Prisma-backed，IK6T46）。
  *  与消费端 model-capability-repo（listEnabledByType，只管启用展示）互补：
@@ -175,7 +176,7 @@ function nullableJson(v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull 
 export function createModelCapabilityAdminRepo(
   prisma: PrismaClient,
 ): ModelCapabilityAdminRepo {
-  return {
+  const repo: ModelCapabilityAdminRepo = {
     async listAll() {
       const rows = await prisma.generation_model_capability.findMany({
         where: { is_delete: false },
@@ -362,6 +363,49 @@ export function createModelCapabilityAdminRepo(
         where: { id: pid, is_delete: false },
       });
       return row ? toRow(row) : null;
+    },
+  };
+  return invalidateOnWrite(repo);
+}
+
+/** IKH BDO：任何写路径成功后整片失效消费端缓存。
+ *
+ *  包在工厂出口而不是散进 6 个写方法里——漏一处就是「运营改完配置、线上最多 5 分钟不生效」，
+ *  而这类漏法在 code review 里几乎看不出来。只有写**成功**才失效：失败的写不该打掉缓存。
+ */
+function invalidateOnWrite(repo: ModelCapabilityAdminRepo): ModelCapabilityAdminRepo {
+  return {
+    listAll: () => repo.listAll(),
+    getById: (id) => repo.getById(id),
+    create: async (input) => {
+      const result = await repo.create(input);
+      if (result.ok) await invalidateModelCapabilityCache();
+      return result;
+    },
+    update: async (id, input) => {
+      const row = await repo.update(id, input);
+      if (row) await invalidateModelCapabilityCache();
+      return row;
+    },
+    toggleEnabled: async (id) => {
+      const row = await repo.toggleEnabled(id);
+      if (row) await invalidateModelCapabilityCache();
+      return row;
+    },
+    remove: async (id) => {
+      const removed = await repo.remove(id);
+      if (removed) await invalidateModelCapabilityCache();
+      return removed;
+    },
+    updateSortOrder: async (items) => {
+      const result = await repo.updateSortOrder(items);
+      if (result.ok) await invalidateModelCapabilityCache();
+      return result;
+    },
+    setDefault: async (id) => {
+      const row = await repo.setDefault(id);
+      if (row) await invalidateModelCapabilityCache();
+      return row;
     },
   };
 }
