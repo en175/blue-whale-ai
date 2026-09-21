@@ -4,7 +4,7 @@
  * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 480×240 横矩形
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
@@ -367,6 +367,21 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const isDraft = data.genStatus === 'draft';
+  /** 右侧出源手柄可见性：空壳与待生成草稿不出（草稿转生成中/成品时才补挂进 DOM） */
+  const showSourceHandle = !isEmptyShell && !isDraft;
+  /** React Flow 只在节点首测与尺寸变化时测量 handleBounds：手柄显隐翻转而节点同尺寸
+   *  （草稿占位与成品同形，IKHHCN）时库不重测，新挂载手柄永远不注册、拖线静默无响应，
+   *  须在显隐翻转时手动触发重测（库对动态手柄的指定姿势）。挂载首测库自己量，只在
+   *  翻转时补测——冗余首调在 jsdom 会撞 DOMMatrixReadOnly 缺桩（IKHHCN 门禁实证）。 */
+  const updateNodeInternals = useUpdateNodeInternals();
+  const handleVisibilityRef = useRef<[boolean, boolean] | null>(null);
+  useEffect(() => {
+    const prev = handleVisibilityRef.current;
+    handleVisibilityRef.current = [showTargetHandle, showSourceHandle];
+    if (prev === null) return;
+    if (prev[0] === showTargetHandle && prev[1] === showSourceHandle) return;
+    updateNodeInternals(id);
+  }, [updateNodeInternals, id, showTargetHandle, showSourceHandle]);
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   /** IKDMQU Q5：有旧素材（有效 http 素材 src）的生成中卡片继续显示素材，仅叠加状态角标；
@@ -723,7 +738,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
           </div>
         )}
-        {!isEmptyShell && !isDraft && (
+        {showSourceHandle && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
         <HandlePlus />
       </Handle>
