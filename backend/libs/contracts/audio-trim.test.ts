@@ -25,6 +25,7 @@ import {
   AUDIO_TRIM_POLL_PATH_PREFIX,
   AUDIO_TRIM_SUBMIT_PATH,
   audioTrimInputSchema,
+  buildAudioTrimInput,
   buildAudioTrimTimeParams,
   defaultAudioTrimOutputFormat,
   roundAudioTrimSeconds,
@@ -168,6 +169,51 @@ describe("贴边省略（ADR-0111：左缘贴 0 省 start_time、右缘贴源全
     expect(
       buildAudioTrimTimeParams({ start: 1.23456, end: 9.87654, sourceDuration: 300 }),
     ).toEqual({ start_time: 1.23, end_time: 9.88 });
+  });
+});
+
+describe("冻结 input 构造（buildAudioTrimInput：时间键经贴边省略/量化收口，产物恒过 schema）", () => {
+  it("中间段四键全出（全精度选区出站前收口两位小数）", () => {
+    const input = buildAudioTrimInput({
+      sourceAssetId: "88",
+      timeRange: { start: 1.23456, end: 9.87654, sourceDuration: 300 },
+      outputFormat: "wav",
+    });
+    expect(input).toEqual({ source_asset_id: "88", start_time: 1.23, end_time: 9.88, output_format: "wav" });
+    expect(audioTrimInputSchema.parse(input)).toEqual(input);
+  });
+
+  it("贴边省略形态：左贴 0 省 start_time、右贴全长省 end_time、双贴边两键全省", () => {
+    expect(
+      buildAudioTrimInput({
+        sourceAssetId: "88",
+        timeRange: { start: 0, end: 120.25, sourceDuration: 300 },
+        outputFormat: "mp3",
+      }),
+    ).toEqual({ source_asset_id: "88", end_time: 120.25, output_format: "mp3" });
+    expect(
+      buildAudioTrimInput({
+        sourceAssetId: "88",
+        timeRange: { start: 60.5, end: 300, sourceDuration: 300 },
+        outputFormat: "m4a",
+      }),
+    ).toEqual({ source_asset_id: "88", start_time: 60.5, output_format: "m4a" });
+    const neither = buildAudioTrimInput({
+      sourceAssetId: "88",
+      timeRange: { start: 0, end: 300, sourceDuration: 300 },
+      outputFormat: "ogg",
+    });
+    expect(neither).toEqual({ source_asset_id: "88", output_format: "ogg" });
+    expect(audioTrimInputSchema.parse(neither)).toEqual(neither);
+  });
+
+  it("键名恒等 AUDIO_TRIM_INPUT_KEYS（工厂内不自造键名字面量）", () => {
+    const input = buildAudioTrimInput({
+      sourceAssetId: "5",
+      timeRange: { start: 3, end: 8.25, sourceDuration: 300 },
+      outputFormat: "flac",
+    });
+    expect(Object.keys(input).sort()).toEqual([...Object.values(AUDIO_TRIM_INPUT_KEYS)].sort());
   });
 });
 
