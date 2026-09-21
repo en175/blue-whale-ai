@@ -413,7 +413,7 @@ public class RocketMqConfig {
      * MQ 生产者。
      * <p>
      * 视频 processor 自投延迟消息（scheduleNext 5s）到同一 topic/tag。
-     * producer 无 consumer group（video-queue.ts:79-98）。
+     * producer 无 consumer group（generation-queue.ts:79-98）。
      */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer generationMessageProducer(ClientConfiguration clientConfig) {

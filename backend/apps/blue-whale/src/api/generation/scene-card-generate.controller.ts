@@ -23,7 +23,7 @@ import { handleStoryboardPreviewCreate } from "@lib/shared/generation/handle-sto
 import {
   enqueueVideoGenerationJob,
   enqueueImageGenerationJob,
-} from "@lib/shared/generation/video-queue.js";
+} from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";

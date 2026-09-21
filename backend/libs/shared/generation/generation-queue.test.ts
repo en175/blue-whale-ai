@@ -9,32 +9,32 @@ import {
   VIDEO_SCENE_SPLIT_TAG,
 } from "./queue.constants.js";
 import {
-  createRocketMqVideoProducer,
+  createRocketMqGenerationProducer,
   enqueueAudioGenerationJob,
   loadRocketMqConfig,
-  VIDEO_MIN_DELAY_MS,
-} from "./video-queue.js";
+  GENERATION_MIN_DELAY_MS,
+} from "./generation-queue.js";
 
 /** IKBGKA：enqueueImageGenerationJob 用独立 tag=image，与视频 tag（video）隔离。 */
-describe("createRocketMqVideoProducer image tag", () => {
+describe("createRocketMqGenerationProducer image tag", () => {
   const send = vi.fn();
   const rmqProducer = { send } as unknown as Pick<Producer, "send">;
 
   it("图片入队带 image tag", async () => {
-    const producer = createRocketMqVideoProducer(rmqProducer, IMAGE_GENERATION_TAG);
+    const producer = createRocketMqGenerationProducer(rmqProducer, IMAGE_GENERATION_TAG);
     await producer.enqueue("301");
     expect(send).toHaveBeenCalledWith({
       topic: "generation-task",
       tag: "image",
       body: Buffer.from(JSON.stringify({ jobId: "301" })),
-      delay: VIDEO_MIN_DELAY_MS,
+      delay: GENERATION_MIN_DELAY_MS,
     });
   });
 });
 
 /** IKCR78：enqueueAudioGenerationJob 用独立 tag=audio，与视频/图片/媒体提取隔离。 */
 describe("enqueueAudioGenerationJob audio tag", () => {
-  it("入队携带 audio tag 常量（与 createRocketMqVideoProducer tag 传播一致）", async () => {
+  it("入队携带 audio tag 常量（与 createRocketMqGenerationProducer tag 传播一致）", async () => {
     expect(AUDIO_GENERATION_TAG).toBe("audio");
     expect(AUDIO_GENERATION_TAG).not.toBe(IMAGE_GENERATION_TAG);
   });
@@ -51,23 +51,23 @@ describe("enqueueVideoSceneSplitJob video_scene_split tag", () => {
   });
 });
 
-describe("createRocketMqVideoProducer", () => {
+describe("createRocketMqGenerationProducer", () => {
   const send = vi.fn();
   const rmqProducer = { send } as unknown as Pick<Producer, "send">;
 
   it("默认入队也带 1s 延时（统一 DELAY，topic 只收 DELAY）", async () => {
-    const producer = createRocketMqVideoProducer(rmqProducer, "video");
+    const producer = createRocketMqGenerationProducer(rmqProducer, "video");
     await producer.enqueue("42");
     expect(send).toHaveBeenCalledWith({
       topic: "generation-task",
       tag: "video",
       body: Buffer.from(JSON.stringify({ jobId: "42" })),
-      delay: VIDEO_MIN_DELAY_MS,
+      delay: GENERATION_MIN_DELAY_MS,
     });
   });
 
   it("延迟消息：delayMs 直接映射到 delay（客户端 delay 单位是 ms）", async () => {
-    const producer = createRocketMqVideoProducer(rmqProducer, "video");
+    const producer = createRocketMqGenerationProducer(rmqProducer, "video");
     await producer.enqueue("43", { delayMs: 2000 });
     expect(send).toHaveBeenCalledWith({
       topic: "generation-task",
@@ -78,10 +78,10 @@ describe("createRocketMqVideoProducer", () => {
   });
 
   it("delayMs=0 落到 1s 下限延时（仍是 DELAY）", async () => {
-    const producer = createRocketMqVideoProducer(rmqProducer, "video");
+    const producer = createRocketMqGenerationProducer(rmqProducer, "video");
     await producer.enqueue("44", { delayMs: 0 });
     const arg = send.mock.calls.at(-1)![0] as Record<string, unknown>;
-    expect(arg).toHaveProperty("delay", VIDEO_MIN_DELAY_MS);
+    expect(arg).toHaveProperty("delay", GENERATION_MIN_DELAY_MS);
   });
 });
 

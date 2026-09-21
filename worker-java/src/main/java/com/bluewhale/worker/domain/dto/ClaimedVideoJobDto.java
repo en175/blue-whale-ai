@@ -7,7 +7,7 @@ import java.util.Map;
  * <p>
  * 比 ClaimedJobDto（图片/音频共用）多出的字段：
  * <ul>
- *   <li>pollCount：已轮询次数（rescheduleVideoPoll 累计，IKBBXH 上限 720 判定用）</li>
+ *   <li>pollCount：已轮询次数（rescheduleProviderPoll 累计，IKBBXH 上限 720 判定用）</li>
  *   <li>progress：轮询进度（IKEA26 瞬时错误重排时保持不倒退）</li>
  *   <li>providerTaskId：上游任务 id（null=未提交，分相判据）</li>
  *   <li>parentProviderTaskId：IKEA26 父 job 的 provider_task_id（retry job 防双扣）</li>
@@ -34,7 +34,7 @@ public record ClaimedVideoJobDto(
         String workerId,
         /** 增后 fencing_token（candidate.fencing_token + 1n → Number()） */
         long fencingToken,
-        /** 已轮询次数（rescheduleVideoPoll 累计，IKBBXH：轮询上限 720 判定用） */
+        /** 已轮询次数（rescheduleProviderPoll 累计，IKBBXH：轮询上限 720 判定用） */
         int pollCount,
         /** 轮询进度（IKEA26：瞬时网络错误重排时保持进度不倒退） */
         int progress,

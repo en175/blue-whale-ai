@@ -35,8 +35,8 @@ import java.util.Set;
  * <ol>
  *   <li>claimVideoSubtitleErase（富投影：providerTaskId / pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（返 task_id）→
- *       markVideoSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *       markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排；failed → 终态 1043 + 上游原因透传；completed → **立即下载转存（火山 URL 仅
  *       24h 有效）** → 建 Asset（type=video / source=generated）→ 终态 succeeded</li>
  * </ol>
@@ -175,7 +175,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     // ========== submit 相 ==========
 
     /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交 → markVideoSubmitted → 续排轮询。
+     * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSubtitleEraseJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -217,8 +217,8 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
                 providerToken, source.getUrl(), detectMode, eraseBoxes);
         log.info("[video_subtitle_erase] 上游已提交 jobId={} providerTaskId={}", claim.id(), taskId);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
-        boolean updated = stateMachine.markVideoSubmitted(
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), SUBTITLE_ERASE_POLL_INTERVAL_MS);
@@ -239,7 +239,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[video_subtitle_erase] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), SUBTITLE_ERASE_POLL_INTERVAL_MS);
@@ -256,7 +256,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
                         "去字幕轮询超时（超过 " + MAX_SUBTITLE_ERASE_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), SUBTITLE_ERASE_POLL_INTERVAL_MS);

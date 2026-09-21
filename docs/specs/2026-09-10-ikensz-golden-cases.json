@@ -51,28 +51,28 @@
  {
   "case_id": "G08",
   "contract_ref": "§3.2",
-  "title_zh": "markVideoSubmitted guard-fail（stale token）",
+  "title_zh": "markProviderSubmitted guard-fail（stale token）",
   "given": "updateMany 返回 count=0（fencing_token 不一致或 job 已非 processing）",
-  "expect": "markVideoSubmitted 返回 false"
+  "expect": "markProviderSubmitted 返回 false"
  },
  {
   "case_id": "G09",
   "contract_ref": "§3.2",
-  "title_zh": "rescheduleVideoPoll happy：钳制+续租+释放",
+  "title_zh": "rescheduleProviderPoll happy：钳制+续租+释放",
   "given": "input progress=42; updateMany 返回 count=1",
   "expect": "data.progress=42; data.poll_count={increment:1}; data.next_poll_at=now+5s; data.next_action_at=now+5s; data.lease_owner=null; data.lease_expires_at=null; data.version={increment:1}; 返回 true"
  },
  {
   "case_id": "G10",
   "contract_ref": "§3.2",
-  "title_zh": "rescheduleVideoPoll progress 钳制 >99 与 <0",
+  "title_zh": "rescheduleProviderPoll progress 钳制 >99 与 <0",
   "given": "input progress=150 和 progress=-5 各一次",
   "expect": "data.progress 分别被钳制为 99 和 0（Math.max(0, Math.min(99, Math.round(x))))"
  },
  {
   "case_id": "G11",
   "contract_ref": "§3.2",
-  "title_zh": "rescheduleVideoPoll guard-fail（stale token）",
+  "title_zh": "rescheduleProviderPoll guard-fail（stale token）",
   "given": "updateMany 返回 count=0",
   "expect": "返回 false"
  },
@@ -331,14 +331,14 @@
  {
   "case_id": "G71",
   "contract_ref": "§3.2/评审C1",
-  "title_zh": "markVideoSubmitted SQL 钉桩：provider='new-api'/progress=1/next_poll_at=next_action_at=now+5s(Java计算)/lease清空/version+1；fencing_token 不得递增；禁 DATE_ADD…MILLISECOND",
+  "title_zh": "markProviderSubmitted SQL 钉桩：provider='new-api'/progress=1/next_poll_at=next_action_at=now+5s(Java计算)/lease清空/version+1；fencing_token 不得递增；禁 DATE_ADD…MILLISECOND",
   "given": "CAS 命中",
   "expect": "SET 全列断言 + 无 fence bump + 无非法 INTERVAL"
  },
  {
   "case_id": "G72",
   "contract_ref": "§3.2/评审C2",
-  "title_zh": "rescheduleVideoPoll：progress 钳制(150→99,-5→0)在 Java 侧；last_polled_at=#{now}；next_poll_at/next_action_at=+5s；无 fence bump；poll_count+1",
+  "title_zh": "rescheduleProviderPoll：progress 钳制(150→99,-5→0)在 Java 侧；last_polled_at=#{now}；next_poll_at/next_action_at=+5s；无 fence bump；poll_count+1",
   "given": "progress=150/-5",
   "expect": "捕获参数 ==99/==0；SQL 含 last_polled_at/next_poll_at；无 fencing_token+1"
  },

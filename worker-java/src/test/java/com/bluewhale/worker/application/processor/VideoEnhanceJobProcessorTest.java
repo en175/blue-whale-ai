@@ -37,7 +37,7 @@ import static org.mockito.Mockito.*;
 /**
  * VideoEnhanceJobProcessor 单测（IKH3VF，父规格 IKH3VB）。
  * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markVideoSubmitted + scheduleNext / poll
+ * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
  * processing 续排 / 轮询超限 / completed 立即转存发布——官方 duration、档位推导宽高、
  * resolution/fps 随发布 payload / failed 归 1045 + 上游原因透传〔含 SDR 限制场景〕）、
  * input 业务键兜底校验、凭证缺失分类、§5 信号保留与兜底归并、瞬时轮询错误判定、
@@ -195,32 +195,32 @@ class VideoEnhanceJobProcessorTest {
     // ========== submit 相：参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
-    @DisplayName("submit：resolution 透传 → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("submit：resolution 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitTransportsResolutionAndSchedulesNext() {
         stubSubmitClaim(input("2k"));
         stubSourceAsset(1920, 1080);
         when(enhanceVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4", "2k"))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(enhanceVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4", "2k");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input("1080p"));
         stubSourceAsset(1920, 1080);
         when(enhanceVideoClient.submit(anyString(), anyString(), anyString()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -276,18 +276,18 @@ class VideoEnhanceJobProcessorTest {
     // ========== poll 相：状态机 ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll + scheduleNext(5s)")
+    @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(input("1080p"), 3);
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new EnhanceVideoTaskObservation("processing", null, null, null, null,
                         null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -304,7 +304,7 @@ class VideoEnhanceJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -315,12 +315,12 @@ class VideoEnhanceJobProcessorTest {
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 画质增强任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

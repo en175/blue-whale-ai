@@ -23,12 +23,12 @@
 
 | 项 | 值 | 出处 |
 |---|---|---|
-| topic | `generation-task`（**修正六：由 `generation-video` 更名**）。**两侧都没有 env 覆盖**：topic 是编译期常量——生产侧（`backend`）单处来自 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`loadRocketMqConfig` 只绑连接参数，`createRocketMqVideoProducer` 直接读该常量）；消费侧（`worker-java`）单处来自 `GenerationMqRoute` 枚举。`ROCKETMQ_TOPIC` 在两侧都无绑定目标，部署环境里残留 `ROCKETMQ_TOPIC=generation-video` 在两侧都被静默忽略 ⇒ **没有任何运行时途径把消息投到旧名** | `queue.constants.ts` / `video-queue.ts`（`loadRocketMqConfig` / `createRocketMqVideoProducer`）/ `GenerationMqRoute` |
+| topic | `generation-task`（**修正六：由 `generation-video` 更名**）。**两侧都没有 env 覆盖**：topic 是编译期常量——生产侧（`backend`）单处来自 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`loadRocketMqConfig` 只绑连接参数，`createRocketMqGenerationProducer` 直接读该常量）；消费侧（`worker-java`）单处来自 `GenerationMqRoute` 枚举。`ROCKETMQ_TOPIC` 在两侧都无绑定目标，部署环境里残留 `ROCKETMQ_TOPIC=generation-video` 在两侧都被静默忽略 ⇒ **没有任何运行时途径把消息投到旧名** | `queue.constants.ts` / `generation-queue.ts`（`loadRocketMqConfig` / `createRocketMqGenerationProducer`）/ `GenerationMqRoute` |
 | tags | `video`（**修正六：由 `step` 更名**，语义仍为视频多步任务）/ `image` / `audio` / `media_extract` / `image_enhance`（§14）/ `image_erase`（§15）——6 个 tag 由同一 topic 承载，**服务启动即全部消费，无按 tag 启停开关**（§16） | `queue.constants.ts` |
 | TS 消费者组 | **已退役**：TS worker 应用在 `release/2026.09.15` 整目录删除（`1312c474`，PR !636），组名现由 Java 侧独占（§16） | 4 个 consumer `:28-85`（删除前基线） |
 | Java 消费者组 | 全为**字面量**（修正六：`-java` 后缀与 `WORKER_GROUP_SUFFIX` 退役，无 env 覆盖）：`generation-extract-worker` / `generation-audio-worker` / `generation-image-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker` / `generation-video-worker` | ADR-0084 修正六决策 3/4 |
-| 消息体 | **恒为 `{"jobId":"<字符串>"}`**，无其他字段、无类型判别、无重试计数 | `video-queue.ts:57-59` |
-| 投递类型 | **全部 DELAY 消息**，delay 下限 1000ms（0 也按 1000） | `video-queue.ts:60`、`VIDEO_MIN_DELAY_MS:17` |
+| 消息体 | **恒为 `{"jobId":"<字符串>"}`**，无其他字段、无类型判别、无重试计数 | `generation-queue.ts:57-59` |
+| 投递类型 | **全部 DELAY 消息**，delay 下限 1000ms（0 也按 1000） | `generation-queue.ts:60`、`GENERATION_MIN_DELAY_MS:17` |
 | 拉取 | `receive(10, 30_000)`（batch=10，不可见 30s） | 4 consumer |
 | ack 语义 | 成功才 ack；体解析失败/（image、audio）jobId 非纯数字 → ack 丢弃毒丸；**handler 抛错 → 不 ack 不 nack，broker 30s 后重投**。全仓无显式 nack、无 DLQ 代码 | video `:79-100`、image `:147-169`、audio `:144-167`、extract `:137-156` |
 | 并发 | video 顺序 for-await；image/audio/extract = receive 后 Semaphore(20/5/2) fire-and-forget | consumer 各文件 |
@@ -52,7 +52,7 @@
 ### 3.2 租约与心跳
 - TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值（**image 例外：300s，见 §11 政策修订**）。
 - 真心跳仅 media_extract：`updateMediaExtractProgress` 写 progress(0–99) 同时续租（`media-extract-ops:26-43`）。
-- video 无心跳：`markVideoSubmitted` / `rescheduleVideoPoll` 写完即**释放租约**（lease_owner/expires 置 null）并设 `next_action_at=now+5000ms`，下轮以孤儿接管方式再 claim。轮询上限 `MAX_VIDEO_POLLS=720`（≈60 分钟）→ `ERROR_PROVIDER_TIMEOUT`。
+- video 无心跳：`markProviderSubmitted` / `rescheduleProviderPoll` 写完即**释放租约**（lease_owner/expires 置 null）并设 `next_action_at=now+5000ms`，下轮以孤儿接管方式再 claim。轮询上限 `MAX_VIDEO_POLLS=720`（≈60 分钟）→ `ERROR_PROVIDER_TIMEOUT`。
 
 ### 3.3 终态与结算（同事务原子）
 - `completeJobAndSettle` = completeJobInTx + settleReservationInTx 单事务；settle 抛错整体回滚。终态清 `next_action_at`、租约、`progress=100`。
@@ -68,8 +68,8 @@
 |---|---|---|
 | `POST /internal/generation/jobs/claim` | 各 `claim*JobById`（按 tag 分型） | 返回含新 fencing_token、pollCount/progress/parentProviderTaskId/reservedAmountFen（video） |
 | `.../heartbeat` | `updateMediaExtractProgress` | 仅 extract 刀用 |
-| `.../submit` | `markVideoSubmitted` | 仅 video：记 taskId + 释放租约 + next+5s |
-| `.../reschedule` | `rescheduleVideoPoll` | 仅 video 瞬态轮询错误 |
+| `.../submit` | `markProviderSubmitted` | 仅 video：记 taskId + 释放租约 + next+5s |
+| `.../reschedule` | `rescheduleProviderPoll` | 仅 video 瞬态轮询错误 |
 | `.../complete` | `completeJobAndSettle` / `publishVideoResult` / `publishMediaExtractResult`（按 type 路由） | 结算金额入参见 §5 |
 | `.../fail` | `failJob` / `failVideoJob` / `failMediaExtractJob` | 含 refund 证据核查（TS 侧做，见 §3.3） |
 | `.../requeue` | `requeueImageJobForRetry` | image 瞬态重试回 queued |
@@ -147,8 +147,8 @@
 | `failVideoJob` | `code, message, details?, releaseNote?`（同上） | :146 |
 | `failMediaExtractJob` | `code, message, details?` | :188 |
 | `updateMediaExtractProgress` | `progress`（0-99 钳制 + 续租，§3.2） | :168 |
-| `markVideoSubmitted` | `providerTaskId`（+释放租约、next+5s） | :118 |
-| `rescheduleVideoPoll` | `progress`（poll_count+1） | :124 |
+| `markProviderSubmitted` | `providerTaskId`（+释放租约、next+5s） | :118 |
+| `rescheduleProviderPoll` | `progress`（poll_count+1） | :124 |
 | `cancelVideoBeforeDispatch` | （无独有字段；额外 DB 守卫 `provider_task_id IS NULL`） | :157 |
 | `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
 
@@ -410,7 +410,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 1. **退役 `WORKER_ENABLED_TAGS` 本体**：删除 6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`application.yml` 中的 `worker.enabled-tags` 映射、`Dockerfile` 中的 `ENV WORKER_ENABLED_TAGS=""`、`ReadyController` 的 `enabledTags` 字段；consumer / processor / 客户端 bean **全部无条件装配**。**服务启动即消费全部 6 个 tag**（§1 表）。
 2. **默认语义从「安全拉起」翻转为「缺配置即失败」**：启动即要求 MQ（`ROCKETMQ_ENDPOINTS`）、DB（`DATABASE_URL`）、上游网关（`NEW_API_BASE_URL`）、TOS（`VOLC_*`）**四套**配置齐备，缺任一项由 bean 装配抛出并终止启动（`NEW_API_BASE_URL` 与其余三套同属硬门槛：5 个网关客户端 audio / image / image_enhance / image_erase / video 全部无条件装配，构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`）。取代原「空 tags → 不连 MQ 不连 DB，只起 `/ready`」形态——该形态把「忘记配置」与「故意只探活」压成同一个状态，是本次修复的核心动因。
-3. **命名对齐**：topic `generation-video` → `generation-task`；tag `step` → `video`。生产侧与消费侧**必须在同一次发布内原子切换**：中间态不报错，只是消息无人消费（由 recovery 兜底，`RECOVERY_MAX_AGE_MINUTES` 默认 120）。**两侧取值来源相同——都是编译期常量，都没有 env 覆盖**：生产侧（`backend`）`video-queue.ts` 的 topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`createRocketMqVideoProducer` 直接取该常量，`loadRocketMqConfig` 只绑连接参数），tag 由六个入队函数各传各自常量；消费侧（`worker-java`）topic / tag 单处来自 `GenerationMqRoute` 枚举（`VideoConsumer.TAG`、`VideoJobProcessor.tag()` 都转发该枚举），`RocketMqConfig` 只绑连接参数。`ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 在两侧都无绑定目标、残留值被静默忽略，故不再存在「生产者被指回旧名」这条静默滞留途径；剩下的错配只可能来自两侧部署了不同版本的镜像。
+3. **命名对齐**：topic `generation-video` → `generation-task`；tag `step` → `video`。生产侧与消费侧**必须在同一次发布内原子切换**：中间态不报错，只是消息无人消费（由 recovery 兜底，`RECOVERY_MAX_AGE_MINUTES` 默认 120）。**两侧取值来源相同——都是编译期常量，都没有 env 覆盖**：生产侧（`backend`）`generation-queue.ts` 的 topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`（`createRocketMqGenerationProducer` 直接取该常量，`loadRocketMqConfig` 只绑连接参数），tag 由六个入队函数各传各自常量；消费侧（`worker-java`）topic / tag 单处来自 `GenerationMqRoute` 枚举（`VideoConsumer.TAG`、`VideoJobProcessor.tag()` 都转发该枚举），`RocketMqConfig` 只绑连接参数。`ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 在两侧都无绑定目标、残留值被静默忽略，故不再存在「生产者被指回旧名」这条静默滞留途径；剩下的错配只可能来自两侧部署了不同版本的镜像。
 4. **退役 `WORKER_GROUP_SUFFIX`**：group 名回落为字面量 `generation-<type>-worker`（原 `generation-<type>-worker-java`）。位点绑定在 `(group, topic)` 上，topic 更名后新 topic 的位点本就从零开始，故本次是**唯一的零重放风险窗口**；错过此后每次改 group 名都需处理位点。前置：确认旧 TS worker 容器已停——否则 Java 与该进程落入同名 group，消息被分流。
 5. **topic 粒度保持单 topic，不按任务类型拆分**：隔离已在 consumer group 层取得（每个 tag 一个 group、一个 Semaphore、一条 receive 线程），重试队列/死信、并发度、扩缩容粒度均已独立；拆 topic 只增益位点重置/配额/按类积压可观测，对资源隔离无贡献。
 6. **`GET /ready` 只返回 `{"status":"ready"}`**：`enabledTags` 与 `consumerGroupSuffix` 两个字段随开关退役删除（运维事实源从「读数组」变回「进程活着即全部 tag 在消费」）。
@@ -477,7 +477,7 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 ### 17.5 结果回填约定
 
-- **成功**：worker 调网关提交路由（`POST {NEW_API_BASE_URL}` 代理官方 `POST /api/v1/tools/erase-video-subtitle-pro`，对客模型名 `mediakit-erase-video-subtitle-pro`，鉴权同 §14.5：任务冻结的用户 sk- + `X-Trace-Id` + `X-Client-System: bluewhale`）→ 返 `task_id` → **复用视频生成的异步任务轮询骨架**（提交后 `markVideoSubmitted` 存 provider_task_id + 释放租约 + next+5s → `rescheduleVideoPoll` 周期轮询 → claim 按 `next_action_at` 领取，不新建任务状态机形态）→ 轮询至 `completed` 后**立即下载结果视频（URL 仅 24h 有效）**→ 落对象存储公开读 → 建 Asset（`type='video'` / `source='generated'` / `generation_job_id`）→ 终态 `succeeded`（免费工具无结算联动，同 §14.5 形态）→ 前端经 `GET /api/jobs/:id` 拿 Asset，按 `target_node_id` 回填去字幕结果卡（源卡不动；结果卡是普通视频素材卡，可再次去字幕、连线送生成）。
+- **成功**：worker 调网关提交路由（`POST {NEW_API_BASE_URL}` 代理官方 `POST /api/v1/tools/erase-video-subtitle-pro`，对客模型名 `mediakit-erase-video-subtitle-pro`，鉴权同 §14.5：任务冻结的用户 sk- + `X-Trace-Id` + `X-Client-System: bluewhale`）→ 返 `task_id` → **复用视频生成的异步任务轮询骨架**（提交后 `markProviderSubmitted` 存 provider_task_id + 释放租约 + next+5s → `rescheduleProviderPoll` 周期轮询 → claim 按 `next_action_at` 领取，不新建任务状态机形态）→ 轮询至 `completed` 后**立即下载结果视频（URL 仅 24h 有效）**→ 落对象存储公开读 → 建 Asset（`type='video'` / `source='generated'` / `generation_job_id`）→ 终态 `succeeded`（免费工具无结算联动，同 §14.5 形态）→ 前端经 `GET /api/jobs/:id` 拿 Asset，按 `target_node_id` 回填去字幕结果卡（源卡不动；结果卡是普通视频素材卡，可再次去字幕、连线送生成）。
 - **失败**：提交失败 / 轮询超时 / 供应商错误统一终态 `failed` + `error={code,message}` 走既有错误码投影（兜底 `video_subtitle_erase_failed`，上游可读原因透传前端投影；额度/内容政策信号识别沿用 §5）；**不提供自动重试**（官方无取消端点，家族「发出不取消」口径），用户在结果卡手动重试，沿用冻结 input。
 
 ### 17.6 注册触点与工单分工（附录 C 清单的 video_subtitle_erase 实例化）

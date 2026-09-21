@@ -76,7 +76,7 @@ public class JobFinalizer {
     ) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(jobIdLong, workerId, fencingToken);
+        int guardAffected = jobMapper.publishResultGuard(jobIdLong, workerId, fencingToken);
         if (guardAffected != 1) {
             log.warn("[media_extract] publishMediaExtractResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
@@ -116,7 +116,7 @@ public class JobFinalizer {
     }
 
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
-    //            publishMediaExtractGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
+    //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========
 
     /**
@@ -133,7 +133,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishAudioTrimDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[audio_trim] publishAudioTrimResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -221,14 +221,14 @@ public class JobFinalizer {
      * <p>
      * 免费工具无结算联动，同 publishMediaExtractResult 形态（单槽单 asset、双事件），
      * 差异 = Asset type='image' / source='generated' 且带宽高（结果图 ImageIO 解析，
-     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageEnhanceResult(PublishImageEnhanceDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[image_enhance] publishImageEnhanceResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -272,14 +272,14 @@ public class JobFinalizer {
      * <p>
      * 免费工具无结算联动，同 publishImageEnhanceResult 形态（单槽单 asset、双事件），
      * Asset type='image' / source='generated' 且带宽高（结果图 ImageIO 解析，
-     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageEraseResult(PublishImageEraseDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[image_erase] publishImageEraseResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -324,14 +324,14 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），
      * Asset type='image' / source='generated' 且带宽高（优先取官方响应 result.image_width/
      * image_height，缺失时结果图 ImageIO 解析兜底，解析失败静默 null，契约 §8 等价标准）。
-     * 守卫复用 publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 守卫复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageCutoutResult(PublishImageCutoutDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[image_cutout] publishImageCutoutResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -755,7 +755,7 @@ public class JobFinalizer {
      * 发布 image_outpaint 结果（IKGOQW）。
      * <p>
      * 与 publishImageEnhanceResult 同构（免费工具无结算联动、单槽单 asset、双事件），
-     * Asset type='image' / source='generated'。守卫复用 publishMediaExtractGuard /
+     * Asset type='image' / source='generated'。守卫复用 publishResultGuard /
      * updateOutputAssetIds（两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
@@ -763,7 +763,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishImageOutpaintDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[image_outpaint] publishImageOutpaintResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -812,7 +812,7 @@ public class JobFinalizer {
      * 拼 JSON 数组（消费方按下标与轨类型双通道对位）。终态日志 payload 落契约
      * VocalSplitTrackResult 结构的轨数组（track_type / asset_id / url / duration）——这是
      * 轨类型在 DB 侧的唯一承载位（assets 无轨类型列，getStatus 轨投影经 output_asset_ids
-     * 顺序 + input.scene 轨序组装）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 顺序 + input.scene 轨序组装）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 免费工具终态收口）；每轨一条 asset.created +
      * 一条 status_changed（output_asset_ids = 全部轨资产，project_id 守卫内，extract 同款）。
      */
@@ -821,7 +821,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVocalSplitDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[vocal_split] publishVocalSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -887,7 +887,7 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），
      * 差异 = Asset type='video' 且带宽 durationSec（官方 result.duration 秒；宽高为源
      * Asset 近似值，官方不返回输出元数据，§8 静默 null 等价标准）。守卫复用
-     * publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
@@ -895,7 +895,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[video_subtitle_erase] publishVideoSubtitleEraseResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -942,7 +942,7 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishVideoSubtitleEraseResult 形态（单槽单 asset、双事件），
      * 差异 = 宽高由 processor 按目标分辨率档位推导（官方不返回输出像素）、带宽
      * resolution / fps——assets 无对应列，两值落终态日志 payload（结果字段入库的承载位）。
-     * 守卫复用 publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 守卫复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
@@ -950,7 +950,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[video_enhance] publishVideoEnhanceResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -1003,7 +1003,7 @@ public class JobFinalizer {
      * 发布 video_scene_split 结果（IKH8BP，父规格 IKH86V，附录 C 触点⑤）。
      * <p>
      * 免费工具无结算联动，同 {@link #publishVideoEnhanceResult} 形态（守卫复用
-     * publishMediaExtractGuard），差异 = **一对多**：N 段切片逐段建 Asset（type='video' /
+     * publishResultGuard），差异 = **一对多**：N 段切片逐段建 Asset（type='video' /
      * source='generated'，duration_ms = 段时长；宽高为源 Asset 近似值——切片不改变分辨率），
      * output_asset_ids 落全部段资产 id 数组（1 段与 N 段同构不特判）。
      * <p>
@@ -1018,7 +1018,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[video_scene_split] publishVideoSceneSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",

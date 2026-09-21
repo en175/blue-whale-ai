@@ -38,9 +38,9 @@ import java.util.Set;
  * <ol>
  *   <li>claimVideoSceneSplit（富投影：providerTaskId / pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（granularity 经契约
- *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markVideoSubmitted（存
+ *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排；failed → 分类终态；completed → **逐段下载切片转存自家 TOS（火山
  *       segment_video_url 仅 24h 有效；每段转存前心跳续租防长窗口租约过期）** → 单事务逐段
  *       建 Asset + 契约 result 回传 → 终态 succeeded</li>
@@ -186,7 +186,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
     /**
      * 提交相：解析冻结 input + 源视频 → 网关提交（granularity → segment_threshold 在客户端
-     * 单处映射）→ markVideoSubmitted → 续排轮询。
+     * 单处映射）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -222,9 +222,9 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         log.info("[video_scene_split] 上游已提交 jobId={} providerTaskId={} granularity={}",
                 claim.id(), taskId, granularity);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
         //    SQL 无 type 过滤，video_scene_split 直接复用）
-        boolean updated = stateMachine.markVideoSubmitted(
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), SCENE_SPLIT_POLL_INTERVAL_MS);
@@ -245,7 +245,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[video_scene_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), SCENE_SPLIT_POLL_INTERVAL_MS);
@@ -262,7 +262,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
                         "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), SCENE_SPLIT_POLL_INTERVAL_MS);

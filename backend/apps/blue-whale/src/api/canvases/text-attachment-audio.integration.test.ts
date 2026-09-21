@@ -15,14 +15,14 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
-vi.mock("@lib/shared/generation/video-queue.js", () => ({
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoGenerationJob: vi.fn(async () => {}),
   enqueueImageGenerationJob: vi.fn(async () => {}),
   enqueueAudioGenerationJob: vi.fn(async () => {}),
   enqueueMediaExtractJob: vi.fn(async () => {}),
   loadRocketMqConfig: vi.fn(() => ({ endpoints: "", sslEnabled: false })),
-  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
-  closeVideoGenerationQueue: vi.fn(async () => {}),
+  createRocketMqGenerationProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeGenerationQueue: vi.fn(async () => {}),
 }));
 
 // IKFCXE「音频文本上下文生成闭环」公开接口集成（接纳段）：

@@ -39,8 +39,8 @@ import java.util.regex.Pattern;
  *   <li>claimVideoJobById（富投影：pollCount/progress/providerTaskId/parentProviderTaskId）</li>
  *   <li>cancelRequested AND providerTaskId==null → cancelVideoBeforeDispatch</li>
  *   <li>providerTaskId==null → (a) parent-reuse 防双扣 → (b) buildSubmitRequest → submit →
- *       markVideoSubmitted → scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → poll → transient → rescheduleVideoPoll(5s);
+ *       markProviderSubmitted → scheduleNext(5s)</li>
+ *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s);
  *       pollCount>=720 → provider_timeout; succeeded+URL → relay → publishVideoResult;
  *       failed → failVideoJob</li>
  * </ol>
@@ -297,8 +297,8 @@ public class VideoJobProcessor implements JobProcessor {
             SubmitResult submitted = videoClient.submit(providerToken, request);
             log.info("[video] 上游已提交 jobId={} providerTaskId={}", claim.id(), submitted.taskId());
 
-            // markVideoSubmitted（:238-242）
-            boolean updated = stateMachine.markVideoSubmitted(
+            // markProviderSubmitted（:238-242）
+            boolean updated = stateMachine.markProviderSubmitted(
                     claim.id(), claim.workerId(), claim.fencingToken(), submitted.taskId());
             if (updated) {
                 scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
@@ -321,7 +321,7 @@ public class VideoJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[video] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     log.info("[video] 瞬时重试已排队 jobId={} pollCount={} nextDelayMs={}",
@@ -345,7 +345,7 @@ public class VideoJobProcessor implements JobProcessor {
                 return;
             }
 
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), observation.progress());
             if (updated) {
                 scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
@@ -464,7 +464,7 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * MQ 自投延迟消息（video-queue.ts:54-62 enqueue）。
+     * MQ 自投延迟消息（generation-queue.ts:54-62 enqueue）。
      */
     private void scheduleNext(String jobId, long delayMs) {
         try {
