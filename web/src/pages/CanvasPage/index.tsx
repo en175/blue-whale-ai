@@ -1354,24 +1354,12 @@ export default function CanvasPage() {
       top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
     };
   })();
-  /** 音视频分离编辑态跟随锚（IKH28U，口径同去字幕）：源视频卡上方工具条 / 下方发送条。
-   *  工具条手动换算（高约 42 + 间距 10）；发送条走 IKH25A 中心点锚口径（left=源卡中心 x，
+  /** 音视频分离编辑态跟随锚（IKH28U，口径同去字幕）：源视频卡下方单条（单条化后仅此
+   *  一处锚，上方工具条锚已随单条化退役）。走 IKH25A 中心点锚口径（left=源卡中心 x，
    *  组件 translateX(-50%) 真居中；halfWidth 仅视口钳制不参与居中，恒偏左 130px 缺陷不复现）。 */
   const audioVideoSplitSourceNode = audioVideoSplitTargetNodeId
     ? mediaNodes.find((n) => n.id === audioVideoSplitTargetNodeId) ?? null
     : null;
-  const audioVideoSplitToolbarAnchor = (() => {
-    if (!audioVideoSplitSourceNode || wrapperSize.width <= 0) return null;
-    const box = nodeBoxOf(audioVideoSplitSourceNode);
-    const zoom = liveViewport.zoom || 1;
-    const screenLeft = audioVideoSplitSourceNode.position.x * zoom + liveViewport.x;
-    const screenTop = audioVideoSplitSourceNode.position.y * zoom + liveViewport.y;
-    const center = Math.round(screenLeft + (box.width * zoom) / 2);
-    return {
-      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
-      top: Math.round(Math.max(8, screenTop - 52)),
-    };
-  })();
   const audioVideoSplitSendBarAnchor = (() => {
     if (!audioVideoSplitSourceNode || wrapperSize.width <= 0) return null;
     const box = nodeBoxOf(audioVideoSplitSourceNode);
@@ -1386,22 +1374,11 @@ export default function CanvasPage() {
       top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
     };
   })();
-  /** 人声背景分离编辑态跟随锚（IKHA2W，口径同音视频分离）：源视频卡上方工具条 / 下方发送条。 */
+  /** 人声背景分离编辑态跟随锚（IKHA2W，口径同音视频分离）：源视频卡下方单条
+   *  （单条化后仅此一处锚，上方工具条锚已随单条化退役）。 */
   const vocalSplitSourceNode = vocalSplitTargetNodeId
     ? mediaNodes.find((n) => n.id === vocalSplitTargetNodeId) ?? null
     : null;
-  const vocalSplitToolbarAnchor = (() => {
-    if (!vocalSplitSourceNode || wrapperSize.width <= 0) return null;
-    const box = nodeBoxOf(vocalSplitSourceNode);
-    const zoom = liveViewport.zoom || 1;
-    const screenLeft = vocalSplitSourceNode.position.x * zoom + liveViewport.x;
-    const screenTop = vocalSplitSourceNode.position.y * zoom + liveViewport.y;
-    const center = Math.round(screenLeft + (box.width * zoom) / 2);
-    return {
-      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
-      top: Math.round(Math.max(8, screenTop - 52)),
-    };
-  })();
   const vocalSplitSendBarAnchor = (() => {
     if (!vocalSplitSourceNode || wrapperSize.width <= 0) return null;
     const box = nodeBoxOf(vocalSplitSourceNode);
@@ -10305,11 +10282,11 @@ export default function CanvasPage() {
           />
         )}
 
-        {/* 音视频分离编辑态浮条（IKH28U 骨架 / IKH28X 发送闭环）：上条仅 X 退出（本工具
-            无画布操作）；下条 = 分离格式下拉（触发钮显当前格式）+ 本期免费 + 发送钮；
-            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
-            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送按当前所选格式
-            建任务（发送即先退编辑态再建占位卡） */}
+        {/* 音视频分离编辑态单条（IKH28U 骨架 / IKH28X 发送闭环）：X 关闭在最左（对齐
+            抠图/去字幕单条先例，本工具无画布操作）+ 分离格式下拉（触发钮显当前格式）+
+            本期免费 + 发送钮；视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入
+            承担；四退出（X/Esc/点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；
+            发送按当前所选格式建任务（发送即先退编辑态再建占位卡） */}
         {audioVideoSplitTargetNodeId && (
           <VideoAudioSplitDialog
             onClose={exitAudioVideoSplitEditing}
@@ -10317,16 +10294,16 @@ export default function CanvasPage() {
             onFormatChange={setAudioVideoSplitFormat}
             onSend={handleAudioVideoSplitSend}
             submitting={audioVideoSplitSubmitting}
-            toolbarAnchor={audioVideoSplitToolbarAnchor}
             sendBarAnchor={audioVideoSplitSendBarAnchor}
           />
         )}
 
-        {/* 人声背景分离编辑态浮条（IKHA2W）：上条仅 X 退出（本工具无画布操作）；下条 =
-            场景下拉（触发钮显当前场景，四档带产出轨数说明）+ 格式下拉（五档，触发钮显当前
-            格式）+ 本期免费 + 发送钮；视频暂停与播放控制锁定经 MediaNode 的 splitEditing
-            注入承担；四退出（X/Esc/点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；
-            发送按当前所选场景与格式建任务（发送即先退编辑态再建占位卡） */}
+        {/* 人声背景分离编辑态单条（IKHA2W）：X 关闭在最左（对齐抠图/音视频分离单条
+            先例，本工具无画布操作）+ 场景下拉（触发钮显当前场景，四档带产出轨数说明）+
+            格式下拉（五档，触发钮显当前格式）+ 本期免费 + 发送钮；视频暂停与播放控制
+            锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/点其他卡/点空白）
+            由本页承载，未发送退出不建任务不建卡；发送按当前所选场景与格式建任务
+            （发送即先退编辑态再建占位卡） */}
         {vocalSplitTargetNodeId && (
           <VocalSplitDialog
             onClose={exitVocalSplitEditing}
@@ -10336,7 +10313,6 @@ export default function CanvasPage() {
             onFormatChange={setVocalSplitFormat}
             onSend={handleVocalSplitSend}
             submitting={vocalSplitSubmitting}
-            toolbarAnchor={vocalSplitToolbarAnchor}
             sendBarAnchor={vocalSplitSendBarAnchor}
           />
         )}

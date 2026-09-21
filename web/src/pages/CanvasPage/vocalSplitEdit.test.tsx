@@ -215,8 +215,9 @@ async function click(testId: string) {
   });
 }
 
+/** 编辑态单条探针（单条化后上方工具条退役；X 关闭随单条卸载——出现=会话活跃、消失=已退出） */
 function toolbar(): HTMLElement | null {
-  return document.body.querySelector('[data-testid="vocal-split-toolbar"]');
+  return document.body.querySelector('[data-testid="vocal-split-close"]');
 }
 
 function sendBar(): HTMLElement | null {
@@ -264,12 +265,14 @@ afterEach(async () => {
 });
 
 describe('IKHA2W 编辑态呈现（进入不建任务）', () => {
-  it('进入编辑态：上条仅 X、下条发送条（场景默认通用/格式默认 AAC/本期免费/发送钮）；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
+  it('进入编辑态：单条（X 关闭在最左）+ 发送条要素（场景默认通用/格式默认 AAC/本期免费/发送钮）；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
     await renderPage();
     await enterVocal();
-    expect(toolbar()).toBeTruthy();
-    expect(bodyBtn('vocal-split-close')).toBeTruthy();
+    const close = bodyBtn('vocal-split-close');
     const bar = sendBar()!;
+    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/音视频分离单条先例）
+    expect(bar.contains(close)).toBe(true);
+    expect(bar.querySelector('button')).toBe(close);
     expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('通用');
     expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('AAC');
     expect(bar.textContent).toContain('本期免费');

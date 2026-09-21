@@ -208,8 +208,9 @@ async function click(testId: string) {
   });
 }
 
+/** 编辑态单条探针（单条化后上方工具条退役；X 关闭随单条卸载——出现=会话活跃、消失=已退出） */
 function toolbar(): HTMLElement | null {
-  return document.body.querySelector('[data-testid="audio-video-split-toolbar"]');
+  return document.body.querySelector('[data-testid="audio-video-split-close"]');
 }
 
 /** 编辑态内选格式（展开下拉点选项） */
@@ -247,12 +248,14 @@ afterEach(async () => {
 });
 
 describe('IKH28U 编辑态呈现（进入不建任务）', () => {
-  it('进入编辑态：上条仅 X、下条三要素发送条（格式 M4A/本期免费/发送钮）；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
+  it('进入编辑态：单条（X 关闭在最左）+ 三要素（格式 M4A/本期免费/发送钮）；splitEditing 与 soloToolbarHidden 注入源卡；不建任务不建卡', async () => {
     await renderPage();
     await enterSplit();
-    expect(toolbar()).toBeTruthy();
-    expect(bodyBtn('audio-video-split-close')).toBeTruthy();
+    const close = bodyBtn('audio-video-split-close');
     const sendBar = document.body.querySelector('[data-testid="audio-video-split-send-bar"]')!;
+    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/去字幕单条先例）
+    expect(sendBar.contains(close)).toBe(true);
+    expect(sendBar.querySelector('button')).toBe(close);
     // 三要素（IKH28X）：格式触发钮显当前格式（默认 M4A）+ 本期免费 + 发送钮
     expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
     expect(sendBar.textContent).toContain('本期免费');

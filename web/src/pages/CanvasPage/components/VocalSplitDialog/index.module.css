@@ -1,27 +1,17 @@
 /* ============================================
- * VocalSplitDialog 人声背景分离编辑态工具条/发送条（IKHA2W）
- * 跟随源视频卡浮出的两条横条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
+ * VocalSplitDialog 人声背景分离编辑态单条（IKHA2W）
+ * 跟随源视频卡下方浮出的唯一一条，X 关闭在最左（对齐抠图/音视频分离单条先例，
+ * 上方仅 X 的独立工具条随单条化退役）：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
  * 24px 胶囊圆角（对齐 VideoAudioSplitDialog 家族形态）；场景/格式菜单浮层为
  * IKGZ8C 浮层菜单家族同款（向上弹出）。条内控件全走令牌，不复制体系外硬编码
  * 字面量写法。
  * ============================================ */
 
-/* ---- 源视频卡上方工具条 ---- */
-.toolbar {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 52px;
-  z-index: 21;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background-color: var(--color-bg-overlay);
-  border: 1px solid var(--color-border-overlay);
-  border-radius: 24px;
-  box-shadow: var(--shadow-overlay);
-  white-space: nowrap;
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border-secondary);
+  margin: 0 2px;
 }
 
 .toolBtn {
@@ -43,7 +33,7 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 源视频卡下方发送条 ---- */
+/* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;
