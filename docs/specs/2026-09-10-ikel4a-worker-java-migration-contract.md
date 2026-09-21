@@ -156,7 +156,9 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 ## 10. 实施注记（本地全栈联调 2026-09-10 实锤，双端共同遵守）
 
-- **DATETIME 时基 = UTC naive**：Prisma/TS 写入均为 UTC 挂钟值；Java 侧一切写库时刻必须 `LocalDateTime.now(ZoneOffset.UTC)`。教训：用本地钟写 `next_action_at`/`lease_expires_at` 会让 requeue 单在服务端 `NOW()`（UTC）视角躲进未来 8 小时、claim 永不可见（1808 实锤）。金标镜像断言的时间窗基准同 UTC。
+- **DATETIME 时基 = 北京时间墙钟（+08:00）**（2026-09-21 修订，IKHJ0Q；原文为「UTC naive」）：Prisma/TS 与 Java 写入的字面量**都是**北京挂钟值，Java 侧一切写库时刻必须经 `WorkerClock.now()`（`application/service/WorkerClock`，内部 `ZoneOffset.ofHours(8)`）。会话时区由 `DataSourceConfig` 的 `connectionInitSql` 钉在 `+08:00`，Node 侧由 `db.ts` 的 `timezone` + `@prisma/adapter-mariadb` 补丁共同保证——**三处必须同批次上线**。
+  - **教训不变、且比原文更普适**：写库时刻的字面量必须与服务端 `NOW()` 同一个钟。原则与「用哪个钟」无关——原文的 UTC 版和现在的 +08:00 版是同一个约束的两次实例化。偏离即失效：用本地钟写 `next_action_at`/`lease_expires_at` 而 `NOW()` 是另一个钟，requeue 单会在服务端视角躲进未来 8 小时、claim 永不可见（1808 实锤）；反向偏离（字面量落后 `NOW()`）则租约恒判过期、任务被立刻重复认领。
+  - 金标镜像断言的时间窗基准随之改为北京墙钟。
 - **invisible 窗与慢 handler**：`receive(10, 30s)` 下 handler 超 30s（如带参考图的 image 编辑）必然引发 broker 重投；重复投递由「lease 未过期 + fencing」在 claim 处静默拦截（1809 实锤：两次 handle、一次 CAS 生效、零重复副作用）。消费端 `ack 失败` WARN 属预期噪音，不作为故障告警。
 - **edits 参考图必须传字节**（`new-api-generation-ops.ts` 语义），传 URL 字符串网关 400；key 前缀 `uploads/{userId}/image/...` 的 userId 取自 job.user_id，禁止 0 兜底。
 
@@ -267,7 +269,8 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **不引入 Lombok**；手写访问器维持现状一致性。
 - 状态 / 类型 / MIME / 参考角色字符串一律枚举或常量表收口（`JobStatus`、`JobType`、`MediaMime`、`ReferenceRole` 等），禁止跨层裸字符串（§2 合法值清单为权威枚举来源）。
 - 禁裸 `RuntimeException`，抛领域 Error；消费者 catch-log-continue 统一收进基类模板方法。
-- 时间读取一律经注入的 `java.time.Clock`（UTC），禁散落 `LocalDateTime.now()`——租约/重试测试可确定化。
+- 时间读取一律经单一入口 `WorkerClock.now()`，禁散落 `LocalDateTime.now()`（2026-09-21 修订，IKHJ0Q：口径由 UTC 改为北京时间 +08:00，修订同时删掉了此前两份重复的 `nowUtc()` 私有副本）。
+  - **未满足原文的「注入 `Clock`」**：实现是静态工具类而非注入 bean，理由是本模块无 Spring 上下文依赖的测试（processor 单测直接 new）也调用它。代价是租约/重试测试仍然无法冻结时钟、只能靠 ±N 秒的窗口夹逼。若要彻底消除这类 flake，需另立一刀改成可注入——登记为已知偏离，不假装已满足。
 
 ### 13.4 重构期行为变更上界（整备批次纪律，后续整备刀同样适用）
 

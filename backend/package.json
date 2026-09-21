@@ -14,7 +14,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/terminus": "^11.0.0",
-    "@prisma/adapter-mariadb": "^7.9.0",
+    "@prisma/adapter-mariadb": "7.9.0",
     "@prisma/client": "^7.9.0",
     "@volcengine/openapi": "^1.36.2",
     "@volcengine/tos-sdk": "^2.9.1",

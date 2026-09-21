@@ -26,7 +26,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -317,7 +316,7 @@ public class JobStateMachineService {
     public boolean updateMediaExtractProgress(UpdateMediaExtractProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.updateMediaExtractProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
                 clampedProgress, leaseExpiresAt);
@@ -339,7 +338,7 @@ public class JobStateMachineService {
             com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = LocalDateTime.now(ZoneOffset.UTC)
+        LocalDateTime leaseExpiresAt = WorkerClock.now()
                 .plusSeconds(VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS);
         int affected = jobMapper.updateVideoSceneSplitProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
@@ -368,7 +367,7 @@ public class JobStateMachineService {
     public boolean markProviderSubmitted(String jobId, String workerId,
                                       long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
-        LocalDateTime nextPollAt = LocalDateTime.now(ZoneOffset.UTC).plusNanos(5_000L * 1_000_000);
+        LocalDateTime nextPollAt = WorkerClock.now().plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.markProviderSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
         if (affected != 1) {
             log.warn("[video] markProviderSubmitted 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -384,7 +383,7 @@ public class JobStateMachineService {
                                        long fencingToken, int progress) {
         Long jobIdLong = Long.parseLong(jobId);
         int clamped = Math.max(0, Math.min(99, progress));
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime now = WorkerClock.now();
         LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.rescheduleProviderPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         if (affected != 1) {
@@ -438,7 +437,7 @@ public class JobStateMachineService {
         if (payload != null) {
             logEntry.setPayload(toJson(payload));
         }
-        logEntry.setOccurredAt(LocalDateTime.now(ZoneOffset.UTC));
+        logEntry.setOccurredAt(WorkerClock.now());
         jobLogMapper.insert(logEntry);
     }
 

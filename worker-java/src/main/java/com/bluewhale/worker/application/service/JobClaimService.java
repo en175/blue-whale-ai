@@ -23,7 +23,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -195,7 +194,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
         int affected = jobMapper.claimMediaExtractCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -239,7 +238,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(AUDIO_TRIM_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(AUDIO_TRIM_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -275,7 +274,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimAudioCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -312,7 +311,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(imageLeaseSeconds());
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(imageLeaseSeconds());
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -348,7 +347,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimVideoCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -395,7 +394,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_ENHANCE_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_ENHANCE_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -431,7 +430,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_ERASE_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_ERASE_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -467,7 +466,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_CUTOUT_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_CUTOUT_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -505,7 +504,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_OUTPAINT_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_OUTPAINT_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -544,7 +543,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_SUBTITLE_ERASE_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_SUBTITLE_ERASE_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -587,7 +586,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_ENHANCE_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_ENHANCE_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -629,7 +628,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VOCAL_SPLIT_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VOCAL_SPLIT_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -672,7 +671,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_SCENE_SPLIT_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_SCENE_SPLIT_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
@@ -697,10 +696,6 @@ public class JobClaimService {
     }
 
     // ========== 内部工具 ==========
-
-    private static LocalDateTime nowUtc() {
-        return LocalDateTime.now(ZoneOffset.UTC);
-    }
 
     Map<String, Object> parseJson(String json) {
         if (json == null || json.isBlank()) {

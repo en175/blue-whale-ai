@@ -99,7 +99,7 @@ class VideoWriteFenceGoldenTest {
     @DisplayName("G72b: markProviderSubmitted 时刻参数 = now+5s（Java 计算，非 SQL 函数）")
     void g72b_nextPollAtComputedInJava() {
         when(jobMapper.markProviderSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), any())).thenReturn(1);
-        LocalDateTime before = LocalDateTime.now(java.time.ZoneOffset.UTC);
+        LocalDateTime before = WorkerClock.now();
         service.markProviderSubmitted("300", "w1", 5, "task-9");
         ArgumentCaptor<LocalDateTime> cap = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(jobMapper).markProviderSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), cap.capture());

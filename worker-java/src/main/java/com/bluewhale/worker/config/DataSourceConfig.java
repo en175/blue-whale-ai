@@ -40,6 +40,18 @@ public class DataSourceConfig {
         config.setConnectionTimeout(30_000);
         config.setIdleTimeout(600_000);
         config.setMaxLifetime(1_800_000);
+        // 时间口径（IKHJ0Q）：Hikari 对每条新建物理连接执行一次，把会话时区钉到北京时间。
+        // 必须与 WorkerClock（Java 侧时刻字面量）以及 Node 侧（db.ts 的 timezone + mariadb adapter 补丁）同批次上线。
+        //
+        // 为什么用 connectionInitSql 而不是 JDBC URL 参数：
+        //   ① parseDatabaseUrl 只取 host/port/path/userInfo，DATABASE_URL 上带的 query 串会被静默丢弃；
+        //   ② 改 URL 拼装会打破 DataSourceUrlTest 的三条 jdbcUrl 全等断言；
+        //   ③ mysql-connector-j 的 connectionTimeZone 管的是 Timestamp/Instant 换算，而本模块所有时间列
+        //      都映射为 LocalDateTime（不经那条路径），真正要生效得靠 forceConnectionTimeZoneToSession，
+        //      语义绕且同样要改 URL。
+        // 这一条改的是 DB 端求值：NOW()、CURRENT_TIMESTAMP(0)、DDL 的 DEFAULT CURRENT_TIMESTAMP(0)。
+        // 库里 DATETIME 列存的是字面量（不做时区换算），所以字面量本身由两侧的写入端负责。
+        config.setConnectionInitSql("SET time_zone='+08:00'");
 
         return new HikariDataSource(config);
     }

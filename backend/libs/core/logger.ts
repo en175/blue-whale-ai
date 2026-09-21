@@ -37,7 +37,7 @@ export interface MetricEventInput {
 export interface LogRecord {
   /** OTel SeverityText，小写 debug/info/warn/error */
   severity_text: LogLevel;
-  /** OTel Timestamp，ISO8601 带毫秒，恒为 UTC（Z）。见 toBlueWhaleTimestamp */
+  /** OTel Timestamp，ISO8601 带毫秒，恒为 +08:00（北京时间）。见 toBlueWhaleTimestamp */
   timestamp: string;
   /** OTel service.name，进程级常量，由 setLogServiceName 声明。不是配置 */
   service_name: string;
@@ -86,29 +86,35 @@ export interface CreateLoggerOptions {
 }
 
 /**
- * `2026-09-02T13:55:12.887Z` —— UTC、带毫秒，三仓共用的那一个墙上时钟。
+ * `2026-09-21T14:30:34.000+08:00` —— 北京时间、带毫秒。
  *
- * **由时间戳算出，不读 TZ、不读宿主机。**这个区别是它的安全性所在：跨服务按字符串排序只在三家
+ * **由时间戳算出，不读 TZ、不读宿主机。**这个区别是它的安全性所在：跨服务按字符串排序只在各家
  * 写同一个时区时成立，而从容器配置推导出来的值，离「某个容器改了 TZ、于是悄悄换了个时区」只有
  * 一步——那正是它替掉的那个 bug（Go 写 +08:00、Node 写 Z，+08:00 排在 Z 后面尽管实际更早）。
+ * 固定偏移没有夏令时问题（亚洲/上海自 1991 年起无 DST），是精确算术。
  *
- * **2026-09-03 从 +08:00 改成 UTC，理由不是「UTC 更标准」。** 上一版写 +08:00 是因为看日志的人
- * 都在这个时区，而心算减八小时最贵的时刻恰好是出故障的时候。那个论证只在「日志被单独读」时成立，
- * 而它不是：排查一定是把日志行、它写出的那条库记录、它返回的那个 API 响应放在一起看。全链路查了
- * 一遍，那三样**已经全是 UTC**——
+ * **2026-09-21 从 UTC 改回 +08:00（IKHJ0Q）。** 上一版（2026-09-03）写 UTC，理由是「全链路已经
+ * 全是 UTC，日志是唯一例外，每次交叉引用要付八小时心算」。那个论证成立的前提是库也为 UTC——
+ * 而那个前提从来没被代码保证过，只是碰巧（见下）。本次把存储口径钉成北京时间之后，前提不再成立：
  *
  * | 位置 | 值 |
  * | --- | --- |
- * | agent REST 响应 | `2026-09-02T13:55:12.887Z` |
- * | `blue_whale` / `blue_whale_agent` `datetime` | `2026-09-02 13:55:12`（UTC 墙钟） |
- * | `new-api` `bigint` | `1788357317`（真 UTC epoch） |
+ * | `blue_whale` / `blue_whale_agent` `datetime` | `2026-09-21 14:30:34`（**北京时间墙钟**） |
+ * | 本函数的日志时间戳 | `2026-09-21T14:30:34.000+08:00`（同一时刻，可逐字对照） |
+ * | agent / blue-whale REST 响应 | `2026-09-21T06:30:34.000Z`（**仍是 UTC**，见下） |
+ * | `new-api` `bigint` | `1789972234`（真 epoch，无时区语义） |
  *
- * ——日志是整个系统里唯一的例外，于是每一次交叉引用都要付八小时心算。写 UTC 之后，日志里的时刻
- * 可以直接粘进 SQL 的 WHERE。代价是真的（人读墙上时间要自己换算），而且是明知代价接受的：
- * 换算每读一次付一次，它替掉的心算每交叉引用一次付一次。
+ * ⚠️ **接口响应仍是 UTC，本函数对齐的是「库」不是「接口」。** 接口侧走 `JSON.stringify` 与散落各处
+ * 的 `.toISOString()`，两者恒产 `Z` 结尾，改不动（除非逐处替换成统一的格式化函数，是另一件事）。
+ * 所以「日志时刻可直接粘进 SQL 的 WHERE」这条性质**在库侧成立、在接口侧不成立**——排查时若要拿
+ * 接口返回的时间去 SQL 里查，仍需自行换算。这是本次改动明知代价接受的：库里存北京时间是被
+ * 明确要求的口径，而日志贴着库走比贴着接口走更常用（排查时先看库、再对接口）。
+ *
+ * 若将来接口也统一到 +08:00，这里应当一并重新审视——本注释与 logger.test.ts 里的断言是同一个
+ * 契约的两面，改一处必须改另一处。
  */
 export function toBlueWhaleTimestamp(epochMs: number): string {
-  return new Date(epochMs).toISOString();
+  return new Date(epochMs + 8 * 3_600_000).toISOString().replace("Z", "+08:00");
 }
 
 /** 提取调用点（跳过 logger 自身帧）。路径与行号分开返回，见 D2。 */

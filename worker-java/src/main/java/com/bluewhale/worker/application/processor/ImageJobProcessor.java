@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
@@ -147,7 +148,7 @@ public class ImageJobProcessor implements JobProcessor {
         // 瞬态重试（generation-worker.ts:705-725）
         if (isTransientImageError(errorCode) && job.retry_count() < MAX_IMAGE_RETRIES) {
             long backoffMs = imageRetryBackoffMs(job.retry_count());
-            java.time.LocalDateTime nextActionAt = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)
+            java.time.LocalDateTime nextActionAt = WorkerClock.now()
                     .plusNanos(backoffMs * 1_000_000L);
             boolean requeued = stateMachine.requeueImageJobForRetry(job.id(), nextActionAt);
             if (requeued) {

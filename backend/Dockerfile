@@ -18,6 +18,9 @@ ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
+# IKHJ0Q：pnpm-workspace.yaml 的 patchedDependencies 指向这里的补丁，必须在 pnpm install 之前到位，
+# 否则 --frozen-lockfile 解析补丁路径时 ENOENT。.dockerignore 已同步放行 patches/。
+COPY patches patches
 
 # 国内 npm 镜像加速
 ENV npm_config_registry=https://registry.npmmirror.com
