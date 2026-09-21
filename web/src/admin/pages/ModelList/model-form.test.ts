@@ -132,6 +132,67 @@ describe('buildCreateParams', () => {
   });
 });
 
+// IKHEXG：`default_size` / `default_aspect_ratio` 在后端是 **NOT NULL**（VarChar）列，「未配」的形态
+// 是**空串**。表单曾把它们序列化成 null（`form.defaultSize.trim() || null`），写闸门又只收字符串
+// → 非图片/视频行（音频 / 文生文）从后台保存**必然 400**（实测：`PUT /api/admin/models/23` 报
+// 「默认尺寸(default_size)须为字符串且≤32字符」）。
+// 另一层：diff 比对两侧都套 `?? null`，库里是 `''` 而提交侧是 `null`，会把「其实等价」判成变更。
+describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () => {
+  const audioSnapshot = () =>
+    snapshot({
+      type: 'audio',
+      modelId: 'seed-audio-1.0',
+      label: '豆包 Seed Audio 1.0',
+      parser: 'seedream',
+      sizes: [],
+      ratios: [],
+    });
+
+  it('音频行 create 提交空串（旧逻辑发 null，被写闸门拒）', () => {
+    const result = buildCreateParams(audioSnapshot());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.default_size).toBe('');
+    expect(result.value.default_aspect_ratio).toBe('');
+  });
+
+  it('音频行：库里空串 vs 提交空串 → 不产生伪变更', () => {
+    const initial = modelRow({
+      capability_type: 'audio',
+      default_size: '',
+      default_aspect_ratio: '',
+      supported_sizes: [],
+      supported_aspect_ratios: [],
+    });
+    const result = buildCreateParams(audioSnapshot());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(initial, result.value);
+    expect('default_size' in changes).toBe(false);
+    expect('default_aspect_ratio' in changes).toBe(false);
+  });
+
+  it('图片行：清空尺寸/比例框 → 提交空串（旧逻辑发 null）', () => {
+    const result = buildCreateParams(snapshot({ type: 'image', defaultSize: '', defaultRatio: '' }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.default_size).toBe('');
+    expect(result.value.default_aspect_ratio).toBe('');
+  });
+
+  // 上面三条都在证「不要多提交」；这条证反向——真的改了就必须提交。
+  // 少了它，日后把 diff 的归一写过头（比如恒判相等）会静默吞掉真实修改，而测试全绿。
+  it('图片行：真的改了尺寸/比例 → 原样提交（正向往返）', () => {
+    const initial = modelRow({ default_size: '1K', default_aspect_ratio: '1:1' });
+    const result = buildCreateParams(snapshot({ type: 'image', defaultSize: '2K', defaultRatio: '16:9' }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(initial, result.value);
+    expect(changes.default_size).toBe('2K');
+    expect(changes.default_aspect_ratio).toBe('16:9');
+  });
+});
+
 // IKG4UR：库中 supported_durations 有数组（管理端写入）与对象（消费端契约/种子写入）两种形态。
 // 只认数组时，打开对象行会读成空、保存把整列覆盖成 null——静默数据损坏。
 describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
@@ -410,16 +471,16 @@ describe('时长区间解析（IKHBDO）', () => {
 
 describe('features 键形与类型（IKHBDO）', () => {
   it('读侧回落 camelCase（后端 toFeatures 优先认 camel）', () => {
-    expect(readFeature({ maxReferenceImages: 4 }, 'max_reference_images')).toBe(4);
-    expect(readFeature({ max_reference_images: 6 }, 'max_reference_images')).toBe(6);
+    expect(readFeature({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(4);
+    expect(readFeature({ image_reference_max: 6 }, 'image_reference_max')).toBe(6);
     expect(readFeature({ sequentialImageGeneration: true }, 'sequential_image_generation')).toBe(true);
-    expect(hasFeatureKey({ maxReferenceImages: 4 }, 'max_reference_images')).toBe(true);
+    expect(hasFeatureKey({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(true);
     expect(camelFeatureKey('image_protocol')).toBe('imageProtocol');
   });
 
   it('类型不符的脏值不归结构化控件管（会留在高级 JSON 里回写，而不是被删掉）', () => {
-    expect(featureValueTypeOk('max_reference_images', 4)).toBe(true);
-    expect(featureValueTypeOk('max_reference_images', '4')).toBe(false);
+    expect(featureValueTypeOk('image_reference_max', 4)).toBe(true);
+    expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);
     expect(featureValueTypeOk('tools', 'yes')).toBe(false);
     expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(true);

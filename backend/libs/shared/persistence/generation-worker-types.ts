@@ -20,8 +20,8 @@ export interface ImageCapabilitySnapshot {
   api_size: string | null;
   width: number | null;
   height: number | null;
-  /** 参考图数量上限（features.max_reference_images 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
-  max_reference_images: number;
+  /** 参考图数量上限（features.image_reference_max 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
+  image_reference_max: number;
   channel_parser: string;
   request_mapping: unknown;
   default_size: string;

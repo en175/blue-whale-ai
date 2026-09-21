@@ -163,7 +163,7 @@ function videoModel(
     default_duration: 5,
     features: {
       reference_image: true,
-      max_reference_images: 10,
+      image_reference_max: 10,
       watermark: false,
       quantity_max: 1,
       sequential_image_generation: false,
@@ -178,7 +178,6 @@ function videoModel(
       video_reference_max: 3,
       audio_reference: modelId === 'seedance-2',
       audio_reference_max: 3,
-      image_reference_max: 1,
       max_reference_duration_sec: 15,
       ...features,
     },
@@ -736,7 +735,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
   it('切换参考数量上限不足的模型：保留全部参考并说明原因，用户删除超限项后恢复发送', async () => {
     apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [
       videoModel('seedance-2', '测试视频模型'),
-      videoModel('cap1-video', '单参考视频模型', { max_reference_images: 1, video_reference_max: 0, audio_reference_max: 0 }),
+      videoModel('cap1-video', '单参考视频模型', { image_reference_max: 1, video_reference_max: 0, audio_reference_max: 0 }),
     ]);
     await renderPage();
     await clickNode('d1');

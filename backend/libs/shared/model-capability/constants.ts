@@ -131,19 +131,12 @@ function featuresFieldErr(features: unknown): string | null {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
   }
-  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（max_reference_images /
-  // quantity_max / 各布尔位）任意类型都能入库——"abc" / 1.5 照收。读侧再宽容降级
-  // 也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。按同一原则补齐。
-  const maxRefImages = features.max_reference_images ?? features.maxReferenceImages;
-  if (maxRefImages !== undefined && maxRefImages !== null) {
-    if (
-      typeof maxRefImages !== "number" ||
-      !Number.isInteger(maxRefImages) ||
-      maxRefImages < 0 ||
-      maxRefImages > MAX_REFERENCE_COUNT
-    )
-      return `参考图上限(max_reference_images)须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
-  }
+  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（数量上限 / 各布尔位）任意类型都能入库
+  // ——"abc" / 1.5 照收。读侧再宽容降级也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。
+  // 按同一原则补齐。
+  //
+  // IKHEXG：参考图上限原先在这一段单独校一遍（当时它还叫 max_reference_images，不在上面的
+  // ADR-0086 键表里）；合并进 `image_reference_max` 后已由上面的数量上限循环覆盖，此处删除重复段。
   const quantityMax = features.quantity_max ?? features.quantityMax;
   if (quantityMax !== undefined && quantityMax !== null) {
     if (
@@ -269,6 +262,21 @@ function pickString(v: unknown): string | undefined {
 
 function pickNullableString(v: unknown): string | null | undefined {
   return v == null ? null : typeof v === "string" ? v : undefined;
+}
+
+/** NOT NULL 字符串列（`default_size` / `default_aspect_ratio`）的取值归一。
+ *
+ *  IKHEXG：这两列在库里是 `VarChar NOT NULL`，「未配」的形态是**空串**；而表单把清空的状态
+ *  发成 `null`（`form.defaultSize.trim() || null`），旧闸门又只收字符串 → 保存必然 400
+ *  （本单实测：音频行 `PUT /api/admin/models/23` 报「默认尺寸(default_size)须为字符串」）。
+ *  收 null 并归一为空串：与列形态一致，且保留「清空」的语义。
+ *
+ *  ⚠️ **创建与更新的语义不对称**（既有行为，非本次引入）：更新时空串就是空串；但创建时
+ *  `default_size` 为空串会被 repo 的 `deriveDefaultSize` 顶成 `supported_sizes[0].id`
+ *  （`model-capability-admin-repo.ts`）。别假设两个解析器对空串的处理一致。 */
+function pickNotNullString(v: unknown): string | undefined {
+  if (v === null) return "";
+  return pickString(v);
 }
 
 function parseParserAndMapping(
@@ -416,7 +424,7 @@ export function parseModelCreateBody(
       error: `图标(icon)超长（≤${MODEL_FIELD_LIMITS.icon}字符）`,
     };
 
-  const defaultSize = pickString(body.default_size);
+  const defaultSize = pickNotNullString(body.default_size);
   if (
     defaultSize !== undefined &&
     defaultSize.length > MODEL_FIELD_LIMITS.default_size
@@ -438,7 +446,7 @@ export function parseModelCreateBody(
       error: `默认格式(default_format)超长（≤${MODEL_FIELD_LIMITS.default_format}字符）`,
     };
 
-  const defaultAspectRatio = pickString(body.default_aspect_ratio);
+  const defaultAspectRatio = pickNotNullString(body.default_aspect_ratio);
   if (
     defaultAspectRatio !== undefined &&
     defaultAspectRatio.length > MODEL_FIELD_LIMITS.default_aspect_ratio
@@ -512,15 +520,17 @@ export function parseModelUpdateBody(
         error: `图标(icon)超长（≤${MODEL_FIELD_LIMITS.icon}字符）`,
       };
   }
+  // IKHEXG：两列是 NOT NULL，「清空」的合法表达是空串（不是 null）。收 null 归一为空串——
+  // 只收字符串会让表单（对非图片/视频行恒发 null）保存必然 400，实测症状即此。
+  const defaultSize = pickNotNullString(body.default_size);
   if (body.default_size !== undefined) {
-    const defaultSize = pickString(body.default_size);
     if (
       defaultSize === undefined ||
       defaultSize.length > MODEL_FIELD_LIMITS.default_size
     )
       return {
         ok: false,
-        error: `默认尺寸(default_size)须为字符串且≤${MODEL_FIELD_LIMITS.default_size}字符`,
+        error: `默认尺寸(default_size)须为字符串、null（等价空串）且≤${MODEL_FIELD_LIMITS.default_size}字符`,
       };
   }
   if (body.default_format !== undefined) {
@@ -528,15 +538,15 @@ export function parseModelUpdateBody(
     if (defaultFormat === undefined)
       return { ok: false, error: "默认格式(default_format)须为字符串或 null" };
   }
+  const defaultAspectRatio = pickNotNullString(body.default_aspect_ratio);
   if (body.default_aspect_ratio !== undefined) {
-    const defaultAspectRatio = pickString(body.default_aspect_ratio);
     if (
       defaultAspectRatio === undefined ||
       defaultAspectRatio.length > MODEL_FIELD_LIMITS.default_aspect_ratio
     )
       return {
         ok: false,
-        error: `默认比例(default_aspect_ratio)须为字符串且≤${MODEL_FIELD_LIMITS.default_aspect_ratio}字符`,
+        error: `默认比例(default_aspect_ratio)须为字符串、null（等价空串）且≤${MODEL_FIELD_LIMITS.default_aspect_ratio}字符`,
       };
   }
   if (body.default_duration !== undefined) {
@@ -603,13 +613,13 @@ export function parseModelUpdateBody(
         supported_formats: body.supported_formats,
       }),
       ...(body.default_size !== undefined && {
-        default_size: body.default_size as string,
+        default_size: defaultSize as string,
       }),
       ...(body.default_format !== undefined && {
         default_format: pickNullableString(body.default_format) as string | null,
       }),
       ...(body.default_aspect_ratio !== undefined && {
-        default_aspect_ratio: body.default_aspect_ratio as string,
+        default_aspect_ratio: defaultAspectRatio as string,
       }),
       ...(body.default_duration !== undefined && {
         default_duration: pickNullableDuration(body.default_duration) as

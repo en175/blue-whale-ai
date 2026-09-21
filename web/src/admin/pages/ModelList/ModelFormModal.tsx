@@ -51,7 +51,6 @@ const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }
 };
 
 const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
-  max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
   quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
   // IKHBDO：补上 text——TextGenDialog 就是按 `features.max_prompt_length ?? 缺省` 卡文本输入长度的，
   // 而表单只对 image / video 渲染这个键，文本行因此永远配不了自己的提示词上限。
@@ -60,13 +59,17 @@ const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]
     types: ['image', 'video', 'text'],
     placeholder: '如 32000',
   },
-  /** ADR-0086：普通参考中视频素材上限。 */
+  /** ADR-0086：视频生成普通参考中的视频素材上限。 */
   video_reference_max: { label: '视频参考上限 video_reference_max', types: ['video'], placeholder: '如 3' },
-  /** ADR-0086：音频生成中音频参考上限。 */
+  /** ADR-0086：视频 / 音频生成中的音频素材参考上限。 */
   audio_reference_max: { label: '音频参考上限 audio_reference_max', types: ['audio', 'video'], placeholder: '如 3' },
-  /** ADR-0086：音频生成中图片参考上限。 */
-  image_reference_max: { label: '音频图参考上限 image_reference_max', types: ['audio'], placeholder: '如 1' },
-  /** ADR-0086：输入参考素材总时长上限（秒；2.0=15 / 2.5=30；空=不限）。 */
+  /** 图片 / 视频 / 音频三种生成共用的图参考上限。
+   *  IKHEXG：合并了旧的 `max_reference_images`——两者字面几乎一样、语义却不同
+   *  （旧键当时管图片/视频生成、本键管音频生成），运营与研发都误判过。
+   *  现在键名只表达媒介，作用域由行的 capability_type 决定，故三种类型都可编辑。 */
+  image_reference_max: { label: '图片参考上限 image_reference_max', types: ['image', 'video', 'audio'], placeholder: '如 10' },
+  /** ADR-0086：输入参考素材总时长上限（秒；2.0=15 / 2.5=30；空=不限）。
+   *  IKHEXG：音频链路此前漏读该键，本次已补上校验（见 model-reference-limits.ts / reference-limits.ts）。 */
   max_reference_duration_sec: { label: '参考素材总时长上限秒 max_reference_duration_sec', types: ['video', 'audio'], placeholder: '如 15（留空 = 不限）' },
 };
 

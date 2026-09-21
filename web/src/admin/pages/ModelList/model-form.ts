@@ -37,12 +37,11 @@ export const KNOWN_FEATURE_KEYS = [
   'video_reference',
   'audio_reference',
   'tools',
-  'max_reference_images',
+  'image_reference_max',
   'quantity_max',
   'max_prompt_length',
   'video_reference_max',
   'audio_reference_max',
-  'image_reference_max',
   'max_reference_duration_sec',
   'i2i_model_name',
   'image_protocol',
@@ -392,8 +391,10 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
     supported_aspect_ratios: ratios,
     supported_durations: durations,
     supported_formats: formats,
-    default_size: form.type === 'image' || form.type === 'video' ? form.defaultSize.trim() || null : null,
-    default_aspect_ratio: form.type === 'image' || form.type === 'video' ? form.defaultRatio.trim() || null : null,
+    // IKHEXG：这两列在后端是 NOT NULL（VarChar），「未配」的形态是**空串**——
+    // 发 null 会被写闸门拒（保存必然 400，实测症状）。非图片/视频行没有尺寸/比例概念，同样发空串。
+    default_size: form.type === 'image' || form.type === 'video' ? form.defaultSize.trim() : '',
+    default_aspect_ratio: form.type === 'image' || form.type === 'video' ? form.defaultRatio.trim() : '',
     default_format: form.type === 'text' ? null : form.defaultFormat.trim() || null,
     default_duration: defaultDuration,
     features: form.features,
@@ -434,9 +435,11 @@ export function diffUpdateParams(
   if (JSON.stringify(created.features ?? {}) !== JSON.stringify(initial.features ?? {})) {
     changes.features = created.features;
   }
-  if ((created.default_size ?? null) !== (initial.default_size ?? null)) changes.default_size = created.default_size ?? null;
-  if ((created.default_aspect_ratio ?? null) !== (initial.default_aspect_ratio ?? null)) {
-    changes.default_aspect_ratio = created.default_aspect_ratio ?? null;
+  // IKHEXG：两侧都归一到空串再比。库里是 ''、create 侧对非图片/视频行恒为 ''，用 `?? null` 比会把
+  // 「其实等价」判成变更，进而把 null 塞进提交体被写闸门拒——非图片/视频行保存必然 400 的根因。
+  if ((created.default_size ?? '') !== (initial.default_size ?? '')) changes.default_size = created.default_size ?? '';
+  if ((created.default_aspect_ratio ?? '') !== (initial.default_aspect_ratio ?? '')) {
+    changes.default_aspect_ratio = created.default_aspect_ratio ?? '';
   }
   if ((created.default_format ?? null) !== (initial.default_format ?? null)) {
     changes.default_format = created.default_format ?? null;
@@ -504,12 +507,11 @@ export function hasFeatureKey(features: Record<string, unknown> | undefined, key
 /** 结构化控件能承载的取值类型。类型不符的脏值不归控件管，留在高级 JSON 里原样回写，
  *  避免「读成空白 → 保存把整个键删掉」这种静默数据丢失（写侧闸门会拒，报错好过丢数据）。 */
 const FEATURE_NUMBER_KEYS = new Set([
-  'max_reference_images',
+  'image_reference_max',
   'quantity_max',
   'max_prompt_length',
   'video_reference_max',
   'audio_reference_max',
-  'image_reference_max',
   'max_reference_duration_sec',
 ]);
 const FEATURE_STRING_KEYS = new Set(['i2i_model_name', 'image_protocol']);

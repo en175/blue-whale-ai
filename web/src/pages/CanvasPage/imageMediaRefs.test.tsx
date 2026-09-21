@@ -87,9 +87,9 @@ const apiMocks = vi.hoisted(() => ({
       default_format: null,
       default_aspect_ratio: '1:1',
       default_duration: null,
-      // max_reference_images 是参考图上限的唯一口径（ADR-0086）：9 会让下方「连满 10 张」用例
+      // image_reference_max 是参考图上限的唯一口径（ADR-0086）：9 会让下方「连满 10 张」用例
       // 变成连满 9 张，与用例名/断言的缺省能力行 10 自相矛盾
-      features: { reference_image: true, max_reference_images: 10 },
+      features: { reference_image: true, image_reference_max: 10 },
       version: 1,
       digest: '',
     },
@@ -516,7 +516,7 @@ describe('IKDMQR 画布连线来源校验', () => {
   });
 
   it('同一素材（相同 assetId）重复连入被拒绝；参考图超过上限被拒绝（缺省能力行 10）', async () => {
-    // 画布上另一张同 assetId 的复制卡 + 10 张独立素材（缺省上限 DEFAULT_MAX_REFERENCE_IMAGES=10，ADR-0086）
+    // 画布上另一张同 assetId 的复制卡 + 10 张独立素材（本用例能力行显式配 image_reference_max=10，ADR-0086）
     canvasDocMock.current = {
       doc: {
         id: 11,

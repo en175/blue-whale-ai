@@ -42,7 +42,7 @@ export function readPromptPlan(node: PromptTargetNode, targetType: "image" | "vi
 export function validatePlanModel(nodeId: string, bindings: PromptBinding[], count: number, model: ModelCapabilityView | undefined) {
   if (!model) planError(nodeId, bindings, "请选择可用图片模型");
   if (count > 0 && !model.features.reference_image) planError(nodeId, bindings, "当前模型不支持图片参考");
-  if (count > model.features.max_reference_images) planError(nodeId, bindings, `参考图最多 ${model.features.max_reference_images} 张，请调整引用或模型`);
+  if (count > model.features.image_reference_max) planError(nodeId, bindings, `参考图最多 ${model.features.image_reference_max} 张，请调整引用或模型`);
 }
 
 export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[], planNodeId: string, targetNodeId: string, syncBindings?: PromptBinding[]) {

@@ -118,6 +118,54 @@ describe("时长形态闸门（IKG4UR）", () => {
 });
 
 describe("parseModelUpdateBody", () => {
+  // IKHEXG：default_size / default_aspect_ratio 是 NOT NULL（VarChar）列，「未配」的形态是空串。
+  // 表单对非图片/视频行恒发 null（清空尺寸框的图片行也发 null），旧闸门只收字符串
+  // → 音频/文生文行从后台保存必然 400（实测 PUT /api/admin/models/23）。
+  it("default_size / default_aspect_ratio 收 null，归一为空串（NOT NULL 列）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: null,
+      default_aspect_ratio: null,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("");
+    expect(parsed.value.default_aspect_ratio).toBe("");
+  });
+
+  it("default_size / default_aspect_ratio 仍拒非字符串非 null（防脏值落库）", () => {
+    for (const bad of [5, true, [], {}]) {
+      expect(parseModelUpdateBody({ default_size: bad }).ok).toBe(false);
+      expect(parseModelUpdateBody({ default_aspect_ratio: bad }).ok).toBe(false);
+    }
+  });
+
+  it("default_size / default_aspect_ratio 超长仍被拒（列宽 32 / 16）", () => {
+    expect(parseModelUpdateBody({ default_size: "x".repeat(33) }).ok).toBe(false);
+    expect(parseModelUpdateBody({ default_aspect_ratio: "x".repeat(17) }).ok).toBe(false);
+  });
+
+  // IKHEXG：上面把两个值提到了 `if` 外面算（为了让返回值用归一后的值），于是「字段缺席」与
+  // 「字段清空」只差 spread 上那个 `body.default_size !== undefined` 的守卫。少了这条钉子，
+  // 日后顺手把守卫删掉，**每次更新都会写一遍空串**，把所有行的默认尺寸静默清掉。
+  it("未携带该字段 → 不提交（缺席 ≠ 清空）", () => {
+    const parsed = parseModelUpdateBody({ model_label: "新名字" });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect("default_size" in parsed.value).toBe(false);
+    expect("default_aspect_ratio" in parsed.value).toBe(false);
+  });
+
+  it("真实改动仍原样提交（往返不被吞掉）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: "2K",
+      default_aspect_ratio: "16:9",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("2K");
+    expect(parsed.value.default_aspect_ratio).toBe("16:9");
+  });
+
   it("更新为 gpt 时必须带 request_mapping", () => {
     const parsed = parseModelUpdateBody({
       channel_parser: "gpt",
@@ -191,8 +239,8 @@ describe("parseModelUpdateBody", () => {
   // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
   it("features 闸门补键：脏类型 → 拒绝", () => {
     const dirty = [
-      { max_reference_images: "abc" },
-      { max_reference_images: 1.5 },
+      { image_reference_max: "abc" },
+      { image_reference_max: 1.5 },
       { quantity_max: 1.5 },
       { quantity_max: 0 },
       { reference_image: "yes" },
@@ -216,7 +264,7 @@ describe("parseModelUpdateBody", () => {
     expect(
       parseModelUpdateBody({
         features: {
-          max_reference_images: 14,
+          image_reference_max: 14,
           quantity_max: 10,
           reference_image: true,
           watermark: false,
@@ -227,7 +275,7 @@ describe("parseModelUpdateBody", () => {
           sequential_image_generation: false,
           stream: false,
           image_protocol: "openai-images",
-          maxReferenceImages: 14,
+          imageReferenceMax: 14,
           quantityMax: 10,
           imageProtocol: "inline-image",
         },

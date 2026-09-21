@@ -964,7 +964,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     const tx = buildTx({
       ...overrides,
       ...capabilityWith({
-        max_reference_images: 30,
+        image_reference_max: 30,
         video_reference: true,
         video_reference_max: 5,
         audio_reference: true,
@@ -982,7 +982,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     expect(result.kind).toBe("applied");
     const input = tx.generation_jobs.create.mock.calls[0][0].data.input;
     expect(input.reference_limits).toEqual({
-      max_reference_images: 30,
+      image_reference_max: 30,
       video_reference_max: 5,
       audio_reference_max: 2,
       max_reference_duration_sec: 60,
@@ -1039,7 +1039,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     ]);
 
     const strict = await repoWith(
-      buildTx({ ...overrides, ...capabilityWith({ max_reference_images: 3 }) }),
+      buildTx({ ...overrides, ...capabilityWith({ image_reference_max: 3 }) }),
     ).repo.regenerateSceneCard({ ...baseInput, reference_assets: frames });
     expect(strict).toEqual({
       kind: "capability_limit",
@@ -1048,7 +1048,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
 
     const looseTx = buildTx({
       ...overrides,
-      ...capabilityWith({ max_reference_images: 5 }),
+      ...capabilityWith({ image_reference_max: 5 }),
     });
     const loose = await repoWith(looseTx).repo.regenerateSceneCard({
       ...baseInput,
@@ -1062,7 +1062,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     const tx = buildTx({
       ...overrides,
       ...capabilityWith({
-        maxReferenceImages: 30,
+        imageReferenceMax: 30,
         videoReference: true,
         videoReferenceMax: 5,
       }),
@@ -1077,7 +1077,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     expect(result.kind).toBe("applied");
     const input = tx.generation_jobs.create.mock.calls[0][0].data.input;
     expect(input.reference_limits).toMatchObject({
-      max_reference_images: 30,
+      image_reference_max: 30,
       video_reference_max: 5,
     });
   });

@@ -108,7 +108,7 @@ class ImageJobProcessorErrorMappingTest {
         mockClaim(input);
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
-        cap.setFeatures("{\"maxReferenceImages\": 2}");
+        cap.setFeatures("{\"imageReferenceMax\": 2}");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
 
         processor.handle("100");
@@ -426,7 +426,7 @@ class ImageJobProcessorErrorMappingTest {
         cap.setWidth(1024);
         cap.setHeight(1024);
         cap.setChannelParser("seedream");
-        cap.setFeatures("{\"maxReferenceImages\": 10}");
+        cap.setFeatures("{\"imageReferenceMax\": 10}");
         return cap;
     }
 

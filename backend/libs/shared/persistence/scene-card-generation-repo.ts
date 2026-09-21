@@ -530,6 +530,9 @@ async function regenerateSceneCardInTransaction(
       version: true,
       enabled: true,
       is_delete: true,
+      // IKHEXG：toFeatures 按行类型选 image_reference_max 的缺省（音频 1 / 其余 10）。
+      // 不影响 digest——capabilityDigestFromModelCapability 只取固定的 8 个参数字段。
+      capability_type: true,
       supported_sizes: true,
       supported_aspect_ratios: true,
       supported_durations: true,
@@ -552,7 +555,8 @@ async function regenerateSceneCardInTransaction(
 
   // IKHBDO：库中 features 原始 JSON → 归一能力集（snake_case + 缺省补齐）。
   // 冻结快照与参考数量判定都读这份归一值，避免 camelCase 历史行「配置输给写死的缺省」。
-  const features = toFeatures(capability.features);
+  // IKHEXG：传行的 capability_type——`image_reference_max` 的缺省按生成类型分（音频 1 / 其余 10）。
+  const features = toFeatures(capability.features, capability.capability_type);
 
   // 5b. 参数越界（AC#1 能力约束）：提交参数与参考模式必须在当前能力支持范围内。
   const limitReason = checkCapabilityLimit(

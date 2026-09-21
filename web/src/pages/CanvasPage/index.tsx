@@ -45,7 +45,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { AssetImageRefLimitProvider, videoRefCapsOfModel } from './modelCaps';
-import { imageReferenceMaxOfCap, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
@@ -734,9 +734,9 @@ export default function CanvasPage() {
   /** 视频草稿的参考能力（模型未解析 → null：分类上限回落缺省，视频/音频参考门控放行交服务端） */
   const videoCapsOfDraft = (nodeId: string | null | undefined): VideoRefCapabilities | null =>
     videoRefCapsOfModel(draftModelOf(nodeId, 'video'));
-  /** 图片草稿的参考图上限（能力行 max_reference_images；模型未解析回落缺省 10） */
+  /** 图片草稿的参考图上限（能力行 image_reference_max；模型未解析回落缺省 10） */
   const imageRefMaxOfDraft = (nodeId: string): number =>
-    imageReferenceMaxOfCap(draftModelOf(nodeId, 'image')?.features);
+    imageReferenceMaxOf(draftModelOf(nodeId, 'image')?.features);
   /** 提交防线的视频/音频参考能力位判定（ADR-0086）：按提交模型的能力行逐类型判定，返回拒绝原因。
    *  模型未解析（能力列表未加载/接口失败）返回 null 不阻断——交服务端 400 判定，不做客户端假阴性。 */
   const videoRefUnsupportedByModel = (modelId: string, refs: VideoMediaRefs): string | null => {
@@ -771,7 +771,7 @@ export default function CanvasPage() {
       showToast('warn', '该素材已连入当前草稿');
       return false;
     }
-    // 上限读草稿绑定模型的 max_reference_images（ADR-0086，此前写死 10）
+    // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
     const imageMax = imageRefMaxOfDraft(targetId);
     if (refs.length >= imageMax) {
       showToast('warn', refOverflowToast(['image'], { image: imageMax }));
@@ -1195,8 +1195,8 @@ export default function CanvasPage() {
     fetchGenerationModels('image').then(setImageModels).catch(() => undefined);
   }, []);
   /** 资产卡参考图上限（ADR-0086）：资产卡经图片面板生成图片，按图片能力默认模型取
-   *  max_reference_images（无显式默认取列表首条；列表未加载回落缺省 10，与服务端一致） */
-  const assetImageRefMax = imageReferenceMaxOfCap(
+   *  image_reference_max（无显式默认取列表首条；列表未加载回落缺省 10，与服务端一致） */
+  const assetImageRefMax = imageReferenceMaxOf(
     (imageModels.find((m) => m.is_default) ?? imageModels[0])?.features,
   );
   useEffect(() => {
@@ -5325,7 +5325,7 @@ export default function CanvasPage() {
       if (imageDraftId) {
         const current = imageMediaRefsOf(imageDraftId, edgesRef.current, mediaNodesRef.current);
         const known = new Set(current.map((r) => r.assetId));
-        // 上限读草稿绑定模型的 max_reference_images（ADR-0086，此前写死 10）
+        // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
         const imageMax = imageRefMaxOfDraft(imageDraftId);
         const accepted: AssetRecord[] = [];
         let skippedDup = false;

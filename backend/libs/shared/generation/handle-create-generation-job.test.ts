@@ -24,8 +24,9 @@ function buildDeps() {
         model_id: "seed-audio-1.0",
         features: {
           audio_reference_max: 3,
+          // IKHEXG：音频行的图参考上限 1（原夹具同时带 max_reference_images:10 与
+          // image_reference_max:1——两键合并后只剩这一个，取音频链路原本生效的 1）。
           image_reference_max: 1,
-          max_reference_images: 10,
         },
       },
     ]);
@@ -340,9 +341,9 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
   });
 });
 
-// IKA72G：图片参考图上限读取模型能力配置（features.max_reference_images），
+// IKA72G：图片参考图上限读取模型能力配置（features.image_reference_max），
 // 不再写死 4；无配置时回退与网关/ARK 一致的 10；字段统一 input_asset_ids。
-function buildImageDeps(maxReferenceImages?: number) {
+function buildImageDeps(imageReferenceMax?: number) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
     name: "项目",
@@ -353,9 +354,9 @@ function buildImageDeps(maxReferenceImages?: number) {
     {
       model_id: "seedream-5.0",
       features:
-        maxReferenceImages === undefined
+        imageReferenceMax === undefined
           ? undefined
-          : { max_reference_images: maxReferenceImages },
+          : { image_reference_max: imageReferenceMax },
     },
   ]);
   const createJob = vi.fn().mockResolvedValue({
@@ -459,7 +460,9 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("能力未配置 → 回退网关/ARK 常量 10：10 张通过、11 张 400", async () => {
+  // IKHEXG：图片/视频链路的缺省仍是 10（网关 maxImageEditImages / 方舟 Seedream 复合编辑），
+  // 按行类型选的缺省只在音频链路上是 1（见 model-capability-repo 的两个 DEFAULT_* 常量）。
+  it("能力未配置 → 回退图片/视频缺省 10：10 张通过、11 张 400", async () => {
     const { deps: okDeps, createJob: okCreate } = buildImageDeps();
     const ok = await handleCreateGenerationJob(
       "u1",
@@ -696,7 +699,7 @@ function buildVideoDeps(modelRow: Record<string, unknown> = {}) {
     thumb: null,
     created_at: "2026-08-18T00:00:00.000Z",
   });
-  // IKHBDO：可选 modelRow 覆盖能力行（如 features.max_reference_images）——参考上限只认配置，
+  // IKHBDO：可选 modelRow 覆盖能力行（如 features.image_reference_max）——参考上限只认配置，
   // 用例需要能给出「配到 12 / 配到 30」的行；缺省保持原先的无 features 行。
   const listEnabledByType = vi.fn().mockResolvedValue([
     { model_id: "doubao-seedance-2-0-260128", ...modelRow },
@@ -901,9 +904,9 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
 
   // IKHBDO：原先此处断言写死的「参考素材最多 12 个」。上限改由能力行判定后，同一条请求的
   // 判词随配置走（12 上限 → 「参考图最多 12 张」），故断言改成配置口径，兼作「能力行生效」的证据。
-  it("素材库参考超能力行上限（max_reference_images=12）→ 400 参考图最多 12 张", async () => {
+  it("素材库参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
     const { deps, createJob } = buildVideoDeps({
-      features: { max_reference_images: 12 },
+      features: { image_reference_max: 12 },
     });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       id: `Asset-ref-${i}`,
@@ -1148,9 +1151,9 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
   });
 
   // IKHBDO：同上一「素材库参考」用例——单数组 references 分支的判词同样只认能力行。
-  it("references 普通参考超能力行上限（max_reference_images=12）→ 400 参考图最多 12 张", async () => {
+  it("references 普通参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
     const { deps, createJob } = buildVideoDeps({
-      features: { max_reference_images: 12 },
+      features: { image_reference_max: 12 },
     });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       role: "reference" as const,
@@ -2252,13 +2255,13 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
             supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
             features: {
               reference_image: true,
-              max_reference_images: 10,
+              // IKHEXG：两键合并后只剩一个图参考上限，取视频链路原本生效的 10。
+              image_reference_max: 10,
               quantity_max: 1,
               video_reference: false,
               video_reference_max: 3,
               audio_reference: false,
               audio_reference_max: 3,
-              image_reference_max: 1,
               max_reference_duration_sec: null,
               ...features,
             },
@@ -2273,8 +2276,8 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
 
   const imageRef = (i: number) => ({ role: 'reference' as const, asset_id: String(i), type: 'image' as const });
 
-  it('视频普通参考图片数超能力行 max_reference_images → 400 参考图最多 N 张', async () => {
-    const { deps, createJob } = videoDepsWithFeatures({ max_reference_images: 3 });
+  it('视频普通参考图片数超能力行 image_reference_max → 400 参考图最多 N 张', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({ image_reference_max: 3 });
     const result = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: [1, 2, 3, 4].map(imageRef),
@@ -2285,7 +2288,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   });
 
   it('恰好达到图上限（3 张）放行', async () => {
-    const { deps } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const { deps } = videoDepsWithFeatures({ image_reference_max: 3 });
     const result = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: [1, 2, 3].map(imageRef),
@@ -2326,7 +2329,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   // 执行期只读这份快照（对齐 generate_audio 的冻结口径）。
   it('参考上限按能力行冻结进 job.input.reference_limits', async () => {
     const { deps, createJob } = videoDepsWithFeatures({
-      max_reference_images: 14,
+      image_reference_max: 14,
       video_reference_max: 5,
       audio_reference_max: 2,
       max_reference_duration_sec: 30,
@@ -2338,7 +2341,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(result.code).toBe(200);
     const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
     expect(input.reference_limits).toEqual({
-      max_reference_images: 14,
+      image_reference_max: 14,
       video_reference_max: 5,
       audio_reference_max: 2,
       max_reference_duration_sec: 30,
@@ -2348,7 +2351,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   it('同一份 4 张参考图：能力行配 3 时 400、配 5 时 200（上限随配置而非固定常量）', async () => {
     const refs = Array.from({ length: 4 }, (_, i) => imageRef(i + 1));
 
-    const strict = videoDepsWithFeatures({ max_reference_images: 3 });
+    const strict = videoDepsWithFeatures({ image_reference_max: 3 });
     const rejected = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: refs,
@@ -2357,7 +2360,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(rejected.msg).toContain('参考图最多 3 张');
     expect(strict.createJob).not.toHaveBeenCalled();
 
-    const loose = videoDepsWithFeatures({ max_reference_images: 5 });
+    const loose = videoDepsWithFeatures({ image_reference_max: 5 });
     const accepted = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: refs,
@@ -2370,7 +2373,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   // 写死 12 会让「13 张 + 配 30」的模型永久卡死（本用例前半段就是该场景的回归）。
   // 后半段是反向证据：上限确实随配置收紧，不是「一律放行」。
   it('参考上限完全随能力行走：配 30 收下 13 张参考，配 5 在第 6 张拒绝', async () => {
-    const loose = videoDepsWithFeatures({ max_reference_images: 30 });
+    const loose = videoDepsWithFeatures({ image_reference_max: 30 });
     const accepted = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: Array.from({ length: 13 }, (_, i) => imageRef(i + 1)),
@@ -2378,7 +2381,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(accepted.code).toBe(200);
     expect(loose.createJob).toHaveBeenCalledTimes(1);
 
-    const strict = videoDepsWithFeatures({ max_reference_images: 5 });
+    const strict = videoDepsWithFeatures({ image_reference_max: 5 });
     const rejected = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: Array.from({ length: 6 }, (_, i) => imageRef(i + 1)),
@@ -2406,13 +2409,14 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
             supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
             features: {
               reference_image: true,
-              max_reference_images: 10,
+              // IKHEXG：视频行的图参考上限 10（原夹具同时带 max_reference_images:10 与
+              // image_reference_max:1——两键合并后只剩这一个，取视频链路原本生效的 10）。
+              image_reference_max: 10,
               quantity_max: 1,
               video_reference: true,
               video_reference_max: 3,
               audio_reference: false,
               audio_reference_max: 3,
-              image_reference_max: 1,
               max_reference_duration_sec: null,
             },
           })),

@@ -18,6 +18,34 @@
 > `scene-card-generation-repo.ts`）与相关测试**暂留未删**，待后续工单连同 `-1`（智能时长）一并处置
 > ——`-1` 需要「区间 + 额外允许值」的表达，当前数据形态给不了。
 
+> **修订 2026-09-21（IKHEXG）——决策 1 的键表重写：`max_reference_images` 并入 `image_reference_max`。**
+>
+> 决策 1「既有 `max_reference_images` 保留复用」这一条作废。两把键**字面几乎一样、语义却不同**，
+> 且没有任何机制强制统一——已实际造成误判与错配：
+>
+> - `gpt-image-2`（图片行）同时带 `max_reference_images:16` 与 `image_reference_max:1`，
+>   后者在该行上根本不被读，是死值；
+> - `doubao-seedance-2-5`（视频行）把图参考 **30** 写在 `image_reference_max` 上——视频链路不读它，
+>   **实际生效的是缺省 10**，而生产清单要求 30。
+>
+> **新的不变式**：参考上限键的名字**只表达素材媒介**，作用域由行的 `capability_type` 与调用点的
+> `kind` 决定。`max_reference_images` 不再被读、不再被写，代码与表单中已无该标识符；存量值由
+> `029_ikhexg_reference_key_rename` 迁移搬入 `image_reference_max`（按行类型判定原本生效的那把，
+> 行为逐字不变）。`image_reference_max` 的语义随之从「音频生成中图片参考上限」扩为
+> 「图片 / 视频 / 音频三种生成中的图参考上限」——**同一行内它只有一种含义**，跨行歧义正是本次消除的。
+>
+> **缺省按生成类型分叉**（官方值本就不同，故拆成两个常量）：图片/视频生成 10
+> （网关 `maxImageEditImages` / 方舟 Seedream 复合编辑）、音频生成 1（官方音频接口只收 1 张），
+> 由 `toFeatures(json, capabilityType)` 按行类型选。`video_reference_max` / `audio_reference_max`
+> 的缺省仍是 3（未参与本次合并，不夹带行为变更）。
+>
+> **配套修复**：音频链路此前**漏读** `max_reference_duration_sec`——后台表单对音频行开放了该键、
+> 代码却不校验，属「配了不生效」。本次已在服务端 `checkReferenceLimits` 与前端同源实现中补上。
+>
+> **守卫**：新增 `reference-key-family.test.ts`，把「凡 `<媒介>_reference_max` 必须落在
+> {image,video,audio} 白名单内」及「后端写闸门 / 前端白名单 / 前端标签表三处枚举相等」钉死，
+> 防止命名方案再次各自生长。
+
 后台模型能力配置（`generation_model_capability.features` JSON 列）补齐多类型素材限制并核正参数：参考素材的分类上限（图/视频/音频）、输入素材总时长上限、按任务类型的比例与时长约束、以及视频生成是否接受视频/音频素材作参考，全部落**能力目录**，生成面板与服务端校验同读目录，删除前端 `REF_LIMITS` / `MAX_VIDEO_REFS` 与服务端 `validateAudioReferences` / `validateVideo` 里的硬编码常量与 `seedance-2` 前缀特判。
 
 **动因**：工单核对官方接口差异发现——Seedance 2.0/2.5 视频、音频素材各自总时长上限（15s/30s）、2.0 禁单独输入音频、视频素材作普通参考目前靠 `supportsVideoReferenceModel` 硬编码 `seedance-2` 前缀，图片参考图上限前端 `ImageDialog` 写死 9 张与服务端能力行（缺省 10）不一致。这些规则按模型能力行表达后，新增模型不需要改代码。
@@ -32,14 +60,14 @@
 
 1. `features` 新增键（全 snake_case，写侧走写入闸门，读侧对脏值宽容降级）：
    - `video_reference: boolean` — 视频生成是否接受**视频素材**作普通参考（替代 `seedance-2` 前缀特判；2.5 开，其余关）
-   - `video_reference_max: number` — 普通参考中视频素材上限（缺省 3）
+   - `video_reference_max: number` — 视频生成普通参考中**视频素材**上限（缺省 3）
    - `audio_reference: boolean` — 视频生成是否接受**音频素材**作参考（2.0 关，2.5 开）
-   - `audio_reference_max: number` — 音频生成中音频参考上限（缺省 3）
-   - `image_reference_max: number` — 音频生成中图片参考上限（缺省 1）
+   - `audio_reference_max: number` — 视频 / 音频生成中**音频素材**参考上限（缺省 3）
+   - `image_reference_max: number` — 图片 / 视频 / 音频三种生成中**图参考**上限（缺省按生成类型：图片/视频 10、音频 1。见 2026-09-21 修订段）
    - `max_reference_duration_sec: number|null` — 输入参考素材总时长上限（视频/音频；2.0=15，2.5=30；null=不限）
    - `task_types: object` — 按任务类型的比例/时长约束（default/first_frame/first_last_frame/edit/prolong 各自 allowed 比例与时长；本轮结构就位，前端现有模式映射 first_frame/first_last_frame，edit/prolong 无 UI 入口）
-   - 既有 `max_reference_images`（图参考上限）与 `quantity_max`（单次输出数）保留复用
-2. **服务端校验全读 features**：`validateAudioReferences`（音频≤`audio_reference_max`、图≤`image_reference_max`、不可混用由能力位表达）、`validateVideo`（普通参考视频素材≤`video_reference_max`）、参考素材总时长≤`max_reference_duration_sec`、图参考≤`max_reference_images`。
+   - 既有 `quantity_max`（单次输出数）保留复用（原「既有 `max_reference_images` 保留复用」见 2026-09-21 修订段，已并入 `image_reference_max`）
+2. **服务端校验全读 features**：`validateAudioReferences`（音频≤`audio_reference_max`、图≤`image_reference_max`、不可混用由能力位表达）、`validateVideo`（普通参考视频素材≤`video_reference_max`）、参考素材总时长≤`max_reference_duration_sec`（视频/音频两链路）、图参考≤`image_reference_max`。
 3. **前端同源**：删 `REF_LIMITS` / `MAX_VIDEO_REFS` / `supportsVideoReferenceModel`，面板读 `GenerationModel.features` 驱动数量/时长/视频参考门控。
    - 补充（IKHBO）：本决定落地时 `supportsVideoReferenceModel` 只删了一半——函数体仍留着 `seedance-2` / `doubao-seedance-2-0` 前缀特判，且画布层（连线校验、资产库接纳槽位、资产卡参考图上限、提交防线）仍写死 `9/3/3` 与 `10`。该前缀特判对 Seedance 2.5 与 2.0 **恰好判反**（2.5 的 `video_reference=true` 被误拦、2.0 的 `false` 被误放），2.5 携带视频/音频参考的草稿在客户端无法提交。现已删除前缀特判，画布页改按**草稿卡绑定模型**（`draftModelId`）的能力行取值；模型未解析（能力列表未加载 / 卡上未绑定模型）时回落缺省值且**不阻断**，交服务端兜底，避免客户端假阴性。
 4. **任务类型比例/时长**：前端按现有 mode 映射（prompt→default、keyframe/text2video→first_frame/first_last_frame）读 `features.task_types` 约束渲染（自适应比例/自动时长钳制）。
