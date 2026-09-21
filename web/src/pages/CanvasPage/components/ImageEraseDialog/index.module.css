@@ -102,15 +102,69 @@
   color: var(--color-text-secondary);
 }
 
-.brushRow input[type='range'] {
+.brushSlider {
+  position: relative;
   width: 90px;
-  accent-color: #3d5afe;
-  cursor: pointer;
+  flex-shrink: 0;
 }
 
-.brushRow input[type='range']:disabled {
+.brushRangeInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.brushHit {
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.brushHit:focus-visible {
+  outline: 1px solid #888;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.brushHit[aria-disabled='true'] {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.brushTrack {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: #4a4a4a;
+  pointer-events: none;
+}
+
+.brushFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: #888;
+}
+
+.brushThumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 /* ---- 源图卡下方发送条 ---- */
