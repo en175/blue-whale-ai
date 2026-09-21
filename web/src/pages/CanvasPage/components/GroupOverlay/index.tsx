@@ -27,6 +27,17 @@ import {
 } from '../../canvasGroups';
 import styles from './index.module.css';
 
+/** 捕获阶段须放行的覆盖层：目标在这些子树上时，不按「组框穿透到 pane / 内容卡盒」拦截。
+ *  扩图框、裁切框手柄压在源卡盒边界上（IKGOQ0 / IKH1WJ）；
+ *  钉屏幕工具条 / 二级菜单 / 跟随对话框迁出 .react-flow__node 后同样压在卡盒上（IKHCUA）。 */
+function isPassthroughOverlayTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(
+    target.closest('[data-outpaint-frame]')
+    || target.closest('[data-crop-frame]')
+    || target.closest('[data-gen-panel-territory]'),
+  );
+}
+
 interface GroupOverlayProps {
   /** 画布内部节点（含实时坐标 / 选中态 / measured 尺寸，拖拽中实时更新） */
   nodes: Node[];
@@ -388,12 +399,9 @@ export default function GroupOverlay({
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || !e.isPrimary || draggingRef.current) return;
-      // 扩图扩展框是交互覆盖层（与 .react-flow__panel 同类，须放行）：其手柄命中带压在
-      // 源图卡盒边界上，落点必在卡盒内——若在此拦死，扩图拖拽永远启动不了（IKGOQ0 验收报障）
-      if (e.target instanceof Element && e.target.closest('[data-outpaint-frame]')) return;
-      // 裁切框同病同款：边手柄命中带同样整条压在源图卡盒边界上，不豁免则裁切拖拽
-      // 永远启动不了（IKH1WJ）
-      if (e.target instanceof Element && e.target.closest('[data-crop-frame]')) return;
+      // 扩图框 / 裁切框 / 钉屏幕浮层都压在内容卡盒上，target 却不在 .react-flow__node 内。
+      // 不放行会被当成「组框穿透到 pane」：拦传播并程序化选中下方节点（IKGOQ0 / IKH1WJ / IKHCUA）。
+      if (isPassthroughOverlayTarget(e.target)) return;
       const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
       if (content) {
@@ -443,6 +451,7 @@ export default function GroupOverlay({
     };
     // 双击组空白 = 进入组内编辑（TC_CX_210），拦截 d3-zoom 的双击缩放避免视口跳动
     const onDblClick = (e: MouseEvent) => {
+      if (isPassthroughOverlayTarget(e.target)) return;
       const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
       if (content) {
