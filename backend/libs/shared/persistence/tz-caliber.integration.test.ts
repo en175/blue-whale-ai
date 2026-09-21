@@ -74,8 +74,11 @@ describe.skipIf(!databaseUrl)("时区口径：库里存北京时间（IKHJ0Q）"
   });
 
   it("读回的瞬时与写入的瞬时相等（往返恒等，JS 侧比较不失真）", async () => {
+    // 显式 ORDER BY：现在表里只有一行，取 [0] 恰好对；但下一行测试会再插一条，
+    // 一旦有人调整用例顺序或让本用例可单独重跑，不排序就会取错行而**静默地仍然通过**
+    // （两条 explicit_w 的字面量类型相同，只差时刻）。排序把这件事钉死。
     const res = await adapter.queryRaw({
-      sql: `SELECT explicit_w FROM ${TABLE}`,
+      sql: `SELECT explicit_w FROM ${TABLE} ORDER BY id ASC LIMIT 1`,
       args: [],
       argTypes: [],
     });
