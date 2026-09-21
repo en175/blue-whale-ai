@@ -1,5 +1,5 @@
 /* 拖线落到空白/内容节点后的生成类型菜单 */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { ConnectGenKind } from '../../connectAbility';
 import styles from './index.module.css';
@@ -19,23 +19,25 @@ interface ConnectTypeMenuProps {
 }
 
 export default function ConnectTypeMenu({ x, y, enabled, onSelect, onClose }: ConnectTypeMenuProps) {
+  // CanvasPage 高频重渲染下 onClose 引用常新，监听生命周期不能跟着抖：经 ref 消费最新回调，effect 只在挂载时跑一次
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const close = (e: Event) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest(`.${styles.menu}`)) return;
-      onClose();
+      onCloseRef.current();
     };
-    // 等松开连线的那次 click 过完再监听，避免菜单刚弹出就被关掉
-    const timer = window.setTimeout(() => {
-      document.addEventListener('pointerdown', close);
-      document.addEventListener('contextmenu', close, true);
-    }, 0);
+    // 拖线松手（pointerup）弹菜单，当次交互里 pointerdown 早已过去、后续只有 click，
+    // 无需延迟挂载；多等一个宏任务反而在高频重渲染页面上留下「点击落空」窗口（IKHHW8）
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('contextmenu', close, true);
     return () => {
-      window.clearTimeout(timer);
       document.removeEventListener('pointerdown', close);
       document.removeEventListener('contextmenu', close, true);
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div
