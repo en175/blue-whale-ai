@@ -169,8 +169,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   /** 悬停本卡（IKGYYE 钉屏幕迁移）：操作条 `.wrapper:hover .nodeBar` 的 hover 显示语义
    *  由 JS 指针事件等价保持——工具条 DOM 迁出节点卡后 CSS :hover 不再作用于卡外层。
    *  IKGYYB hover 桥接：卡 leave 延迟 HOVER_BRIDGE_CLEAR_MS 清除，工具条层根 enter
-   *  取消清除——鼠标从卡移向工具条穿过间隙时不闪卸（未选中纯 hover 卡上按钮可达） */
+   *  取消清除——鼠标从卡移向工具条穿过间隙时不闪卸（未选中纯 hover 卡上按钮可达）。
+   *  IKH5FP：enter/leave 在缩放层与 body portal 之间会漏配对，hovered 会卡住；
+   *  悬停期间用屏幕命中兜底，点卡片/工具条以外立即关闭。 */
   const [hovered, setHovered] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
   const hoverClearTimerRef = useRef<number | null>(null);
   const clearHoverBridge = useCallback(() => {
     if (hoverClearTimerRef.current != null) {
@@ -178,15 +182,52 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       hoverClearTimerRef.current = null;
     }
   }, []);
-  const scheduleHoverClear = useCallback(() => {
+  const hideHoverToolbar = useCallback(() => {
+    clearHoverBridge();
+    setHovered(false);
+  }, [clearHoverBridge]);
+  const scheduleHoverClear = useCallback((restart = true) => {
+    if (!restart && hoverClearTimerRef.current != null) return;
     clearHoverBridge();
     hoverClearTimerRef.current = window.setTimeout(() => {
       hoverClearTimerRef.current = null;
       setHovered(false);
     }, HOVER_BRIDGE_CLEAR_MS);
   }, [clearHoverBridge]);
+  const pointerOverHoverZone = useCallback((clientX: number, clientY: number) => {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return false;
+    return Boolean(wrapperRef.current?.contains(el) || layerRef.current?.contains(el));
+  }, []);
+  const handleHoverZoneEnter = useCallback(() => {
+    clearHoverBridge();
+    setHovered(true);
+  }, [clearHoverBridge]);
+  const handleHoverZoneLeave = useCallback(() => {
+    scheduleHoverClear(true);
+  }, [scheduleHoverClear]);
   // 卸载清 timer：避免迟到的清除回调打在已卸载组件上
   useEffect(() => clearHoverBridge, [clearHoverBridge]);
+  useEffect(() => {
+    if (!hovered) return;
+    const onPointerMove = (event: PointerEvent) => {
+      if (pointerOverHoverZone(event.clientX, event.clientY)) {
+        clearHoverBridge();
+        return;
+      }
+      scheduleHoverClear(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (pointerOverHoverZone(event.clientX, event.clientY)) return;
+      hideHoverToolbar();
+    };
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [hovered, pointerOverHoverZone, clearHoverBridge, scheduleHoverClear, hideHoverToolbar]);
   const isTextGen = data.textGen === true;
   const hasTextGenBody = Boolean(
     (typeof data.text === 'string' && data.text.trim())
@@ -753,10 +794,13 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   return (
     <div
+      ref={wrapperRef}
       className={`${styles.wrapper} ${selected ? styles.selected : ''} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
       onContextMenu={handleContextMenu}
-      onMouseEnter={() => { clearHoverBridge(); setHovered(true); }}
-      onMouseLeave={scheduleHoverClear}
+      onPointerEnter={handleHoverZoneEnter}
+      onPointerLeave={handleHoverZoneLeave}
+      onMouseEnter={handleHoverZoneEnter}
+      onMouseLeave={handleHoverZoneLeave}
       style={nodeTitleSizing(zoom)}
     >
       {/* IKGYYE 钉屏幕迁移：同一层操作位置的两条工具栏（编辑时格式工具栏、其余操作条，
@@ -768,8 +812,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         nodeId={id}
         show={isFocused || showSoloToolbar || hovered}
         toolbarLift={isFocused ? undefined : NODE_BAR_LIFT}
-        onLayerMouseEnter={clearHoverBridge}
-        onLayerMouseLeave={scheduleHoverClear}
+        layerRef={layerRef}
+        onLayerPointerEnter={handleHoverZoneEnter}
+        onLayerPointerLeave={handleHoverZoneLeave}
       >
         {isFocused ? (
           <div

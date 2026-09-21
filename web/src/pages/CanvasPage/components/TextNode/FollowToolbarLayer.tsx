@@ -11,7 +11,7 @@
  * 会在节点卸载 / 离页时和 React 抢 removeChild，整页 NotFoundError。
  * 挂 body 后用 position:fixed + 容器 getBoundingClientRect 偏移，屏幕尺寸仍不随缩放变化。
  * ============================================ */
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../followDialog';
@@ -24,10 +24,12 @@ export interface FollowToolbarLayerProps {
   show: boolean;
   /** 工具条顶边相对卡片顶边的抬升量（屏幕像素，估高 + 间距）；缺省用 FOLLOW_ABOVE_LIFT */
   toolbarLift?: number;
-  /** 层根鼠标进入（IKGYYB hover 桥接）：指针从卡间隙抵达工具条，取消延迟清除 hover */
-  onLayerMouseEnter?: () => void;
-  /** 层根鼠标离开（IKGYYB hover 桥接）：指针移向卡外，重新调度延迟清除（移回卡则被卡 enter 取消） */
-  onLayerMouseLeave?: () => void;
+  /** 层根 DOM，供卡片侧用命中测试判断指针是否还在工具条上 */
+  layerRef?: Ref<HTMLDivElement>;
+  /** 层根指针进入（IKGYYB hover 桥接）：指针从卡间隙抵达工具条，取消延迟清除 hover */
+  onLayerPointerEnter?: () => void;
+  /** 层根指针离开（IKGYYB hover 桥接）：指针移向卡外，重新调度延迟清除（移回卡则被卡 enter 取消） */
+  onLayerPointerLeave?: () => void;
   children: ReactNode;
 }
 
@@ -35,8 +37,9 @@ export default function FollowToolbarLayer({
   nodeId,
   show,
   toolbarLift,
-  onLayerMouseEnter,
-  onLayerMouseLeave,
+  layerRef,
+  onLayerPointerEnter,
+  onLayerPointerLeave,
   children,
 }: FollowToolbarLayerProps) {
   const flowDom = useStore((state) => state.domNode);
@@ -58,6 +61,7 @@ export default function FollowToolbarLayer({
 
   return createPortal(
     <div
+      ref={layerRef}
       className={layerStyles.toolbarLayer}
       data-gen-panel-territory
       style={{
@@ -66,8 +70,10 @@ export default function FollowToolbarLayer({
         top: anchor.top + flowRect.top,
         zIndex: 1,
       }}
-      onMouseEnter={onLayerMouseEnter}
-      onMouseLeave={onLayerMouseLeave}
+      onPointerEnter={onLayerPointerEnter}
+      onPointerLeave={onLayerPointerLeave}
+      onMouseEnter={onLayerPointerEnter}
+      onMouseLeave={onLayerPointerLeave}
     >
       {children}
     </div>,
