@@ -16,6 +16,7 @@ import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+import type { SmartMattingMode } from '../../smartMatting';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
@@ -228,6 +229,10 @@ export interface MediaNodeData {
   /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
    *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
   onSceneSplit?: (id: string) => void;
+  /** 智能抠像（IKHK7N）：进入抠像编辑态（视频卡工具条「智能抠像 ▾」下拉菜单项与触发钮
+   *  直启首项派发，mode 由菜单项决定：portrait=人像抠像、greenscreen=绿幕抠像）；
+   *  置灰门槛见 smartMatting.ts；编辑态本体由 IKHK9N 交付，本票只接通入口事件 */
+  onSmartMatting?: (id: string, mode: SmartMattingMode) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */

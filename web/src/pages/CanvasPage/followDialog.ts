@@ -43,8 +43,10 @@ export const FOLLOW_ABOVE_LIFT = 52;
  *  IKHLKR 首位「HD」单按钮升为「高清 ▾」下拉触发钮后**重新实测**：视频卡工具条 564px
  *  （headless chromium + 仓内 global.css 渲染真实工具条；同环境复核图片卡工具条 473px，
  *  与 ADR-0107 记录一致，测量口径可信），真实半宽约 282，270→288 维持同一 6px 余量。
- *  新增宽度来自触发钮的下拉箭头（ChevronDown 12px + toolBtn gap 6px = +18px）。 */
-export const FOLLOW_ABOVE_HALF_WIDTH = 288;
+ *  新增宽度来自触发钮的下拉箭头（ChevronDown 12px + toolBtn gap 6px = +18px）。
+ *  IKHK7N 视频卡再追加「智能抠像 ▾」（图标+文字+chevron，形状同「智能去字幕 ▾」约 106px），
+ *  与「高清 ▾」并存后估约 670px（真实半宽约 335），288→341 维持同一 6px 余量。 */
+export const FOLLOW_ABOVE_HALF_WIDTH = 341;
 /** 上方锚定垂直钳顶保底（屏幕像素）：卡片顶到视口上方时工具条不被容器裁掉 */
 export const FOLLOW_ABOVE_MIN_TOP = 8;
 

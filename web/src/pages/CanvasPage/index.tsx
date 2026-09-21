@@ -112,6 +112,7 @@ import {
   type SceneSplitGranularity,
   type SceneSplitIdentity,
 } from './sceneSplit';
+import type { SmartMattingMode } from './smartMatting';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
@@ -2088,6 +2089,7 @@ export default function CanvasPage() {
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+          onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -3023,6 +3025,10 @@ export default function CanvasPage() {
     /** 场景切分（IKH8BJ 通道/接线）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发）；
      *  首帧渲染前经由 actionsRef.current.sceneSplit 分派到 handleNodeSceneSplit */
     sceneSplit: (_id: string) => {},
+    /** 智能抠像（IKHK7N 通道/接线）：进入抠像编辑态（视频卡工具条「智能抠像 ▾」下拉
+     *  菜单项与触发钮直启首项派发，mode 定死会话形态：portrait=人像、greenscreen=绿幕）；
+     *  首帧渲染前经由 actionsRef.current.smartMatting 分派到 handleNodeSmartMatting */
+    smartMatting: (_id: string, _mode: SmartMattingMode) => {},
     /** 视频 HD 高清（IKH3VG 通道/接线）：源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条
      *  「HD」徽标按钮派发）；首帧渲染前经由 actionsRef.current.videoEnhance 分派到
      *  handleNodeVideoEnhance */
@@ -4545,6 +4551,7 @@ export default function CanvasPage() {
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+        onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onFrameInterpolation: (id: string) => actionsRef.current.frameInterpolation(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4594,6 +4601,7 @@ export default function CanvasPage() {
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+        onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4655,6 +4663,7 @@ export default function CanvasPage() {
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+        onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5146,6 +5155,7 @@ export default function CanvasPage() {
       onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
       onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
       onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+      onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
       onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5538,6 +5548,7 @@ export default function CanvasPage() {
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+          onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -6421,6 +6432,7 @@ export default function CanvasPage() {
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+        onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -8606,6 +8618,12 @@ export default function CanvasPage() {
     });
   };
 
+  /** 智能抠像（IKHK7N 入口占位）：置灰门槛已在工具条置灰层完成（smartMattingGateReason），
+   *  此处只接通入口事件派发。TODO(IKHK9N)：编辑态本体（源卡停帧锁定、编辑态单条、输出
+   *  格式与背景色、发送闭环与结果卡）由后续票交付，届时在此按 mode 进入抠像编辑会话
+   *  （工具会话口径对齐 handleNodeSceneSplit 的 runToolSessionEntry 先例）。 */
+  const handleNodeSmartMatting = (_id: string, _mode: SmartMattingMode) => {};
+
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
   const handleCropPresetChange = (key: CropPresetKey) => {
@@ -9302,6 +9320,7 @@ export default function CanvasPage() {
   actionsRef.current.trimAudio = handleNodeTrimAudio;
   actionsRef.current.vocalBackgroundSplit = handleNodeVocalBackgroundSplit;
   actionsRef.current.sceneSplit = handleNodeSceneSplit;
+  actionsRef.current.smartMatting = handleNodeSmartMatting;
   actionsRef.current.videoEnhance = handleNodeVideoEnhance;
   actionsRef.current.frameInterpolation = handleNodeFrameInterpolation;
   actionsRef.current.download = handleNodeDownload;
@@ -9917,6 +9936,7 @@ export default function CanvasPage() {
               onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
               onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
               onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
+              onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
