@@ -812,13 +812,49 @@ class VideoJobProcessorTest {
 
         processor.handle("601");
 
-        verify(stateMachine, never()).failVideoJob(anyString(),
-                eq(GenerationError.ERROR_UNSUPPORTED_INPUT), anyString(), any(), anyString(), anyLong());
+        // 断言的是不变式「这个 job 没被判失败」，不是「没抛被删门控的那个错误码」——
+        // 后者只钉住 unsupported_input，将来若有谁重加一道名字门控换了错误码就漏过去了。
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
         assertThat(captor.getValue().model()).isEqualTo("doubao-seedance-2-5-260628");
         assertThat(captor.getValue().references())
                 .containsExactly(new VideoReference("video", "http://video.mp4", null));
+    }
+
+    @Test
+    @DisplayName("IKHBDO 回归：带参考音频的 job 同样不再按模型名放行——2.5（非 seedance-2 / 非 doubao-seedance-2-0）照常提交")
+    void referenceAudioAcceptedForNonSeedance2Model() {
+        // 被删的门控是 `(videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)`——
+        // 视频与音频两半一起拒。上面那条只钉住视频半：音频夹具全都用 baseInput()，其
+        // model_id="seedance-2" 恰好**匹配**旧前缀，所以重加一道「只对音频生效」的名字门控
+        // 完全不会红。本用例改用同一真实型号（不匹配旧前缀）+ 参考音频。
+        Map<String, Object> input = baseInput();
+        input.put("model_id", "doubao-seedance-2-5-260628");
+        input.put("references", List.of(Map.of(
+                "role", "reference", "type", "audio", "asset_id", "9")));
+        // 音频参考没有物理边界校验（validateReferenceVideo 只对视频生效），放行的唯一前提是
+        // 数量不超上限：这里无冻结快照 → 回落旧常量 audio_reference_max=3，实际 1 条。
+        doReturn(Map.of("9", audioAsset()))
+                .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+        ClaimedVideoJobDto claim = videoClaim("602", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("602"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikhbdo-audio", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("602"), anyString(), eq(1L), eq("task-ikhbdo-audio"));
+
+        processor.handle("602");
+
+        // 同上：只断言「没被判失败」，不绑定任何具体错误码。
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        assertThat(captor.getValue().model()).isEqualTo("doubao-seedance-2-5-260628");
+        assertThat(captor.getValue().references())
+                .containsExactly(new VideoReference("audio", "http://audio.mp3", null));
     }
 
     // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========

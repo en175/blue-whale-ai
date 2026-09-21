@@ -2436,7 +2436,7 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
 
     expect(result.code).toBe(400);
     expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
-    expect((result.data as { code: string }).code).toBe(ERROR_MODEL_UNAVAILABLE);
+    expect(result.data?.code).toBe(ERROR_MODEL_UNAVAILABLE);
     expect(createJob).not.toHaveBeenCalled();
   });
 });
