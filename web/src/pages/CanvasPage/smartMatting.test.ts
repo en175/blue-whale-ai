@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VIDEO_MATTING_MAX_DURATION_MS } from '@lib/contracts/video-matting';
 import {
   SMART_MATTING_ENTRY_HINT,
   SMART_MATTING_GREENSCREEN_HINT,
@@ -10,6 +11,10 @@ import {
 } from './smartMatting';
 
 describe('smartMattingGateReason（智能抠像门槛预检，IKHK7N）', () => {
+  it('时长上限单源：web 门槛秒值与契约 VIDEO_MATTING_MAX_DURATION_MS 同值（防重新硬编码漂移）', () => {
+    expect(SMART_MATTING_MAX_DURATION_SECONDS * 1000).toBe(VIDEO_MATTING_MAX_DURATION_MS);
+  });
+
   it('已关联资产且时长未超限放行（assetId 字符串/数字形态均放行）', () => {
     expect(smartMattingGateReason({ assetId: '5' })).toBeNull();
     expect(smartMattingGateReason({ assetId: 9 })).toBeNull();

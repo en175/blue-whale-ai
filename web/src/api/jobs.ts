@@ -18,6 +18,11 @@ import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
+import type {
+  VideoMattingBackgroundColor,
+  VideoMattingFormat,
+  VideoMattingMode,
+} from '@lib/contracts/video-matting';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -607,9 +612,9 @@ export function createVideoSceneSplit(
 export interface CreateVideoMattingPayload {
   source_asset_id: string;
   target_node_id: string;
-  mode: 'portrait' | 'greenscreen';
-  format: 'WEBM' | 'MP4';
-  background_color?: 'white' | 'black' | 'green';
+  mode: VideoMattingMode;
+  format: VideoMattingFormat;
+  background_color?: VideoMattingBackgroundColor;
   client_token: string;
 }
 

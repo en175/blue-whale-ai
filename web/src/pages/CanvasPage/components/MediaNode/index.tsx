@@ -734,6 +734,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               onLoadedMetadata={handleVideoMetadata}
               style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
             />
+            {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
+                左下角半透明胶囊标注「透明背景 · WEBM」，与棋盘格一起标识透明产物；
+                仅 transparentOutput 标记卡渲染，MP4 纯色结果不渲染 */}
+            {data.transparentOutput === true && (
+              <span className={styles.transparentTag} data-testid="video-transparent-tag">
+                透明背景 · WEBM
+              </span>
+            )}
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
                 仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}
             {data.subtitleEraseEditing && (

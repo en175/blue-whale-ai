@@ -215,6 +215,23 @@
   background-size: 16px 16px;
 }
 
+/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 .rcard .screen .alphatag）：
+   视频区左下角半透明深底胶囊，注明产物为透明背景 WebM（MP4 纯色结果不渲染）；静态纯视觉、
+   不接管指针（pointer-events: none），点击/播放操作仍落到视频本体。 */
+.transparentTag {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
 .mediaVideo {
   display: block;
   width: 100%;

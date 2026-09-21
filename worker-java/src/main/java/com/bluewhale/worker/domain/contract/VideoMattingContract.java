@@ -113,7 +113,8 @@ public final class VideoMattingContract {
     public static final String DEFAULT_BACKGROUND_COLOR = "white";
 
     // ========== 提交参数键名（两模式共用同一组官方 body 参数；画布创建入口的 input 冻结形态
-    //            〔source_asset_id / target_node_id 等〕由创建入口票按家族先例扩展） ==========
+    //            〔source_asset_id / target_node_id / mode / format / background_color〕已由
+    //            IKHK98 创建入口落到 INPUT_KEY_* 常量，与本组同源） ==========
 
     /** 待处理视频的公网可访问 URL（worker 出站前由源 Asset url 解析，Asset url 落库即 public-read）。 */
     public static final String SUBMIT_KEY_VIDEO_URL = "video_url";
@@ -140,7 +141,8 @@ public final class VideoMattingContract {
     // ========== 使用限制口径（文档出处：官方 PDF「参考信息」表——支持 mp4 / flv / ts / avi /
     //            mov / mkv 等主流格式〔开放式列举〕，建议单输入 ≤10 GB，处理耗时通常为视频
     //            时长 1~3 倍）：不做格式预检白名单与大小预检（家族口径），口径单源在 TS 契约注释；
-    //            时长门槛与轮询窗口上限由创建入口票 / worker 票按 ADR-0112 定值 ==========
+    //            时长门槛 10 分钟已定值于 TS 契约 VIDEO_MATTING_MAX_DURATION_MS（IKHK98 服务端
+    //            复核同源），轮询窗口上限 720 次由执行票 IKHK99 定值 ==========
 
     // ========== 错误码（数值 1049 见 error-codes.ts ERROR_VIDEO_MATTING_FAILED；
     //            1048 已由音频截取占用） ==========

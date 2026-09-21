@@ -394,7 +394,9 @@ describe('IKHK9N 四路退出：未发送退出画布无痕迹', () => {
 });
 
 describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
-  type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit';
+  /** 视频卡可进入的既有会话（含新近接入的架构家族三项；音频卡会话 audioTrim 见下方单例
+   *  ——其源卡是音频节点，本组 seed 只有图/视频两卡，单列一例补 seed） */
+  type Kind = 'erase' | 'cutout' | 'crop' | 'outpaint' | 'subtitleErase' | 'audioVideoSplit' | 'sceneSplit' | 'vocalSplit';
   const SESSION_UI_TESTID: Record<Kind, string> = {
     erase: 'erase-send-bar',
     cutout: 'cutout-toolbar',
@@ -402,8 +404,12 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
     outpaint: 'outpaint-dialog',
     subtitleErase: 'subtitle-erase-send-bar',
     audioVideoSplit: 'audio-video-split-send-bar',
+    sceneSplit: 'scene-split-send-bar',
+    vocalSplit: 'vocal-split-send-bar',
   };
-  const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit'];
+  const KINDS: Kind[] = [
+    'erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit', 'sceneSplit', 'vocalSplit',
+  ];
 
   /** 进入既有会话（图片工具经图片卡 handler，视频工具经视频卡 handler） */
   async function enterSession(kind: Kind) {
@@ -415,7 +421,9 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
       else if (kind === 'crop') image.onCropImage('i1');
       else if (kind === 'outpaint') image.onOutpaintImage('i1');
       else if (kind === 'subtitleErase') video.onVideoSubtitleErase('v1', 'smart');
-      else video.onAudioVideoSplit('v1');
+      else if (kind === 'audioVideoSplit') video.onAudioVideoSplit('v1');
+      else if (kind === 'sceneSplit') video.onSceneSplit('v1');
+      else video.onVocalBackgroundSplit('v1');
     });
   }
 
@@ -440,9 +448,45 @@ describe('IKHK9N 与既有会话互斥（集中协调器口径）', () => {
     expect(sendBar()).toBeTruthy();
     await enterSession(kind);
     expect(sendBar()).toBeNull();
-    // 音视频分离接管时同样向 v1 注入 splitEditing（同款源卡锁定标记），不作 undefined 断言
-    if (kind !== 'audioVideoSplit') expect(v1Data().splitEditing).toBeUndefined();
+    // 音视频分离/场景切分/人声背景分离接管时同样向 v1 注入 splitEditing（同款源卡锁定标记），
+    // 不作 undefined 断言
+    if (kind !== 'audioVideoSplit' && kind !== 'sceneSplit' && kind !== 'vocalSplit') {
+      expect(v1Data().splitEditing).toBeUndefined();
+    }
     expect(sessionUi(kind)).toBeTruthy();
+  });
+
+  it('音频卡会话（截取）与智能抠像互斥：源卡为音频节点，补 seed 单例覆盖', async () => {
+    // 补一张音频卡（口径同 audioTrimEdit.test.tsx 的 a1），其余 seed 不变
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    doc.nodes.push({
+      id: 'a1',
+      type: 'mediaNode',
+      position: { x: 400, y: 400 },
+      data: {
+        src: 'http://aud/a1.mp3',
+        mediaType: 'audio',
+        fileName: '播客片头.mp3',
+        assetId: '8',
+        duration: 15,
+        mime: 'audio/mpeg',
+      },
+    });
+    await renderPage();
+    const audio = fullNode('a1').data as Record<string, (nodeId: string) => void>;
+    await act(async () => {
+      audio.onTrimAudio('a1');
+    });
+    expect(document.body.querySelector('[data-testid="audio-trim-send-bar"]')).toBeTruthy();
+    await enterSmartMatting('greenscreen');
+    expect(document.body.querySelector('[data-testid="audio-trim-send-bar"]')).toBeNull();
+    expect(sendBar()).toBeTruthy();
+    // 反向：抠像中进入截取，抠像退出
+    await act(async () => {
+      audio.onTrimAudio('a1');
+    });
+    expect(sendBar()).toBeNull();
+    expect(document.body.querySelector('[data-testid="audio-trim-send-bar"]')).toBeTruthy();
   });
 });
 

@@ -372,6 +372,12 @@ describe("video_matting 双端一致性（读 worker-java 源码文本，防漂�
     }
   });
 
+  it("VideoMattingContract：五 input 键名与 TS 同值（冻结形态跨进程单源，先例同场景切分/去字幕）", () => {
+    for (const key of Object.values(VIDEO_MATTING_INPUT_KEYS)) {
+      expect(contractJava).toContain(`= "${key}";`);
+    }
+  });
+
   it("执行面兜底码 video_matting_failed → 1049（1048 已由音频截取占用），Java 契约侧常量同步", () => {
     expect(ERROR_VIDEO_MATTING_FAILED).toBe("video_matting_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1049);

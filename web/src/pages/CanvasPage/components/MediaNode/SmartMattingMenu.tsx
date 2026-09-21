@@ -9,7 +9,10 @@
  *    两项纯文字 = 「人像抠像」（任意视频只识别人物主体）+「绿幕抠像」（绿幕/纯色背景
  *    素材，主体可为人、物品、动物），各项 title 恒为自己的 hint（置灰时仍能看两项说明，
  *    理解置灰是整卡门槛，同去字幕规格故事 7 口径）；
- *  - 触发钮图标 WandSparkles + 文案「智能抠像」+ ChevronDown；可用态触发钮 title 保留
+ *  - 触发钮图标 WandSparkles（IKHK7N 本票定稿，弃原型占位 Scissors：跨媒体同功能同图标
+ *    ——图片卡「抠图」同为自动识别主体移背景，家族有 Download/Info 跨媒体同图标先例，
+ *    ADR-0112 亦沿用图像抠图的棋盘格视觉语言；Scissors 已被音频卡「截取」占用，共用会
+ *    造成同产品同图标双语义）+ 文案「智能抠像」+ ChevronDown；可用态触发钮 title 保留
  *    入口效果边界说明（同 AudioVideoSplitMenu triggerHint 口径）。
  * 菜单就地渲染在工具条 wrap 内（同 SubtitleEraseMenu，不 portal）：DOM 位于
  * NodeFollowToolbar 钉屏幕容器（根元素带 data-gen-panel-territory）内，菜单项点击既不落

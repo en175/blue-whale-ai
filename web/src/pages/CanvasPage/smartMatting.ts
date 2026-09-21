@@ -13,8 +13,11 @@ import {
   VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
   VIDEO_MATTING_DEFAULT_FORMAT,
   VIDEO_MATTING_FORMATS,
+  VIDEO_MATTING_MAX_DURATION_MS,
+  VIDEO_MATTING_MODES,
   type VideoMattingBackgroundColor,
   type VideoMattingFormat,
+  type VideoMattingMode,
 } from '@lib/contracts/video-matting';
 import { readJobFailText } from '@/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
@@ -25,8 +28,10 @@ export const SMART_MATTING_ENTRY_HINT = '识别人物或绿幕主体并移除背
 /** 置灰原因一（同场景切分：视频未关联资产时入口不可用） */
 export const SMART_MATTING_MISSING_ASSET_REASON = '当前视频尚未关联资产，无法智能抠像';
 
-/** 10 分钟时长上限（秒）：时长超限且有数据时置灰；恰好 600 放行（超限才拦） */
-export const SMART_MATTING_MAX_DURATION_SECONDS = 600;
+/** 10 分钟时长上限（秒）：时长超限且有数据时置灰；恰好 600 放行（超限才拦）。
+ *  数值单源在契约 VIDEO_MATTING_MAX_DURATION_MS（口径同去字幕 web 侧引契约常量先例
+ *  videoSubtitleErase.ts：前端门槛预检与服务端复核同值，改契约即两端同步）。 */
+export const SMART_MATTING_MAX_DURATION_SECONDS = VIDEO_MATTING_MAX_DURATION_MS / 1000;
 
 /** 置灰原因二：时长超 10 分钟且有时长数据（时长缺失不判，由后端按权威数据复核） */
 export const SMART_MATTING_OVER_DURATION_REASON = '视频超过 10 分钟，暂不支持智能抠像';
@@ -54,10 +59,14 @@ export function smartMattingGateReason(source: SmartMattingGateSource): string |
 
 /* ============ 抠像模式（ADR-0112：模式前置到入口下拉） ============ */
 
-/** 抠像模式（ADR-0112：双模式对齐火山 matte-portrait-video / matte-greenscreen-video
- *  两端点）：入口菜单两项各进一种会话，会话内不互切（换模式 = 退出后从菜单重选，
- *  去字幕家族口径）；触发钮点击直启首项「人像抠像」（portrait）。 */
-export type SmartMattingMode = 'portrait' | 'greenscreen';
+/** 抠像模式两值：契约 VIDEO_MATTING_MODES 再导出（枚举值只此一份，口径同
+ *  sceneSplit.ts / audioVideoSplit.ts 再导出先例）。双模式对齐火山
+ *  matte-portrait-video / matte-greenscreen-video 两端点：入口菜单两项各进一种会话，
+ *  会话内不互切（换模式 = 退出后从菜单重选，去字幕家族口径）；触发钮点击直启首项
+ *  「人像抠像」（portrait）。 */
+export const SMART_MATTING_MODES = VIDEO_MATTING_MODES;
+
+export type SmartMattingMode = VideoMattingMode;
 
 /** 首项「人像抠像」菜单项悬停说明（工单验收：任意视频只识别人物主体） */
 export const SMART_MATTING_PORTRAIT_HINT = '任意视频，自动识别人物主体';

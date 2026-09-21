@@ -207,10 +207,12 @@ export const videoMattingSubmitSchema = z
   });
 export type VideoMattingSubmit = z.infer<typeof videoMattingSubmitSchema>;
 
-/** result 冻结键名（跨进程结果契约——worker 写入、前端成品卡回填消费都用本组键；官方
- *  查询 result 的本仓跨进程形态：video_url 为**转存自有存储后的公开读产物地址**——官方
- *  result.video_url 是 24h 临时链接**不跨进程落库**（即收即转存 TOS，家族口径），
- *  resolution / duration 官方同名同值透传）。 */
+/** result 冻结键名（跨进程结果契约——worker 写入终态 payload 双通道〔终态日志 + status_changed
+ *  事件〕；官方查询 result 的本仓跨进程形态：video_url 为**转存自有存储后的公开读产物地址**
+ *  ——官方 result.video_url 是 24h 临时链接**不跨进程落库**（即收即转存 TOS，家族口径），
+ *  resolution / duration 官方同名同值透传）。前端成品卡回填走 asset 通道（产物 Asset 的
+ *  url/宽高/时长，先例同 HD/去字幕）；本组键当前无前端消费方，任务详情投影暂只按场景切分
+ *  schema 出 result（jobs.service.ts），抠像 result 恒 null——保留本契约供后续消费者使用。 */
 export const VIDEO_MATTING_RESULT_KEYS = {
   /** 抠像结果产物地址（自有存储公开读 URL；worker 下载官方产物转存后回填，不得直连
    *  火山 24h 临时链接）。 */
