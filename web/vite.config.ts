@@ -163,11 +163,11 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       // 仅真正的 Vite dev server 启用。Vitest 的 command 也是 serve，
-      // 这个插件会挂住 websocket，导致 `vitest run` 退不出、门禁被 close timeout 误杀。
+      // code-inspector / TOS 代理会挂住连接，导致 `vitest run` 退不出、门禁被 close timeout 误杀。
       command === 'serve' && !process.env.VITEST && codeInspectorPlugin({ bundler: 'vite' }),
       react(),
-      tosUploadProxy(),
-      tosFetchProxy(),
+      !process.env.VITEST && tosUploadProxy(),
+      !process.env.VITEST && tosFetchProxy(),
     ],
     resolve: {
       alias: {
