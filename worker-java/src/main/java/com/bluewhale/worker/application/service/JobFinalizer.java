@@ -684,6 +684,39 @@ public class JobFinalizer {
     }
 
     /**
+     * 发布 video_matting 结果（IKHK99，父规格 IKHJRC，契约 IKHK7F，附录 C 触点⑤）。
+     * <p>
+     * 免费工具无结算联动，同 {@link #publishVideoEnhanceResult} 形态（单槽单 asset、双事件，
+     * 走 {@link #publishSingleAssetResult} 模板）；差异 = **契约 result 三键落终态日志 payload**
+     * （键序 video_url→resolution→duration，video_enhance 的 resolution/fps 先例）：
+     * video_url（转存自有存储后的公开读地址——官方 24h 临时链接不落库）/ resolution / duration
+     * 按 VideoMattingContract.RESULT_KEY_* 组装为结果字段承载位（当前前端走 asset 通道回填
+     * 成品卡，本组键为契约承载位，见 backend/libs/contracts/video-matting.ts 注释）。
+     */
+    @Transactional
+    public boolean publishVideoMattingResult(
+            com.bluewhale.worker.domain.dto.PublishVideoMattingDto input) {
+        java.util.Map<String, Object> extraLogPayload = new java.util.LinkedHashMap<>();
+        extraLogPayload.put(
+                com.bluewhale.worker.domain.contract.VideoMattingContract.RESULT_KEY_VIDEO_URL,
+                input.url());
+        extraLogPayload.put(
+                com.bluewhale.worker.domain.contract.VideoMattingContract.RESULT_KEY_RESOLUTION,
+                input.resolution());
+        extraLogPayload.put(
+                com.bluewhale.worker.domain.contract.VideoMattingContract.RESULT_KEY_DURATION,
+                input.durationSec() != null ? input.durationSec() : 0);
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[video_matting] publishVideoMattingResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                input.width(), input.height(),
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "智能抠像完成", extraLogPayload));
+    }
+
+    /**
      * 发布 video_scene_split 结果（IKH8BP，父规格 IKH86V，附录 C 触点⑤）。
      * <p>
      * 免费工具无结算联动，同 {@link #publishVideoEnhanceResult} 形态（守卫复用

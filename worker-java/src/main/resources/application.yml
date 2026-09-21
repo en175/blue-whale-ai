@@ -31,6 +31,7 @@ worker:
     video-enhance: ${VIDEO_ENHANCE_CONCURRENCY:5}
     vocal-split: ${VOCAL_SPLIT_CONCURRENCY:5}
     video-scene-split: ${VIDEO_SCENE_SPLIT_CONCURRENCY:5}
+    video-matting: ${VIDEO_MATTING_CONCURRENCY:5}
     video-frame-interpolation: ${VIDEO_FRAME_INTERPOLATION_CONCURRENCY:5}
 
 rocketmq:

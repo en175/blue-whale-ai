@@ -40,6 +40,30 @@ public final class VideoMattingContract {
      *  claim SQL 的 source 白名单仅含本值。 */
     public static final String SOURCE = "video_matting";
 
+    // ========== input 冻结键名（IKHK99 worker 执行面按家族先例扩展——键名跨进程单源在
+    //            本类，创建入口（IKHK98）与 worker 解析一律引用本组常量，禁止另行发明字面量；
+    //            业务键恒在、值恒为合法枚举，创建时定死，重试原样沿用。provider_credential
+    //            是业务键之上的基础设施键（创建侧冻结落库，同 VideoSubtitleEraseContract 口径）。
+
+    /** 源素材身份（被抠像的视频 Asset id）。 */
+    public static final String INPUT_KEY_SOURCE_ASSET_ID = "source_asset_id";
+
+    /** 目标节点身份（画布任务占位卡 node id，前端生成传入；worker 不消费画布拓扑）。 */
+    public static final String INPUT_KEY_TARGET_NODE_ID = "target_node_id";
+
+    /** 抠像模式（portrait / greenscreen；**不进出站提交参数**——选择端点即选择模式，
+     *  worker 按它经 {@link #SUBMIT_PATHS} / {@link #MODEL_NAMES} 分流，值域见
+     *  {@link #SUPPORTED_MODES}）。 */
+    public static final String INPUT_KEY_MODE = "mode";
+
+    /** 输出格式（WEBM / MP4，值域见 {@link #SUPPORTED_FORMATS}；创建侧补缺省后冻结，
+     *  出站同名同值透传官方 format 参数）。 */
+    public static final String INPUT_KEY_FORMAT = "format";
+
+    /** MP4 纯色背景色（white / black / green，值域见 {@link #SUPPORTED_BACKGROUND_COLORS}；
+     *  仅 format=MP4 时在冻结 input 中（创建侧补缺省 white 后冻结），出站仅此时显式携带。 */
+    public static final String INPUT_KEY_BACKGROUND_COLOR = "background_color";
+
     // ========== 抠像模式枚举（本仓产品语义命名，双模式与官方两个工具端点一一对应） ==========
     // 模式不进提交参数（选择端点即选择模式）；模式选择前置在入口下拉直选，不跨会话记忆（ADR-0112）。
 

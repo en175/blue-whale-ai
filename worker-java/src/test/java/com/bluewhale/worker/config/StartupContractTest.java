@@ -74,6 +74,8 @@ class StartupContractTest {
                     () -> mock(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class))
             .withBean(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class,
                     () -> mock(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoMattingJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoMattingJobProcessor.class))
             .withBean(com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor.class,
                     () -> mock(com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor.class))
             .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
@@ -154,7 +156,7 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 十五个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十四个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
         // Map.of 最多 10 对，audio_trim/vocal_split/video_scene_split/video_matting/video_frame_interpolation 加入后为 15 入口用 Map.ofEntries（entry 静态导入见文件头）。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(

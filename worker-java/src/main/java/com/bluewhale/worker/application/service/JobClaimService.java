@@ -154,6 +154,18 @@ public class JobClaimService {
             List.of(com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.SOURCE);
 
     /**
+     * video_matting 租约 420s（IKHK99，父规格 IKHJRC，契约 IKHK7F）：轮询到点步是短查询，但
+     * completed 步要在同一租约窗口内完成抠像结果视频下载（输入可达 10GB 级）+ TOS 转存——
+     * 取 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投；
+     * 转存前另有 updateVideoMattingProgress 心跳续租推回窗口）。
+     */
+    private static final int VIDEO_MATTING_LEASE_SECONDS = 420;
+
+    /** video_matting claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「智能抠像 ▾」下拉）。 */
+    private static final List<String> VIDEO_MATTING_CLAIM_SOURCES =
+            List.of(com.bluewhale.worker.domain.contract.VideoMattingContract.SOURCE);
+
+    /**
      * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
      * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
      * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
@@ -712,6 +724,49 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    /**
+     * 领取 video_matting 作业（IKHK99，父规格 IKHJRC，契约 IKHK7F，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
+     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     */
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto> claimVideoMatting(
+            String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                com.bluewhale.worker.domain.contract.VideoMattingContract.TAG,
+                VIDEO_MATTING_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_MATTING_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[video_matting] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

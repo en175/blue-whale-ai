@@ -45,6 +45,7 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> videoEnhanceProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> vocalSplitProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> videoSceneSplitProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> videoMattingProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProvider;
     @Mock private GenerationMessageProducer videoProducer;
     @Mock private GenerationMessageProducer imageProducer;
@@ -59,6 +60,7 @@ class RecoveryServiceTest {
     @Mock private GenerationMessageProducer videoEnhanceProducer;
     @Mock private GenerationMessageProducer vocalSplitProducer;
     @Mock private GenerationMessageProducer videoSceneSplitProducer;
+    @Mock private GenerationMessageProducer videoMattingProducer;
     @Mock private GenerationMessageProducer videoFrameInterpolationProducer;
 
     private RecoveryService service;
@@ -78,6 +80,7 @@ class RecoveryServiceTest {
         when(videoEnhanceProvider.getIfAvailable()).thenReturn(videoEnhanceProducer);
         when(vocalSplitProvider.getIfAvailable()).thenReturn(vocalSplitProducer);
         when(videoSceneSplitProvider.getIfAvailable()).thenReturn(videoSceneSplitProducer);
+        when(videoMattingProvider.getIfAvailable()).thenReturn(videoMattingProducer);
         when(videoFrameInterpolationProvider.getIfAvailable()).thenReturn(videoFrameInterpolationProducer);
         when(jobMapper.listDueVideoJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of());
@@ -92,12 +95,14 @@ class RecoveryServiceTest {
         when(jobMapper.listDueVideoEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVocalSplitJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVideoSceneSplitJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueVideoMattingJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVideoFrameInterpolationJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
                 audioProvider, extractProvider, audioTrimProvider, imageEnhanceProvider,
                 imageEraseProvider, imageCutoutProvider, imageOutpaintProvider,
-                videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider, videoSceneSplitProvider,
-                videoFrameInterpolationProvider, MAX_AGE_MINUTES);
+                videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider,
+                videoSceneSplitProvider, videoMattingProvider, videoFrameInterpolationProvider,
+                MAX_AGE_MINUTES);
     }
 
     @Test
