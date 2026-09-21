@@ -8,6 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReactFlowProvider } from '@xyflow/react';
 import MediaNode, { type MediaGenStatus } from './index';
 
+/** IKHIT1：只替换手柄重测钩子以断言调用时机，其余导出（Provider/Handle/useStore）
+    保持官方实现；jsdom 不起真实 ReactFlow 测量。 */
+const updateNodeInternalsMock = vi.hoisted(() => vi.fn());
+vi.mock('@xyflow/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@xyflow/react')>();
+  return { ...actual, useUpdateNodeInternals: () => updateNodeInternalsMock };
+});
+
 let root: Root;
 let mountNode: HTMLDivElement;
 
@@ -25,6 +33,34 @@ interface RenderExtra {
   data?: Record<string, unknown>;
 }
 
+function nodeElement(
+  mediaType: 'image' | 'video' | 'audio',
+  extra?: RenderExtra,
+) {
+  return createElement(ReactFlowProvider, null, createElement(MediaNode, {
+    id: extra?.id ?? `${mediaType}-node`,
+    data: {
+      mediaType,
+      src: 'blob:test',
+      fileName: `${mediaType}.bin`,
+      genStatus: extra?.genStatus,
+      progress: extra?.progress,
+      errorText: extra?.errorText,
+      ...extra?.data,
+    },
+    selected: extra?.selected ?? true,
+    type: 'mediaNode',
+    dragging: false,
+    zIndex: 1,
+    selectable: true,
+    deletable: true,
+    draggable: true,
+    isConnectable: true,
+    positionAbsoluteX: 0,
+    positionAbsoluteY: 0,
+  } as never));
+}
+
 async function renderNode(
   mediaType: 'image' | 'video' | 'audio',
   extra?: RenderExtra,
@@ -33,30 +69,17 @@ async function renderNode(
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(
-      createElement(ReactFlowProvider, null, createElement(MediaNode, {
-        id: extra?.id ?? `${mediaType}-node`,
-        data: {
-          mediaType,
-          src: 'blob:test',
-          fileName: `${mediaType}.bin`,
-          genStatus: extra?.genStatus,
-          progress: extra?.progress,
-          errorText: extra?.errorText,
-          ...extra?.data,
-        },
-        selected: extra?.selected ?? true,
-        type: 'mediaNode',
-        dragging: false,
-        zIndex: 1,
-        selectable: true,
-        deletable: true,
-        draggable: true,
-        isConnectable: true,
-        positionAbsoluteX: 0,
-        positionAbsoluteY: 0,
-      } as never)),
-    );
+    root.render(nodeElement(mediaType, extra));
+  });
+}
+
+/** 同实例重渲（IKHIT1）：复用既有 root 更新属性，不断组件身份 */
+async function rerenderNode(
+  mediaType: 'image' | 'video' | 'audio',
+  extra?: RenderExtra,
+) {
+  await act(async () => {
+    root.render(nodeElement(mediaType, extra));
   });
 }
 
@@ -758,5 +781,24 @@ describe('MediaNode 音视频分离编辑态锁定层（IKH28U）', () => {
     // 未注入的正常视频卡不渲染锁定层
     await renderNode('video', {});
     expect(mountNode.querySelector('[data-testid="split-lock-layer"]')).toBeNull();
+  });
+});
+
+describe('MediaNode 手柄显隐翻转重测（IKHIT1）', () => {
+  /** React Flow 只在首测与尺寸变化时量 handleBounds：同尺寸下显隐翻转必须手动补测
+      （IKHHCN 根因），否则新挂手柄不注册、拖线静默失效。挂载首测跳过是 jsdom 缺
+      DOMMatrixReadOnly 桩的既定口径（冗余首调会崩测试文件），本用例一并锁住。 */
+  it('draft 挂载首测与显隐不变的 rerender 都不调；draft→generating 翻转重测一次', async () => {
+    updateNodeInternalsMock.mockClear();
+    await renderNode('image', { genStatus: 'draft', data: { src: '', draft: true } });
+    expect(updateNodeInternalsMock).not.toHaveBeenCalled();
+    // 显隐不变的 rerender（仅改名）：不补测
+    await rerenderNode('image', { genStatus: 'draft', data: { src: '', draft: true, fileName: '改名后' } });
+    expect(updateNodeInternalsMock).not.toHaveBeenCalled();
+    // 同实例 draft→generating：右侧出源手柄补挂（显隐翻转），须重测一次；
+    // 随 genStatus 翻转 src 也从 '' 回落默认 blob:test（data 整体重传），断言只认调用次数
+    await rerenderNode('image', { genStatus: 'generating', progress: 0 });
+    expect(updateNodeInternalsMock).toHaveBeenCalledTimes(1);
+    expect(updateNodeInternalsMock).toHaveBeenCalledWith('image-node');
   });
 });
