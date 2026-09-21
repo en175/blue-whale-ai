@@ -784,6 +784,43 @@ class VideoJobProcessorTest {
         assertThat(error.getMessage()).contains("参考视频最多 3 个");
     }
 
+    // ========== IKHBDO 回归：参考视频校验不含模型名知识 ==========
+
+    @Test
+    @DisplayName("IKHBDO 回归：带参考视频的 job 不再按模型名前缀放行——2.5（非 seedance-2 / 非 doubao-seedance-2-0）照常提交")
+    void referenceVideoAcceptedForNonSeedance2Model() {
+        // 症状：曾有一道 `isSeedance2Model(SEEDANCE2_PATTERN)` 前缀门控，把能力行为
+        // features.video_reference=true 的 Seedance 2.5 拒成 unsupported_input，却给 2.0 放行。
+        // 本用例的 model_id 是真实已配置型号且**不匹配** `^seedance-2$|^doubao-seedance-2-0(?:-|$)`。
+        Map<String, Object> input = baseInput();
+        input.put("model_id", "doubao-seedance-2-5-260628");
+        input.put("references", List.of(Map.of(
+                "role", "reference", "type", "video", "asset_id", "9")));
+        // 物理约束全部满足，断言不可能「因先被某条边界拦下」而误绿：
+        // size 1024B ∈ (0,200MB]、时长 5s ≥ 2s、单边 1280/720 ∈ [300,6000]、
+        // 总像素 921,600 ∈ [409600,8295044]、宽高比 1.78 ∈ [0.4,2.5]、mime video/mp4。
+        doReturn(Map.of("9", videoAsset(1024L, 5000, 1280, 720, "video/mp4")))
+                .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+        ClaimedVideoJobDto claim = videoClaim("601", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("601"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikhbdo", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("601"), anyString(), eq(1L), eq("task-ikhbdo"));
+
+        processor.handle("601");
+
+        verify(stateMachine, never()).failVideoJob(anyString(),
+                eq(GenerationError.ERROR_UNSUPPORTED_INPUT), anyString(), any(), anyString(), anyLong());
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        assertThat(captor.getValue().model()).isEqualTo("doubao-seedance-2-5-260628");
+        assertThat(captor.getValue().references())
+                .containsExactly(new VideoReference("video", "http://video.mp4", null));
+    }
+
     // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========
 
     @Nested

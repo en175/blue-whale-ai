@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ERROR_MODEL_UNAVAILABLE } from "@lib/contracts";
+
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 
 // IK9ILQ：音频生成接入 —— 校验分支单测。
@@ -2384,5 +2386,57 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     expect(rejected.code).toBe(400);
     expect(rejected.msg).toContain('参考图最多 5 张');
     expect(strict.createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKHBDO：模型 id **原样取用**，只认运营配置的目录行。
+// 这里曾有一张 `VIDEO_MODEL_ALIASES = { "seedance-2": "doubao-seedance-2-0-260128" }` 的旧前端
+// 兼容表，在**白名单查询之前**改写 model_id。按「配置永远第一」这是个反例：别名表是写死的，
+// 而它抢在配置之前生效——运营若真配一行 model_id 就叫 `seedance-2`，请求会被改写成 2.0 那行，
+// 那一行永远赢不了。故删除，改为原样取用：非目录 id 一律以 400 明确失败，而不是被静默改写。
+describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）', () => {
+  const videoDepsWithCatalogue = (modelIds: string[]) => {
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: '1', cursor: 1 });
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: '1', name: '项目', thumb: null, created_at: '2026-08-18T00:00:00.000Z' }) },
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue(
+          modelIds.map((model_id) => ({
+            model_id,
+            supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
+            features: {
+              reference_image: true,
+              max_reference_images: 10,
+              quantity_max: 1,
+              video_reference: true,
+              video_reference_max: 3,
+              audio_reference: false,
+              audio_reference_max: 3,
+              image_reference_max: 1,
+              max_reference_duration_sec: null,
+            },
+          })),
+        ),
+      },
+      command: { createJob },
+      assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  };
+
+  it('旧别名 seedance-2 不在启用目录 → 400 model_unavailable（不再被改写成 2.0 那行）', async () => {
+    // 目录里只有真实型号 `doubao-seedance-2-0-260128`——恰是旧别名表的目标。
+    // 若别名改写恢复，`seedance-2` 会被改写成该行从而 200；本用例把它钉成 400。
+    const { deps, createJob } = videoDepsWithCatalogue(['doubao-seedance-2-0-260128']);
+
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      parameters: { ...VIDEO_BODY.parameters, model_id: 'seedance-2' },
+    }, null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
+    expect((result.data as { code: string }).code).toBe(ERROR_MODEL_UNAVAILABLE);
+    expect(createJob).not.toHaveBeenCalled();
   });
 });
