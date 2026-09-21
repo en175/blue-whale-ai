@@ -754,7 +754,7 @@ public class JobClaimService {
             return Optional.empty();
         }
 
-        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_MATTING_LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_MATTING_LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());

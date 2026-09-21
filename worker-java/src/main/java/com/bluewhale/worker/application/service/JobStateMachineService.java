@@ -412,7 +412,7 @@ public class JobStateMachineService {
             com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = LocalDateTime.now(ZoneOffset.UTC)
+        LocalDateTime leaseExpiresAt = WorkerClock.now()
                 .plusSeconds(VIDEO_MATTING_PROGRESS_LEASE_SECONDS);
         int affected = jobMapper.updateVideoMattingProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
