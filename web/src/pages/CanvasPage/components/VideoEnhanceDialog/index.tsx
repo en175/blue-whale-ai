@@ -22,7 +22,7 @@ interface VideoEnhanceDialogProps {
   onParamsChange: (resolution: VideoEnhanceResolution) => void;
   /** 回填上次参数（node.data.videoEnhance.lastParams 恢复；缺省用契约默认档 1080P） */
   initialResolution?: VideoEnhanceResolution | null;
-  /** 生成中：参数只读冻结（保留查看，取消入口在画布卡片上） */
+  /** 生成中：参数只读冻结（保留查看；工具卡不开放取消） */
   generating?: boolean;
   /** 提交中（保存/提交期间只读，同图片面板 submitting 口径） */
   submitting?: boolean;
@@ -45,7 +45,7 @@ export default function VideoEnhanceDialog({
 
   const readOnly = generating === true || submitting === true;
   const readOnlyReason = generating
-    ? '生成中，参数只读；可在画布卡片上取消生成'
+    ? '生成中，参数只读'
     : '正在保存并提交，参数只读';
 
   /** 可用态悬停为效果边界一句（「最高可至 4K」，词条口径），只读态为只读原因（同一 title 通道） */

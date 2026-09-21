@@ -21,7 +21,7 @@ import AudioTrimOverlay from './AudioTrimOverlay';
 import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
-import { mediaNodeGenerationOverlay } from './generationOverlay';
+import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
@@ -411,7 +411,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isMediaExtraction = isMediaExtractNodeId(id);
   /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
   const isAudioTrimCard = isAudioTrimNodeId(id);
-  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
+  const hideCancel = isMediaExtraction
+    || isAudioTrimCard
+    || isCanvasToolGeneration(data as Record<string, unknown>);
+  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction, hideCancel);
   const failHeadline = mediaNodeFailHeadline({
     genStatus: data.genStatus,
     errorText: data.errorText,
@@ -456,7 +459,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       );
     }
     if (isGenerating) {
-      /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
+      /* 生成中：转圈；音频提取展示真实进度；生图/生视频可取消，画布工具卡不开放取消 */
       return (
         <div className={styles.genBox}>
           <div className={styles.genSpinner} />
@@ -758,9 +761,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.regenText}>
               重新生成中{typeof data.progress === 'number' ? ` ${data.progress}%` : ''}
             </span>
-            <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
-              取消
-            </button>
+            {!hideCancel && (
+              <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
+                取消
+              </button>
+            )}
           </div>
         )}
         {/* IKDMQV：重新生成失败/取消的成品卡——旧素材继续显示，底部角标呈现原因与重试。
