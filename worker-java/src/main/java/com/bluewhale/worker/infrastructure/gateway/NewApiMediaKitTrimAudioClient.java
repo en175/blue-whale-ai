@@ -53,7 +53,7 @@ import java.util.UUID;
  * （completed→succeeded、failed→failed、其余→processing）。
  * <p>
  * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级，
- * 兜底归并 audio_trim_failed 1047；网关错误不透传英文）；poll 的网络超时 / 连接失败 /
+ * 兜底归并 audio_trim_failed 1048；网关错误不透传英文）；poll 的网络超时 / 连接失败 /
  * HTTP 429/5xx 抛错时以 cause 携带状态（{@link NewApiVideoClient.HttpStatusException}
  * 复用），供 processor 按 isTransientPollError 语义判定瞬时重排。
  */

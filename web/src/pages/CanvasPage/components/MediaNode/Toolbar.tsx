@@ -22,9 +22,13 @@
  * IKH8BJ 视频卡追加「场景切分」入口：图标+文字单按钮（无下拉），形态同「音视频分离」，
  * 落其之后、分隔线之前；置灰门槛见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据），
  * 点击派发 onSceneSplit 进入编辑态（编辑态本体由 IKH8BR 交付）。
+ * IKHA2E「音视频分离」改悬停下拉（ADR-0110）：原单按钮升为 AudioVideoSplitMenu（悬停展开/
+ * 移出延时关/点触发钮直启首项，形态同「智能去字幕 ▾」）；菜单两项 = 首项原「音视频分离」
+ * 直进（功能不改名）+ 次项「人声背景分离」，次项置灰门槛见 vocalSplit.ts（未关联资产）、
+ * 点击派发 onVocalBackgroundSplit 进入编辑态（编辑态本体由 IKHA2W 交付）。
  * ============================================ */
 import { useCallback } from 'react';
-import { AudioLines, Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, Film, type LucideIcon } from 'lucide-react';
+import { Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, Film, type LucideIcon } from 'lucide-react';
 import { outpaintGateReason } from '../../imageOutpaint';
 import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
@@ -35,6 +39,7 @@ import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
+import AudioVideoSplitMenu, { type AudioVideoSplitMenuItem } from './AudioVideoSplitMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
 
@@ -96,8 +101,8 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const videoSubtitleEraseDisabledReason = videoSubtitleEraseGateReason(data);
   const handleCropImage = useCallback(() => data.onCropImage?.(id), [data, id]);
   const handleCutoutImage = useCallback(() => data.onCutoutImage?.(id), [data, id]);
-  /** 音视频分离（IKH28U）：点击进入编辑态（不再一键直发，发送闭环归 IKH28X），
-   *  对齐「智能去字幕」一行派发模式；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
+  /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：点击触发钮直启首项「音视频分离」
+   *  进入编辑态，原单按钮直启链路零变化；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
   /** 音频截取（IKHB6Y，父单 IKHB08）：首位「截取」点亮为可点入口，点击派发 onTrimAudio
@@ -106,6 +111,9 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  不照搬家族「数据缺失不拦」口径） */
   const handleTrimAudio = useCallback(() => data.onTrimAudio?.(id), [data, id]);
   const audioTrimDisabledReason = audioTrimGateReason(data);
+  /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
+   *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
+  const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
   /** 场景切分（IKH8BJ）：点击进入场景切分编辑态（编辑态本体归 IKH8BR）；
    *  置灰预检见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据，缺失放行） */
   const handleSceneSplit = useCallback(() => data.onSceneSplit?.(id), [data, id]);
@@ -187,6 +195,27 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     },
   ];
 
+  /** 「音视频分离 ▾」下拉菜单项（IKHA2E）：首项保持原名「音视频分离」、直启原链路不变
+   *  （点击触发钮=直启首项）；第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）；
+   *  门槛同源整卡预检（未关联资产唯一置灰，点击无效但悬停仍可展开看两项说明与置灰原因），
+   *  各项 title 恒为自己的 hint。 */
+  const audioVideoSplitMenuItems: AudioVideoSplitMenuItem[] = [
+    {
+      id: 'split',
+      label: '音视频分离',
+      hint: AUDIO_VIDEO_SPLIT_ENTRY_HINT,
+      disabledReason: audioVideoSplitDisabledReason,
+      onSelect: handleAudioVideoSplit,
+    },
+    {
+      id: 'vocalBackground',
+      label: '人声背景分离',
+      hint: '把人声与背景音分离为多张音频卡',
+      disabledReason: audioVideoSplitDisabledReason,
+      onSelect: handleVocalBackgroundSplit,
+    },
+  ];
+
   /* 数据门（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显；
    *  谓词与 CanvasPage 显隐门共用（mediaCardToolbarVisible，IKGYYB 审查消双实现） */
   if (!mediaCardToolbarVisible(data)) return null;
@@ -230,15 +259,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
         );
       })}
       {data.mediaType === 'video' && (
-        <button
-          className={styles.toolBtn}
-          onClick={handleAudioVideoSplit}
-          disabled={audioVideoSplitDisabledReason !== null}
-          title={audioVideoSplitDisabledReason ?? AUDIO_VIDEO_SPLIT_ENTRY_HINT}
-        >
-          <AudioLines size={14} strokeWidth={2} />
-          <span>音视频分离</span>
-        </button>
+        <AudioVideoSplitMenu
+          items={audioVideoSplitMenuItems}
+          triggerHint={AUDIO_VIDEO_SPLIT_ENTRY_HINT}
+        />
       )}
       {/* 音频卡「截取」入口（IKHB6Y）：从占位点亮为可点——aria-disabled 门槛置灰口径
           同画质横排（.toolBtn[aria-disabled='true']），置灰 title 悬停原因、可用态无

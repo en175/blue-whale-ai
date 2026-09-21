@@ -332,7 +332,7 @@ const SESSION_UI_TESTID: Record<string, string> = {
   crop: 'crop-confirm',
   outpaint: 'outpaint-dialog',
   subtitleErase: 'subtitle-erase-send-bar',
-  audioVideoSplit: 'audio-video-split-toolbar',
+  audioVideoSplit: 'audio-video-split-send-bar',
   audioTrim: 'audio-trim-send-bar',
 };
 const sessionToolUi = (kind: keyof typeof SESSION_UI_TESTID) =>

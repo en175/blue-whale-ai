@@ -1,28 +1,18 @@
 /* ============================================
- * VideoAudioSplitDialog 音视频分离编辑态工具条/发送条（IKH28U 骨架 / IKH28X 三要素）
- * 跟随源视频卡浮出的两条横条：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
- * 24px 胶囊圆角（对齐 VideoSubtitleEraseDialog 家族形态，无令牌档由
+ * VideoAudioSplitDialog 音视频分离编辑态单条（IKH28U 骨架 / IKH28X 三要素）
+ * 跟随源视频卡下方浮出的唯一一条，X 关闭在最左（对齐抠图/去字幕单条先例，
+ * 上方仅 X 的独立工具条随单条化退役）：容器视觉 = 浮层容器三令牌（背景/描边/
+ * 阴影）+ 24px 胶囊圆角（对齐 VideoSubtitleEraseDialog 家族形态，无令牌档由
  * overlayContainer.test.ts 白名单锁 24px 字面量）；分离格式菜单浮层入 IKGZ8C
  * 浮层菜单家族（12px 档，overlayContainer.test.ts 断言）。条内控件全走令牌，
  * 不复制体系外硬编码字面量写法。
  * ============================================ */
 
-/* ---- 源视频卡上方工具条 ---- */
-.toolbar {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 52px;
-  z-index: 21;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background-color: var(--color-bg-overlay);
-  border: 1px solid var(--color-border-overlay);
-  border-radius: 24px;
-  box-shadow: var(--shadow-overlay);
-  white-space: nowrap;
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border-secondary);
+  margin: 0 2px;
 }
 
 .toolBtn {
@@ -44,7 +34,7 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 源视频卡下方发送条 ---- */
+/* ---- 源视频卡下方单条 ---- */
 .sendBar {
   position: absolute;
   left: 50%;

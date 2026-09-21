@@ -1,0 +1,166 @@
+/* ============================================
+ * VocalSplitDialog 人声背景分离编辑态单条（IKHA2W）
+ * 跟随源视频卡下方浮出的唯一一条，X 关闭在最左（对齐抠图/音视频分离单条先例，
+ * 上方仅 X 的独立工具条随单条化退役）：容器视觉 = 浮层容器三令牌（背景/描边/阴影）+
+ * 24px 胶囊圆角（对齐 VideoAudioSplitDialog 家族形态）；场景/格式菜单浮层为
+ * IKGZ8C 浮层菜单家族同款（向上弹出）。条内控件全走令牌，不复制体系外硬编码
+ * 字面量写法。
+ * ============================================ */
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border-secondary);
+  margin: 0 2px;
+}
+
+.toolBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 源视频卡下方单条 ---- */
+.sendBar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--spacing-lg);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: 24px;
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+/* 跟随锚定（IKH25A 中心点锚口径，inline left/top 生效）：解除默认 bottom 定位避免
+   top/bottom 双侧拉伸；left: 0 兜底 inline 缺失；transform 不覆盖，继承基础态
+   translateX(-50%) 以锚点（源卡中心 x）真居中。口径同音视频分离 sendBarFollow。 */
+.sendBarFollow {
+  bottom: auto;
+  left: 0;
+}
+
+/* ---- 下拉（场景/格式两组同款；触发钮显当前所选；菜单向上弹出避开发送条下方视口边缘） ---- */
+.formatWrap {
+  position: relative;
+}
+
+.formatTrigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.formatTrigger:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.formatTrigger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.formatMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 22;
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.formatMenuItem {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.formatMenuItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 当前所选：主色底白字指示（对齐音视频分离 .formatMenuItemActive 激活先例；触发钮同步显示该值） */
+.formatMenuItemActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-primary);
+}
+
+/* ---- 「本期免费」标注（对齐音视频分离 freeHint；本工具免费口径，无「输出最高」后缀） ---- */
+.freeHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-success);
+  background-color: rgba(64, 192, 87, 0.1);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+
+/* ---- 发送钮：Dock 主发送钮同款（灰底圆角方形 + 白 ↑ 图标，口径同
+ *    VideoAudioSplitDialog .sendBtn——置灰态即默认灰，无额外 disabled 透明度） ---- */
+.sendBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-disabled);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: var(--color-border-hover);
+  filter: brightness(1.2);
+}

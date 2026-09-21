@@ -181,7 +181,7 @@ class NewApiMediaKitTrimAudioClientTest {
     }
 
     @Test
-    @DisplayName("200 但缺 task_id → 1047 兜底")
+    @DisplayName("200 但缺 task_id → 1048 兜底")
     void missingTaskIdFallsBack() {
         responseJson.set("{\"success\":true,\"request_id\":\"req-3\"}");
 
@@ -192,7 +192,7 @@ class NewApiMediaKitTrimAudioClientTest {
     }
 
     @Test
-    @DisplayName("非 JSON 响应 → 1047 兜底")
+    @DisplayName("非 JSON 响应 → 1048 兜底")
     void invalidJsonFallsBack() {
         responseJson.set("not-json<");
 

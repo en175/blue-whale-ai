@@ -100,6 +100,7 @@ vi.mock('@/api/jobs', () => ({
   createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
+  createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));

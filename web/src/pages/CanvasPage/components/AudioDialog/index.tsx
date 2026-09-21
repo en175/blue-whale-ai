@@ -392,8 +392,21 @@ export default function AudioDialog({
     })),
     'audio',
   );
+  /** 连入文本节点有正文时，输入框为空也可发送（IKHGET，对齐图像/视频节点口径） */
+  const hasAttachmentText = (attachments ?? []).some((item) => item.text.trim().length > 0);
+  const canSend = Boolean(
+    (text.trim() || hasAttachmentText)
+    && currentModel
+    && !readOnly
+    && !pickLocked
+    && !invalidPrompt
+    && !invalidDraftRefs
+    && !textIndexBlocked
+    && !referenceLimitError
+    && !draftBinding?.saveFailed,
+  );
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
+    if (!canSend || !currentModel) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
     const composedOverLimit = composedPromptLimitError(
       composeImageSendPrompt(attachments, text.trim(), promptDocToSend),
@@ -557,19 +570,15 @@ export default function AudioDialog({
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
-      {referenceLimitError && (
-        <div role="alert" data-testid="audio-ref-overflow">
-          {referenceLimitError}
+      {/* 分类上限与文本索引校验会产出同一句「参考图最多 x 个」：只展示一条（优先文本索引原因） */}
+      {(textIndexError || referenceLimitError) && (
+        <div role="alert" data-testid={textIndexError ? 'audio-text-index-error' : 'audio-ref-overflow'}>
+          {textIndexError || referenceLimitError}
         </div>
       )}
       {invalidDraftRefs && (
         <div role="alert" data-testid="audio-ref-invalid">
           {draftRefInvalid!.map((item) => `${item.name}：${item.reason}，请恢复素材或移除后发送`).join('；')}
-        </div>
-      )}
-      {textIndexError && (
-        <div role="alert" data-testid="audio-text-index-error">
-          {textIndexError}
         </div>
       )}
 
@@ -624,9 +633,9 @@ export default function AudioDialog({
             {promptCharCountLabel(text.length, maxInput)}
           </div>
           <button
-            className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
+            className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || Boolean(referenceLimitError) || draftBinding?.saveFailed}
+            disabled={!canSend}
             onClick={handleSend}
             title="发送"
           >

@@ -152,6 +152,11 @@ public class JobStateMachineService {
         return claimService.claimVideoEnhance(jobId, workerId);
     }
 
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto> claimVocalSplit(
+            String jobId, String workerId) {
+        return claimService.claimVocalSplit(jobId, workerId);
+    }
+
     // ========== 终态收口（委托 JobFinalizer） ==========
 
     public boolean completeJob(String jobId, List<String> assetIds, String workerId, long fencingToken) {
@@ -274,6 +279,21 @@ public class JobStateMachineService {
     public boolean publishVideoEnhanceResult(
             com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto input) {
         return finalizer.publishVideoEnhanceResult(input);
+    }
+
+    // ========== vocal_split 直通（DTO 形态，VocalSplitJobProcessor 专用；
+    //            失败复用 failMediaExtractJob 守卫——轮询型任务守卫多清 next_poll_at，
+    //            跨工具复用同款 SQL，video_enhance 复用 failVideoJob 同例） ==========
+
+    public boolean publishVocalSplitResult(
+            com.bluewhale.worker.domain.dto.PublishVocalSplitDto input) {
+        return finalizer.publishVocalSplitResult(input);
+    }
+
+    public boolean failVocalSplitJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
+        return finalizer.failMediaExtractJob(
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
     }
 
     // ========== video_scene_split 直通（DTO 形态，VideoSceneSplitJobProcessor 专用；

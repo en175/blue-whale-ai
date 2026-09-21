@@ -172,9 +172,12 @@ public class TosAudioMediaRelay {
                 ContentDigest.md5Hex(bytes));
     }
 
-    /** 按任务所选格式推导 mime（扩展名与 TOS Content-Type / assets.mime 的单源）。 */
+    /** 按任务所选格式推导 mime（扩展名与 TOS Content-Type / assets.mime 的单源；
+     *  aac 供 vocal_split 五值枚举——该工具枚举含 aac 而 media_extract 无，
+     *  回退表补 aac 分支对既有调用无影响）。 */
     static String mimeForOutputFormat(String outputFormat) {
         return switch (outputFormat) {
+            case "aac" -> "audio/aac";
             case "m4a" -> "audio/mp4";
             case "ogg" -> "audio/ogg";
             case "flac" -> "audio/flac";

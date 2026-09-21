@@ -382,7 +382,7 @@ describe('IKH8BR 与既有六会话互斥（集中协调器口径）', () => {
     crop: 'crop-confirm',
     outpaint: 'outpaint-dialog',
     subtitleErase: 'subtitle-erase-send-bar',
-    audioVideoSplit: 'audio-video-split-toolbar',
+    audioVideoSplit: 'audio-video-split-send-bar',
   };
   const KINDS: Kind[] = ['erase', 'cutout', 'crop', 'outpaint', 'subtitleErase', 'audioVideoSplit'];
 

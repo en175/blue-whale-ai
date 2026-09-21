@@ -286,24 +286,24 @@ describe('IKHB7A 编辑态呈现（进入不建任务）', () => {
     expect(flowProps.current.edges).toEqual([]);
   });
 
-  it('与其他工具编辑会话互斥：分离会话中点截取，分离浮条退出、截取发送条接管（反向亦然）', async () => {
+  it('与其他工具编辑会话互斥：分离会话中点截取，分离发送条退出、截取发送条接管（反向亦然）', async () => {
     await renderPage();
     const video = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
     await act(async () => {
       video.data.onAudioVideoSplit('v1');
     });
-    expect(document.body.querySelector('[data-testid="audio-video-split-toolbar"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="audio-video-split-send-bar"]')).toBeTruthy();
     await enterTrim();
-    expect(document.body.querySelector('[data-testid="audio-video-split-toolbar"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="audio-video-split-send-bar"]')).toBeNull();
     expect(sendBar()).toBeTruthy();
     expect(a1Data().trimEditing).toBeTruthy();
-    // 反向互斥：截取态中点分离，截取发送条退出、分离浮条接管
+    // 反向互斥：截取态中点分离，截取发送条退出、分离发送条接管
     await act(async () => {
       video.data.onAudioVideoSplit('v1');
     });
     expect(sendBar()).toBeNull();
     expect(a1Data().trimEditing).toBeUndefined();
-    expect(document.body.querySelector('[data-testid="audio-video-split-toolbar"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="audio-video-split-send-bar"]')).toBeTruthy();
   });
 });
 
@@ -467,7 +467,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(done.data.fileName).toBe('播客片头(截取).mp3');
   });
 
-  it('轮询终态 failed：1047 兜底码映射可读文案；带身份卡原参数重试建新任务并收敛成品', async () => {
+  it('轮询终态 failed：1048 兜底码映射可读文案；带身份卡原参数重试建新任务并收敛成品', async () => {
     apiMocks.createAudioTrim.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j1', status: 'failed', progress: 1,

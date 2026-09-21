@@ -39,7 +39,7 @@ import static org.mockito.Mockito.*;
  * trim-audio 执行面，模板 MediaExtractJobProcessorErrorMappingTest 一对一平移）。
  * <p>
  * 覆盖：claim 语义、input 业务键兜底校验（含 start_time / end_time 可选与脏值形态）、
- * 凭证缺失分类、submit 相（提交成功存 task_id + 续排 / §5 信号保留 / 归并 1047）、
+ * 凭证缺失分类、submit 相（提交成功存 task_id + 续排 / §5 信号保留 / 归并 1048）、
  * poll 相（processing 续排进度保持 / 轮询超限 / 瞬时错误重排 / 火山 failed 分类 + 上游
  * 原因透传）、completed 立即转存发布（官方 duration 直取不回落 / md5 穿透）、转存强依赖
  * 与瞬时判定。不连真实 MQ/DB/TOS/网关。
@@ -200,7 +200,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     // ========== 源素材 / 凭证 ==========
 
     @Test
-    @DisplayName("源素材不可用（非 audio）→ 1047 兜底 + 可读原因，不提交上游")
+    @DisplayName("源素材不可用（非 audio）→ 1048 兜底 + 可读原因，不提交上游")
     void sourceAssetNotAudio_failed() {
         stubSubmitClaim(input());
         AssetEntity video = new AssetEntity();
@@ -278,7 +278,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("submit provider_failed → 归并 1047 兜底（无自动重试）")
+    @DisplayName("submit provider_failed → 归并 1048 兜底（无自动重试）")
     void submitProviderFailed_normalized() {
         stubSubmitClaim(input());
         stubSourceAsset();
@@ -292,7 +292,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("submit 超时（provider_timeout）→ 归并 1047（宁可不重试也不双跑，家族口径）")
+    @DisplayName("submit 超时（provider_timeout）→ 归并 1048（宁可不重试也不双跑，家族口径）")
     void submitTimeout_normalized() {
         stubSubmitClaim(input());
         stubSourceAsset();
@@ -325,7 +325,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("poll 超限（pollCount>=720）→ 1047 轮询超时，不再续排")
+    @DisplayName("poll 超限（pollCount>=720）→ 1048 轮询超时，不再续排")
     void pollExceedsLimit_fails() {
         stubPollClaim(input(), AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -356,7 +356,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1047 兜底")
+    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1048 兜底")
     void pollHardError_fails() {
         stubPollClaim(input(), 3, 7);
         AudioTrimError notFound = new AudioTrimError(
@@ -372,7 +372,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     // ========== poll 相：火山任务 failed（§5 分类映射） ==========
 
     @Test
-    @DisplayName("poll failed（end_time 超真实片尾官方约束拒绝）→ 1047 + 上游可读原因透传（前端投影）")
+    @DisplayName("poll failed（end_time 超真实片尾官方约束拒绝）→ 1048 + 上游可读原因透传（前端投影）")
     void pollFailed_transportsUpstreamReason() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -404,7 +404,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("poll failed 无上游原因 → 1047 + 默认文案")
+    @DisplayName("poll failed 无上游原因 → 1048 + 默认文案")
     void pollFailedWithoutReason_fallsBackMessage() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -476,7 +476,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("completed 未返回结果音频 URL → 1047 兜底")
+    @DisplayName("completed 未返回结果音频 URL → 1048 兜底")
     void pollCompletedWithoutUrl_fails() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -489,7 +489,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("TOS 未配置 → 1047（结果 URL 24h 失效，强依赖不降级直存）")
+    @DisplayName("TOS 未配置 → 1048（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         AudioTrimJobProcessor noRelayProcessor = new AudioTrimJobProcessor(
                 stateMachine, new AssetSourceService(assetMapper),
@@ -530,7 +530,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("转存失败（下载 404）→ 1047 兜底，不发布")
+    @DisplayName("转存失败（下载 404）→ 1048 兜底，不发布")
     void relayFails_fails() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))

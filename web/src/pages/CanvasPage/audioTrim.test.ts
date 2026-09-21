@@ -140,7 +140,7 @@ describe('audioTrim 终态补丁（轮询收敛，IKHB7A）', () => {
     expect(patch).not.toHaveProperty('duration');
   });
 
-  it('failed：1047 兜底码与上游透传文案收敛为可读 errorText', () => {
+  it('failed：1048 兜底码与上游透传文案收敛为可读 errorText', () => {
     expect(
       audioTrimTerminalPatch({ status: 'failed', error: { code: 'audio_trim_failed', msg: '' } }),
     ).toEqual({ genStatus: 'failed', errorText: '音频截取失败，请重试' });

@@ -11,6 +11,8 @@
    IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
    悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
    派发 onTrimAudio（编辑态行为归 IKHB7A）；其余四钮维持占位「即将上线」。
+   IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
+   独立实例），第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）。
    IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
    置灰门槛与悬停原因断言同族（门槛纯逻辑另见 sceneSplit.test.ts）。 */
 import { act, createElement } from 'react';
@@ -662,6 +664,186 @@ describe('MediaNodeToolbar 「智能去字幕 ▾」下拉入口（IKH3OU）', (
   });
 });
 
+/* IKHA2E：「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮，交互口径与「智能去字幕 ▾」
+   同构但独立实例（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、点击触发钮直启首项）。
+   家族差异：触发钮可用态 title 保留入口效果边界说明（去字幕可用态无 title，ADR-0104）；
+   第二项「人声背景分离」仅派发挂接点（编辑态本体由后续票实现，未注入回调时安全 no-op）。
+   门槛=视频未关联资产唯一置灰（ADR-0103 决策四，无时长/分辨率/大小前置拦截）：整钮
+   aria-disabled 置灰、点击无效，hover 仍展开菜单看两项说明与置灰原因。
+   合成事件口径同上：mouseover/mouseout + relatedTarget 在 wrap 外。 */
+describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', () => {
+  const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="audio-video-split-menu-trigger"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="audio-video-split-menu"]');
+  const item = (id: string) =>
+    mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-video-split-menu-item-${id}"]`);
+
+  async function hoverIn() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  async function hoverOut() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
+  async function settleHoverClose() {
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('仅视频卡渲染，位次在「智能去字幕」之后、详情之前（原单按钮位置承继）', async () => {
+    await renderToolbar('video');
+    const order = labels();
+    expect(order.indexOf('音视频分离')).toBeGreaterThan(order.indexOf('智能去字幕'));
+    expect(order.indexOf('音视频分离')).toBeLessThan(order.indexOf('详情'));
+    await renderToolbar('image');
+    expect(labels().includes('音视频分离')).toBe(false);
+    await renderToolbar('audio');
+    expect(labels().includes('音视频分离')).toBe(false);
+  });
+
+  it('触发钮形态：AudioLines 图标 + 「音视频分离」文字 + ChevronDown 下拉箭头（默认收起）', async () => {
+    await renderToolbar('video');
+    const btn = trigger();
+    expect(btn.textContent).toBe('音视频分离');
+    expect(btn.querySelector('svg.lucide-audio-lines')).not.toBeNull();
+    expect(btn.querySelector('svg.lucide-chevron-down')).not.toBeNull();
+    expect(btn.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menu()).toBeNull();
+  });
+
+  it('悬停自动展开两项菜单：首项「音视频分离」+ 第二项「人声背景分离」，各项 title 为自己的 hint', async () => {
+    await renderToolbar('video', { data: { onAudioVideoSplit: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    const rendered = [...mountNode.querySelectorAll('[data-testid^="audio-video-split-menu-item-"]')];
+    expect(rendered.map((b) => b.textContent)).toEqual(['音视频分离', '人声背景分离']);
+    expect(item('split')!.getAttribute('title')).toContain('将视频完整音轨分离为音频卡片');
+    expect(item('vocalBackground')!.getAttribute('title')).toBe('把人声与背景音分离为多张音频卡');
+  });
+
+  it('移出触发钮延迟后关闭；延迟窗口内重新进入不关闭', async () => {
+    await renderToolbar('video', { data: { onAudioVideoSplit: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    await hoverOut();
+    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
+    expect(menu()).not.toBeNull();
+    await settleHoverClose();
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await hoverOut();
+    await hoverIn();
+    await settleHoverClose();
+    expect(menu()).not.toBeNull();
+  });
+
+  it('Esc 与点外立即关闭（不等待延迟窗口）', async () => {
+    await renderToolbar('video', { data: { onAudioVideoSplit: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('点击触发钮直启首项「音视频分离」（原行为不变，携带节点 id），菜单收起', async () => {
+    const onAudioVideoSplit = vi.fn();
+    await renderToolbar('video', { data: { onAudioVideoSplit, assetId: 'a1' } });
+    await act(async () => {
+      trigger().click();
+    });
+    expect(onAudioVideoSplit).toHaveBeenCalledWith('video-node');
+    expect(menu()).toBeNull();
+  });
+
+  it('两菜单项各自派发：首项派发 onAudioVideoSplit、第二项派发 onVocalBackgroundSplit 挂接点（携带节点 id）', async () => {
+    const onAudioVideoSplit = vi.fn();
+    const onVocalBackgroundSplit = vi.fn();
+    await renderToolbar('video', { data: { onAudioVideoSplit, onVocalBackgroundSplit, assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      item('vocalBackground')!.click();
+    });
+    expect(onVocalBackgroundSplit).toHaveBeenCalledWith('video-node');
+    expect(onAudioVideoSplit).not.toHaveBeenCalled();
+    // 选择后菜单收起
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      item('split')!.click();
+    });
+    expect(onAudioVideoSplit).toHaveBeenCalledWith('video-node');
+  });
+
+  it('第二项挂接点未注入时点击安全 no-op（不抛错、首项回调不受影响）', async () => {
+    const onAudioVideoSplit = vi.fn();
+    await renderToolbar('video', { data: { onAudioVideoSplit, assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      item('vocalBackground')!.click();
+    });
+    expect(onAudioVideoSplit).not.toHaveBeenCalled();
+    expect(menu()).toBeNull();
+  });
+
+  it('未关联资产：整钮 aria-disabled 置灰 + title 展示原因、点击无效；hover 仍展开菜单且两项一并置灰', async () => {
+    const onAudioVideoSplit = vi.fn();
+    const onVocalBackgroundSplit = vi.fn();
+    await renderToolbar('video', { data: { onAudioVideoSplit, onVocalBackgroundSplit } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.getAttribute('title')).toContain('尚未关联资产');
+    await act(async () => {
+      btn.click();
+    });
+    expect(onAudioVideoSplit).not.toHaveBeenCalled();
+
+    // hover 仍可展开看说明与原因：两项 title 恒为自己的 hint，点击均不派发
+    await hoverIn();
+    expect(menu()).not.toBeNull();
+    const split = item('split')!;
+    const vocal = item('vocalBackground')!;
+    expect(split.getAttribute('aria-disabled')).toBe('true');
+    expect(vocal.getAttribute('aria-disabled')).toBe('true');
+    expect(split.getAttribute('title')).toContain('将视频完整音轨分离为音频卡片');
+    expect(vocal.getAttribute('title')).toBe('把人声与背景音分离为多张音频卡');
+    await act(async () => {
+      split.click();
+      vocal.click();
+    });
+    expect(onAudioVideoSplit).not.toHaveBeenCalled();
+    expect(onVocalBackgroundSplit).not.toHaveBeenCalled();
+  });
+
+  it('关联资产后整钮可用（aria-disabled 移除），触发钮可用态 title 为入口效果边界说明', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1' } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    expect(btn.getAttribute('title')).toContain('仅音频'); // AUDIO_VIDEO_SPLIT_ENTRY_HINT
+  });
+});
+
 describe('MediaNodeToolbar HD 高清入口（IKH3VG）', () => {
   const hdBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="video-enhance-btn"]')!;
 
@@ -837,28 +1019,5 @@ describe('MediaNodeToolbar 其余按钮回调（携带节点 id）', () => {
     await renderToolbar('image', { data: { onAddToChat } });
     await clickButton('添加到 Agent 聊天');
     expect(onAddToChat).toHaveBeenCalledWith('image-node');
-  });
-
-  it('音视频分离（IKH28U）：无资产置灰并悬停唯一原因；点击派发进入编辑态回调（不再一键直发、无提交中态）', async () => {
-    const onAudioVideoSplit = vi.fn();
-    await renderToolbar('video', { data: { onAudioVideoSplit } });
-    const btn = () => [...mountNode.querySelectorAll('button')]
-      .find((b) => b.textContent?.includes('音视频分离'))!;
-    expect(btn().disabled).toBe(true); // 默认 fixture 无 assetId（唯一置灰条件）
-    expect(btn().getAttribute('title')).toContain('尚未关联资产');
-    expect(btn().getAttribute('title')).not.toContain('仅音频'); // 置灰原因与可用态 hint 互斥（同一 title 通道）
-    await act(async () => {
-      btn().click();
-    });
-    expect(onAudioVideoSplit).not.toHaveBeenCalled(); // 置灰点击不派发
-
-    await renderToolbar('video', { id: 'v2', data: { onAudioVideoSplit, assetId: 'a1' } });
-    expect(btn().disabled).toBe(false);
-    expect(btn().textContent).toContain('音视频分离');
-    expect(btn().getAttribute('title')).toContain('仅音频'); // 可用态悬停为效果边界一句
-    await act(async () => {
-      btn().click();
-    });
-    expect(onAudioVideoSplit).toHaveBeenCalledWith('v2'); // 同步进入会话派发，无「提交中…」中间态
   });
 });
