@@ -282,6 +282,33 @@ describe('IKH8BR 场景切分会话单条（容器三令牌 + 24px 胶囊，无�
   });
 });
 
+/* ---- IKHK9N 智能抠像编辑态单条（1 成员，24px 胶囊对齐去字幕/场景切分家族形态：
+   X/模式标题/格式下拉/背景色分段（仅 MP4）/⚡0 徽标/发送钮六要素单条承载） ---- */
+
+describe('IKHK9N 智能抠像编辑态单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
+  const mattingCss = readFileSync(
+    fileURLToPath(new URL('../pages/CanvasPage/components/SmartMattingDialog/index.module.css', import.meta.url)),
+    'utf-8',
+  );
+
+  it.each([
+    ['源视频卡下方单条', 'sendBar'],
+  ] as const)('%s 容器三件套引用令牌、圆角 24px 胶囊、无硬编码容器色值', (_name, container) => {
+    const block = ruleBlockOf(mattingCss, `.${container}`);
+    expect(block).toContain('background-color: var(--color-bg-overlay)');
+    expect(block).toContain('border: 1px solid var(--color-border-overlay)');
+    expect(block).toContain('border-radius: 24px');
+    expect(block).toContain('box-shadow: var(--shadow-overlay)');
+    expectNoHardcoded(block);
+  });
+
+  it('输出格式菜单浮层入 IKGZ8C 浮层菜单家族（容器四件套引用令牌，12px 档）', () => {
+    const block = ruleBlockOf(mattingCss, '.formatMenu');
+    expectOverlayContainer(block);
+    expectNoHardcoded(block, [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636']);
+  });
+});
+
 /* ---- IKGZ8C 浮层菜单家族（7 成员，浮条档 12px） ---- */
 describe('IKGZ8C 浮层菜单家族（ADR-0100：7 成员统一到浮层容器令牌）', () => {
   const memberCss = (component: string) =>

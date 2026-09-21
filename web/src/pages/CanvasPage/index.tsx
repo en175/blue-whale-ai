@@ -112,7 +112,18 @@ import {
   type SceneSplitGranularity,
   type SceneSplitIdentity,
 } from './sceneSplit';
-import type { SmartMattingMode } from './smartMatting';
+import {
+  SMART_MATTING_DEFAULT_BACKGROUND_COLOR,
+  SMART_MATTING_DEFAULT_FORMAT,
+  SMART_MATTING_EDGE_ORIGIN,
+  buildSmartMattingInput,
+  buildSmartMattingPlaceholderNode,
+  smartMattingErrorText,
+  type SmartMattingBackgroundColor,
+  type SmartMattingFormat,
+  type SmartMattingIdentity,
+  type SmartMattingMode,
+} from './smartMatting';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
@@ -213,6 +224,7 @@ import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
 import VocalSplitDialog from './components/VocalSplitDialog';
 import SceneSplitDialog from './components/SceneSplitDialog';
+import SmartMattingDialog from './components/SmartMattingDialog';
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
@@ -305,6 +317,7 @@ import {
   createAudioTrim,
   createVocalSplit,
   createVideoSceneSplit,
+  createVideoMatting,
   newIdempotencyKey,
   readJobFailText,
   type CreateFrameInterpolationPayload,
@@ -709,6 +722,26 @@ export default function CanvasPage() {
   /** 发送同步锁（IKH8BR）：发送先退会话（条随即卸载），submitting 状态防不住同一事件
    *  循环内的双击——ref 锁按 cropSubmittingRef 先例兜底（连点只发一次请求）。 */
   const sceneSplitSendingRef = useRef(false);
+  /** 智能抠像编辑会话（IKHK9N，第八视频工具会话，ADR-0112）：处于抠像编辑的源视频卡
+   *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
+   *  卡下方浮出单条（X/模式标题/格式下拉/背景色分段（仅 MP4）/⚡0/发送，SmartMattingDialog）；
+   *  发送先退会话再建任务占位卡；未发送退出（X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
+  const [smartMattingTargetNodeId, setSmartMattingTargetNodeId] = useState<string | null>(null);
+  /** 抠像模式（IKHK9N，会话期交互态）：入口下拉直选传入（portrait/greenscreen），决定单条
+   *  标题与提交端点；单条内无模式切换控件——换模式 = 退出后从入口菜单重选（ADR-0112）。 */
+  const [smartMattingMode, setSmartMattingMode] = useState<SmartMattingMode>('portrait');
+  /** 输出格式（IKHK9N，会话期交互态）：两档 WEBM 透明默认 / MP4 纯色。格式不跨会话记忆
+   *  ——每次进入编辑态重置 WEBM、退出复位（exitSmartMattingEditing）；发送时随任务冻结进
+   *  占位卡身份（smartMatting.lastInput），失败重试按冻结参数原样重发。 */
+  const [smartMattingFormat, setSmartMattingFormat] = useState<SmartMattingFormat>(SMART_MATTING_DEFAULT_FORMAT);
+  /** 背景色（IKHK9N，会话期交互态）：白色默认/黑色/绿色，仅 format=MP4 时显示与生效
+   *  （WEBM 透明不接受背景色，契约 strict）。不跨会话记忆，进入重置 white、退出复位。 */
+  const [smartMattingBackgroundColor, setSmartMattingBackgroundColor] = useState<SmartMattingBackgroundColor>(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
+  /** 智能抠像发送中（创建请求飞行期防重复提交，口径同 sceneSplitSubmitting） */
+  const [smartMattingSubmitting, setSmartMattingSubmitting] = useState(false);
+  /** 发送同步锁（IKHK9N，口径同 sceneSplitSendingRef）：发送先退会话（条随即卸载），
+   *  submitting 状态防不住同一事件循环内的双击，ref 锁兜底（连点只发一次请求）。 */
+  const smartMattingSendingRef = useRef(false);
   /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
    *  创建失败复位（面板保留可调档重发） */
   const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
@@ -1620,6 +1653,26 @@ export default function CanvasPage() {
     const screenTop = sceneSplitSourceNode.position.y * zoom + liveViewport.y;
     const center = Math.round(screenLeft + (box.width * zoom) / 2);
     const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
+  /** 智能抠像跟随锚（IKHK9N，口径同场景切分/去字幕单条）：源视频卡下方单条
+   *  （SmartMattingDialog）。IKH25A 中心点锚——条壳 translateX(-50%) 真居中，
+   *  left 传源卡中心 x；估半宽 170 仅用于视口钳制（条内比场景切分多一个格式下拉，
+   *  按 MP4 态最宽形态估），top 同家族节点下方 + 16 间距。 */
+  const smartMattingSourceNode = smartMattingTargetNodeId
+    ? mediaNodes.find((n) => n.id === smartMattingTargetNodeId) ?? null
+    : null;
+  const smartMattingSendBarAnchor = (() => {
+    if (!smartMattingSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(smartMattingSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = smartMattingSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = smartMattingSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 170;
     return {
       left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
       top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
@@ -3645,6 +3698,7 @@ export default function CanvasPage() {
       audioTrim: audioTrimTargetNodeId,
       vocalSplit: vocalSplitTargetNodeId,
       sceneSplit: sceneSplitTargetNodeId,
+      smartMatting: smartMattingTargetNodeId,
     },
     exits: {
       erase: exitEraseEditing,
@@ -3656,6 +3710,7 @@ export default function CanvasPage() {
       audioTrim: exitAudioTrimEditing,
       vocalSplit: exitVocalSplitEditing,
       sceneSplit: exitSceneSplitEditing,
+      smartMatting: exitSmartMattingEditing,
     },
     dismissGenPanels: dismissAllGenPanels,
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
@@ -3670,7 +3725,8 @@ export default function CanvasPage() {
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
     || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null
-    || audioTrimTargetNodeId != null || vocalSplitTargetNodeId != null || sceneSplitTargetNodeId != null;
+    || audioTrimTargetNodeId != null || vocalSplitTargetNodeId != null || sceneSplitTargetNodeId != null
+    || smartMattingTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
    *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
@@ -3880,7 +3936,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, smartMattingTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -4363,6 +4419,14 @@ export default function CanvasPage() {
     // exitSceneSplitEditing 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneSplitTargetNodeId, mediaNodes]);
+  /** 智能抠像编辑态绑定清理（IKHK9N）：目标源视频卡被删除时退出编辑态，防浮条悬挂
+   *  （口径同场景切分绑定清理） */
+  useEffect(() => {
+    if (!smartMattingTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === smartMattingTargetNodeId)) exitSmartMattingEditing();
+    // exitSmartMattingEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smartMattingTargetNodeId, mediaNodes]);
 
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
@@ -6132,6 +6196,38 @@ export default function CanvasPage() {
       }
       // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
     }
+    if (((node.data ?? {}) as Record<string, unknown>).smartMatting != null) {
+      // 智能抠像占位卡分流（IKHK9N 建、终态就地收敛）：成功即就地转普通成品视频卡
+      //（src/assetId/宽高时长取产物、genStatus 清空；fileName 保持建卡时的模式展示名
+      //  ——标题跟随模式）；失败落失败态 + 家族可读文案（重试按 lastInput 原参数重发）。
+      //  透明格式棋盘格垫底与结果卡语义（不记抠像身份）归 IKHKAC——需读
+      //  data.smartMatting.lastInput.format 判定透明产物，改造本分支时保留该信息。
+      if (detail.status === 'succeeded') {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        patchMediaNode(nodeId, {
+          genStatus: undefined,
+          progress: 100,
+          errorText: undefined,
+          src: detail.asset?.url ?? '',
+          mediaType: 'video',
+          assetId: detail.asset?.id,
+          width: detail.asset?.width ?? undefined,
+          height: detail.asset?.height ?? undefined,
+          duration: detail.asset?.duration ?? undefined,
+        });
+        return 'terminal';
+      }
+      if (detail.status === 'failed') {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        patchMediaNode(nodeId, {
+          genStatus: 'failed',
+          // 失败文案走智能抠像家族映射（1049 兜底「智能抠像失败，请重试」）
+          errorText: smartMattingErrorText(detail.error),
+        });
+        return 'terminal';
+      }
+      // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
+    }
     if (isMediaExtractNodeId(nodeId)) {
       const extractPatch = mediaExtractTerminalPatch(
         detail,
@@ -7469,6 +7565,38 @@ export default function CanvasPage() {
         });
       return;
     }
+    const smartMattingIdentity = ((node?.data ?? {}) as Record<string, unknown>).smartMatting as
+      | SmartMattingIdentity
+      | undefined;
+    if (smartMattingIdentity?.lastInput) {
+      // 智能抠像卡分流（IKHK9N，镜像场景切分/分离）：契约无 retry 端点，重试 = 冻结业务参数
+      // 原样重发创建接口（源素材/占位卡绑定/模式/格式/背景色随 lastInput 冻结）；client_token
+      // 每次重试都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法智能抠像');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/场景切分分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createVideoMatting(currentId, { ...smartMattingIdentity.lastInput, client_token: newIdempotencyKey() })
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
       | MediaExtractIdentity
       | undefined;
@@ -8482,6 +8610,18 @@ export default function CanvasPage() {
     setSceneSplitSubmitting(false);
   };
 
+  /** 退出智能抠像编辑态（IKHK9N 四退出共用：X/Esc/点其他卡/点画布空白）：会话参数
+   *  （模式/输出格式/背景色）与发送中复位——参数不跨会话记忆（每次进入重置
+   *  WEBM + 白色），未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
+   *  自动恢复（MediaNode 承担）。 */
+  const exitSmartMattingEditing = () => {
+    setSmartMattingTargetNodeId(null);
+    setSmartMattingMode('portrait');
+    setSmartMattingFormat(SMART_MATTING_DEFAULT_FORMAT);
+    setSmartMattingBackgroundColor(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
+    setSmartMattingSubmitting(false);
+  };
+
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
    *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
   const exitCropMode = () => {
@@ -8618,11 +8758,22 @@ export default function CanvasPage() {
     });
   };
 
-  /** 智能抠像（IKHK7N 入口占位）：置灰门槛已在工具条置灰层完成（smartMattingGateReason），
-   *  此处只接通入口事件派发。TODO(IKHK9N)：编辑态本体（源卡停帧锁定、编辑态单条、输出
-   *  格式与背景色、发送闭环与结果卡）由后续票交付，届时在此按 mode 进入抠像编辑会话
-   *  （工具会话口径对齐 handleNodeSceneSplit 的 runToolSessionEntry 先例）。 */
-  const handleNodeSmartMatting = (_id: string, _mode: SmartMattingMode) => {};
+  /** 智能抠像（IKHK7N 入口 / IKHK9N 编辑态）：把目标视频卡置为抠像编辑会话——模式随
+   *  入口下拉直选传入（portrait/greenscreen，单条内不可切换）、输出格式与背景色重置
+   *  默认（WEBM + 白色，不跨会话记忆）。置灰门槛（未关联资产/超 10 分钟）已在工具条
+   *  置灰层完成（smartMattingGateReason），此处只管进入；互斥退出与生成面板关闭经
+   *  toolSessionCoordinator（第十会话，口径对齐 handleNodeSceneSplit）、不动视角；
+   *  视频随会话态注入在当前帧暂停并锁定播放控制（MediaNode splitEditing 承担）。 */
+  const handleNodeSmartMatting = (id: string, mode: SmartMattingMode) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    runToolSessionEntry('smartMatting', () => {
+      setSmartMattingMode(mode);
+      setSmartMattingFormat(SMART_MATTING_DEFAULT_FORMAT);
+      setSmartMattingBackgroundColor(SMART_MATTING_DEFAULT_BACKGROUND_COLOR);
+      setSmartMattingTargetNodeId(id);
+    });
+  };
 
   /** 裁切比例选择（IKGW1N）：预设 → 框变为内容区内最大内接该比例矩形并居中（inscribeCropRect）；
    *  自由 → 框保持不变（只是解除比例锁定）。 */
@@ -9108,6 +9259,115 @@ export default function CanvasPage() {
     }).finally(() => {
       sceneSplitSendingRef.current = false;
       setSceneSplitSubmitting(false);
+    });
+    return true;
+  };
+
+  /* ===== 智能抠像发送链路（IKHK9N，镜像场景切分/去字幕家族）：先退会话 → 本地建任务
+     占位卡（target_node_id 取该卡）→ POST video-mattings → job_id 回写占位卡 → 轮询终态 ===== */
+
+  /** 智能抠像任务发送核心：按所选模式/格式/背景色 POST video-mattings（client_token 每次
+   *  新生成——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
+   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——先建卡
+   *  后发请求，IKH8BO 契约；展示名标注模式「人像抠像/绿幕抠像」、生成中骨架、smartMatting
+   *  身份——lastInput 供失败重试原参数重发）、拉来源边（origin=smart-matting，参考推导
+   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 通用终态分支收敛；成本票
+   *  IKHK9N 只做到此，成品卡棋盘格与结果卡语义归 IKHKAC）、立刻落盘（best-effort，防刚
+   *  建任务就关页丢卡）。创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态
+   *  （文案可读、卡上重试按原参数重发——不静默删卡，用户重试不必重新进会话配置）。
+   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
+   *  无积分预估、不走余额拦截门。 */
+  const startSmartMattingJob = async (
+    sourceNodeId: string,
+    args: {
+      sourceAssetId: string;
+      mode: SmartMattingMode;
+      format: SmartMattingFormat;
+      backgroundColor: SmartMattingBackgroundColor;
+    },
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法智能抠像');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法智能抠像');
+      return false;
+    }
+    // 发送即退会话（BO 定死顺序：先退再建卡——占位卡节点 id 要作为 target_node_id 发送）
+    exitSmartMattingEditing();
+    const placeholderId = newNodeId('smart-matting');
+    const lastInput = buildSmartMattingInput({
+      sourceAssetId: args.sourceAssetId,
+      targetNodeId: placeholderId,
+      mode: args.mode,
+      format: args.format,
+      backgroundColor: args.backgroundColor,
+    });
+    const placeholder = attachCallbacks(
+      buildSmartMattingPlaceholderNode({
+        nodeId: placeholderId,
+        mode: args.mode,
+        sourceAssetId: args.sourceAssetId,
+        lastInput,
+        source: node,
+      }) as Node,
+    );
+    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
+    // 登记：占位卡身份以 smartMatting 身份标记为准，失败由卡上重试收敛）
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
+    try {
+      const created = await createVideoMatting(currentId, {
+        ...lastInput,
+        client_token: newIdempotencyKey(),
+      });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startSceneSplitJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
+      stopJobPolling(placeholderId, jobTimersRef.current);
+      patchMediaNode(placeholderId, { jobId: created.job_id });
+      pollJob(placeholderId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
+      await flushCanvasSave(currentId).catch(() => {});
+      return true;
+    } catch (e: unknown) {
+      // 创建失败：占位卡转失败态（卡上重试原参数重发，client_token 重试时另生成）
+      patchMediaNode(placeholderId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '智能抠像任务创建失败，请重试',
+      });
+      showToast('error', isApiError(e) ? e.message : '智能抠像任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** 智能抠像发送（单条发送钮）：源素材身份 + 当前模式/输出格式/背景色 → 先退会话再建
+   *  占位卡发任务。请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛
+   *  由 startSmartMattingJob 承担。 */
+  const handleSmartMattingSend = (): boolean => {
+    const nodeId = smartMattingTargetNodeId;
+    if (!nodeId || smartMattingSubmitting || smartMattingSendingRef.current) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '当前视频尚未关联资产，无法智能抠像');
+      return false;
+    }
+    smartMattingSendingRef.current = true;
+    setSmartMattingSubmitting(true);
+    void startSmartMattingJob(nodeId, {
+      sourceAssetId: String(sourceAssetId),
+      mode: smartMattingMode,
+      format: smartMattingFormat,
+      backgroundColor: smartMattingBackgroundColor,
+    }).finally(() => {
+      smartMattingSendingRef.current = false;
+      setSmartMattingSubmitting(false);
     });
     return true;
   };
@@ -10889,6 +11149,7 @@ export default function CanvasPage() {
               || cutoutNodeId || outpaintNodeId || showFrameInterpolationDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               || audioTrimTargetNodeId || vocalSplitTargetNodeId || sceneSplitTargetNodeId
+              || smartMattingTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     n.id === eraseTargetNodeId
@@ -10898,7 +11159,8 @@ export default function CanvasPage() {
                     || n.id === outpaintNodeId
                     || n.id === subtitleEraseTargetNodeId
                     || n.id === audioVideoSplitTargetNodeId
-                    || n.id === audioTrimTargetNodeId || n.id === vocalSplitTargetNodeId || n.id === sceneSplitTargetNodeId;
+                    || n.id === audioTrimTargetNodeId || n.id === vocalSplitTargetNodeId || n.id === sceneSplitTargetNodeId
+                    || n.id === smartMattingTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
                     && n.id !== subtitleEraseTargetNodeId
@@ -10945,6 +11207,9 @@ export default function CanvasPage() {
                   // 场景切分会话（IKH8BR）：源视频卡同款停帧 + 播放控制锁定（复用 splitEditing
                   // 标记，MediaNode 承担）；浮条由本页 SceneSplitDialog 承担
                   if (n.id === sceneSplitTargetNodeId) data.splitEditing = true;
+                  // 智能抠像编辑会话（IKHK9N）：同款停帧 + 播放控制锁定（复用 splitEditing
+                  // 标记，MediaNode 承担）；单条由本页 SmartMattingDialog 承担
+                  if (n.id === smartMattingTargetNodeId) data.splitEditing = true;
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
                   if (hideToolbar) data.soloToolbarHidden = true;
@@ -11601,6 +11866,26 @@ export default function CanvasPage() {
             onSend={handleSceneSplitSend}
             submitting={sceneSplitSubmitting}
             sendBarAnchor={sceneSplitSendBarAnchor}
+          />
+        )}
+
+        {/* 智能抠像编辑态单条（IKHK9N）：源卡下方唯一一条 = X + 模式标题（人像抠像/
+            绿幕抠像，跟随入口下拉所选）+ 格式下拉（WEBM 透明默认/MP4 纯色，向上弹）
+            + 背景色分段（仅 MP4：白/黑/绿）+ ⚡0 徽标 + 发送钮（对齐去字幕单条家族形态）；
+            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
+            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送先退会话再建
+            任务占位卡（模式/格式/背景色随任务冻结，飞行期防重复提交） */}
+        {smartMattingTargetNodeId && (
+          <SmartMattingDialog
+            onClose={exitSmartMattingEditing}
+            mode={smartMattingMode}
+            format={smartMattingFormat}
+            onFormatChange={setSmartMattingFormat}
+            backgroundColor={smartMattingBackgroundColor}
+            onBackgroundColorChange={setSmartMattingBackgroundColor}
+            onSend={handleSmartMattingSend}
+            submitting={smartMattingSubmitting}
+            sendBarAnchor={smartMattingSendBarAnchor}
           />
         )}
 
