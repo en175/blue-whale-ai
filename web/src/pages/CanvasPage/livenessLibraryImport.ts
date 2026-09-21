@@ -13,6 +13,7 @@ import {
   type UploadCompleteData,
 } from '@/api/assets';
 import { computeFileMd5, probeMediaMeta } from '@/utils/upload';
+import { fetchRemoteMedia } from './fetchRemoteMedia';
 import { isMaterialLibraryId } from './mediaRefs';
 
 /** 选择弹窗里尚未转成本地资产的真人人像库条目 */
@@ -41,15 +42,8 @@ function mimeOf(blobType: string, type: 'image' | 'video'): string {
   return type === 'video' ? 'video/mp4' : 'image/jpeg';
 }
 
-/** 开发模式经 Vite /__tos-fetch 同域转发，避免 TOS CORS 拦截 */
-function tosFetchUrl(url: string): string {
-  if (!import.meta.env.DEV || !/^https?:\/\//.test(url)) return url;
-  if (typeof window !== 'undefined' && url.startsWith(window.location.origin)) return url;
-  return `/__tos-fetch?url=${encodeURIComponent(url)}`;
-}
-
 async function fetchLibraryFile(url: string, name: string, type: 'image' | 'video'): Promise<File> {
-  const res = await fetch(tosFetchUrl(url));
+  const res = await fetchRemoteMedia(url);
   if (!res.ok) throw new Error(`下载失败（${res.status}）`);
   const blob = await res.blob();
   return new File([blob], name, { type: mimeOf(blob.type, type) });

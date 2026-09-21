@@ -1,4 +1,5 @@
 /* 系统剪贴板：复制图片原件 / 读取可粘贴的图或文本 */
+import { fetchRemoteMedia } from './fetchRemoteMedia';
 
 export type ClipboardPastePayload =
   | { kind: 'image'; file: File }
@@ -32,7 +33,7 @@ export async function readCanvasClipboard(): Promise<ClipboardPastePayload | nul
 
 /** 把图片原件写入系统剪贴板，供外部应用粘贴 */
 export async function copyImageToClipboard(url: string): Promise<void> {
-  const res = await fetch(url);
+  const res = await fetchRemoteMedia(url);
   if (!res.ok) throw new Error('读取图片失败');
   const blob = await res.blob();
   const type = blob.type.startsWith('image/') ? blob.type : 'image/png';
