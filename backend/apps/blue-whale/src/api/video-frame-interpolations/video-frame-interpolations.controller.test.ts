@@ -4,14 +4,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ERROR_ENQUEUE_FAILED, ok } from "@lib/contracts";
 
-vi.mock("@lib/shared/generation/video-queue.js", () => ({
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoFrameInterpolationJob: vi.fn(),
 }));
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn() },
 }));
 
-const { enqueueVideoFrameInterpolationJob } = await import("@lib/shared/generation/video-queue.js");
+const { enqueueVideoFrameInterpolationJob } = await import("@lib/shared/generation/generation-queue.js");
 const { VideoFrameInterpolationsController } = await import(
   "./video-frame-interpolations.controller.js"
 );

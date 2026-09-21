@@ -3,7 +3,7 @@
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/video-queue.js";
+import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
