@@ -24,12 +24,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.awt.image.BufferedImage;
+import java.awt.image.IndexColorModel;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import javax.imageio.ImageIO;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -140,6 +148,58 @@ class ImageCutoutJobProcessorTest {
     private void assertFailCode(String expectedCode) {
         verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
+    }
+
+    /**
+     * 造带指定像素的 PNG 字节（IKHGJI 空产物闸门夹具）。
+     * <p>
+     * {@code TYPE_INT_ARGB} 造出的 PNG 与火山抠图产物同形（color type 6，带透明通道）；
+     * 换成 {@code TYPE_INT_RGB} 即模拟上游误回不带 alpha 的产物。像素为行优先的 ARGB。
+     */
+    private static byte[] png(int imageType, int width, int height, int... argb) {
+        BufferedImage img = new BufferedImage(width, height, imageType);
+        img.setRGB(0, 0, width, height, argb, 0, width);
+        return writePng(img);
+    }
+
+    /**
+     * 造索引色 + tRNS 的 PNG 字节：透明信息挂在调色板上，没有独立 alpha band
+     * （{@code getAlphaRaster()} 对它是 null）。钉住闸门走批量 {@code getRGB} 而非 {@code getAlphaRaster}
+     * 的理由——换成后者并把 null 当「非空」，这类全透明图就会被放行，正是本单要修的假成功。
+     */
+    private static byte[] indexedTransparentPng(int width, int height) {
+        // 调色板两格都是 alpha=0（RGB 取不同值，避免退化成一个颜色被编码器改写形态）
+        IndexColorModel cm = new IndexColorModel(1, 2,
+                new byte[]{0, (byte) 0xFF}, new byte[]{0, 0}, new byte[]{0, 0}, new byte[]{0, 0});
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_INDEXED, cm);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                // 直接写调色板下标，绕开 setRGB 的颜色匹配
+                img.getRaster().setSample(x, y, 0, 0);
+            }
+        }
+        return writePng(img);
+    }
+
+    private static byte[] writePng(BufferedImage img) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            ImageIO.write(img, "png", out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** 把结果图桩换成任意字节（沿用 resultDownloadFails 那条用例的 remove + 重建手法）。 */
+    private void stubResultBytes(byte[] bytes) {
+        resultServer.removeContext("/cutout.png");
+        resultServer.createContext("/cutout.png", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "image/png");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+        });
     }
 
     // ========== claim 语义（IKC9EJ 同构） ==========
@@ -428,6 +488,155 @@ class ImageCutoutJobProcessorTest {
 
         processor.handle("100");
 
+        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    // ========== 空产物闸门（IKHGJI：火山 scene 硬过滤档返回 200 + alpha 全 0 的假成功） ==========
+
+    @Test
+    @DisplayName("全透明结果图 → 判空拦截：不转存、不发布、落 image_cutout_failed")
+    void allTransparentResult_cutoutFailed() {
+        stubResultBytes(png(BufferedImage.TYPE_INT_ARGB, 2, 2,
+                0x00000000, 0x00000000, 0x00000000, 0x00000000));
+        stubClaim(humanSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        // 成功链一并桩上：闸门若不生效，job 会一路走到成功，assertFailCode 才会真的失败。
+        // 不桩的话未打桩的 uploadImageBytes 返回 null → NPE 被 handle 兜住 → 同样落
+        // image_cutout_failed，断言就成了摆设（只有下面的 never() 还能拦住）。
+        stubPublish();
+
+        processor.handle("100");
+
+        assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
+        // 闸门拦在 uploadImageBytes 之前：既不落脏资产，也不留终态 succeeded
+        verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
+        verify(stateMachine, never()).publishImageCutoutResult(any());
+    }
+
+    @Test
+    @DisplayName("半透明结果图（alpha=127，抠图边缘常态）→ 不误判为空，照常转存发布")
+    void semiTransparentResult_notJudgedEmpty() {
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        // setUp 的桩图 PNG_1X1 解出来是 alpha=127：判据若写成「非 255 即空」会在这里误杀
+        verify(tosService).uploadImageBytes(eq(PNG_1X1), anyString(), eq("9"));
+        verify(stateMachine).publishImageCutoutResult(any());
+        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("2x2 里仅 1 个像素不透明 → 不算空产物，放行")
+    void singleOpaquePixelResult_notEmpty() {
+        stubResultBytes(png(BufferedImage.TYPE_INT_ARGB, 2, 2,
+                0x00000000, 0x00000000, 0x00000000, 0xFF00FF00));
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
+        verify(stateMachine).publishImageCutoutResult(any());
+        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("索引色 + tRNS 的全透明结果图 → 同样判空拦截（透明不在独立 alpha band 上）")
+    void indexedTransparentResult_cutoutFailed() throws Exception {
+        byte[] bytes = indexedTransparentPng(2, 2);
+        // 先钉住夹具本身：索引色 + tRNS 的图 hasAlpha() 为 true 却没有独立 alpha band。
+        // 这两条断言一旦挂了，说明 JDK 的 PNG 解码行为变了，闸门换 getAlphaRaster() 的前提也随之作废。
+        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(bytes));
+        assertThat(decoded.getColorModel().hasAlpha()).isTrue();
+        assertThat(decoded.getAlphaRaster()).isNull();
+        stubResultBytes(bytes);
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        assertFailCode(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED);
+        verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
+        verify(stateMachine, never()).publishImageCutoutResult(any());
+    }
+
+    @Test
+    @DisplayName("全不透明产物、不带 alpha 通道（真彩 png）→ 不算空产物，放行")
+    void opaqueWithoutAlphaChannel_notEmpty() {
+        stubResultBytes(png(BufferedImage.TYPE_INT_RGB, 2, 2,
+                0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF));
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
+        verify(stateMachine).publishImageCutoutResult(any());
+        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("全不透明产物、带 alpha 通道（RGBA 全 255）→ 与上一条同判，放行（钉住编码无关）")
+    void opaqueArgbResult_notEmpty() {
+        stubResultBytes(png(BufferedImage.TYPE_INT_ARGB, 2, 2,
+                0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF));
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        verify(tosService).uploadImageBytes(any(), anyString(), eq("9"));
+        verify(stateMachine).publishImageCutoutResult(any());
+        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("结果图不可解码（非图片字节）→ 不触发闸门，维持契约 §8 静默降级")
+    void undecodableResult_skipsGate() {
+        byte[] garbage = "not-an-image".getBytes(StandardCharsets.UTF_8);
+        stubResultBytes(garbage);
+        stubClaim(generalSceneInput());
+        stubSourceAsset();
+        when(mediaKitCutoutClient.cutout(anyString(), anyString(), anyString(),
+                any(), any(), any(), any()))
+                .thenReturn(new NewApiMediaKitCutoutClient.CutoutResult(resultUrl, 800, 600));
+        stubPublish();
+
+        processor.handle("100");
+
+        // 魔数认不出 → sniffImageMime 兜底 image/png，mime 照常带过去（不是 null）
+        verify(tosService).uploadImageBytes(eq(garbage), eq("image/png"), eq("9"));
+        verify(stateMachine).publishImageCutoutResult(any());
         verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }

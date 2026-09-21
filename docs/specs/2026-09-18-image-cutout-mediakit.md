@@ -73,7 +73,7 @@
 - 参数映射：scene 直传 general/human/product；need_contour 布尔、contour_color 固定 #FFFFFF、contour_size 1~50 默认 10、need_crop_background 布尔，四者仅人像/商品场景随请求携带；output_format 固定 png；queue_id 不传。
 - 链路：镜像高清放大与擦除整条模板，新任务类型 image_cutout、独立创建端点、edge origin 纯视觉来源连线（参考推导跳过）、发送时建结果卡（无草稿先行）、失败重试分流沿用 lastInput 原参数重发。
 - 后端：创建入口校验（格式/大小/按场景上限）后入队；契约新增 image_cutout 章节（web 与 worker 双端共享）。
-- worker：同步调用 remove-image-background（对客模型名 mediakit-remove-image-background）、下载结果落对象存储、建素材、终态回填。
+- worker：同步调用 remove-image-background（对客模型名 mediakit-remove-image-background）、下载结果落对象存储、建素材、终态回填；转存前按像素判空产物（整幅 alpha 全 0，三个场景统一判）→ 归 `image_cutout_failed`，不转存不发布（IKHGJI：`scene=human/product` 检不出主体时火山返 200 + `success:true` + 全透明 PNG，无 error 字段。判据只认「整幅全透明」，缺透明通道的产物不算空产物——那属「全同色」另一套判据，不属本单）。
 - 计费：网关配零价（model_price=0），网关配置单另行建立（对标擦除 IKGOTD 模式）。
 
 ## Testing Decisions

@@ -56,7 +56,8 @@ import java.util.Set;
  *   <li>content_rejected / content_rejected_reference / quota_exhausted：
  *       NewApiErrorClassifier §5 分类信号，保留既有码投影</li>
  *   <li>image_cutout_failed：其余一律归并兜底（调用失败 / 超时 / 供应商错误
- *       （网关 success=false 返 400 且不扣费）/ 源素材不可用 / 结果下载转存失败），
+ *       （网关 success=false 返 400 且不扣费）/ 源素材不可用 / 结果下载转存失败 /
+ *       空产物（IKHGJI：结果图整幅 alpha 全 0，scene=human 检不出主体时的假成功）），
  *       上游可读原因随 message 透传</li>
  * </ul>
  * <p>
@@ -240,15 +241,26 @@ public class ImageCutoutJobProcessor implements JobProcessor {
         // 缺失时以结果图 ImageIO 解析兜底，解析失败静默 null（契约 §8 等价标准）。
         Integer width = result.imageWidth();
         Integer height = result.imageHeight();
+        BufferedImage img = null;
         try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(content));
-            if (img != null) {
-                if (width == null) width = ImageJobProcessor.positiveDimension(img.getWidth());
-                if (height == null) height = ImageJobProcessor.positiveDimension(img.getHeight());
-            }
+            img = ImageIO.read(new ByteArrayInputStream(content));
         } catch (Exception ignored) {
             // 契约 §8：解析失败静默 null，资产照常落库
             log.debug("[image_cutout] ImageIO 解析宽高失败(非关键，降级 null)");
+        }
+        if (img != null) {
+            if (width == null) width = ImageJobProcessor.positiveDimension(img.getWidth());
+            if (height == null) height = ImageJobProcessor.positiveDimension(img.getHeight());
+            // 空产物闸门（IKHGJI）：scene=human/product 检不出主体时，火山返 200 + success:true +
+            // 一张 alpha 全 0 的 PNG，不带 error 字段。原先只判「字节非空 + content-type 是 image/*」，
+            // 于是空图被当成功转存——用户拿到一张空白结果卡，而重试入口只在失败态出现，无法自救。
+            // 此处按像素判空后拒绝转存：不落脏资产、不留终态 succeeded（解析失败仍走上面的静默分支）。
+            if (isEmptyCutoutResult(img)) {
+                log.warn("[image_cutout] 空产物(未识别到主体) jobId={} scene={} w={} h={}",
+                        claim.id(), cutoutScene, img.getWidth(), img.getHeight());
+                throw new ImageCutoutError(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED,
+                        "抠图结果为空：未识别到主体");
+            }
         }
         TosMediaStorage.UploadResult stored = tosService.uploadImageBytes(content, mime, claim.userId());
         log.info("[image_cutout] 转存完成 jobId={} storageKey={} size={} w={} h={}",
@@ -275,6 +287,35 @@ public class ImageCutoutJobProcessor implements JobProcessor {
         } else {
             log.info("[image_cutout] 发布成功 jobId={}", claim.id());
         }
+    }
+
+    /**
+     * 结果图是否为空产物（IKHGJI）：整幅图找不到任何一个 alpha ≠ 0 的像素。
+     * <p>
+     * 判据必须是「全透明」而非「不透明」——抠图产物的主体边缘有大量半透明像素，
+     * 按 255 判会误杀正常结果（测试夹具 {@code PNG_1X1} 的 alpha 就是 127）。
+     * <p>
+     * 无 alpha 通道的产物（上游误回 jpeg / 真彩 png）<b>不算空产物</b>：那类图整幅透不出「空」，
+     * 要识别只能另起「全同色」一套判据，不属本单。把「没通道」当「空」还会让同一批像素
+     * 因编码不同得到相反结论——全不透明的像素编成 RGBA 放行、编成 RGB 却拦截。
+     * <p>
+     * 按行走 {@link BufferedImage#getRGB(int, int, int, int, int[], int, int)} 批量取像素：数组复用、
+     * 不逐像素装箱，且对索引色 + tRNS 这类没有独立 alpha band 的图也能取到正确 alpha
+     * （{@code getAlphaRaster()} 对它们返回 null，用它反而要多一条兜底分支）。
+     * 全空图是最坏情况（扫满全图，human 场景上限 7680×4320）；正常结果扫到首个不透明像素即返回。
+     */
+    private static boolean isEmptyCutoutResult(BufferedImage img) {
+        int width = img.getWidth();
+        int[] row = new int[width];
+        for (int y = 0, height = img.getHeight(); y < height; y++) {
+            img.getRGB(0, y, width, 1, row, 0, width);
+            for (int x = 0; x < width; x++) {
+                if ((row[x] >>> 24) != 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     // ========== 结果图下载（generation-worker.ts image 路径同构） ==========
