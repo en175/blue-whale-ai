@@ -41,7 +41,7 @@ public class RecoveryService {
     /** 每轮每类批大小（契约 §7：批 100）。 */
     private static final int SCAN_LIMIT = 100;
 
-    /** 重投延迟下限（video-queue.ts:17 VIDEO_MIN_DELAY_MS，producer 侧同样钳制）。 */
+    /** 重投延迟下限（generation-queue.ts:17 GENERATION_MIN_DELAY_MS，producer 侧同样钳制）。 */
     private static final long REENQUEUE_DELAY_MS = 1000L;
 
     private final GenerationJobMapper jobMapper;

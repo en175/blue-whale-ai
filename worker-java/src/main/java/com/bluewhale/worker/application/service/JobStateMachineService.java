@@ -365,13 +365,13 @@ public class JobStateMachineService {
     /**
      * 标记视频已提交（video-ops.ts:14-30）：provider_task_id + 释放租约 + next+5s。
      */
-    public boolean markVideoSubmitted(String jobId, String workerId,
+    public boolean markProviderSubmitted(String jobId, String workerId,
                                       long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
         LocalDateTime nextPollAt = LocalDateTime.now(ZoneOffset.UTC).plusNanos(5_000L * 1_000_000);
-        int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
+        int affected = jobMapper.markProviderSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
         if (affected != 1) {
-            log.warn("[video] markVideoSubmitted 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+            log.warn("[video] markProviderSubmitted 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         }
         return affected == 1;
@@ -380,15 +380,15 @@ public class JobStateMachineService {
     /**
      * 重排视频轮询（video-ops.ts:32-57）：poll_count+1 + 钳制 + 释放租约 + next+5s。
      */
-    public boolean rescheduleVideoPoll(String jobId, String workerId,
+    public boolean rescheduleProviderPoll(String jobId, String workerId,
                                        long fencingToken, int progress) {
         Long jobIdLong = Long.parseLong(jobId);
         int clamped = Math.max(0, Math.min(99, progress));
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
-        int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
+        int affected = jobMapper.rescheduleProviderPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         if (affected != 1) {
-            log.warn("[video] rescheduleVideoPoll 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+            log.warn("[video] rescheduleProviderPoll 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
         }
         return affected == 1;

@@ -38,9 +38,9 @@ import java.util.Set;
  *       pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源素材（视频或音频 Asset，官方双协议输入）→
  *       网关提交（scene 出站映射官方首字母大写枚举 + output_format 同名同值，**不是
- *       extract-audio 的 format**）→ markVideoSubmitted（存 provider_task_id + 释放租约 +
+ *       extract-audio 的 format**）→ markProviderSubmitted（存 provider_task_id + 释放租约 +
  *       next+5s + progress=1）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排（超限 1047）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
  *       （火山各轨 URL 仅 24h 有效）** → 按 scene 轨序发布 2/3 条音频 Asset → 终态 succeeded
  *       （轨数组回填终态日志 payload，getStatus 投影见契约 VocalSplitTrackResult）</li>
@@ -63,7 +63,7 @@ import java.util.Set;
  *       透传前端投影</li>
  * </ul>
  * <p>
- * 进度口径对齐家族：markVideoSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleVideoPoll
+ * 进度口径对齐家族：markProviderSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleProviderPoll
  * 保持不倒退、publishVocalSplitResult 终态 progress=100。
  */
 @Component
@@ -180,7 +180,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
     /**
      * 提交相：解析冻结 input + 源素材 → 网关提交（scene 出站映射 + output_format）→
-     * markVideoSubmitted → 续排轮询。
+     * markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVocalSplitJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -226,9 +226,9 @@ public class VocalSplitJobProcessor implements JobProcessor {
         log.info("[vocal_split] 上游已提交 jobId={} providerTaskId={} scene={} format={}",
                 claim.id(), taskId, scene, outputFormat);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s +
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s +
         //    progress=1；SQL 无 type 过滤，家族直接复用）
-        boolean updated = stateMachine.markVideoSubmitted(
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), VOCAL_SPLIT_POLL_INTERVAL_MS);
@@ -249,7 +249,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[vocal_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), VOCAL_SPLIT_POLL_INTERVAL_MS);
@@ -266,7 +266,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
                         "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), VOCAL_SPLIT_POLL_INTERVAL_MS);

@@ -34,9 +34,9 @@ import type { GenerationTag } from "./queue.constants.js";
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
-export const VIDEO_MIN_DELAY_MS = 1_000;
+export const GENERATION_MIN_DELAY_MS = 1_000;
 
-export type VideoQueueProducer = {
+export type GenerationQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
 };
 
@@ -64,14 +64,14 @@ export function loadRocketMqConfig(
   };
 }
 
-/** RocketMQ 适配器：把 Producer 包成 VideoQueueProducer 端口。
+/** RocketMQ 适配器：把 Producer 包成 GenerationQueueProducer 端口。
  *  topic 恒为 {@link GENERATION_TASK_QUEUE}（编译期常量，读自本模块，不接受覆盖）；
  *  tag 由调用方传入本类任务的常量（六类任务各一）。
  *  delay 单位 ms（客户端 delay → 投递时间戳 now+delay）。 */
-export function createRocketMqVideoProducer(
+export function createRocketMqGenerationProducer(
   producer: Pick<Producer, "send">,
   tag: GenerationTag,
-): VideoQueueProducer {
+): GenerationQueueProducer {
   return {
     async enqueue(jobId, options = {}) {
       const delay = Math.max(0, options.delayMs ?? 0);
@@ -79,7 +79,7 @@ export function createRocketMqVideoProducer(
         topic: GENERATION_TASK_QUEUE,
         tag,
         body: Buffer.from(JSON.stringify({ jobId })),
-        delay: delay > 0 ? delay : VIDEO_MIN_DELAY_MS,
+        delay: delay > 0 ? delay : GENERATION_MIN_DELAY_MS,
       });
     },
   };
@@ -131,7 +131,7 @@ export async function enqueueVideoGenerationJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     VIDEO_GENERATION_TAG,
   ).enqueue(jobId, options);
@@ -144,7 +144,7 @@ export async function enqueueMediaExtractJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     MEDIA_EXTRACT_TAG,
   ).enqueue(jobId, options);
@@ -158,7 +158,7 @@ export async function enqueueAudioTrimJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     AUDIO_TRIM_TAG,
   ).enqueue(jobId, options);
@@ -171,7 +171,7 @@ export async function enqueueImageGenerationJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     IMAGE_GENERATION_TAG,
   ).enqueue(jobId, options);
@@ -184,7 +184,7 @@ export async function enqueueAudioGenerationJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     AUDIO_GENERATION_TAG,
   ).enqueue(jobId, options);
@@ -197,7 +197,7 @@ export async function enqueueImageEnhanceJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     IMAGE_ENHANCE_TAG,
   ).enqueue(jobId, options);
@@ -210,7 +210,7 @@ export async function enqueueImageEraseJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     IMAGE_ERASE_TAG,
   ).enqueue(jobId, options);
@@ -223,7 +223,7 @@ export async function enqueueImageCutoutJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     IMAGE_CUTOUT_TAG,
   ).enqueue(jobId, options);
@@ -236,7 +236,7 @@ export async function enqueueImageOutpaintJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     IMAGE_OUTPAINT_TAG,
   ).enqueue(jobId, options);
@@ -250,7 +250,7 @@ export async function enqueueVideoSubtitleEraseJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     VIDEO_SUBTITLE_ERASE_TAG,
   ).enqueue(jobId, options);
@@ -264,7 +264,7 @@ export async function enqueueVideoEnhanceJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     VIDEO_ENHANCE_TAG,
   ).enqueue(jobId, options);
@@ -278,7 +278,7 @@ export async function enqueueVocalSplitJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     VOCAL_SPLIT_TAG,
   ).enqueue(jobId, options);
@@ -293,13 +293,13 @@ export async function enqueueVideoSceneSplitJob(
 ): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
-  await createRocketMqVideoProducer(
+  await createRocketMqGenerationProducer(
     producer,
     VIDEO_SCENE_SPLIT_TAG,
   ).enqueue(jobId, options);
 }
 
-export async function closeVideoGenerationQueue(): Promise<void> {
+export async function closeGenerationQueue(): Promise<void> {
   const startup = rocketMqStartup;
   rocketMqProducer = null;
   rocketMqStartup = null;

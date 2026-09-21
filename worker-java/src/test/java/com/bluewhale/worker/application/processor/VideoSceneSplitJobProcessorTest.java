@@ -40,7 +40,7 @@ import static org.mockito.Mockito.*;
 /**
  * VideoSceneSplitJobProcessor 单测（IKH8BP，父规格 IKH86V）。
  * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markVideoSubmitted + scheduleNext / poll
+ * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
  * processing 续排 / 轮询超限 / completed 逐段转存发布 / failed 分类终态 + 上游原因透传）、
  * segments 一对多解析与逐段持久化（段序 / 起止秒 / 官方 duration / 源宽高近似 / 1 段不特判）、
  * **部分段转存失败 → 整体失败且不发布（无半成品资产悬挂）**、input 业务键兜底校验、凭证缺失
@@ -206,31 +206,31 @@ class VideoSceneSplitJobProcessorTest {
     // ========== submit 相：状态机与错误归并（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
-    @DisplayName("submit：granularity 透传 → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("submit：granularity 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitStoresTaskIdAndSchedulesNext() {
         stubSubmitClaim(input("fine"));
         stubSourceAsset();
         when(segmentScenesClient.submit("sk-frozen-token", "https://example.com/src.mp4", "fine"))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "fine");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input("standard"));
         stubSourceAsset();
         when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -298,17 +298,17 @@ class VideoSceneSplitJobProcessorTest {
     // ========== poll 相：状态机 ==========
 
     @Test
-    @DisplayName("poll processing（running）→ rescheduleVideoPoll + scheduleNext(5s)")
+    @DisplayName("poll processing（running）→ rescheduleProviderPoll + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(input("standard"), 3);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new SceneSplitTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -324,7 +324,7 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -335,12 +335,12 @@ class VideoSceneSplitJobProcessorTest {
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 场景切分任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

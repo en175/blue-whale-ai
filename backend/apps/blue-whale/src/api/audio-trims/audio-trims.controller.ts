@@ -4,7 +4,7 @@
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { enqueueAudioTrimJob } from "@lib/shared/generation/video-queue.js";
+import { enqueueAudioTrimJob } from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { AudioTrimsService } from "@lib/shared/audio-trims/audio-trims.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";

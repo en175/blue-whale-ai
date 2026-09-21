@@ -62,9 +62,9 @@ class VideoWriteFenceGoldenTest {
     }
 
     @Test
-    @DisplayName("G71: markVideoSubmitted SQL 钉桩——含 provider/progress=1/next_poll_at，无 fencing_token 递增，无非法 INTERVAL")
-    void g71_markVideoSubmittedSqlPinned() {
-        String sql = updateSqlOf("markVideoSubmitted");
+    @DisplayName("G71: markProviderSubmitted SQL 钉桩——含 provider/progress=1/next_poll_at，无 fencing_token 递增，无非法 INTERVAL")
+    void g71_markProviderSubmittedSqlPinned() {
+        String sql = updateSqlOf("markProviderSubmitted");
         assertThat(sql)
                 .contains("provider = 'new-api'")
                 .contains("progress = 1")
@@ -77,9 +77,9 @@ class VideoWriteFenceGoldenTest {
     }
 
     @Test
-    @DisplayName("G72: rescheduleVideoPoll 钳制在 Java 侧——150→99、-5→0；SQL 含 last_polled_at/next_poll_at、无 fence bump")
+    @DisplayName("G72: rescheduleProviderPoll 钳制在 Java 侧——150→99、-5→0；SQL 含 last_polled_at/next_poll_at、无 fence bump")
     void g72_rescheduleClampAndSql() {
-        String sql = updateSqlOf("rescheduleVideoPoll");
+        String sql = updateSqlOf("rescheduleProviderPoll");
         assertThat(sql)
                 .contains("poll_count = COALESCE(poll_count, 0) + 1")
                 .contains("last_polled_at = #{now}")
@@ -87,22 +87,22 @@ class VideoWriteFenceGoldenTest {
                 .doesNotContain("fencing_token = fencing_token + 1")
                 .doesNotContain("MILLISECOND");
 
-        when(jobMapper.rescheduleVideoPoll(eq(300L), eq("w1"), eq(5L), anyInt(), any(), any())).thenReturn(1);
-        service.rescheduleVideoPoll("300", "w1", 5, 150);
-        service.rescheduleVideoPoll("300", "w1", 5, -5);
+        when(jobMapper.rescheduleProviderPoll(eq(300L), eq("w1"), eq(5L), anyInt(), any(), any())).thenReturn(1);
+        service.rescheduleProviderPoll("300", "w1", 5, 150);
+        service.rescheduleProviderPoll("300", "w1", 5, -5);
         ArgumentCaptor<Integer> cap = ArgumentCaptor.forClass(Integer.class);
-        verify(jobMapper, times(2)).rescheduleVideoPoll(eq(300L), eq("w1"), eq(5L), cap.capture(), any(), any());
+        verify(jobMapper, times(2)).rescheduleProviderPoll(eq(300L), eq("w1"), eq(5L), cap.capture(), any(), any());
         assertThat(cap.getAllValues()).containsExactly(99, 0);
     }
 
     @Test
-    @DisplayName("G72b: markVideoSubmitted 时刻参数 = now+5s（Java 计算，非 SQL 函数）")
+    @DisplayName("G72b: markProviderSubmitted 时刻参数 = now+5s（Java 计算，非 SQL 函数）")
     void g72b_nextPollAtComputedInJava() {
-        when(jobMapper.markVideoSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), any())).thenReturn(1);
+        when(jobMapper.markProviderSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), any())).thenReturn(1);
         LocalDateTime before = LocalDateTime.now(java.time.ZoneOffset.UTC);
-        service.markVideoSubmitted("300", "w1", 5, "task-9");
+        service.markProviderSubmitted("300", "w1", 5, "task-9");
         ArgumentCaptor<LocalDateTime> cap = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(jobMapper).markVideoSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), cap.capture());
+        verify(jobMapper).markProviderSubmitted(eq(300L), eq("w1"), eq(5L), eq("task-9"), cap.capture());
         assertThat(cap.getValue()).isBetween(before.plusSeconds(4), before.plusSeconds(7));
     }
 

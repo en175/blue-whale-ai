@@ -148,7 +148,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
             """)
-    int publishMediaExtractGuard(
+    int publishResultGuard(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken
@@ -475,7 +475,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
-     * 标记视频已提交（video-ops.ts:14-35 markVideoSubmitted 逐字）。
+     * 标记视频已提交（video-ops.ts:14-35 markProviderSubmitted 逐字）。
      * <p>
      * 评审修复 C1：补 provider='new-api'、progress=1、next_poll_at；
      * **去掉 fencing_token+1**（TS 不 bump——fence 只在 claim/requeue 递增，契约 §3.1）。
@@ -497,7 +497,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
             """)
-    int markVideoSubmitted(
+    int markProviderSubmitted(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken,
@@ -506,7 +506,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
-     * 重排视频轮询（video-ops.ts:37-58 rescheduleVideoPoll 逐字）。
+     * 重排视频轮询（video-ops.ts:37-58 rescheduleProviderPoll 逐字）。
      * <p>
      * 评审修复 C2：progress 由 service 端钳制（Math.max(0,Math.min(99,round))）后传入；
      * 补 last_polled_at、next_poll_at；**去掉 fencing_token+1**（TS 不 bump）。
@@ -527,7 +527,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
             """)
-    int rescheduleVideoPoll(
+    int rescheduleProviderPoll(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken,

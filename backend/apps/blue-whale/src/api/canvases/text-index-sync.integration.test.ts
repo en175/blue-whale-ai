@@ -21,14 +21,14 @@ import { textInputSignatureOf, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE } from "@
 // 入队函数在测试中被 stub（对齐 audio-draft.integration.test.ts 先例）：任务停在 queued，
 // 终态由测试直接翻 DB——音频 IKCR78 fail-fast（无 MQ 入队异常 → markFailed「任务入队失败」）
 // 会终止前端轮询、阻断签名回写断言；图片/视频入队失败仅记日志不受影响。
-vi.mock("@lib/shared/generation/video-queue.js", () => ({
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoGenerationJob: vi.fn(async () => {}),
   enqueueImageGenerationJob: vi.fn(async () => {}),
   enqueueAudioGenerationJob: vi.fn(async () => {}),
   enqueueMediaExtractJob: vi.fn(async () => {}),
   loadRocketMqConfig: vi.fn(() => ({ endpoints: "", sslEnabled: false })),
-  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
-  closeVideoGenerationQueue: vi.fn(async () => {}),
+  createRocketMqGenerationProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeGenerationQueue: vi.fn(async () => {}),
 }));
 
 /* IKFM3S 文本索引下游同步契约 v1 集成（隔离 MySQL，IKFM3S_DATABASE_URL 门控）：

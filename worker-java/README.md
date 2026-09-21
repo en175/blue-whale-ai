@@ -20,7 +20,7 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
 - **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL`（上游网关）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
-- **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/video-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
+- **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/generation-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
 - `GET /ready` 只返回 `{"status":"ready"}`。
 
 决策依据：ADR-0084「修正六」/ 契约 §16。
@@ -218,13 +218,13 @@ worker/
     - 上限 200MB
   - [x] mq `GenerationMessageProducer`：MQ 生产者端口（视频 scheduleNext 自投延迟消息）
   - [x] mq `RocketMqGenerationMessageProducer`：rocketmq-client-java Producer 实现
-    - delay 下限 1000ms（VIDEO_MIN_DELAY_MS）
+    - delay 下限 1000ms（GENERATION_MIN_DELAY_MS）
   - [x] processor `VideoJobProcessor`：完整视频编排（video-job-runner.ts:195-376 runVideoJobStep）
     - 多步状态机：每步 = 一次 MQ 消费（submit 或 poll）
     - cancel-before-dispatch：cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch
-    - submit 阶段：buildSubmitRequest → submit → markVideoSubmitted → scheduleNext(5s)
+    - submit 阶段：buildSubmitRequest → submit → markProviderSubmitted → scheduleNext(5s)
     - IKEA26 parent-reuse 防双扣：retry job 先查父 task → SUCCESS → publish without submit
-    - poll 阶段：transient → rescheduleVideoPoll(5s); ≥720 → provider_timeout
+    - poll 阶段：transient → rescheduleProviderPoll(5s); ≥720 → provider_timeout
     - succeeded+URL → relay → publishVideoResult
     - 参考校验：video-reference-validation.ts 完整移植（Seedance 2.0 约束）
     - 修正一：cost_reservations / actual_amount_fen / release_note 整体省略
@@ -233,8 +233,8 @@ worker/
     - group=generation-video-worker+suffix
   - [x] service `JobStateMachineService` 扩展：
     - `claimVideoJobById` → Optional<ClaimedVideoJobDto>（套 source 白名单 4 源 + parentProviderTaskId join）
-    - `markVideoSubmitted` → boolean（provider_task_id + 释放租约 + next+5s）
-    - `rescheduleVideoPoll` → boolean（poll_count+1 + 释放租约 + next+5s）
+    - `markProviderSubmitted` → boolean（provider_task_id + 释放租约 + next+5s）
+    - `rescheduleProviderPoll` → boolean（poll_count+1 + 释放租约 + next+5s）
     - `publishVideoResult` → boolean（@Transactional：guard + asset + slots + events）
     - `cancelVideoBeforeDispatch` → boolean（WHERE provider_task_id IS NULL + cancelled + log）
   - [x] config `VideoEnabledCondition`：@Conditional 按 tag "step" 启停
