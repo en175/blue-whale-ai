@@ -46,6 +46,9 @@ export const VOCAL_SPLIT_TAG = "vocal_split";
  *  用独立 tag 区分任务类型；与 generation_jobs.type / VIDEO_SCENE_SPLIT_JOB_TYPE（@lib/contracts）保持一致。 */
 export const VIDEO_SCENE_SPLIT_TAG = "video_scene_split";
 
+/** 智能抠像任务 tag（IKHK7F，契约见 @lib/contracts/video-matting）：复用 GENERATION_TASK_QUEUE，
+ *  用独立 tag 区分任务类型；与 generation_jobs.type / VIDEO_MATTING_JOB_TYPE（@lib/contracts）保持一致。 */
+export const VIDEO_MATTING_TAG = "video_matting";
 /** 视频插帧任务 tag（IKHLK3，父需求 IKHLES，契约见 @lib/contracts/video-frame-interpolation）：复用
  *  GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type /
  *  VIDEO_FRAME_INTERPOLATION_JOB_TYPE（@lib/contracts）保持一致。 */
@@ -55,7 +58,7 @@ export const VIDEO_FRAME_INTERPOLATION_TAG = "video_frame_interpolation";
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
 export const VIDEO_GENERATION_TAG = "video";
 
-/** 十四个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
+/** 十五个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
  *  发明一个字符串不会有任何运行时报错，只会静默滞留）。 */
 export type GenerationTag =
   | typeof VIDEO_GENERATION_TAG
@@ -71,4 +74,5 @@ export type GenerationTag =
   | typeof VIDEO_ENHANCE_TAG
   | typeof VOCAL_SPLIT_TAG
   | typeof VIDEO_SCENE_SPLIT_TAG
+  | typeof VIDEO_MATTING_TAG
   | typeof VIDEO_FRAME_INTERPOLATION_TAG;
