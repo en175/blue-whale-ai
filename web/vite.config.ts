@@ -169,6 +169,10 @@ export default defineConfig(({ command, mode }) => {
       !process.env.VITEST && tosUploadProxy(),
       !process.env.VITEST && tosFetchProxy(),
     ],
+    // spawnSync（验证门禁）把 stdout 接到管道时 Vite 退不干净；Vitest 2 无 CLI --forceExit。
+    test: {
+      forceExit: true,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
