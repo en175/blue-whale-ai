@@ -103,6 +103,20 @@ describe('GroupOverlay 捕获拦截的覆盖层放行', () => {
     frame.remove();
   });
 
+  it('按下目标是钉屏幕浮层（data-gen-panel-territory 子树）：放行，不再拦死传播（IKHCUA）', async () => {
+    await mountOverlay();
+    const overlay = document.createElement('div');
+    overlay.setAttribute('data-gen-panel-territory', '');
+    const button = document.createElement('button');
+    overlay.appendChild(button);
+    document.body.appendChild(overlay);
+    let reached = false;
+    button.addEventListener('pointerdown', () => { reached = true; });
+    button.dispatchEvent(pointerDown(150, 150));
+    expect(reached).toBe(true);
+    overlay.remove();
+  });
+
   it('对照：非豁免目标同位置按下仍被拦死（防穿透框选语义不变）', async () => {
     await mountOverlay();
     const plain = document.createElement('div');
