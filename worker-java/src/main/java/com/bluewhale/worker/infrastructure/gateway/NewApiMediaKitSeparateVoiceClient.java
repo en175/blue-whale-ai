@@ -4,28 +4,19 @@ import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.SocketTimeoutException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.UUID;
 
 /**
  * new-api 网关 MediaKit 人声背景音分离客户端（IKHA2J；契约 =
  * backend/libs/contracts/vocal-split.ts，以 {@link NewApiMediaKitExtractAudioClient} 为模板
  * ——家族内第四个 MediaKit 异步任务：提交返 task_id + 查询端点轮询按 scene 取 result 的
- * 2/3 个音轨 URL 与 duration）。
+ * 2/3 个音轨 URL 与 duration。HTTP 骨架自 IKHKMK 起收敛入
+ * {@link NewApiMediaKitAsyncTaskClient}，本类只保留契约枚举校验、出站 payload 构造
+ * 与 completed 多轨结果解析）。
  * <p>
  * 端点（网关**对客**路径，常量单源在 {@link VocalSplitContract}，契约票 IKHA2C 已冻结）：
  * <ul>
@@ -64,23 +55,13 @@ import java.util.UUID;
  * isTransientPollError 语义判定瞬时重排。
  */
 @Component
-public class NewApiMediaKitSeparateVoiceClient {
-
-    private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitSeparateVoiceClient.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final MediaType JSON_TYPE = MediaType.get("application/json");
+public class NewApiMediaKitSeparateVoiceClient extends NewApiMediaKitAsyncTaskClient {
 
     /**
      * 对客模型名（网关渠道路由 + model_price 配 0 免费口径；家族客户端 MODEL 同款集中一处）。
      * 候选值 mediakit-separate-voice——最终以网关票确认为准，有出入只改本常量。
      */
     static final String MODEL = "mediakit-separate-voice";
-
-    /** submit 超时 30s（异步提交秒级入队，家族同窗口）。 */
-    private static final int SUBMIT_TIMEOUT_MS = 30_000;
-
-    /** poll 超时 10s（家族同窗口）。 */
-    private static final int POLL_TIMEOUT_MS = 10_000;
 
     /** 轨类型 → 官方 result URL 键（官方 PDF scene 取值表「输出音轨」列逐字；单源在本类，
      *  契约只冻结轨类型——URL 键名是供应商传输细节，不进跨进程契约）。 */
@@ -90,19 +71,38 @@ public class NewApiMediaKitSeparateVoiceClient {
             "music", "music_audio_url",
             "sfx", "sfx_audio_url");
 
-    private final OkHttpClient submitClient;
-    private final OkHttpClient pollClient;
-    private final String baseUrl;
-
     public NewApiMediaKitSeparateVoiceClient() {
         this(System.getenv("NEW_API_BASE_URL"));
     }
 
     /** 测试用构造器：注入 base URL。 */
     NewApiMediaKitSeparateVoiceClient(String baseUrl) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
-        this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
-        this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
+        super(baseUrl);
+    }
+
+    @Override
+    protected String submitPath() {
+        return VocalSplitContract.SUBMIT_PATH;
+    }
+
+    @Override
+    protected String pollPathPrefix() {
+        return VocalSplitContract.POLL_PATH_PREFIX;
+    }
+
+    @Override
+    protected String taskLabel() {
+        return "人声背景分离";
+    }
+
+    @Override
+    protected String fallbackCode() {
+        return VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED;
+    }
+
+    @Override
+    protected RuntimeException error(String code, String message) {
+        return new VocalSplitError(code, message);
     }
 
     /**
@@ -118,15 +118,13 @@ public class NewApiMediaKitSeparateVoiceClient {
      */
     public String submit(String token, String sourceUrl, boolean sourceIsVideo,
                          String scene, String outputFormat) {
-        String traceId = UUID.randomUUID().toString();
-
         if (scene == null || !VocalSplitContract.SUPPORTED_SCENES.contains(scene)) {
             // processor 已按契约枚举校验，此处兜底防御（retry 冻结快照可能带历史脏值）
-            throw new VocalSplitError(GenerationError.ERROR_INVALID_INPUT,
+            throw error(GenerationError.ERROR_INVALID_INPUT,
                     "人声背景分离场景非法: " + scene);
         }
         if (outputFormat == null || !VocalSplitContract.SUPPORTED_OUTPUT_FORMATS.contains(outputFormat)) {
-            throw new VocalSplitError(GenerationError.ERROR_INVALID_INPUT,
+            throw error(GenerationError.ERROR_INVALID_INPUT,
                     "人声背景分离输出格式非法: " + outputFormat);
         }
 
@@ -137,78 +135,7 @@ public class NewApiMediaKitSeparateVoiceClient {
         // 出站映射官方首字母大写枚举（契约 SCENE_UPSTREAM_MAP 单源，禁止另行发明字面量）
         payload.put("scene", VocalSplitContract.SCENE_UPSTREAM_MAP.get(scene));
         payload.put("output_format", outputFormat);
-
-        String bodyJson;
-        try {
-            bodyJson = JSON.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new VocalSplitError(
-                    VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED, "请求序列化失败");
-        }
-
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + VocalSplitContract.SUBMIT_PATH)
-                .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Content-Type", "application/json");
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = submitClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            // 提交超时：上游可能已受理但未拿到 task_id——归终态不重试（宁可不重试也不双跑，
-            // 家族口径），由 processor 归并兜底码
-            throw new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 人声背景分离提交超时");
-        } catch (Exception e) {
-            throw new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 人声背景分离提交失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // 官方同步错误结构 error{code,message,param,type}（success=false 任务不创建）——
-                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                String reason = extractUpstreamMessage(rawText);
-                String message = "人声背景分离任务提交失败: HTTP " + response.code();
-                if (!reason.isEmpty()) {
-                    message += " " + reason;
-                } else {
-                    message += " body=" + truncate(rawText);
-                }
-                throw new VocalSplitError(code, message);
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-
-            JsonNode errorNode = parsed.get("error");
-            if (errorNode != null && errorNode.has("message")) {
-                String errText = errorNode.get("message").asText();
-                String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
-                throw new VocalSplitError(code, "MediaKit 人声背景分离提交业务失败: " + truncate(errText));
-            }
-
-            // data 解包宽容（网关可能包 data 层，家族同款）
-            JsonNode data = unwrapData(parsed);
-            String taskId = textOrNull(data, "task_id");
-            if (taskId == null || taskId.isEmpty()) {
-                throw new VocalSplitError(
-                        VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
-                        "MediaKit 人声背景分离提交响应缺少 task_id");
-            }
-            return taskId;
-        } catch (VocalSplitError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VocalSplitError(
-                    VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
-                    "MediaKit 人声背景分离提交响应读取失败: " + e.getMessage());
-        }
+        return executeSubmit(token, payload);
     }
 
     /**
@@ -222,148 +149,35 @@ public class NewApiMediaKitSeparateVoiceClient {
      * @throws VocalSplitError 网络 / HTTP / 解析错误（瞬时语义由 cause 携带，processor 判定）
      */
     public SeparateVoiceTaskObservation poll(String token, String taskId) {
-        String traceId = UUID.randomUUID().toString();
+        PollBody body = executePoll(token, taskId);
+        String normalized = normalizedStatus(body);
 
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + VocalSplitContract.POLL_PATH_PREFIX + encodePath(taskId))
-                .get();
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = pollClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            throw new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 人声背景分离任务查询超时");
-        } catch (java.net.ConnectException | java.net.UnknownHostException e) {
-            VocalSplitError error = new VocalSplitError(
-                    GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 人声背景分离任务查询网络不可达");
-            error.initCause(e);
-            throw error;
-        } catch (Exception e) {
-            throw new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 人声背景分离任务查询失败: " + e.getMessage());
+        if ("failed".equals(normalized)) {
+            // 上游错误信号：error 对象（提交响应同形状）与顶层 message 都读、取非空合并
+            return new SeparateVoiceTaskObservation("failed", null, null,
+                    extractUpstreamCode(body), extractPollUpstreamMessage(body));
         }
 
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // HTTP 429/5xx 瞬时（cause 携带状态供 processor 重排）；4xx 业务错 → 硬失败
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                VocalSplitError error = new VocalSplitError(code,
-                        "MediaKit 人声背景分离任务查询失败: HTTP " + response.code() + " body=" + truncate(rawText));
-                error.initCause(new NewApiVideoClient.HttpStatusException(response.code()));
-                throw error;
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-            JsonNode data = unwrapData(parsed);
-
-            String status = textOrNull(data, "status");
-            if (status == null) {
-                throw new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "MediaKit 人声背景分离任务响应缺少 status");
-            }
-            String normalized = status.toLowerCase();
-
-            if ("failed".equals(normalized)) {
-                // 上游错误信号：error 对象（提交响应同形状）与顶层 message 都读、取非空合并
-                JsonNode rawError = data.has("error") && data.get("error").isObject()
-                        ? data.get("error") : parsed.get("error");
-                String upstreamCode = rawError != null && rawError.has("code")
-                        ? rawError.get("code").asText() : null;
-                String upstreamMessage = extractUpstreamMessage(parsed, data);
-                return new SeparateVoiceTaskObservation("failed", null, null,
-                        upstreamCode, upstreamMessage);
-            }
-
-            if ("completed".equals(normalized)) {
-                // 逐轨取官方 URL 键（轨类型键承载；二分法只有 voice/background，三分法多
-                // music/sfx——按出现即取，不按 scene 预判轨集，缺失轨由 processor 对账）
-                JsonNode result = data.path("result");
-                Map<String, String> trackUrls = new TreeMap<>();
-                for (Map.Entry<String, String> entry : TRACK_URL_KEYS.entrySet()) {
-                    JsonNode urlNode = result.get(entry.getValue());
-                    if (urlNode != null && urlNode.isTextual() && !urlNode.asText().isEmpty()) {
-                        trackUrls.put(entry.getKey(), urlNode.asText());
-                    }
+        if ("completed".equals(normalized)) {
+            // 逐轨取官方 URL 键（轨类型键承载；二分法只有 voice/background，三分法多
+            // music/sfx——按出现即取，不按 scene 预判轨集，缺失轨由 processor 对账）
+            JsonNode result = body.data().path("result");
+            Map<String, String> trackUrls = new TreeMap<>();
+            for (Map.Entry<String, String> entry : TRACK_URL_KEYS.entrySet()) {
+                JsonNode urlNode = result.get(entry.getValue());
+                if (urlNode != null && urlNode.isTextual() && !urlNode.asText().isEmpty()) {
+                    trackUrls.put(entry.getKey(), urlNode.asText());
                 }
-                JsonNode duration = result.get("duration");
-                return new SeparateVoiceTaskObservation("succeeded",
-                        trackUrls,
-                        duration != null && duration.isNumber() ? duration.asDouble() : null,
-                        null, null);
             }
-
-            // queued / running 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
-            return new SeparateVoiceTaskObservation("processing", null, null, null, null);
-        } catch (VocalSplitError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 人声背景分离任务响应解析失败: " + e.getMessage());
+            JsonNode duration = result.get("duration");
+            return new SeparateVoiceTaskObservation("succeeded",
+                    trackUrls,
+                    duration != null && duration.isNumber() ? duration.asDouble() : null,
+                    null, null);
         }
-    }
 
-    // ========== 内部工具 ==========
-
-    private JsonNode parseJsonOrThrow(String rawText) {
-        try {
-            return JSON.readTree(rawText);
-        } catch (Exception e) {
-            throw new VocalSplitError(
-                    VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
-                    "MediaKit 未返回有效 JSON");
-        }
-    }
-
-    /** data 解包（网关可能包 data 层；非对象形态回退顶层，家族同款）。 */
-    private static JsonNode unwrapData(JsonNode parsed) {
-        return parsed.has("data") && parsed.get("data").isObject() ? parsed.get("data") : parsed;
-    }
-
-    /**
-     * 提取上游可读失败原因（error.message 或顶层 message 字段，两层都读取非空）。
-     * 供应商原因透传给前端投影（失败 message 口径）。
-     */
-    private static String extractUpstreamMessage(String rawText) {
-        try {
-            JsonNode parsed = JSON.readTree(rawText);
-            return extractUpstreamMessage(parsed, unwrapData(parsed));
-        } catch (Exception e) {
-            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
-        }
-        return "";
-    }
-
-    /** 同上（已解析形态）：网关 data 信封时先查解包层，再查顶层；无信封时两轮退化为一轮。 */
-    private static String extractUpstreamMessage(JsonNode parsed, JsonNode data) {
-        for (JsonNode node : new JsonNode[] { data, parsed }) {
-            JsonNode message = node.path("error").path("message");
-            if (!message.isTextual() || message.asText().isEmpty()) {
-                message = node.path("message");
-            }
-            if (message.isTextual() && !message.asText().isEmpty()) {
-                return truncate(message.asText());
-            }
-        }
-        return "";
-    }
-
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
-        return (v != null && v.isTextual()) ? v.asText() : null;
-    }
-
-    private static String truncate(String text) {
-        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
-    }
-
-    private static String encodePath(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+        // queued / running 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
+        return new SeparateVoiceTaskObservation("processing", null, null, null, null);
     }
 
     /**

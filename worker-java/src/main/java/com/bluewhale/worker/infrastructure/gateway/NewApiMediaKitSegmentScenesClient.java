@@ -4,28 +4,21 @@ import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * new-api 网关 MediaKit 场景切分客户端（IKH8BP，父规格 IKH86V；以
  * {@link NewApiMediaKitExtractAudioClient} 为模板——家族第四个 MediaKit 异步任务：
- * 提交返 task_id + 查询端点轮询取 result.duration + result.segments[]）。
+ * 提交返 task_id + 查询端点轮询取 result.duration + result.segments[]。HTTP 骨架自
+ * IKHKMK 起收敛入 {@link NewApiMediaKitAsyncTaskClient}，本类只保留契约枚举校验、
+ * 出站 payload 构造与 completed 结果解析）。
  * <p>
  * 端点（网关**对客**路径，常量单源在 {@link VideoSceneSplitContract}，IKH8BH 契约冻结）：
  * <ul>
@@ -62,11 +55,9 @@ import java.util.UUID;
  * isTransientPollError 语义判定瞬时重排。
  */
 @Component
-public class NewApiMediaKitSegmentScenesClient {
+public class NewApiMediaKitSegmentScenesClient extends NewApiMediaKitAsyncTaskClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitSegmentScenesClient.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
     /** 网关异步提交路由路径（对客；契约常量单源，IKH67T：禁止写火山上游路径）。 */
     static final String SUBMIT_PATH = VideoSceneSplitContract.SUBMIT_PATH;
@@ -77,25 +68,38 @@ public class NewApiMediaKitSegmentScenesClient {
     /** 对客模型名（契约常量单源：网关渠道路由 + model_price 配 0 免费口径）。 */
     static final String MODEL = VideoSceneSplitContract.MODEL_NAME;
 
-    /** submit 超时 30s（异步提交秒级入队，去字幕家族同窗口）。 */
-    private static final int SUBMIT_TIMEOUT_MS = 30_000;
-
-    /** poll 超时 10s（去字幕家族同窗口）。 */
-    private static final int POLL_TIMEOUT_MS = 10_000;
-
-    private final OkHttpClient submitClient;
-    private final OkHttpClient pollClient;
-    private final String baseUrl;
-
     public NewApiMediaKitSegmentScenesClient() {
         this(System.getenv("NEW_API_BASE_URL"));
     }
 
     /** 测试用构造器：注入 base URL。 */
     NewApiMediaKitSegmentScenesClient(String baseUrl) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
-        this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
-        this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
+        super(baseUrl);
+    }
+
+    @Override
+    protected String submitPath() {
+        return SUBMIT_PATH;
+    }
+
+    @Override
+    protected String pollPathPrefix() {
+        return POLL_PATH_PREFIX;
+    }
+
+    @Override
+    protected String taskLabel() {
+        return "场景切分";
+    }
+
+    @Override
+    protected String fallbackCode() {
+        return VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED;
+    }
+
+    @Override
+    protected RuntimeException error(String code, String message) {
+        return new VideoSceneSplitError(code, message);
     }
 
     /**
@@ -109,12 +113,10 @@ public class NewApiMediaKitSegmentScenesClient {
      * @throws VideoSceneSplitError 按错误分类抛错
      */
     public String submit(String token, String videoUrl, String granularity) {
-        String traceId = UUID.randomUUID().toString();
-
         Integer threshold = VideoSceneSplitContract.SEGMENT_THRESHOLD.get(granularity);
         if (threshold == null) {
             // processor 已按契约枚举校验，此处兜底防御（retry 冻结快照可能带历史脏值）
-            throw new VideoSceneSplitError(GenerationError.ERROR_INVALID_INPUT,
+            throw error(GenerationError.ERROR_INVALID_INPUT,
                     "场景切分粒度非法: " + granularity);
         }
 
@@ -122,78 +124,7 @@ public class NewApiMediaKitSegmentScenesClient {
         payload.put("model", MODEL);
         payload.put("video_url", videoUrl);
         payload.put("segment_threshold", threshold);
-
-        String bodyJson;
-        try {
-            bodyJson = JSON.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(
-                    VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED, "请求序列化失败");
-        }
-
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + SUBMIT_PATH)
-                .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Content-Type", "application/json");
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = submitClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            // 提交超时：上游可能已受理但未拿到 task_id——归终态不重试（宁可不重试也不双跑，
-            // 同步家族口径），由 processor 归并兜底码
-            throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 场景切分提交超时");
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 场景切分提交失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // 网关对 success=false / 未配价 / 缺渠道返 400 且不扣费——
-                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                String reason = extractUpstreamMessage(rawText);
-                String message = "场景切分任务提交失败: HTTP " + response.code();
-                if (!reason.isEmpty()) {
-                    message += " " + reason;
-                } else {
-                    message += " body=" + truncate(rawText);
-                }
-                throw new VideoSceneSplitError(code, message);
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-
-            JsonNode errorNode = parsed.get("error");
-            if (errorNode != null && errorNode.has("message")) {
-                String errText = errorNode.get("message").asText();
-                String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
-                throw new VideoSceneSplitError(code, "MediaKit 场景切分提交业务失败: " + truncate(errText));
-            }
-
-            // data 解包宽容（网关可能包 data 层，视频客户端同款）
-            JsonNode data = unwrapData(parsed);
-            String taskId = textOrNull(data, "task_id");
-            if (taskId == null || taskId.isEmpty()) {
-                throw new VideoSceneSplitError(
-                        VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
-                        "MediaKit 场景切分提交响应缺少 task_id");
-            }
-            return taskId;
-        } catch (VideoSceneSplitError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(
-                    VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
-                    "MediaKit 场景切分提交响应读取失败: " + e.getMessage());
-        }
+        return executeSubmit(token, payload);
     }
 
     /**
@@ -207,85 +138,30 @@ public class NewApiMediaKitSegmentScenesClient {
      * @throws VideoSceneSplitError 网络 / HTTP / 解析错误（瞬时语义由 cause 携带，processor 判定）
      */
     public SceneSplitTaskObservation poll(String token, String taskId) {
-        String traceId = UUID.randomUUID().toString();
+        PollBody body = executePoll(token, taskId);
+        String normalized = normalizedStatus(body);
 
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + POLL_PATH_PREFIX + encodePath(taskId))
-                .get();
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = pollClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 场景切分任务查询超时");
-        } catch (java.net.ConnectException | java.net.UnknownHostException e) {
-            VideoSceneSplitError error = new VideoSceneSplitError(
-                    GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 场景切分任务查询网络不可达");
-            error.initCause(e);
-            throw error;
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 场景切分任务查询失败: " + e.getMessage());
+        if ("failed".equals(normalized)) {
+            // 上游错误信号：error 对象（code/message/param/type——TaskError / ApiError）与
+            // 顶层 message 都读、取非空合并
+            return new SceneSplitTaskObservation("failed", null, null,
+                    extractUpstreamCode(body), extractPollUpstreamMessage(body));
         }
 
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // HTTP 429/5xx 瞬时（cause 携带状态供 processor 重排）；4xx 业务错 → 硬失败
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                VideoSceneSplitError error = new VideoSceneSplitError(code,
-                        "MediaKit 场景切分任务查询失败: HTTP " + response.code() + " body=" + truncate(rawText));
-                error.initCause(new NewApiVideoClient.HttpStatusException(response.code()));
-                throw error;
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-            JsonNode data = unwrapData(parsed);
-
-            String status = textOrNull(data, "status");
-            if (status == null) {
-                throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "MediaKit 场景切分任务响应缺少 status");
-            }
-            String normalized = status.toLowerCase();
-
-            if ("failed".equals(normalized)) {
-                // 上游错误信号：error 对象（code/message/param/type——TaskError / ApiError）与
-                // 顶层 message 都读、取非空合并
-                JsonNode rawError = data.has("error") && data.get("error").isObject()
-                        ? data.get("error") : parsed.get("error");
-                String upstreamCode = rawError != null && rawError.has("code")
-                        ? rawError.get("code").asText() : null;
-                String upstreamMessage = extractUpstreamMessage(rawText);
-                return new SceneSplitTaskObservation("failed", null, null,
-                        upstreamCode, upstreamMessage);
-            }
-
-            if ("completed".equals(normalized)) {
-                JsonNode result = data.path("result");
-                Double durationSec = result.path("duration").isNumber()
-                        ? result.path("duration").asDouble() : null;
-                List<SegmentObservation> segments = parseSegments(result.path("segments"));
-                return new SceneSplitTaskObservation("succeeded", durationSec, segments,
-                        null, null);
-            }
-
-            // running / queued 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
-            return new SceneSplitTaskObservation("processing", null, null, null, null);
-        } catch (VideoSceneSplitError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 场景切分任务响应解析失败: " + e.getMessage());
+        if ("completed".equals(normalized)) {
+            JsonNode result = body.data().path("result");
+            Double durationSec = result.path("duration").isNumber()
+                    ? result.path("duration").asDouble() : null;
+            List<SegmentObservation> segments = parseSegments(result.path("segments"));
+            return new SceneSplitTaskObservation("succeeded", durationSec, segments,
+                    null, null);
         }
+
+        // running / queued 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
+        return new SceneSplitTaskObservation("processing", null, null, null, null);
     }
 
-    // ========== 内部工具 ==========
+    // ========== 族特异结果解析 ==========
 
     /**
      * 官方 result.segments[] 解析：按返回顺序逐段取 start_time / end_time /
@@ -321,54 +197,6 @@ public class NewApiMediaKitSegmentScenesClient {
             segments.add(new SegmentObservation(start.asDouble(), end.asDouble(), url.asText()));
         }
         return segments;
-    }
-
-    private JsonNode parseJsonOrThrow(String rawText) {
-        try {
-            return JSON.readTree(rawText);
-        } catch (Exception e) {
-            throw new VideoSceneSplitError(
-                    VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
-                    "MediaKit 未返回有效 JSON");
-        }
-    }
-
-    /** data 解包（网关可能包 data 层；非对象形态回退顶层，视频客户端同款）。 */
-    private static JsonNode unwrapData(JsonNode parsed) {
-        return parsed.has("data") && parsed.get("data").isObject() ? parsed.get("data") : parsed;
-    }
-
-    /**
-     * 提取上游可读失败原因（error.message 或顶层 message 字段，两层都读取非空）。
-     * 供应商原因透传给前端投影（错误映射口径：可读文案）。
-     */
-    private static String extractUpstreamMessage(String rawText) {
-        try {
-            JsonNode node = JSON.readTree(rawText);
-            JsonNode message = node.path("error").path("message");
-            if (!message.isTextual() || message.asText().isEmpty()) {
-                message = node.path("message");
-            }
-            if (message.isTextual() && !message.asText().isEmpty()) {
-                return truncate(message.asText());
-            }
-        } catch (Exception e) {
-            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
-        }
-        return "";
-    }
-
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
-        return (v != null && v.isTextual()) ? v.asText() : null;
-    }
-
-    private static String truncate(String text) {
-        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
-    }
-
-    private static String encodePath(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**
