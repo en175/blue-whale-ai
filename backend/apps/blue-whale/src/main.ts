@@ -9,7 +9,10 @@ import { closeDefaultTlsLogWriter } from "@lib/core/logging";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
-import { assertAgentModelGatewayConfig } from "./api/agent/agent-model-gateway.controller.js";
+import {
+  assertAgentModelGatewayConfig,
+  drainAgentModelStreams,
+} from "./api/agent/agent-model-gateway.controller.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
 
@@ -69,16 +72,29 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  app.enableShutdownHooks();
+  // 这里曾有 `app.enableShutdownHooks()`。它只做一件事：替我们监听 SIGTERM/SIGINT 然后调
+  // `app.close()`。而下面本来就有一对自己的处理器做同样的事——两份监听器在同一个信号上并发
+  // 跑，Nest 那份会立刻开始 `callDestroyHook()` 关掉 Redis，把我们刚开始的排空连同进程一起
+  // 掀翻（IKHCJ2，见下面 shutdown 的说明）。生命周期钩子由 `app.close()` 照常触发，不受影响。
 
   await app.listen(port);
   logger.info(`backend listening on :${port}`);
 
   // 优雅停机（IK9RSS）：app.close() 触发 OnModuleDestroy 链，之后冲刷 TLS 缓冲。
   // closeDefaultTlsLogWriter 自带 5s 超时，TLS 不可达不反噬进程退出。
+  //
+  // **排空必须排在 app.close() 之前**（IKHCJ2）。Nest 的停机顺序是 onModuleDestroy →
+  // beforeApplicationShutdown → 关 HTTP server，第一步就把 Redis 关了；在途请求挂着的 Redis
+  // 命令被 ioredis 的 flushQueue 以一个未处理的拒绝掀翻，整个进程当场死。2026-09-20 实测：
+  // 排空日志打出了「在途 1 条，最多等 90000ms」，0.2 秒后进程就没了，ioredis 的堆栈留在
+  // stdout 上。所以在途模型流不能靠 Nest 的生命周期排空，只能在它开始拆之前排干净。
   const shutdown = async (): Promise<void> => {
+    await drainAgentModelStreams();
     await app.close();
     await closeDefaultTlsLogWriter(5_000);
+    // 显式退出：没有 Nest 的信号处理器之后，没人再把信号重新抛一次，而残留的句柄
+    // （连接池、计时器）足以让进程挂到容器的停止超时被 SIGKILL。
+    process.exit(0);
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
