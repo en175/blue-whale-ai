@@ -118,6 +118,32 @@ describe("时长形态闸门（IKG4UR）", () => {
 });
 
 describe("parseModelUpdateBody", () => {
+  // IKHEXG：default_size / default_aspect_ratio 是 NOT NULL（VarChar）列，「未配」的形态是空串。
+  // 表单对非图片/视频行恒发 null（清空尺寸框的图片行也发 null），旧闸门只收字符串
+  // → 音频/文生文行从后台保存必然 400（实测 PUT /api/admin/models/23）。
+  it("default_size / default_aspect_ratio 收 null，归一为空串（NOT NULL 列）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: null,
+      default_aspect_ratio: null,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("");
+    expect(parsed.value.default_aspect_ratio).toBe("");
+  });
+
+  it("default_size / default_aspect_ratio 仍拒非字符串非 null（防脏值落库）", () => {
+    for (const bad of [5, true, [], {}]) {
+      expect(parseModelUpdateBody({ default_size: bad }).ok).toBe(false);
+      expect(parseModelUpdateBody({ default_aspect_ratio: bad }).ok).toBe(false);
+    }
+  });
+
+  it("default_size / default_aspect_ratio 超长仍被拒（列宽 32 / 16）", () => {
+    expect(parseModelUpdateBody({ default_size: "x".repeat(33) }).ok).toBe(false);
+    expect(parseModelUpdateBody({ default_aspect_ratio: "x".repeat(17) }).ok).toBe(false);
+  });
+
   it("更新为 gpt 时必须带 request_mapping", () => {
     const parsed = parseModelUpdateBody({
       channel_parser: "gpt",
