@@ -144,6 +144,28 @@ describe("parseModelUpdateBody", () => {
     expect(parseModelUpdateBody({ default_aspect_ratio: "x".repeat(17) }).ok).toBe(false);
   });
 
+  // IKHEXG：上面把两个值提到了 `if` 外面算（为了让返回值用归一后的值），于是「字段缺席」与
+  // 「字段清空」只差 spread 上那个 `body.default_size !== undefined` 的守卫。少了这条钉子，
+  // 日后顺手把守卫删掉，**每次更新都会写一遍空串**，把所有行的默认尺寸静默清掉。
+  it("未携带该字段 → 不提交（缺席 ≠ 清空）", () => {
+    const parsed = parseModelUpdateBody({ model_label: "新名字" });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect("default_size" in parsed.value).toBe(false);
+    expect("default_aspect_ratio" in parsed.value).toBe(false);
+  });
+
+  it("真实改动仍原样提交（往返不被吞掉）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: "2K",
+      default_aspect_ratio: "16:9",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("2K");
+    expect(parsed.value.default_aspect_ratio).toBe("16:9");
+  });
+
   it("更新为 gpt 时必须带 request_mapping", () => {
     const parsed = parseModelUpdateBody({
       channel_parser: "gpt",

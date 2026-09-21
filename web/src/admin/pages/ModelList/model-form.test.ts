@@ -179,6 +179,18 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
     expect(result.value.default_size).toBe('');
     expect(result.value.default_aspect_ratio).toBe('');
   });
+
+  // 上面三条都在证「不要多提交」；这条证反向——真的改了就必须提交。
+  // 少了它，日后把 diff 的归一写过头（比如恒判相等）会静默吞掉真实修改，而测试全绿。
+  it('图片行：真的改了尺寸/比例 → 原样提交（正向往返）', () => {
+    const initial = modelRow({ default_size: '1K', default_aspect_ratio: '1:1' });
+    const result = buildCreateParams(snapshot({ type: 'image', defaultSize: '2K', defaultRatio: '16:9' }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(initial, result.value);
+    expect(changes.default_size).toBe('2K');
+    expect(changes.default_aspect_ratio).toBe('16:9');
+  });
 });
 
 // IKG4UR：库中 supported_durations 有数组（管理端写入）与对象（消费端契约/种子写入）两种形态。

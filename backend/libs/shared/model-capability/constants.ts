@@ -269,7 +269,11 @@ function pickNullableString(v: unknown): string | null | undefined {
  *  IKHEXG：这两列在库里是 `VarChar NOT NULL`，「未配」的形态是**空串**；而表单把清空的状态
  *  发成 `null`（`form.defaultSize.trim() || null`），旧闸门又只收字符串 → 保存必然 400
  *  （本单实测：音频行 `PUT /api/admin/models/23` 报「默认尺寸(default_size)须为字符串」）。
- *  收 null 并归一为空串：与列形态一致，且保留「清空」的语义。 */
+ *  收 null 并归一为空串：与列形态一致，且保留「清空」的语义。
+ *
+ *  ⚠️ **创建与更新的语义不对称**（既有行为，非本次引入）：更新时空串就是空串；但创建时
+ *  `default_size` 为空串会被 repo 的 `deriveDefaultSize` 顶成 `supported_sizes[0].id`
+ *  （`model-capability-admin-repo.ts`）。别假设两个解析器对空串的处理一致。 */
 function pickNotNullString(v: unknown): string | undefined {
   if (v === null) return "";
   return pickString(v);
