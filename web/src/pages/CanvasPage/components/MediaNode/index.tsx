@@ -715,6 +715,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           />
         ) : data.mediaType === 'video' ? (
           <>
+            {/* 透明结果卡棋盘格垫底层（IKHKAC）：垫在 video 之下的静态棋盘格，透明 WebM 的
+                透明区域透出格纹，一眼认出这是可合成的透明素材（视觉语言沿用图片抠图结果卡
+                imageCutout 先例）；仅 transparentOutput 标记卡渲染——标记在任务完成回填时
+                按产物格式冻结（WEBM 透明=true，MP4 纯色不设），aria-hidden 纯视觉 */}
+            {data.transparentOutput === true && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="video-transparent-checkerboard" />
+            )}
             <video
               ref={videoRef}
               className={styles.mediaVideo}

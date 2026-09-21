@@ -6197,12 +6197,17 @@ export default function CanvasPage() {
       // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
     }
     if (((node.data ?? {}) as Record<string, unknown>).smartMatting != null) {
-      // 智能抠像占位卡分流（IKHK9N 建、终态就地收敛）：成功即就地转普通成品视频卡
+      // 智能抠像占位卡分流（IKHK9N 建、IKHKAC 完成回填）：成功即就地转普通成品视频卡
       //（src/assetId/宽高时长取产物、genStatus 清空；fileName 保持建卡时的模式展示名
-      //  ——标题跟随模式）；失败落失败态 + 家族可读文案（重试按 lastInput 原参数重发）。
-      //  透明格式棋盘格垫底与结果卡语义（不记抠像身份）归 IKHKAC——需读
-      //  data.smartMatting.lastInput.format 判定透明产物，改造本分支时保留该信息。
+      //  ——标题跟随模式）；同时按产物格式冻结透明标记 transparentOutput（WEBM 透明=true
+      //  → 视频区垫棋盘格；MP4 纯色不设），并清掉 smartMatting 身份——结果卡不记抠像身份，
+      //  选中开普通视频面板、可下载入库、可再发起全部视频工具（含再次抠像）。
+      //  失败落失败态 + 家族可读文案（重试按 lastInput 原参数重发）。
       if (detail.status === 'succeeded') {
+        const mattingIdentity = ((node.data ?? {}) as Record<string, unknown>).smartMatting as
+          | SmartMattingIdentity
+          | undefined;
+        const transparent = mattingIdentity?.lastInput?.format === 'WEBM';
         stopJobPolling(nodeId, jobTimersRef.current);
         patchMediaNode(nodeId, {
           genStatus: undefined,
@@ -6214,6 +6219,8 @@ export default function CanvasPage() {
           width: detail.asset?.width ?? undefined,
           height: detail.asset?.height ?? undefined,
           duration: detail.asset?.duration ?? undefined,
+          transparentOutput: transparent ? true : undefined,
+          smartMatting: undefined,
         });
         return 'terminal';
       }
