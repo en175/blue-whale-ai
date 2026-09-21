@@ -20,6 +20,10 @@
  * IKH8BJ 视频卡追加「场景切分」入口：图标+文字单按钮（无下拉），形态同「音视频分离」，
  * 落其之后、分隔线之前；置灰门槛见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据），
  * 点击派发 onSceneSplit 进入编辑态（编辑态本体由 IKH8BR 交付）。
+ * IKHA2E「音视频分离」改悬停下拉（ADR-0110）：原单按钮升为 AudioVideoSplitMenu（悬停展开/
+ * 移出延时关/点触发钮直启首项，形态同「智能去字幕 ▾」）；菜单两项 = 首项原「音视频分离」
+ * 直进（功能不改名）+ 次项「人声背景分离」，次项置灰门槛见 vocalSplit.ts（未关联资产）、
+ * 点击派发 onVocalBackgroundSplit 进入编辑态（编辑态本体由 IKHA2W 交付）。
  * ============================================ */
 import { useCallback } from 'react';
 import { Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, Film, type LucideIcon } from 'lucide-react';

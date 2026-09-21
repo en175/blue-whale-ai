@@ -40,8 +40,8 @@ public enum JobTypeEnum {
     VIDEO_SUBTITLE_ERASE("video_subtitle_erase"),
 
     /** 视频 HD 高清（tag=video_enhance，IKH3VE，父规格 IKH3VB；契约 =
-     * backend/libs/contracts/video-enhance.ts，火山 MediaKit 画质增强大模型版）；
-     * 消费者与处理器由 worker 票按附录 C 触点注册。 */
+     *  backend/libs/contracts/video-enhance.ts，火山 MediaKit 画质增强大模型版）；
+     *  消费者与处理器由 worker 票按附录 C 触点注册。 */
     VIDEO_ENHANCE("video_enhance"),
 
     /** 人声背景分离（tag=vocal_split，IKHA2C；契约 = backend/libs/contracts/vocal-split.ts，

@@ -99,7 +99,7 @@ public final class VocalSplitContract {
      *  异步工具（去字幕 / 视频 HD / 音视频分离）共用同一条查询路由，路径**不含 async 段**。 */
     public static final String POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
-    // ========== 错误码（兜底码数值 1046 见 error-codes.ts ERROR_VOCAL_SPLIT_FAILED；
+    // ========== 错误码（兜底码数值 1047 见 error-codes.ts ERROR_VOCAL_SPLIT_FAILED；
     //            归并口径全文 = backend/libs/contracts/vocal-split.ts 尾注） ==========
 
     /** 执行兜底失败码：网关分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed

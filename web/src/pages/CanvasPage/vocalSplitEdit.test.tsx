@@ -524,7 +524,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     expect(failed.data.errorText).toBe('任务入队失败，请重试');
   });
 
-  it('轮询终态 succeeded：本票最小处理 = 占位卡停生成中（progress 100、genStatus 清除），不回填成品不做扇出（归 IKHA30）', async () => {
+  it('轮询终态 succeeded 但无 tracks：空轨防御路径 = 占位卡停生成中（progress 100、genStatus 清除）不扇出（成功逐轨扇出由 vocalSplitFanout.test 覆盖）', async () => {
     apiMocks.createVocalSplit.mockResolvedValueOnce({ job_id: 'j740', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j740', status: 'succeeded', progress: 100,

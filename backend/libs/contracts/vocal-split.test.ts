@@ -222,8 +222,11 @@ describe("vocal_split 双端一致性（读 worker-java 源码文本，防漂移
     expect(contractJava).toContain(
       'String ERROR_VOCAL_SPLIT_FAILED = "vocal_split_failed";',
     );
+    // Error 类不重复定义字面量（对齐 VideoSceneSplitError 先例）：仅 {@link} 指向
+    // Contract 单源，防漂移面收敛到上面那处断言。
+    expect(vocalSplitErrorJava).not.toContain('"vocal_split_failed"');
     expect(vocalSplitErrorJava).toContain(
-      'String VOCAL_SPLIT_FAILED = "vocal_split_failed";',
+      "{@link VocalSplitContract#ERROR_VOCAL_SPLIT_FAILED}",
     );
   });
 });

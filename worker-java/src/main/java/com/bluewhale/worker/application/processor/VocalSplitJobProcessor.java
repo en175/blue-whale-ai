@@ -41,14 +41,14 @@ import java.util.Set;
  *       extract-audio 的 format**）→ markVideoSubmitted（存 provider_task_id + 释放租约 +
  *       next+5s + progress=1）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
- *       续排（超限 1046）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
+ *       续排（超限 1047）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
  *       （火山各轨 URL 仅 24h 有效）** → 按 scene 轨序发布 2/3 条音频 Asset → 终态 succeeded
  *       （轨数组回填终态日志 payload，getStatus 投影见契约 VocalSplitTrackResult）</li>
  * </ol>
  * 多轨发布面（与单轨先例的契约差异）：scene 二分法（audio/music）两轨 voice+background、
  * 三分法（drama/narrate）三轨 voice+music+sfx；轨序单源 {@link VocalSplitContract#SCENE_TRACKS}，
  * 按轨序逐轨 persist + 单事务发布，output_asset_ids 按轨序拼 JSON 数组；官方 result 缺任一
- * 轨 URL 或任一轨转存失败 → 整单失败（1046，无部分成功口径）。
+ * 轨 URL 或任一轨转存失败 → 整单失败（1047，无部分成功口径）。
  * <p>
  * 错误码口径（契约尾注三类映射，无 worker 级自动重试，用户手动重试沿用冻结 input）：
  * <ul>
@@ -57,7 +57,7 @@ import java.util.Set;
  *       worker 兜底防御）</li>
  *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
  *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>vocal_split_failed（1046）：其余一律归并兜底——网关 provider_failed / 提交超时 /
+ *   <li>vocal_split_failed（1047）：其余一律归并兜底——网关 provider_failed / 提交超时 /
  *       轮询超时 / 火山任务 failed（含 scene 门槛等供应商侧拒绝）/ 源素材不可用 / 结果缺轨 /
  *       转存失败（超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message
  *       透传前端投影</li>
@@ -71,7 +71,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VocalSplitJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 vocal_split_failed(1046)。 */
+    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 vocal_split_failed(1047)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
@@ -327,7 +327,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : resolveSourceDurationSec(claim);
 
-        // 逐轨转存（轨序展开；任一失败整单失败——由 handle 统一归并 1046）
+        // 逐轨转存（轨序展开；任一失败整单失败——由 handle 统一归并 1047）
         List<PublishVocalSplitTrackDto> tracks = new ArrayList<>(trackOrder.size());
         for (String trackType : trackOrder) {
             TosAudioMediaRelay.StoredAudio stored =
@@ -428,7 +428,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
     /**
      * 失败码归一（契约尾注）：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * vocal_split_failed（1046）。
+     * vocal_split_failed（1047）。
      */
     private static String resolveFailCode(Exception e) {
         if (e instanceof VocalSplitError vse && PRESERVED_ERROR_CODES.contains(vse.getCode())) {
@@ -439,7 +439,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
     /**
      * 上游任务 failed 的错误码分类（§5 优先级；家族分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1046）。
+     * 版权 → 内容政策 → 额度 → 兜底 1047）。
      */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "

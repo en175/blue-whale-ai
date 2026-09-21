@@ -1,10 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 
 import {
+  VIDEO_SCENE_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_SCENE_TRACKS,
 } from "@lib/contracts";
-import { VIDEO_SCENE_SPLIT_JOB_TYPE } from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 

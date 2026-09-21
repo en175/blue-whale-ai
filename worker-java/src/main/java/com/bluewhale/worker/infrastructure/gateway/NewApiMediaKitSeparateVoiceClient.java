@@ -59,7 +59,7 @@ import java.util.UUID;
  * <p>
  * 错误分类复用 NewApiErrorClassifier（content &gt; quota &gt; provider_failed，§5 优先级；
  * 网关错误与火山 failed 双路），保留既有码投影，其余由 processor 归并契约兜底码
- * vocal_split_failed（1046）。poll 的网络超时 / 连接失败 / HTTP 429/5xx 抛错时以 cause
+ * vocal_split_failed（1047）。poll 的网络超时 / 连接失败 / HTTP 429/5xx 抛错时以 cause
  * 携带状态（{@link NewApiVideoClient.HttpStatusException} 复用），供 processor 按
  * isTransientPollError 语义判定瞬时重排。
  */
@@ -275,7 +275,7 @@ public class NewApiMediaKitSeparateVoiceClient {
                         ? data.get("error") : parsed.get("error");
                 String upstreamCode = rawError != null && rawError.has("code")
                         ? rawError.get("code").asText() : null;
-                String upstreamMessage = extractUpstreamMessage(rawText);
+                String upstreamMessage = extractUpstreamMessage(parsed, data);
                 return new SeparateVoiceTaskObservation("failed", null, null,
                         upstreamCode, upstreamMessage);
             }
@@ -331,7 +331,17 @@ public class NewApiMediaKitSeparateVoiceClient {
      */
     private static String extractUpstreamMessage(String rawText) {
         try {
-            JsonNode node = JSON.readTree(rawText);
+            JsonNode parsed = JSON.readTree(rawText);
+            return extractUpstreamMessage(parsed, unwrapData(parsed));
+        } catch (Exception e) {
+            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
+        }
+        return "";
+    }
+
+    /** 同上（已解析形态）：网关 data 信封时先查解包层，再查顶层；无信封时两轮退化为一轮。 */
+    private static String extractUpstreamMessage(JsonNode parsed, JsonNode data) {
+        for (JsonNode node : new JsonNode[] { data, parsed }) {
             JsonNode message = node.path("error").path("message");
             if (!message.isTextual() || message.asText().isEmpty()) {
                 message = node.path("message");
@@ -339,8 +349,6 @@ public class NewApiMediaKitSeparateVoiceClient {
             if (message.isTextual() && !message.asText().isEmpty()) {
                 return truncate(message.asText());
             }
-        } catch (Exception e) {
-            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
         }
         return "";
     }

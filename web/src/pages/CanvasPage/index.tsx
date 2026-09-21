@@ -7917,7 +7917,7 @@ export default function CanvasPage() {
   /** 人声背景分离（IKHA2W 入口）：把目标视频卡置为人声背景分离编辑态（「音视频分离 ▾」
    *  下拉第二项派发）。置灰门槛（assetId 缺失）已在下拉菜单项置灰层完成
    *  （audioVideoSplitGateReason 同源整卡门槛），此处只管进入；其余编辑会话退出与生成
-   *  面板关闭经 toolSessionCoordinator（第七会话，与音视频分离等既有会话互斥）、不动视角；
+   *  面板关闭经 toolSessionCoordinator（第八会话，与音视频分离、场景切分等既有会话互斥）、不动视角；
    *  场景/格式重置默认（通用/aac，不跨会话记忆）；视频随编辑态注入暂停并锁定播放控制
    *  （MediaNode 承担）。 */
   const handleNodeVocalBackgroundSplit = (id: string) => {
@@ -7933,7 +7933,7 @@ export default function CanvasPage() {
   /** 场景切分（IKH8BJ 入口 / IKH8BR 编辑会话）：把目标视频卡置为场景切分编辑会话并重置
    *  粒度 standard（不跨会话记忆）。置灰门槛（资产缺失/超 2 小时）已在工具条按钮置灰层
    *  完成（sceneSplitGateReason），此处只管进入；互斥退出与生成面板关闭经
-   *  toolSessionCoordinator（第七会话，口径对齐 handleNodeAudioVideoSplit）、不动视角；
+   *  toolSessionCoordinator（第八会话，口径对齐 handleNodeAudioVideoSplit）、不动视角；
    *  视频随会话态注入在当前帧暂停并锁定播放控制（MediaNode splitEditing 承担）。 */
   const handleNodeSceneSplit = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);

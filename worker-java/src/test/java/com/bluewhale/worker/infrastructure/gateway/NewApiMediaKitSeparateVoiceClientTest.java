@@ -194,7 +194,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
     }
 
     @Test
-    @DisplayName("200 但缺 task_id → 1046 兜底")
+    @DisplayName("200 但缺 task_id → 1047 兜底")
     void missingTaskIdFallsBack() {
         responseJson.set("{\"success\":true,\"request_id\":\"req-3\"}");
 
@@ -205,7 +205,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
     }
 
     @Test
-    @DisplayName("非 JSON 响应 → 1046 兜底")
+    @DisplayName("非 JSON 响应 → 1047 兜底")
     void invalidJsonFallsBack() {
         responseJson.set("not-json<");
 
@@ -308,6 +308,20 @@ class NewApiMediaKitSeparateVoiceClientTest {
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.trackUrls()).hasSize(2);
         assertThat(observation.trackUrls().get("voice")).isEqualTo("https://volc/v.aac");
+    }
+
+    @Test
+    @DisplayName("poll 网关 data 信封 failed → 解包后仍取到上游可读原因")
+    void pollFailedDataEnvelopeKeepsUpstreamMessage() {
+        responseJson.set("{\"data\":{\"task_id\":\"amk-tool-1\",\"status\":\"failed\","
+                + "\"error\":{\"code\":\"AudioParseFailed\",\"message\":\"输入音频解析失败\"}}}");
+
+        SeparateVoiceTaskObservation observation =
+                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.upstreamCode()).isEqualTo("AudioParseFailed");
+        assertThat(observation.upstreamMessage()).contains("输入音频解析失败");
     }
 
     @Test
