@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* IKH3VG 视频 HD 高清面板闭环链路测试：点 HD 建草稿卡（标题/身份/来源连线）与面板跟随弹出、
-   分辨率切换即时写卡（lastParams 持久化）、面板打开全局工具条门（soloToolbarHidden 注入 +
-   钉屏幕容器 show 门）、关闭再点 HD 草稿卡重开参数恢复、「重新编辑」分流回 HD 面板、
+   分辨率切换即时写卡（lastParams 持久化）、HD 面板打开不藏上方操作条（IKHFUF，对齐普通
+   生成面板）、关闭再点 HD 草稿卡重开参数恢复、「重新编辑」分流回 HD 面板、
    四路退出（X/Esc/点外/点其他卡）不建任务不丢参数草稿保留、与去字幕会话互斥。
    渲染模式沿用 imageEnhancePanel.test.tsx（FlowCanvas 打桩透出 props）。 */
 import { act, createElement } from 'react';
@@ -297,7 +297,7 @@ describe('IKH3VG 点 HD 建草稿卡与面板跟随', () => {
 });
 
 describe('IKH3VG 会话模态：全局工具条门与互斥', () => {
-  it('HD 面板打开期间：全部媒体卡注入 soloToolbarHidden，钉屏幕工具条容器 show 关闭；关闭后恢复', async () => {
+  it('HD 面板打开期间：不注入 soloToolbarHidden，钉屏幕工具条容器 show 保持（IKHFUF）', async () => {
     seedDoc();
     await renderPage();
     // 模拟唯一选中源卡（soloMediaToolbarNode 非空，容器挂载）
@@ -306,12 +306,10 @@ describe('IKH3VG 会话模态：全局工具条门与互斥', () => {
     });
     await videoEnhance();
 
-    // 渲染期注入：全部媒体卡（含源卡与新 HD 卡）工具条隐藏标记
     for (const node of mediaNodes()) {
-      expect((node.data as Record<string, unknown>).soloToolbarHidden).toBe(true);
+      expect((node.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
     }
-    // 钉屏幕容器 show 门关闭（真实显隐控制点）
-    expect(mediaFollowToolbarShow()).toBe(false);
+    expect(mediaFollowToolbarShow()).toBe(true);
 
     await closeViaX();
     for (const node of mediaNodes()) {

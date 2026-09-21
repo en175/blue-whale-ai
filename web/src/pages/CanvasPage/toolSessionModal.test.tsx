@@ -3,8 +3,8 @@
    生成 Dock 六面板不可见不可开（进入时维持现状全量 dismiss），源图卡悬浮工具条隐藏
    （MediaNode 渲染期注入 soloToolbarHidden，组件渲染门断言在 MediaNode/index.test.tsx）；
    会话期请求打开生成面板（左工具栏/点草稿卡等）先按四路退出口径退出会话（参数丢弃）再放行；
-   选中联动不回弹面板；未发送草稿在隐藏期间保留、退出后原样回来；高清面板打开期间
-   悬浮工具条同样隐藏；四方互斥无回归。渲染模式沿用 genPanelDismiss.test.tsx
+   选中联动不回弹面板；未发送草稿在隐藏期间保留、退出后原样回来；高清/HD 参数面板
+   打开不再藏上方操作条（IKHFUF，对齐普通生成面板）；四方互斥无回归。渲染模式沿用 genPanelDismiss.test.tsx
    （FlowCanvas/CanvasToolbar 打桩透出 props，面板真实渲染）。
    IKH3ZJ 生成面板准入经 toolSessionCoordinator（exitAllToolSessions）后补齐守护：
    面板准入矩阵扩到 erase/crop/outpaint/去字幕（此前仅 cutout×工具栏、crop×点草稿卡），
@@ -295,8 +295,8 @@ function soloToolbarHidden(id: string): boolean {
 }
 
 /** 钉屏幕媒体卡工具条容器 show 门（IKGZ5O×IKGYYD 缝合后的真实显隐控制点）：工具条迁出
- *  MediaNode 后模态显隐由 followToolbarLayer 的 show 表达式承担（!editSessionActive &&
- *  !showEnhanceDialog）；FlowCanvas 打桩不渲染钉屏幕层，从捕获的 JSX 结构读
+ *  MediaNode 后模态显隐由 followToolbarLayer 的 show 表达式承担（!editSessionActive）；
+ *  FlowCanvas 打桩不渲染钉屏幕层，从捕获的 JSX 结构读
  *  NodeFollowToolbar.show 锁定「会话态传进了容器门」这一环。须先模拟唯一选中
  *  （onSelectionChange）使 soloMediaToolbarNode 非空，否则容器不挂载、返回 undefined */
 function mediaFollowToolbarShow(): boolean | undefined {
@@ -532,8 +532,8 @@ describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再
   });
 });
 
-describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
-  it('高清会话（面板打开态）隐藏全部卡悬浮工具条，关闭后恢复', async () => {
+describe('IKHFUF 高清面板打开期间上方操作条仍在', () => {
+  it('高清参数面板打开不注入 soloToolbarHidden，钉屏幕工具条 show 保持（对齐普通生成面板）', async () => {
     await renderPage();
     await selectSolo('i1');
     expect(mediaFollowToolbarShow()).toBe(true);
@@ -541,24 +541,18 @@ describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
       (fullNode('i1').data as Record<string, (id: string) => void>).onEnhanceImage('i1');
     });
     await vi.waitFor(() => expect(enhanceSend()).toBeTruthy());
-    // 钉屏幕容器 show 门随高清面板关闭（showEnhanceDialog 分支）
-    expect(mediaFollowToolbarShow()).toBe(false);
+    expect(mediaFollowToolbarShow()).toBe(true);
     const nodes = () => (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
-    // 源卡、既有草稿卡、新建高清草稿卡（与截取源音频卡 a1）的悬浮工具条一律隐藏
     expect(nodes().length).toBe(4);
     for (const n of nodes()) {
-      expect((n.data as Record<string, unknown>).soloToolbarHidden).toBe(true);
+      expect((n.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
     }
-    // 关闭高清面板：悬浮工具条恢复
     const closeBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.title === '关闭')!;
     await act(async () => {
       closeBtn.click();
     });
     expect(enhanceSend()).toBeNull();
     expect(mediaFollowToolbarShow()).toBe(true);
-    for (const n of nodes()) {
-      expect((n.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
-    }
   });
 });
 
