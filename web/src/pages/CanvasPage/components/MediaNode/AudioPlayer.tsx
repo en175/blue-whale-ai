@@ -155,13 +155,16 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
   /** 截取编辑态手势（进入/拖抓手）统一暂停与播放头钳制（IKHB7A）：
    *  - null → 非 null（进入编辑态）：暂停 + 播放头归零（红色定位条归零）；
    *  - 非 null 间变化（拖抓手改选区）：暂停（拖任一抓手即暂停），播放头被挤出
-   *    新选区时钳回最近边界。依赖 trimSelection 的值（引用每轮渲染重建不受影响）。 */
+   *    新选区时钳回最近边界。
+   *  依赖 trimSelection（引用比较）触发，但值未变（起止秒数相同）时早退——父级每轮
+   *  渲染若重建选区对象，不能构成「选区变化」触发暂停（回归：编辑态点播放被打断）。 */
   const prevSelectionRef = useRef<AudioPlayerTrimSelection | null>(null);
   useEffect(() => {
     const a = audioRef.current;
     const prev = prevSelectionRef.current;
     prevSelectionRef.current = trimSelection ?? null;
     if (!a || !trimSelection) return;
+    if (prev && prev.start === trimSelection.start && prev.end === trimSelection.end) return;
     if (!a.paused) a.pause();
     if (prev == null) {
       // 进入编辑态：播放头归零

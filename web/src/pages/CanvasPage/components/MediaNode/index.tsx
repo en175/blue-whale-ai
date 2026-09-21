@@ -649,7 +649,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             fileName={data.fileName}
             duration={typeof data.duration === 'number' ? data.duration : undefined}
             onDownload={() => data.onDownload?.(id)}
-            trimSelection={data.trimEditing ? { ...data.trimEditing.selection } : null}
+            trimSelection={data.trimEditing ? data.trimEditing.selection : null}
             trimOverlay={
               data.trimEditing ? (
                 <AudioTrimOverlay

@@ -141,6 +141,22 @@ describe('AudioPlayer 截取编辑态试听钳制（IKHB7A）', () => {
     expect(playMock).toHaveBeenCalled();
   });
 
+  it('播放中父级重渲染传「值相同、引用不同」选区：不应暂停', async () => {
+    // 回归锁：MediaNode 接线曾以 spread 每轮渲染重建 trimSelection 引用，选区 effect
+    // 按引用比较触发且无条件暂停——click 冒泡引发的任何一次父级重渲染都会误判「选区
+    // 变化」强制暂停（编辑态点播放动零点几秒即停）。值未变不构成选区变化。
+    await renderPlayer({ start: 5, end: 8 });
+    const audio = audioEl();
+    stubCurrentTime(audio, 0);
+    await act(async () => {
+      clickPlayButton(); // 从选区头 5 起播，playing=true
+    });
+    expect(audio.currentTime).toBe(5);
+    pauseMock.mockClear();
+    rerenderPlayer({ start: 5, end: 8 }); // 值相同、引用不同（spread 形态）
+    expect(pauseMock).not.toHaveBeenCalled();
+  });
+
   it('播放推进越过选区尾：自动停且播放头停终点；再点播放从选区头重播', async () => {
     await renderPlayer({ start: 5, end: 8 });
     const audio = audioEl();
