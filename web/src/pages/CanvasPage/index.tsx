@@ -568,6 +568,8 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
+  /** 当前已打开高清面板绑定的卡 id（同步写，避免点卡+选中联动同拍各 setSeed 把面板重挂载） */
+  const enhanceBoundRef = useRef<string | null>(null);
   /** 视频 HD 高清面板（IKH3VG）：绑定 HD 卡（草稿或成品视频卡）的极简参数面板
    *  （骨架与口径同 showEnhanceDialog 家族） */
   const [showVideoEnhanceDialog, setShowVideoEnhanceDialog] = useState(false);
@@ -576,6 +578,8 @@ export default function CanvasPage() {
   const [videoEnhanceSeed, setVideoEnhanceSeed] = useState<{ ts: number; initialResolution: VideoEnhanceResolution } | null>(null);
   /** HD 面板隐藏豁免（口径同 enhancePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const videoEnhancePanelHiddenRef = useRef(false);
+  /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
+  const videoEnhanceBoundRef = useRef<string | null>(null);
   /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
    *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
    *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
@@ -1689,10 +1693,24 @@ export default function CanvasPage() {
   /** IKGYYD 钉屏幕悬浮工具栏：唯一选中的普通成品媒体卡（数据门同迁移前 MediaNode 内判定：
    *  生成流程卡 / 素材缺失 / 空壳上传卡不显——谓词与 MediaNodeToolbar 共用，
    *  IKGYYB 审查消弱类型双实现）；「唯一选中 + 画布无多选」精确门、锚定与
-   *  拖动/平移缩放实时跟随由 NodeFollowToolbar 容器承担（渲染在画布缩放层之外） */
-  const soloMediaToolbarNode = soloSelectedNodeId
+   *  拖动/平移缩放实时跟随由 NodeFollowToolbar 容器承担（渲染在画布缩放层之外）。
+   *  IKHFUF：高清/HD 面板已绑到一张成品卡时，操作条跟绑定卡走（不跟 RF 选中是否跟上），
+   *  点高清卡时上方操作条与下方面板同时出现；草稿/生成中的高清卡仍走数据门不显条。 */
+  const selectedMediaToolbarNode = soloSelectedNodeId
     ? mediaNodes.find((n) => n.id === soloSelectedNodeId) ?? null
     : null;
+  const enhancePanelToolbarNode = (() => {
+    const boundId = showEnhanceDialog && enhanceDraftId
+      ? enhanceDraftId
+      : showVideoEnhanceDialog && videoEnhanceDraftId
+        ? videoEnhanceDraftId
+        : null;
+    if (!boundId) return null;
+    const node = mediaNodes.find((n) => n.id === boundId) ?? null;
+    if (!node || !mediaCardToolbarVisible(node.data ?? {})) return null;
+    return node;
+  })();
+  const soloMediaToolbarNode = enhancePanelToolbarNode ?? selectedMediaToolbarNode;
   const showSoloMediaToolbar = soloMediaToolbarNode != null
     && mediaCardToolbarVisible(soloMediaToolbarNode.data ?? {});
   // IKGZ5O 工具会话模态门不并入本谓词：editSessionActive 定义位置晚于此处（TDZ），
@@ -3295,29 +3313,27 @@ export default function CanvasPage() {
         showToast('warn', '保存失败，请重试');
         return;
       }
-      if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
-        // 高清草稿卡（IKGM9O）：点卡开高清放大面板（不再落生成图片面板）
-        if (data.imageEnhance) openEnhanceDraftDialog(node.id);
-        else openImageDraftDialog(node.id);
-      }
-      if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
-        // HD 草稿卡（IKH3VG）：点卡开 HD 面板（不再落视频生成面板）
-        if (data.videoEnhance) openVideoEnhanceDraftDialog(node.id);
-        else openVideoDraftDialog(node.id);
-      }
-      if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
+      // 高清/HD 身份卡优先（IKHFUF）：不依赖 draft/jobId，点卡必开对应参数面板，
+      // 并与上方操作条并存。用 else-if 避免再落入普通生成面板。
+      if (node.type === 'mediaNode' && data.imageEnhance) {
+        openEnhanceDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.videoEnhance) {
+        openVideoEnhanceDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
+        openImageDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
+        openVideoDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
         openAudioDraftDialog(node.id);
-      }
-      if (node.type === 'textNode' && data.textGen === true) {
+      } else if (node.type === 'textNode' && data.textGen === true) {
         if (skipTextGenOpenRef.current) {
           skipTextGenOpenRef.current = false;
           return;
         }
         openTextGenDialog(node.id);
-      }
-      // IKDMQU P1：单选有生成记录的成品卡自动打开对应生成面板（编辑写回原卡，发送后原卡重新生成）；
-      // 上传素材卡无生成记录，不自动打开（Q4）；重新生成中/失败态的卡 jobId 仍在，可打开查看或调整重发
-      if (node.type === 'mediaNode' && hasGenerationRecord(node)) {
+      } else if (node.type === 'mediaNode' && hasGenerationRecord(node)) {
+        // IKDMQU P1：单选有生成记录的成品卡自动打开对应生成面板（编辑写回原卡，发送后原卡重新生成）；
+        // 上传素材卡无生成记录，不自动打开（Q4）；重新生成中/失败态的卡 jobId 仍在，可打开查看或调整重发
         openMediaDraftDialog(node.id, data.mediaType);
       }
       return;
@@ -3479,12 +3495,14 @@ export default function CanvasPage() {
   /** 高清面板关闭（IKGM9O）：置隐藏豁免标记，紧随的选中变化不回弹重开（口径同图片面板） */
   const closeEnhanceDialog = () => {
     enhancePanelHiddenRef.current = true;
+    enhanceBoundRef.current = null;
     setShowEnhanceDialog(false);
   };
   /** HD 面板关闭（IKH3VG）：置隐藏豁免标记，紧随的选中变化不回弹重开（口径同高清面板）；
    *  参数已随切换即时写卡，关闭不丢参数、草稿卡保留 */
   const closeVideoEnhanceDialog = () => {
     videoEnhancePanelHiddenRef.current = true;
+    videoEnhanceBoundRef.current = null;
     setShowVideoEnhanceDialog(false);
   };
   const dismissAllGenPanels = () => {
@@ -3605,7 +3623,12 @@ export default function CanvasPage() {
     if (soloId && !editSessionActive) {
       const mediaNode = mediaNodesRef.current.find((n) => n.id === soloId);
       const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
-      if (mediaNode && (mediaData.draft === true || hasGenerationRecord(mediaNode))) {
+      if (mediaNode && (
+        mediaData.draft === true
+        || hasGenerationRecord(mediaNode)
+        || Boolean(mediaData.imageEnhance)
+        || Boolean(mediaData.videoEnhance)
+      )) {
         const mediaType = mediaData.mediaType;
         // IKFXZD/IKDMQV：面板刚被显式关闭（发送成功即隐藏、空白点击）时处于 hidden 豁免期，
         // 程序化选中不得经本路径回弹重开——口径同下方 syncPanelVisible 的 hiddenRef 拦截
@@ -3767,6 +3790,21 @@ export default function CanvasPage() {
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
    *  下一次媒体合并 effect 用过期坐标覆盖画布内部状态，导致同组节点跳变（IKDKII 验收缺陷） */
   const handleNodeDragStop = (_node: Node, draggedNodes: Node[]) => {
+    // nodeDragThreshold=1 时轻微位移会吞掉 click。高清/HD 成品卡若只挪了几像素，
+    // 按点卡处理：打开参数面板并露出上方操作条（IKHFUF）。
+    if (draggedNodes.length === 1) {
+      const dragged = draggedNodes[0]!;
+      const before = mediaNodesRef.current.find((n) => n.id === dragged.id);
+      const data = (dragged.data ?? {}) as Record<string, unknown>;
+      if (
+        before
+        && Math.abs(dragged.position.x - before.position.x) <= 4
+        && Math.abs(dragged.position.y - before.position.y) <= 4
+        && (data.imageEnhance || data.videoEnhance)
+      ) {
+        handleCanvasNodeClick(dragged);
+      }
+    }
     const positions = new Map(draggedNodes.map((n) => [n.id, n.position]));
     // 撤销登记（IKD0JT）：refs 此刻仍是拖拽前坐标，仅登记实际移动过的节点
     const before = [
@@ -3931,8 +3969,25 @@ export default function CanvasPage() {
     if (!canOpenEditor(nodeId)) return;
     enhancePanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
+    setShowVideoEnhanceDialog(false);
+    videoEnhanceBoundRef.current = null;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
+    // 成品高清卡：立刻钉选中，操作条跟这张卡走。草稿/生成中卡仍走数据门不显条，
+    // 也不抢源卡选中（从源卡点「高清」建草稿时源卡操作条保持到 RF 选中新卡为止）。
+    if (mediaCardToolbarVisible(d)) {
+      setSoloSelectedNodeId(nodeId);
+    }
+    // 已打开同一张高清卡：只保证面板可见，不换 seed，避免点卡+选中联动把面板重挂载、
+    // 上方操作条被闪掉（IKHFUF）。
+    if (enhanceBoundRef.current === nodeId) {
+      setShowEnhanceDialog(true);
+      return;
+    }
+    enhanceBoundRef.current = nodeId;
+    if (mediaCardToolbarVisible(d)) {
+      setSelectRequest({ id: nodeId, ts: Date.now() });
+    }
     const identity = d.imageEnhance as ImageEnhanceIdentity | undefined;
     // 源图尺寸快照：按 sourceAssetId 在画布上找同素材卡读实测尺寸（无匹配/无尺寸都不拦，服务端同口径）
     const sourceAssetId = identity?.sourceAssetId;
@@ -3964,8 +4019,21 @@ export default function CanvasPage() {
     if (!canOpenEditor(nodeId)) return;
     videoEnhancePanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
+    setShowEnhanceDialog(false);
+    enhanceBoundRef.current = null;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (mediaCardToolbarVisible(d)) {
+      setSoloSelectedNodeId(nodeId);
+    }
+    if (videoEnhanceBoundRef.current === nodeId) {
+      setShowVideoEnhanceDialog(true);
+      return;
+    }
+    videoEnhanceBoundRef.current = nodeId;
+    if (mediaCardToolbarVisible(d)) {
+      setSelectRequest({ id: nodeId, ts: Date.now() });
+    }
     const identity = d.videoEnhance as VideoEnhanceIdentity | undefined;
     setVideoEnhanceDraftId(nodeId);
     setVideoEnhanceSeed({
@@ -10334,18 +10402,17 @@ export default function CanvasPage() {
             //  四件套（接管指针不冒泡开音频面板），发送条由本页 AudioTrimBar 承担
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/音频截取）
-            //  或高清面板/HD 面板打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记
-            //  不再控制渲染，退为集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担
+            // 工具状态模态（IKGZ5O）：仅编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/
+            //  音频截取等）注入 soloToolbarHidden。高清/HD 参数面板与普通生成面板相同，
+            //  打开期间不藏上方操作条（IKHFUF：成品高清卡要点卡仍能用去字幕/分离等工具）。
+            //  标记迁出后不再控制渲染，退为集成测试可观测；模态显隐由 followToolbarLayer 的 show 门承担
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
-              || cutoutNodeId || outpaintNodeId || showEnhanceDialog || showVideoEnhanceDialog
+              || cutoutNodeId || outpaintNodeId
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               || audioTrimTargetNodeId || vocalSplitTargetNodeId || sceneSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
-                    showEnhanceDialog
-                    || showVideoEnhanceDialog
-                    || n.id === eraseTargetNodeId
+                    n.id === eraseTargetNodeId
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
                     || n.id === outpaintNodeId
@@ -10413,13 +10480,16 @@ export default function CanvasPage() {
             <>
               {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
                   内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随。
-                  IKGZ5O 工具会话模态：任一编辑会话激活或高清面板/HD 面板打开期间整条不渲染（词条
-                  「工具会话」模态口径；editSessionActive 与 showEnhanceDialog/showVideoEnhanceDialog
-                  为全局布尔，对全部媒体卡生效） */}
+                  IKGZ5O 工具会话模态：擦除/抠图等编辑会话激活时整条不渲染。高清/HD 参数面板
+                  与普通生成面板一样，打开时仍露出上方操作条（IKHFUF）。 */}
               {soloMediaToolbarNode ? (
                 <NodeFollowToolbar
                   nodeId={soloMediaToolbarNode.id}
-                  show={showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog && !showVideoEnhanceDialog}
+                  show={showSoloMediaToolbar && !editSessionActive}
+                  hovered={
+                    enhancePanelToolbarNode != null
+                    && enhancePanelToolbarNode.id === soloMediaToolbarNode.id
+                  }
                 >
                   <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
                 </NodeFollowToolbar>
