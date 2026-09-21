@@ -154,6 +154,22 @@ describe('MediaNode draft overlay (IKDMQQ)', () => {
     expect(mountNode.textContent).not.toContain('视频生成');
     expect(titleRow().textContent).toContain('HD');
   });
+
+  it('插帧草稿（IKHLKR）：视频卡占位文案为「配置参数生成插帧视频」，标题为「插帧 · 60fps」', async () => {
+    await renderNode('video', {
+      genStatus: 'draft',
+      selected: false,
+      data: {
+        src: '',
+        draft: true,
+        fileName: '插帧 · 60fps',
+        frameInterpolation: { sourceAssetId: 'a1', lastParams: { fps: 60 } },
+      },
+    });
+    expect(mountNode.textContent).toContain('配置参数生成插帧视频');
+    expect(mountNode.textContent).not.toContain('视频生成');
+    expect(titleRow().textContent).toContain('插帧 · 60fps');
+  });
 });
 
 describe('MediaNode generating overlay', () => {

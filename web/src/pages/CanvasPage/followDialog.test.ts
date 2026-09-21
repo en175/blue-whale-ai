@@ -141,10 +141,10 @@ describe('IKGYYD computeFollowAnchorAbove（卡片上方居中锚定）', () => 
     });
   });
 
-  it('缺省估半宽为 270（IKH8BJ：视频卡追加「场景切分」后视频工具条实测 528px，真实半宽约 264）', () => {
+  it('缺省估半宽为 288（IKHLKR：高清 ▾ 触发钮后视频工具条实测 564px，真实半宽约 282）', () => {
     const { toolbarHalfWidth: _omit, ...noHalfWidth } = base;
-    // 节点中心贴近左缘，验证缺省钳制按 270 而非 IKH3XZ 旧值 250（528px 工具条贴屏幕边缘不被裁）
-    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: -600 })).toEqual({ left: 12 + 270, top: 148 });
-    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: 1000 })).toEqual({ left: 1200 - 270 - 12, top: 148 });
+    // 节点中心贴近左缘，验证缺省钳制按 288 而非 IKH8BJ 旧值 270（564px 工具条贴屏幕边缘不被裁）
+    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: -600 })).toEqual({ left: 12 + 288, top: 148 });
+    expect(computeFollowAnchorAbove({ ...noHalfWidth, nodeX: 1000 })).toEqual({ left: 1200 - 288 - 12, top: 148 });
   });
 });

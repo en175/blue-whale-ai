@@ -844,77 +844,235 @@ describe('MediaNodeToolbar 「音视频分离 ▾」下拉入口（IKHA2E）', (
   });
 });
 
-describe('MediaNodeToolbar HD 高清入口（IKH3VG）', () => {
-  const hdBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="video-enhance-btn"]')!;
+/* IKH3VG 原有 HD 入口 + IKHLKR 改造：视频卡首位「HD」单按钮升为「高清 ▾」悬停下拉
+   （FrameInterpolationMenu，ADR-0113）——首项「HD 高清」直启原链路零变化，次项「插帧」
+   建插帧草稿卡。**两层门槛分开**（家族差异）：整钮 aria-disabled 只看未关联资产
+   （trigger gate，hover 仍可展开看说明），HD 的分辨率上下限从整钮降为菜单项级
+   （item gate）；源视频超上限时 HD 项置灰而插帧可用，触发钮文字是「高清」故点击不派发。
+   合成事件口径同「音视频分离 ▾」段：mouseover/mouseout + relatedTarget 在 wrap 外。 */
+describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKHLKR 改造）', () => {
+  const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="video-enhance-menu-trigger"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="video-enhance-menu"]');
+  const item = (id: string) =>
+    mountNode.querySelector<HTMLButtonElement>(`[data-testid="video-enhance-menu-item-${id}"]`);
 
-  it('仅视频卡渲染（图片卡/音频卡不出现 HD）', async () => {
-    await renderToolbar('image');
-    expect(mountNode.querySelector('[data-testid="video-enhance-btn"]')).toBeNull();
-    await renderToolbar('audio');
-    expect(mountNode.querySelector('[data-testid="video-enhance-btn"]')).toBeNull();
-    await renderToolbar('video');
-    expect(hdBtn()).toBeTruthy();
+  async function hoverIn() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  async function hoverOut() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
+  async function settleHoverClose() {
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it('HD 徽标为视频卡工具条首位（IKH3WE 三按钮撤除后 HD 继承第一位，ADR-0106 取代 ADR-0105 排位表述）', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('仅视频卡渲染（图片卡/音频卡不出现「高清 ▾」触发钮）', async () => {
+    await renderToolbar('image');
+    expect(mountNode.querySelector('[data-testid="video-enhance-menu-trigger"]')).toBeNull();
+    await renderToolbar('audio');
+    expect(mountNode.querySelector('[data-testid="video-enhance-menu-trigger"]')).toBeNull();
+    await renderToolbar('video');
+    expect(trigger()).toBeTruthy();
+  });
+
+  it('HD 徽标为视频卡工具条首位（IKH3WE 三按钮撤除后 HD 继承第一位，ADR-0106）', async () => {
     await renderToolbar('video');
     const order = labels();
     expect(order[0]).toBe('HD高清');
     expect(order.indexOf('HD高清')).toBeLessThan(order.indexOf('智能去字幕'));
   });
 
-  it('徽标 icon + 中文功能名形态：HD 描边小方标 + 「高清」文字（家族「图标 + 文字」同构）', async () => {
+  it('触发钮形态：HD 描边小方标 + 「高清」文字 + ChevronDown 下拉箭头（默认收起）', async () => {
     await renderToolbar('video');
-    expect(hdBtn().querySelector(`.${styles.hdBadge}`)?.textContent).toBe('HD');
-    expect(hdBtn().textContent).toBe('HD高清');
+    const btn = trigger();
+    expect(btn.querySelector(`.${styles.hdBadge}`)?.textContent).toBe('HD');
+    expect(btn.textContent).toBe('HD高清');
+    expect(btn.querySelector('svg.lucide-chevron-down')).not.toBeNull();
+    expect(btn.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menu()).toBeNull();
   });
 
-  it('点击派发 onVideoEnhance（携带节点 id）', async () => {
-    const onVideoEnhance = vi.fn();
-    await renderToolbar('video', { data: { onVideoEnhance, assetId: 'a1' } });
+  it('悬停自动展开两项菜单：首项「HD 高清」+ 次项「插帧」，可用态各项 title 为自己的 hint', async () => {
+    await renderToolbar('video', { data: { onVideoEnhance: vi.fn(), onFrameInterpolation: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    expect(item('hd')!.textContent).toBe('HD 高清');
+    expect(item('interpolation')!.textContent).toBe('插帧');
+    expect(item('hd')!.getAttribute('title')).toContain('最高可至 4K');
+    expect(item('interpolation')!.getAttribute('title')).toBe('提升视频帧率，画面更流畅');
+    expect(item('hd')!.getAttribute('aria-disabled')).toBeNull();
+    expect(item('interpolation')!.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('移出触发钮延迟后关闭；延迟窗口内重新进入不关闭', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1' } });
+    await hoverIn();
+    await hoverOut();
+    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
+    expect(menu()).not.toBeNull();
+    await settleHoverClose();
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await hoverOut();
+    await hoverIn();
+    await settleHoverClose();
+    expect(menu()).not.toBeNull();
+  });
+
+  it('Esc 与点外立即关闭（不等待延迟窗口）', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1' } });
+    await hoverIn();
     await act(async () => {
-      hdBtn().click();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('点击触发钮直启首项「HD 高清」（原单按钮行为不变，携带节点 id），菜单收起', async () => {
+    const onVideoEnhance = vi.fn();
+    const onFrameInterpolation = vi.fn();
+    await renderToolbar('video', { data: { onVideoEnhance, onFrameInterpolation, assetId: 'a1' } });
+    await act(async () => {
+      trigger().click();
+    });
+    expect(onVideoEnhance).toHaveBeenCalledWith('video-node');
+    expect(onFrameInterpolation).not.toHaveBeenCalled();
+    expect(menu()).toBeNull();
+  });
+
+  it('两菜单项各自派发：首项派发 onVideoEnhance、次项派发 onFrameInterpolation（携带节点 id）', async () => {
+    const onVideoEnhance = vi.fn();
+    const onFrameInterpolation = vi.fn();
+    await renderToolbar('video', { data: { onVideoEnhance, onFrameInterpolation, assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      item('interpolation')!.click();
+    });
+    expect(onFrameInterpolation).toHaveBeenCalledWith('video-node');
+    expect(onVideoEnhance).not.toHaveBeenCalled();
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      item('hd')!.click();
     });
     expect(onVideoEnhance).toHaveBeenCalledWith('video-node');
   });
 
-  it('置灰四情形之未关联资产：置灰并悬停唯一原因（宽高缺失不叠加拦截）', async () => {
-    await renderToolbar('video');
-    expect(hdBtn().disabled).toBe(true);
-    expect(hdBtn().getAttribute('title')).toContain('尚未关联资产');
-    // 宽高缺失（存量视频）不拦：关联资产即可用
-    await renderToolbar('video', { id: 'v2', data: { assetId: 'a1' } });
-    expect(hdBtn().disabled).toBe(false);
-    expect(hdBtn().getAttribute('title')).toContain('4K');
-  });
-
-  it('置灰四情形之短/长边超上限：横屏长边>1920、竖屏短边>1080 均置灰并悬停原因；竖屏 1080×1920 合法', async () => {
+  it('未关联资产：整钮 aria-disabled + title 展示原因、触发钮与两项点击均不派发；hover 仍展开看说明', async () => {
     const onVideoEnhance = vi.fn();
-    // 横屏长边超限（2561>1920）
-    await renderToolbar('video', { data: { onVideoEnhance, assetId: 'a1', width: 2561, height: 1440 } });
-    expect(hdBtn().disabled).toBe(true);
-    expect(hdBtn().getAttribute('title')).toContain('1920');
-    // 竖屏短边超限（短边 1081>1080）
-    await renderToolbar('video', { id: 'tall', data: { onVideoEnhance, assetId: 'a1', width: 1081, height: 1920 } });
-    expect(hdBtn().disabled).toBe(true);
-    expect(hdBtn().getAttribute('title')).toContain('1080');
-    // 竖屏恰 1080×1920 合法（契约「短边 [360,1080]、长边 [360,1920]」）
-    await renderToolbar('video', { id: 'legal', data: { onVideoEnhance, assetId: 'a1', width: 1080, height: 1920 } });
-    expect(hdBtn().disabled).toBe(false);
-    // 置灰点击不派发
-    await renderToolbar('video', { id: 'over', data: { onVideoEnhance, assetId: 'a1', width: 3840, height: 2160 } });
+    const onFrameInterpolation = vi.fn();
+    await renderToolbar('video', { data: { onVideoEnhance, onFrameInterpolation } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.getAttribute('title')).toContain('尚未关联资产');
     await act(async () => {
-      hdBtn().click();
+      btn.click();
     });
     expect(onVideoEnhance).not.toHaveBeenCalled();
+
+    // hover 仍可展开看说明：两项置灰、title 为置灰原因，点击均不派发
+    await hoverIn();
+    expect(menu()).not.toBeNull();
+    const hd = item('hd')!;
+    const interp = item('interpolation')!;
+    expect(hd.getAttribute('aria-disabled')).toBe('true');
+    expect(interp.getAttribute('aria-disabled')).toBe('true');
+    expect(hd.getAttribute('title')).toContain('尚未关联资产');
+    expect(interp.getAttribute('title')).toContain('尚未关联资产');
+    await act(async () => {
+      hd.click();
+      interp.click();
+    });
+    expect(onVideoEnhance).not.toHaveBeenCalled();
+    expect(onFrameInterpolation).not.toHaveBeenCalled();
   });
 
-  it('置灰四情形之短边不足 360：置灰并悬停原因；恰 360 放行', async () => {
+  it('关联资产且宽高缺失放行：整钮可用（无 title），HD 项悬停为入口 hint', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1' } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    expect(btn.getAttribute('title')).toBeNull();
+    await hoverIn();
+    expect(item('hd')!.getAttribute('title')).toContain('4K');
+    expect(item('hd')!.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('HD 项置灰而插帧可用（超上限）：整钮仍可展开，HD 项 title 为原因、触发钮点击不派发', async () => {
+    const onVideoEnhance = vi.fn();
+    const onFrameInterpolation = vi.fn();
+    const over = { onVideoEnhance, onFrameInterpolation, assetId: 'a1', width: 2561, height: 1440 };
+    await renderToolbar('video', { data: over });
+    // 整钮只看未关联资产：超上限不置灰整钮
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
+    await hoverIn();
+    expect(item('hd')!.getAttribute('aria-disabled')).toBe('true');
+    expect(item('hd')!.getAttribute('title')).toContain('1920');
+    // 插帧不受 HD 分辨率门槛限制
+    expect(item('interpolation')!.getAttribute('aria-disabled')).toBeNull();
+    expect(item('interpolation')!.getAttribute('title')).toBe('提升视频帧率，画面更流畅');
+    // 触发钮文字是「高清」：HD 项被拦时点击不派发（不自动改派插帧）
+    await act(async () => {
+      trigger().click();
+    });
+    expect(onVideoEnhance).not.toHaveBeenCalled();
+    expect(onFrameInterpolation).not.toHaveBeenCalled();
+    // 从菜单可选插帧
+    await hoverIn();
+    await act(async () => {
+      item('interpolation')!.click();
+    });
+    expect(onFrameInterpolation).toHaveBeenCalledWith('video-node');
+  });
+
+  it('HD 项置灰之短边不足 360：项 title 为原因；恰 360 放行（竖屏 1080×1920 同口径）', async () => {
     await renderToolbar('video', { data: { assetId: 'a1', width: 640, height: 359 } });
-    expect(hdBtn().disabled).toBe(true);
-    expect(hdBtn().getAttribute('title')).toContain('360');
+    await hoverIn();
+    expect(item('hd')!.getAttribute('aria-disabled')).toBe('true');
+    expect(item('hd')!.getAttribute('title')).toContain('360');
+
     await renderToolbar('video', { id: 'exact', data: { assetId: 'a1', width: 640, height: 360 } });
-    expect(hdBtn().disabled).toBe(false);
+    await hoverIn();
+    expect(item('hd')!.getAttribute('aria-disabled')).toBeNull();
+
+    await renderToolbar('video', { id: 'tall', data: { assetId: 'a1', width: 1080, height: 1920 } });
+    await hoverIn();
+    expect(item('hd')!.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('插帧项挂接点未注入时点击安全 no-op（不抛错、HD 项回调不受影响）', async () => {
+    const onVideoEnhance = vi.fn();
+    await renderToolbar('video', { data: { onVideoEnhance, assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      item('interpolation')!.click();
+    });
+    expect(onVideoEnhance).not.toHaveBeenCalled();
+    expect(menu()).toBeNull();
   });
 });
 
