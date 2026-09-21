@@ -84,17 +84,17 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         supported_formats: ["png"],
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
-        features: { max_reference_images: 1 },
+        features: { image_reference_max: 1 },
       },
-      update: { features: { max_reference_images: 1 } },
+      update: { features: { image_reference_max: 1 } },
     });
     // IKFM3W：视频目标测试模型（契约 §10）——全能参考（video_reference 开 / audio 关）、
     // 图片参考上限 1（超限联算）、video_reference 关（类型能力位阻止）。
     // sort_order：默认模型排最前（浏览器段面板默认选中它，避免误选 limit/novid 档）。
-    const videoFeatures = { reference_image: true, video_reference: true, audio_reference: false, max_reference_images: 10 };
+    const videoFeatures = { reference_image: true, video_reference: true, audio_reference: false, image_reference_max: 10 };
     for (const [modelId, label, features, sortOrder] of [
       [VIDEO_MODEL_ID, "IKFM3W Video", videoFeatures, 0],
-      [VIDEO_LIMIT_MODEL_ID, "IKFM3W Video Limit", { ...videoFeatures, max_reference_images: 1 }, 100],
+      [VIDEO_LIMIT_MODEL_ID, "IKFM3W Video Limit", { ...videoFeatures, image_reference_max: 1 }, 100],
       [VIDEO_NOVID_MODEL_ID, "IKFM3W Video NoVid", { ...videoFeatures, video_reference: false }, 101],
     ] as const) {
       await prisma.client.generation_model_capability.upsert({
@@ -724,7 +724,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     expect(await jobCount(projectId)).toBe(before);
   });
 
-  it("视频分类超限：直接参考 + 文本带入图联算超 max_reference_images → 400", async () => {
+  it("视频分类超限：直接参考 + 文本带入图联算超 image_reference_max → 400", async () => {
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId), VIDEO_LIMIT_MODEL_ID));

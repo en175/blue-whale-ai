@@ -185,14 +185,6 @@ export function freshVideoCanvasRefs(refs: VideoMediaRefs, mediaNodes: Node[]): 
   return next;
 }
 
-/** 当前模型是否支持视频参考（ADR-0086：由能力行 features.video_reference 驱动，替代旧 seedance-2 前缀特判）。
- *  UI 禁用与提交防线共用同一判定。 */
-export function supportsVideoReferenceModel(modelId: string, caps?: VideoRefCapabilities | null): boolean {
-  // 兼容旧调用点：能力位缺省（未传 caps 或 caps 未带该位）时维持 seedance-2 前缀特判。
-  if (caps?.videoReference !== undefined) return caps.videoReference;
-  return modelId === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(modelId);
-}
-
 /** 视频草稿身份判定（IKDMQQ 约定延伸）：draft 标记 + 视频媒体类型 */
 export function isVideoDraftNode(node: Node | undefined): boolean {
   if (!node || node.type !== 'mediaNode') return false;

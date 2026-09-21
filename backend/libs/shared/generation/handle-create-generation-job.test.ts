@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ERROR_MODEL_UNAVAILABLE } from "@lib/contracts";
+
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 
 // IK9ILQ：音频生成接入 —— 校验分支单测。
@@ -22,8 +24,9 @@ function buildDeps() {
         model_id: "seed-audio-1.0",
         features: {
           audio_reference_max: 3,
+          // IKHEXG：音频行的图参考上限 1（原夹具同时带 max_reference_images:10 与
+          // image_reference_max:1——两键合并后只剩这一个，取音频链路原本生效的 1）。
           image_reference_max: 1,
-          max_reference_images: 10,
         },
       },
     ]);
@@ -338,9 +341,9 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
   });
 });
 
-// IKA72G：图片参考图上限读取模型能力配置（features.max_reference_images），
+// IKA72G：图片参考图上限读取模型能力配置（features.image_reference_max），
 // 不再写死 4；无配置时回退与网关/ARK 一致的 10；字段统一 input_asset_ids。
-function buildImageDeps(maxReferenceImages?: number) {
+function buildImageDeps(imageReferenceMax?: number) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
     name: "项目",
@@ -351,9 +354,9 @@ function buildImageDeps(maxReferenceImages?: number) {
     {
       model_id: "seedream-5.0",
       features:
-        maxReferenceImages === undefined
+        imageReferenceMax === undefined
           ? undefined
-          : { max_reference_images: maxReferenceImages },
+          : { image_reference_max: imageReferenceMax },
     },
   ]);
   const createJob = vi.fn().mockResolvedValue({
@@ -457,7 +460,9 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("能力未配置 → 回退网关/ARK 常量 10：10 张通过、11 张 400", async () => {
+  // IKHEXG：图片/视频链路的缺省仍是 10（网关 maxImageEditImages / 方舟 Seedream 复合编辑），
+  // 按行类型选的缺省只在音频链路上是 1（见 model-capability-repo 的两个 DEFAULT_* 常量）。
+  it("能力未配置 → 回退图片/视频缺省 10：10 张通过、11 张 400", async () => {
     const { deps: okDeps, createJob: okCreate } = buildImageDeps();
     const ok = await handleCreateGenerationJob(
       "u1",
@@ -687,15 +692,17 @@ describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", 
 });
 
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
-function buildVideoDeps() {
+function buildVideoDeps(modelRow: Record<string, unknown> = {}) {
   const findOwnedById = vi.fn().mockResolvedValue({
     id: "1",
     name: "项目",
     thumb: null,
     created_at: "2026-08-18T00:00:00.000Z",
   });
+  // IKHBDO：可选 modelRow 覆盖能力行（如 features.image_reference_max）——参考上限只认配置，
+  // 用例需要能给出「配到 12 / 配到 30」的行；缺省保持原先的无 features 行。
   const listEnabledByType = vi.fn().mockResolvedValue([
-    { model_id: "doubao-seedance-2-0-260128" },
+    { model_id: "doubao-seedance-2-0-260128", ...modelRow },
   ]);
   const createJob = vi.fn().mockResolvedValue({
     generation_job_id: "1",
@@ -716,7 +723,7 @@ const VIDEO_BODY = {
   expected_output_count: 1,
   parameters: {
     prompt: "人物走过街角",
-    model_id: "seedance-2",
+    model_id: "doubao-seedance-2-0-260128",
     aspect_ratio: "16:9",
     resolution: "720p",
     duration: 8,
@@ -895,8 +902,12 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     ]);
   });
 
-  it("素材库参考超 12 个 → 400 参考素材最多 12 个", async () => {
-    const { deps, createJob } = buildVideoDeps();
+  // IKHBDO：原先此处断言写死的「参考素材最多 12 个」。上限改由能力行判定后，同一条请求的
+  // 判词随配置走（12 上限 → 「参考图最多 12 张」），故断言改成配置口径，兼作「能力行生效」的证据。
+  it("素材库参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
+    const { deps, createJob } = buildVideoDeps({
+      features: { image_reference_max: 12 },
+    });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       id: `Asset-ref-${i}`,
       type: "image" as const,
@@ -909,7 +920,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       deps,
     );
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -1139,8 +1150,11 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("references 普通参考超 12 个 → 400 参考素材最多 12 个", async () => {
-    const { deps, createJob } = buildVideoDeps();
+  // IKHBDO：同上一「素材库参考」用例——单数组 references 分支的判词同样只认能力行。
+  it("references 普通参考超能力行上限（image_reference_max=12）→ 400 参考图最多 12 张", async () => {
+    const { deps, createJob } = buildVideoDeps({
+      features: { image_reference_max: 12 },
+    });
     const refs = Array.from({ length: 13 }, (_, i) => ({
       role: "reference" as const,
       material_id: `Asset-ref-${i}`,
@@ -1154,7 +1168,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       deps,
     );
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -1448,7 +1462,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
 // 快照形状与图片同构；视频既有冻结字段（resolution/duration/参考引用）保持。
 function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
-  // seedance-2 经别名解析为 doubao-seedance-2-0-260128，白名单按解析后 id 校验
+  // 白名单按请求里的真实目录 id 校验（旧 seedance-2 别名已删除）
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
     .fn()
     .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
@@ -2241,13 +2255,13 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
             supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
             features: {
               reference_image: true,
-              max_reference_images: 10,
+              // IKHEXG：两键合并后只剩一个图参考上限，取视频链路原本生效的 10。
+              image_reference_max: 10,
               quantity_max: 1,
               video_reference: false,
               video_reference_max: 3,
               audio_reference: false,
               audio_reference_max: 3,
-              image_reference_max: 1,
               max_reference_duration_sec: null,
               ...features,
             },
@@ -2262,8 +2276,8 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
 
   const imageRef = (i: number) => ({ role: 'reference' as const, asset_id: String(i), type: 'image' as const });
 
-  it('视频普通参考图片数超能力行 max_reference_images → 400 参考图最多 N 张', async () => {
-    const { deps, createJob } = videoDepsWithFeatures({ max_reference_images: 3 });
+  it('视频普通参考图片数超能力行 image_reference_max → 400 参考图最多 N 张', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({ image_reference_max: 3 });
     const result = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: [1, 2, 3, 4].map(imageRef),
@@ -2274,7 +2288,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
   });
 
   it('恰好达到图上限（3 张）放行', async () => {
-    const { deps } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const { deps } = videoDepsWithFeatures({ image_reference_max: 3 });
     const result = await handleCreateGenerationJob('u1', 'p1', {
       ...VIDEO_BODY,
       references: [1, 2, 3].map(imageRef),
@@ -2308,6 +2322,125 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
     }, null, deps);
     expect(result.code).toBe(400);
     expect(result.msg).toContain('参考素材总时长超过 15 秒');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  // IKHBDO：参考上限由接纳侧按能力行冻结进 job.input.reference_limits —— worker 不含模型知识，
+  // 执行期只读这份快照（对齐 generate_audio 的冻结口径）。
+  it('参考上限按能力行冻结进 job.input.reference_limits', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({
+      image_reference_max: 14,
+      video_reference_max: 5,
+      audio_reference_max: 2,
+      max_reference_duration_sec: 30,
+    });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [imageRef(1)],
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(input.reference_limits).toEqual({
+      image_reference_max: 14,
+      video_reference_max: 5,
+      audio_reference_max: 2,
+      max_reference_duration_sec: 30,
+    });
+  });
+
+  it('同一份 4 张参考图：能力行配 3 时 400、配 5 时 200（上限随配置而非固定常量）', async () => {
+    const refs = Array.from({ length: 4 }, (_, i) => imageRef(i + 1));
+
+    const strict = videoDepsWithFeatures({ image_reference_max: 3 });
+    const rejected = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: refs,
+    }, null, strict.deps);
+    expect(rejected.code).toBe(400);
+    expect(rejected.msg).toContain('参考图最多 3 张');
+    expect(strict.createJob).not.toHaveBeenCalled();
+
+    const loose = videoDepsWithFeatures({ image_reference_max: 5 });
+    const accepted = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: refs,
+    }, null, loose.deps);
+    expect(accepted.code).toBe(200);
+    expect(loose.createJob).toHaveBeenCalledTimes(1);
+  });
+
+  // IKHBDO：**配置必须赢**。白名单解析前的预检拿不到能力行，绝不能自带一个数量上限——
+  // 写死 12 会让「13 张 + 配 30」的模型永久卡死（本用例前半段就是该场景的回归）。
+  // 后半段是反向证据：上限确实随配置收紧，不是「一律放行」。
+  it('参考上限完全随能力行走：配 30 收下 13 张参考，配 5 在第 6 张拒绝', async () => {
+    const loose = videoDepsWithFeatures({ image_reference_max: 30 });
+    const accepted = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: Array.from({ length: 13 }, (_, i) => imageRef(i + 1)),
+    }, null, loose.deps);
+    expect(accepted.code).toBe(200);
+    expect(loose.createJob).toHaveBeenCalledTimes(1);
+
+    const strict = videoDepsWithFeatures({ image_reference_max: 5 });
+    const rejected = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: Array.from({ length: 6 }, (_, i) => imageRef(i + 1)),
+    }, null, strict.deps);
+    expect(rejected.code).toBe(400);
+    expect(rejected.msg).toContain('参考图最多 5 张');
+    expect(strict.createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKHBDO：模型 id **原样取用**，只认运营配置的目录行。
+// 这里曾有一张 `VIDEO_MODEL_ALIASES = { "seedance-2": "doubao-seedance-2-0-260128" }` 的旧前端
+// 兼容表，在**白名单查询之前**改写 model_id。按「配置永远第一」这是个反例：别名表是写死的，
+// 而它抢在配置之前生效——运营若真配一行 model_id 就叫 `seedance-2`，请求会被改写成 2.0 那行，
+// 那一行永远赢不了。故删除，改为原样取用：非目录 id 一律以 400 明确失败，而不是被静默改写。
+describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）', () => {
+  const videoDepsWithCatalogue = (modelIds: string[]) => {
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: '1', cursor: 1 });
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: '1', name: '项目', thumb: null, created_at: '2026-08-18T00:00:00.000Z' }) },
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue(
+          modelIds.map((model_id) => ({
+            model_id,
+            supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
+            features: {
+              reference_image: true,
+              // IKHEXG：视频行的图参考上限 10（原夹具同时带 max_reference_images:10 与
+              // image_reference_max:1——两键合并后只剩这一个，取视频链路原本生效的 10）。
+              image_reference_max: 10,
+              quantity_max: 1,
+              video_reference: true,
+              video_reference_max: 3,
+              audio_reference: false,
+              audio_reference_max: 3,
+              max_reference_duration_sec: null,
+            },
+          })),
+        ),
+      },
+      command: { createJob },
+      assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  };
+
+  it('旧别名 seedance-2 不在启用目录 → 400 model_unavailable（不再被改写成 2.0 那行）', async () => {
+    // 目录里只有真实型号 `doubao-seedance-2-0-260128`——恰是旧别名表的目标。
+    // 若别名改写恢复，`seedance-2` 会被改写成该行从而 200；本用例把它钉成 400。
+    const { deps, createJob } = videoDepsWithCatalogue(['doubao-seedance-2-0-260128']);
+
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      parameters: { ...VIDEO_BODY.parameters, model_id: 'seedance-2' },
+    }, null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
+    expect(result.data?.code).toBe(ERROR_MODEL_UNAVAILABLE);
     expect(createJob).not.toHaveBeenCalled();
   });
 });

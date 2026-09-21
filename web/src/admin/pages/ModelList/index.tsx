@@ -43,6 +43,9 @@ export default function ModelList() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState('');
+  /** IKHBDO：排序号支持直接编辑。仅靠上/下移时，两行 sort_order 相同会让交换变成空操作
+   *  （按钮点了没反应），运营也没有别的入口把顺序改回来。 */
+  const [sortDrafts, setSortDrafts] = useState<Record<string, string>>({});
 
   const filtered = useMemo(
     () => models.filter((m) => m.capability_type === activeTab).sort((a, b) => a.sort_order - b.sort_order),
@@ -67,6 +70,12 @@ export default function ModelList() {
     const a = filtered[i];
     const b = filtered[j];
     setActionError('');
+    // IKHBDO：两行排序号相同 → 交换写入的是同一个值，等于什么都没做（按钮看起来是坏的）。
+    // 直接把这种情况说出来，并指向可用的入口（直接改排序号）。
+    if (a.sort_order === b.sort_order) {
+      setActionError(`「${a.model_label}」与「${b.model_label}」的排序号相同（${a.sort_order}），上下移不会生效——请直接改「排序」列的数值。`);
+      return;
+    }
     try {
       await Promise.all([
         updateAdminModel(a.id, { sort_order: b.sort_order }),
@@ -75,6 +84,33 @@ export default function ModelList() {
       load();
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '排序失败，请稍后重试');
+    }
+  };
+
+  /** IKHBDO：直接写该行排序号（唯一能把重复排序号改开的入口）。 */
+  const commitSort = async (id: string) => {
+    const draft = sortDrafts[id];
+    if (draft === undefined) return;
+    const value = Number(draft.trim());
+    const current = models.find((m) => m.id === id);
+    if (!draft.trim() || !Number.isInteger(value) || value < 0) {
+      setActionError('排序号须为非负整数。');
+      setSortDrafts((prev) => ({ ...prev, [id]: current ? String(current.sort_order) : '' }));
+      return;
+    }
+    if (current && current.sort_order === value) {
+      setSortDrafts((prev) => ({ ...prev, [id]: String(value) }));
+      return;
+    }
+    setActionError('');
+    try {
+      await updateAdminModel(id, { sort_order: value });
+      setSortDrafts((prev) => ({ ...prev, [id]: String(value) }));
+      load();
+    } catch (e) {
+      // 写入失败 → 回显库里的值，别让输入框停在没生效的数字上
+      setSortDrafts((prev) => ({ ...prev, [id]: current ? String(current.sort_order) : '' }));
+      setActionError(isApiError(e) ? e.message : '排序号更新失败，请稍后重试');
     }
   };
 
@@ -198,14 +234,37 @@ export default function ModelList() {
                 </td>
                 <td>
                   {m.is_default ? (
-                    <span className={styles.badgeDefault}>默认</span>
+                    <span className={styles.badgeDefault} title="显式默认模型（同类只设一个）。后端「只设不清」：要取消本行的默认，把同类型另一行设为默认即可。">
+                      默认
+                    </span>
                   ) : (
-                    <button className={styles.linkBtn} onClick={() => makeDefault(m.id)}>
+                    <button
+                      className={styles.linkBtn}
+                      title="设为该类型的默认模型。后端只设不清——没有「取消默认」这个动作，把另一行设为默认就等于换过去。"
+                      onClick={() => makeDefault(m.id)}
+                    >
                       设为默认
                     </button>
                   )}
                 </td>
-                <td className={styles.cellSort}>{m.sort_order}</td>
+                <td className={styles.cellSort}>
+                  <input
+                    className={styles.sortInput}
+                    type="number"
+                    min={0}
+                    value={sortDrafts[m.id] ?? String(m.sort_order)}
+                    onChange={(e) => setSortDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                    onBlur={() => commitSort(m.id)}
+                    onKeyDown={(e) => {
+                      // 回车等价于失焦：只留一条提交路径，避免回车 + 失焦连发两次 PUT
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    title="排序号（同类内越小越靠前）。两行相同会让上下移失效，直接改这里的数值即可。"
+                  />
+                </td>
                 <td className={styles.cellTime}>{fmtTime(m.updated_at)}</td>
                 <td>
                   <div className={styles.actionGroup}>

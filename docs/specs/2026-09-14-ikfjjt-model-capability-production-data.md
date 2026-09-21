@@ -10,22 +10,36 @@
 
 ## 通用说明（能力键，features JSON）
 
-| 键 | 语义 | 未配置缺省 |
-|---|---|---|
-| `video_reference` | 视频生成是否接受**视频素材**作普通参考 | false |
-| `video_reference_max` | 普通参考中视频素材上限 | 3 |
-| `audio_reference` | 视频生成是否接受**音频素材**作参考 | false |
-| `audio_reference_max` | 音频生成中音频参考上限 | 3 |
-| `image_reference_max` | 音频生成中图片参考上限 | 1 |
-| `max_reference_duration_sec` | 输入参考素材**总时长**上限（秒） | null（不限） |
-| `max_reference_images` | 图片参考图上限 | 10 |
-| `task_types` | 按任务类型的比例/时长约束（JSON 对象） | 空 |
+> ⚠️ **2026-09-21（IKHEXG）起，参考上限键按「素材媒介」命名，作用域由行的类型决定。**
+> 原 `max_reference_images` 已并入 `image_reference_max` 并从代码中删除；存量值由
+> `029_ikhexg_reference_key_rename` 迁移自动搬入（按行类型判定原本生效的那把，行为不变）。
+> 下表及下方各表里的 `max_reference_images` 一律改读作 **`image_reference_max`**；
+> 配置时**图片行也要填 `image_reference_max`**（旧键在后台已不再渲染）。
+
+| 键 | 语义 | 适用生成类型 | 未配置缺省 |
+|---|---|---|---|
+| `video_reference` | 视频生成是否接受**视频素材**作普通参考 | 视频 | false |
+| `video_reference_max` | 普通参考中视频素材上限 | 视频 | 3 |
+| `audio_reference` | 视频生成是否接受**音频素材**作参考 | 视频 | false |
+| `audio_reference_max` | 音频素材参考上限 | 视频 / 音频 | 3 |
+| `image_reference_max` | **图参考上限**（IKHEXG 合并了原 `max_reference_images`） | 图片 / 视频 / 音频 | 图片·视频 **10**、音频 **1** |
+| `max_reference_duration_sec` | 输入参考素材**总时长**上限（秒） | 视频 / 音频 | null（不限）|
+| `task_types` | 按任务类型的比例/时长约束（JSON 对象） | — | 空 |
+
+> **`image_reference_max` 的缺省按行类型分**（官方值本就不同）：图片/视频行 10
+> （网关 `maxImageEditImages` / 方舟 Seedream 复合编辑），音频行 1（官方音频接口只收 1 张）。
+> 两键同现时以**本行类型原本被读的那把**为准——迁移即按此搬值，无需人工判。
+
+> **补缺（Q10）**：下方「视频」表的图参考一栏此前缺失。据
+> `2026-08-24-video-ref-image-limit-prompt-design.md` 记载，三条 Seedance 2.0 行在测试库留 NULL、
+> 后手工置 **9**（官方参考图上限）。请运营按 9 核正 2.0 / 2.0 Fast / 2.0 Mini 三行的
+> `image_reference_max`。
 
 ## 逐模型应填值
 
 ### 图片
 
-| 模型 | max_reference_images | quantity_max | 档位（supported_sizes） | 备注 |
+| 模型 | image_reference_max | quantity_max | 档位（supported_sizes） | 备注 |
 |---|---|---|---|---|
 | Seedream 5.0 Lite | **14**（现 10）| 15 | 2K/3K/4K | 官方参考图最多 14，且**输入图+输出图≤15** |
 | Seedream 4.5 | **14**（现 10）| 15 | 2K/4K | 同上联动校验 |

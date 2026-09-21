@@ -18,6 +18,7 @@ import {
   parseModelCreateBody,
   parseModelUpdateBody,
 } from "@lib/shared/model-capability/constants.js";
+import { invalidateModelCapabilityCache } from "@lib/shared/persistence/model-capability-cache.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
@@ -38,6 +39,17 @@ export class AdminModelsController {
     } catch (error) {
       throw toAdminError(error);
     }
+  }
+
+  /** 手动清空消费端模型能力缓存（IKH BDO）。
+   *
+   *  正常路径由各写方法自动失效；这个入口兜的是「绕过应用的改动」——迁移脚本、直改库，
+   *  或 Redis 短暂失联期间漏掉的失效。没有它就只能干等 5 分钟 TTL。
+   *  必须声明在 `@Post()` 之外：路径含斜杠，不会被 create 抢。 */
+  @Post("cache/flush")
+  async flushCache() {
+    await invalidateModelCapabilityCache();
+    return { success: true, data: { flushed: true } };
   }
 
   @Post()
@@ -122,11 +134,14 @@ export class AdminModelsController {
     @Body() body: unknown,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const parsed = parseModelUpdateBody(body);
-    if (!parsed.ok) throw new AdminException(400, parsed.error);
     try {
+      // IKH BDO：先读库中那一行，再做请求体校验——更新是 diff 提交，没改过的
+      // channel_parser 不在 body 里，映射表校验必须按库中的解析器判定。
+      // 这里必须读库、不得读缓存：拿旧值校验等于没校验。
       const before = await this.modelCapability.getById(id);
       if (!before) throw new AdminException(404, "模型不存在");
+      const parsed = parseModelUpdateBody(body, before);
+      if (!parsed.ok) throw new AdminException(400, parsed.error);
       const after = await this.modelCapability.update(id, parsed.value);
       if (!after) throw new AdminException(404, "模型不存在");
       try {

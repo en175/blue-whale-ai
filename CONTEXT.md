@@ -542,6 +542,16 @@ _Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入�
 音频（audio）。四种在管理目录中并列；一条能力的能力类型在创建后不可改。
 _Avoid_: 把音频生成当成视频特性；用 features.audio 表示音频模型（那是「视频带音轨」）；档位
 
+**参考上限（Reference Limit）**:
+模型能力目录里按**素材媒介**声明的、一次生成中该媒介素材可作参考的数量上限。键名只表达媒介
+（`image_reference_max` / `video_reference_max` / `audio_reference_max`），**它适用于哪种生成由
+行的能力类型与调用点的生成类型共同决定**——同一行内一把键只有一个含义。
+配了就以配置为准，未配置才回落缺省；缺省按行类型分（`image_reference_max`：图片/视频行 10、
+音频行 1；另两键 3）。与「能力位」（`reference_image` / `video_reference` / `audio_reference`
+这类布尔开关）是两回事：能力位管**能不能收**，参考上限管**最多几个**。
+_Avoid_: 让键名同时承载「媒介」与「生成类型」两种轴（历史 `max_reference_images` 与
+`image_reference_max` 就是这么撞车的）；在图片/视频行的配置里另开一把「音频专用」的图参考键。
+
 **运行模态（Generation Modality）**:
 图片能力档的两种工作方式：文生图（仅提示词）与图生图（提示词 + 参考图）。模态不是能力——
 同一档能力同时覆盖两种模态，任务创建时是否带参考图决定本次走哪种；一档能力若不支持参考图，

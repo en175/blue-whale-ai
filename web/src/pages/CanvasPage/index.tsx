@@ -33,20 +33,24 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
-  supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
   checkAddVideoRef,
   incomingVideoRefOccupied,
   occupiedVideoRefIds,
+  videoRefIdentityIds,
   type VideoMediaRef,
   type VideoMediaRefs,
+  type VideoRefCapabilities,
   type VideoRefRole,
 } from './videoMediaRefs';
+import { AssetImageRefLimitProvider, videoRefCapsOfModel } from './modelCaps';
+import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
-import { downloadFileNameOf } from './components/cardName';
+import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
@@ -747,6 +751,34 @@ export default function CanvasPage() {
     edgesRef.current = next;
     setEdges(next);
   };
+  /** 草稿卡的模型能力解析（ADR-0086）：按卡上 draftModelId 在对应能力列表里取能力行。
+   *  未绑定模型或列表未加载 → undefined：消费处按缺省处理且**不阻断**（宁可服务端 400 判定，
+   *  不做客户端假阴性拦截）。 */
+  const draftModelOf = (nodeId: string | null | undefined, kind: 'video' | 'image'): GenerationModel | undefined => {
+    const data = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
+    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
+    if (!modelId) return undefined;
+    return (kind === 'video' ? videoModelsRef.current : imageModelsRef.current).find((m) => m.model_id === modelId);
+  };
+  /** 视频草稿的参考能力（模型未解析 → null：分类上限回落缺省，视频/音频参考门控放行交服务端） */
+  const videoCapsOfDraft = (nodeId: string | null | undefined): VideoRefCapabilities | null =>
+    videoRefCapsOfModel(draftModelOf(nodeId, 'video'));
+  /** 图片草稿的参考图上限（能力行 image_reference_max；模型未解析回落缺省 10） */
+  const imageRefMaxOfDraft = (nodeId: string): number =>
+    imageReferenceMaxOf(draftModelOf(nodeId, 'image')?.features);
+  /** 提交防线的视频/音频参考能力位判定（ADR-0086）：按提交模型的能力行逐类型判定，返回拒绝原因。
+   *  模型未解析（能力列表未加载/接口失败）返回 null 不阻断——交服务端 400 判定，不做客户端假阴性。 */
+  const videoRefUnsupportedByModel = (modelId: string, refs: VideoMediaRefs): string | null => {
+    const model = videoModelsRef.current.find((m) => m.model_id === modelId);
+    if (!model) return null;
+    const f = model.features;
+    const unsupported = refs.reference.some((r) =>
+      r.mediaType === 'video' ? !supportsVideoReferenceOf(f)
+        : r.mediaType === 'audio' ? !supportsAudioReferenceOf(f)
+          : false,
+    );
+    return unsupported ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null;
+  };
   /** 图片草稿参考连线校验（IKDMQR）：仅当目标是图片草稿且来源是媒体节点时介入——
    *  仅有效图片媒体结果可连入；重复素材（按 assetId 归一，兼容三形态）与超上限明确拒绝，不静默丢弃输入。
    *  文本/商品/资产卡等来源与非草稿目标沿用既有语义（文本附件/未来切片），本函数放行。 */
@@ -768,8 +800,10 @@ export default function CanvasPage() {
       showToast('warn', '该素材已连入当前草稿');
       return false;
     }
-    if (refs.length >= 10) {
-      showToast('warn', refOverflowToast(['image'], { image: 10 }));
+    // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
+    const imageMax = imageRefMaxOfDraft(targetId);
+    if (refs.length >= imageMax) {
+      showToast('warn', refOverflowToast(['image'], { image: imageMax }));
       return false;
     }
     return true;
@@ -795,7 +829,8 @@ export default function CanvasPage() {
     const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
       ? sourceData.materialId
       : undefined;
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs, undefined, [materialId]);
+    // 分类上限读草稿绑定模型的能力行（ADR-0086，此前 caps 恒 undefined → 回落到写死的 9/3/3）
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId]);
     if (msg) {
       showToast('warn', msg);
       return false;
@@ -1045,6 +1080,11 @@ export default function CanvasPage() {
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
+  /** 画布层模型能力列表（ADR-0086）：连线校验、资产接纳槽位与资产卡上限按「草稿卡绑定的模型」
+   *  的能力行取值，不再写死 9/3/3、10。与首页/图片/视频面板同源（fetchGenerationModels 有模块级
+   *  请求缓存，重复挂载不产生重复请求）。失败保留空列表：消费处回落缺省且不阻断。 */
+  const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
+  const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   /** 工具栏加号 →「资产库选择」弹窗开关 */
   const [showAssetsPicker, setShowAssetsPicker] = useState(false);
@@ -1177,6 +1217,17 @@ export default function CanvasPage() {
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   useEffect(() => { setLiveViewport(viewport); }, [viewport]);
+  /** 加载视频/图片能力列表（ADR-0086）：画布连线、资产接纳与资产卡上限据此取能力行；
+   *  失败不阻断画布（保留空列表 → 消费处按缺省值），避免接口抖动让画布不可用。 */
+  useEffect(() => {
+    fetchGenerationModels('video').then(setVideoModels).catch(() => undefined);
+    fetchGenerationModels('image').then(setImageModels).catch(() => undefined);
+  }, []);
+  /** 资产卡参考图上限（ADR-0086）：资产卡经图片面板生成图片，按图片能力默认模型取
+   *  image_reference_max（无显式默认取列表首条；列表未加载回落缺省 10，与服务端一致） */
+  const assetImageRefMax = imageReferenceMaxOf(
+    (imageModels.find((m) => m.is_default) ?? imageModels[0])?.features,
+  );
   useEffect(() => {
     const el = canvasWrapperRef.current;
     if (!el) return;
@@ -2870,6 +2921,7 @@ export default function CanvasPage() {
     node: Node,
     refs: VideoMediaRefs,
     role: 'first' | 'last',
+    caps?: VideoRefCapabilities | null,
   ): { current: VideoMediaRef | undefined } | null => {
     const err = videoRefSourceError(node, role);
     if (err) {
@@ -2891,7 +2943,7 @@ export default function CanvasPage() {
       ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
       reference: refs.reference.filter((r) => !sameIncoming(r)),
     };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, undefined, [sourceMaterialId]);
+    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, caps, [sourceMaterialId]);
     if (msg) {
       showToast('warn', msg);
       return null;
@@ -2905,7 +2957,7 @@ export default function CanvasPage() {
    *  返回是否实际落槽（IKGB7Y 自动退出判定用；拒绝/幂等返回 false） */
   const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last'): boolean => {
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const check = checkVideoFrameReplace(node, refs, role);
+    const check = checkVideoFrameReplace(node, refs, role, videoCapsOfDraft(targetId));
     if (!check) return false;
     if (check.current) {
       if (isLibraryOnlyVideoRef(check.current)) {
@@ -5229,12 +5281,16 @@ export default function CanvasPage() {
         }
         return;
       }
-      // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
-      // 缺省回落旧 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读草稿绑定模型的能力行，
+      // 与 checkAddVideoRef 同口径；模型未解析回落缺省 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      const caps = videoCapsOfDraft(videoDraftId);
+      const imageMax = caps?.imageMax ?? 9;
+      const videoMax = caps?.videoReferenceMax ?? 3;
+      const audioMax = caps?.audioReferenceMax ?? 3;
       const known = occupiedVideoRefIds(refs);
-      let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
-      let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
-      let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
+      let imgSlots = imageMax - refs.reference.filter((r) => r.mediaType === 'image').length;
+      let vidSlots = videoMax - refs.reference.filter((r) => r.mediaType === 'video').length;
+      let audSlots = audioMax - refs.reference.filter((r) => r.mediaType === 'audio').length;
       const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
       let skippedDup = false;
       const filtered: AssetRecord[] = [];
@@ -5259,7 +5315,7 @@ export default function CanvasPage() {
       }
       accepted = filtered;
       if (skippedDup) showToast('warn', '重复的素材已跳过');
-      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
+      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: imageMax, video: videoMax, audio: audioMax }));
       if (accepted.length === 0) return;
       if (!videoDraftId) {
         accepted.forEach((a) =>
@@ -5338,18 +5394,20 @@ export default function CanvasPage() {
       if (imageDraftId) {
         const current = imageMediaRefsOf(imageDraftId, edgesRef.current, mediaNodesRef.current);
         const known = new Set(current.map((r) => r.assetId));
+        // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
+        const imageMax = imageRefMaxOfDraft(imageDraftId);
         const accepted: AssetRecord[] = [];
         let skippedDup = false;
         let overflow = false;
         for (const a of images) {
           const id = String(a.id);
           if (known.has(id)) { skippedDup = true; continue; }
-          if (known.size >= 10) { overflow = true; break; }
+          if (known.size >= imageMax) { overflow = true; break; }
           known.add(id);
           accepted.push(a);
         }
         if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflow) showToast('warn', refOverflowToast(['image']));
+        if (overflow) showToast('warn', refOverflowToast(['image'], { image: imageMax }));
         if (accepted.length === 0) return;
         const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
         if (!nodeIds) {
@@ -5391,6 +5449,12 @@ export default function CanvasPage() {
   };
 
   /* ============ 生成任务编排：创建 → 占位节点 → 轮询 → 产物挂载 ============ */
+
+  /** 模型能力列表最新值（避开 useCallback 闭包陈旧，口径同 nodes ref） */
+  const videoModelsRef = useRef<GenerationModel[]>([]);
+  videoModelsRef.current = videoModels;
+  const imageModelsRef = useRef<GenerationModel[]>([]);
+  imageModelsRef.current = imageModels;
 
   /** 媒体节点最新列表（轮询中判断节点是否仍存在） */
   const mediaNodesRef = useRef<Node[]>([]);
@@ -7092,15 +7156,25 @@ export default function CanvasPage() {
       }
       return undefined;
     };
-    const videoRefs = videoSeed?.targetNodeId ? mergedVideoMediaRefsOf(videoSeed.targetNodeId, edges, mediaNodes) : { reference: [] };
+    // 与 Dock 展示 / 提交同源：直接参考 ∪ 文本索引带入（方案卡应用到画布后素材只挂在方案卡上，不直连视频草稿）
+    const videoRefs = videoSeed?.targetNodeId
+      ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
+      : { reference: [] };
+    const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
+      .flatMap((ref) => videoRefIdentityIds(ref));
     return {
-      image: forTarget(imageSeed?.targetNodeId, imageSeed?.targetNodeId ? imageMediaRefsOf(imageSeed.targetNodeId, edges, mediaNodes).map(ref => ref.assetId) : []),
+      image: forTarget(
+        imageSeed?.targetNodeId,
+        imageSeed?.targetNodeId
+          ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
+          : [],
+      ),
       videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
         const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
         const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
         return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
       }).join('、'),
-      video: forTarget(videoSeed?.targetNodeId, [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])].map(ref => ref.assetId)),
+      video: forTarget(videoSeed?.targetNodeId, videoAvailableIds),
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
 
@@ -8054,7 +8128,7 @@ export default function CanvasPage() {
   };
 
   /** 下载单个媒体节点：成功返回 true，无素材则 false。
-   *  文件名以当前卡片名称为基础，扩展名取真实文件类型（blob MIME 优先，节点 mime/素材地址兜底，IKFA8Y） */
+   *  文件名以当前卡片名称为基础，扩展名经 resolveDownloadMime 纠正 M4A 错标后再取（IKFA8Y） */
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (node?.data?.assetMissing) {
@@ -8064,10 +8138,20 @@ export default function CanvasPage() {
     const src = node?.data?.src as string | undefined;
     if (!src) return false;
     const name = (node?.data?.fileName as string) || id;
-    const mime = node?.data?.mime as string | undefined;
+    const nodeMime = node?.data?.mime as string | undefined;
+    const mediaType = node?.data?.mediaType as string | undefined;
     const blob = await fetchAssetBlob(src);
     if (blob) {
-      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, blob.type || mime, src), true);
+      const sniffed = await sniffMediaMime(blob, mediaType);
+      const type = resolveDownloadMime({
+        sniffed,
+        blobType: blob.type,
+        nodeMime,
+        src,
+        fileName: name,
+        mediaType,
+      });
+      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, type, src), true);
       return true;
     }
     window.open(src, '_blank', 'noopener');
@@ -8086,10 +8170,17 @@ export default function CanvasPage() {
       if (media && !media.data?.assetMissing && src) {
         const blob = await fetchAssetBlob(src);
         if (blob) {
-          const sniffed = await sniffMediaMime(blob);
-          const nodeMime = media.data?.mime as string | undefined;
-          const mime = sniffed || blob.type || nodeMime;
           const cardName = (media.data?.fileName as string) || id;
+          const mediaType = media.data?.mediaType as string | undefined;
+          const sniffed = await sniffMediaMime(blob, mediaType);
+          const mime = resolveDownloadMime({
+            sniffed,
+            blobType: blob.type,
+            nodeMime: media.data?.mime as string | undefined,
+            src,
+            fileName: cardName,
+            mediaType,
+          });
           items.push({
             filename: uniqueDownloadName(downloadFileNameOf(cardName, mime, src), usedNames),
             blob,
@@ -8456,10 +8547,11 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      // 视频参考仅部分模型支持（ADR-0086：读能力行 features.video_reference；旧 seedance-2 前缀特判
-      // 作为缺省兜底）：提交防线与面板 UI 禁用同一判定
-      if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType !== 'image')) {
-        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+      // 视频/音频参考的能力位（ADR-0086）：按提交模型的能力行判定，替代旧 seedance-2 前缀特判
+      // （旧特判对 2.5 与 2.0 恰好判反：2.5 被误拦、2.0 被误放）；模型未解析不阻断，交服务端兜底
+      const refGate = videoRefUnsupportedByModel(opts.modelId, draftRefs);
+      if (refGate) {
+        showToast('warn', refGate);
         return;
       }
       applyingRef.current = true;
@@ -9503,8 +9595,11 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      if (!supportsVideoReferenceModel(modelId) && draftRefs.reference.some((ref) => ref.mediaType !== 'image')) {
-        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+      // 视频/音频参考的能力位（ADR-0086）：按卡上模型的能力行判定（同 handleDialogSend），
+      // 模型未解析不阻断，交服务端兜底
+      const refGate = videoRefUnsupportedByModel(modelId, draftRefs);
+      if (refGate) {
+        showToast('warn', refGate);
         return;
       }
       applyingRef.current = true;
@@ -9723,6 +9818,9 @@ export default function CanvasPage() {
       {/* 画布区域 */}
       <div ref={canvasWrapperRef} className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
+      {/* 资产卡参考图上限（ADR-0086）：节点组件经 context 读能力行，避免为卡内上限在
+          节点树层层透传 props；未注入/未加载时回落能力缺省值 */}
+      <AssetImageRefLimitProvider value={assetImageRefMax}>
       <FlowCanvas
           showMiniMap={showMiniMap}
           toolMode={toolMode}
@@ -9905,6 +10003,7 @@ export default function CanvasPage() {
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
           onUpdateGenerate={onUpdateGenerate}
         />
+      </AssetImageRefLimitProvider>
         {connectMenu && (
           <ConnectTypeMenu
             x={connectMenu.x}

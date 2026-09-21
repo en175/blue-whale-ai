@@ -62,9 +62,9 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
         supported_formats: ["png"],
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
-        features: { max_reference_images: 2 },
+        features: { image_reference_max: 2 },
       },
-      update: { features: { max_reference_images: 2 } },
+      update: { features: { image_reference_max: 2 } },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);

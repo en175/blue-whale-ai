@@ -20,7 +20,7 @@ import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
-import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOfCap, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/lib/model-reference-limits';
 import { promptCharCountLabel, promptMaxLengthOf } from '@/lib/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import DurationSlider from './DurationSlider';
@@ -603,7 +603,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // 上传上限（与画布弹窗同规则）：图片/视频/音频均读能力行（ADR-0086），能力未加载完时图片为 0、视频/音频回落缺省
   /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
-   *  （max_reference_images / video_reference_max / audio_reference_max） */
+   *  （image_reference_max / video_reference_max / audio_reference_max） */
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const selectedPromptModel = isImageTab
     ? selectedImageModel
@@ -612,7 +612,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       : selectedCreationModel;
   const activePromptCap = promptMaxLengthOf(selectedPromptModel?.features?.max_prompt_length);
   const imagePromptCap = promptMaxLengthOf(selectedImageModel?.features?.max_prompt_length);
-  const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 0;
+  const agentMaxImages = selectedCreationModel?.features?.image_reference_max ?? 0;
   const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
   const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
   const agentImageCount = agentFiles.filter((f) => f.kind === 'image').length;
@@ -627,7 +627,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
-      : (selectedVideoModel?.features?.max_reference_images ?? 10);
+      // 能力未加载时用不阻断的宽松兜底（IKHBO 口径），而非能力缺省 1。
+      : (selectedVideoModel?.features?.image_reference_max ?? UNRESOLVED_IMAGE_REFERENCE_LIMIT);
   const videoMaxVideos = videoReferenceMaxOf(selectedVideoModel?.features);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= videoMaxVideos;
@@ -642,9 +643,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           ? '请补充尾帧'
           : ''
     : '';
-  /** AI 图片参考图上限（ADR-0086：读能力行 max_reference_images，缺省 DEFAULT_MAX_REFERENCE_IMAGES=10，
+  /** AI 图片参考图上限（ADR-0086：读能力行 image_reference_max；缺省 10，与后端图片/视频口径一致，
    *  不再 min 到旧写死 9）。 */
-  const imageMaxImages = imageReferenceMaxOfCap(selectedImageModel?.features);
+  const imageMaxImages = imageReferenceMaxOf(selectedImageModel?.features);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   /** 切换 AI视频模式（ADR-0086 对齐画布）：切首尾帧把普通参考里的图片转为首帧/尾帧槽，

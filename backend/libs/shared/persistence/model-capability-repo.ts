@@ -1,22 +1,35 @@
 import type { PrismaClient } from "@prisma/client";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
+import {
+  getModelCapabilityList,
+  setModelCapabilityList,
+} from "./model-capability-cache.js";
 
 /** 模型能力只读 repo（Prisma-backed），复用 generation_model_capability 表。
  *  对齐 Java GenerationModelCapabilityService.listCapabilities：查启用项 + DTO 整形。
  *  wire 字段 snake_case（Jackson SNAKE_CASE）。 */
 
-/** 参考图数量缺省上限：与网关（blue-whale-api maxImageEditImages=10）/ 火山方舟
- *  Seedream 4.0/5.0（10 张复合编辑）对齐（IKA72G）。后端创建校验与 generation worker
- *  共用此常量兜底；模型能力行显式配置 features.max_reference_images 时以其为准。 */
-export const DEFAULT_MAX_REFERENCE_IMAGES = 10;
-
-/** 参考素材分类上限缺省（ADR-0086）：与旧前端/服务端硬编码对齐，模型能力行未配置时兜底。
- *  - 视频生成普通参考中视频素材上限 3（旧 MAX_VIDEO_REFS）
- *  - 音频生成中音频参考上限 3 / 图片参考上限 1（旧 validateAudioReferences 硬编码）
- *  能力行显式配置 features.video_reference_max / audio_reference_max / image_reference_max 时以其为准。 */
+/** 参考素材上限缺省（ADR-0086 / IKHEXG）：模型能力行未配置时兜底，**各自对齐官方口径**。
+ *
+ *  键按**素材媒介**命名，作用域由调用点的 `kind` 决定（见 generation-runtime/reference-limits.ts）：
+ *  `image_reference_max` 服务图片/视频/音频三种生成，`video_reference_max` 只服务视频生成，
+ *  `audio_reference_max` 服务视频与音频生成。
+ *
+ *  ⚠️ `image_reference_max` 一把键服务三种生成，但**官方值按生成类型分叉**（图片/视频 10、
+ *  音频 1），故拆成两个常量、由 {@link toFeatures} 按行的 capability_type 选。 */
 export const DEFAULT_VIDEO_REFERENCE_MAX = 3;
 export const DEFAULT_AUDIO_REFERENCE_MAX = 3;
-export const DEFAULT_IMAGE_REFERENCE_MAX = 1;
+
+/** 图片 / 视频生成的图参考上限缺省：与网关（`blue-whale-api` `maxImageEditImages=10`）/
+ *  火山方舟 Seedream 4.0/5.0（10 张复合编辑）对齐（IKA72G，原 `max_reference_images` 的缺省；
+ *  IKHEXG 合并后仍是图片/视频链路的缺省）。 */
+export const DEFAULT_IMAGE_REFERENCE_MAX = 10;
+
+/** **音频**生成的图参考上限缺省：官方音频接口只收 1 张图片参考，且音频与图片参考不可混用
+ *  （旧 `validateAudioReferences` 硬编码口径；逐模型真值见
+ *  docs/specs/2026-09-14-ikfjjt-model-capability-production-data.md 音频表 = 1）。
+ *  IKHEXG：显式命名——此前它与 `max_reference_images` 共用「图片上限」的语义，是误判之源。 */
+export const DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO = 1;
 
 export interface ModelSizeOption {
   id: string;
@@ -35,7 +48,6 @@ export interface ModelDurationRange {
 
 export interface ModelFeatures {
   reference_image: boolean;
-  max_reference_images: number;
   watermark: boolean;
   quantity_max: number;
   sequential_image_generation: boolean;
@@ -59,13 +71,14 @@ export interface ModelFeatures {
   max_prompt_length: number | null;
   /** 视频生成是否接受视频素材作普通参考（ADR-0086）。替代旧 supportsVideoReferenceModel seedance 前缀特判。 */
   video_reference: boolean;
-  /** 普通参考中视频素材上限（ADR-0086）；缺省 DEFAULT_VIDEO_REFERENCE_MAX。 */
+  /** 视频生成普通参考中的视频素材上限（ADR-0086）；缺省 DEFAULT_VIDEO_REFERENCE_MAX。 */
   video_reference_max: number;
   /** 视频生成是否接受音频素材作参考（ADR-0086；Seedance 2.0 关 / 2.5 开）。 */
   audio_reference: boolean;
-  /** 音频生成中音频参考上限（ADR-0086）；缺省 DEFAULT_AUDIO_REFERENCE_MAX。 */
+  /** 视频 / 音频生成中的音频素材参考上限（ADR-0086）；缺省 DEFAULT_AUDIO_REFERENCE_MAX。 */
   audio_reference_max: number;
-  /** 音频生成中图片参考上限（ADR-0086）；缺省 DEFAULT_IMAGE_REFERENCE_MAX。 */
+  /** 图片 / 视频 / 音频三种生成中的图参考上限；缺省 DEFAULT_IMAGE_REFERENCE_MAX。
+   *  IKHEXG：合并了旧的 `max_reference_images`（该行原写「音频生成中图片参考上限」，已不成立）。 */
   image_reference_max: number;
   /** 输入参考素材总时长上限（秒，ADR-0086；视频/音频参考。2.0=15 / 2.5=30；null=不限）。 */
   max_reference_duration_sec: number | null;
@@ -123,8 +136,6 @@ type SizeJson = {
 type FeaturesJson = {
   referenceImage?: boolean;
   reference_image?: boolean;
-  maxReferenceImages?: number;
-  max_reference_images?: number;
   watermark?: boolean;
   quantityMax?: number;
   quantity_max?: number;
@@ -203,15 +214,19 @@ function pickTaskTypes(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function toFeatures(json: unknown): ModelFeatures {
+/** 能力行 features JSON → 归一化的 {@link ModelFeatures}。
+ *
+ *  导出原因（IKHBDO）：scene-card 再生成拿到的 features 是**库中原始 JSON**（历史行可能仍是
+ *  camelCase 形态），冻结参考上限前必须先走同一条归一，否则 camelCase 行冻结不出任何字段 →
+ *  worker 回落旧常量 → 配置输给写死的缺省。接纳侧经 ModelCapabilityRepo 读出的已是归一结果。
+ *
+ *  IKHEXG：`capabilityType` 用于选 `image_reference_max` 的缺省——该键服务三种生成，
+ *  而官方值按生成类型分叉（图片/视频 10、音频 1）。调用点都拿得到行的类型：
+ *  `listEnabledByType(capabilityType)` 与 scene-card 再生成的 Prisma 原始行。 */
+export function toFeatures(json: unknown, capabilityType?: string): ModelFeatures {
   const f = (json ?? {}) as FeaturesJson;
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
-    // IK6PA5：缺省不能兜底 0——前端 atReferenceLimit = referenceCount >= max_reference_images
-    // 在 0 上限时恒 true，上传入口被静默禁用。
-    // IKA72G：缺省从 4 上调为 10，与网关/ARK 多图上限一致（后端创建校验/worker 同源）。
-    max_reference_images:
-      f.maxReferenceImages ?? f.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES,
     watermark: f.watermark === true,
     quantity_max: f.quantityMax ?? f.quantity_max ?? 1,
     sequential_image_generation:
@@ -233,9 +248,15 @@ function toFeatures(json: unknown): ModelFeatures {
     audio_reference_max:
       pickNonNegativeInt(f.audioReferenceMax ?? f.audio_reference_max) ??
       DEFAULT_AUDIO_REFERENCE_MAX,
+    // IK6PA5：缺省不能兜底 0——前端 atReferenceLimit = referenceCount >= image_reference_max
+    // 在 0 上限时恒 true，上传入口被静默禁用。
+    // IKHEXG：缺省按行的生成类型分——音频生成官方只收 1 张图（且不可与音频参考混用），
+    // 图片/视频生成对齐网关/ARK 的 10。类型未知时取更宽松的 10，避免误拦。
     image_reference_max:
       pickNonNegativeInt(f.imageReferenceMax ?? f.image_reference_max) ??
-      DEFAULT_IMAGE_REFERENCE_MAX,
+      (capabilityType === "audio"
+        ? DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO
+        : DEFAULT_IMAGE_REFERENCE_MAX),
     max_reference_duration_sec: pickPositiveNumber(
       f.maxReferenceDurationSec ?? f.max_reference_duration_sec,
     ),
@@ -278,11 +299,16 @@ function toDurationRange(json: unknown): ModelDurationRange | null {
 export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapabilityRepo {
   return {
     async listEnabledByType(capabilityType) {
+      // IKH BDO：cache-aside。这是生成链路每次建任务都要走的白名单查询，
+      // 而配置极低频——缓存把热路径从「每次查库」降成「每 5 分钟查一次」。
+      // 失效由管理端各写方法显式触发（见 model-capability-admin-repo）。
+      const cached = await getModelCapabilityList(capabilityType);
+      if (cached) return cached;
       const rows = await prisma.generation_model_capability.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
       });
-      return rows.map((cap) => ({
+      const views = rows.map((cap) => ({
         model_id: cap.model_id,
         provider_id: cap.provider_id,
         model_label: cap.model_label,
@@ -295,7 +321,7 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         default_format: cap.default_format,
         default_aspect_ratio: cap.default_aspect_ratio,
         default_duration: cap.default_duration,
-        features: toFeatures(cap.features),
+        features: toFeatures(cap.features, capabilityType),
         channel_parser:
           typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
             ? cap.channel_parser
@@ -305,6 +331,8 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         version: cap.version,
         digest: capabilityDigestFromModelCapability(cap),
       }));
+      await setModelCapabilityList(capabilityType, views);
+      return views;
     },
   };
 }

@@ -503,6 +503,17 @@ export function useAgentSession(projectId: string, agentModel?: string) {
         return;
       }
 
+      /* ---- 正文短了：断线续跑把已经上屏的半句话收回来了（IKHCJ2） ----
+       * reducer 已经把数据截短，这里要把**已露出的字数**一起收回。不收的话它还停在断线前的
+       * 位置，比新正文还长，于是模型重说的每一个字都会立刻整段冒出来——动画没了，而这一段
+       * 恰恰是最需要它的时候：屏幕上刚有字消失，用户正盯着看。 */
+      if (t === 'assistant.rewind.v1') {
+        const text = after.live?.text ?? '';
+        revealedRef.current = Math.min(revealedRef.current, text.length);
+        setStreamingText(text.slice(0, Math.floor(revealedRef.current)));
+        return;
+      }
+
       /* ---- 按轮动作台账（run_actions.updated.v1）不再消费（IKCPQ1 / IKDK5K） ----
        * 它是同一次工具调用的另一份落库视图；工具行已经由 tool.activity 与 tool_call 部件
        * 画出终态与耗时，再挂一份台账就是同一事实画两次。服务端仍然发，这里不接。 */

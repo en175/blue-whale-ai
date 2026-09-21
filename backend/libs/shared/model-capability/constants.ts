@@ -73,6 +73,14 @@ const MAX_PROMPT_LENGTH_LIMIT = 65_535;
 /** ADR-0086：参考素材限制键的上限（防运营误配海量值污染前端/校验）。 */
 const MAX_REFERENCE_COUNT = 1_000;
 
+/** 单次输出上限的量级闸门；上游 `expected_output_count` 另有 1–4 的硬校验。 */
+const MAX_QUANTITY_MAX = 100;
+
+/** snake_case → camelCase。读侧（toFeatures / worker-java）两种键形都认，写闸门同理。 */
+function camelKey(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
 /** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length；
  *  ADR-0086 追加参考素材限制键 video_reference / video_reference_max / audio_reference /
  *  audio_reference_max / image_reference_max / max_reference_duration_sec / task_types。
@@ -122,6 +130,43 @@ function featuresFieldErr(features: unknown): string | null {
   if (taskTypes !== undefined && taskTypes !== null) {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
+  }
+  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（数量上限 / 各布尔位）任意类型都能入库
+  // ——"abc" / 1.5 照收。读侧再宽容降级也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。
+  // 按同一原则补齐。
+  //
+  // IKHEXG：参考图上限原先在这一段单独校一遍（当时它还叫 max_reference_images，不在上面的
+  // ADR-0086 键表里）；合并进 `image_reference_max` 后已由上面的数量上限循环覆盖，此处删除重复段。
+  const quantityMax = features.quantity_max ?? features.quantityMax;
+  if (quantityMax !== undefined && quantityMax !== null) {
+    if (
+      typeof quantityMax !== "number" ||
+      !Number.isInteger(quantityMax) ||
+      quantityMax < 1 ||
+      quantityMax > MAX_QUANTITY_MAX
+    )
+      return `单次输出上限(quantity_max)须为 1–${MAX_QUANTITY_MAX} 的整数或 null`;
+  }
+  for (const key of [
+    "reference_image",
+    "watermark",
+    "audio",
+    "tools",
+    "first_frame",
+    "last_frame",
+    "first_last_frame",
+    "sequential_image_generation",
+    "stream",
+  ] as const) {
+    const v = features[key] ?? features[camelKey(key)];
+    if (v !== undefined && v !== null && typeof v !== "boolean")
+      return `${key}须为布尔值`;
+  }
+  // 出站图片协议名；未知取值 worker-java 回落 inline-image 并告警，故这里只卡类型。
+  const protocol = features.image_protocol ?? features.imageProtocol;
+  if (protocol !== undefined && protocol !== null) {
+    if (typeof protocol !== "string" || protocol.trim().length === 0)
+      return "图片协议(image_protocol)须为非空字符串或 null";
   }
   return null;
 }
@@ -219,9 +264,25 @@ function pickNullableString(v: unknown): string | null | undefined {
   return v == null ? null : typeof v === "string" ? v : undefined;
 }
 
+/** NOT NULL 字符串列（`default_size` / `default_aspect_ratio`）的取值归一。
+ *
+ *  IKHEXG：这两列在库里是 `VarChar NOT NULL`，「未配」的形态是**空串**；而表单把清空的状态
+ *  发成 `null`（`form.defaultSize.trim() || null`），旧闸门又只收字符串 → 保存必然 400
+ *  （本单实测：音频行 `PUT /api/admin/models/23` 报「默认尺寸(default_size)须为字符串」）。
+ *  收 null 并归一为空串：与列形态一致，且保留「清空」的语义。
+ *
+ *  ⚠️ **创建与更新的语义不对称**（既有行为，非本次引入）：更新时空串就是空串；但创建时
+ *  `default_size` 为空串会被 repo 的 `deriveDefaultSize` 顶成 `supported_sizes[0].id`
+ *  （`model-capability-admin-repo.ts`）。别假设两个解析器对空串的处理一致。 */
+function pickNotNullString(v: unknown): string | undefined {
+  if (v === null) return "";
+  return pickString(v);
+}
+
 function parseParserAndMapping(
   body: Record<string, unknown>,
   mode: "create" | "update",
+  currentParser?: unknown,
 ): ParseResult<{
   channel_parser?: ImageChannelParserId;
   request_mapping?: unknown;
@@ -232,12 +293,38 @@ function parseParserAndMapping(
       error: `生成渠道解析器只支持 ${IMAGE_CHANNEL_PARSERS.join(" / ")}`,
     };
   }
-  const parser = isImageChannelParserId(body.channel_parser)
-    ? body.channel_parser
+  // update 是 diff 提交——没改过的 channel_parser 不在请求体里。解析器必须回落到
+  // **库中该行**的值，否则下面整段映射校验会被跳过：GPT 行删空矩阵、Seedream 行
+  // 映射表被清空都是从这条缝漏过去的（解析器未知 ⇒ 不校验 ⇒ 脏值直接落库）。
+  const rawParser = body.channel_parser;
+  const parserExplicit = isImageChannelParserId(rawParser);
+  const parser: ImageChannelParserId = parserExplicit
+    ? rawParser
     : mode === "create"
       ? "seedream"
-      : undefined;
-  if (body.request_mapping !== undefined && body.request_mapping !== null) {
+      : isImageChannelParserId(currentParser)
+        ? currentParser
+        : "seedream";
+  // Seedream 行的映射表是 IK629 之后尺寸换算的唯一来源（worker-java hasSizeMatrix
+  // 判假即回退成「直传 provider size」，而那正是 024 迁移要修的 400 Invalid size）。
+  // 后台没有「清空矩阵」入口，所以对一个**本来就是 seedream** 的行，客户端传的 null
+  // 不是运营意图、是 diff 提交的产物——按「不改」处理。
+  //
+  // 但「本来不是 seedream」的行不能这么办：把 gpt 行切到 seedream 时，前端同样只发
+  // null，而那个 null 就是「gpt 的矩阵不再适用」的唯一表达。当成「不改」会把上一族的
+  // 矩阵留在行里，worker 拿它去算 seedream 的尺寸，而界面上没有任何入口能再清掉它。
+  const currentParserIsSeedream =
+    isImageChannelParserId(currentParser) && currentParser === "seedream";
+  const clearSeedreamMapping =
+    parser === "seedream" &&
+    body.request_mapping === null &&
+    currentParserIsSeedream;
+  const mappingProvided = body.request_mapping !== undefined && !clearSeedreamMapping;
+  if (
+    mappingProvided &&
+    body.request_mapping !== null &&
+    body.request_mapping !== undefined
+  ) {
     const mappingTypeErr = jsonField(
       body.request_mapping,
       "映射(request_mapping)",
@@ -245,24 +332,22 @@ function parseParserAndMapping(
     );
     if (mappingTypeErr) return { ok: false, error: mappingTypeErr };
   }
-  if (parser) {
-    const mapping =
-      body.request_mapping === undefined && parser === "seedream"
-        ? null
-        : body.request_mapping;
-    if (parser !== "seedream" && mapping === undefined) {
-      return { ok: false, error: "request_mapping 不能为空" };
-    }
-    const mappingErr = validateRequestMapping(parser, mapping ?? null);
+  // 显式声明切到 gpt / banana 时必须同时给出映射表——否则切完是一张空表，
+  // 该模型每次请求都 empty_mapping。缺省不传 channel_parser 时表示「不改」，
+  // 那一行的映射表原样留在库里，由上面的 currentParser 兜底校验。
+  if (parserExplicit && parser !== "seedream" && !mappingProvided) {
+    return { ok: false, error: "request_mapping 不能为空" };
+  }
+  if (mappingProvided) {
+    const mappingErr = validateRequestMapping(parser, body.request_mapping);
     if (mappingErr) return { ok: false, error: mappingErr };
   }
   return {
     ok: true,
     value: {
-      ...(parser ? { channel_parser: parser } : {}),
-      ...(body.request_mapping !== undefined
-        ? { request_mapping: body.request_mapping }
-        : {}),
+      // 新建恒带解析器（缺省 seedream）；更新只在显式声明时才提交，否则会覆盖库里那一行。
+      ...(parserExplicit || mode === "create" ? { channel_parser: parser } : {}),
+      ...(mappingProvided ? { request_mapping: body.request_mapping } : {}),
     },
   };
 }
@@ -339,7 +424,7 @@ export function parseModelCreateBody(
       error: `图标(icon)超长（≤${MODEL_FIELD_LIMITS.icon}字符）`,
     };
 
-  const defaultSize = pickString(body.default_size);
+  const defaultSize = pickNotNullString(body.default_size);
   if (
     defaultSize !== undefined &&
     defaultSize.length > MODEL_FIELD_LIMITS.default_size
@@ -361,7 +446,7 @@ export function parseModelCreateBody(
       error: `默认格式(default_format)超长（≤${MODEL_FIELD_LIMITS.default_format}字符）`,
     };
 
-  const defaultAspectRatio = pickString(body.default_aspect_ratio);
+  const defaultAspectRatio = pickNotNullString(body.default_aspect_ratio);
   if (
     defaultAspectRatio !== undefined &&
     defaultAspectRatio.length > MODEL_FIELD_LIMITS.default_aspect_ratio
@@ -406,8 +491,14 @@ export function parseModelCreateBody(
   };
 }
 
+/** 校验管理端「更新模型」请求体。
+ *
+ *  `current` 是**库中当前那一行**（至少 `channel_parser`）。更新是 diff 提交，未变更的
+ *  字段不在请求体里，光看 body 推不出该用哪个解析器做映射校验——必须由调用方把行读出来
+ *  传进来。调用方须读库，**不得读缓存**：校验读到旧值等于没校验。 */
 export function parseModelUpdateBody(
   body: unknown,
+  current?: { channel_parser?: unknown },
 ): ParseResult<ModelUpdatePayload> {
   if (!isPlainObject(body)) return { ok: false, error: "请求体须为 JSON 对象" };
 
@@ -429,15 +520,17 @@ export function parseModelUpdateBody(
         error: `图标(icon)超长（≤${MODEL_FIELD_LIMITS.icon}字符）`,
       };
   }
+  // IKHEXG：两列是 NOT NULL，「清空」的合法表达是空串（不是 null）。收 null 归一为空串——
+  // 只收字符串会让表单（对非图片/视频行恒发 null）保存必然 400，实测症状即此。
+  const defaultSize = pickNotNullString(body.default_size);
   if (body.default_size !== undefined) {
-    const defaultSize = pickString(body.default_size);
     if (
       defaultSize === undefined ||
       defaultSize.length > MODEL_FIELD_LIMITS.default_size
     )
       return {
         ok: false,
-        error: `默认尺寸(default_size)须为字符串且≤${MODEL_FIELD_LIMITS.default_size}字符`,
+        error: `默认尺寸(default_size)须为字符串、null（等价空串）且≤${MODEL_FIELD_LIMITS.default_size}字符`,
       };
   }
   if (body.default_format !== undefined) {
@@ -445,15 +538,15 @@ export function parseModelUpdateBody(
     if (defaultFormat === undefined)
       return { ok: false, error: "默认格式(default_format)须为字符串或 null" };
   }
+  const defaultAspectRatio = pickNotNullString(body.default_aspect_ratio);
   if (body.default_aspect_ratio !== undefined) {
-    const defaultAspectRatio = pickString(body.default_aspect_ratio);
     if (
       defaultAspectRatio === undefined ||
       defaultAspectRatio.length > MODEL_FIELD_LIMITS.default_aspect_ratio
     )
       return {
         ok: false,
-        error: `默认比例(default_aspect_ratio)须为字符串且≤${MODEL_FIELD_LIMITS.default_aspect_ratio}字符`,
+        error: `默认比例(default_aspect_ratio)须为字符串、null（等价空串）且≤${MODEL_FIELD_LIMITS.default_aspect_ratio}字符`,
       };
   }
   if (body.default_duration !== undefined) {
@@ -495,7 +588,7 @@ export function parseModelUpdateBody(
   const featuresErr = featuresFieldErr(body.features);
   if (featuresErr) return { ok: false, error: featuresErr };
 
-  const parsedMapping = parseParserAndMapping(body, "update");
+  const parsedMapping = parseParserAndMapping(body, "update", current?.channel_parser);
   if (!parsedMapping.ok) return parsedMapping;
 
   return {
@@ -520,13 +613,13 @@ export function parseModelUpdateBody(
         supported_formats: body.supported_formats,
       }),
       ...(body.default_size !== undefined && {
-        default_size: body.default_size as string,
+        default_size: defaultSize as string,
       }),
       ...(body.default_format !== undefined && {
         default_format: pickNullableString(body.default_format) as string | null,
       }),
       ...(body.default_aspect_ratio !== undefined && {
-        default_aspect_ratio: body.default_aspect_ratio as string,
+        default_aspect_ratio: defaultAspectRatio as string,
       }),
       ...(body.default_duration !== undefined && {
         default_duration: pickNullableDuration(body.default_duration) as

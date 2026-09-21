@@ -25,8 +25,11 @@ final class ImageChannelMapper {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 默认参考图上限（与 TS DEFAULT_MAX_REFERENCE_IMAGES 一致，generation-worker.ts:333）。 */
-    static final int DEFAULT_MAX_REFERENCE_IMAGES = 10;
+    /** 默认参考图上限（与 TS DEFAULT_IMAGE_REFERENCE_MAX 一致，图片/视频官方口径）。
+     *  网关 blue-whale-api maxImageEditImages=10 / 火山方舟 Seedream 4.0/5.0「10 张复合编辑」（IKA72G）。
+     *  IKHEXG：合并键 `image_reference_max` 的缺省按生成类型分——**图片/视频 10、音频 1**
+     *  （音频常量在 TS 侧为 DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO；本进程只跑图片链路，故取 10）。 */
+    static final int DEFAULT_IMAGE_REFERENCE_MAX = 10;
 
     private ImageChannelMapper() {}
 
@@ -207,19 +210,19 @@ final class ImageChannelMapper {
     }
 
     /**
-     * 从 features JSON 提取 max_reference_images（asset-ops.ts:127-139）。
+     * 从 features JSON 提取 image_reference_max（asset-ops.ts:127-139）。
      */
     static int parseMaxReferenceImages(String featuresJson) {
-        if (featuresJson == null || featuresJson.isBlank()) return DEFAULT_MAX_REFERENCE_IMAGES;
+        if (featuresJson == null || featuresJson.isBlank()) return DEFAULT_IMAGE_REFERENCE_MAX;
         try {
             Map<String, Object> features = JSON.readValue(featuresJson,
                     new TypeReference<Map<String, Object>>() {});
-            Object v = features.get("maxReferenceImages");
-            if (v == null) v = features.get("max_reference_images");
+            Object v = features.get("imageReferenceMax");
+            if (v == null) v = features.get("image_reference_max");
             if (v instanceof Number n) return n.intValue();
-            return DEFAULT_MAX_REFERENCE_IMAGES;
+            return DEFAULT_IMAGE_REFERENCE_MAX;
         } catch (Exception e) {
-            return DEFAULT_MAX_REFERENCE_IMAGES;
+            return DEFAULT_IMAGE_REFERENCE_MAX;
         }
     }
 

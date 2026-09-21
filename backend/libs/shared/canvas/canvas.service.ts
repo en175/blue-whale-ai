@@ -277,7 +277,8 @@ export class CanvasService {
       const materials = (Array.isArray(target.data?.draftMaterialRefs) ? target.data.draftMaterialRefs : []) as Array<{ materialId: string; mediaType: "image" | "video"; role: string }>;
       const materialRefs = materials.map(m => ({ id: m.materialId, type: m.mediaType, role: m.role === "first" ? "first_frame" : m.role === "last" ? "last_frame" : "reference" }));
       validateVideoPlan(planNodeId, result.plan.bindings, [...refs, ...materialRefs], model, target.data?.draftMode);
-      try { validateReferences(model!.model_id, refs.filter(r => r.role === "reference"), materialRefs.filter(r => r.role === "reference")); }
+      // IKHBDO：参考上限与支持位一律读能力行 features（本模块不再有任何模型名/上限硬编码）。
+      try { validateReferences(model!.features, refs.filter(r => r.role === "reference"), materialRefs.filter(r => r.role === "reference")); }
       catch (error) { planError(planNodeId, result.plan.bindings, error instanceof Error ? error.message : "素材不受支持"); }
     }
     // IKFC26：校验按既有 draftMode 口径执行（validateVideoPlan 对 prompt 无特判），模式切换仅影响持久化
