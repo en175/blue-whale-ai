@@ -23,7 +23,8 @@ export function createMySqlPool(config = loadMySqlConfig()): Pool {
   return createPool({
     ...config,
     connectionLimit: 4,
-    timezone: "Z",
+    // 与 Prisma 路径同口径（北京时间）：mysql2 的 timezone 同时参与 DATETIME 的解析与格式化。
+    timezone: "+08:00",
   });
 }
 

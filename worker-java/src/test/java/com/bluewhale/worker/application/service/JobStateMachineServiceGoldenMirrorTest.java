@@ -193,11 +193,11 @@ class JobStateMachineServiceGoldenMirrorTest {
         )).thenReturn(1);
 
         // when
-        LocalDateTime before = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(119);
+        LocalDateTime before = WorkerClock.now().plusSeconds(119);
         boolean result = service.updateMediaExtractProgress(
                 new UpdateMediaExtractProgressDto("300", "worker-1", 5L, 50)
         );
-        LocalDateTime after = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(121);
+        LocalDateTime after = WorkerClock.now().plusSeconds(121);
 
         // then
         assertThat(result).isTrue();
@@ -576,7 +576,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setType("audio");
         candidate.setStatus("processing");
         candidate.setFencingToken(2L);
-        candidate.setLeaseExpiresAt(LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(10)); // 过期租约
+        candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10)); // 过期租约
         candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"seed-audio-1.0\"}");
         candidate.setExpectedOutputCount(1);
         candidate.setRetryCount(0);
@@ -762,7 +762,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setType("image");
         candidate.setStatus("processing");
         candidate.setFencingToken(2L);
-        candidate.setLeaseExpiresAt(LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(10));
+        candidate.setLeaseExpiresAt(WorkerClock.now().minusSeconds(10));
         candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"gpt-image-1\"}");
         candidate.setExpectedOutputCount(4);
         candidate.setRetryCount(1);
@@ -821,7 +821,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("G14-G16: requeueImageJobForRetry happy → true + exact SQL fields")
     void requeueImage_happy() {
-        LocalDateTime nextAction = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(30);
+        LocalDateTime nextAction = WorkerClock.now().plusSeconds(30);
         when(jobMapper.requeueImageCas(eq(300L), eq(nextAction))).thenReturn(1);
 
         boolean result = service.requeueImageJobForRetry("300", nextAction);
@@ -837,7 +837,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     void requeueImage_countZero() {
         when(jobMapper.requeueImageCas(eq(300L), any(LocalDateTime.class))).thenReturn(0);
 
-        boolean result = service.requeueImageJobForRetry("300", LocalDateTime.now(java.time.ZoneOffset.UTC));
+        boolean result = service.requeueImageJobForRetry("300", WorkerClock.now());
 
         assertThat(result).isFalse();
     }
@@ -848,7 +848,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.requeueImageCas(eq(300L), any(LocalDateTime.class)))
                 .thenThrow(new RuntimeException("DB error"));
 
-        boolean result = service.requeueImageJobForRetry("300", LocalDateTime.now(java.time.ZoneOffset.UTC));
+        boolean result = service.requeueImageJobForRetry("300", WorkerClock.now());
 
         assertThat(result).isFalse();
     }

@@ -14,3 +14,6 @@ allowBuilds:
   tos-crc64-js: false
   unrs-resolver: true
   ffmpeg-static: true
+
+patchedDependencies:
+  '@prisma/adapter-mariadb@7.9.0': patches/@prisma__adapter-mariadb@7.9.0.patch

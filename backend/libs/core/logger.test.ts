@@ -54,9 +54,9 @@ describe("createLogger —— 结构化字段", () => {
       trace_id: "",
       body: "hello tls",
     });
-    // 恒为 UTC：三仓同一个墙上时钟，且不随 TZ 变。
+    // 恒为北京时间 +08:00（与库同一个墙上时钟），且不随 TZ 变。
     expect(parsed.timestamp).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/,
     );
     // 仓库相对路径，不是构建机上的绝对路径——后者说的是构建机而不是文件，副本之间比不了。
     expect(parsed.code_file_path).toMatch(
@@ -280,22 +280,23 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
   });
 });
 
-describe("toBlueWhaleTimestamp —— 三仓同一个墙上时钟", () => {
-  it("恒为 UTC，带毫秒", () => {
-    // 2026-09-03 从 +08:00 改成 UTC：REST 响应、两个 datetime 库、new-api 的 epoch
-    // 本来就全是 UTC，日志是唯一的例外，每次交叉引用都要心算八小时。
-    expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T08:00:00.000Z");
+describe("toBlueWhaleTimestamp —— 与库同一个墙上时钟（IKHJ0Q）", () => {
+  it("恒为北京时间 +08:00，带毫秒", () => {
+    // 2026-09-21 从 UTC 改回 +08:00：库里存的 `datetime` 就是北京时间墙钟，日志贴着库走。
+    // 注意接口响应仍是 UTC（JSON.stringify / toISOString 恒产 Z），日志不对齐接口——取舍见
+    // logger.ts 的文档块。
+    expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T16:00:00.000+08:00");
   });
 
   it("不随进程时区变化", () => {
-    // 安全性本身：跨服务按字符串排序只在三家写同一个时区时成立，而从 TZ 推导出来的值，
+    // 安全性本身：跨服务按字符串排序只在各家写同一个时区时成立，而从 TZ 推导出来的值，
     // 离「某个容器改了 TZ、于是悄悄换了个时区」只有一步。
     const original = process.env.TZ;
     try {
       for (const tz of ["UTC", "America/New_York", "Asia/Shanghai"]) {
         process.env.TZ = tz;
         expect(toBlueWhaleTimestamp(1756800000000)).toBe(
-          "2025-09-02T08:00:00.000Z",
+          "2025-09-02T16:00:00.000+08:00",
         );
       }
     } finally {

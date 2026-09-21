@@ -12,6 +12,7 @@ import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
+import com.bluewhale.worker.application.service.WorkerClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -264,8 +265,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 30s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(25));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(35));
+        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(25));
+        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(35));
 
         // 不应调用 failJob
         verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(),
@@ -299,8 +300,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 60s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(55));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(65));
+        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(55));
+        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(65));
     }
 
     @Test
@@ -330,8 +331,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 120s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(115));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(125));
+        assertThat(nextActionAt).isAfter(WorkerClock.now().plusSeconds(115));
+        assertThat(nextActionAt).isBefore(WorkerClock.now().plusSeconds(125));
     }
 
     @Test
