@@ -489,7 +489,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     await sendVocal();
     const failed = nodeById('vocal-split-j720')!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：vocal_split_failed（1046）→「人声背景分离失败，请重试」
+    // W 票错误码面：vocal_split_failed（1047）→「人声背景分离失败，请重试」
     expect(failed.data.errorText).toBe('人声背景分离失败，请重试');
 
     // 重试：lastInput（源素材+场景+格式）原样重发创建接口（新 job），回到生成中并续轮询

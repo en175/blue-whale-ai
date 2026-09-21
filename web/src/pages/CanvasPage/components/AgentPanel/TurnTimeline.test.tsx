@@ -204,6 +204,7 @@ describe('TurnFooter', () => {
     tokenUsage: { input_tokens: 12217, cached_input_tokens: 7799, output_tokens: 791, reasoning_tokens: 452 },
     contextCapacity: { used_input_tokens: 6536, configured_max_tokens: 200000, ratio: 0.033, compaction_state: 'none' },
     failureText: null,
+    failureRetryable: true,
     cardFailureText: null,
     cardFailureRetryable: true,
   };
@@ -229,6 +230,50 @@ describe('TurnFooter', () => {
       root.render(createElement(LastTurnLine, { account: { ...base, outcome: 'cancelled', seconds: 5, tokenUsage: null, contextCapacity: null } }));
     });
     expect(mountNode.textContent).toBe('⊘上一轮已取消 5s · 21:37 结束');
+  });
+
+  /**
+   * 报告里记的「前端无重试入口」，在用户那边是成立的：入口在输入框工具栏角落，一个 14px 的
+   * 无字图标，而失败这件事发生在对话流里——那一行以前只有字，什么都点不了。
+   */
+  it('失败：给了 onRetry 就在那一行旁边摆一个「重新回答」，点了就调它', async () => {
+    const account = { ...base, outcome: 'failed' as const, failureText: '与模型服务的连接中断，自动重连几次都没成功。', tokenUsage: null, contextCapacity: null };
+    await render(createElement(TurnFooter, { account }));
+    // 不给回调就不画按钮：不是最后一轮、或者还有别的轮在跑时，重来的会是另一轮。
+    expect(mountNode.querySelector('button')).toBeNull();
+
+    let clicked = 0;
+    await act(async () => {
+      root.render(createElement(TurnFooter, { account, onRetry: () => { clicked += 1; } }));
+    });
+    const button = mountNode.querySelector('button');
+    expect(button?.textContent).toBe('重新回答');
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(clicked).toBe(1);
+  });
+
+  /**
+   * 「再试也会被同一道审核拦下」那一类不给按钮——服务端说了算（`failureRetryable`）。
+   * 给了的话用户会一遍遍按、一遍遍撞同一堵墙，那正是 `model_input_blocked` 当初要消灭的事。
+   */
+  it('服务端说这次重试没用：不画按钮，只留那句话', async () => {
+    await render(
+      createElement(TurnFooter, {
+        account: {
+          ...base,
+          outcome: 'failed' as const,
+          failureText: '这段描述没通过模型的安全审核，这个会话里再试也会被拦。',
+          failureRetryable: false,
+          tokenUsage: null,
+          contextCapacity: null,
+        },
+        onRetry: () => {},
+      }),
+    );
+    expect(mountNode.textContent).toContain('没通过模型的安全审核');
+    expect(mountNode.querySelector('button')).toBeNull();
   });
 
   // IKEV0V：聊天里改卡没改成，那一轮照常完成、侧边栏还挂着上一版。不交代的话，

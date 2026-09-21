@@ -33,7 +33,7 @@ const seedance: GenerationModel = {
   default_duration: 10,
   features: {
     reference_image: true,
-    max_reference_images: 10,
+    image_reference_max: 10,
     watermark: false,
     quantity_max: 1,
     sequential_image_generation: false,

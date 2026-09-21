@@ -11,6 +11,7 @@ import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-eras
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
+import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -219,6 +220,24 @@ export interface VocalSplitJobTrack {
   duration: number | null;
 }
 
+/** 场景切分任务结果形态（GET /api/jobs/:id 的 result 键，IKH8C1）：契约校验后的
+ *  切分结果——segments 按段序排列（segment_index 1 起）、起止秒 Number、
+ *  segment_asset_id 指向 output_assets 里的段资产。非场景切分任务或畸形 payload 为 null。 */
+export interface JobSceneSplitResult {
+  /** 源视频总时长（秒） */
+  duration: number;
+  segments: Array<{
+    /** 段序号（1 起） */
+    segment_index: number;
+    /** 段起点（秒） */
+    start_time: number;
+    /** 段终点（秒） */
+    end_time: number;
+    /** 段资产 id（对应 output_assets 里同 id 项） */
+    segment_asset_id: string;
+  }>;
+}
+
 /** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
   job_id: number | string;
@@ -231,6 +250,10 @@ export interface JobDetail {
    *  契约 VOCAL_SPLIT_SCENE_TRACKS[input.scene]（voice 恒首轨）；其余任务恒缺失。
    *  既有 asset 单对象仍在（回首轨），多轨消费走本字段。 */
   tracks?: VocalSplitJobTrack[] | null;
+  /** 按 output_asset_ids 顺序的全量产出资源（场景切分扇出取段资产用，IKH8C1；其余任务缺省） */
+  output_assets?: JobAsset[];
+  /** 契约校验后的结果形态（场景切分：段起止与段资产 id，IKH8C1）；非场景切分任务或畸形 payload 为 null */
+  result?: JobSceneSplitResult | null;
   /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
   text_input_signature?: string | null;
   error?: JobError | null;
@@ -436,6 +459,42 @@ export function createVideoEnhancement(
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-scene-splits 请求体（四键，业务键名与
+ *  backend/libs/contracts/video-scene-split.ts 契约恒等；IKH8BO 创建入口 strict 复核：
+ *  source_asset_id 正整数字符串、target_node_id 非空（发送前本地建的占位卡节点 id）、
+ *  granularity ∈ fine/standard/coarse；client_token 为幂等基础设施键（≤64 可打印 ASCII），
+ *  每次发送、每次失败重试都新生成——同 token 只会重放旧任务，禁复用）。 */
+export interface CreateVideoSceneSplitPayload {
+  source_asset_id: string;
+  target_node_id: string;
+  granularity: VideoSceneSplitGranularity;
+  client_token: string;
+}
+
+/** 创建视频场景切分任务返回（IKH8BR）；同家族：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoSceneSplitCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频场景切分任务（IKH8BR）；免费口径同 image_enhance / media_extract——不带幂等头
+ *  （幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡由前端在发送前
+ *  本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id 轮询至终态
+ *  （completed 分支的段卡扇出归 IKH8C1）。 */
+export function createVideoSceneSplit(
+  projectId: string,
+  payload: CreateVideoSceneSplitPayload,
+): Promise<VideoSceneSplitCreatedData> {
+  return apiRequest<VideoSceneSplitCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-scene-splits`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

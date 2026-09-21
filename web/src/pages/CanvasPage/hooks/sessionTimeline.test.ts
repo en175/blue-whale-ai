@@ -631,3 +631,113 @@ describe('方案卡的事件与归位', () => {
     expect(turns[1].solutionCards).toEqual([]);
   });
 });
+
+function rewind(runId: string, keepChars: number, at: number, fromDeltaIndex = 0): TimelineEvent {
+  return {
+    type: 'assistant.rewind.v1',
+    data: {
+      occurred_at: iso(at),
+      run_id: runId,
+      payload: {
+        stream_id: `assistant_${runId}`,
+        keep_chars: keepChars,
+        from_delta_index: fromDeltaIndex,
+        reason: 'transport_resumed',
+      },
+    },
+  };
+}
+
+/**
+ * 断线续跑把已经上屏的半句话收回来（IKHCJ2 3c）。
+ *
+ * Agent 到模型网关的连接断掉时，服务端从上一个步骤边界接着跑。断掉的那一步如果已经说出口
+ * 半句话，模型重说时不会一字不差——不擦掉旧的，用户看到的就是「半句话 + 另一个开头」。
+ *
+ * 这一组用例盯两件事：擦得干净，以及**擦得幂等**。SSE 是至少一次投递，重连重放会把同一条
+ * 擦除指令再放一遍；正因为它带的是绝对长度而不是增量，重放才不会多砍一刀。
+ */
+describe('断线续跑的擦除（IKHCJ2）', () => {
+  it('把正文截回边界，后面重说的话接在截口上', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '我先从画面节奏', 200),
+      rewind('run1', 4, 300),
+      delta('run1', '我想先定调性。', 400),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子我想先定调性。');
+  });
+
+  it('同一条擦除指令到两次，结果一样——它带的是绝对长度，不是增量', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [delta('run1', '这条片子我先从画面', 100), rewind('run1', 4, 200), rewind('run1', 4, 210)]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子');
+  });
+
+  /** 连断两次：第二条擦除指令要连第一次重说的话一起擦掉，所以两条的 keep_chars 相同。 */
+  it('连断两次：每次都擦回同一个边界', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '第一次说的', 200),
+      rewind('run1', 4, 300),
+      delta('run1', '第二次说的', 400),
+      rewind('run1', 4, 500),
+      delta('run1', '第三次说的。', 600),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子第三次说的。');
+  });
+
+  it('思考不擦：模型重想一遍的代价远小于整轮失败，思考区里留着断线前那一段', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      reasoningDelta('run1', '先确认画幅。', 100),
+      delta('run1', '我先从画面', 200),
+      rewind('run1', 0, 300),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('');
+    expect(live.reasonings.map((r) => r.text)).toEqual(['先确认画幅。']);
+  });
+
+  /**
+   * 工具行与思考段用正文偏移挂在正文上。擦掉一段正文之后，挂在截口之外的条目会指向一个不
+   * 存在的位置——那会让它们在时间线上排到正文后面去，或者干脆排不出来。
+   */
+  it('挂在被擦掉那段上的工具行跟着回到截口，不会指向不存在的位置', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '我先查一下方法。', 200),
+      activity('run1', '正在查阅对应的创作方法', 300, 'skill_read'),
+      rewind('run1', 4, 400),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子');
+    expect(live.toolCalls.every((c) => c.at <= live.text.length)).toBe(true);
+  });
+
+  it('要保留的比现有的还多：当没这回事——迟到的擦除指令不该凭空造出字来', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    live = applyLiveEvent(live, delta('run1', '这条片子', 100), 0);
+    const before = live;
+    live = applyLiveEvent(live, rewind('run1', 99, 200), 0);
+    expect(live).toBe(before);
+  });
+
+  it('跑完了就不再接擦除指令——终态那条正式消息已经是退回之后的', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    live = applyLiveEvent(live, delta('run1', '这条片子', 100), 0);
+    live = { ...live, ended: true };
+    expect(applyLiveEvent(live, rewind('run1', 0, 200), 0).text).toBe('这条片子');
+  });
+});

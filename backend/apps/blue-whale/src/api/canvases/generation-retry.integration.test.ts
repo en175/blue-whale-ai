@@ -63,9 +63,9 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_aspect_ratio: "16:9",
         default_duration: 5,
         supported_durations: { min: 4, max: 12, step: 1 },
-        features: { reference_image: true, max_reference_images: 10, first_frame: true, last_frame: true, first_last_frame: true },
+        features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true },
       },
-      update: { features: { reference_image: true, max_reference_images: 10, first_frame: true, last_frame: true, first_last_frame: true } },
+      update: { features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true } },
     });
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: AUDIO_MODEL } },

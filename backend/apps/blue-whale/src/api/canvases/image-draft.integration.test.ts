@@ -215,7 +215,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     const otherProjectId = (await projects.create("987654", "IKDUHM other project")).id;
     await prisma.client.generation_model_capability.update({
       where: { provider_id_model_id: { provider_id: "ikdmqq-test", model_id: MODEL_ID } },
-      data: { features: { reference_image: ref !== "incompatible", max_reference_images: 9 } },
+      data: { features: { reference_image: ref !== "incompatible", image_reference_max: 9 } },
     });
     const asset = await prisma.client.assets.create({ data: {
       user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/saved.png",

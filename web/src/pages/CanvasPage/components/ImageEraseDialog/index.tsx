@@ -7,6 +7,7 @@
  * 「清除文字」不经遮罩直接上抛（规格：两条发送路径共用同一条任务链路）。
  * data-gen-panel-territory 豁免点外关闭误杀；Esc/X/点其他卡/点空白退出由 CanvasPage 承载。
  * ============================================ */
+import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
 import type { FollowDialogAnchor } from '../../followDialog';
 import type { MaskCoordinateSpace, MaskOp } from '../../eraseMask';
@@ -20,6 +21,28 @@ export type EraseTool = 'brush' | 'rect' | 'eraser';
 export const ERASE_BRUSH_RADIUS_MIN = 6;
 export const ERASE_BRUSH_RADIUS_MAX = 64;
 export const ERASE_BRUSH_RADIUS_DEFAULT = 20;
+const ERASE_BRUSH_RADIUS_STEP = 2;
+/** 滑块把手边长：拖动映射与定位都要扣掉半径，否则两端会留死区 */
+const BRUSH_SLIDER_THUMB_SIZE = 12;
+
+function snapBrushRadius(raw: number): number {
+  const clamped = Math.min(ERASE_BRUSH_RADIUS_MAX, Math.max(ERASE_BRUSH_RADIUS_MIN, raw));
+  const snapped =
+    ERASE_BRUSH_RADIUS_MIN +
+    Math.round((clamped - ERASE_BRUSH_RADIUS_MIN) / ERASE_BRUSH_RADIUS_STEP) * ERASE_BRUSH_RADIUS_STEP;
+  return Math.min(ERASE_BRUSH_RADIUS_MAX, Math.max(ERASE_BRUSH_RADIUS_MIN, snapped));
+}
+
+/** 把指针 x 映射到闭合区间 [min, max]：轨道可用宽度 = 全宽 − 把手，再按把手半径偏移。 */
+function brushRadiusFromPointer(clientX: number, trackLeft: number, trackWidth: number): number {
+  const thumbRadius = BRUSH_SLIDER_THUMB_SIZE / 2;
+  const usableWidth = Math.max(trackWidth - BRUSH_SLIDER_THUMB_SIZE, 0);
+  if (usableWidth <= 0) return ERASE_BRUSH_RADIUS_MIN;
+  const ratio = Math.min(1, Math.max(0, (clientX - trackLeft - thumbRadius) / usableWidth));
+  return snapBrushRadius(
+    ERASE_BRUSH_RADIUS_MIN + ratio * (ERASE_BRUSH_RADIUS_MAX - ERASE_BRUSH_RADIUS_MIN),
+  );
+}
 
 interface ImageEraseDialogProps {
   /** X 关闭（四退出之一，未发送丢弃遮罩由父级处理） */
@@ -76,6 +99,18 @@ export default function ImageEraseDialog({
 }: ImageEraseDialogProps) {
   const readOnly = submitting === true;
   const canSendMask = !readOnly && hasPaint && maskSpace !== null;
+  const brushTrackRef = useRef<HTMLDivElement>(null);
+  const brushRatio =
+    (brushRadius - ERASE_BRUSH_RADIUS_MIN) / (ERASE_BRUSH_RADIUS_MAX - ERASE_BRUSH_RADIUS_MIN);
+  const brushThumbOffset = `calc(${brushRatio} * (100% - ${BRUSH_SLIDER_THUMB_SIZE}px))`;
+  const brushFillWidth = `calc(${brushRatio} * (100% - ${BRUSH_SLIDER_THUMB_SIZE}px) + ${BRUSH_SLIDER_THUMB_SIZE / 2}px)`;
+
+  const applyBrushPointer = (clientX: number) => {
+    const track = brushTrackRef.current;
+    if (!track || readOnly) return;
+    const rect = track.getBoundingClientRect();
+    onBrushRadiusChange(brushRadiusFromPointer(clientX, rect.left, rect.width));
+  };
   const sendDisabledReason = readOnly
     ? '正在发送，请稍候'
     : !hasPaint
@@ -140,16 +175,74 @@ export default function ImageEraseDialog({
         ))}
         <label className={styles.brushRow} title="笔刷大小（画笔与橡皮共用）">
           <span className={styles.brushLabel}>笔刷</span>
-          <input
-            type="range"
-            data-testid="erase-brush-size"
-            min={ERASE_BRUSH_RADIUS_MIN}
-            max={ERASE_BRUSH_RADIUS_MAX}
-            step={2}
-            value={brushRadius}
-            disabled={readOnly}
-            onChange={(event) => onBrushRadiusChange(Number(event.target.value))}
-          />
+          <div className={styles.brushSlider}>
+            <input
+              type="range"
+              className={styles.brushRangeInput}
+              data-testid="erase-brush-size"
+              min={ERASE_BRUSH_RADIUS_MIN}
+              max={ERASE_BRUSH_RADIUS_MAX}
+              step={ERASE_BRUSH_RADIUS_STEP}
+              value={brushRadius}
+              disabled={readOnly}
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => onBrushRadiusChange(Number(event.target.value))}
+            />
+            <div
+              ref={brushTrackRef}
+              className={styles.brushHit}
+              role="slider"
+              tabIndex={readOnly ? -1 : 0}
+              aria-label="笔刷大小"
+              aria-valuemin={ERASE_BRUSH_RADIUS_MIN}
+              aria-valuemax={ERASE_BRUSH_RADIUS_MAX}
+              aria-valuenow={brushRadius}
+              aria-disabled={readOnly}
+              onPointerDown={(event) => {
+                if (readOnly) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                applyBrushPointer(event.clientX);
+              }}
+              onPointerMove={(event) => {
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                applyBrushPointer(event.clientX);
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+              }}
+              onPointerCancel={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+              }}
+              onKeyDown={(event) => {
+                if (readOnly) return;
+                let next: number | null = null;
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+                  next = brushRadius - ERASE_BRUSH_RADIUS_STEP;
+                } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+                  next = brushRadius + ERASE_BRUSH_RADIUS_STEP;
+                } else if (event.key === 'Home') {
+                  next = ERASE_BRUSH_RADIUS_MIN;
+                } else if (event.key === 'End') {
+                  next = ERASE_BRUSH_RADIUS_MAX;
+                }
+                if (next == null) return;
+                event.preventDefault();
+                onBrushRadiusChange(snapBrushRadius(next));
+              }}
+            >
+              <div className={styles.brushTrack}>
+                <div className={styles.brushFill} style={{ width: brushFillWidth }} />
+                <div className={styles.brushThumb} style={{ left: brushThumbOffset }} />
+              </div>
+            </div>
+          </div>
         </label>
         <span className={styles.divider} />
         <button

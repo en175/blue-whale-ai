@@ -21,7 +21,7 @@
 
 - 可连入条件：`mediaNode` + `mediaType === "image"` + 就绪态（无 `genStatus`）+ `src` 非空非 `blob:` + 有 `assetId`（上传完成）+ 未失效（非 `assetMissing`）。
 - 拒绝并 toast 原因（不静默丢弃）：待生成草稿 / 生成中 / 失败·已取消 / 素材已被删除 / 上传中（blob）/ 视频与音频 / 素材未关联资产。
-- 重复关系：同一 `assetId`（不同卡片、同一素材）再次连入 → 拒绝「该素材已连入当前草稿」；前端固定上限 9 张（`REF_LIMITS.image`），超限拒绝。模型能力上限（`features.max_reference_images`）与素材归属校验延续服务端既有链路（IKA72G：创建期 400 + worker 执行期同源校验）。
+- 重复关系：同一 `assetId`（不同卡片、同一素材）再次连入 → 拒绝「该素材已连入当前草稿」；前端固定上限 9 张（`REF_LIMITS.image`），超限拒绝。模型能力上限（`features.image_reference_max`）与素材归属校验延续服务端既有链路（IKA72G：创建期 400 + worker 执行期同源校验）。
 - 失效来源的**既有连线**保留在画布上（不自动清除），Dock 推导时跳过展示与消费；来源恢复或用户断线前不再作为输入。
 
 ## 双向同步

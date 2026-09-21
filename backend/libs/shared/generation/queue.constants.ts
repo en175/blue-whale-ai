@@ -37,6 +37,9 @@ export const VIDEO_ENHANCE_TAG = "video_enhance";
 /** 人声背景分离任务 tag（IKHA2C，契约见 @lib/contracts/vocal-split）：复用 GENERATION_TASK_QUEUE，
  *  用独立 tag 区分任务类型；与 generation_jobs.type / VOCAL_SPLIT_JOB_TYPE（@lib/contracts）保持一致。 */
 export const VOCAL_SPLIT_TAG = "vocal_split";
+/** 视频场景切分任务 tag（IKH8BH，契约见 @lib/contracts/video-scene-split）：复用 GENERATION_TASK_QUEUE，
+ *  用独立 tag 区分任务类型；与 generation_jobs.type / VIDEO_SCENE_SPLIT_JOB_TYPE（@lib/contracts）保持一致。 */
+export const VIDEO_SCENE_SPLIT_TAG = "video_scene_split";
 
 /** 视频生成任务 tag（IKEL9A 刀④；修正六由 "step" 更名为与任务类型同名）：复用 GENERATION_TASK_QUEUE，
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
@@ -55,4 +58,5 @@ export type GenerationTag =
   | typeof IMAGE_OUTPAINT_TAG
   | typeof VIDEO_SUBTITLE_ERASE_TAG
   | typeof VIDEO_ENHANCE_TAG
-  | typeof VOCAL_SPLIT_TAG;
+  | typeof VOCAL_SPLIT_TAG
+  | typeof VIDEO_SCENE_SPLIT_TAG;

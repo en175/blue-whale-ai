@@ -87,7 +87,7 @@ describe('buildVocalSplitPlaceholderNode', () => {
 });
 
 describe('vocalSplitErrorText', () => {
-  it('优先 msg；1046 兜底码映射「人声背景分离失败，请重试」；入队失败映射专用文案', () => {
+  it('优先 msg；1047 兜底码映射「人声背景分离失败，请重试」；入队失败映射专用文案', () => {
     expect(vocalSplitErrorText({ msg: '任务入队失败，请重试' })).toBe('任务入队失败，请重试');
     expect(vocalSplitErrorText({ code: 'vocal_split_failed' })).toBe('人声背景分离失败，请重试');
     expect(vocalSplitErrorText({ code: 'enqueue_failed' })).toBe('任务入队失败，请重试');

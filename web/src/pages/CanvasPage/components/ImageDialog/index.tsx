@@ -205,7 +205,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
 
   const currentGen = modelList.find((m) => m.model_id === selectedModel);
   const maxInput = promptMaxLengthOf(currentGen?.features?.max_prompt_length);
-  const maxImages = currentGen?.features?.max_reference_images ?? 10;
+  const maxImages = currentGen?.features?.image_reference_max ?? 10;
   const maxVideos = videoReferenceMaxOf(currentGen?.features);
 
   /** 快照参考项名称刷新（IKFA8Y）：自由模式的参考名称取自选取当刻，卡片改名后按画布节点 id
@@ -376,7 +376,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     : invalidMediaRefs?.length ? '参考素材不可用，请调整参考后发送'
     : textIndexError ? textIndexError
     : edgeRefs?.length && !currentGen.features.reference_image ? '当前模型不支持图片参考，请调整模型或参考'
-    : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
+    : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.image_reference_max || maxImages)
       ? '参考图片数量超过模型支持上限，请调整参考'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : maxInput != null && flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`

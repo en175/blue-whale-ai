@@ -37,7 +37,8 @@ INSERT INTO generation_model_capability (
     NULL,
     JSON_OBJECT(
       'reference_image', TRUE,
-      'max_reference_images', 4,
+      -- IKHEXG：max_reference_images 并入 image_reference_max（029 迁移对存量库做同一件事）
+      'image_reference_max', 4,
       'watermark', TRUE,
       'quantity_max', 4,
       'sequential_image_generation', TRUE,
@@ -211,11 +212,12 @@ INSERT INTO generation_model_capability (
     NULL,
     JSON_OBJECT(
       'quantity_max', 1,
-      'max_reference_images', 16,
+      -- IKHEXG：本行原同时带 max_reference_images:16 与 image_reference_max:1；后者在图片行上
+      -- 从不被读，是死值。按「保留原本生效的那把」合成一个 image_reference_max = 16。
+      'image_reference_max', 16,
       'reference_image', TRUE,
       'video_reference_max', 0,
-      'audio_reference_max', 0,
-      'image_reference_max', 1
+      'audio_reference_max', 0
     ),
     TRUE,
     40,

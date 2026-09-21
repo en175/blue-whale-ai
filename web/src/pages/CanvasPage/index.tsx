@@ -33,20 +33,24 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
-  supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
   checkAddVideoRef,
   incomingVideoRefOccupied,
   occupiedVideoRefIds,
+  videoRefIdentityIds,
   type VideoMediaRef,
   type VideoMediaRefs,
+  type VideoRefCapabilities,
   type VideoRefRole,
 } from './videoMediaRefs';
+import { AssetImageRefLimitProvider, videoRefCapsOfModel } from './modelCaps';
+import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
+import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
-import { downloadFileNameOf } from './components/cardName';
+import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
@@ -78,6 +82,18 @@ import {
   type VocalSplitIdentity,
   type VocalSplitScene,
 } from './vocalSplit';
+import {
+  SCENE_SPLIT_DEFAULT_GRANULARITY,
+  SCENE_SPLIT_EDGE_ORIGIN,
+  SCENE_SPLIT_NODE_GAP,
+  buildSceneSplitPlaceholderNode,
+  sceneSplitErrorText,
+  sceneSplitFanoutLayout,
+  sceneSplitSegmentBox,
+  sceneSplitSegmentLabel,
+  type SceneSplitGranularity,
+  type SceneSplitIdentity,
+} from './sceneSplit';
 import {
   IMAGE_ENHANCE_EDGE_ORIGIN,
   buildImageEnhanceInput,
@@ -163,6 +179,7 @@ import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog'
 import VideoSubtitleEraseDialog from './components/VideoSubtitleEraseDialog';
 import VideoAudioSplitDialog from './components/VideoAudioSplitDialog';
 import VocalSplitDialog from './components/VocalSplitDialog';
+import SceneSplitDialog from './components/SceneSplitDialog';
 import CropDialog from './components/CropDialog';
 import {
   clampCropRect,
@@ -251,6 +268,8 @@ import {
   createVideoEnhancement,
   createMediaExtraction,
   createVocalSplit,
+  createVideoSceneSplit,
+  newIdempotencyKey,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -581,7 +600,7 @@ export default function CanvasPage() {
   const [audioVideoSplitSubmitting, setAudioVideoSplitSubmitting] = useState(false);
   /** 人声背景分离编辑态（IKHA2W，会话口径同音视频分离）：处于人声背景分离编辑的源视频卡
    *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
-   *  上方仅 X 工具条 + 下方发送条（场景下拉/格式下拉/本期免费/发送钮，VocalSplitDialog）。
+   *  卡下方浮出单条（X/场景下拉/格式下拉/本期免费/发送钮，VocalSplitDialog，单条化对齐抠图/去字幕先例）。
    *  发送按所选场景与格式建任务与音频占位卡；未发送退出（X/Esc/点其他卡/点画布空白）
    *  不建任务不建卡。 */
   const [vocalSplitTargetNodeId, setVocalSplitTargetNodeId] = useState<string | null>(null);
@@ -594,6 +613,20 @@ export default function CanvasPage() {
   const [vocalSplitFormat, setVocalSplitFormat] = useState<VocalSplitFormat>(VOCAL_SPLIT_DEFAULT_FORMAT);
   /** 人声背景分离发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
   const [vocalSplitSubmitting, setVocalSplitSubmitting] = useState(false);
+  /** 场景切分编辑会话（IKH8BR，第七工具会话）：处于场景切分编辑的源视频卡 node id，
+   *  null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
+   *  卡下方浮出单条（X/标题/粒度三档/⚡0/发送，SceneSplitDialog）；发送先退会话再建
+   *  任务占位卡；未发送退出（X/Esc/点其他卡/点画布空白）不建任务不建卡。 */
+  const [sceneSplitTargetNodeId, setSceneSplitTargetNodeId] = useState<string | null>(null);
+  /** 切分粒度（IKH8BR，会话期交互态）：三档分段控件选择，standard 默认。粒度不跨会话
+   *  记忆——进入编辑态重置、退出复位（exitSceneSplitEditing）；发送时随任务冻结进占位卡
+   *  身份（sceneSplit.lastInput），失败重试按冻结粒度原样重发。 */
+  const [sceneSplitGranularity, setSceneSplitGranularity] = useState<SceneSplitGranularity>(SCENE_SPLIT_DEFAULT_GRANULARITY);
+  /** 场景切分发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
+  const [sceneSplitSubmitting, setSceneSplitSubmitting] = useState(false);
+  /** 发送同步锁（IKH8BR）：发送先退会话（条随即卸载），submitting 状态防不住同一事件
+   *  循环内的双击——ref 锁按 cropSubmittingRef 先例兜底（连点只发一次请求）。 */
+  const sceneSplitSendingRef = useRef(false);
   /** HD 面板发送中（IKH3VH）：创建往返期间面板只读防重复提交（口径同 audioVideoSplitSubmitting），
    *  创建失败复位（面板保留可调档重发） */
   const [videoEnhanceSubmitting, setVideoEnhanceSubmitting] = useState(false);
@@ -750,6 +783,34 @@ export default function CanvasPage() {
     edgesRef.current = next;
     setEdges(next);
   };
+  /** 草稿卡的模型能力解析（ADR-0086）：按卡上 draftModelId 在对应能力列表里取能力行。
+   *  未绑定模型或列表未加载 → undefined：消费处按缺省处理且**不阻断**（宁可服务端 400 判定，
+   *  不做客户端假阴性拦截）。 */
+  const draftModelOf = (nodeId: string | null | undefined, kind: 'video' | 'image'): GenerationModel | undefined => {
+    const data = (mediaNodesRef.current.find((n) => n.id === nodeId)?.data ?? {}) as Record<string, unknown>;
+    const modelId = typeof data.draftModelId === 'string' ? data.draftModelId : '';
+    if (!modelId) return undefined;
+    return (kind === 'video' ? videoModelsRef.current : imageModelsRef.current).find((m) => m.model_id === modelId);
+  };
+  /** 视频草稿的参考能力（模型未解析 → null：分类上限回落缺省，视频/音频参考门控放行交服务端） */
+  const videoCapsOfDraft = (nodeId: string | null | undefined): VideoRefCapabilities | null =>
+    videoRefCapsOfModel(draftModelOf(nodeId, 'video'));
+  /** 图片草稿的参考图上限（能力行 image_reference_max；模型未解析回落缺省 10） */
+  const imageRefMaxOfDraft = (nodeId: string): number =>
+    imageReferenceMaxOf(draftModelOf(nodeId, 'image')?.features);
+  /** 提交防线的视频/音频参考能力位判定（ADR-0086）：按提交模型的能力行逐类型判定，返回拒绝原因。
+   *  模型未解析（能力列表未加载/接口失败）返回 null 不阻断——交服务端 400 判定，不做客户端假阴性。 */
+  const videoRefUnsupportedByModel = (modelId: string, refs: VideoMediaRefs): string | null => {
+    const model = videoModelsRef.current.find((m) => m.model_id === modelId);
+    if (!model) return null;
+    const f = model.features;
+    const unsupported = refs.reference.some((r) =>
+      r.mediaType === 'video' ? !supportsVideoReferenceOf(f)
+        : r.mediaType === 'audio' ? !supportsAudioReferenceOf(f)
+          : false,
+    );
+    return unsupported ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null;
+  };
   /** 图片草稿参考连线校验（IKDMQR）：仅当目标是图片草稿且来源是媒体节点时介入——
    *  仅有效图片媒体结果可连入；重复素材（按 assetId 归一，兼容三形态）与超上限明确拒绝，不静默丢弃输入。
    *  文本/商品/资产卡等来源与非草稿目标沿用既有语义（文本附件/未来切片），本函数放行。 */
@@ -771,8 +832,10 @@ export default function CanvasPage() {
       showToast('warn', '该素材已连入当前草稿');
       return false;
     }
-    if (refs.length >= 10) {
-      showToast('warn', refOverflowToast(['image'], { image: 10 }));
+    // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
+    const imageMax = imageRefMaxOfDraft(targetId);
+    if (refs.length >= imageMax) {
+      showToast('warn', refOverflowToast(['image'], { image: imageMax }));
       return false;
     }
     return true;
@@ -798,7 +861,8 @@ export default function CanvasPage() {
     const materialId = typeof sourceData.materialId === 'string' && sourceData.materialId
       ? sourceData.materialId
       : undefined;
-    const msg = checkAddVideoRef(role, mediaType, assetId, refs, undefined, [materialId]);
+    // 分类上限读草稿绑定模型的能力行（ADR-0086，此前 caps 恒 undefined → 回落到写死的 9/3/3）
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs, videoCapsOfDraft(targetId), [materialId]);
     if (msg) {
       showToast('warn', msg);
       return false;
@@ -1048,6 +1112,11 @@ export default function CanvasPage() {
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
+  /** 画布层模型能力列表（ADR-0086）：连线校验、资产接纳槽位与资产卡上限按「草稿卡绑定的模型」
+   *  的能力行取值，不再写死 9/3/3、10。与首页/图片/视频面板同源（fetchGenerationModels 有模块级
+   *  请求缓存，重复挂载不产生重复请求）。失败保留空列表：消费处回落缺省且不阻断。 */
+  const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);
+  const [imageModels, setImageModels] = useState<GenerationModel[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   /** 工具栏加号 →「资产库选择」弹窗开关 */
   const [showAssetsPicker, setShowAssetsPicker] = useState(false);
@@ -1180,6 +1249,17 @@ export default function CanvasPage() {
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   useEffect(() => { setLiveViewport(viewport); }, [viewport]);
+  /** 加载视频/图片能力列表（ADR-0086）：画布连线、资产接纳与资产卡上限据此取能力行；
+   *  失败不阻断画布（保留空列表 → 消费处按缺省值），避免接口抖动让画布不可用。 */
+  useEffect(() => {
+    fetchGenerationModels('video').then(setVideoModels).catch(() => undefined);
+    fetchGenerationModels('image').then(setImageModels).catch(() => undefined);
+  }, []);
+  /** 资产卡参考图上限（ADR-0086）：资产卡经图片面板生成图片，按图片能力默认模型取
+   *  image_reference_max（无显式默认取列表首条；列表未加载回落缺省 10，与服务端一致） */
+  const assetImageRefMax = imageReferenceMaxOf(
+    (imageModels.find((m) => m.is_default) ?? imageModels[0])?.features,
+  );
   useEffect(() => {
     const el = canvasWrapperRef.current;
     if (!el) return;
@@ -1385,6 +1465,25 @@ export default function CanvasPage() {
     const zoom = liveViewport.zoom || 1;
     const screenLeft = vocalSplitSourceNode.position.x * zoom + liveViewport.x;
     const screenTop = vocalSplitSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    const halfWidth = 130;
+    return {
+      left: Math.max(FOLLOW_PAD + halfWidth, Math.min(center, wrapperSize.width - halfWidth - FOLLOW_PAD)),
+      top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
+    };
+  })();
+  /** 场景切分会话跟随锚（IKH8BR，口径同去字幕/分离）：源视频卡下方单条（SceneSplitDialog）。
+   *  IKH25A 中心点锚——条壳自身 translateX(-50%) 真居中，left 传源卡中心 x，
+   *  估半宽 130 仅用于视口钳制；top 同家族节点下方 + 16 间距。 */
+  const sceneSplitSourceNode = sceneSplitTargetNodeId
+    ? mediaNodes.find((n) => n.id === sceneSplitTargetNodeId) ?? null
+    : null;
+  const sceneSplitSendBarAnchor = (() => {
+    if (!sceneSplitSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(sceneSplitSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = sceneSplitSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = sceneSplitSourceNode.position.y * zoom + liveViewport.y;
     const center = Math.round(screenLeft + (box.width * zoom) / 2);
     const halfWidth = 130;
     return {
@@ -1830,6 +1929,7 @@ export default function CanvasPage() {
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -2751,6 +2851,9 @@ export default function CanvasPage() {
      *  「音视频分离 ▾」下拉第二项派发）；首帧渲染前经由
      *  actionsRef.current.vocalBackgroundSplit 分派到 handleNodeVocalBackgroundSplit */
     vocalBackgroundSplit: (_id: string) => {},
+    /** 场景切分（IKH8BJ 通道/接线）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发）；
+     *  首帧渲染前经由 actionsRef.current.sceneSplit 分派到 handleNodeSceneSplit */
+    sceneSplit: (_id: string) => {},
     /** 视频 HD 高清（IKH3VG 通道/接线）：源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条
      *  「HD」徽标按钮派发）；首帧渲染前经由 actionsRef.current.videoEnhance 分派到
      *  handleNodeVideoEnhance */
@@ -2861,6 +2964,7 @@ export default function CanvasPage() {
     node: Node,
     refs: VideoMediaRefs,
     role: 'first' | 'last',
+    caps?: VideoRefCapabilities | null,
   ): { current: VideoMediaRef | undefined } | null => {
     const err = videoRefSourceError(node, role);
     if (err) {
@@ -2882,7 +2986,7 @@ export default function CanvasPage() {
       ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
       reference: refs.reference.filter((r) => !sameIncoming(r)),
     };
-    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, undefined, [sourceMaterialId]);
+    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared, caps, [sourceMaterialId]);
     if (msg) {
       showToast('warn', msg);
       return null;
@@ -2896,7 +3000,7 @@ export default function CanvasPage() {
    *  返回是否实际落槽（IKGB7Y 自动退出判定用；拒绝/幂等返回 false） */
   const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last'): boolean => {
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const check = checkVideoFrameReplace(node, refs, role);
+    const check = checkVideoFrameReplace(node, refs, role, videoCapsOfDraft(targetId));
     if (!check) return false;
     if (check.current) {
       if (isLibraryOnlyVideoRef(check.current)) {
@@ -3351,6 +3455,7 @@ export default function CanvasPage() {
       subtitleErase: subtitleEraseTargetNodeId,
       audioVideoSplit: audioVideoSplitTargetNodeId,
       vocalSplit: vocalSplitTargetNodeId,
+      sceneSplit: sceneSplitTargetNodeId,
     },
     exits: {
       erase: exitEraseEditing,
@@ -3360,6 +3465,7 @@ export default function CanvasPage() {
       subtitleErase: exitSubtitleEraseEditing,
       audioVideoSplit: exitAudioVideoSplitEditing,
       vocalSplit: exitVocalSplitEditing,
+      sceneSplit: exitSceneSplitEditing,
     },
     dismissGenPanels: dismissAllGenPanels,
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
@@ -3368,13 +3474,14 @@ export default function CanvasPage() {
   const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
     enterToolSession(kind, buildToolSessionDeps(), init);
 
-  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离
-   *  任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话再放行，
-   *  见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
+  /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离/
+   *  场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求先退会话
+   *  再放行，见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
     || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null
-    || vocalSplitTargetNodeId != null;
+    || vocalSplitTargetNodeId != null
+    || sceneSplitTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
    *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
@@ -3573,7 +3680,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, vocalSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -3944,6 +4051,14 @@ export default function CanvasPage() {
     // exitVocalSplitEditing 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vocalSplitTargetNodeId, mediaNodes]);
+  /** 场景切分编辑会话绑定清理（IKH8BR）：目标源视频卡被删除时退出会话，防浮条悬挂
+   *  （口径同去字幕/分离绑定清理） */
+  useEffect(() => {
+    if (!sceneSplitTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === sceneSplitTargetNodeId)) exitSceneSplitEditing();
+    // exitSceneSplitEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneSplitTargetNodeId, mediaNodes]);
 
   /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
   useEffect(() => {
@@ -4130,6 +4245,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4172,6 +4288,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4229,6 +4346,7 @@ export default function CanvasPage() {
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -4714,6 +4832,7 @@ export default function CanvasPage() {
       onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
       onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+      onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
       onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5103,6 +5222,7 @@ export default function CanvasPage() {
           onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+          onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -5220,12 +5340,16 @@ export default function CanvasPage() {
         }
         return;
       }
-      // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
-      // 缺省回落旧 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读草稿绑定模型的能力行，
+      // 与 checkAddVideoRef 同口径；模型未解析回落缺省 9/3/3）；assetId / materialId 互通查重（TC_DG_205）
+      const caps = videoCapsOfDraft(videoDraftId);
+      const imageMax = caps?.imageMax ?? 9;
+      const videoMax = caps?.videoReferenceMax ?? 3;
+      const audioMax = caps?.audioReferenceMax ?? 3;
       const known = occupiedVideoRefIds(refs);
-      let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
-      let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
-      let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
+      let imgSlots = imageMax - refs.reference.filter((r) => r.mediaType === 'image').length;
+      let vidSlots = videoMax - refs.reference.filter((r) => r.mediaType === 'video').length;
+      let audSlots = audioMax - refs.reference.filter((r) => r.mediaType === 'audio').length;
       const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
       let skippedDup = false;
       const filtered: AssetRecord[] = [];
@@ -5250,7 +5374,7 @@ export default function CanvasPage() {
       }
       accepted = filtered;
       if (skippedDup) showToast('warn', '重复的素材已跳过');
-      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
+      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: imageMax, video: videoMax, audio: audioMax }));
       if (accepted.length === 0) return;
       if (!videoDraftId) {
         accepted.forEach((a) =>
@@ -5329,18 +5453,20 @@ export default function CanvasPage() {
       if (imageDraftId) {
         const current = imageMediaRefsOf(imageDraftId, edgesRef.current, mediaNodesRef.current);
         const known = new Set(current.map((r) => r.assetId));
+        // 上限读草稿绑定模型的 image_reference_max（ADR-0086，此前写死 10）
+        const imageMax = imageRefMaxOfDraft(imageDraftId);
         const accepted: AssetRecord[] = [];
         let skippedDup = false;
         let overflow = false;
         for (const a of images) {
           const id = String(a.id);
           if (known.has(id)) { skippedDup = true; continue; }
-          if (known.size >= 10) { overflow = true; break; }
+          if (known.size >= imageMax) { overflow = true; break; }
           known.add(id);
           accepted.push(a);
         }
         if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflow) showToast('warn', refOverflowToast(['image']));
+        if (overflow) showToast('warn', refOverflowToast(['image'], { image: imageMax }));
         if (accepted.length === 0) return;
         const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
         if (!nodeIds) {
@@ -5382,6 +5508,12 @@ export default function CanvasPage() {
   };
 
   /* ============ 生成任务编排：创建 → 占位节点 → 轮询 → 产物挂载 ============ */
+
+  /** 模型能力列表最新值（避开 useCallback 闭包陈旧，口径同 nodes ref） */
+  const videoModelsRef = useRef<GenerationModel[]>([]);
+  videoModelsRef.current = videoModels;
+  const imageModelsRef = useRef<GenerationModel[]>([]);
+  imageModelsRef.current = imageModels;
 
   /** 媒体节点最新列表（轮询中判断节点是否仍存在） */
   const mediaNodesRef = useRef<Node[]>([]);
@@ -5542,6 +5674,96 @@ export default function CanvasPage() {
     if (currentId) void flushCanvasSave(currentId).catch(() => {});
   };
 
+  /** 场景切分完成扇出（IKH8C1）：移除任务占位卡，按 result.segments 返回顺序在源卡右侧
+   *  网格建 N 张普通视频段卡（「第 N 段 起止时间」标注、assetId 关联段资产——工具条门槛
+   *  走 BJ 已有 gate，全量工具可用含链式再切分），逐张拉来源连线（纯视觉 origin=scene-split），
+   *  立即落盘。段资产 = output_assets 里 id === segment_asset_id 项；段卡宽高随资产回填
+   *  （缺失回退源卡分辨率），1 段不特判（第 1 段、全程时间轴照常出 1 张）。
+   *  段卡 data 保留 jobId（家族口径同 applyJobTerminal 通用成功分支——成品卡不清 jobId）：
+   *  MediaNode 以 jobId≠null 判定生成宿主渲染 target Handle，缺它则来源连线无法渲染。
+   *  落位 sceneSplitFanoutLayout 纯函数自动避让画布既有节点（源卡与占位卡不参与避让
+   *  ——占位卡本步移除、扇出语义就在其右侧）。占位卡登记 locallyRemoved 防迟到响应复活。 */
+  const fanOutSceneSplitSegments = (
+    placeholderId: string,
+    jobId: number | string,
+    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
+  ) => {
+    const placeholder = mediaNodesRef.current.find((n) => n.id === placeholderId);
+    if (!placeholder) return;
+    const identity = ((placeholder.data ?? {}) as Record<string, unknown>).sceneSplit as
+      | SceneSplitIdentity
+      | undefined;
+    const segments = detail.result?.segments ?? [];
+    const outputAssets = detail.output_assets ?? [];
+    if (segments.length === 0) {
+      // 畸形 payload 防御（契约校验后 result 为 null）：成功却无段，占位卡按失败口径兜底
+      patchMediaNode(placeholderId, { progress: 100, genStatus: 'failed', errorText: sceneSplitErrorText(null) });
+      return;
+    }
+    const sourceAssetId = identity?.sourceAssetId;
+    const source = sourceAssetId != null
+      ? mediaNodesRef.current.find(
+          (n) => readAssetId((n.data ?? {}) as Record<string, unknown>) === sourceAssetId,
+        )
+      : undefined;
+    const sourceData = (source?.data ?? {}) as Record<string, unknown>;
+    const fallbackWidth = typeof sourceData.width === 'number' ? sourceData.width : undefined;
+    const fallbackHeight = typeof sourceData.height === 'number' ? sourceData.height : undefined;
+    const segAssetOf = (assetId: string) =>
+      outputAssets.find((a) => String(a.id) === String(assetId));
+    // 落位：锚点取源卡（缺失降级占位卡），既有节点排除源卡与占位卡
+    const anchor = nodeBoxOf(source ?? placeholder);
+    const occupied = [
+      ...mediaNodesRef.current,
+      ...textNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ]
+      .filter((n) => n.id !== placeholderId && n.id !== source?.id)
+      .map(nodeBoxOf);
+    const positions = sceneSplitFanoutLayout({
+      anchor,
+      count: segments.length,
+      segmentSize: sceneSplitSegmentBox({ width: fallbackWidth, height: fallbackHeight }),
+      occupied,
+    });
+    const fallbackPos = {
+      x: Math.round(anchor.x + anchor.width + SCENE_SPLIT_NODE_GAP),
+      y: Math.round(anchor.y),
+    };
+    const segmentNodes = segments.map((seg, i) => {
+      const asset = segAssetOf(seg.segment_asset_id);
+      const pos = positions[i] ?? fallbackPos;
+      return {
+        id: newNodeId('scene-segment'),
+        type: 'mediaNode' as const,
+        position: pos,
+        data: {
+          src: asset?.url ?? '',
+          fileName: sceneSplitSegmentLabel(seg.segment_index, seg.start_time, seg.end_time),
+          mediaType: 'video' as const,
+          assetId: String(seg.segment_asset_id),
+          width: asset?.width ?? fallbackWidth,
+          height: asset?.height ?? fallbackHeight,
+          jobId,
+        },
+      };
+    });
+    // 同步写 ref 再 setState（扇出后 flush 才能读到本轮节点，口径同 startSceneSplitJob）
+    const next = mediaNodesRef.current
+      .filter((n) => n.id !== placeholderId)
+      .concat(segmentNodes.map((n) => attachCallbacks(n as Node)));
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    locallyRemovedGenerationNodesRef.current.add(placeholderId);
+    if (source) {
+      for (const seg of segmentNodes) {
+        addCanvasEdge(source.id, seg.id, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
+      }
+    }
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  };
+
   /** 任务终态收敛（IKDMQW）：按任务权威状态落卡片终态，轮询 tick、普通取消与删除流程共用。
    *  返回 'terminal' 表示已终态（轮询应停），'processing' 表示未终态（调用方决定续链）。
    *  调用方需先过 jobResponseGuarded 防线。
@@ -5560,6 +5782,25 @@ export default function CanvasPage() {
       stopJobPolling(nodeId, jobTimersRef.current);
       setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
     };
+    if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
+      // 场景切分占位卡分流（IKH8BR 建卡/失败，IKH8C1 完成扇出）：按任务类型收敛终态。
+      if (detail.status === 'succeeded') {
+        // 停轮询后扇出：移除占位卡、按返回顺序建 N 张段卡拉来源连线（1 段不特判）
+        stopJobPolling(nodeId, jobTimersRef.current);
+        fanOutSceneSplitSegments(nodeId, jobId, detail);
+        return 'terminal';
+      }
+      if (detail.status === 'failed') {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        patchMediaNode(nodeId, {
+          genStatus: 'failed',
+          // 失败文案走场景切分家族映射（1046 兜底「场景切分失败，请重试」）
+          errorText: sceneSplitErrorText(detail.error),
+        });
+        return 'terminal';
+      }
+      // cancelled 落到下方通用分支：占位卡无成品内容，收敛为移除
+    }
     if (isMediaExtractNodeId(nodeId)) {
       const extractPatch = mediaExtractTerminalPatch(
         detail,
@@ -5834,6 +6075,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+        onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -6810,6 +7052,38 @@ export default function CanvasPage() {
         });
       return;
     }
+    const sceneSplitIdentity = ((node?.data ?? {}) as Record<string, unknown>).sceneSplit as
+      | SceneSplitIdentity
+      | undefined;
+    if (sceneSplitIdentity?.lastInput) {
+      // 场景切分卡分流（IKH8BR，镜像去字幕/分离）：契约无 retry 端点，重试 = 冻结业务参数
+      // 原样重发创建接口（源素材/占位卡绑定/粒度随 lastInput 冻结）；client_token 每次重试
+      // 都新生成（同 token 只会重放旧任务），原地承接本占位卡（target_node_id=本卡 id）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法场景切分');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清/擦除/去字幕/抠图分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() })
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
+      return;
+    }
     const mediaExtractIdentity = ((node?.data ?? {}) as Record<string, unknown>).mediaExtract as
       | MediaExtractIdentity
       | undefined;
@@ -7045,15 +7319,25 @@ export default function CanvasPage() {
       }
       return undefined;
     };
-    const videoRefs = videoSeed?.targetNodeId ? mergedVideoMediaRefsOf(videoSeed.targetNodeId, edges, mediaNodes) : { reference: [] };
+    // 与 Dock 展示 / 提交同源：直接参考 ∪ 文本索引带入（方案卡应用到画布后素材只挂在方案卡上，不直连视频草稿）
+    const videoRefs = videoSeed?.targetNodeId
+      ? mergedVideoRefsWithTextIndex(videoSeed.targetNodeId, edges, mediaNodes, textNodes)
+      : { reference: [] };
+    const videoAvailableIds = [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])]
+      .flatMap((ref) => videoRefIdentityIds(ref));
     return {
-      image: forTarget(imageSeed?.targetNodeId, imageSeed?.targetNodeId ? imageMediaRefsOf(imageSeed.targetNodeId, edges, mediaNodes).map(ref => ref.assetId) : []),
+      image: forTarget(
+        imageSeed?.targetNodeId,
+        imageSeed?.targetNodeId
+          ? mergedImageRefsOf(imageSeed.targetNodeId, edges, [...mediaNodes, ...textNodes]).map((ref) => ref.assetId)
+          : [],
+      ),
       videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
         const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
         const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
         return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
       }).join('、'),
-      video: forTarget(videoSeed?.targetNodeId, [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])].map(ref => ref.assetId)),
+      video: forTarget(videoSeed?.targetNodeId, videoAvailableIds),
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
 
@@ -7535,6 +7819,15 @@ export default function CanvasPage() {
     setVocalSplitSubmitting(false);
   };
 
+  /** 退出场景切分编辑会话（IKH8BR 四退出共用）：会话参数（切分粒度）与发送中复位——
+   *  粒度不跨会话记忆（每次进入重置 standard），未发送退出无卡无边无任务；播放控制随
+   *  splitEditing 标记移除自动恢复（MediaNode 承担）。 */
+  const exitSceneSplitEditing = () => {
+    setSceneSplitTargetNodeId(null);
+    setSceneSplitGranularity(SCENE_SPLIT_DEFAULT_GRANULARITY);
+    setSceneSplitSubmitting(false);
+  };
+
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
    *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
   const exitCropMode = () => {
@@ -7634,6 +7927,20 @@ export default function CanvasPage() {
       setVocalSplitScene(VOCAL_SPLIT_DEFAULT_SESSION_SCENE);
       setVocalSplitFormat(VOCAL_SPLIT_DEFAULT_FORMAT);
       setVocalSplitTargetNodeId(id);
+    });
+  };
+
+  /** 场景切分（IKH8BJ 入口 / IKH8BR 编辑会话）：把目标视频卡置为场景切分编辑会话并重置
+   *  粒度 standard（不跨会话记忆）。置灰门槛（资产缺失/超 2 小时）已在工具条按钮置灰层
+   *  完成（sceneSplitGateReason），此处只管进入；互斥退出与生成面板关闭经
+   *  toolSessionCoordinator（第七会话，口径对齐 handleNodeAudioVideoSplit）、不动视角；
+   *  视频随会话态注入在当前帧暂停并锁定播放控制（MediaNode splitEditing 承担）。 */
+  const handleNodeSceneSplit = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    runToolSessionEntry('sceneSplit', () => {
+      setSceneSplitGranularity(SCENE_SPLIT_DEFAULT_GRANULARITY);
+      setSceneSplitTargetNodeId(id);
     });
   };
 
@@ -7922,6 +8229,76 @@ export default function CanvasPage() {
     }
   };
 
+  /* ===== 场景切分发送链路（IKH8BR，镜像去字幕/HD 家族）：先退会话 → 本地建任务占位卡
+     （target_node_id 取该卡）→ POST video-scene-splits → job_id 回写占位卡 → 轮询终态 ===== */
+
+  /** 场景切分任务发送核心：按所选粒度 POST video-scene-splits（client_token 每次新生成
+   *  ——同 token 只会重放旧任务，重试亦复用本函数口径）。BO 定死流程顺序：**先退会话**
+   *  再本地在源视频右侧建任务占位卡（node id 本地生成，target_node_id 发送时取它——
+   *  先建卡后发请求，IKH8BO 契约；展示名标注粒度档、生成中骨架、sceneSplit 身份
+   *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
+   *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
+   *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
+   *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
+   *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
+   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
+   *  无积分预估、不走余额拦截门。 */
+  const startSceneSplitJob = async (
+    sourceNodeId: string,
+    payload: { source_asset_id: string; target_node_id: string; granularity: SceneSplitGranularity },
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法场景切分');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源视频卡不存在，无法场景切分');
+      return false;
+    }
+    // 发送即退会话（BO 定死顺序：先退再建卡——占位卡节点 id 要作为 target_node_id 发送）
+    exitSceneSplitEditing();
+    const placeholderId = payload.target_node_id;
+    const placeholder = attachCallbacks(
+      buildSceneSplitPlaceholderNode({
+        nodeId: placeholderId,
+        granularity: payload.granularity,
+        sourceAssetId: payload.source_asset_id,
+        source: node,
+      }) as Node,
+    );
+    // 先同步写 ref 再 setState：后续连线端点与轮询 guard 都要求节点已在（无 pendingNodeIdsRef
+    // 登记：占位卡身份以 sceneSplit 身份标记为准，失败由卡上重试收敛）
+    const current = mediaNodesRef.current;
+    const next = current.some((item) => item.id === placeholderId) ? current : [...current, placeholder];
+    mediaNodesRef.current = next;
+    setMediaNodes(next);
+    addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SCENE_SPLIT_EDGE_ORIGIN });
+    try {
+      const created = await createVideoSceneSplit(currentId, {
+        ...payload,
+        client_token: newIdempotencyKey(),
+      });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
+      stopJobPolling(placeholderId, jobTimersRef.current);
+      patchMediaNode(placeholderId, { jobId: created.job_id });
+      pollJob(placeholderId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢卡
+      await flushCanvasSave(currentId).catch(() => {});
+      return true;
+    } catch (e: unknown) {
+      // 创建失败：占位卡转失败态（卡上重试原参数原粒度重发，client_token 重试时另生成）
+      patchMediaNode(placeholderId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
+      });
+      showToast('error', isApiError(e) ? e.message : '场景切分任务创建失败，请重试');
+      return false;
+    }
+  };
+
   /** 人声背景分离发送（发送条发送钮）：源素材身份 + 当前所选场景与格式 → 建任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startVocalSplitJob 承担，
    *  失败停留编辑态（参数可调后重发）。 */
@@ -7940,6 +8317,31 @@ export default function CanvasPage() {
       scene: vocalSplitScene,
       output_format: vocalSplitFormat,
     }).finally(() => setVocalSplitSubmitting(false));
+    return true;
+  };
+
+  /** 场景切分发送（单条发送钮）：源素材身份 + 当前所选粒度 → 先退会话再建占位卡发任务。
+   *  请求发出即返回（飞行期 submitting 防重复提交）；创建往返与轮询收敛由
+   *  startSceneSplitJob 承担。 */
+  const handleSceneSplitSend = (): boolean => {
+    const nodeId = sceneSplitTargetNodeId;
+    if (!nodeId || sceneSplitSubmitting || sceneSplitSendingRef.current) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '当前视频尚未关联资产，无法场景切分');
+      return false;
+    }
+    sceneSplitSendingRef.current = true;
+    setSceneSplitSubmitting(true);
+    void startSceneSplitJob(nodeId, {
+      source_asset_id: String(sourceAssetId),
+      target_node_id: newNodeId('scene-split'),
+      granularity: sceneSplitGranularity,
+    }).finally(() => {
+      sceneSplitSendingRef.current = false;
+      setSceneSplitSubmitting(false);
+    });
     return true;
   };
 
@@ -7992,7 +8394,7 @@ export default function CanvasPage() {
   };
 
   /** 下载单个媒体节点：成功返回 true，无素材则 false。
-   *  文件名以当前卡片名称为基础，扩展名取真实文件类型（blob MIME 优先，节点 mime/素材地址兜底，IKFA8Y） */
+   *  文件名以当前卡片名称为基础，扩展名经 resolveDownloadMime 纠正 M4A 错标后再取（IKFA8Y） */
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (node?.data?.assetMissing) {
@@ -8002,10 +8404,20 @@ export default function CanvasPage() {
     const src = node?.data?.src as string | undefined;
     if (!src) return false;
     const name = (node?.data?.fileName as string) || id;
-    const mime = node?.data?.mime as string | undefined;
+    const nodeMime = node?.data?.mime as string | undefined;
+    const mediaType = node?.data?.mediaType as string | undefined;
     const blob = await fetchAssetBlob(src);
     if (blob) {
-      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, blob.type || mime, src), true);
+      const sniffed = await sniffMediaMime(blob, mediaType);
+      const type = resolveDownloadMime({
+        sniffed,
+        blobType: blob.type,
+        nodeMime,
+        src,
+        fileName: name,
+        mediaType,
+      });
+      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, type, src), true);
       return true;
     }
     window.open(src, '_blank', 'noopener');
@@ -8024,10 +8436,17 @@ export default function CanvasPage() {
       if (media && !media.data?.assetMissing && src) {
         const blob = await fetchAssetBlob(src);
         if (blob) {
-          const sniffed = await sniffMediaMime(blob);
-          const nodeMime = media.data?.mime as string | undefined;
-          const mime = sniffed || blob.type || nodeMime;
           const cardName = (media.data?.fileName as string) || id;
+          const mediaType = media.data?.mediaType as string | undefined;
+          const sniffed = await sniffMediaMime(blob, mediaType);
+          const mime = resolveDownloadMime({
+            sniffed,
+            blobType: blob.type,
+            nodeMime: media.data?.mime as string | undefined,
+            src,
+            fileName: cardName,
+            mediaType,
+          });
           items.push({
             filename: uniqueDownloadName(downloadFileNameOf(cardName, mime, src), usedNames),
             blob,
@@ -8136,6 +8555,7 @@ export default function CanvasPage() {
   actionsRef.current.videoSubtitleErase = handleNodeVideoSubtitleErase;
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
   actionsRef.current.vocalBackgroundSplit = handleNodeVocalBackgroundSplit;
+  actionsRef.current.sceneSplit = handleNodeSceneSplit;
   actionsRef.current.videoEnhance = handleNodeVideoEnhance;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -8394,10 +8814,11 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      // 视频参考仅部分模型支持（ADR-0086：读能力行 features.video_reference；旧 seedance-2 前缀特判
-      // 作为缺省兜底）：提交防线与面板 UI 禁用同一判定
-      if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType !== 'image')) {
-        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+      // 视频/音频参考的能力位（ADR-0086）：按提交模型的能力行判定，替代旧 seedance-2 前缀特判
+      // （旧特判对 2.5 与 2.0 恰好判反：2.5 被误拦、2.0 被误放）；模型未解析不阻断，交服务端兜底
+      const refGate = videoRefUnsupportedByModel(opts.modelId, draftRefs);
+      if (refGate) {
+        showToast('warn', refGate);
         return;
       }
       applyingRef.current = true;
@@ -8746,6 +9167,7 @@ export default function CanvasPage() {
               onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
               onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
+              onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -9441,8 +9863,11 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      if (!supportsVideoReferenceModel(modelId) && draftRefs.reference.some((ref) => ref.mediaType !== 'image')) {
-        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
+      // 视频/音频参考的能力位（ADR-0086）：按卡上模型的能力行判定（同 handleDialogSend），
+      // 模型未解析不阻断，交服务端兜底
+      const refGate = videoRefUnsupportedByModel(modelId, draftRefs);
+      if (refGate) {
+        showToast('warn', refGate);
         return;
       }
       applyingRef.current = true;
@@ -9661,6 +10086,9 @@ export default function CanvasPage() {
       {/* 画布区域 */}
       <div ref={canvasWrapperRef} className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
+      {/* 资产卡参考图上限（ADR-0086）：节点组件经 context 读能力行，避免为卡内上限在
+          节点树层层透传 props；未注入/未加载时回落能力缺省值 */}
+      <AssetImageRefLimitProvider value={assetImageRefMax}>
       <FlowCanvas
           showMiniMap={showMiniMap}
           toolMode={toolMode}
@@ -9685,6 +10113,7 @@ export default function CanvasPage() {
               || cutoutNodeId || outpaintNodeId || showEnhanceDialog || showVideoEnhanceDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               || vocalSplitTargetNodeId
+              || sceneSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     showEnhanceDialog
@@ -9695,7 +10124,8 @@ export default function CanvasPage() {
                     || n.id === outpaintNodeId
                     || n.id === subtitleEraseTargetNodeId
                     || n.id === audioVideoSplitTargetNodeId
-                    || n.id === vocalSplitTargetNodeId;
+                    || n.id === vocalSplitTargetNodeId
+                    || n.id === sceneSplitTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
                     && n.id !== subtitleEraseTargetNodeId
@@ -9727,6 +10157,9 @@ export default function CanvasPage() {
                   }
                   if (n.id === audioVideoSplitTargetNodeId) data.splitEditing = true;
                   if (n.id === vocalSplitTargetNodeId) data.splitEditing = true;
+                  // 场景切分会话（IKH8BR）：源视频卡同款停帧 + 播放控制锁定（复用 splitEditing
+                  // 标记，MediaNode 承担）；浮条由本页 SceneSplitDialog 承担
+                  if (n.id === sceneSplitTargetNodeId) data.splitEditing = true;
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
                   if (hideToolbar) data.soloToolbarHidden = true;
@@ -9841,6 +10274,7 @@ export default function CanvasPage() {
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
           onUpdateGenerate={onUpdateGenerate}
         />
+      </AssetImageRefLimitProvider>
         {connectMenu && (
           <ConnectTypeMenu
             x={connectMenu.x}
@@ -10314,6 +10748,22 @@ export default function CanvasPage() {
             onSend={handleVocalSplitSend}
             submitting={vocalSplitSubmitting}
             sendBarAnchor={vocalSplitSendBarAnchor}
+          />
+        )}
+
+        {/* 场景切分编辑态单条（IKH8BR）：源卡下方唯一一条 = X + 标题 + 粒度三档分段
+            （细/标准/粗，standard 默认）+ ⚡0 徽标 + 发送钮（对齐去字幕单条家族形态）；
+            视频暂停与播放控制锁定经 MediaNode 的 splitEditing 注入承担；四退出（X/Esc/
+            点其他卡/点空白）由本页承载，未发送退出不建任务不建卡；发送先退会话再建
+            任务占位卡（粒度随任务冻结，飞行期防重复提交） */}
+        {sceneSplitTargetNodeId && (
+          <SceneSplitDialog
+            onClose={exitSceneSplitEditing}
+            granularity={sceneSplitGranularity}
+            onGranularityChange={setSceneSplitGranularity}
+            onSend={handleSceneSplitSend}
+            submitting={sceneSplitSubmitting}
+            sendBarAnchor={sceneSplitSendBarAnchor}
           />
         )}
 

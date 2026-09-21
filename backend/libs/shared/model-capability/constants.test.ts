@@ -118,11 +118,169 @@ describe("时长形态闸门（IKG4UR）", () => {
 });
 
 describe("parseModelUpdateBody", () => {
+  // IKHEXG：default_size / default_aspect_ratio 是 NOT NULL（VarChar）列，「未配」的形态是空串。
+  // 表单对非图片/视频行恒发 null（清空尺寸框的图片行也发 null），旧闸门只收字符串
+  // → 音频/文生文行从后台保存必然 400（实测 PUT /api/admin/models/23）。
+  it("default_size / default_aspect_ratio 收 null，归一为空串（NOT NULL 列）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: null,
+      default_aspect_ratio: null,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("");
+    expect(parsed.value.default_aspect_ratio).toBe("");
+  });
+
+  it("default_size / default_aspect_ratio 仍拒非字符串非 null（防脏值落库）", () => {
+    for (const bad of [5, true, [], {}]) {
+      expect(parseModelUpdateBody({ default_size: bad }).ok).toBe(false);
+      expect(parseModelUpdateBody({ default_aspect_ratio: bad }).ok).toBe(false);
+    }
+  });
+
+  it("default_size / default_aspect_ratio 超长仍被拒（列宽 32 / 16）", () => {
+    expect(parseModelUpdateBody({ default_size: "x".repeat(33) }).ok).toBe(false);
+    expect(parseModelUpdateBody({ default_aspect_ratio: "x".repeat(17) }).ok).toBe(false);
+  });
+
+  // IKHEXG：上面把两个值提到了 `if` 外面算（为了让返回值用归一后的值），于是「字段缺席」与
+  // 「字段清空」只差 spread 上那个 `body.default_size !== undefined` 的守卫。少了这条钉子，
+  // 日后顺手把守卫删掉，**每次更新都会写一遍空串**，把所有行的默认尺寸静默清掉。
+  it("未携带该字段 → 不提交（缺席 ≠ 清空）", () => {
+    const parsed = parseModelUpdateBody({ model_label: "新名字" });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect("default_size" in parsed.value).toBe(false);
+    expect("default_aspect_ratio" in parsed.value).toBe(false);
+  });
+
+  it("真实改动仍原样提交（往返不被吞掉）", () => {
+    const parsed = parseModelUpdateBody({
+      default_size: "2K",
+      default_aspect_ratio: "16:9",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.default_size).toBe("2K");
+    expect(parsed.value.default_aspect_ratio).toBe("16:9");
+  });
+
   it("更新为 gpt 时必须带 request_mapping", () => {
     const parsed = parseModelUpdateBody({
       channel_parser: "gpt",
     });
     expect(parsed.ok).toBe(false);
+  });
+
+  // IKH BDO：更新是 diff 提交，没改过的 channel_parser 不在 body 里，映射校验
+  // 必须按**库中该行**的解析器判定，否则整段校验被跳过（脏值直接落库）。
+  it("库中 gpt 行：只改展示名（不带 mapping）→ 放行，且不提交 mapping", () => {
+    const parsed = parseModelUpdateBody(
+      { model_label: "新名字" },
+      { channel_parser: "gpt" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect("request_mapping" in parsed.value).toBe(false);
+  });
+
+  it("库中 gpt 行：显式清空 mapping（null）→ 拒绝", () => {
+    expect(
+      parseModelUpdateBody(
+        { request_mapping: null },
+        { channel_parser: "gpt" },
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("库中 gpt 行：空交叉格 {matrix:{}} → 拒绝（落库后该模型每次请求都 400）", () => {
+    expect(
+      parseModelUpdateBody(
+        { request_mapping: { matrix: {} } },
+        { channel_parser: "gpt" },
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("库中 seedream 行：mapping 传 null 视为「不改」，不透传给 repo", () => {
+    const parsed = parseModelUpdateBody(
+      { model_label: "x", request_mapping: null },
+      { channel_parser: "seedream" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect("request_mapping" in parsed.value).toBe(false);
+  });
+
+  it("库中 seedream 行：mapping 传对象 → 原样写入", () => {
+    const matrix = { matrix: { "1K": { "1:1": "1024x1024" } } };
+    const parsed = parseModelUpdateBody(
+      { request_mapping: matrix },
+      { channel_parser: "seedream" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.request_mapping).toEqual(matrix);
+  });
+
+  // 「null 视为不改」只对**本来就是 seedream** 的行成立。从 gpt 切到 seedream 时，
+  // 那个 null 就是「gpt 矩阵不再适用」的唯一表达——照「不改」处理会把上一族的矩阵
+  // 留在行里，worker 拿它去算 seedream 尺寸，而界面没有任何入口能清掉。
+  it("库中 gpt 行：切到 seedream 且 mapping 传 null → 照实清空，不留上一族的矩阵", () => {
+    const parsed = parseModelUpdateBody(
+      { channel_parser: "seedream", request_mapping: null },
+      { channel_parser: "gpt" },
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.channel_parser).toBe("seedream");
+      expect(parsed.value.request_mapping).toBeNull();
+    }
+  });
+
+  // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
+  it("features 闸门补键：脏类型 → 拒绝", () => {
+    const dirty = [
+      { image_reference_max: "abc" },
+      { image_reference_max: 1.5 },
+      { quantity_max: 1.5 },
+      { quantity_max: 0 },
+      { reference_image: "yes" },
+      { watermark: 1 },
+      { audio: "true" },
+      { tools: "no" },
+      { first_frame: 0 },
+      { last_frame: 1 },
+      { first_last_frame: [] },
+      { sequential_image_generation: "x" },
+      { stream: "x" },
+      { image_protocol: 42 },
+      { image_protocol: "  " },
+    ];
+    for (const features of dirty) {
+      expect(parseModelUpdateBody({ features }).ok).toBe(false);
+    }
+  });
+
+  it("features 闸门补键：合法值与 camelCase 键形 → 放行", () => {
+    expect(
+      parseModelUpdateBody({
+        features: {
+          image_reference_max: 14,
+          quantity_max: 10,
+          reference_image: true,
+          watermark: false,
+          audio: true,
+          tools: true,
+          first_frame: true,
+          first_last_frame: false,
+          sequential_image_generation: false,
+          stream: false,
+          image_protocol: "openai-images",
+          imageReferenceMax: 14,
+          quantityMax: 10,
+          imageProtocol: "inline-image",
+        },
+      }).ok,
+    ).toBe(true);
   });
 });
 

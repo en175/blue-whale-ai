@@ -53,7 +53,7 @@ function model(label: string): GenerationModel {
     default_duration: null,
     features: {
       reference_image: false,
-      max_reference_images: 0,
+      image_reference_max: 0,
       watermark: false,
       quantity_max: 1,
       sequential_image_generation: false,

@@ -158,14 +158,14 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
     }
   });
 
-  it("执行兜底码 vocal_split_failed → 1046，与既有各工具兜底码不冲突，文案表同步", () => {
+  it("执行兜底码 vocal_split_failed → 1047（1046 被先合入的场景切分 !789 占用后让号），不与既有码冲突，文案表同步", () => {
     expect(ERROR_VOCAL_SPLIT_FAILED).toBe("vocal_split_failed");
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VOCAL_SPLIT_FAILED]).toBe(1046);
-    expect(ERROR_CODES[1046]).toBeTruthy();
-    // 1046 是 1045（video_enhance）之后的下一空号，不与任何既有码撞位。
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VOCAL_SPLIT_FAILED]).toBe(1047);
+    expect(ERROR_CODES[1047]).toBeTruthy();
+    // 1046（video_scene_split）与 1047（vocal_split）各占一号，不与任何既有码撞位。
     for (const [code, numeric] of Object.entries(GENERATION_ERROR_NUMERIC_CODES)) {
       if (code !== ERROR_VOCAL_SPLIT_FAILED) {
-        expect(numeric).not.toBe(1046);
+        expect(numeric).not.toBe(1047);
       }
     }
   });

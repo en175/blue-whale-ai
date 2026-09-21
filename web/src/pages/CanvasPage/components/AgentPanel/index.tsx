@@ -1801,6 +1801,21 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                             }
                           : undefined
                       }
+                      onRetry={
+                        // 整轮失败的重来（IKHCJ2 第 5 项）：走重试接口，就在失败那行旁边。
+                        // 在这之前这里只有一行字、什么都点不了，唯一的入口是输入框工具栏角落
+                        // 一个 14px 无字图标——测试报告因此记成「前端无重试入口」。
+                        //
+                        // **只给最后一轮**：`retryRun` 重试的是最近一次失败的那个 run，往上翻到
+                        // 一个更早的失败轮点它，重来的会是另一轮，而用户看不出这件事。
+                        turnIndex === turns.length - 1 &&
+                        failedRunId !== null &&
+                        !retryUnavailable &&
+                        runningRunId === null &&
+                        !streaming
+                          ? retryRun
+                          : undefined
+                      }
                     />
                   )}
                 </div>

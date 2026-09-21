@@ -201,6 +201,9 @@ export interface MediaNodeData {
    *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
    *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
   onVocalBackgroundSplit?: (id: string) => void;
+  /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
+   *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
+  onSceneSplit?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */

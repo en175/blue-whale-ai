@@ -53,7 +53,7 @@ export function fallbackErrorCode(type: string): string {
   if (type === "video") return ERROR_VIDEO_GENERATION_FAILED;
   if (type === "media_extract") return ERROR_MEDIA_EXTRACT_FAILED;
   if (type === "audio") return ERROR_AUDIO_GENERATION_FAILED;
-  // IKHA2I：人声分离失败无 stored_error 时兜到契约 1046（不落到图片生成的默认文案）。
+  // IKHA2I：人声分离失败无 stored_error 时兜到契约 1047（不落到图片生成的默认文案）。
   if (type === "vocal_split") return ERROR_VOCAL_SPLIT_FAILED;
   return ERROR_IMAGE_GENERATION_FAILED;
 }

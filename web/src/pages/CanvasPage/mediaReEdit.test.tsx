@@ -591,7 +591,9 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
       supported_durations: { min: 4, max: 12, step: 1 }, default_duration: 8,
       features: { reference_image: true, first_frame: true, last_frame: true, first_last_frame: true },
     }));
-    apiMocks.fetchGenerationModels.mockResolvedValueOnce(capable).mockResolvedValueOnce(capable).mockResolvedValueOnce(capable);
+    // 常驻实现（不再 once 队列）：画布页自身也读模型能力（连线/资产接纳/资产卡上限），
+    // 二次挂载后 once 值已被吃光会让面板退回无能力模型并误判冲突
+    apiMocks.fetchGenerationModels.mockResolvedValue(capable);
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'succeeded', progress: 100,
       asset: { id: 'a9', url: kind === 'image' ? 'http://img/out.png' : 'http://img/out.mp4', type: kind } });
     const handoff: GenHandoff = kind === 'image'

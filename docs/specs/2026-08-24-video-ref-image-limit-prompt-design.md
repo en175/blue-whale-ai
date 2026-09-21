@@ -1,5 +1,11 @@
 # 视频参考图超限前端提示 + 模型能力配置对齐设计
 
+> ⚠️ **历史记录（IKA72G 时期），键名已失效——勿照本文操作**。
+> 文中 `features.max_reference_images` 已在 2026-09-21（IKHEXG）并入 `image_reference_max`
+> 并从代码中删除；存量值由 `029_ikhexg_reference_key_rename` 迁移搬入。配置真值见
+> [生产模型能力数据更新清单](2026-09-14-ikfjjt-model-capability-production-data.md)。
+> 本文保留原样以记录当时「三个 2.0 视频模型配 9」的实际动作。
+
 - 日期：2026-08-24
 - 状态：待评审
 - 范围：web.master.xfai.cloud 视频生成入口（首页 ChatBox 视频tab + 画布 BottomDialog）在用户上传参考图超过对应模型限量时提示「减少图片」；同时把已接入的 2.0 视频模型 `features.max_reference_images` 配置对齐 Seedance 官方上限（9）。参考前序工单 IKA72G（后端参考图上限读模型能力配置）。

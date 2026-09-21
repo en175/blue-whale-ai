@@ -49,7 +49,10 @@ public enum GenerationMqRouteEnum {
     VIDEO_ENHANCE("generation-task", "video_enhance"),
 
     /** 人声背景分离（IKHA2C；契约 = backend/libs/contracts/vocal-split.ts）。 */
-    VOCAL_SPLIT("generation-task", "vocal_split");
+    VOCAL_SPLIT("generation-task", "vocal_split"),
+
+    /** 视频场景切分（IKH8BH，父规格 IKH86V；契约 = backend/libs/contracts/video-scene-split.ts）。 */
+    VIDEO_SCENE_SPLIT("generation-task", "video_scene_split");
 
     private final String topic;
 

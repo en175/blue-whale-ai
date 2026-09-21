@@ -40,7 +40,7 @@ import static org.mockito.Mockito.*;
  * VocalSplitJobProcessor 编排测试（IKHA2J；模板 MediaExtractJobProcessorErrorMappingTest）。
  * <p>
  * 覆盖：claim 语义、input 业务键兜底校验（scene / output_format 枚举）、凭证缺失分类、
- * submit 相（scene 出站映射提交 + 存 task_id + 续排 / §5 信号保留 / 归并 1046）、poll 相
+ * submit 相（scene 出站映射提交 + 存 task_id + 续排 / §5 信号保留 / 归并 1047）、poll 相
  * （processing 续排进度保持 / 轮询超限 / 瞬时错误重排 / 火山 failed 分类 + 上游原因透传）、
  * completed **逐轨转存与多轨资产回填**（二分法两轨 / 三分法三轨、轨序 = 契约 SCENE_TRACKS、
  * 缺任一轨整单失败、官方 duration / 回落源时长）、转存强依赖与瞬时判定。
@@ -181,7 +181,7 @@ class VocalSplitJobProcessorTest {
     // ========== 源素材 / 凭证 ==========
 
     @Test
-    @DisplayName("源素材不可用（图片）→ 1046 兜底 + 可读原因，不提交上游")
+    @DisplayName("源素材不可用（图片）→ 1047 兜底 + 可读原因，不提交上游")
     void sourceAssetNotMedia_providerFailed() {
         stubSubmitClaim(input("audio"));
         AssetEntity image = new AssetEntity();
@@ -278,7 +278,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit provider_failed → 归并 1046 兜底（无自动重试）")
+    @DisplayName("submit provider_failed → 归并 1047 兜底（无自动重试）")
     void submitProviderFailed_normalized() {
         stubSubmitClaim(input("audio"));
         stubSourceAsset("video");
@@ -292,7 +292,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit 超时（provider_timeout）→ 归并 1046（宁可不重试也不双跑，家族口径）")
+    @DisplayName("submit 超时（provider_timeout）→ 归并 1047（宁可不重试也不双跑，家族口径）")
     void submitTimeout_normalized() {
         stubSubmitClaim(input("audio"));
         stubSourceAsset("video");
@@ -325,7 +325,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 超限（pollCount>=720 ≈ 60 分钟窗口）→ 1046 轮询超时，不再续排")
+    @DisplayName("poll 超限（pollCount>=720 ≈ 60 分钟窗口）→ 1047 轮询超时，不再续排")
     void pollExceedsLimit_fails() {
         stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
@@ -356,7 +356,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1046 兜底")
+    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1047 兜底")
     void pollHardError_fails() {
         stubPollClaim(input("audio"), 3, 7);
         VocalSplitError notFound = new VocalSplitError(
@@ -372,7 +372,7 @@ class VocalSplitJobProcessorTest {
     // ========== poll 相：火山任务 failed（错误归并） ==========
 
     @Test
-    @DisplayName("poll failed → 1046 + 上游可读原因透传（前端投影）")
+    @DisplayName("poll failed → 1047 + 上游可读原因透传（前端投影）")
     void pollFailed_transportsUpstreamReason() {
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
@@ -403,7 +403,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed 无上游原因 → 1046 + 默认文案")
+    @DisplayName("poll failed 无上游原因 → 1047 + 默认文案")
     void pollFailedWithoutReason_fallsBackMessage() {
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
@@ -529,7 +529,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("completed 缺轨（drama 场景只回两轨）→ 1046 兜底整单失败，不发布不转存")
+    @DisplayName("completed 缺轨（drama 场景只回两轨）→ 1047 兜底整单失败，不发布不转存")
     void pollCompletedMissingTrack_fails() {
         stubPollClaim(input("drama"), 3, 7);
         // 三分法场景但 result 只带两轨（缺 sfx）
@@ -553,7 +553,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("TOS 未配置 → 1046（结果 URL 24h 失效，强依赖不降级直存）")
+    @DisplayName("TOS 未配置 → 1047（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VocalSplitJobProcessor noRelayProcessor = new VocalSplitJobProcessor(
                 stateMachine, new AssetSourceService(assetMapper),
@@ -574,7 +574,7 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("任一轨转存失败（背景轨下载 404）→ 1046 兜底整单失败，不发布")
+    @DisplayName("任一轨转存失败（背景轨下载 404）→ 1047 兜底整单失败，不发布")
     void relayFailsOnAnyTrack_fails() {
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))

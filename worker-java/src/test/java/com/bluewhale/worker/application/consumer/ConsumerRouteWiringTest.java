@@ -57,7 +57,8 @@ class ConsumerRouteWiringTest {
             GenerationMqRouteEnum.VIDEO,
             GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE,
             GenerationMqRouteEnum.VIDEO_ENHANCE,
-            GenerationMqRouteEnum.VOCAL_SPLIT);
+            GenerationMqRouteEnum.VOCAL_SPLIT,
+            GenerationMqRouteEnum.VIDEO_SCENE_SPLIT);
 
     /** 残留旧名的部署环境（修正六之前的 topic / tag 取值）。 */
     private static StandardEnvironment residualOverrideEnvironment() {
@@ -100,6 +101,9 @@ class ConsumerRouteWiringTest {
                         workerProps, clientConfig),
                 config.vocalSplitConsumer(
                         mock(com.bluewhale.worker.application.processor.VocalSplitJobProcessor.class),
+                        workerProps, clientConfig),
+                config.videoSceneSplitConsumer(
+                        mock(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class),
                         workerProps, clientConfig));
 
         assertThat(consumers).hasSize(ROUTES.size());

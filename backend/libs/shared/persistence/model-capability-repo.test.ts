@@ -121,7 +121,9 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(a.digest).toBe(b.digest);
   });
 
-  it("features 缺 max_reference_images 时兜底 10（与网关/ARK 上限对齐，IKA72G）", async () => {
+  // IKHEXG：`image_reference_max` 一把键服务三种生成，官方缺省按生成类型分叉——
+  // 图片/视频 10（网关 maxImageEditImages / 方舟 Seedream 复合编辑），音频 1（官方音频接口只收 1 张）。
+  it("features 缺 image_reference_max 时按行类型兜底：图片行 10", async () => {
     const { repo } = repoWith([
       buildRow({ features: { reference_image: true, watermark: true, quantity_max: 4 } }),
     ]);
@@ -129,15 +131,24 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [view] = await repo.listEnabledByType("image");
 
     expect(view.features.reference_image).toBe(true);
-    expect(view.features.max_reference_images).toBe(10);
+    expect(view.features.image_reference_max).toBe(10);
   });
 
-  it("显式配置 max_reference_images 时原样透出（不被兜底覆盖，IK6PA5）", async () => {
+  it("features 缺 image_reference_max 时按行类型兜底：音频行 1（IKHEXG）", async () => {
+    // 类型来自查询参数（listEnabledByType 的入参），不是行上的字段——归一按前者选缺省。
+    const { repo } = repoWith([buildRow({ features: { watermark: true } })]);
+
+    const [view] = await repo.listEnabledByType("audio");
+
+    expect(view.features.image_reference_max).toBe(1);
+  });
+
+  it("显式配置 image_reference_max 时原样透出（不被兜底覆盖，IK6PA5）", async () => {
     const { repo } = repoWith([
       buildRow({
         features: {
           reference_image: true,
-          max_reference_images: 10,
+          image_reference_max: 10,
           watermark: false,
           quantity_max: 4,
         },
@@ -146,17 +157,17 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
 
     const [view] = await repo.listEnabledByType("image");
 
-    expect(view.features.max_reference_images).toBe(10);
+    expect(view.features.image_reference_max).toBe(10);
   });
 
-  it("camelCase maxReferenceImages 同样被识别（IK6PA5）", async () => {
+  it("camelCase imageReferenceMax 同样被识别（IK6PA5）", async () => {
     const { repo } = repoWith([
-      buildRow({ features: { reference_image: true, maxReferenceImages: 6 } }),
+      buildRow({ features: { reference_image: true, imageReferenceMax: 6 } }),
     ]);
 
     const [view] = await repo.listEnabledByType("image");
 
-    expect(view.features.max_reference_images).toBe(6);
+    expect(view.features.image_reference_max).toBe(6);
   });
 
   it("features 为 NULL 时兜底 10 且 reference_image 为 false（IK6PA5 / IKA72G）", async () => {
@@ -165,7 +176,7 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [view] = await repo.listEnabledByType("image");
 
     expect(view.features.reference_image).toBe(false);
-    expect(view.features.max_reference_images).toBe(10);
+    expect(view.features.image_reference_max).toBe(10);
   });
 
   // IKESD6 / ADR-0085：i2i_model_name / max_prompt_length 读侧归一（snake+camel 双收，脏值降级 null）。

@@ -898,6 +898,111 @@ public class JobFinalizer {
         return true;
     }
 
+    /**
+     * 发布 video_scene_split 结果（IKH8BP，父规格 IKH86V，附录 C 触点⑤）。
+     * <p>
+     * 免费工具无结算联动，同 {@link #publishVideoEnhanceResult} 形态（守卫复用
+     * publishMediaExtractGuard），差异 = **一对多**：N 段切片逐段建 Asset（type='video' /
+     * source='generated'，duration_ms = 段时长；宽高为源 Asset 近似值——切片不改变分辨率），
+     * output_asset_ids 落全部段资产 id 数组（1 段与 N 段同构不特判）。
+     * <p>
+     * **段序 / 起止秒 / 段资产引用 / 总时长按契约 result 键跨进程回传**（generation_jobs 无
+     * result 列，家族承载位双通道）：终态日志 payload（入库承载，video_enhance 的
+     * resolution/fps 先例）+ status_changed 事件 payload 的 result 键（前端完成事件驱动
+     * 移除任务占位卡、按 result.segments[] 逐段扇出段卡，ADR-0108）。每段另发 asset.created
+     * 事件（家族形态；段卡素材地址 = 自有存储 url，不直连火山 24h 临时链接，规格故事 23）。
+     */
+    @Transactional
+    public boolean publishVideoSceneSplitResult(
+            com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("[video_scene_split] publishVideoSceneSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        // 逐段建 Asset（段序按官方 segments[] 返回顺序；切片不改变分辨率 → 宽高取源近似）
+        List<com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto.Segment> segments =
+                input.segments();
+        List<AssetEntity> assets = new java.util.ArrayList<>(segments.size());
+        List<String> assetIds = new java.util.ArrayList<>(segments.size());
+        // 契约 result 形态：{duration, segments[{segment_index, start_time, end_time, segment_asset_id}]}
+        List<Map<String, Object>> resultSegments = new java.util.ArrayList<>(segments.size());
+        for (com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto.Segment segment : segments) {
+            AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "video",
+                    segment.url(), segment.storageKey(), segment.mime(), segment.size(), segment.md5(),
+                    segment.width(), segment.height(),
+                    (int) Math.round((segment.endTimeSec() - segment.startTimeSec()) * 1000));
+            assetMapper.insert(asset);
+            assets.add(asset);
+            assetIds.add(asset.getId().toString());
+            Map<String, Object> resultSegment = new java.util.LinkedHashMap<>();
+            resultSegment.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SEGMENT_KEY_INDEX,
+                    segment.segmentIndex());
+            resultSegment.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SEGMENT_KEY_START_TIME,
+                    segment.startTimeSec());
+            resultSegment.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SEGMENT_KEY_END_TIME,
+                    segment.endTimeSec());
+            resultSegment.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SEGMENT_KEY_ASSET_ID,
+                    asset.getId().toString());
+            resultSegments.add(resultSegment);
+        }
+
+        // 数字数组形态（completeJob 多产物 toJson(Long 列表) 同构；media_extract 单产物 "[id]" 等价）
+        jobMapper.updateOutputAssetIds(jobIdLong,
+                toJson(assetIds.stream().map(Long::parseLong).toList()));
+
+        // 结果字段入库承载位：日志 payload 带契约 result 形态（段序/起止秒/段资产引用/总时长）
+        Map<String, Object> resultMeta = new java.util.LinkedHashMap<>();
+        resultMeta.put("asset_ids", assetIds);
+        resultMeta.put(
+                com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_DURATION,
+                input.durationSec() != null ? input.durationSec() : 0);
+        resultMeta.put(
+                com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_SEGMENTS,
+                resultSegments);
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "场景切分完成", resultMeta);
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        // 每段一条 asset.created（家族形态）+ 一条 status_changed（payload 带 result 供前端扇出）
+        if (job != null && job.getProjectId() != null) {
+            for (int i = 0; i < assets.size(); i++) {
+                AssetEntity asset = assets.get(i);
+                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                        Map.of("asset_id", asset.getId().toString(),
+                                "generation_job_id", job.getId().toString(),
+                                "type", asset.getType(),
+                                "access_url", asset.getUrl()));
+            }
+            Map<String, Object> resultPayload = new java.util.LinkedHashMap<>();
+            resultPayload.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_DURATION,
+                    input.durationSec() != null ? input.durationSec() : 0);
+            resultPayload.put(
+                    com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_SEGMENTS,
+                    resultSegments);
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", assetIds,
+                            "result", resultPayload));
+        }
+        return true;
+    }
+
     // ========== 内部工具 ==========
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,

@@ -173,7 +173,11 @@ describe("SceneCardRegenerationRequest contract", () => {
     ).toThrow(/首尾帧模式不能与普通参考素材混用/);
   });
 
-  it("拒绝超过 12 个普通参考素材", () => {
+  // IKHBDO：原先这里断言「参考素材最多 12 个」。契约层拿不到能力行，数量上限不能写死在这里——
+  // 判定下移到手握能力行的 scene-card-generation-repo（checkReferenceCountLimits）。
+  // 本用例保留原「超量参考」的输入形状，断言改为**契约层不再拦**（上限由能力行决定，
+  // 例如配了 30 的模型必须能提交 13 个）。
+  it("不再在契约层拦参考数量（上限由能力行在 repo 层判定）", () => {
     const references = Array.from({ length: 13 }, (_, index) => ({
       ...referenceAsset,
       mention_id: String(101 + index),
@@ -183,7 +187,7 @@ describe("SceneCardRegenerationRequest contract", () => {
         ...baseRequest,
         reference_assets: references,
       }),
-    ).toThrow(/参考素材最多 12 个/);
+    ).not.toThrow();
   });
 
   it("拒绝场景卡素材作为首帧（scene_card 无 asset 映射，不静默降级）", () => {

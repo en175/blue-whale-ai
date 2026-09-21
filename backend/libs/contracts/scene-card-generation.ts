@@ -36,7 +36,9 @@ export function validateVideoReferenceConfiguration(
     return "尾帧必须与首帧一起使用";
   if ((firstFrameCount > 0 || lastFrameCount > 0) && referenceCount > 0)
     return "首尾帧模式不能与普通参考素材混用";
-  if (referenceCount > 12) return "参考素材最多 12 个";
+  // IKHBDO：此处**不再有**「参考素材最多 12 个」——契约层拿不到能力行，数量上限必须由手握
+  // 能力行的那一层判定（scene-card-generation-repo.checkReferenceCountLimits，与接纳侧
+  // checkReferenceLimits 同源）。写死 12 会让「配了 30 的模型」在第 13 个素材就被拦掉。
 
   // scene_card 类素材无 asset 映射（resolveReferenceAssetsToFlat 解析不出 asset_id），
   // 作首/尾帧会被静默丢弃、worker 按无帧生成（AC#4 不静默降级）——其内容经投影进
