@@ -33,7 +33,11 @@ const mqRouteJava = readFileSync(
   "utf8",
 );
 
-/** 十三个入口 ↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
+/** 路由注册总数（IKHKMR）：与 EXPECTED_ROUTES 清单互锁的唯一计数源——只改清单不改此数
+ * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。 */
+const EXPECTED_ROUTE_COUNT = 13;
+
+/** 入口清单（项数须恒等于 EXPECTED_ROUTE_COUNT）↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
 const EXPECTED_ROUTES = [
   { entry: "VIDEO", tag: VIDEO_GENERATION_TAG },
   { entry: "IMAGE", tag: IMAGE_GENERATION_TAG },
@@ -51,13 +55,21 @@ const EXPECTED_ROUTES = [
 ] as const;
 
 describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java 源码文本，防漂移）", () => {
-  it("十三个入口逐项存在：topic = GENERATION_TASK_QUEUE，tag = TS 同名常量", () => {
+  it("EXPECTED_ROUTES 长度与显式计数互锁：只改清单不改计数（或反之）即红", () => {
+    // 计数单源：测试名与断言均引用 EXPECTED_ROUTE_COUNT，清单长度必须与它相等。
+    expect(
+      EXPECTED_ROUTES.length,
+      `EXPECTED_ROUTES 有 ${EXPECTED_ROUTES.length} 项，但 EXPECTED_ROUTE_COUNT 声明为 ${EXPECTED_ROUTE_COUNT}——清单与计数必须同步改`,
+    ).toBe(EXPECTED_ROUTE_COUNT);
+  });
+
+  it(`${EXPECTED_ROUTE_COUNT} 个入口逐项存在：topic = GENERATION_TASK_QUEUE，tag = TS 同名常量`, () => {
     for (const { entry, tag } of EXPECTED_ROUTES) {
       expect(mqRouteJava).toContain(`${entry}("${GENERATION_TASK_QUEUE}", "${tag}")`);
     }
   });
 
-  it("枚举常量表与 TS 十三个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）", () => {
+  it(`枚举常量表与 TS ${EXPECTED_ROUTE_COUNT} 个 tag 一一对应（多一个 / 少一个 / 任一侧换值都红）`, () => {
     // 形如 `    VIDEO("generation-task", "video"),`（末项以 `;` 收尾）。
     // 缩进放宽为 `\s*`：纯格式化改动不该红；下面那条 length 断言负责把「正则没匹配上」
     // 变成一句可读的失败，而不是 `expected [] to equal [7 items]` 这种查不出原因的报错。

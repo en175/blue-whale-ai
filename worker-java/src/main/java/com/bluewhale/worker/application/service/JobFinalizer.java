@@ -31,6 +31,10 @@ import java.util.Map;
  * <p>
  * 媒体差异 = payload 组装（asset 类型、单槽 vs 多槽、事件槽位语义）。第 5 类扩展触点：
  * 新增 publish/fail payload 组装策略（契约附录 C），不复制方法三元组。
+ * <p>
+ * IKHKMJ 同构收敛：单槽免费工具族 publish 收敛到 {@link #publishSingleAssetResult} 模板
+ * （公开方法 = 填参数薄委托），轮询型 fail 收敛到 {@link #failPollingToolJob}；新家族
+ * 接入不再整段复制骨架。
  */
 @Service
 public class JobFinalizer {
@@ -67,55 +71,25 @@ public class JobFinalizer {
 
     /**
      * 发布 media_extract 结果（media-extract-ops.ts:45-135）。
+     * <p>
+     * 单槽免费工具形态，走 {@link #publishSingleAssetResult} 模板；本方法仅填家族参数
+     * （type='audio'、duration 秒入 duration_ms、日志文案）。
      */
     @Transactional
     public boolean publishMediaExtractResult(
             String jobId, String projectId, String userId, String workerId, long fencingToken,
             String url, String storageKey, String mime, Long size, String md5, Double duration
     ) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(jobIdLong, workerId, fencingToken);
-        if (guardAffected != 1) {
-            log.warn("[media_extract] publishMediaExtractResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    jobId, workerId, fencingToken);
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, projectId, userId, "audio",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[media_extract] publishMediaExtractResult",
+                jobId, projectId, userId, workerId, fencingToken, "audio",
                 url, storageKey, mime, size, md5, null, null,
-                duration != null ? (int) Math.round(duration * 1000) : null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "音频已提取",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 两个事件都在 job.project_id 守卫内（media-extract-ops.ts:102 逐字：asset.created 与
-        // status_changed 同处 `if (job.project_id != null)`；与通用 createAsset 的恒发不同）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                duration != null ? (int) Math.round(duration * 1000) : null,
+                "音频已提取", null));
     }
 
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
-    //            publishMediaExtractGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
+    //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========
 
     /**
@@ -130,46 +104,14 @@ public class JobFinalizer {
     @Transactional
     public boolean publishAudioTrimResult(
             com.bluewhale.worker.domain.dto.PublishAudioTrimDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[audio_trim] publishAudioTrimResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "audio",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[audio_trim] publishAudioTrimResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "audio",
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
                 null, null,
-                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "音频已截取",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract 的 project_id 守卫形态；前端按 generation_job 轮询回填截取结果卡。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "音频已截取", null));
     }
 
     /**
@@ -179,40 +121,9 @@ public class JobFinalizer {
     @Transactional
     public boolean failAudioTrimJob(
             com.bluewhale.worker.domain.dto.FailAudioTrimDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        Map<String, Object> errorObj = new java.util.HashMap<>();
-        errorObj.put("code", input.code());
-        errorObj.put("message", input.message());
-        if (input.details() != null) {
-            errorObj.put("details", input.details());
-        }
-        String errorJson = toJson(errorObj);
-
-        int guardAffected = jobMapper.failMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken(), errorJson);
-        if (guardAffected != 1) {
-            log.warn("[audio_trim] failAudioTrimJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        insertLog(jobIdLong, JobStatusEnum.FAILED, input.code() + ": " + input.message(),
-                Map.of("code", input.code(), "message", input.message(),
-                        "details", input.details() != null ? input.details() : Map.of()));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "error", Map.of("code", input.code(), "message", input.message())));
-        }
-        return true;
+        return failPollingToolJob("[audio_trim] failAudioTrimJob",
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
     }
 
     /**
@@ -220,50 +131,18 @@ public class JobFinalizer {
      * <p>
      * 免费工具无结算联动，同 publishMediaExtractResult 形态（单槽单 asset、双事件），
      * 差异 = Asset type='image' / source='generated' 且带宽高（结果图 ImageIO 解析，
-     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageEnhanceResult(PublishImageEnhanceDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[image_enhance] publishImageEnhanceResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[image_enhance] publishImageEnhanceResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "image",
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
-                input.width(), input.height(), null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "高清放大完成",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract 的 project_id 守卫形态；前端按 input.target_node_id 回填目标高清卡（源卡不动）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.width(), input.height(), null,
+                "高清放大完成", null));
     }
 
     /**
@@ -271,50 +150,18 @@ public class JobFinalizer {
      * <p>
      * 免费工具无结算联动，同 publishImageEnhanceResult 形态（单槽单 asset、双事件），
      * Asset type='image' / source='generated' 且带宽高（结果图 ImageIO 解析，
-     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 解析失败静默 null，契约 §8 等价标准）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageEraseResult(PublishImageEraseDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[image_erase] publishImageEraseResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[image_erase] publishImageEraseResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "image",
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
-                input.width(), input.height(), null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "图片擦除完成",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract/enhance 的 project_id 守卫形态；前端按 input.target_node_id 回填擦除结果卡（源卡不动）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.width(), input.height(), null,
+                "图片擦除完成", null));
     }
 
     /**
@@ -323,50 +170,18 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），
      * Asset type='image' / source='generated' 且带宽高（优先取官方响应 result.image_width/
      * image_height，缺失时结果图 ImageIO 解析兜底，解析失败静默 null，契约 §8 等价标准）。
-     * 守卫复用 publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 守卫复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageCutoutResult(PublishImageCutoutDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[image_cutout] publishImageCutoutResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[image_cutout] publishImageCutoutResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "image",
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
-                input.width(), input.height(), null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "图片抠图完成",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract/enhance/erase 的 project_id 守卫形态；前端按 input.target_node_id 回填抠图结果卡（源卡不动）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.width(), input.height(), null,
+                "图片抠图完成", null));
     }
 
     /**
@@ -714,92 +529,27 @@ public class JobFinalizer {
     public boolean failMediaExtractJob(String jobId, String errorCode, String errorMessage,
                                        Map<String, Object> details,
                                        String workerId, long fencingToken) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        Map<String, Object> errorObj = new java.util.HashMap<>();
-        errorObj.put("code", errorCode);
-        errorObj.put("message", errorMessage);
-        if (details != null) {
-            errorObj.put("details", details);
-        }
-        String errorJson = toJson(errorObj);
-
-        int guardAffected = jobMapper.failMediaExtractGuard(
-                jobIdLong, workerId, fencingToken, errorJson);
-        if (guardAffected != 1) {
-            log.warn("[media_extract] failMediaExtractJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    jobId, workerId, fencingToken);
-            return false;
-        }
-
-        insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
-                Map.of("code", errorCode, "message", errorMessage,
-                        "details", details != null ? details : Map.of()));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)));
-        }
-        return true;
+        return failPollingToolJob("[media_extract] failMediaExtractJob",
+                jobId, errorCode, errorMessage, details, workerId, fencingToken);
     }
 
     /**
      * 发布 image_outpaint 结果（IKGOQW）。
      * <p>
      * 与 publishImageEnhanceResult 同构（免费工具无结算联动、单槽单 asset、双事件），
-     * Asset type='image' / source='generated'。守卫复用 publishMediaExtractGuard /
+     * Asset type='image' / source='generated'。守卫复用 publishResultGuard /
      * updateOutputAssetIds（两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishImageOutpaintResult(
             com.bluewhale.worker.domain.dto.PublishImageOutpaintDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[image_outpaint] publishImageOutpaintResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[image_outpaint] publishImageOutpaintResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "image",
                 input.url(), input.storageKey(), input.mime(), input.size(),
-                input.md5(), input.width(), input.height(), null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "智能扩图完成",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract / enhance 的 project_id 守卫形态；前端按 input.target_node_id
-        // 回填扩图结果卡（源卡不动）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.md5(), input.width(), input.height(), null,
+                "智能扩图完成", null));
     }
 
     /**
@@ -811,7 +561,7 @@ public class JobFinalizer {
      * 拼 JSON 数组（消费方按下标与轨类型双通道对位）。终态日志 payload 落契约
      * VocalSplitTrackResult 结构的轨数组（track_type / asset_id / url / duration）——这是
      * 轨类型在 DB 侧的唯一承载位（assets 无轨类型列，getStatus 轨投影经 output_asset_ids
-     * 顺序 + input.scene 轨序组装）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * 顺序 + input.scene 轨序组装）。守卫复用 publishResultGuard / updateOutputAssetIds
      * （两 SQL 均无 type 过滤，语义 = 免费工具终态收口）；每轨一条 asset.created +
      * 一条 status_changed（output_asset_ids = 全部轨资产，project_id 守卫内，extract 同款）。
      */
@@ -820,7 +570,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVocalSplitDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[vocal_split] publishVocalSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -886,53 +636,20 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），
      * 差异 = Asset type='video' 且带宽 durationSec（官方 result.duration 秒；宽高为源
      * Asset 近似值，官方不返回输出元数据，§8 静默 null 等价标准）。守卫复用
-     * publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishVideoSubtitleEraseResult(
             com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[video_subtitle_erase] publishVideoSubtitleEraseResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "video",
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[video_subtitle_erase] publishVideoSubtitleEraseResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video",
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
                 input.width(), input.height(),
-                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "视频去字幕完成",
-                Map.of("asset_ids", List.of(asset.getId().toString())));
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract/erase 的 project_id 守卫形态；前端按 input.target_node_id 回填去字幕
-        // 结果卡（源卡不动，结果卡可再次去字幕，§17.5）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "视频去字幕完成", null));
     }
 
     /**
@@ -941,68 +658,36 @@ public class JobFinalizer {
      * 免费工具无结算联动，同 publishVideoSubtitleEraseResult 形态（单槽单 asset、双事件），
      * 差异 = 宽高由 processor 按目标分辨率档位推导（官方不返回输出像素）、带宽
      * resolution / fps——assets 无对应列，两值落终态日志 payload（结果字段入库的承载位）。
-     * 守卫复用 publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 守卫复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
      * 语义 = 单槽免费工具终态收口）。
      */
     @Transactional
     public boolean publishVideoEnhanceResult(
             com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto input) {
-        Long jobIdLong = Long.parseLong(input.jobId());
-
-        int guardAffected = jobMapper.publishMediaExtractGuard(
-                jobIdLong, input.workerId(), input.fencingToken());
-        if (guardAffected != 1) {
-            log.warn("[video_enhance] publishVideoEnhanceResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
-                    input.jobId(), input.workerId(), input.fencingToken());
-            return false;
-        }
-
-        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "video",
-                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
-                input.width(), input.height(),
-                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null);
-        assetMapper.insert(asset);
-
-        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
-
-        // 结果字段入库：assets 承载 url/宽高/时长；resolution 档位与 fps（assets 无列）落日志 payload
-        java.util.Map<String, Object> resultMeta = new java.util.HashMap<>();
-        resultMeta.put("asset_ids", List.of(asset.getId().toString()));
+        // 结果字段入库：assets 承载 url/宽高/时长；resolution 档位与 fps（assets 无列）落日志
+        // payload（结果字段入库的承载位），经模板 extraLogPayload 合并（键序 resolution→fps）。
+        java.util.Map<String, Object> extraLogPayload = new java.util.LinkedHashMap<>();
         if (input.resolution() != null) {
-            resultMeta.put("resolution", input.resolution());
+            extraLogPayload.put("resolution", input.resolution());
         }
         if (input.fps() != null) {
-            resultMeta.put("fps", input.fps());
+            extraLogPayload.put("fps", input.fps());
         }
-        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "视频 HD 高清完成", resultMeta);
-
-        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // 双事件同 extract/erase 的 project_id 守卫形态；前端按 input.target_node_id 回填
-        // HD 高清结果卡（源卡不动，ADR-0105）。
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                    Map.of("asset_id", asset.getId().toString(),
-                            "generation_job_id", job.getId().toString(),
-                            "type", asset.getType(),
-                            "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "type", job.getType(),
-                            "source", job.getSource(),
-                            "status", job.getStatus(),
-                            "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
-        }
-        return true;
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[video_enhance] publishVideoEnhanceResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                input.width(), input.height(),
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "视频 HD 高清完成", extraLogPayload));
     }
 
     /**
      * 发布 video_scene_split 结果（IKH8BP，父规格 IKH86V，附录 C 触点⑤）。
      * <p>
      * 免费工具无结算联动，同 {@link #publishVideoEnhanceResult} 形态（守卫复用
-     * publishMediaExtractGuard），差异 = **一对多**：N 段切片逐段建 Asset（type='video' /
+     * publishResultGuard），差异 = **一对多**：N 段切片逐段建 Asset（type='video' /
      * source='generated'，duration_ms = 段时长；宽高为源 Asset 近似值——切片不改变分辨率），
      * output_asset_ids 落全部段资产 id 数组（1 段与 N 段同构不特判）。
      * <p>
@@ -1017,7 +702,7 @@ public class JobFinalizer {
             com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
 
-        int guardAffected = jobMapper.publishMediaExtractGuard(
+        int guardAffected = jobMapper.publishResultGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
             log.warn("[video_scene_split] publishVideoSceneSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
@@ -1099,6 +784,132 @@ public class JobFinalizer {
                             "progress", job.getProgress(),
                             "output_asset_ids", assetIds,
                             "result", resultPayload));
+        }
+        return true;
+    }
+
+    // ========== 家族模板（IKHKMJ 同构收敛） ==========
+    // 单槽免费工具 publish（8 家族）与轮询型免费工具 fail（media_extract / audio_trim，
+    // 及复用 failMediaExtractJob 守卫的 vocal_split）的骨架逐字同构，差异全为数据参数。
+    // 新免费工具家族接入 = publish DTO + 下方模板薄委托（填 tag / asset type / 时长换算 /
+    // 日志文案 / 附加日志键）；失败侧零新增（按骨架复用 failJob / failVideoJob /
+    // failMediaExtractJob，守卫 SQL 无 type 过滤）。多槽/带槽语义（completeJob / failJob /
+    // failVideoJob / publishVideoResult / publishVocalSplitResult /
+    // publishVideoSceneSplitResult）不走模板——槽位与摘要同步的差异实质大于同构。
+
+    /**
+     * 单槽免费工具发布模板：守卫 CAS → 建 asset → 回写 output_asset_ids → 终态日志 →
+     * project_id 守卫内双事件（asset.created + status_changed）。
+     * <p>
+     * 守卫复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 语义 = 单槽免费工具终态收口）。两个事件都在 job.project_id 守卫内
+     * （media-extract-ops.ts:102 逐字：asset.created 与 status_changed 同处
+     * {@code if (job.project_id != null)}；与通用 createAsset 的恒发不同）。
+     * <p>
+     * 日志 payload = asset_ids + extraLogPayload（video_enhance 的 resolution/fps 先例，
+     * 键序由调用方构造 extraLogPayload 时决定；null = 无附加键）。
+     */
+    private boolean publishSingleAssetResult(SingleAssetPublish p) {
+        Long jobIdLong = Long.parseLong(p.jobId());
+
+        int guardAffected = jobMapper.publishResultGuard(
+                jobIdLong, p.workerId(), p.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("{} 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    p.logTag(), p.jobId(), p.workerId(), p.fencingToken());
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, p.projectId(), p.userId(), p.assetType(),
+                p.url(), p.storageKey(), p.mime(), p.size(), p.md5(),
+                p.width(), p.height(), p.durationMs());
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        Map<String, Object> logPayload = new java.util.HashMap<>();
+        logPayload.put("asset_ids", List.of(asset.getId().toString()));
+        if (p.extraLogPayload() != null) {
+            logPayload.putAll(p.extraLogPayload());
+        }
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, p.successMessage(), logPayload);
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+        return true;
+    }
+
+    /**
+     * 单槽免费工具发布模板的参数束（家族间唯一差异即此束的字段值，非 per-family 配置）。
+     */
+    private record SingleAssetPublish(
+            /** 守卫 warn 日志前缀（"[family] methodName"，逐字保留家族可观测性）。 */
+            String logTag,
+            String jobId, String projectId, String userId, String workerId, long fencingToken,
+            /** Asset type：audio / image / video。 */
+            String assetType,
+            String url, String storageKey, String mime, Long size, String md5,
+            Integer width, Integer height, Integer durationMs,
+            String successMessage,
+            /** 终态日志附加键值（可 null）；结果字段入库的承载位先例。 */
+            Map<String, Object> extraLogPayload
+    ) {}
+
+    /**
+     * 轮询型免费工具失败模板：failMediaExtractGuard（SET 清 next_action_at + next_poll_at）
+     * → 终态日志 → project_id 守卫内单条 status_changed。无槽位语义、无摘要同步，
+     * details.raw 透传原始原因。守卫 SQL 无 type 过滤，免费工具族跨家族复用。
+     */
+    private boolean failPollingToolJob(String logTag, String jobId, String errorCode,
+                                       String errorMessage, Map<String, Object> details,
+                                       String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        String errorJson = toJson(errorObj);
+
+        int guardAffected = jobMapper.failMediaExtractGuard(
+                jobIdLong, workerId, fencingToken, errorJson);
+        if (guardAffected != 1) {
+            log.warn("{} 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    logTag, jobId, workerId, fencingToken);
+            return false;
+        }
+
+        insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
         }
         return true;
     }

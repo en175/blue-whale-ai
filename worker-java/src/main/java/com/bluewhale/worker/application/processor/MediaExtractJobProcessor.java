@@ -34,9 +34,9 @@ import java.util.Set;
  * <ol>
  *   <li>claimMediaExtract（富投影：providerTaskId / pollCount / progress，§18 冻结）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（带 output_format，
- *       返 task_id）→ markVideoSubmitted（存 provider_task_id + 释放租约 + next+5s）→
+ *       返 task_id）→ markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→
  *       scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排（超限 1044）；failed → 分类终态（§18.4）；completed → **立即下载转存自家 TOS
  *       （火山 audio_url 仅 24h 有效）** → 发布音频 Asset（type=audio）→ 终态 succeeded</li>
  * </ol>
@@ -59,8 +59,8 @@ import java.util.Set;
  *       上游可读原因随 message 透传前端投影</li>
  * </ul>
  * <p>
- * 进度口径对齐去字幕：markVideoSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleVideoPoll
- * 保持不倒退、publishMediaExtractGuard 终态 progress=100；旧 ffmpeg 链路的
+ * 进度口径对齐去字幕：markProviderSubmitted 落 progress=1（SQL 侧）、轮询 rescheduleProviderPoll
+ * 保持不倒退、publishResultGuard 终态 progress=100；旧 ffmpeg 链路的
  * updateMediaExtractProgress 心跳（下载带 21-90 映射）不再使用。
  */
 @Component
@@ -176,7 +176,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
     // ========== submit 相 ==========
 
     /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交（带 output_format）→ markVideoSubmitted →
+     * 提交相：解析冻结 input + 源视频 → 网关提交（带 output_format）→ markProviderSubmitted →
      * 续排轮询。
      */
     private void submitPhase(ClaimedMediaExtractJobDto claim, String providerToken) {
@@ -213,9 +213,9 @@ public class MediaExtractJobProcessor implements JobProcessor {
         log.info("[media_extract] 上游已提交 jobId={} providerTaskId={} format={}",
                 claim.id(), taskId, outputFormat);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
         //    SQL 无 type 过滤，media_extract 直接复用）
-        boolean updated = stateMachine.markVideoSubmitted(
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), MEDIA_EXTRACT_POLL_INTERVAL_MS);
@@ -236,7 +236,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[media_extract] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), MEDIA_EXTRACT_POLL_INTERVAL_MS);
@@ -253,7 +253,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
                         "音频提取轮询超时（超过 " + MAX_MEDIA_EXTRACT_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), MEDIA_EXTRACT_POLL_INTERVAL_MS);

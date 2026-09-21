@@ -308,9 +308,9 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
-        /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
+        /** IKBBXH：轮询次数（rescheduleProviderPoll 累计），供轮询上限判定。 */
         pollCount: Number(candidate.poll_count ?? 0),
-        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleProviderPoll 落库用）。 */
         progress: Number(candidate.progress ?? 0),
         // IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
         // candidate 行已含 retry_of_job_id（findFirst 全行返回）——非 retry job 零额外查询；
@@ -633,9 +633,9 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
-        /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
+        /** IKBBXH：轮询次数（rescheduleProviderPoll 累计），供轮询上限判定。 */
         pollCount: Number(candidate.poll_count ?? 0),
-        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleProviderPoll 落库用）。 */
         progress: Number(candidate.progress ?? 0),
         // IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
         // candidate 行已含 retry_of_job_id（findFirst 全行返回）——非 retry job 零额外查询；

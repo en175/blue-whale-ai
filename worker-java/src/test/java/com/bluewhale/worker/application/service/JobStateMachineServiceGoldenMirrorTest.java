@@ -53,7 +53,7 @@ import static org.mockito.Mockito.*;
  * 延迟用例（刀① 覆盖）：
  * - G01-G04：claimNextJob/claimJobById 通用模式（video/image 路径）
  * - G07：claimNextJob catch-swallow（TS-only，by-id 变体无 catch 按契约 §3.1 不对称）
- * - G08-G11：markVideoSubmitted/rescheduleVideoPoll（video 路径）
+ * - G08-G11：markProviderSubmitted/rescheduleProviderPoll（video 路径）
  * - G12-G13：cancelVideoBeforeDispatch（video 路径）
  * - G14-G16：requeueImageJobForRetry（image 路径）
  * - G17：completeJob（通用模式，publishMediaExtractResult 已覆盖事务模式）
@@ -271,7 +271,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @DisplayName("publishMediaExtractResult: happy path with asset + logs + events")
     void publishMediaExtractResult_happyPath() {
         // given
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
@@ -319,7 +319,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishMediaExtractResult: stale token → false")
     void publishMediaExtractResult_staleToken() {
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
 
         PublishMediaExtractDto input = new PublishMediaExtractDto(
                 "300", "42", "9", "worker-1", 5L,
@@ -435,7 +435,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @DisplayName("publishAudioTrimResult: happy path with asset + logs + events（duration 取官方秒换算 ms）")
     void publishAudioTrimResult_happyPath() {
         // given
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
@@ -484,7 +484,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishAudioTrimResult: stale token → false")
     void publishAudioTrimResult_staleToken() {
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
 
         com.bluewhale.worker.domain.dto.PublishAudioTrimDto input =
                 new com.bluewhale.worker.domain.dto.PublishAudioTrimDto(
@@ -1113,7 +1113,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @DisplayName("publishVideoSceneSplitResult: 多段资产落库 + 契约 result 跨进程回传（IKH8BP）")
     void publishVideoSceneSplitResult_happyPath() {
         // given
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
 
         final long[] seq = {900L};
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
@@ -1184,7 +1184,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishVideoSceneSplitResult: stale token → false（无段资产落库）")
     void publishVideoSceneSplitResult_staleToken() {
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
 
         PublishVideoSceneSplitDto input = new PublishVideoSceneSplitDto(
                 "300", "42", "9", "worker-1", 5L, 95.0,

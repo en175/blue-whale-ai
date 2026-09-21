@@ -38,7 +38,7 @@ import static org.mockito.Mockito.*;
 /**
  * VideoSubtitleEraseJobProcessor 单测（迁移契约 §17 / IKGZ81）。
  * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markVideoSubmitted + scheduleNext / poll
+ * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
  * processing 续排 / 轮询超限 / completed 立即转存发布 / failed 归 1043 + 上游原因透传）、
  * 四种请求形态的 submit 参数（无框/有框 × subtitle_smart/text_full，出站 JSON 映射在
  * 客户端测试钉）、input 业务键兜底校验、凭证缺失分类、§5 信号保留与兜底归并、瞬时轮询
@@ -219,20 +219,20 @@ class VideoSubtitleEraseJobProcessorTest {
     // ========== submit 相：四种请求形态参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
-    @DisplayName("无框 subtitle_smart：submit 传空框列表 → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("无框 subtitle_smart：submit 传空框列表 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitNoBoxesSubtitleSmart() {
         stubSubmitClaim(input("subtitle_smart", List.of()));
         stubSourceAsset();
         when(subtitleEraseClient.submit(eq("sk-frozen-token"), eq("https://example.com/src.mp4"),
                 eq("subtitle_smart"), anyList())).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(subtitleEraseClient).submit(eq("sk-frozen-token"), eq("https://example.com/src.mp4"),
                 eq("subtitle_smart"), eq(List.of()));
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoSubtitleEraseJobProcessor.SUBTITLE_ERASE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -246,7 +246,7 @@ class VideoSubtitleEraseJobProcessorTest {
         stubSourceAsset();
         when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(true);
 
         processor.handle("100");
@@ -264,7 +264,7 @@ class VideoSubtitleEraseJobProcessorTest {
         stubSourceAsset();
         when(subtitleEraseClient.submit(anyString(), anyString(), eq("text_full"), anyList()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(true);
 
         processor.handle("100");
@@ -282,7 +282,7 @@ class VideoSubtitleEraseJobProcessorTest {
         stubSourceAsset();
         when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(true);
 
         processor.handle("100");
@@ -292,13 +292,13 @@ class VideoSubtitleEraseJobProcessorTest {
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input("subtitle_smart", List.of()));
         stubSourceAsset();
         when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -368,17 +368,17 @@ class VideoSubtitleEraseJobProcessorTest {
     // ========== poll 相：状态机 ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll + scheduleNext(5s)")
+    @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(input("subtitle_smart", List.of()), 3);
         when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new SubtitleEraseTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSubtitleEraseJobProcessor.SUBTITLE_ERASE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -395,7 +395,7 @@ class VideoSubtitleEraseJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -406,12 +406,12 @@ class VideoSubtitleEraseJobProcessorTest {
         when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 去字幕任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoSubtitleEraseJobProcessor.SUBTITLE_ERASE_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

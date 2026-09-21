@@ -204,14 +204,14 @@ class VocalSplitJobProcessorTest {
         stubSourceAsset("audio");
         when(separateVoiceClient.submit(eq("sk-frozen-token"), eq("https://example.com/src.mp4"),
                 eq(false), eq("music"), eq("aac"))).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(separateVoiceClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 false, "music", "aac");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
     }
 
     @Test
@@ -229,13 +229,13 @@ class VocalSplitJobProcessorTest {
     // ========== submit 相：提交成功 + 错误归并（无自动重试） ==========
 
     @Test
-    @DisplayName("提交成功：submit 带产品小写 scene + output_format → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("提交成功：submit 带产品小写 scene + output_format → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitSuccess_marksAndSchedules() {
         stubSubmitClaim(input("drama"));
         stubSourceAsset("video");
         when(separateVoiceClient.submit(eq("sk-frozen-token"), eq("https://example.com/src.mp4"),
                 eq(true), eq("drama"), eq("aac"))).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
@@ -243,19 +243,19 @@ class VocalSplitJobProcessorTest {
         // 出站 scene 是产品小写键（客户端内经契约 SCENE_UPSTREAM_MAP 换算官方枚举）
         verify(separateVoiceClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 true, "drama", "aac");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVocalSplitJob(any());
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input("audio"));
         stubSourceAsset("video");
         when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -309,17 +309,17 @@ class VocalSplitJobProcessorTest {
     // ========== poll 相：状态机 + 进度口径（对齐家族） ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll(进度保持不倒退) + scheduleNext(5s)")
+    @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new SeparateVoiceTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 7);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVocalSplitJob(any());
     }
@@ -334,7 +334,7 @@ class VocalSplitJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -345,12 +345,12 @@ class VocalSplitJobProcessorTest {
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 人声背景分离任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 7);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVocalSplitJob(any());
     }

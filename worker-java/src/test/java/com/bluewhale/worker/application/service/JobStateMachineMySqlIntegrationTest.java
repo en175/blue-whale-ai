@@ -459,11 +459,11 @@ class JobStateMachineMySqlIntegrationTest {
     class FenceGuardTests {
 
         @Test
-        @DisplayName("G08: markVideoSubmitted 用 stale token → false，DB 不变")
-        void markVideoSubmitted_staleToken_false() {
+        @DisplayName("G08: markProviderSubmitted 用 stale token → false，DB 不变")
+        void markProviderSubmitted_staleToken_false() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            boolean result = service.markVideoSubmitted(
+            boolean result = service.markProviderSubmitted(
                     String.valueOf(id), "worker-1", 3L /* stale */, "task-1");
 
             assertThat(result).isFalse();
@@ -473,11 +473,11 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("G11: rescheduleVideoPoll 用错误 lease_owner → false")
-        void rescheduleVideoPoll_wrongOwner_false() {
+        @DisplayName("G11: rescheduleProviderPoll 用错误 lease_owner → false")
+        void rescheduleProviderPoll_wrongOwner_false() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
-            boolean result = service.rescheduleVideoPoll(
+            boolean result = service.rescheduleProviderPoll(
                     String.valueOf(id), "worker-2" /* wrong */, 5L, 42);
 
             assertThat(result).isFalse();
@@ -784,12 +784,12 @@ class JobStateMachineMySqlIntegrationTest {
     class VideoPathTests {
 
         @Test
-        @DisplayName("G71: markVideoSubmitted → provider='new-api', lease 释放, next≈now+5s")
-        void markVideoSubmitted_happy() {
+        @DisplayName("G71: markProviderSubmitted → provider='new-api', lease 释放, next≈now+5s")
+        void markProviderSubmitted_happy() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
 
             LocalDateTime before = WorkerClock.now();
-            boolean ok = service.markVideoSubmitted(
+            boolean ok = service.markProviderSubmitted(
                     String.valueOf(id), "worker-1", 5L, "provider-task-1");
             LocalDateTime after = WorkerClock.now();
 
@@ -809,12 +809,12 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("G09: rescheduleVideoPoll → poll_count+1, progress 写入, lease 释放")
-        void rescheduleVideoPoll_happy() {
+        @DisplayName("G09: rescheduleProviderPoll → poll_count+1, progress 写入, lease 释放")
+        void rescheduleProviderPoll_happy() {
             long id = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
             jdbc.update("UPDATE generation_jobs SET poll_count=3 WHERE id=?", id);
 
-            boolean ok = service.rescheduleVideoPoll(
+            boolean ok = service.rescheduleProviderPoll(
                     String.valueOf(id), "worker-1", 5L, 42);
 
             assertThat(ok).isTrue();
@@ -827,14 +827,14 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("G10: rescheduleVideoPoll 钳制 150→99 与 -5→0")
-        void rescheduleVideoPoll_clamp() {
+        @DisplayName("G10: rescheduleProviderPoll 钳制 150→99 与 -5→0")
+        void rescheduleProviderPoll_clamp() {
             long id1 = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
-            service.rescheduleVideoPoll(String.valueOf(id1), "worker-1", 5L, 150);
+            service.rescheduleProviderPoll(String.valueOf(id1), "worker-1", 5L, 150);
             assertThat(readJob(id1).getProgress()).isEqualTo(99);
 
             long id2 = seedClaimedJob(9L, "video", "bottom_dock", "worker-1", 5L);
-            service.rescheduleVideoPoll(String.valueOf(id2), "worker-1", 5L, -5);
+            service.rescheduleProviderPoll(String.valueOf(id2), "worker-1", 5L, -5);
             assertThat(readJob(id2).getProgress()).isEqualTo(0);
         }
 

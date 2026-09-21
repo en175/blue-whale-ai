@@ -78,7 +78,11 @@ import {
   type AudioTrimIdentity,
 } from './audioTrim';
 import type { AudioTrimSelection } from './audioTrimGeometry';
-import { defaultAudioTrimOutputFormat, buildAudioTrimTimeParams } from '@lib/contracts/audio-trim';
+import {
+  buildAudioTrimInput,
+  defaultAudioTrimOutputFormat,
+  type AudioTrimInput,
+} from '@lib/contracts/audio-trim';
 import AudioTrimBar from './components/AudioTrimBar';
 import {
   VOCAL_SPLIT_DEFAULT_FORMAT,
@@ -4305,7 +4309,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
-          onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
+        onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
@@ -4349,7 +4353,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
-          onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
+        onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -4408,7 +4412,7 @@ export default function CanvasPage() {
         onVideoEnhance: (id: string) => actionsRef.current.videoEnhance(id),
         onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
-          onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
+        onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -6154,7 +6158,7 @@ export default function CanvasPage() {
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
-          onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
+        onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onDownload: (id: string) => actionsRef.current.download(id),
@@ -8314,7 +8318,8 @@ export default function CanvasPage() {
   };
 
   /** 截取任务发送核心（先例 startAudioVideoSplitJob 同构）：按当前选区与所选格式 POST
-   *  audio-trims（贴边省略与两位小数经契约 buildAudioTrimTimeParams 收口）；创建成功后先退
+   *  audio-trims（payload 形态 = 契约 AudioTrimInput，由契约构造 buildAudioTrimInput 收口
+   *  贴边省略与两位小数）；创建成功后先退
    *  编辑态再在源音频卡右侧 +60px 建截取占位卡（node id = audio-trim-{job_id}，展示名
    *  「源名(截取).{格式}」；带 audioTrim 身份——lastInput 供失败重试原样重发）、拉来源边
    *  （origin=audio-trim，参考推导跳过，源音频不占参考位防参考污染）、启动轮询
@@ -8322,13 +8327,7 @@ export default function CanvasPage() {
    *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。 */
   const startAudioTrimJob = async (
     sourceNodeId: string,
-    payload: {
-      source_asset_id: string;
-      start_time?: number;
-      end_time?: number;
-      output_format: AudioTrimFormat;
-    },
-    timeParams: { start_time?: number; end_time?: number },
+    payload: AudioTrimInput,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法截取');
@@ -8348,7 +8347,7 @@ export default function CanvasPage() {
         buildAudioTrimPlaceholderNode({
           jobId: created.job_id,
           outputFormat: payload.output_format,
-          timeParams,
+          timeParams: { start_time: payload.start_time, end_time: payload.end_time },
           sourceAssetId: payload.source_asset_id,
           source: node,
         }) as Node,
@@ -8512,21 +8511,16 @@ export default function CanvasPage() {
       showToast('warn', '音频时长缺失，无法截取');
       return false;
     }
-    // 贴边省略与两位小数（契约纯函数，口径只此一份）：判定在全精度、量化在判定后
-    const timeParams = buildAudioTrimTimeParams({
-      start: selection.start,
-      end: selection.end,
-      sourceDuration,
-    });
     setAudioTrimSubmitting(true);
+    // 贴边省略与两位小数在契约构造内收口（buildAudioTrimTimeParams 口径只此一份）：
+    // 判定在全精度、量化在判定后
     void startAudioTrimJob(
       nodeId,
-      {
-        source_asset_id: String(sourceAssetId),
-        ...timeParams,
-        output_format: audioTrimFormat,
-      },
-      timeParams,
+      buildAudioTrimInput({
+        sourceAssetId: String(sourceAssetId),
+        timeRange: { start: selection.start, end: selection.end, sourceDuration },
+        outputFormat: audioTrimFormat,
+      }),
     ).finally(() => setAudioTrimSubmitting(false));
     return true;
   };

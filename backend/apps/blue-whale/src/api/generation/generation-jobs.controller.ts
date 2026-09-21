@@ -16,7 +16,7 @@ import {
   enqueueAudioGenerationJob,
   enqueueImageGenerationJob,
   enqueueVideoGenerationJob,
-} from "@lib/shared/generation/video-queue.js";
+} from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";

@@ -4,27 +4,17 @@ import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.SocketTimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
- * new-api 网关 MediaKit 视频去字幕客户端（迁移契约 §17 / IKGZ81；以 NewApiMediaKitCutoutClient
- * 为模板，差异 = **家族内首个异步任务**：提交返 task_id + 查询端点轮询取结果，区别于
- * 高清/擦除/抠图的单次同步路由）。
+ * new-api 网关 MediaKit 视频去字幕客户端（迁移契约 §17 / IKGZ81；**家族内首个异步任务**：
+ * 提交返 task_id + 查询端点轮询取结果，区别于高清/擦除/抠图的单次同步路由。
+ * HTTP 骨架自 IKHKMK 起收敛入 {@link NewApiMediaKitAsyncTaskClient}，本类只保留
+ * 契约枚举校验、出站 payload 构造与 completed 结果解析）。
  * <p>
  * 端点（网关**对客**路由；网关内部转发火山上游 POST /api/v1/tools/erase-video-subtitle-pro，
  * 参数名与响应形状以火山官方 PDF「提交字幕擦除（精细化版）任务 API」为准）：
@@ -59,11 +49,7 @@ import java.util.UUID;
  * 复用），供 processor 按视频骨架 isTransientPollError 语义判定瞬时重排。
  */
 @Component
-public class NewApiMediaKitSubtitleEraseClient {
-
-    private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitSubtitleEraseClient.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final MediaType JSON_TYPE = MediaType.get("application/json");
+public class NewApiMediaKitSubtitleEraseClient extends NewApiMediaKitAsyncTaskClient {
 
     /** 网关异步提交路由路径（对客；网关按路径末段决定工具，见类注释）。 */
     static final String SUBMIT_PATH = "/v1/mediakit/erase-video-subtitle-pro";
@@ -75,25 +61,38 @@ public class NewApiMediaKitSubtitleEraseClient {
     /** 对客模型名（§17.1：网关渠道路由 + model_price 配 0 免费口径）。 */
     static final String MODEL = "mediakit-erase-video-subtitle-pro";
 
-    /** submit 超时 30s（异步提交秒级入队，取视频 submit 同窗口）。 */
-    private static final int SUBMIT_TIMEOUT_MS = 30_000;
-
-    /** poll 超时 10s（视频轮询同窗口）。 */
-    private static final int POLL_TIMEOUT_MS = 10_000;
-
-    private final OkHttpClient submitClient;
-    private final OkHttpClient pollClient;
-    private final String baseUrl;
-
     public NewApiMediaKitSubtitleEraseClient() {
         this(System.getenv("NEW_API_BASE_URL"));
     }
 
     /** 测试用构造器：注入 base URL。 */
     NewApiMediaKitSubtitleEraseClient(String baseUrl) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
-        this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
-        this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
+        super(baseUrl);
+    }
+
+    @Override
+    protected String submitPath() {
+        return SUBMIT_PATH;
+    }
+
+    @Override
+    protected String pollPathPrefix() {
+        return POLL_PATH_PREFIX;
+    }
+
+    @Override
+    protected String taskLabel() {
+        return "去字幕";
+    }
+
+    @Override
+    protected String fallbackCode() {
+        return VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED;
+    }
+
+    @Override
+    protected RuntimeException error(String code, String message) {
+        return new VideoSubtitleEraseError(code, message);
     }
 
     /**
@@ -108,12 +107,10 @@ public class NewApiMediaKitSubtitleEraseClient {
      */
     public String submit(String token, String videoUrl, String detectMode,
                          List<Map<String, Object>> eraseBoxes) {
-        String traceId = UUID.randomUUID().toString();
-
         String mode = VideoSubtitleEraseContract.MODE.get(detectMode);
         if (mode == null) {
             // processor 已按契约枚举校验，此处兜底防御（retry 冻结快照可能带历史脏值）
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_INVALID_INPUT,
+            throw error(GenerationError.ERROR_INVALID_INPUT,
                     "去字幕检测模式非法: " + detectMode);
         }
 
@@ -127,78 +124,7 @@ public class NewApiMediaKitSubtitleEraseClient {
         if (eraseBoxes != null && !eraseBoxes.isEmpty()) {
             payload.put("erase_ratio_location", eraseBoxes);
         }
-
-        String bodyJson;
-        try {
-            bodyJson = JSON.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(
-                    VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED, "请求序列化失败");
-        }
-
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + SUBMIT_PATH)
-                .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Content-Type", "application/json");
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = submitClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            // 提交超时：上游可能已受理但未拿到 task_id——归终态不重试（宁可不重试也不双跑，
-            // 同步家族口径），由 processor 归并兜底码
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 去字幕提交超时");
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 去字幕提交失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // 网关对 success=false / 未配价 / 缺渠道返 400 且不扣费——
-                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                String reason = extractUpstreamMessage(rawText);
-                String message = "去字幕任务提交失败: HTTP " + response.code();
-                if (!reason.isEmpty()) {
-                    message += " " + reason;
-                } else {
-                    message += " body=" + truncate(rawText);
-                }
-                throw new VideoSubtitleEraseError(code, message);
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-
-            JsonNode errorNode = parsed.get("error");
-            if (errorNode != null && errorNode.has("message")) {
-                String errText = errorNode.get("message").asText();
-                String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
-                throw new VideoSubtitleEraseError(code, "MediaKit 去字幕提交业务失败: " + truncate(errText));
-            }
-
-            // data 解包宽容（网关可能包 data 层，视频客户端同款）
-            JsonNode data = unwrapData(parsed);
-            String taskId = textOrNull(data, "task_id");
-            if (taskId == null || taskId.isEmpty()) {
-                throw new VideoSubtitleEraseError(
-                        VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
-                        "MediaKit 去字幕提交响应缺少 task_id");
-            }
-            return taskId;
-        } catch (VideoSubtitleEraseError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(
-                    VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
-                    "MediaKit 去字幕提交响应读取失败: " + e.getMessage());
-        }
+        return executeSubmit(token, payload);
     }
 
     /**
@@ -211,131 +137,26 @@ public class NewApiMediaKitSubtitleEraseClient {
      * @throws VideoSubtitleEraseError 网络 / HTTP / 解析错误（瞬时语义由 cause 携带，processor 判定）
      */
     public SubtitleEraseTaskObservation poll(String token, String taskId) {
-        String traceId = UUID.randomUUID().toString();
+        PollBody body = executePoll(token, taskId);
+        String normalized = normalizedStatus(body);
 
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(baseUrl + POLL_PATH_PREFIX + encodePath(taskId))
-                .get();
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = pollClient.newCall(request).execute();
-        } catch (SocketTimeoutException e) {
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 去字幕任务查询超时");
-        } catch (java.net.ConnectException | java.net.UnknownHostException e) {
-            VideoSubtitleEraseError error = new VideoSubtitleEraseError(
-                    GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 去字幕任务查询网络不可达");
-            error.initCause(e);
-            throw error;
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 去字幕任务查询失败: " + e.getMessage());
+        if ("failed".equals(normalized)) {
+            // 上游错误信号：error 对象（提交响应同形状）与顶层 message 都读、取非空合并
+            return new SubtitleEraseTaskObservation("failed", null, null,
+                    extractUpstreamCode(body), extractPollUpstreamMessage(body));
         }
 
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // HTTP 429/5xx 瞬时（cause 携带状态供 processor 重排）；4xx 业务错 → 硬失败
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                VideoSubtitleEraseError error = new VideoSubtitleEraseError(code,
-                        "MediaKit 去字幕任务查询失败: HTTP " + response.code() + " body=" + truncate(rawText));
-                error.initCause(new NewApiVideoClient.HttpStatusException(response.code()));
-                throw error;
-            }
-
-            JsonNode parsed = parseJsonOrThrow(rawText);
-            JsonNode data = unwrapData(parsed);
-
-            String status = textOrNull(data, "status");
-            if (status == null) {
-                throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "MediaKit 去字幕任务响应缺少 status");
-            }
-            String normalized = status.toLowerCase();
-
-            if ("failed".equals(normalized)) {
-                // 上游错误信号：error 对象（提交响应同形状）与顶层 message 都读、取非空合并
-                JsonNode rawError = data.has("error") && data.get("error").isObject()
-                        ? data.get("error") : parsed.get("error");
-                String upstreamCode = rawError != null && rawError.has("code")
-                        ? rawError.get("code").asText() : null;
-                String upstreamMessage = extractUpstreamMessage(rawText);
-                return new SubtitleEraseTaskObservation("failed", null, null,
-                        upstreamCode, upstreamMessage);
-            }
-
-            if ("completed".equals(normalized)) {
-                JsonNode videoUrl = data.path("result").path("video_url");
-                JsonNode duration = data.path("result").path("duration");
-                return new SubtitleEraseTaskObservation("succeeded",
-                        videoUrl.isTextual() ? videoUrl.asText() : null,
-                        duration.isNumber() ? duration.asDouble() : null,
-                        null, null);
-            }
-
-            // queued / running 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
-            return new SubtitleEraseTaskObservation("processing", null, null, null, null);
-        } catch (VideoSubtitleEraseError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 去字幕任务响应解析失败: " + e.getMessage());
+        if ("completed".equals(normalized)) {
+            JsonNode videoUrl = body.data().path("result").path("video_url");
+            JsonNode duration = body.data().path("result").path("duration");
+            return new SubtitleEraseTaskObservation("succeeded",
+                    videoUrl.isTextual() ? videoUrl.asText() : null,
+                    duration.isNumber() ? duration.asDouble() : null,
+                    null, null);
         }
-    }
 
-    // ========== 内部工具 ==========
-
-    private JsonNode parseJsonOrThrow(String rawText) {
-        try {
-            return JSON.readTree(rawText);
-        } catch (Exception e) {
-            throw new VideoSubtitleEraseError(
-                    VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
-                    "MediaKit 未返回有效 JSON");
-        }
-    }
-
-    /** data 解包（网关可能包 data 层；非对象形态回退顶层，视频客户端同款）。 */
-    private static JsonNode unwrapData(JsonNode parsed) {
-        return parsed.has("data") && parsed.get("data").isObject() ? parsed.get("data") : parsed;
-    }
-
-    /**
-     * 提取上游可读失败原因（error.message 或顶层 message 字段，两层都读取非空）。
-     * 供应商原因透传给前端投影（§17.5 失败段）。
-     */
-    private static String extractUpstreamMessage(String rawText) {
-        try {
-            JsonNode node = JSON.readTree(rawText);
-            JsonNode message = node.path("error").path("message");
-            if (!message.isTextual() || message.asText().isEmpty()) {
-                message = node.path("message");
-            }
-            if (message.isTextual() && !message.asText().isEmpty()) {
-                return truncate(message.asText());
-            }
-        } catch (Exception e) {
-            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
-        }
-        return "";
-    }
-
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
-        return (v != null && v.isTextual()) ? v.asText() : null;
-    }
-
-    private static String truncate(String text) {
-        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
-    }
-
-    private static String encodePath(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+        // queued / running 等中间态 → 继续轮询（官方中间态枚举未逐字冻结，统一 processing）
+        return new SubtitleEraseTaskObservation("processing", null, null, null, null);
     }
 
     /**

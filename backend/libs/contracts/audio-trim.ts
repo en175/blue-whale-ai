@@ -148,6 +148,26 @@ export const audioTrimInputSchema = z
   );
 export type AudioTrimInput = z.infer<typeof audioTrimInputSchema>;
 
+/** 冻结 input 构造（纯工厂，web 发送条唯一构造口径）：源素材 id + 选区（内部全精度）+
+ *  输出格式 → 提交 payload 四键形态。时间键经 buildAudioTrimTimeParams 收口（贴边省略 +
+ *  两位小数），消费方不再手拼键名、不再 timeParams 结伴双传；产物恒过 audioTrimInputSchema
+ *  （source_asset_id 串化与格式枚举合法性由调用方状态保证，同 schema 复核兜底）。 */
+export function buildAudioTrimInput({
+  sourceAssetId,
+  timeRange,
+  outputFormat,
+}: {
+  sourceAssetId: string;
+  timeRange: AudioTrimTimeRange;
+  outputFormat: AudioTrimOutputFormat;
+}): AudioTrimInput {
+  return {
+    [AUDIO_TRIM_INPUT_KEYS.sourceAssetId]: sourceAssetId,
+    ...buildAudioTrimTimeParams(timeRange),
+    [AUDIO_TRIM_INPUT_KEYS.outputFormat]: outputFormat,
+  };
+}
+
 /** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_AUDIO_TRIM_FAILED=1048，
  *  TS 侧常量单源在 error-codes.ts，本文件不重复定义——media-extract / video-enhance 同款）：
  *  三类映射——① 网关错误（HTTP 非 2xx / 成功态 error 信封 / 提交 SocketTimeout）复用既有

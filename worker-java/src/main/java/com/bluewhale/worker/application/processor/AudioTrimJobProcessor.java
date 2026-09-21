@@ -33,9 +33,9 @@ import java.util.Set;
  * <ol>
  *   <li>claimAudioTrim（富投影：providerTaskId / pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源音频素材 → 网关提交（audio_url +
- *       start_time / end_time 贴边省略可选 + format，返 task_id）→ markVideoSubmitted
+ *       start_time / end_time 贴边省略可选 + format，返 task_id）→ markProviderSubmitted
  *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排（超限 1048）；failed → 分类终态（§5）；completed → **立即下载转存自家 TOS
  *       （火山 audio_url 仅 24h 有效）** → 发布音频 Asset（type=audio）→ 终态 succeeded</li>
  * </ol>
@@ -175,7 +175,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
     /**
      * 提交相：解析冻结 input + 源音频 → 网关提交（贴边省略口径下 start_time / end_time
-     * 可选）→ markVideoSubmitted → 续排轮询。
+     * 可选）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedAudioTrimJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -224,9 +224,9 @@ public class AudioTrimJobProcessor implements JobProcessor {
         log.info("[audio_trim] 上游已提交 jobId={} providerTaskId={} format={} start={} end={}",
                 claim.id(), taskId, outputFormat, startTime, endTime);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
         //    SQL 无 type 过滤，audio_trim 直接复用）
-        boolean updated = stateMachine.markVideoSubmitted(
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), AUDIO_TRIM_POLL_INTERVAL_MS);
@@ -247,7 +247,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[audio_trim] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), AUDIO_TRIM_POLL_INTERVAL_MS);
@@ -264,7 +264,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
                         "音频截取轮询超时（超过 " + MAX_AUDIO_TRIM_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), AUDIO_TRIM_POLL_INTERVAL_MS);

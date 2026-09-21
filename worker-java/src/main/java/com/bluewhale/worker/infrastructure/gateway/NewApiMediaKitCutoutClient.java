@@ -1,27 +1,20 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
 import com.bluewhale.worker.domain.contract.ImageCutoutContract;
-import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * new-api 网关 MediaKit 图像抠图客户端（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md /
- * IKGXM2；以 NewApiMediaKitEraseClient 为模板，两者各自独立 bean）。
+ * IKGXM2；以 NewApiMediaKitEraseClient 为模板，两者各自独立 bean。HTTP 骨架自 IKHKMK
+ * 起收敛入 {@link NewApiMediaKitSyncClient}，本类只保留出站 payload 构造、官方宽高
+ * 解析与超时变化轴）。
  * <p>
  * 端点：{@code POST {NEW_API_BASE_URL}/v1/mediakit/sync/remove-image-background}（网关同步路由，
  * 本仓不直连火山、不新增凭证配置项——渠道与上游 API Key 在网关侧配置）。
@@ -52,11 +45,9 @@ import java.util.UUID;
  * 其余（超时 / 供应商失败 / 无结果）由 processor 归并兜底码 image_cutout_failed。
  */
 @Component
-public class NewApiMediaKitCutoutClient {
+public class NewApiMediaKitCutoutClient extends NewApiMediaKitSyncClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitCutoutClient.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
     /** 网关同步路由路径（blue-whale-api 网关侧 MediaKit 渠道）。 */
     static final String CUTOUT_PATH = "/v1/mediakit/sync/remove-image-background";
@@ -71,9 +62,6 @@ public class NewApiMediaKitCutoutClient {
      */
     private static final int DEFAULT_TIMEOUT_MS = 300_000;
 
-    private final OkHttpClient httpClient;
-    private final String baseUrl;
-
     public NewApiMediaKitCutoutClient() {
         this(System.getenv("NEW_API_BASE_URL"));
     }
@@ -85,8 +73,27 @@ public class NewApiMediaKitCutoutClient {
 
     /** 测试用构造器：注入读/写超时（毫秒）。 */
     NewApiMediaKitCutoutClient(String baseUrl, int timeoutMs) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
-        this.httpClient = NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
+        super(baseUrl, timeoutMs);
+    }
+
+    @Override
+    protected String syncPath() {
+        return CUTOUT_PATH;
+    }
+
+    @Override
+    protected String taskLabel() {
+        return "图片抠图";
+    }
+
+    @Override
+    protected String fallbackCode() {
+        return ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED;
+    }
+
+    @Override
+    protected RuntimeException error(String code, String message) {
+        return new ImageCutoutError(code, message);
     }
 
     /**
@@ -106,8 +113,6 @@ public class NewApiMediaKitCutoutClient {
     public CutoutResult cutout(String token, String imageUrl, String scene,
                                Boolean needContour, String contourColor, Integer contourSize,
                                Boolean needCropBackground) {
-        String traceId = UUID.randomUUID().toString();
-
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", MODEL);
         payload.put("image_url", imageUrl);
@@ -121,111 +126,17 @@ public class NewApiMediaKitCutoutClient {
         }
         payload.put("output_format", ImageCutoutContract.OUTPUT_FORMAT);
 
-        Request.Builder requestBuilder;
-        try {
-            requestBuilder = new Request.Builder()
-                    .url(baseUrl + CUTOUT_PATH)
-                    .post(RequestBody.create(JSON.writeValueAsString(payload), JSON_TYPE))
-                    .header("Content-Type", "application/json");
-        } catch (Exception e) {
-            throw new ImageCutoutError(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED,
-                    "请求序列化失败");
-        }
-        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
-        Request request = requestBuilder.build();
-
-        Response response;
-        try {
-            response = httpClient.newCall(request).execute();
-        } catch (java.net.SocketTimeoutException e) {
-            // 超时统一终态不重试（无 worker 级自动重试；宁可不重试也不双跑）
-            throw new ImageCutoutError(GenerationError.ERROR_PROVIDER_TIMEOUT,
-                    "MediaKit 图片抠图超时");
-        } catch (Exception e) {
-            // 连接失败 / 其余 IO：请求可能未达上游，零扣费风险——仍归终态（无自动重试）
-            throw new ImageCutoutError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "MediaKit 图片抠图调用失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-
-        try (response) {
-            ResponseBody body = response.body();
-            String rawText = body != null ? body.string() : "";
-
-            if (!response.isSuccessful()) {
-                // 网关对 success=false / 未配价 / 缺渠道返 400 且不扣费——
-                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影。
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
-                String reason = extractUpstreamMessage(rawText);
-                String message = "图片抠图失败: HTTP " + response.code();
-                if (!reason.isEmpty()) {
-                    message += " " + reason;
-                } else {
-                    message += " body=" + truncate(rawText);
-                }
-                throw new ImageCutoutError(code, message);
-            }
-
-            JsonNode parsed;
-            try {
-                parsed = JSON.readTree(rawText);
-            } catch (Exception e) {
-                throw new ImageCutoutError(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED,
-                        "MediaKit 未返回有效 JSON");
-            }
-
-            JsonNode errorNode = parsed.get("error");
-            if (errorNode != null && errorNode.has("message")) {
-                String errText = errorNode.get("message").asText();
-                String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
-                throw new ImageCutoutError(code, "MediaKit 图片抠图业务失败: " + truncate(errText));
-            }
-
-            JsonNode resultUrl = parsed.path("result").path("image_url");
-            if (!resultUrl.isTextual() || resultUrl.asText().isEmpty()) {
-                throw new ImageCutoutError(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED,
-                        "MediaKit 未返回结果图");
-            }
-            // 官方响应自带宽高（result.image_width/image_height）；缺失/非数值时置 null，
-            // processor 以结果图 ImageIO 解析兜底（契约 §8 静默 null 等价标准）。
-            JsonNode widthNode = parsed.path("result").path("image_width");
-            JsonNode heightNode = parsed.path("result").path("image_height");
-            Integer width = widthNode.isNumber() && widthNode.canConvertToInt()
-                    ? widthNode.asInt() : null;
-            Integer height = heightNode.isNumber() && heightNode.canConvertToInt()
-                    ? heightNode.asInt() : null;
-            return new CutoutResult(resultUrl.asText(), width, height);
-        } catch (ImageCutoutError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new ImageCutoutError(ImageCutoutContract.ERROR_IMAGE_CUTOUT_FAILED,
-                    "MediaKit 响应读取失败: " + e.getMessage());
-        }
-    }
-
-    // ========== 内部工具 ==========
-
-    /**
-     * 提取上游可读失败原因（网关 400 body 的 error.message 或顶层 message 字段）。
-     * 供应商原因（如源图超门槛）透传给前端投影。
-     */
-    private static String extractUpstreamMessage(String rawText) {
-        try {
-            JsonNode node = JSON.readTree(rawText);
-            JsonNode message = node.path("error").path("message");
-            if (!message.isTextual() || message.asText().isEmpty()) {
-                message = node.path("message");
-            }
-            if (message.isTextual() && !message.asText().isEmpty()) {
-                return truncate(message.asText());
-            }
-        } catch (Exception e) {
-            log.debug("上游错误 body 非法 JSON，回退原文截断: {}", e.getMessage());
-        }
-        return "";
-    }
-
-    private static String truncate(String text) {
-        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
+        JsonNode parsed = executeSyncPost(token, payload);
+        String resultUrl = requireResultImageUrl(parsed);
+        // 官方响应自带宽高（result.image_width/image_height）；缺失/非数值时置 null，
+        // processor 以结果图 ImageIO 解析兜底（契约 §8 静默 null 等价标准）。
+        JsonNode widthNode = parsed.path("result").path("image_width");
+        JsonNode heightNode = parsed.path("result").path("image_height");
+        Integer width = widthNode.isNumber() && widthNode.canConvertToInt()
+                ? widthNode.asInt() : null;
+        Integer height = heightNode.isNumber() && heightNode.canConvertToInt()
+                ? heightNode.asInt() : null;
+        return new CutoutResult(resultUrl, width, height);
     }
 
     private static int loadTimeoutMs() {

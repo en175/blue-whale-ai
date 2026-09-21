@@ -241,8 +241,8 @@ describe("§3.1 updateMany reject 兜底", () => {
   });
 });
 
-// §3.1 / §3.2：markVideoSubmitted guard-fail。
-describe("§3.2 markVideoSubmitted", () => {
+// §3.1 / §3.2：markProviderSubmitted guard-fail。
+describe("§3.2 markProviderSubmitted", () => {
   it("stale fencing_token → count=0 → 返回 false（guard fail 静默）", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const repo = createWorkerRepo({
@@ -250,7 +250,7 @@ describe("§3.2 markVideoSubmitted", () => {
     } as never);
 
     await expect(
-      repo.markVideoSubmitted({
+      repo.markProviderSubmitted({
         jobId: "300",
         workerId: "stale",
         fencingToken: 4,
@@ -260,15 +260,15 @@ describe("§3.2 markVideoSubmitted", () => {
   });
 });
 
-// §3.2：rescheduleVideoPoll 全套。
-describe("§3.2 rescheduleVideoPoll", () => {
+// §3.2：rescheduleProviderPoll 全套。
+describe("§3.2 rescheduleProviderPoll", () => {
   it("happy：progress 钳制 0–99 / poll_count+1 / 释放租约 / next_action_at≈now+5s", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const repo = createWorkerRepo({
       generation_jobs: { updateMany },
     } as never);
 
-    const result = await repo.rescheduleVideoPoll({
+    const result = await repo.rescheduleProviderPoll({
       jobId: "300",
       workerId: "worker-1",
       fencingToken: 5,
@@ -303,7 +303,7 @@ describe("§3.2 rescheduleVideoPoll", () => {
       generation_jobs: { updateMany },
     } as never);
 
-    await repo.rescheduleVideoPoll({
+    await repo.rescheduleProviderPoll({
       jobId: "300",
       workerId: "worker-1",
       fencingToken: 5,
@@ -315,7 +315,7 @@ describe("§3.2 rescheduleVideoPoll", () => {
       }),
     );
 
-    await repo.rescheduleVideoPoll({
+    await repo.rescheduleProviderPoll({
       jobId: "300",
       workerId: "worker-1",
       fencingToken: 5,
@@ -335,7 +335,7 @@ describe("§3.2 rescheduleVideoPoll", () => {
     } as never);
 
     await expect(
-      repo.rescheduleVideoPoll({
+      repo.rescheduleProviderPoll({
         jobId: "300",
         workerId: "stale",
         fencingToken: 4,

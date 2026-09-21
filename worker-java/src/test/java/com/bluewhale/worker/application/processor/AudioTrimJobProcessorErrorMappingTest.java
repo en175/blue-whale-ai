@@ -185,14 +185,14 @@ class AudioTrimJobProcessorErrorMappingTest {
         stubSourceAsset();
         when(trimAudioClient.submit(eq("sk-frozen-token"), eq("https://example.com/src.mp3"),
                 isNull(), isNull(), eq("mp3"))).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(trimAudioClient).submit("sk-frozen-token", "https://example.com/src.mp3",
                 null, null, "mp3");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failAudioTrimJob(any());
     }
@@ -230,32 +230,32 @@ class AudioTrimJobProcessorErrorMappingTest {
     // ========== submit 相：提交成功 + 错误归并（§5 分类；无自动重试） ==========
 
     @Test
-    @DisplayName("提交成功：submit 带 audio_url + 时间区间 + output_format → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("提交成功：submit 带 audio_url + 时间区间 + output_format → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitSuccess_marksAndSchedules() {
         stubSubmitClaim(input());
         stubSourceAsset();
         when(trimAudioClient.submit(eq("sk-frozen-token"), eq("https://example.com/src.mp3"),
                 eq(60.5), eq(180.75), eq("mp3"))).thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(trimAudioClient).submit("sk-frozen-token", "https://example.com/src.mp3",
                 60.5, 180.75, "mp3");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failAudioTrimJob(any());
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input());
         stubSourceAsset();
         when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -309,17 +309,17 @@ class AudioTrimJobProcessorErrorMappingTest {
     // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll(进度保持不倒退) + scheduleNext(5s)")
+    @DisplayName("poll processing → rescheduleProviderPoll(进度保持不倒退) + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new TrimAudioTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 7);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failAudioTrimJob(any());
     }
@@ -334,7 +334,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         processor.handle("100");
 
         assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -345,12 +345,12 @@ class AudioTrimJobProcessorErrorMappingTest {
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new AudioTrimError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 音频截取任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 7);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failAudioTrimJob(any());
     }

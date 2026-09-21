@@ -32,9 +32,9 @@ import java.util.Set;
  * <ol>
  *   <li>claimVideoEnhance（富投影：providerTaskId / pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（video_url +
- *       resolution + bitrate_level 恒 medium，fps 不传，返 task_id）→ markVideoSubmitted
+ *       resolution + bitrate_level 恒 medium，fps 不传，返 task_id）→ markProviderSubmitted
  *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
  *       续排（超限 1045）；failed → 分类终态；completed → **立即下载转存（火山 video_url
  *       仅 24h 有效）** → 建 Asset（type=video / source='generated'）→ 终态 succeeded</li>
  * </ol>
@@ -172,7 +172,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
     // ========== submit 相 ==========
 
     /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交 → markVideoSubmitted → 续排轮询。
+     * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoEnhanceJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -210,8 +210,8 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
         log.info("[video_enhance] 上游已提交 jobId={} providerTaskId={} resolution={}",
                 claim.id(), taskId, resolution);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
-        boolean updated = stateMachine.markVideoSubmitted(
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), VIDEO_ENHANCE_POLL_INTERVAL_MS);
@@ -232,7 +232,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
             if (isTransientPollError(pollError)) {
                 log.warn("[video_enhance] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), VIDEO_ENHANCE_POLL_INTERVAL_MS);
@@ -249,7 +249,7 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
                         "画质增强轮询超时（超过 " + MAX_VIDEO_ENHANCE_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), VIDEO_ENHANCE_POLL_INTERVAL_MS);

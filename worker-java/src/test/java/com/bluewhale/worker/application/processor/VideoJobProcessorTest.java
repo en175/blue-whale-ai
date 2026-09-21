@@ -107,7 +107,7 @@ class VideoJobProcessorTest {
     // ========== submit 路径 ==========
 
     @Test
-    @DisplayName("G51: submit → markVideoSubmitted + scheduleNext(5000ms)")
+    @DisplayName("G51: submit → markProviderSubmitted + scheduleNext(5000ms)")
     void submitPath() {
         Map<String, Object> input = baseInput();
         ClaimedVideoJobDto claim = videoClaim("102", false, null, 0, 0, null, input);
@@ -117,12 +117,12 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-456", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("102"), anyString(), eq(1L), eq("task-456"));
+                .markProviderSubmitted(eq("102"), anyString(), eq(1L), eq("task-456"));
 
         processor.handle("102");
 
         verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
-        verify(stateMachine).markVideoSubmitted(eq("102"), anyString(), eq(1L), eq("task-456"));
+        verify(stateMachine).markProviderSubmitted(eq("102"), anyString(), eq(1L), eq("task-456"));
         verify(producer).enqueue(eq("102"), eq(5000L));
     }
 
@@ -141,7 +141,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-ikfa1p", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("110"), anyString(), eq(1L), eq("task-ikfa1p"));
+                .markProviderSubmitted(eq("110"), anyString(), eq(1L), eq("task-ikfa1p"));
 
         processor.handle("110");
 
@@ -187,7 +187,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-ikfcxc-2", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("112"), anyString(), eq(1L), eq("task-ikfcxc-2"));
+                .markProviderSubmitted(eq("112"), anyString(), eq(1L), eq("task-ikfcxc-2"));
 
         processor.handle("112");
 
@@ -210,7 +210,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-ikfcxc-3", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("113"), anyString(), eq(1L), eq("task-ikfcxc-3"));
+                .markProviderSubmitted(eq("113"), anyString(), eq(1L), eq("task-ikfcxc-3"));
 
         processor.handle("113");
 
@@ -274,7 +274,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("new-task", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("105"), anyString(), eq(1L), eq("new-task"));
+                .markProviderSubmitted(eq("105"), anyString(), eq(1L), eq("new-task"));
 
         processor.handle("105");
 
@@ -284,7 +284,7 @@ class VideoJobProcessorTest {
     // ========== poll 路径 ==========
 
     @Test
-    @DisplayName("G55: poll processing → rescheduleVideoPoll + scheduleNext(5000ms)")
+    @DisplayName("G55: poll processing → rescheduleProviderPoll + scheduleNext(5000ms)")
     void pollProcessing() {
         ClaimedVideoJobDto claim = videoClaim("106", false, "task-106", 5, 30, null);
         doReturn(Optional.of(claim)).when(stateMachine)
@@ -293,11 +293,11 @@ class VideoJobProcessorTest {
         doReturn(new VideoTaskObservation("processing", 50, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-106"));
         doReturn(true).when(stateMachine)
-                .rescheduleVideoPoll(eq("106"), anyString(), eq(1L), eq(50));
+                .rescheduleProviderPoll(eq("106"), anyString(), eq(1L), eq(50));
 
         processor.handle("106");
 
-        verify(stateMachine).rescheduleVideoPoll(eq("106"), anyString(), eq(1L), eq(50));
+        verify(stateMachine).rescheduleProviderPoll(eq("106"), anyString(), eq(1L), eq(50));
         verify(producer).enqueue(eq("106"), eq(5000L));
     }
 
@@ -808,7 +808,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-ikhbdo", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("601"), anyString(), eq(1L), eq("task-ikhbdo"));
+                .markProviderSubmitted(eq("601"), anyString(), eq(1L), eq("task-ikhbdo"));
 
         processor.handle("601");
 
@@ -844,7 +844,7 @@ class VideoJobProcessorTest {
         doReturn(new SubmitResult("task-ikhbdo-audio", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
         doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("602"), anyString(), eq(1L), eq("task-ikhbdo-audio"));
+                .markProviderSubmitted(eq("602"), anyString(), eq(1L), eq("task-ikhbdo-audio"));
 
         processor.handle("602");
 

@@ -29,7 +29,7 @@ public record ClaimedVideoEnhanceJobDto(
         String workerId,
         /** 增后 fencing_token */
         long fencingToken,
-        /** 已轮询次数（rescheduleVideoPoll 累计，轮询上限判定用） */
+        /** 已轮询次数（rescheduleProviderPoll 累计，轮询上限判定用） */
         int pollCount,
         /** 轮询进度（瞬时错误重排时保持不倒退） */
         int progress
