@@ -50,7 +50,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
-import { downloadFileNameOf } from './components/cardName';
+import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
@@ -7799,7 +7799,7 @@ export default function CanvasPage() {
   };
 
   /** 下载单个媒体节点：成功返回 true，无素材则 false。
-   *  文件名以当前卡片名称为基础，扩展名取真实文件类型（blob MIME 优先，节点 mime/素材地址兜底，IKFA8Y） */
+   *  文件名以当前卡片名称为基础，扩展名经 resolveDownloadMime 纠正 M4A 错标后再取（IKFA8Y） */
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (node?.data?.assetMissing) {
@@ -7809,10 +7809,20 @@ export default function CanvasPage() {
     const src = node?.data?.src as string | undefined;
     if (!src) return false;
     const name = (node?.data?.fileName as string) || id;
-    const mime = node?.data?.mime as string | undefined;
+    const nodeMime = node?.data?.mime as string | undefined;
+    const mediaType = node?.data?.mediaType as string | undefined;
     const blob = await fetchAssetBlob(src);
     if (blob) {
-      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, blob.type || mime, src), true);
+      const sniffed = await sniffMediaMime(blob, mediaType);
+      const type = resolveDownloadMime({
+        sniffed,
+        blobType: blob.type,
+        nodeMime,
+        src,
+        fileName: name,
+        mediaType,
+      });
+      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, type, src), true);
       return true;
     }
     window.open(src, '_blank', 'noopener');
@@ -7831,10 +7841,17 @@ export default function CanvasPage() {
       if (media && !media.data?.assetMissing && src) {
         const blob = await fetchAssetBlob(src);
         if (blob) {
-          const sniffed = await sniffMediaMime(blob);
-          const nodeMime = media.data?.mime as string | undefined;
-          const mime = sniffed || blob.type || nodeMime;
           const cardName = (media.data?.fileName as string) || id;
+          const mediaType = media.data?.mediaType as string | undefined;
+          const sniffed = await sniffMediaMime(blob, mediaType);
+          const mime = resolveDownloadMime({
+            sniffed,
+            blobType: blob.type,
+            nodeMime: media.data?.mime as string | undefined,
+            src,
+            fileName: cardName,
+            mediaType,
+          });
           items.push({
             filename: uniqueDownloadName(downloadFileNameOf(cardName, mime, src), usedNames),
             blob,

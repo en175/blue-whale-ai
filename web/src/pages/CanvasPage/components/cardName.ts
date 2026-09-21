@@ -21,6 +21,9 @@ const MIME_EXTENSIONS: Record<string, string[]> = {
   'audio/mpeg': ['mp3'],
   'video/mpeg': ['mpeg', 'mpg'],
   'audio/mp3': ['mp3'],
+  'audio/mp4': ['m4a'],
+  'audio/x-m4a': ['m4a'],
+  'audio/m4a': ['m4a'],
   'audio/wav': ['wav'],
   'audio/x-wav': ['wav'],
   'audio/aac': ['aac'],
@@ -35,11 +38,7 @@ function extensionOfPath(path: string): string {
   return match ? match[1]!.toLowerCase() : '';
 }
 
-/** 真实文件类型对应的扩展名：优先 MIME（blob / 节点），其次素材地址路径；都拿不到返回空串 */
-export function mediaExtensionOf(mime?: string, src?: string): string {
-  const mediaType = (mime ?? '').split(';')[0]!.trim().toLowerCase();
-  const fromMime = MIME_EXTENSIONS[mediaType];
-  if (fromMime) return fromMime[0]!;
+function extensionFromUrl(src?: string): string {
   let path = (src ?? '').split(/[?#]/)[0]!;
   try {
     path = new URL(path).pathname;
@@ -47,6 +46,37 @@ export function mediaExtensionOf(mime?: string, src?: string): string {
     // 相对地址（blob: 等）按原串处理
   }
   return extensionOfPath(path);
+}
+
+/**
+ * 下载用 MIME。M4A 与 MP4 同属 ISO 容器，CDN/浏览器常把 Content-Type 标成
+ * audio/mpeg 或 video/mp4：对象 key / 卡片名的 .m4a、音频卡上的 ISO 容器，都认成 audio/mp4。
+ */
+export function resolveDownloadMime(input: {
+  sniffed?: string;
+  blobType?: string;
+  nodeMime?: string;
+  src?: string;
+  fileName?: string;
+  mediaType?: string;
+}): string | undefined {
+  if (extensionFromUrl(input.src) === 'm4a' || extensionOfPath(input.fileName ?? '') === 'm4a') {
+    return 'audio/mp4';
+  }
+  const mime = (input.sniffed || input.blobType || input.nodeMime || '').split(';')[0]!.trim();
+  if (input.mediaType === 'audio' && mime.toLowerCase() === 'video/mp4') return 'audio/mp4';
+  return mime || undefined;
+}
+
+/** 真实文件类型对应的扩展名：一般优先 MIME，其次素材地址路径。
+ *  例外：路径已是 .m4a 时以路径为准（MIME 常被错标成 audio/mpeg / video/mp4）。 */
+export function mediaExtensionOf(mime?: string, src?: string): string {
+  const pathExt = extensionFromUrl(src);
+  if (pathExt === 'm4a') return 'm4a';
+  const mediaType = (mime ?? '').split(';')[0]!.trim().toLowerCase();
+  const fromMime = MIME_EXTENSIONS[mediaType];
+  if (fromMime) return fromMime[0]!;
+  return pathExt;
 }
 
 /** 名称与实际扩展名须同属一种媒体类型（例如 jpg/jpeg、mpeg/mpg）。 */
