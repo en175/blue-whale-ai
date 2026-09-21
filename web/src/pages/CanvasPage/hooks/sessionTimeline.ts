@@ -768,6 +768,11 @@ export interface TurnAccount {
   /** 失败时后端的那句人话。 */
   failureText: string | null;
   /**
+   * 这次失败再试一次有没有用（IKHCJ2 第 5 项）。服务端说了算，缺这个字段时按**可以重试**算：
+   * 少给一次机会，用户就只能重开会话；多给一次，最坏也只是再失败一次。
+   */
+  failureRetryable: boolean;
+  /**
    * 这一轮完成了、但要写的生成卡没写出来时，后端的那句人话（IKEV0V）。只在聊天里改卡时出现：
    * 那一轮照常 completed，侧边栏还挂着上一版。不写出来，用户会把旧卡当成这次改出来的。
    */
@@ -808,6 +813,7 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
+    failureRetryable: run.failure?.retryable !== false,
     cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
     cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };

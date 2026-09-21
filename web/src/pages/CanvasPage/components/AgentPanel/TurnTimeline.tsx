@@ -385,8 +385,23 @@ const ACCOUNT_CLASS: Record<TurnAccount['outcome'], string> = {
  * 每轮尾都写一遍是噪音。完成的轮什么都不写——回答就在上面。
  *
  * `onRetryCard` 只给最后一轮：它把这一轮用户的原话重发一遍——重试接口只接失败的轮，这一轮是完成的，走不了那条。
+ *
+ * `onRetry` 是**整轮失败**时的重来（IKHCJ2 第 5 项），走重试接口。在这之前，失败的轮在这里
+ * 只有一行字、什么都点不了，唯一的重试入口是输入框工具栏角落一个 14px 的无字图标——
+ * 测试报告因此记成「前端无重试入口」，而那个判断在用户那边是成立的：够不着的入口等于没有。
+ *
+ * 要不要给这个按钮由**服务端**说了算（`account.failureRetryable`，与失败文案同出一张表）。
+ * 「再试也会被同一道审核拦下」那一类不给，否则用户会一遍遍按、一遍遍撞同一堵墙。
  */
-export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onRetryCard?: () => void }) {
+export function TurnFooter({
+  account,
+  onRetryCard,
+  onRetry,
+}: {
+  account: TurnAccount;
+  onRetryCard?: () => void;
+  onRetry?: () => void;
+}) {
   const cardFailed = account.outcome === 'completed' && Boolean(account.cardFailureText);
   const label =
     account.outcome === 'failed'
@@ -406,6 +421,11 @@ export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onR
       {cardFailed && account.cardFailureRetryable && onRetryCard && (
         <button type="button" className={styles.turnFooterRetry} onClick={onRetryCard}>
           再试一次
+        </button>
+      )}
+      {account.outcome === 'failed' && account.failureRetryable && onRetry && (
+        <button type="button" className={styles.turnFooterRetry} onClick={onRetry}>
+          重新回答
         </button>
       )}
     </div>
