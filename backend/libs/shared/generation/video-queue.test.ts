@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Producer } from "rocketmq-client-nodejs";
 
-import { AUDIO_GENERATION_TAG, IMAGE_GENERATION_TAG } from "./queue.constants.js";
+import {
+  AUDIO_GENERATION_TAG,
+  IMAGE_GENERATION_TAG,
+  MEDIA_EXTRACT_TAG,
+  VIDEO_ENHANCE_TAG,
+  VIDEO_SCENE_SPLIT_TAG,
+} from "./queue.constants.js";
 import {
   createRocketMqVideoProducer,
   enqueueAudioGenerationJob,
@@ -31,6 +37,17 @@ describe("enqueueAudioGenerationJob audio tag", () => {
   it("入队携带 audio tag 常量（与 createRocketMqVideoProducer tag 传播一致）", async () => {
     expect(AUDIO_GENERATION_TAG).toBe("audio");
     expect(AUDIO_GENERATION_TAG).not.toBe(IMAGE_GENERATION_TAG);
+  });
+});
+
+/** IKH8BO：enqueueVideoSceneSplitJob 用独立 tag=video_scene_split，与 HD / 媒体提取隔离
+ *  （tag 常量 IKH8BH 已建，值与 generation_jobs.type 同源，契约测试对账）。 */
+describe("enqueueVideoSceneSplitJob video_scene_split tag", () => {
+  it("入队携带 video_scene_split tag 常量，与家族其他 tag 不混用", () => {
+    expect(VIDEO_SCENE_SPLIT_TAG).toBe("video_scene_split");
+    expect(VIDEO_SCENE_SPLIT_TAG).not.toBe(VIDEO_ENHANCE_TAG);
+    expect(VIDEO_SCENE_SPLIT_TAG).not.toBe(MEDIA_EXTRACT_TAG);
+    expect(VIDEO_SCENE_SPLIT_TAG).not.toBe(AUDIO_GENERATION_TAG);
   });
 });
 

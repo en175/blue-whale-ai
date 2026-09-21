@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import {
   RESOURCE_NOT_FOUND_CODE,
+  VIDEO_SCENE_SPLIT_RESULT_KEYS,
   errorCodeToNumeric,
   fail,
   ok,
+  videoSceneSplitResultSchema,
 } from "@lib/contracts";
 import { createJobRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -103,6 +105,17 @@ export class JobsService {
       status: job.status,
       progress: job.progress,
       asset: job.asset,
+      // 一对多产物（IKH8C1 场景切分扇出）：全部产出资源 + 契约 result。result 从终态日志
+      // payload 按契约键挑子集再过 strict schema（payload 另带 asset_ids 等入库字段，不外发），
+      // 校验不过即 null，不向下游投影畸形日志。
+      output_assets: job.output_assets,
+      result: (() => {
+        if (job.result === null) return null;
+        const duration = job.result[VIDEO_SCENE_SPLIT_RESULT_KEYS.duration];
+        const segments = job.result[VIDEO_SCENE_SPLIT_RESULT_KEYS.segments];
+        const parsed = videoSceneSplitResultSchema.safeParse({ duration, segments });
+        return parsed.success ? parsed.data : null;
+      })(),
       // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
       text_input_signature: job.text_input_signature,
     });

@@ -467,7 +467,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(done.data.fileName).toBe('播客片头(截取).mp3');
   });
 
-  it('轮询终态 failed：1046 兜底码映射可读文案；带身份卡原参数重试建新任务并收敛成品', async () => {
+  it('轮询终态 failed：1047 兜底码映射可读文案；带身份卡原参数重试建新任务并收敛成品', async () => {
     apiMocks.createAudioTrim.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j1', status: 'failed', progress: 1,

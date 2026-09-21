@@ -162,12 +162,17 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins: [
-      // 仅开发服务启用，且须先于 React 插件注册以保留组件源码位置信息。
-      command === 'serve' && codeInspectorPlugin({ bundler: 'vite' }),
+      // 仅真正的 Vite dev server 启用。Vitest 的 command 也是 serve，
+      // code-inspector / TOS 代理会挂住连接，导致 `vitest run` 退不出、门禁被 close timeout 误杀。
+      command === 'serve' && !process.env.VITEST && codeInspectorPlugin({ bundler: 'vite' }),
       react(),
-      tosUploadProxy(),
-      tosFetchProxy(),
+      !process.env.VITEST && tosUploadProxy(),
+      !process.env.VITEST && tosFetchProxy(),
     ],
+    // spawnSync（验证门禁）把 stdout 接到管道时 Vite 退不干净；Vitest 2 无 CLI --forceExit。
+    test: {
+      forceExit: true,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

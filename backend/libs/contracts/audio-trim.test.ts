@@ -265,10 +265,10 @@ describe("input schema（冻结后形态复核）", () => {
 });
 
 describe("执行面兜底码（error-codes.ts 注册）", () => {
-  it("audio_trim_failed → 1046（1045 已由视频 HD 高清占用，取下一空号），文案表同步", () => {
+  it("audio_trim_failed → 1047（1046 已由场景切分占用〔!789 先入 release〕，让位取下一空号），文案表同步", () => {
     expect(ERROR_AUDIO_TRIM_FAILED).toBe("audio_trim_failed");
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_TRIM_FAILED]).toBe(1046);
-    expect(ERROR_CODES[1046]).toBeTruthy();
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_TRIM_FAILED]).toBe(1047);
+    expect(ERROR_CODES[1047]).toBeTruthy();
     // 家族相邻码不冲突（号位唯一）。
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_MEDIA_EXTRACT_PROVIDER_FAILED]).toBe(1044);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_ENHANCE_FAILED]).toBe(1045);

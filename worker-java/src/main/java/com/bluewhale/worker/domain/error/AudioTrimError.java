@@ -13,7 +13,7 @@ import com.bluewhale.worker.domain.contract.AudioTrimContract;
  */
 public class AudioTrimError extends RuntimeException {
 
-    /** 执行兜底失败码（数值 1046 = TS error-codes.ts ERROR_AUDIO_TRIM_FAILED）。 */
+    /** 执行兜底失败码（数值 1047 = TS error-codes.ts ERROR_AUDIO_TRIM_FAILED）。 */
     public static final String AUDIO_TRIM_FAILED = "audio_trim_failed";
 
     private final String code;

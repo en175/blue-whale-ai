@@ -81,7 +81,7 @@ const imageModel = {
   default_duration: null,
   features: {
     reference_image: true,
-    max_reference_images: 10,
+    image_reference_max: 10,
     watermark: false,
     quantity_max: 1,
     sequential_image_generation: false,
@@ -111,7 +111,7 @@ const videoModel = {
   default_duration: 5,
   features: {
     reference_image: true,
-    max_reference_images: 10,
+    image_reference_max: 10,
     watermark: false,
     quantity_max: 1,
     sequential_image_generation: false,
@@ -141,7 +141,7 @@ const audioModel = {  model_id: 'audio-test',
   default_duration: null,
   features: {
     reference_image: false,
-    max_reference_images: 0,
+    image_reference_max: 0,
     watermark: false,
     quantity_max: 1,
     sequential_image_generation: false,

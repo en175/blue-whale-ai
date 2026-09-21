@@ -97,7 +97,7 @@ beforeEach(() => {
       default_duration: null,
       features: {
         reference_image: true,
-        max_reference_images: 3,
+        image_reference_max: 3,
         watermark: false,
         quantity_max: 1,
         sequential_image_generation: false,

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
-import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOf } from '@/lib/model-reference-limits';
+import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/lib/model-reference-limits';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
@@ -230,7 +230,8 @@ export default function AudioDialog({
 
   const audioRefCount = [...(draftRefs ?? []), ...refs].filter((r) => audioRefItemMediaTypeOf(r) !== 'image').length;
   const imageRefCount = [...(draftRefs ?? []), ...refs].filter((r) => audioRefItemMediaTypeOf(r) === 'image').length;
-  const maxImageRefs = imageReferenceMaxOf(currentModel?.features);
+  // IKHEXG：音频链路用 FOR_AUDIO 口径——模型未解析时回落官方音频缺省 1，而非图片/视频的 10。
+  const maxImageRefs = imageReferenceMaxOfForAudio(currentModel?.features);
   /** 媒体参考无法再添加时的原因（混用 / 分类上限）；文本卡仍可从画布点选。 */
   const mediaLimitReason = imageRefCount > 0 && audioRefCount > 0 ? '音频与图片参考不可混用'
     : imageRefCount >= maxImageRefs ? `参考图最多 ${maxImageRefs} 个`
@@ -380,9 +381,16 @@ export default function AudioDialog({
   const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
   /** IKFM41 §11：文本索引错误（失效/不支持类型）与连线失效同为发送防线，面板持续显示 */
   const textIndexBlocked = Boolean(textIndexError);
-  /** 按最终参考的实际类型校验分类上限与混用，随模型和来源变化重算。 */
+  /** 按最终参考的实际类型校验分类上限、混用与参考素材总时长，随模型和来源变化重算。
+   *  IKHEXG：带上 duration——否则 `max_reference_duration_sec` 在音频链路永远不触发
+   *  （该键在后台对音频行开放，不传时长等于「配了不生效」）。`durations` 与缩略图同一份来源。 */
   const referenceLimitError = checkReferenceLimits(
-    currentModel?.features, currentRefs.map((ref) => ({ type: audioRefItemMediaTypeOf(ref) })), 'audio',
+    currentModel?.features,
+    currentRefs.map((ref) => ({
+      type: audioRefItemMediaTypeOf(ref),
+      duration: durations.get(`${ref.source}-${ref.id}`),
+    })),
+    'audio',
   );
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;

@@ -1,5 +1,6 @@
 /** 图片生成渠道解析器：从能力行目录映射 GPT / banana 请求字段。
- *  Seedream 不走本模块查表，仍由 seedream-image-size 代码表计算。 */
+ *  Seedream 不走本模块查表——尺寸由能力行 `request_mapping.matrix` 承载（IK629：原代码表
+ *  seedream-image-size.ts 已删，见 worker ImageChannelMapper.resolveSeedreamSize）。 */
 
 export const IMAGE_CHANNEL_PARSERS = ["seedream", "gpt", "banana"] as const;
 export type ImageChannelParserId = (typeof IMAGE_CHANNEL_PARSERS)[number];
@@ -165,6 +166,7 @@ export function validateRequestMapping(
     ) {
       return "gpt request_mapping.matrix 须为对象";
     }
+    let filledCells = 0;
     for (const row of Object.values(
       record.matrix as Record<string, unknown>,
     )) {
@@ -176,7 +178,13 @@ export function validateRequestMapping(
         if (typeof cell !== "string" || !isGptProviderSize(cell)) {
           return `gpt 交叉格只能填官方 size 枚举或留空：${String(cell)}`;
         }
+        filledCells += 1;
       }
+    }
+    // 全空的矩阵落库后，mapImageChannelRequest 恒返回 empty_mapping，
+    // 该模型此后每一次请求都 400 —— 与其让线上炸，不如在写入时拦住。
+    if (filledCells === 0) {
+      return "gpt 交叉格不能全为空：至少填一格，否则该模型的所有请求都会失败";
     }
     return null;
   }
@@ -194,11 +202,25 @@ export function validateRequestMapping(
   ) {
     return "banana request_mapping.size 须为对象";
   }
-  for (const map of [record.quality, record.size] as Record<string, unknown>[]) {
+  let qualityFilled = false;
+  let sizeFilled = false;
+  for (const [name, map] of [
+    ["quality", record.quality],
+    ["size", record.size],
+  ] as [string, Record<string, unknown>][]) {
     for (const value of Object.values(map)) {
       if (value == null || value === "") continue;
       if (typeof value !== "string") return "banana 映射值须为字符串";
+      // 运行期用 filled()（trim 判定）认空，这里必须同口径——
+      // 否则 {"1k": "  "} 能过闸门，请求期却恒 empty_mapping。
+      if (!filled(value)) continue;
+      if (name === "quality") qualityFilled = true;
+      else sizeFilled = true;
     }
+  }
+  // 同 gpt：quality / size 任一全空 ⇒ 每次请求都 empty_mapping。
+  if (!qualityFilled || !sizeFilled) {
+    return "banana 映射表 quality / size 至少各填一项，否则该模型的所有请求都会失败";
   }
   return null;
 }

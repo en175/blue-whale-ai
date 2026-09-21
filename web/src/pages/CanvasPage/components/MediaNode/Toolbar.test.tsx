@@ -10,7 +10,9 @@
    音视频合成/转码，悬停「即将上线」、不绑定点击）+ 分隔线 + 下载，详情对音频退役。
    IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
    悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
-   派发 onTrimAudio（编辑态行为归 IKHB7A）；其余四钮维持占位「即将上线」。 */
+   派发 onTrimAudio（编辑态行为归 IKHB7A）；其余四钮维持占位「即将上线」。
+   IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
+   置灰门槛与悬停原因断言同族（门槛纯逻辑另见 sceneSplit.test.ts）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -89,9 +91,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留 HD（首位）与智能去字幕与 @，隐藏「高清 ▾」，多音视频分离', async () => {
+  it('视频卡保留 HD（首位）与智能去字幕与 @，隐藏「高清 ▾」，音视频分离后多场景切分（IKH8BJ）', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['HD高清', '智能去字幕', '音视频分离', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「重新编辑」「生成图片」「生成视频」不再渲染（IKH3WE：派生新卡走拖线类型菜单、原卡重跑走点卡片）', async () => {
@@ -731,6 +733,83 @@ describe('MediaNodeToolbar HD 高清入口（IKH3VG）', () => {
     expect(hdBtn().getAttribute('title')).toContain('360');
     await renderToolbar('video', { id: 'exact', data: { assetId: 'a1', width: 640, height: 360 } });
     expect(hdBtn().disabled).toBe(false);
+  });
+});
+
+/* IKH8BJ：视频卡「场景切分」入口——形态同「音视频分离」（图标+文字单按钮、native disabled
+   置灰 + title 悬停原因/可用态 hint），落「音视频分离」之后、分隔线之前；置灰门槛两条
+   （未关联资产 / 时长超 2 小时且有时长数据，缺失放行）与 Toolbar 侧断言同族，
+   门槛纯逻辑另见 sceneSplit.test.ts；点击派发 onSceneSplit 进入编辑态（IKH8BR 交付）。 */
+describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
+  const btn = () => [...mountNode.querySelectorAll('button')]
+    .find((b) => b.textContent?.includes('场景切分'))!;
+
+  it('落位「音视频分离」之后、分隔线之前（HD 与智能去字幕不变）', async () => {
+    await renderToolbar('video');
+    const toolbar = mountNode.querySelector(`.${styles.toolbar}`)!;
+    const seq = [...toolbar.children].map((el) =>
+      el.classList.contains(styles.toolDivider)
+        ? 'divider'
+        : (el.textContent?.trim() || el.getAttribute('title') || ''),
+    );
+    expect(seq).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', 'divider', '详情', '下载', '添加到 Agent 聊天']);
+  });
+
+  it('仅视频卡显示：图片卡与音频卡不出现「场景切分」入口', async () => {
+    await renderToolbar('image');
+    expect(mountNode.querySelector('button')?.textContent).not.toContain('场景切分');
+    expect(labels()).not.toContain('场景切分');
+    await renderToolbar('audio');
+    expect(labels()).not.toContain('场景切分');
+    await renderToolbar('video');
+    expect(btn()).toBeTruthy();
+  });
+
+  it('图标+文字形态（Film svg + 文字 span，复用透明底 toolBtn）', async () => {
+    await renderToolbar('video');
+    const sceneBtn = btn();
+    expect(sceneBtn.querySelector('svg')?.classList.contains('lucide-film')).toBe(true);
+    expect(sceneBtn.querySelector('span')?.textContent).toBe('场景切分');
+    expect(sceneBtn.classList.contains(styles.toolBtn)).toBe(true);
+  });
+
+  it('未关联资产：置灰并悬停唯一原因，点击不派发（同音视频分离门槛一）', async () => {
+    const onSceneSplit = vi.fn();
+    await renderToolbar('video', { data: { onSceneSplit } });
+    const sceneBtn = btn();
+    expect(sceneBtn.disabled).toBe(true);
+    expect(sceneBtn.getAttribute('title')).toContain('尚未关联资产');
+    await act(async () => {
+      sceneBtn.click();
+    });
+    expect(onSceneSplit).not.toHaveBeenCalled();
+  });
+
+  it('时长超 2 小时且有时长数据：置灰并悬停原因，点击不派发；恰 7200 放行', async () => {
+    const onSceneSplit = vi.fn();
+    await renderToolbar('video', { data: { onSceneSplit, assetId: 'a1', duration: 7200.001 } });
+    const over = btn();
+    expect(over.disabled).toBe(true);
+    expect(over.getAttribute('title')).toContain('2 小时');
+    await act(async () => {
+      over.click();
+    });
+    expect(onSceneSplit).not.toHaveBeenCalled();
+
+    await renderToolbar('video', { id: 'exact-node', data: { onSceneSplit, assetId: 'a1', duration: 7200 } });
+    expect(btn().disabled).toBe(false);
+  });
+
+  it('时长数据缺失放行：关联资产即可点击，可用态悬停为效果边界 hint（后端按权威数据复核）', async () => {
+    const onSceneSplit = vi.fn();
+    await renderToolbar('video', { data: { onSceneSplit, assetId: 'a1' } });
+    const sceneBtn = btn();
+    expect(sceneBtn.disabled).toBe(false);
+    expect(sceneBtn.getAttribute('title')).toContain('片段');
+    await act(async () => {
+      sceneBtn.click();
+    });
+    expect(onSceneSplit).toHaveBeenCalledWith('video-node');
   });
 });
 

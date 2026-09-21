@@ -119,6 +119,17 @@ public class JobClaimService {
             List.of(VideoEnhanceContract.SOURCE);
 
     /**
+     * video_scene_split 租约 420s（IKH8BP，父规格 IKH86V）：轮询到点步是短查询，但 completed
+     * 步要在同一租约窗口内完成 N 段切片逐段下载（单段可达源视频体量）+ TOS 转存——取 MediaKit
+     * 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投，去字幕/HD 同款语义）。
+     */
+    private static final int VIDEO_SCENE_SPLIT_LEASE_SECONDS = 420;
+
+    /** video_scene_split claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「场景切分」）。 */
+    private static final List<String> VIDEO_SCENE_SPLIT_CLAIM_SOURCES =
+            List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE);
+
+    /**
      * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
      * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
      * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
@@ -574,6 +585,49 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    /**
+     * 领取 video_scene_split 作业（IKH8BP，父规格 IKH86V，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约 420s（completed 步含 N 段切片逐段下载 + TOS 转存，见常量注释）。
+     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     */
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto> claimVideoSceneSplit(
+            String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
+                VIDEO_SCENE_SPLIT_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VIDEO_SCENE_SPLIT_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[video_scene_split] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

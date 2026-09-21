@@ -50,7 +50,7 @@ public class GenerationModelCapabilityEntity {
     private String supportedSizes; // JSON
 
     @TableField("features")
-    /** 特性 JSON（含 maxReferenceImages / max_reference_images） */
+    /** 特性 JSON（含 imageReferenceMax / image_reference_max） */
     private String features; // JSON
 
     @TableField("channel_parser")

@@ -213,6 +213,9 @@ export interface MediaNodeData {
    *  编辑态归 IKHB7A，本票只透出回调；置灰门槛见 audioTrim.ts——音频 URL 缺失或时长
    *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
   onTrimAudio?: (id: string) => void;
+  /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
+   *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
+  onSceneSplit?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */

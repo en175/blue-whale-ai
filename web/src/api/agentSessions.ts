@@ -261,7 +261,12 @@ export interface SessionRun {
   /** 这个 Run 回答的输入批次（IKDK5C）。回答按它挂回自己的问题下面。 */
   input_batch_id?: string | null;
   status: string;
-  failure?: { code?: string; message?: string } | null;
+  /**
+   * 这一轮为什么失败。`retryable` 是**服务端**的判断（与文案同出一张表），客户端据它决定
+   * 要不要给「重新回答」——自己维护一张码表迟早会和服务端分叉，分叉的表现是给
+   * 「再试也会被同一道审核拦下」的失败画了个重试按钮。
+   */
+  failure?: { code?: string; message?: string; retryable?: boolean } | null;
   trace_id?: string | null;
   /** 入队时刻（ISO）。状态行的起点：它量的是用户从提交到拿到结果等了多久，不是模型跑了多久。 */
   created_at?: string | null;

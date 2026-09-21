@@ -74,7 +74,7 @@ public final class AudioTrimContract {
      *  异步工具共用同一条查询路由，路径**不含 async 段**。 */
     public static final String POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
-    // ========== 错误码（数值 1046 见 error-codes.ts ERROR_AUDIO_TRIM_FAILED；
+    // ========== 错误码（数值 1047 见 error-codes.ts ERROR_AUDIO_TRIM_FAILED；
     //            1045 已由视频 HD 高清占用） ==========
 
     /** 执行兜底失败码：网关分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 /

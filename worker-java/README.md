@@ -171,7 +171,7 @@ worker/
     - gpt 矩阵查表（matrix[sizeId][ratioId]，大小写不敏感）
     - banana 双映射（quality × size）
     - supported_sizes 匹配（id / api_value / apiValue）
-    - features JSON 解析（maxReferenceImages / max_reference_images）
+    - features JSON 解析（imageReferenceMax / image_reference_max）
   - [x] processor `ImageJobProcessor`：完整图片编排（generation-worker.ts:499-685）
     - claim → 校验输入 → 查能力 → 校验参考图 → 解封凭证 → 渠道映射 →
       调 provider（批量循环）→ 转存 → createAsset 循环 → completeJob

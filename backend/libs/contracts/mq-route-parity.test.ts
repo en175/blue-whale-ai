@@ -18,6 +18,7 @@ import {
   IMAGE_OUTPAINT_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_TAG,
+  VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
   VIDEO_ENHANCE_TAG,
 } from "../shared/generation/queue.constants.js";
@@ -44,6 +45,7 @@ const EXPECTED_ROUTES = [
   { entry: "IMAGE_OUTPAINT", tag: IMAGE_OUTPAINT_TAG },
   { entry: "VIDEO_SUBTITLE_ERASE", tag: VIDEO_SUBTITLE_ERASE_TAG },
   { entry: "VIDEO_ENHANCE", tag: VIDEO_ENHANCE_TAG },
+  { entry: "VIDEO_SCENE_SPLIT", tag: VIDEO_SCENE_SPLIT_TAG },
 ] as const;
 
 describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java 源码文本，防漂移）", () => {

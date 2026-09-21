@@ -72,6 +72,8 @@ class StartupContractTest {
                     () -> mock(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class))
             .withBean(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class,
                     () -> mock(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class))
             .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
             .withPropertyValues("NEW_API_BASE_URL=http://new-api.invalid");
 
@@ -152,7 +154,7 @@ class StartupContractTest {
     @Test
     @DisplayName("GenerationMqRoute 十一个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        // Map.of 最多 10 对，11 入口用 Map.ofEntries（entry 静态导入见文件头）。
+        // Map.of 最多 10 对，audio_trim 与 video_scene_split 加入后为 12 入口用 Map.ofEntries（entry 静态导入见文件头）。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
                 Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
                 Map.entry(GenerationMqRouteEnum.IMAGE, "image"),
@@ -164,7 +166,8 @@ class StartupContractTest {
                 Map.entry(GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout"),
                 Map.entry(GenerationMqRouteEnum.IMAGE_OUTPAINT, "image_outpaint"),
                 Map.entry(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase"),
-                Map.entry(GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance"));
+                Map.entry(GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT, "video_scene_split"));
 
         assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
         for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
@@ -188,6 +191,7 @@ class StartupContractTest {
         assertThat(GenerationMqRouteEnum.IMAGE_OUTPAINT.tag()).isEqualTo(JobTypeEnum.IMAGE_OUTPAINT.value());
         assertThat(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE.tag()).isEqualTo(JobTypeEnum.VIDEO_SUBTITLE_ERASE.value());
         assertThat(GenerationMqRouteEnum.VIDEO_ENHANCE.tag()).isEqualTo(JobTypeEnum.VIDEO_ENHANCE.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.tag()).isEqualTo(JobTypeEnum.VIDEO_SCENE_SPLIT.value());
     }
 
     /**

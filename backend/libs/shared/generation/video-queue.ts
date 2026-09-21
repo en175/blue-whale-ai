@@ -12,6 +12,7 @@ import {
   MEDIA_EXTRACT_TAG,
   VIDEO_ENHANCE_TAG,
   VIDEO_GENERATION_TAG,
+  VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
 } from "./queue.constants.js";
 import type { GenerationTag } from "./queue.constants.js";
@@ -27,6 +28,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueVideoSubtitleEraseJob（tag=video_subtitle_erase，IKGZ80）
  *  / enqueueVideoEnhanceJob（tag=video_enhance，IKH3VE）
  *  / enqueueAudioTrimJob（tag=audio_trim，IKHB6N）
+ *  / enqueueVideoSceneSplitJob（tag=video_scene_split，IKH8BO）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -263,6 +265,21 @@ export async function enqueueVideoEnhanceJob(
   await createRocketMqVideoProducer(
     producer,
     VIDEO_ENHANCE_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 视频场景切分 job 入队（IKH8BO，契约 @lib/contracts/video-scene-split）：
+ *  复用生成任务 topic/queue，用独立 tag「video_scene_split」区分任务类型
+ *  （tag 常量 IKH8BH 已建，本函数补齐发布侧先例位）。 */
+export async function enqueueVideoSceneSplitJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    VIDEO_SCENE_SPLIT_TAG,
   ).enqueue(jobId, options);
 }
 

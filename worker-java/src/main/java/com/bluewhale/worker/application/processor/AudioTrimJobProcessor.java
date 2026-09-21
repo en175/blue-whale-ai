@@ -36,7 +36,7 @@ import java.util.Set;
  *       start_time / end_time 贴边省略可选 + format，返 task_id）→ markVideoSubmitted
  *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
- *       续排（超限 1046）；failed → 分类终态（§5）；completed → **立即下载转存自家 TOS
+ *       续排（超限 1047）；failed → 分类终态（§5）；completed → **立即下载转存自家 TOS
  *       （火山 audio_url 仅 24h 有效）** → 发布音频 Asset（type=audio）→ 终态 succeeded</li>
  * </ol>
  * 下载与转存复用 {@link TosAudioMediaRelay}（音视频分离同套：fetch → audio/ mime 校验 →
@@ -47,7 +47,7 @@ import java.util.Set;
  * 「整轨提取 ≈ 源时长」之上，截取片段 ≠ 源全长，回落会把全长写成片段时长，语义不成立；
  * 官方值缺失即 null（assets.duration_ms 可空）。
  * <p>
- * 错误码口径（数值 1046，无 worker 级自动重试，用户手动重试沿用冻结 input）：
+ * 错误码口径（数值 1047，无 worker 级自动重试，用户手动重试沿用冻结 input）：
  * <ul>
  *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构；凭证冻结在
  *       创建入口）</li>
@@ -55,7 +55,7 @@ import java.util.Set;
  *       形态（创建入口复核是权威，worker 兜底防御）</li>
  *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
  *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
- *   <li>audio_trim_failed（1046）：其余一律归并兜底——网关 provider_failed / 提交超时 /
+ *   <li>audio_trim_failed（1047）：其余一律归并兜底——网关 provider_failed / 提交超时 /
  *       轮询超时 / 火山任务 failed（**含 end_time 超真实片尾、start_time ≥ end_time 等
  *       供应商侧官方约束拒绝**，契约口径不单独识别）/ 源素材不可用 / 结果下载转存失败
  *       （超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message 透传
@@ -67,7 +67,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(AudioTrimJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 audio_trim_failed(1046)。 */
+    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 audio_trim_failed(1047)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
@@ -392,7 +392,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
     /**
      * 失败码归一：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * audio_trim_failed（1046）。
+     * audio_trim_failed（1047）。
      */
     private static String resolveFailCode(Exception e) {
         if (e instanceof AudioTrimError ate && PRESERVED_ERROR_CODES.contains(ate.getCode())) {
@@ -403,7 +403,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
     /**
      * 上游任务 failed 的错误码分类（§5 优先级；家族分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1046）。
+     * 版权 → 内容政策 → 额度 → 兜底 1047）。
      */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "

@@ -85,7 +85,7 @@ const apiMocks = vi.hoisted(() => ({
       default_aspect_ratio: '1:1',
       default_duration: null,
       features: {
-        reference_image: true, max_reference_images: 9, watermark: false, quantity_max: 1,
+        reference_image: true, image_reference_max: 9, watermark: false, quantity_max: 1,
         sequential_image_generation: false, stream: false, tools: false,
         first_frame: false, last_frame: false, first_last_frame: false, audio: false,
       },
@@ -374,7 +374,7 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
       default_aspect_ratio: '1:1',
       default_duration: null,
       features: {
-        reference_image: false, max_reference_images: 9, watermark: false, quantity_max: 1,
+        reference_image: false, image_reference_max: 9, watermark: false, quantity_max: 1,
         sequential_image_generation: false, stream: false, tools: false,
         first_frame: false, last_frame: false, first_last_frame: false, audio: false,
         ...features,
@@ -413,8 +413,8 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
 
   it('关闭按钮结束面板后重开：参考、提示词与配置完整恢复', async () => {
     apiMocks.fetchGenerationModels.mockImplementation(async () => [
-      modelVariant('m-test', '测试生图模型', { reference_image: true, max_reference_images: 9 }),
-      modelVariant('m-hd', '高清模型', { reference_image: true, max_reference_images: 9 }, [{ id: '4k', label: '4K' }]),
+      modelVariant('m-test', '测试生图模型', { reference_image: true, image_reference_max: 9 }),
+      modelVariant('m-hd', '高清模型', { reference_image: true, image_reference_max: 9 }, [{ id: '4k', label: '4K' }]),
     ]);
     pushImageNode('m2', 'a2', '素材图二');
     await renderPage();
@@ -548,7 +548,7 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
 
   it('切换不支持参考的模型：保留全部参考、说明原因并阻止发送，换回兼容模型恢复', async () => {
     apiMocks.fetchGenerationModels.mockImplementation(async () => [
-      modelVariant('m-test', '测试生图模型', { reference_image: true, max_reference_images: 9 }),
+      modelVariant('m-test', '测试生图模型', { reference_image: true, image_reference_max: 9 }),
       modelVariant('m-noref', '无参考模型', {}),
     ]);
     await renderPage();
@@ -578,8 +578,8 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
 
   it('切换参考数量上限不足的模型：保留全部参考并说明原因，用户删除超限项后恢复发送', async () => {
     apiMocks.fetchGenerationModels.mockImplementation(async () => [
-      modelVariant('m-test', '测试生图模型', { reference_image: true, max_reference_images: 9 }),
-      modelVariant('m-cap1', '单参考模型', { reference_image: true, max_reference_images: 1 }),
+      modelVariant('m-test', '测试生图模型', { reference_image: true, image_reference_max: 9 }),
+      modelVariant('m-cap1', '单参考模型', { reference_image: true, image_reference_max: 1 }),
     ]);
     pushImageNode('m2', 'a2', '素材图二');
     await renderPage();
