@@ -41,10 +41,11 @@ export interface ModelFeatures {
   video_reference_max?: number;
   /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
   audio_reference?: boolean;
-  /** ADR-0086：视频 / 音频生成中的音频素材参考上限；IKHEXG 起缺省 1。 */
+  /** ADR-0086：视频 / 音频生成中的音频素材参考上限；缺省 3（IKHEXG 未改动该缺省）。 */
   audio_reference_max?: number;
-  /** 图片 / 视频 / 音频三种生成共用的图参考上限；IKHEXG 起缺省 1。
-   *  IKHEXG：合并了旧的 `max_reference_images`（该键已从前后端契约中移除）。 */
+  /** 图片 / 视频 / 音频三种生成共用的图参考上限。
+   *  IKHEXG：合并了旧的 `max_reference_images`（该键已从前后端契约中移除）。
+   *  缺省按生成类型分——图片/视频 10、音频 1（见 model-reference-limits.ts 的两个 DEFAULT_*）。 */
   image_reference_max?: number;
   /** ADR-0086：输入参考素材总时长上限（秒，视频/音频；2.0=15 / 2.5=30；null=不限）。 */
   max_reference_duration_sec?: number | null;

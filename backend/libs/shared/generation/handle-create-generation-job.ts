@@ -1316,7 +1316,8 @@ export async function handleCreateGenerationJob(
   }
 
   // 4. 参考图语义统一 + image 上限（IKA72G）
-  // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在），缺省统一 1。
+  // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在）；
+  // 图片/视频链路的缺省是 DEFAULT_IMAGE_REFERENCE_MAX = 10（音频链路的 1 是另一个常量）。
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const imageReferenceMax =
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;

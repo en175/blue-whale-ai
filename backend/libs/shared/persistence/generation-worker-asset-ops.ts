@@ -129,7 +129,8 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
         image_reference_max?: number;
       };
       // IKA72G：能力快照带参考图上限（与创建校验同源）。
-      // IKHEXG：键名并入 `image_reference_max`，缺省统一 1（见 model-capability-repo 常量注释）。
+      // IKHEXG：键名并入 `image_reference_max`；此处是图片 worker，缺省取图片/视频口径 10
+      // （音频链路的 1 是另一个常量，见 model-capability-repo 的 DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO）。
       return {
         model_id: cap.model_id,
         api_size: apiSize,

@@ -643,7 +643,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           ? '请补充尾帧'
           : ''
     : '';
-  /** AI 图片参考图上限（ADR-0086：读能力行 image_reference_max；IKHEXG 起与后端缺省对齐为 1，
+  /** AI 图片参考图上限（ADR-0086：读能力行 image_reference_max；缺省 10，与后端图片/视频口径一致，
    *  不再 min 到旧写死 9）。 */
   const imageMaxImages = imageReferenceMaxOf(selectedImageModel?.features);
 

@@ -46,11 +46,15 @@ describe("IKHEXG 双轨迁移（参考上限键名统一）", () => {
   it("非音频行才搬值：行类型决定原本被读的那把键", () => {
     // 音频行读的是 image_reference_max，其上的 max_reference_images 是死值——
     // 搬过去会把死值扶正，正是本次要消除的失效模式。
-    const valueCarryingStatements = migrationSql
-      .split("-- 3)")
-      .slice(0, 2)
-      .join("");
-    expect(valueCarryingStatements.match(/`capability_type` <> 'audio'/g)).toHaveLength(2);
+    // 先剥注释：pre-flight 的示例查询里也含同样的谓词，数进来会误判。
+    const statements = migrationSql
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n");
+    expect(statements.match(/`capability_type` <> 'audio'/g)).toHaveLength(2);
+    // 第 3 步（删残余）不得按类型过滤——音频行与脏值行都要清。
+    const cleanup = statements.slice(statements.indexOf("JSON_REMOVE(`features`, '$.max_reference_images'"));
+    expect(cleanup).not.toContain("capability_type");
   });
 
   it("三步齐备：snake 搬值、camel 搬值、残余一律删", () => {

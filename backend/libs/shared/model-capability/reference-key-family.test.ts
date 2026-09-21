@@ -31,6 +31,16 @@ function familyKeysIn(source: string): Set<string> {
   return found;
 }
 
+/** 去掉块注释与行注释——守卫要抓的是**键被使用**，不是键被解释。
+ *  这三处文件里都有注释在讲「旧键为什么退役」，那些提及是应当留下的史料。 */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
 const backendGate = read("./constants.ts");
 const webFormKeys = read("../../../../web/src/admin/pages/ModelList/model-form.ts");
 const webFormLabels = read(
@@ -68,5 +78,14 @@ describe("IKHEXG 参考上限键族守卫", () => {
     const labels = familyKeysIn(webFormLabels);
     expect(form).toEqual(backend);
     expect(labels).toEqual(backend);
+  });
+
+  it.each(Object.entries(SOURCES))("%s 不含已退役的旧键名（注释除外）", (label, source) => {
+    // ⚠️ 上面那条白名单断言**抓不到**旧键：`max_reference_images` 的后缀是 `_reference_images`，
+    // 不匹配 `*_reference_max` 形态。少了这一条，把旧键加回来测试照样绿——正是本测试要防的事。
+    // 只看非注释行：这三个文件里有注释在讲旧键为什么退役，那些提及是应当留下的史料。
+    expect(stripComments(source), `${label} 出现已退役的 max_reference_images`).not.toMatch(
+      /max_reference_images|maxReferenceImages/,
+    );
   });
 });
