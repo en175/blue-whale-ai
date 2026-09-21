@@ -123,7 +123,7 @@ class ImageJobProcessorI2iAliasTest {
     void defaultProtocolWithReferencesSwapsAlias() {
         Outbound out = captureOutbound(
                 List.of("101"),
-                "{\"i2i_model_name\": \"" + ALIAS + "\", \"max_reference_images\": 10}");
+                "{\"i2i_model_name\": \"" + ALIAS + "\", \"image_reference_max\": 10}");
         assertThat(out.protocol()).isEqualTo(ImageProtocol.INLINE_IMAGE);
         assertThat(out.model()).isEqualTo(ALIAS);
     }
@@ -141,7 +141,7 @@ class ImageJobProcessorI2iAliasTest {
     @DisplayName("inline 形态 + 未配别名 + 参考图 → canonical（单名行为不变）")
     void inlineNoAliasWithReferencesKeepsCanonical() {
         Outbound out = captureOutbound(
-                List.of("101", "102"), "{\"max_reference_images\": 10}");
+                List.of("101", "102"), "{\"image_reference_max\": 10}");
         assertThat(out.model()).isEqualTo(MODEL_ID);
     }
 

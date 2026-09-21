@@ -7,10 +7,11 @@ import { createContext, useContext } from 'react';
 import type { GenerationModel } from '@/api/generation';
 import {
   audioReferenceMaxOf,
-  imageReferenceMaxOfCap,
+  imageReferenceMaxOf,
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
   videoReferenceMaxOf,
+  UNRESOLVED_IMAGE_REFERENCE_LIMIT,
 } from '@/lib/model-reference-limits';
 import type { VideoRefCapabilities } from './videoMediaRefs';
 
@@ -29,13 +30,14 @@ export function videoRefCapsOfModel(model?: GenerationModel | null): VideoRefCap
     audioReference: supportsAudioReferenceOf(f),
     videoReferenceMax: videoReferenceMaxOf(f),
     audioReferenceMax: audioReferenceMaxOf(f),
-    imageMax: imageReferenceMaxOfCap(f),
+    imageMax: imageReferenceMaxOf(f),
   };
 }
 
-/** 资产卡参考图上限（图片生成能力行的 max_reference_images，缺省 10 与服务端 toFeatures 一致）。
- *  资产卡经图片面板生成图片，故以图片能力默认模型为口径；能力列表未加载时按缺省值。 */
-const AssetImageRefLimitContext = createContext(imageReferenceMaxOfCap(null));
+/** 资产卡参考图上限（图片生成能力行的 image_reference_max）。
+ *  资产卡经图片面板生成图片，故以图片能力默认模型为口径；**能力列表未加载时用不阻断的宽松
+ *  兜底**（IKHBO 口径，交服务端判定），而不是能力缺省 1。 */
+const AssetImageRefLimitContext = createContext(UNRESOLVED_IMAGE_REFERENCE_LIMIT);
 
 /** 注入资产卡参考图上限（画布页按图片能力模型解析后下发；不注入时用能力缺省值） */
 export const AssetImageRefLimitProvider = AssetImageRefLimitContext.Provider;

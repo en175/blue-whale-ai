@@ -177,7 +177,7 @@ function imageModel(modelId: string, label: string, features: Partial<ModelFeatu
     default_aspect_ratio: '1:1',
     default_duration: null,
     features: {
-      reference_image: true, max_reference_images: 9, watermark: false, quantity_max: 1,
+      reference_image: true, image_reference_max: 9, watermark: false, quantity_max: 1,
       sequential_image_generation: false, stream: false, tools: false,
       first_frame: false, last_frame: false, first_last_frame: false, audio: false,
       ...features,
@@ -204,7 +204,7 @@ function videoModel(modelId: string, label: string, features: Partial<ModelFeatu
     default_duration: 5,
     features: {
       reference_image: true,
-      max_reference_images: 10,
+      image_reference_max: 10,
       watermark: false,
       quantity_max: 1,
       sequential_image_generation: false,
@@ -237,7 +237,7 @@ function audioModel(): GenerationModel {
     default_aspect_ratio: null,
     default_duration: null,
     features: {
-      reference_image: false, max_reference_images: 0, watermark: false, quantity_max: 1,
+      reference_image: false, image_reference_max: 0, watermark: false, quantity_max: 1,
       sequential_image_generation: false, stream: false, tools: false,
       first_frame: false, last_frame: false, first_last_frame: false, audio: false,
     },

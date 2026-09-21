@@ -11,7 +11,7 @@ import type { VideoWorkerInputAsset, VideoReference } from "./video-job-types.js
 // 单视频字节 / 单边像素 / 总像素 / 宽高比 / 单视频最短时长 / mime 白名单。
 //
 // DEFAULT_* 语义：**无配置可读时的缺省**，不是「配置的兜底」——没有配置字段，所以无条件生效，
-// 这是设计如此（对齐 model-capability-repo 的 DEFAULT_MAX_REFERENCE_IMAGES 家族）。
+// 这是设计如此（命名沿用 model-capability-repo 的 DEFAULT_IMAGE_REFERENCE_MAX 家族）。
 // 命名与 Java 镜像常量（worker-java VideoJobProcessor 同名 DEFAULT_*）保持一致。
 const DEFAULT_MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
 const DEFAULT_MIN_REFERENCE_VIDEO_SECONDS = 2;
@@ -28,7 +28,7 @@ const DEFAULT_REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
  *  「哪个模型支持参考视频/音频」= video_reference / audio_reference 位，
  *  与接纳侧 checkReferenceLimits（handle-create-generation-job）同源同解。 */
 export interface ReferenceLimits {
-  max_reference_images: number;
+  image_reference_max: number;
   video_reference: boolean;
   video_reference_max: number;
   audio_reference: boolean;
@@ -43,7 +43,7 @@ export interface ReferenceLimits {
  *  worker 再判一遍只会多一份会漂移的副本（见 worker 侧同处注释）。
  *  字段可缺省——缺省 = 该字段未配（能力行未归一化/未配置），worker 侧按迁移兜底处理。 */
 export interface FrozenReferenceLimits {
-  max_reference_images?: number;
+  image_reference_max?: number;
   video_reference_max?: number;
   audio_reference_max?: number;
   max_reference_duration_sec?: number | null;
@@ -55,8 +55,8 @@ export function freezeReferenceLimits(
   limits: Partial<ReferenceLimits>,
 ): FrozenReferenceLimits {
   const frozen: FrozenReferenceLimits = {};
-  if (typeof limits.max_reference_images === "number") {
-    frozen.max_reference_images = limits.max_reference_images;
+  if (typeof limits.image_reference_max === "number") {
+    frozen.image_reference_max = limits.image_reference_max;
   }
   if (typeof limits.video_reference_max === "number") {
     frozen.video_reference_max = limits.video_reference_max;
@@ -120,10 +120,10 @@ function validateReferences(
   }
 
   // 上限与支持位全读能力行（ADR-0086 / IKHBDO）：文案与判定顺序对齐接纳侧 checkReferenceLimits。
-  if (imageCount > limits.max_reference_images) {
+  if (imageCount > limits.image_reference_max) {
     throw new VideoInputError(
       ERROR_REFERENCE_LIMIT_EXCEEDED,
-      `参考图最多 ${limits.max_reference_images} 张`,
+      `参考图最多 ${limits.image_reference_max} 张`,
     );
   }
   if (videoCount > 0 && !limits.video_reference) {

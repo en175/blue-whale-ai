@@ -63,7 +63,7 @@ import {
 import {
   audioReferenceMaxOf,
   videoReferenceMaxOf,
-  imageReferenceMaxOfCap,
+  imageReferenceMaxOf,
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
   checkReferenceLimits,
@@ -300,7 +300,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         audioReference: supportsAudioReferenceOf(currentModel.features),
         videoReferenceMax: videoReferenceMaxOf(currentModel.features),
         audioReferenceMax: audioReferenceMaxOf(currentModel.features),
-        imageMax: imageReferenceMaxOfCap(currentModel.features),
+        imageMax: imageReferenceMaxOf(currentModel.features),
       }
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径（ADR-0086：分类上限/素材总时长读能力行，走共享纯函数

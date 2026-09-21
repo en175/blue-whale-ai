@@ -191,8 +191,8 @@ describe("parseModelUpdateBody", () => {
   // IKH BDO：闸门此前只覆盖 9 个键，能力行主流键任意类型都能入库。
   it("features 闸门补键：脏类型 → 拒绝", () => {
     const dirty = [
-      { max_reference_images: "abc" },
-      { max_reference_images: 1.5 },
+      { image_reference_max: "abc" },
+      { image_reference_max: 1.5 },
       { quantity_max: 1.5 },
       { quantity_max: 0 },
       { reference_image: "yes" },
@@ -216,7 +216,7 @@ describe("parseModelUpdateBody", () => {
     expect(
       parseModelUpdateBody({
         features: {
-          max_reference_images: 14,
+          image_reference_max: 14,
           quantity_max: 10,
           reference_image: true,
           watermark: false,
@@ -227,7 +227,7 @@ describe("parseModelUpdateBody", () => {
           sequential_image_generation: false,
           stream: false,
           image_protocol: "openai-images",
-          maxReferenceImages: 14,
+          imageReferenceMax: 14,
           quantityMax: 10,
           imageProtocol: "inline-image",
         },

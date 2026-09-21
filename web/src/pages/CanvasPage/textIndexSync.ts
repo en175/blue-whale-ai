@@ -22,10 +22,12 @@ import {
 import { imageMediaRefsOf, type ImageMediaRef } from './mediaRefs';
 import { audioMediaRefsOf, audioMergedRefsError, type AudioMediaRef } from './audioMediaRefs';
 import { mergedVideoMediaRefsOf, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
+import { UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/lib/model-reference-limits';
 
-/** 图片参考缺省上限（= 后端 DEFAULT_MAX_REFERENCE_IMAGES；模型未配 features.max_reference_images
- *  时的两端同口径缺省。模型配了更小上限时由面板 features 校验与后端 400 接管）。 */
-export const DEFAULT_IMAGE_REFERENCE_LIMIT = 10;
+/** 图片参考缺省上限（= 画布「模型未解析」时的不阻断兜底，与 @/lib/model-reference-limits
+ *  的 UNRESOLVED_IMAGE_REFERENCE_LIMIT 同义）。模型配了更小上限时由面板 features 校验与
+ *  后端 400 接管；能力缺省本身是 1，这里刻意更宽松，避免未解析时制造客户端假阴性（IKHBO 口径）。 */
+export const DEFAULT_IMAGE_REFERENCE_LIMIT = UNRESOLVED_IMAGE_REFERENCE_LIMIT;
 
 /** React Flow 节点/连线结构与契约宽松形状兼容，统一在此收窄（未知字段忽略）。 */
 function canvasOf(nodes: Node[]): Parameters<typeof textIndexOfTarget>[0] {

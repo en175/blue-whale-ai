@@ -98,6 +98,11 @@ public class VideoJobProcessor implements JobProcessor {
      * <p>
      * ⚠️ 这三个常量**不是真相来源**——新 job 一律读接纳侧冻结的能力行值
      * （{@code backend} handle-create-generation-job videoStrategy.composeInput）。
+     * <p>
+     * IKHEXG：冻结快照的键名随参考上限键族一并改名（{@code max_reference_images} →
+     * {@code image_reference_max}）。本进程**只读新键、不读旧键**——IKHEXG 决策为
+     * 「不考虑在途」，即快照仍是旧键的在飞 job（IKHBDO 之后、IKHEXG 之前创建）在此回落本组
+     * 常量，而不是读出它们冻结的配置值。这是有意的取舍，不是漏读。
      */
     static final int LEGACY_MAX_REFERENCE_IMAGES = 9;
     static final int LEGACY_MAX_REFERENCE_VIDEOS = 3;
@@ -134,7 +139,7 @@ public class VideoJobProcessor implements JobProcessor {
             maxDurationSec = positiveIntOrNull(limits.get("max_reference_duration_sec"));
         }
         return new ReferenceLimits(
-                intOr(limits.get("max_reference_images"), LEGACY_MAX_REFERENCE_IMAGES),
+                intOr(limits.get("image_reference_max"), LEGACY_MAX_REFERENCE_IMAGES),
                 intOr(limits.get("video_reference_max"), LEGACY_MAX_REFERENCE_VIDEOS),
                 intOr(limits.get("audio_reference_max"), LEGACY_MAX_REFERENCE_VIDEOS),
                 maxDurationSec);

@@ -3,7 +3,7 @@
 import type {PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
-import {DEFAULT_MAX_REFERENCE_IMAGES} from "./model-capability-repo.js";
+import {DEFAULT_IMAGE_REFERENCE_MAX} from "./model-capability-repo.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
 /** IKDD4Z：查当前项目显式关联的素材 id（project_asset 跨项目复用，is_delete=0）。
@@ -125,19 +125,20 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
         }
       }
       const features = (cap.features ?? {}) as {
-        maxReferenceImages?: number;
-        max_reference_images?: number;
+        imageReferenceMax?: number;
+        image_reference_max?: number;
       };
-      // IKA72G：能力快照带参考图上限（与创建校验同源；缺省与网关/ARK 一致的 10）。
+      // IKA72G：能力快照带参考图上限（与创建校验同源）。
+      // IKHEXG：键名并入 `image_reference_max`，缺省统一 1（见 model-capability-repo 常量注释）。
       return {
         model_id: cap.model_id,
         api_size: apiSize,
         width,
         height,
-        max_reference_images:
-          features.maxReferenceImages ??
-          features.max_reference_images ??
-          DEFAULT_MAX_REFERENCE_IMAGES,
+        image_reference_max:
+          features.imageReferenceMax ??
+          features.image_reference_max ??
+          DEFAULT_IMAGE_REFERENCE_MAX,
         channel_parser:
           typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
             ? cap.channel_parser

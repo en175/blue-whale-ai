@@ -53,7 +53,7 @@ import {
   transferReferenceMarkers,
 } from "@lib/core";
 import {
-  DEFAULT_MAX_REFERENCE_IMAGES,
+  DEFAULT_IMAGE_REFERENCE_MAX,
   type CanvasRepo,
   type CreateJobInput,
   type GenerationCommandRepo,
@@ -410,7 +410,7 @@ function validateVideo(
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
-  // IKA72G：image 参考图上限由 handler 读取模型能力配置（features.max_reference_images）后校验，
+  // IKA72G：image 参考图上限由 handler 读取模型能力配置（features.image_reference_max）后校验，
   // 不再在此写死 4。
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
   const lastFrameAssetId = assetId(body.last_frame_asset_id);
@@ -473,7 +473,7 @@ function validateVideo(
     // 本函数有两个调用形态：白名单解析**前**的策略预检（capability 缺省）与解析**后**的重跑
     // （handleCreateGenerationJob 内的 capability 复核 + effectiveBody 复核，两处都带 capability）。
     // 预检拿不到能力行，故此处**不判任何参考数量**：写死一个上限会先于配置生效，把把上限配到
-    // 阈值以上的模型（如 max_reference_images: 30）永久卡死。数量是能力行的职责，由带 capability
+    // 阈值以上的模型（如 image_reference_max: 30）永久卡死。数量是能力行的职责，由带 capability
     // 的重跑用 checkReferenceLimits 判定；预检只保留与模型无关的结构性校验。
     if (features) {
       const limitErr = checkReferenceLimits(
@@ -739,7 +739,7 @@ function resolveModelId(type: GenerationType, modelId: unknown): string {
 function resolveReferenceAssets(
   body: CreateGenerationJobBody,
   type: GenerationType,
-  maxReferenceImages: number,
+  imageReferenceMax: number,
 ):
   | { ok: true; value: { referenceAssetIds: Array<string | number> } }
   | {
@@ -764,13 +764,13 @@ function resolveReferenceAssets(
     // 重复没有语义（视频端的「同一素材双角色」由 providerUrl 查重另行为 400，不在此列）。
     // mergeTextProvidedReferences 只对新追加项去重，直接项内部的重复会原样穿过，故在此收口。
     const ids = [...new Set(singleRefs.items.map((item) => String(item.asset_id)))];
-    if (ids.length > maxReferenceImages) {
+    if (ids.length > imageReferenceMax) {
       return {
         ok: false,
         value: {
-          message: `参考图最多 ${maxReferenceImages} 张`,
+          message: `参考图最多 ${imageReferenceMax} 张`,
           code: ERROR_UNSUPPORTED_INPUT,
-          params: { max_reference_count: maxReferenceImages },
+          params: { max_reference_count: imageReferenceMax },
         },
       };
     }
@@ -787,13 +787,13 @@ function resolveReferenceAssets(
       : hasExplicitFrame
         ? []
         : inputAssetIds;
-  if (type === "image" && referenceAssetIds.length > maxReferenceImages) {
+  if (type === "image" && referenceAssetIds.length > imageReferenceMax) {
     return {
       ok: false,
       value: {
-        message: `参考图最多 ${maxReferenceImages} 张`,
+        message: `参考图最多 ${imageReferenceMax} 张`,
         code: ERROR_UNSUPPORTED_INPUT,
-        params: { max_reference_count: maxReferenceImages },
+        params: { max_reference_count: imageReferenceMax },
       },
     };
   }
@@ -854,7 +854,7 @@ async function resolveTextIndexReferences(args: {
   projectId: string;
   deps: Pick<GenerationDeps, "canvas">;
   directReferenceAssetIds: Array<string | number>;
-  maxReferenceImages: number;
+  imageReferenceMax: number;
   /** IKFM3W/IKFM41：视频/音频目标的能力行（视频接受类型按 features 位；容量走 checkReferenceLimits） */
   capability?: ModelCapabilityView;
 }): Promise<
@@ -905,7 +905,7 @@ async function resolveTextIndexReferences(args: {
     index,
     acceptedMediaTypes: IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
     mergedReferenceCount: merged.length,
-    maxReferences: args.maxReferenceImages,
+    maxReferences: args.imageReferenceMax,
   });
   if (checkError) {
     if (checkError.kind === "invalid_index") {
@@ -1316,9 +1316,10 @@ export async function handleCreateGenerationJob(
   }
 
   // 4. 参考图语义统一 + image 上限（IKA72G）
+  // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在），缺省统一 1。
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
-  const maxReferenceImages =
-    capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+  const imageReferenceMax =
+    capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
   // ADR-0086 / IKHBDO：视频/音频参考限制**只认能力行 features**。上方 strategy.validate 的预检
   // 发生在白名单解析之前，拿不到 capability，因此它不判参考数量（见 validateVideo 注释）；数量在
   // 此处以真实 features 判定（超限在接纳当下 400，含模型真实上限文案）。
@@ -1409,7 +1410,7 @@ export async function handleCreateGenerationJob(
   // 能力行白名单负责（按 supported_sizes 的 id / api_value 比对）。像素只用于回写
   // assets.width/height（列可空），换算不出写 null 即可——不能把「本地算不出」当成「参数非法」，
   // 否则上游档位命名不遵循 <N>p 时会被误伤（如火山 Seedance 2.0 的 4k 档）。
-  const refs = resolveReferenceAssets(body, type, maxReferenceImages);
+  const refs = resolveReferenceAssets(body, type, imageReferenceMax);
   if (!refs.ok) {
     return fail(400, refs.value.message, {
       code: refs.value.code,
@@ -1425,7 +1426,7 @@ export async function handleCreateGenerationJob(
     projectId,
     deps,
     directReferenceAssetIds: refs.value.referenceAssetIds,
-    maxReferenceImages,
+    imageReferenceMax,
     ...(capability ? { capability } : {}),
   });
   if (!textIndexRefs.ok) {

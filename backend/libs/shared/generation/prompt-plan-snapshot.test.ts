@@ -37,7 +37,6 @@ function makeModel(overrides: Partial<ModelCapabilityView["features"]> = {}, mod
     digest: "digest",
     features: {
       reference_image: true,
-      max_reference_images: 4,
       watermark: false,
       quantity_max: 1,
       sequential_image_generation: false,
@@ -198,7 +197,7 @@ describe("freezePromptPlans 保留的边界校验（IKG4RV 不放松）", () => 
   });
 
   it("参考图数量超过模型上限 → 仍 400", async () => {
-    await expect(callFreeze({ connected: true, model: makeModel({ max_reference_images: 0 }) })).rejects.toThrow("参考图最多 0 张");
+    await expect(callFreeze({ connected: true, model: makeModel({ image_reference_max: 0 }) })).rejects.toThrow("参考图最多 0 张");
   });
 
   it("模型不支持图片参考 → 仍 400", async () => {

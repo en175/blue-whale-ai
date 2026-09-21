@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * - seedream 代码表（hasSeedreamSizeTable / resolveSeedreamImageSize）
  * - gpt 矩阵查表（mapImageChannelRequest gpt parser）
  * - banana 双映射（quality × size）
- * - features JSON 解析（maxReferenceImages）
+ * - features JSON 解析（imageReferenceMax）
  * - supported_sizes 匹配（matchSupportedSize）
  */
 class ImageCapabilityMatrixTest {
@@ -175,22 +175,22 @@ class ImageCapabilityMatrixTest {
     // ========== features 解析 ==========
 
     @Nested
-    @DisplayName("features maxReferenceImages（asset-ops.ts:127-139）")
+    @DisplayName("features imageReferenceMax（asset-ops.ts:127-139）")
     class FeaturesParsing {
 
         @Test
-        @DisplayName("maxReferenceImages 驼峰")
+        @DisplayName("imageReferenceMax 驼峰")
         void camelCase() {
             int max = ImageChannelMapper.parseMaxReferenceImages(
-                    "{\"maxReferenceImages\": 5}");
+                    "{\"imageReferenceMax\": 5}");
             assertThat(max).isEqualTo(5);
         }
 
         @Test
-        @DisplayName("max_reference_images 蛇形")
+        @DisplayName("image_reference_max 蛇形")
         void snakeCase() {
             int max = ImageChannelMapper.parseMaxReferenceImages(
-                    "{\"max_reference_images\": 3}");
+                    "{\"image_reference_max\": 3}");
             assertThat(max).isEqualTo(3);
         }
 

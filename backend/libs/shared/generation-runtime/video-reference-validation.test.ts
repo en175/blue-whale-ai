@@ -15,7 +15,7 @@ import {
 /** 一份能力行 features 投影（字段名与 ModelFeatures 同名，结构对齐）。 */
 function limits(overrides: Partial<ReferenceLimits> = {}): ReferenceLimits {
   return {
-    max_reference_images: 9,
+    image_reference_max: 9,
     video_reference: true,
     video_reference_max: 3,
     audio_reference: true,
@@ -75,8 +75,8 @@ function expectRejected(
 }
 
 describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
-  it("参考图上限随 max_reference_images 变化：14 张放行、15 张拒绝", () => {
-    const config = limits({ max_reference_images: 14 });
+  it("参考图上限随 image_reference_max 变化：14 张放行、15 张拒绝", () => {
+    const config = limits({ image_reference_max: 14 });
     expect(validateReferences(config, images(14), [])).toHaveLength(14);
 
     const error = expectRejected(config, images(15));
@@ -84,7 +84,7 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
     expect(error.message).toBe("参考图最多 14 张");
 
     // 同一份输入在旧默认 9 下被拒：行为差异只来自配置
-    expect(expectRejected(limits({ max_reference_images: 9 }), images(14)).message)
+    expect(expectRejected(limits({ image_reference_max: 9 }), images(14)).message)
       .toBe("参考图最多 9 张");
   });
 
@@ -175,7 +175,7 @@ describe("freezeReferenceLimits（接纳侧冻结口径）", () => {
   it("只冻结 worker 判定要用的上限字段（支持位由接纳侧单独把关，不进快照）", () => {
     expect(
       freezeReferenceLimits({
-        max_reference_images: 14,
+        image_reference_max: 14,
         video_reference: true,
         video_reference_max: 5,
         audio_reference: false,
@@ -183,7 +183,7 @@ describe("freezeReferenceLimits（接纳侧冻结口径）", () => {
         max_reference_duration_sec: 30,
       }),
     ).toEqual({
-      max_reference_images: 14,
+      image_reference_max: 14,
       video_reference_max: 5,
       audio_reference_max: 2,
       max_reference_duration_sec: 30,

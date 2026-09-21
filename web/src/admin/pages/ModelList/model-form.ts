@@ -37,12 +37,11 @@ export const KNOWN_FEATURE_KEYS = [
   'video_reference',
   'audio_reference',
   'tools',
-  'max_reference_images',
+  'image_reference_max',
   'quantity_max',
   'max_prompt_length',
   'video_reference_max',
   'audio_reference_max',
-  'image_reference_max',
   'max_reference_duration_sec',
   'i2i_model_name',
   'image_protocol',
@@ -504,12 +503,11 @@ export function hasFeatureKey(features: Record<string, unknown> | undefined, key
 /** 结构化控件能承载的取值类型。类型不符的脏值不归控件管，留在高级 JSON 里原样回写，
  *  避免「读成空白 → 保存把整个键删掉」这种静默数据丢失（写侧闸门会拒，报错好过丢数据）。 */
 const FEATURE_NUMBER_KEYS = new Set([
-  'max_reference_images',
+  'image_reference_max',
   'quantity_max',
   'max_prompt_length',
   'video_reference_max',
   'audio_reference_max',
-  'image_reference_max',
   'max_reference_duration_sec',
 ]);
 const FEATURE_STRING_KEYS = new Set(['i2i_model_name', 'image_protocol']);

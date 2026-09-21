@@ -54,7 +54,7 @@ vi.mock('../PromptRefEditor', async () => {
 
 const baseFeatures = {
   reference_image: true,
-  max_reference_images: 10,
+  image_reference_max: 10,
   watermark: false,
   quantity_max: 1,
   sequential_image_generation: false,
@@ -282,7 +282,7 @@ describe('IKGB7W 三种禁用态：常显置灰 + 悬停原因（替代旧「+ �
   });
 
   it('普通参考达上限：两按钮 aria-disabled、悬停说明已达上限，n/N 计数保留在附件栏原位', async () => {
-    // 夹具模型 max_reference_images=10（imageMax）+ video_reference_max 缺省 3 → 上限 13
+    // 夹具模型 image_reference_max=10（imageMax）+ video_reference_max 缺省 3 → 上限 13
     const refs = Array.from({ length: 13 }, (_, i) => ref(`m${i}`));
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ mode: 'all', mediaRefs: { reference: refs } });
 

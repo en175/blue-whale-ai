@@ -23,7 +23,6 @@ export interface ModelSize {
 /** 模型能力特性 */
 export interface ModelFeatures {
   reference_image: boolean;
-  max_reference_images: number;
   watermark: boolean;
   quantity_max: number;
   sequential_image_generation: boolean;
@@ -42,9 +41,10 @@ export interface ModelFeatures {
   video_reference_max?: number;
   /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
   audio_reference?: boolean;
-  /** ADR-0086：音频生成中音频参考上限；缺省 3。 */
+  /** ADR-0086：视频 / 音频生成中的音频素材参考上限；IKHEXG 起缺省 1。 */
   audio_reference_max?: number;
-  /** ADR-0086：音频生成中图片参考上限；缺省 1。 */
+  /** 图片 / 视频 / 音频三种生成共用的图参考上限；IKHEXG 起缺省 1。
+   *  IKHEXG：合并了旧的 `max_reference_images`（该键已从前后端契约中移除）。 */
   image_reference_max?: number;
   /** ADR-0086：输入参考素材总时长上限（秒，视频/音频；2.0=15 / 2.5=30；null=不限）。 */
   max_reference_duration_sec?: number | null;

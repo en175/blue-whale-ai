@@ -46,13 +46,13 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         supported_durations: { min: 4, max: 12, step: 1 },
         features: {
           reference_image: true,
-          max_reference_images: 10,
+          image_reference_max: 10,
           first_frame: true,
           last_frame: true,
           first_last_frame: true,
         },
       },
-      update: { features: { reference_image: true, max_reference_images: 10, first_frame: true, last_frame: true, first_last_frame: true } },
+      update: { features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true } },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
@@ -506,7 +506,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         supported_durations: { min: 4, max: 12, step: 1 },
         features: {
           reference_image: true,
-          max_reference_images: 10,
+          image_reference_max: 10,
           first_frame: true,
           last_frame: true,
           first_last_frame: true,

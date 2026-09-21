@@ -410,16 +410,16 @@ describe('时长区间解析（IKHBDO）', () => {
 
 describe('features 键形与类型（IKHBDO）', () => {
   it('读侧回落 camelCase（后端 toFeatures 优先认 camel）', () => {
-    expect(readFeature({ maxReferenceImages: 4 }, 'max_reference_images')).toBe(4);
-    expect(readFeature({ max_reference_images: 6 }, 'max_reference_images')).toBe(6);
+    expect(readFeature({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(4);
+    expect(readFeature({ image_reference_max: 6 }, 'image_reference_max')).toBe(6);
     expect(readFeature({ sequentialImageGeneration: true }, 'sequential_image_generation')).toBe(true);
-    expect(hasFeatureKey({ maxReferenceImages: 4 }, 'max_reference_images')).toBe(true);
+    expect(hasFeatureKey({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(true);
     expect(camelFeatureKey('image_protocol')).toBe('imageProtocol');
   });
 
   it('类型不符的脏值不归结构化控件管（会留在高级 JSON 里回写，而不是被删掉）', () => {
-    expect(featureValueTypeOk('max_reference_images', 4)).toBe(true);
-    expect(featureValueTypeOk('max_reference_images', '4')).toBe(false);
+    expect(featureValueTypeOk('image_reference_max', 4)).toBe(true);
+    expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);
     expect(featureValueTypeOk('tools', 'yes')).toBe(false);
     expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(true);

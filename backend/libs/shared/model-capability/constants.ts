@@ -131,19 +131,12 @@ function featuresFieldErr(features: unknown): string | null {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
   }
-  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（max_reference_images /
-  // quantity_max / 各布尔位）任意类型都能入库——"abc" / 1.5 照收。读侧再宽容降级
-  // 也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。按同一原则补齐。
-  const maxRefImages = features.max_reference_images ?? features.maxReferenceImages;
-  if (maxRefImages !== undefined && maxRefImages !== null) {
-    if (
-      typeof maxRefImages !== "number" ||
-      !Number.isInteger(maxRefImages) ||
-      maxRefImages < 0 ||
-      maxRefImages > MAX_REFERENCE_COUNT
-    )
-      return `参考图上限(max_reference_images)须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
-  }
+  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（数量上限 / 各布尔位）任意类型都能入库
+  // ——"abc" / 1.5 照收。读侧再宽容降级也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。
+  // 按同一原则补齐。
+  //
+  // IKHEXG：参考图上限原先在这一段单独校一遍（当时它还叫 max_reference_images，不在上面的
+  // ADR-0086 键表里）；合并进 `image_reference_max` 后已由上面的数量上限循环覆盖，此处删除重复段。
   const quantityMax = features.quantity_max ?? features.quantityMax;
   if (quantityMax !== undefined && quantityMax !== null) {
     if (

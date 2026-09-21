@@ -162,7 +162,7 @@ describe('IKGB7U 两类点击分派（等价退役菜单两项）', () => {
 
 describe('IKGB7U 禁用态：常显置灰 + 悬停原因（替代入口消失）', () => {
   it('附件达上限：两按钮 aria-disabled、悬停说明已达上限，点击不分派', async () => {
-    // 夹具模型未配 max_reference_images → 缺省上限 10 张
+    // 夹具模型未配 image_reference_max → 缺省上限 10 张
     const files = Array.from({ length: 10 }, (_, i) => imageFile(`f${i}`));
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ initialFiles: files });
 

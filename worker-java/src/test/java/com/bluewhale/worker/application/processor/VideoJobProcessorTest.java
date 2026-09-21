@@ -643,7 +643,7 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("能力行 max_reference_images=14：14 张放行、15 张拒绝（上限真由配置驱动，不固定 9）")
+    @DisplayName("能力行 image_reference_max=14：14 张放行、15 张拒绝（上限真由配置驱动，不固定 9）")
     void maxImagesFromConfig() {
         VideoJobProcessor.ReferenceLimits limits =
                 new VideoJobProcessor.ReferenceLimits(14, 3, 3, 15);
@@ -717,7 +717,7 @@ class VideoJobProcessorTest {
 
         // 单字段缺失 → 该字段回落，其余读冻结值
         Map<String, Object> partial = baseInput();
-        partial.put("reference_limits", Map.of("max_reference_images", 14));
+        partial.put("reference_limits", Map.of("image_reference_max", 14));
         VideoJobProcessor.ReferenceLimits parsed = VideoJobProcessor.referenceLimitsOf(partial);
         assertThat(parsed.maxImages()).isEqualTo(14);
         assertThat(parsed.maxVideos()).isEqualTo(VideoJobProcessor.LEGACY_MAX_REFERENCE_VIDEOS);
@@ -726,7 +726,7 @@ class VideoJobProcessorTest {
 
         // 显式 null（能力行未配上限）≠ 缺失 → 不限，不回落旧 15
         Map<String, Object> explicitNull = new HashMap<>();
-        explicitNull.put("max_reference_images", 14);
+        explicitNull.put("image_reference_max", 14);
         explicitNull.put("video_reference_max", 3);
         explicitNull.put("audio_reference_max", 3);
         explicitNull.put("max_reference_duration_sec", null);
@@ -1291,7 +1291,7 @@ class VideoJobProcessorTest {
         return a;
     }
 
-    /** baseInput + n 条图片参考 + 冻结的参考上限快照（max_reference_images = configuredMax）。 */
+    /** baseInput + n 条图片参考 + 冻结的参考上限快照（image_reference_max = configuredMax）。 */
     private Map<String, Object> inputWithImageRefs(int n, int configuredMax) {
         Map<String, Object> input = baseInput();
         List<Map<String, Object>> refs = new java.util.ArrayList<>();
@@ -1300,7 +1300,7 @@ class VideoJobProcessorTest {
         }
         input.put("references", refs);
         input.put("reference_limits", Map.of(
-                "max_reference_images", configuredMax,
+                "image_reference_max", configuredMax,
                 "video_reference_max", 3,
                 "audio_reference_max", 3,
                 "max_reference_duration_sec", 15));
@@ -1316,7 +1316,7 @@ class VideoJobProcessorTest {
         }
         input.put("reference_asset_ids", ids);
         input.put("reference_limits", Map.of(
-                "max_reference_images", 9,
+                "image_reference_max", 9,
                 "video_reference_max", configuredVideoMax,
                 "audio_reference_max", 3,
                 "max_reference_duration_sec", 15));
