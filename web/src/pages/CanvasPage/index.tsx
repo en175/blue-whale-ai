@@ -450,6 +450,7 @@ export default function CanvasPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
   const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
+  const closeConnectMenu = useCallback(() => setConnectMenu(null), []);
   const connectingSourceRef = useRef<string | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -10280,7 +10281,7 @@ export default function CanvasPage() {
             x={connectMenu.x}
             y={connectMenu.y}
             enabled={availableGenKinds(connectMenu.sourceIds.map(findCanvasNode).filter((n): n is Node => !!n))}
-            onClose={() => setConnectMenu(null)}
+            onClose={closeConnectMenu}
             onSelect={applyConnectType}
           />
         )}

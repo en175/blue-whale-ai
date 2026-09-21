@@ -93,12 +93,14 @@ function handleBox(page: Page, nodeId: string, kind: 'source' | 'target') {
   return node(page, nodeId).locator(`.react-flow__handle.${kind}`).boundingBox();
 }
 
-/** 落空白后弹出的类型菜单：点「图片生成」建草稿并弹面板，Esc 关面板收口（不依赖点外关闭） */
-async function finishMenuWithImageDraft(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '图片生成' }).click();
-  await expect(page.getByRole('textbox')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('textbox')).toHaveCount(0);
+/** 落空白后弹出的类型菜单：点画布空白真实触发点外关闭，断言菜单从 DOM 消失（IKHHW8 回归锁）。
+ *  空白点由运行时 pane 尺寸推导（右下角内缩），与夹具节点布局解耦。 */
+async function closeMenuByOutsideClick(page: Page): Promise<void> {
+  // 先确认菜单已弹出再点外：慢环境下点击早于挂载会偶发落空，菜单不弹则点外断言假绿
+  await expect(page.getByRole('button', { name: '图片生成' })).toBeVisible();
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+  await page.mouse.click(pane.x + pane.width - 60, pane.y + pane.height - 60);
+  await expect(page.getByRole('button', { name: '图片生成' }), '点菜单外空白应关闭连线类型菜单').toHaveCount(0);
 }
 
 test.use({ viewport: { width: 1900, height: 1400 } });
@@ -114,8 +116,8 @@ test('对照组：左右 + 都能拖出连线预览（带既有入边）', async
     await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2, { steps: 8 });
     await expect(connectionLine(page), `${kind === 'source' ? '右' : '左'} + 应拖出预览线`).toBeVisible();
     await page.mouse.up();
-    // 松手落空白弹类型菜单；点「图片生成」+ Esc 关面板收口（同会话继续）
-    await finishMenuWithImageDraft(page);
+    // 松手落空白弹类型菜单；点画布空白点外关闭收口（同会话继续）
+    await closeMenuByOutsideClick(page);
   }
   expect(smokeFailures(tracking)).toEqual([]);
 });
@@ -168,18 +170,18 @@ test('选中态（框选）下右侧 + 拖出预览线', async ({ page }) => {
   expect(smokeFailures(tracking)).toEqual([]);
 });
 
-test('二次拖线：先拖左侧走完建草稿流程，右侧仍能拖出预览线', async ({ page }) => {
+test('二次拖线：先拖左侧弹菜单点外关闭，右侧仍能拖出预览线', async ({ page }) => {
   const tracking = await setupPage(page);
   await gotoCanvas(page);
 
-  // 第一次：左侧 + 拖空白 → 类型菜单 → 图片生成建草稿 → Esc 关面板
+  // 第一次：左侧 + 拖空白 → 类型菜单 → 点画布空白点外关闭
   const left = (await handleBox(page, 'm-gen', 'target'))!;
   await page.mouse.move(left.x + left.width / 2, left.y + left.height / 2);
   await page.mouse.down();
   await page.mouse.move(left.x + left.width / 2 - 200, left.y + left.height / 2 + 100, { steps: 8 });
   await page.mouse.up();
   await expect(page.getByRole('button', { name: '图片生成' })).toBeVisible();
-  await finishMenuWithImageDraft(page);
+  await closeMenuByOutsideClick(page);
 
   // 第二次：右侧 + 仍应拖出预览线
   const right = (await handleBox(page, 'm-gen', 'source'))!;
