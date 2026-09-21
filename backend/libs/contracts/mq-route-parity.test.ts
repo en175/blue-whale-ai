@@ -20,6 +20,7 @@ import {
   VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
   VIDEO_ENHANCE_TAG,
+  VOCAL_SPLIT_TAG,
 } from "../shared/generation/queue.constants.js";
 
 // 读 worker-java 侧路由表源码（对账基准；3 级 .. = 仓库根）。
@@ -43,6 +44,7 @@ const EXPECTED_ROUTES = [
   { entry: "IMAGE_OUTPAINT", tag: IMAGE_OUTPAINT_TAG },
   { entry: "VIDEO_SUBTITLE_ERASE", tag: VIDEO_SUBTITLE_ERASE_TAG },
   { entry: "VIDEO_ENHANCE", tag: VIDEO_ENHANCE_TAG },
+  { entry: "VOCAL_SPLIT", tag: VOCAL_SPLIT_TAG },
   { entry: "VIDEO_SCENE_SPLIT", tag: VIDEO_SCENE_SPLIT_TAG },
 ] as const;
 

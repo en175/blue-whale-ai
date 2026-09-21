@@ -80,6 +80,11 @@ export const ERROR_MEDIA_EXTRACT_PROVIDER_FAILED = "media_extract_provider_faile
  *  （父规格 IKH3VB——网关分类链外的火山任务失败〔含 SDR 限制、输入短边/长边超限等供应商侧
  *  拒绝〕与转存失败统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_VIDEO_ENHANCE_FAILED = "video_enhance_failed";
+/** IKHA2C：人声背景分离（vocal_split，火山 MediaKit 人声背景音分离）执行兜底失败码
+ *  （契约 = backend/libs/contracts/vocal-split.ts——网关分类链外的火山任务失败〔轮询
+ *  status=failed〕与转存失败〔result 各轨 URL 24h 临时链接 → 自家 TOS〕统一归并，
+ *  异步任务轮询失败终态，无 worker 级重试）。 */
+export const ERROR_VOCAL_SPLIT_FAILED = "vocal_split_failed";
 /** IKH8BH：视频场景切分（video_scene_split，火山 MediaKit segment-scenes）执行兜底失败码
  *  （父规格 IKH86V——网关分类链外的火山任务 failed 与逐段转存失败〔任一段失败即整体失败〕
  *  统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
@@ -162,8 +167,10 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_MEDIA_EXTRACT_PROVIDER_FAILED]: 1044,
   // IKH3VF 注：1044 已由音视频分离占用，视频 HD 高清兜底码取下一空号 1045（父规格 IKH3VB）。
   [ERROR_VIDEO_ENHANCE_FAILED]: 1045,
-  // IKH8BH 注：1045 已由视频 HD 高清占用，场景切分兜底码取下一空号 1046（父规格 IKH86V）。
+  // IKH8BH 注：1045 已由视频 HD 高清占用，场景切分兜底码取下一空号 1046（父规格 IKH86V，!789 先合入占号）。
   [ERROR_VIDEO_SCENE_SPLIT_FAILED]: 1046,
+  // IKHA2C 注：1046 已由场景切分占用（与 !789 并行开发撞号），人声背景分离兜底码让号取 1047（契约 = vocal-split.ts）。
+  [ERROR_VOCAL_SPLIT_FAILED]: 1047,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -448,6 +455,7 @@ export const ERROR_CODES: Record<number, string> = {
   1044: "音频提取失败，请重试", // media_extract_provider_failed（火山执行路径）
   1045: "视频画质增强失败，请重试", // video_enhance_failed（火山 MediaKit 画质增强大模型版）
   1046: "场景切分失败，请重试", // video_scene_split_failed（火山 MediaKit segment-scenes）
+  1047: "人声背景分离失败，请重试", // vocal_split_failed（火山 MediaKit 人声背景音分离）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

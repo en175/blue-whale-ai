@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-/* IKH28U 骨架 / IKH28X 三要素：音视频分离编辑态工具条与发送条组件测试。上条仅 X 退出
-   （无框选/开关/撤销重做——本工具无画布操作）；下条三要素 = 分离格式下拉（触发钮显当前
-   格式、展开五选一、当前项高亮）+「本期免费」标注（无「输出最高」后缀）+ 发送钮
-   （submitting 置灰与回调透传）；两条 territory 标记、锚样式透传。渲染模式沿用
-   VideoSubtitleEraseDialog 测试（createRoot + act）。 */
+/* IKH28U 骨架 / IKH28X 三要素：音视频分离编辑态单条组件测试。X 关闭在单条最左（对齐
+   抠图/去字幕单条先例——上方仅 X 退出的独立工具条随单条化退役；无框选/开关/撤销重做
+   ——本工具无画布操作）；三要素 = 分离格式下拉（触发钮显当前格式、展开五选一、当前项
+   高亮）+「本期免费」标注（无「输出最高」后缀）+ 发送钮（submitting 置灰与回调透传）；
+   单条 territory 标记、sendBar 锚样式透传。渲染模式沿用 VideoSubtitleEraseDialog
+   测试（createRoot + act）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +27,6 @@ function renderDialog(props: Partial<Parameters<typeof VideoAudioSplitDialog>[0]
         format: 'm4a',
         onFormatChange: formatChangeMock,
         onSend: sendMock,
-        toolbarAnchor: null,
         sendBarAnchor: null,
         ...props,
       } as Parameters<typeof VideoAudioSplitDialog>[0]),
@@ -55,18 +55,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('IKH28U 工具条呈现', () => {
-  it('上条仅含 X 退出（无框选/开关/撤销重做）', () => {
+describe('IKH28U 单条呈现', () => {
+  it('X 关闭在单条最左（sendBar 后代且为第一个按钮），无框选/开关/撤销重做', () => {
     renderDialog();
-    expect(btn('audio-video-split-close')).toBeTruthy();
-    const toolbar = container!.querySelector('[data-testid="audio-video-split-toolbar"]')!;
-    expect(toolbar.querySelectorAll('button').length).toBe(1);
-    expect(toolbar.textContent).not.toContain('全画面文字');
+    const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]')!;
+    const close = btn('audio-video-split-close');
+    // 单条化后 X 在 sendBar 内且是第一个元素（对齐抠图/去字幕单条先例）
+    expect(sendBar.contains(close)).toBe(true);
+    expect(sendBar.querySelector('button')).toBe(close);
+    expect(sendBar.textContent).not.toContain('全画面文字');
   });
 
-  it('两条浮条均标记 data-gen-panel-territory（豁免点外关闭误杀）', () => {
+  it('单条浮条标记 data-gen-panel-territory（豁免点外关闭误杀）', () => {
     renderDialog();
-    expect(container!.querySelector('[data-testid="audio-video-split-toolbar"]')!.hasAttribute('data-gen-panel-territory')).toBe(true);
     expect(container!.querySelector('[data-testid="audio-video-split-send-bar"]')!.hasAttribute('data-gen-panel-territory')).toBe(true);
   });
 
@@ -146,19 +147,15 @@ describe('IKH28X 发送条三要素', () => {
 });
 
 describe('锚样式透传', () => {
-  it('锚锚定时 inline left/top 生效（无锚不注入 style 定位）', () => {
-    renderDialog({ toolbarAnchor: { left: 120, top: 40 }, sendBarAnchor: { left: 100, top: 300 } });
-    const toolbar = container!.querySelector('[data-testid="audio-video-split-toolbar"]') as HTMLElement;
-    expect(toolbar.style.left).toBe('120px');
-    expect(toolbar.style.top).toBe('40px');
+  it('sendBar 锚定时 inline left/top 生效并加 sendBarFollow（无锚不注入 style 定位）', () => {
+    renderDialog({ sendBarAnchor: { left: 100, top: 300 } });
     const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]') as HTMLElement;
     expect(sendBar.style.left).toBe('100px');
     expect(sendBar.style.top).toBe('300px');
     expect(sendBar.className).toContain('sendBarFollow'); // 跟随锚解除默认 bottom 定位
-    renderDialog({ toolbarAnchor: null, sendBarAnchor: null });
+    renderDialog({ sendBarAnchor: null });
     const unanchoredBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]') as HTMLElement;
     expect(unanchoredBar.className).not.toContain('sendBarFollow');
-    const unanchored = container!.querySelector('[data-testid="audio-video-split-toolbar"]') as HTMLElement;
-    expect(unanchored.style.left).toBe('');
+    expect(unanchoredBar.style.left).toBe('');
   });
 });

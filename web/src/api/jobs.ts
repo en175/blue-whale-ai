@@ -10,6 +10,7 @@ import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
+import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
@@ -158,6 +159,37 @@ export interface MediaExtractionCreatedData {
   status: 'queued';
 }
 
+/** POST /api/projects/:id/vocal-splits 请求体（键名与 backend/libs/contracts/vocal-split.ts
+ *  契约恒等；source_asset_id 恒传、scene/output_format 缺省后端补 audio/aac——与契约
+ *  「冻结后三键恒在」的分工：请求体可选、创建入口补默认后冻结，IKHA2W 编辑态两参数恒显式携带）。 */
+export interface CreateVocalSplitPayload {
+  source_asset_id: string | number;
+  scene?: VocalSplitInput['scene'];
+  output_format?: VocalSplitInput['output_format'];
+}
+
+/** 创建人声背景分离任务返回（IKHA2W）；同音视频分离：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现「任务入队失败，请重试」。 */
+export interface VocalSplitCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建人声背景分离任务（IKHA2W）；免费口径同 media_extract——不带幂等头、无积分预估、
+ *  不走余额拦截门。占位卡由前端在创建成功后本地插入，多轨产物扇出归 IKHA30。 */
+export function createVocalSplit(
+  projectId: string,
+  payload: CreateVocalSplitPayload,
+): Promise<VocalSplitCreatedData> {
+  return apiRequest<VocalSplitCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 /** POST /api/projects/:id/image-enhancements 请求体（六键，键名与 backend/libs/contracts/image-enhance.ts 契约恒等）。
  *  IKGM9O 高清放大面板提交；版本档能力矩阵与源图尺寸门槛由服务端权威复核，前端预检只是体验层。 */
 export type CreateImageEnhancementPayload = ImageEnhanceInput;
@@ -176,6 +208,16 @@ export type CreateImageOutpaintPayload = ImageOutpaintInput;
 export interface ImageOutpaintCreatedData {
   job_id: string;
   status: 'queued';
+}
+
+/** 人声背景分离单轨结果投影（IKHA2J 定死的多轨形状，轨类型枚举与契约同源）；
+ *  duration 后端投影可空（契约 VocalSplitTrackResult 为 number，传输面放宽为可空），
+ *  回填轨卡时长时判空跳过。 */
+export interface VocalSplitJobTrack {
+  track_type: VocalSplitTrackType;
+  asset_id: string;
+  url: string;
+  duration: number | null;
 }
 
 /** 场景切分任务结果形态（GET /api/jobs/:id 的 result 键，IKH8C1）：契约校验后的
@@ -204,6 +246,10 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 人声背景分离多轨结果（IKHA2J）：仅 vocal_split 任务 succeeded 时有值，轨序恒 =
+   *  契约 VOCAL_SPLIT_SCENE_TRACKS[input.scene]（voice 恒首轨）；其余任务恒缺失。
+   *  既有 asset 单对象仍在（回首轨），多轨消费走本字段。 */
+  tracks?: VocalSplitJobTrack[] | null;
   /** 按 output_asset_ids 顺序的全量产出资源（场景切分扇出取段资产用，IKH8C1；其余任务缺省） */
   output_assets?: JobAsset[];
   /** 契约校验后的结果形态（场景切分：段起止与段资产 id，IKH8C1）；非场景切分任务或畸形 payload 为 null */

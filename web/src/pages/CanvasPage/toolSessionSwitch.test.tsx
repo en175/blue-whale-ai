@@ -279,7 +279,7 @@ const SESSION_UI_TESTID: Record<Kind, string> = {
   crop: 'crop-confirm',
   outpaint: 'outpaint-dialog',
   subtitleErase: 'subtitle-erase-send-bar',
-  audioVideoSplit: 'audio-video-split-toolbar',
+  audioVideoSplit: 'audio-video-split-send-bar',
 };
 
 const sessionUi = (kind: Kind) =>

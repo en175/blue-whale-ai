@@ -330,6 +330,31 @@ public class RocketMqConfig {
     }
 
     /**
+     * vocal_split（人声背景分离，火山 MediaKit）consumer（IKHA2J；以 videoEnhance 接线为模板）。
+     * <p>
+     * consumer group = "generation-vocal-split-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#VOCAL_SPLIT}（= TS `VOCAL_SPLIT_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VocalSplitConsumer vocalSplitConsumer(
+            com.bluewhale.worker.application.processor.VocalSplitJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-vocal-split-worker";
+        int concurrency = workerProps.concurrency().vocalSplit();
+
+        return new com.bluewhale.worker.application.consumer.VocalSplitConsumer(
+                processor,
+                GenerationMqRouteEnum.VOCAL_SPLIT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
      * video_scene_split（视频场景切分，火山 MediaKit segment-scenes）consumer（IKH8BP，父规格
      * IKH86V；以 videoEnhance 接线为模板）。
      * <p>
@@ -418,6 +443,21 @@ public class RocketMqConfig {
     }
 
     /**
+     * vocal_split 轮询自投生产者（IKHA2J；去字幕 videoSubtitleEraseMessageProducer 同款）。
+     * <p>
+     * VocalSplitJobProcessor 火山异步链 submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = vocal_split）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer vocalSplitMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.VOCAL_SPLIT.topic(),
+                GenerationMqRouteEnum.VOCAL_SPLIT.tag());
+    }
+
+    /**
      * video_scene_split 轮询自投生产者（IKH8BP；去字幕 videoSubtitleEraseMessageProducer 同款）。
      * <p>
      * VideoSceneSplitJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
@@ -486,6 +526,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoEnhanceRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_ENHANCE);
+    }
+
+    /** recovery 重投 vocal_split（IKHA2J）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer vocalSplitRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.VOCAL_SPLIT);
     }
 
     /** recovery 重投 video_scene_split（IKH8BP，父规格 IKH86V）。 */

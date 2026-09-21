@@ -703,6 +703,84 @@ public class JobFinalizer {
     }
 
     /**
+     * 发布 vocal_split（人声背景分离）结果（IKHA2J，附录 C 触点⑤）。
+     * <p>
+     * 与单轨先例（{@link #publishMediaExtractResult}）的契约差异 = 多轨：scene 二分法两轨 /
+     * 三分法三轨，按 {@link com.bluewhale.worker.domain.dto.PublishVocalSplitDto#tracks()}
+     * 轨序（契约 SCENE_TRACKS，voice 恒首轨）逐轨 insert 音频 Asset，output_asset_ids 按轨序
+     * 拼 JSON 数组（消费方按下标与轨类型双通道对位）。终态日志 payload 落契约
+     * VocalSplitTrackResult 结构的轨数组（track_type / asset_id / url / duration）——这是
+     * 轨类型在 DB 侧的唯一承载位（assets 无轨类型列，getStatus 轨投影经 output_asset_ids
+     * 顺序 + input.scene 轨序组装）。守卫复用 publishMediaExtractGuard / updateOutputAssetIds
+     * （两 SQL 均无 type 过滤，语义 = 免费工具终态收口）；每轨一条 asset.created +
+     * 一条 status_changed（output_asset_ids = 全部轨资产，project_id 守卫内，extract 同款）。
+     */
+    @Transactional
+    public boolean publishVocalSplitResult(
+            com.bluewhale.worker.domain.dto.PublishVocalSplitDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("[vocal_split] publishVocalSplitResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        // 逐轨建资产（type=audio / source='generated'；轨序 = 传入顺序 = 契约 SCENE_TRACKS）
+        List<AssetEntity> assets = new java.util.ArrayList<>(input.tracks().size());
+        List<String> assetIds = new java.util.ArrayList<>(input.tracks().size());
+        List<Map<String, Object>> trackResults = new java.util.ArrayList<>(input.tracks().size());
+        for (com.bluewhale.worker.domain.dto.PublishVocalSplitDto.PublishVocalSplitTrackDto track
+                : input.tracks()) {
+            AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "audio",
+                    track.url(), track.storageKey(), track.mime(), track.size(), track.md5(),
+                    null, null,
+                    track.durationSec() != null ? (int) Math.round(track.durationSec() * 1000) : null);
+            assetMapper.insert(asset);
+            assets.add(asset);
+            assetIds.add(asset.getId().toString());
+            // 契约 VocalSplitTrackResult 逐字段（轨类型 + 资产 id + url + 时长秒）
+            Map<String, Object> trackResult = new java.util.LinkedHashMap<>();
+            trackResult.put("track_type", track.trackType());
+            trackResult.put("asset_id", asset.getId().toString());
+            trackResult.put("url", asset.getUrl());
+            trackResult.put("duration", track.durationSec());
+            trackResults.add(trackResult);
+        }
+
+        // output_asset_ids 按轨序拼 JSON 数组（"[id1,id2(,id3)]"——多轨形态，与单轨同 SQL）
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + String.join(",", assetIds) + "]");
+
+        // 轨数组回填终态日志 payload（结果字段入库的承载位，video_enhance 的 resolution/fps 同款）
+        insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "人声背景分离完成",
+                Map.of("asset_ids", assetIds, "tracks", trackResults));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            // 每轨一条 asset.created（前端逐轨扇出建卡的事件面）
+            for (AssetEntity asset : assets) {
+                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                        Map.of("asset_id", asset.getId().toString(),
+                                "generation_job_id", job.getId().toString(),
+                                "type", asset.getType(),
+                                "access_url", asset.getUrl()));
+            }
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", assetIds));
+        }
+        return true;
+    }
+
+    /**
      * 发布 video_subtitle_erase 结果（迁移契约 §17.5 / IKGZ81，附录 C 触点⑤）。
      * <p>
      * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），

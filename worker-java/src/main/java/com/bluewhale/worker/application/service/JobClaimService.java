@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
+import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
@@ -11,6 +12,7 @@ import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -134,6 +136,19 @@ public class JobClaimService {
      * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
      */
     private static final int MEDIA_EXTRACT_LEASE_SECONDS = 420;
+
+    /**
+     * vocal_split 租约 420s（IKHA2J；火山异步链）：轮询到点步是短查询，但 completed 步要在
+     * 同一租约窗口内完成 **2/3 条**结果音轨逐轨下载 + TOS 转存——取 MediaKit 家族的 420s
+     * （> 超时 + 多轨下载转存余量，防 recovery 把在跑任务判孤儿重投，去字幕 / media_extract
+     * 同款语义）。
+     */
+    private static final int VOCAL_SPLIT_LEASE_SECONDS = 420;
+
+    /** vocal_split claim 的单源白名单（IKHA2J：唯一创建入口 = 画布媒体卡工具条「人声分离」；
+     *  专属来源值口径，video_subtitle_erase / video_enhance 同款模式）。 */
+    private static final List<String> VOCAL_SPLIT_CLAIM_SOURCES =
+            List.of(VocalSplitContract.SOURCE);
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -532,6 +547,48 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    /**
+     * 领取 vocal_split 作业（IKHA2J，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约 420s（completed 步含 2/3 轨结果下载 + TOS 转存，见常量注释）。
+     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     */
+    public Optional<ClaimedVocalSplitJobDto> claimVocalSplit(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                VocalSplitContract.TAG,
+                VOCAL_SPLIT_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(VOCAL_SPLIT_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[vocal_split] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedVocalSplitJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

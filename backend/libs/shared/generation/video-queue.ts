@@ -13,6 +13,7 @@ import {
   VIDEO_GENERATION_TAG,
   VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
+  VOCAL_SPLIT_TAG,
 } from "./queue.constants.js";
 import type { GenerationTag } from "./queue.constants.js";
 
@@ -26,6 +27,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueImageOutpaintJob（tag=image_outpaint，IKGOQV）
  *  / enqueueVideoSubtitleEraseJob（tag=video_subtitle_erase，IKGZ80）
  *  / enqueueVideoEnhanceJob（tag=video_enhance，IKH3VE）
+ *  / enqueueVocalSplitJob（tag=vocal_split，IKHA2I）
  *  / enqueueVideoSceneSplitJob（tag=video_scene_split，IKH8BO）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
@@ -249,6 +251,20 @@ export async function enqueueVideoEnhanceJob(
   await createRocketMqVideoProducer(
     producer,
     VIDEO_ENHANCE_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 人声背景分离 job 入队（IKHA2I，契约 @lib/contracts/vocal-split）：
+ *  复用生成任务 topic/queue，用独立 tag「vocal_split」区分任务类型。 */
+export async function enqueueVocalSplitJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    VOCAL_SPLIT_TAG,
   ).enqueue(jobId, options);
 }
 

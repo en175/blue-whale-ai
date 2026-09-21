@@ -28,6 +28,7 @@ worker:
     image-outpaint: ${IMAGE_OUTPAINT_CONCURRENCY:5}
     video-subtitle-erase: ${VIDEO_SUBTITLE_ERASE_CONCURRENCY:5}
     video-enhance: ${VIDEO_ENHANCE_CONCURRENCY:5}
+    vocal-split: ${VOCAL_SPLIT_CONCURRENCY:5}
     video-scene-split: ${VIDEO_SCENE_SPLIT_CONCURRENCY:5}
 
 rocketmq:

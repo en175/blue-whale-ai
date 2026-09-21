@@ -706,8 +706,8 @@
   pointer-events: none;
 }
 
-/* 下拉锚定包裹层（原「高清 ▾」下拉 IKGOT7，图片侧已随 IKH3XZ 横排退役）：现仅服务视频卡
-   SubtitleEraseMenu，下拉浮层锚定其下方 */
+/* 下拉锚定包裹层（原「高清 ▾」下拉 IKGOT7，图片侧已随 IKH3XZ 横排退役）：现服务视频卡
+   SubtitleEraseMenu 与 AudioVideoSplitMenu 两个下拉，下拉浮层锚定其下方 */
 .qualityWrap {
   position: relative;
   display: flex;

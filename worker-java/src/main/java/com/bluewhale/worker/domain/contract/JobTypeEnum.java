@@ -44,6 +44,11 @@ public enum JobTypeEnum {
      *  消费者与处理器由 worker 票按附录 C 触点注册。 */
     VIDEO_ENHANCE("video_enhance"),
 
+    /** 人声背景分离（tag=vocal_split，IKHA2C；契约 = backend/libs/contracts/vocal-split.ts，
+     *  火山 MediaKit 人声背景音分离，scene 四档分叉 2/3 轨结果）；消费者与处理器由 IKHA2J
+     *  按附录 C 触点注册。 */
+    VOCAL_SPLIT("vocal_split"),
+
     /** 视频场景切分（tag=video_scene_split，IKH8BH，父规格 IKH86V；契约 =
      *  backend/libs/contracts/video-scene-split.ts，火山 MediaKit segment-scenes
      *  一对多逐段扇出，设计定案 ADR-0108）；消费者与处理器由 worker 票按附录 C 触点注册。 */

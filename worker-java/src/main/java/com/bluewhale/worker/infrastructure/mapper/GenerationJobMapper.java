@@ -2,6 +2,7 @@ package com.bluewhale.worker.infrastructure.mapper;
 
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
+import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -744,6 +745,15 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources(
                 VideoEnhanceContract.TAG,
                 List.of(VideoEnhanceContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
+
+    /** 人声背景分离到点/孤儿（IKHA2J）：套 source 白名单（与 claim 同源，单源 vocal_split；
+     *  轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueVocalSplitJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                VocalSplitContract.TAG,
+                List.of(VocalSplitContract.SOURCE),
                 limit, maxAgeMinutes);
     }
 

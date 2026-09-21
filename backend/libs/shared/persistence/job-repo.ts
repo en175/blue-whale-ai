@@ -1,6 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { VIDEO_SCENE_SPLIT_JOB_TYPE } from "@lib/contracts";
+import {
+  VIDEO_SCENE_SPLIT_JOB_TYPE,
+  VOCAL_SPLIT_JOB_TYPE,
+  VOCAL_SPLIT_SCENE_TRACKS,
+} from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 
@@ -46,6 +50,18 @@ export interface JobStatusView {
   stored_error: Record<string, unknown> | null;
   /** IKFM3S §4：快照里的文本输入签名投影（前端轮询成功后回写目标 usedInputSignature）；无则 null。 */
   text_input_signature: string | null;
+  /** IKHA2J：vocal_split 成功时的逐轨结果（契约 VocalSplitTrackResult 结构，轨序 = 契约
+   *  SCENE_TRACKS[scene]，与 output_asset_ids 写入顺序一致）；非 vocal_split / 未成功为 null。
+   *  asset（首个产出）保持不动——既有单 asset 消费者不受影响。 */
+  tracks: JobVocalSplitTrack[] | null;
+}
+
+/** vocal_split 单轨投影（契约 VocalSplitTrackResult 逐字段：轨类型 + 资产 id + url + 时长秒）。 */
+export interface JobVocalSplitTrack {
+  track_type: string;
+  asset_id: string;
+  url: string;
+  duration: number | null;
 }
 
 export interface JobPage {
@@ -75,6 +91,8 @@ type AssetRow = {
   type: string;
   width: number | null;
   height: number | null;
+  /** IKHA2J：vocal_split 轨投影的时长秒换算源（findMany 全列天然带上，其余消费方不读）。 */
+  duration_ms: number | null;
 };
 
 function parseAssetIds(json: unknown): bigint[] {
@@ -187,6 +205,40 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         }
       }
 
+      // IKHA2J：vocal_split 多轨投影（契约 VocalSplitTrackResult）。轨类型不落库（assets 无
+      // 轨类型列）——按 output_asset_ids 写入顺序（= worker 终态按契约 SCENE_TRACKS 轨序拼的
+      // 数组）与 input.scene 的契约轨序逐下标 zip 组装；脏数据（长度不齐 / scene 非法）按短侧
+      // 截断安全降级，不影响 asset 单对象投影。
+      let tracks: JobStatusView["tracks"] = null;
+      if (row.status === "succeeded" && row.type === VOCAL_SPLIT_JOB_TYPE) {
+        const ids = parseAssetIds(row.output_asset_ids);
+        const scene =
+          row.input && typeof row.input === "object" && !Array.isArray(row.input)
+            ? (row.input as Record<string, unknown>).scene
+            : undefined;
+        const trackOrder =
+          typeof scene === "string" && scene in VOCAL_SPLIT_SCENE_TRACKS
+            ? VOCAL_SPLIT_SCENE_TRACKS[scene as keyof typeof VOCAL_SPLIT_SCENE_TRACKS]
+            : undefined;
+        if (trackOrder && ids.length > 0) {
+          const assetMap = await loadAssets(ids);
+          const zipLength = Math.min(ids.length, trackOrder.length);
+          tracks = [];
+          for (let i = 0; i < zipLength; i++) {
+            const id = ids[i];
+            const trackType = trackOrder[i];
+            if (id === undefined || trackType === undefined) continue;
+            const a = assetMap.get(id.toString());
+            tracks.push({
+              track_type: trackType,
+              asset_id: id.toString(),
+              url: a?.url ?? "",
+              duration: a?.duration_ms != null ? a.duration_ms / 1000 : null,
+            });
+          }
+        }
+      }
+
       return {
         job_id: row.id.toString(),
         project_id: row.project_id?.toString() ?? "",
@@ -194,6 +246,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         status: row.status,
         progress: row.progress,
         asset,
+        tracks,
         output_assets: outputAssets,
         result,
         stored_error:
