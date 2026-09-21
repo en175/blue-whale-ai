@@ -45,16 +45,6 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/generation/prompt-plan-snapshot.test.ts",
   },
-  max_reference_images: {
-    consumer:
-      "backend/libs/shared/generation/handle-create-generation-job.ts（resolveReferenceAssets 图片上限）；" +
-      "backend/libs/shared/generation-runtime/reference-limits.ts（图/视频/音频三档共用的图上限）；" +
-      "backend/libs/shared/canvas/prompt-target.ts；" +
-      "web/src/lib/model-reference-limits.ts（imageReferenceMaxOfCap）",
-    fallback: "DEFAULT_MAX_REFERENCE_IMAGES = 10（与网关 maxImageEditImages / ARK 复合编辑上限对齐，IKA72G）",
-    configWinsTest:
-      "backend/libs/shared/generation-runtime/video-reference-validation.test.ts",
-  },
   watermark: {
     consumer: "当前无读取点（仅 handle-list-models 透出消费端 + 后台表单位）",
     fallback: "false",
@@ -171,12 +161,17 @@ const RULINGS: Record<string, Ruling> = {
   },
   image_reference_max: {
     consumer:
-      "backend/libs/shared/generation-runtime/reference-limits.ts（checkReferenceLimits 的 kind==='audio' 分支：音频生成的**图**参考上限）；" +
-      "web/src/lib/model-reference-limits.ts（imageReferenceMaxOf）",
-    fallback: "DEFAULT_IMAGE_REFERENCE_MAX = 1",
-    configWinsTest: null,
-    gapReason:
-      "无测试改变该配置证明胜负（接纳侧音频用例都只走缺省 1）——注意别与 max_reference_images 混（命名陷阱，IKHEXG）",
+      "backend/libs/shared/generation-runtime/reference-limits.ts（checkReferenceLimits 的 image / video / audio 三分支共用的**图**参考上限）；" +
+      "backend/libs/shared/generation/handle-create-generation-job.ts（resolveReferenceAssets 图片上限）；" +
+      "backend/libs/shared/canvas/prompt-target.ts；" +
+      "web/src/lib/model-reference-limits.ts（imageReferenceMaxOf / imageReferenceMaxOfForAudio）；" +
+      "worker-java ImageChannelMapper.parseMaxReferenceImages（图片链路镜像缺省）；冻结进 job.input.reference_limits",
+    fallback:
+      "按行类型分（IKHEXG）：图片/视频行 DEFAULT_IMAGE_REFERENCE_MAX = 10" +
+      "（与网关 maxImageEditImages / ARK 复合编辑上限对齐，IKA72G）；" +
+      "音频行 DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO = 1（官方音频接口只收 1 张）。" +
+      "由 toFeatures(json, capabilityType) 选",
+    configWinsTest: "backend/libs/shared/persistence/model-capability-repo.test.ts",
   },
   max_reference_duration_sec: {
     consumer:
