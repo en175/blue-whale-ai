@@ -34,6 +34,7 @@ import {
   ERROR_UNSUPPORTED_TYPE,
   ERROR_UPLOAD_FAILED,
   ERROR_VIDEO_DOWNLOAD_FAILED,
+  ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
@@ -157,6 +158,10 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("media_extract")).toBe("media_extract_failed");
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
     expect(fallbackErrorCode("audio")).toBe("audio_generation_failed");
+    // IKHLK3：插帧兜到契约 1049（同 vocal_split 先例，不落到图片生成的默认文案）。
+    expect(fallbackErrorCode("video_frame_interpolation")).toBe(
+      ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
+    );
   });
 });
 
@@ -216,6 +221,12 @@ describe("projectPublicError", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
     expect(out!.code).toBe(1021); // video_generation_failed
     expect(out!.message).toBe("视频生成失败");
+  });
+
+  it("IKHLK3: 插帧白名单外码 → 1049 + 插帧文案", () => {
+    const out = projectPublicError({ code: "some_new_code" }, "video_frame_interpolation");
+    expect(out!.code).toBe(1049);
+    expect(out!.message).toBe("视频插帧失败，请重试");
   });
 
   it("null 输入返回 null", () => {

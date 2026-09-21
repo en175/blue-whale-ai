@@ -152,9 +152,9 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 十三个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十四个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        // Map.of 最多 10 对，audio_trim/vocal_split/video_scene_split 加入后为 13 入口用 Map.ofEntries（entry 静态导入见文件头）。
+        // Map.of 最多 10 对，audio_trim/vocal_split/video_scene_split/video_frame_interpolation 加入后为 14 入口用 Map.ofEntries（entry 静态导入见文件头）。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
                 Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
                 Map.entry(GenerationMqRouteEnum.IMAGE, "image"),
@@ -168,7 +168,8 @@ class StartupContractTest {
                 Map.entry(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase"),
                 Map.entry(GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance"),
                 Map.entry(GenerationMqRouteEnum.VOCAL_SPLIT, "vocal_split"),
-                Map.entry(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT, "video_scene_split"));
+                Map.entry(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT, "video_scene_split"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION, "video_frame_interpolation"));
 
         assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
         for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
@@ -194,6 +195,7 @@ class StartupContractTest {
         assertThat(GenerationMqRouteEnum.VIDEO_ENHANCE.tag()).isEqualTo(JobTypeEnum.VIDEO_ENHANCE.value());
         assertThat(GenerationMqRouteEnum.VOCAL_SPLIT.tag()).isEqualTo(JobTypeEnum.VOCAL_SPLIT.value());
         assertThat(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.tag()).isEqualTo(JobTypeEnum.VIDEO_SCENE_SPLIT.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION.tag()).isEqualTo(JobTypeEnum.VIDEO_FRAME_INTERPOLATION.value());
     }
 
     /**

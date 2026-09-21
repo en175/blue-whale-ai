@@ -1,0 +1,54 @@
+// IKHLK3：POST /projects/:projectId/video-frame-interpolations — 视频插帧（火山 MediaKit
+// video-frame-interpolation）建任务端点。
+import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/video-queue.js";
+import { sealProviderCredential } from "@lib/shared/generation/credential.js";
+import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
+import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+
+@Controller("projects/:projectId/video-frame-interpolations")
+export class VideoFrameInterpolationsController {
+  constructor(private readonly videoFrameInterpolations: VideoFrameInterpolationsService) {}
+
+  @Post()
+  async create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: Record<string, unknown>,
+    // 免费口径（ADR-0113 同 HD 高清 / 去字幕）：**没有 Idempotency-Key 头**、不走积分预估与余额拦截门。
+    @Headers("authorization") authorization?: string,
+  ) {
+    // 与 HD 高清 / 去字幕同构：从请求 Authorization 头取请求方 sk-，冻结进 job input.provider_credential，
+    // worker（IKHLKJ 注册的处理器）处理时直接取用（未携带/非 sk- 为空对象）。
+    const internal = sealProviderCredential(authorization);
+    const result = await this.videoFrameInterpolations.create(
+      user.userId,
+      projectId,
+      body ?? {},
+      internal,
+    );
+    if (result.code !== 200 || !result.data) return result;
+    const jobId = String(result.data.job_id);
+    try {
+      await enqueueVideoFrameInterpolationJob(jobId);
+    } catch (error) {
+      logger.error(
+        `[video-frame-interpolation] enqueue failed jobId=${jobId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      // 入队失败仍返回 200（任务已持久化，终态由 GET /api/jobs/:id 轮询呈现）：
+      // code = enqueue_failed（数值 1028），对客文案由码表/前端映射给出「任务入队失败，请重试」；
+      // details.raw 是内部调试原文（RocketMQ 报错），ADR-0078 禁展示用户。
+      await this.videoFrameInterpolations
+        .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
+          raw: "RocketMQ 入队失败",
+        })
+        .catch(() => {});
+    }
+    return result;
+  }
+}
