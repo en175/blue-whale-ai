@@ -61,15 +61,29 @@ function asciiAt(bytes: Uint8Array, offset: number, text: string): boolean {
   return true;
 }
 
-/** 从文件头识别真实媒体 MIME，避免 zip 内条目扩展名与内容不符导致「格式错误」 */
-export async function sniffMediaMime(blob: Blob): Promise<string | undefined> {
+function isoFtypBrand(head: Uint8Array): string {
+  if (!asciiAt(head, 4, 'ftyp') || head.length < 12) return '';
+  return String.fromCharCode(head[8]!, head[9]!, head[10]!, head[11]!).toLowerCase().trim();
+}
+
+/** 从文件头识别真实媒体 MIME，避免 zip 内条目扩展名与内容不符导致「格式错误」。
+ *  ftyp 盒子既装 M4A 也装 MP4：brand 为 m4a/m4b，或调用方已标明这是音频卡，都认成 audio/mp4
+ *  （真实 M4A 的 major brand 经常是 isom/mp42，而不是 m4a）。 */
+export async function sniffMediaMime(
+  blob: Blob,
+  mediaType?: string,
+): Promise<string | undefined> {
   const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
   if (bytesStartWith(head, [0xff, 0xd8, 0xff])) return 'image/jpeg';
   if (bytesStartWith(head, [0x89, 0x50, 0x4e, 0x47])) return 'image/png';
   if (bytesStartWith(head, [0x47, 0x49, 0x46, 0x38])) return 'image/gif';
   if (asciiAt(head, 0, 'RIFF') && asciiAt(head, 8, 'WEBP')) return 'image/webp';
   if (asciiAt(head, 0, 'RIFF') && asciiAt(head, 8, 'WAVE')) return 'audio/wav';
-  if (asciiAt(head, 4, 'ftyp')) return 'video/mp4';
+  if (asciiAt(head, 4, 'ftyp')) {
+    const brand = isoFtypBrand(head);
+    if (brand === 'm4a' || brand === 'm4b' || mediaType === 'audio') return 'audio/mp4';
+    return 'video/mp4';
+  }
   if (bytesStartWith(head, [0x1a, 0x45, 0xdf, 0xa3])) return 'video/webm';
   if (asciiAt(head, 0, 'ID3') || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0)) return 'audio/mpeg';
   return undefined;

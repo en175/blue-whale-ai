@@ -24,18 +24,16 @@ import java.util.UUID;
  * <p>
  * 为什么不复用视频件：视频 relay 的 mime 校验是 {@code video/} 前缀专用（:122），音频产物
  * 会被直接拒收——按「不改动视频 relay 既有行为」口径单独成件，结构逐字对齐视频先例：
- * fetch 源 URL → 校验 {@code audio/} mime → TOS PUT → putObjectAcl public-read。
+ * fetch 源 URL → 校验产物像音频 → TOS PUT → putObjectAcl public-read。
  * <p>
  * key 格式：{@code generated/{userId}/audio/{uuid去横线}.{ext}}（视频先例
  * {@code generated/{userId}/video/...} 的音频同构位；区别于 ffmpeg 本地链路的
  * {@code media-extract/audio/{uuid}.mp3}——本件只承接火山异步产物转存）。
- * <b>扩展名 = 任务所选 output_format</b>（m4a / mp3 / ogg / flac / wav，MediaExtractContract
- * 五值枚举），不从响应 content-type 推——官方产物格式由提交参数决定，防止 CDN content-type
- * 漂移导致后缀与内容不符（旧本地链路 TosMediaStorage.upload 恒 .mp3 硬编码即此问题的
- * ffmpeg 单格式特例，本件随任务格式扩展）。
- * <p>
- * mime 从响应 Content-Type 取（分号参数剥离；缺失回退按 output_format 推导），落
- * {@code assets.mime} 供前端播放器判型。
+ * <b>扩展名与 mime 都以任务所选 output_format 为单源</b>（m4a / mp3 / ogg / flac / wav，
+ * MediaExtractContract 五值枚举），不从响应 content-type 推——官方/CDN 常把 m4a 标成
+ * {@code audio/mpeg} 或 {@code video/mp4}，抄头会导致前端下载扩展名错成 .mp3/.mp4
+ * （IKHCW9）。旧本地链路 TosMediaStorage.upload 恒 .mp3 硬编码即此问题的 ffmpeg
+ * 单格式特例，本件随任务格式扩展。
  * <p>
  * 大小上限 1GiB（全内存 byte[] 转存故仍需硬上限）：火山输入建议 ≤10GB（官方 PDF），其无损
  * wav 音轨理论上限 ≈600MB，1GiB 覆盖最坏情况（视频先例 200MB 对应其 200MB 输入口径）。
@@ -88,20 +86,21 @@ public class TosAudioMediaRelay {
     }
 
     /**
-     * 转存音频（视频先例 persist 同构）：fetch → audio/ 校验 → PUT → makePublic。
+     * 转存音频（视频先例 persist 同构）：fetch → 按 output_format 落 mime →
+     * 弱校验响应头像音频（m4a 允许被标成 video/mp4）→ PUT → makePublic。
      * <p>
      * 错误统一抛 {@link MediaExtractError}（1044 兜底码由 processor 归并，§18.4 第三类：
      * 转存失败归并工具兜底码）。
      *
      * @param sourceUrl     火山 result.audio_url（24h 有效临时链接，调用方须立即转存）
      * @param userId        归属用户（key 路径用）
-     * @param outputFormat  任务所选输出格式（扩展名与回退 mime 的单源，五值枚举）
+     * @param outputFormat  任务所选输出格式（扩展名与 mime 的单源，五值枚举）
      * @return 转存结果
      */
     public StoredAudio persist(String sourceUrl, String userId, String outputFormat) {
         // 1. fetch 源 URL（视频先例同款：60s 超时、followRedirects NORMAL）
         byte[] bytes;
-        String mime;
+        String reportedType = "";
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(sourceUrl))
@@ -116,10 +115,9 @@ public class TosAudioMediaRelay {
                         "生成音频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
             }
             bytes = resp.body();
-            String contentType = resp.headers().firstValue("content-type").orElse(null);
-            mime = contentType != null
-                    ? contentType.split(";", 2)[0].trim()
-                    : defaultMime(outputFormat);
+            reportedType = resp.headers().firstValue("content-type")
+                    .map(value -> value.split(";", 2)[0].trim())
+                    .orElse("");
         } catch (MediaExtractError e) {
             throw e;
         } catch (Exception e) {
@@ -127,8 +125,12 @@ public class TosAudioMediaRelay {
                     "生成音频下载失败: " + e.getMessage(), e);
         }
 
-        // 2. 校验（视频先例同构，mime 前缀换 audio/）
-        if (!mime.startsWith("audio/")) {
+        // 2. mime 按任务格式落定；CDN 头仅作「像不像音频」的弱校验（m4a 允许被标成 video/mp4）
+        String mime = mimeForOutputFormat(outputFormat);
+        String reported = reportedType.toLowerCase();
+        boolean looksLikeAudio = reported.startsWith("audio/");
+        boolean m4aLabeledAsVideo = "m4a".equals(outputFormat) && "video/mp4".equals(reported);
+        if (!reported.isEmpty() && !looksLikeAudio && !m4aLabeledAsVideo) {
             throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED, "生成结果不是音频");
         }
         if (bytes.length == 0) {
@@ -170,8 +172,8 @@ public class TosAudioMediaRelay {
                 ContentDigest.md5Hex(bytes));
     }
 
-    /** 响应缺 Content-Type 时的回退 mime（按任务所选格式推导）。 */
-    static String defaultMime(String outputFormat) {
+    /** 按任务所选格式推导 mime（扩展名与 TOS Content-Type / assets.mime 的单源）。 */
+    static String mimeForOutputFormat(String outputFormat) {
         return switch (outputFormat) {
             case "m4a" -> "audio/mp4";
             case "ogg" -> "audio/ogg";
