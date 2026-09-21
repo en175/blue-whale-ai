@@ -86,7 +86,7 @@ export function audioTrimDisplayName(
   format: AudioTrimFormat,
 ): string {
   const name = typeof sourceFileName === 'string' ? sourceFileName.trim() : '';
-  if (!name) return `音频截取(截取).${format}`;
+  if (!name) return `音频截取.${format}`;
   return `${name.replace(/\.[^./]+$/, '')}(截取).${format}`;
 }
 

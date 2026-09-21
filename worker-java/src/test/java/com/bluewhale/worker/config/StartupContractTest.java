@@ -152,7 +152,7 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 十二个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十三个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
         // Map.of 最多 10 对，audio_trim/vocal_split/video_scene_split 加入后为 13 入口用 Map.ofEntries（entry 静态导入见文件头）。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(

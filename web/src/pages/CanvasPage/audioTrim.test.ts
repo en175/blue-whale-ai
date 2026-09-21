@@ -52,9 +52,9 @@ describe('audioTrim 会话身份与占位卡（IKHB7A，mediaExtract 同族先�
     expect(audioTrimDisplayName('播客片头.mp3', 'wav')).toBe('播客片头(截取).wav');
     expect(audioTrimDisplayName('  播客片头.mp3 ', 'm4a')).toBe('播客片头(截取).m4a');
     expect(audioTrimDisplayName('无扩展名', 'mp3')).toBe('无扩展名(截取).mp3');
-    expect(audioTrimDisplayName(undefined, 'mp3')).toBe('音频截取(截取).mp3');
-    expect(audioTrimDisplayName('', 'ogg')).toBe('音频截取(截取).ogg');
-    expect(audioTrimDisplayName(42, 'flac')).toBe('音频截取(截取).flac');
+    expect(audioTrimDisplayName(undefined, 'mp3')).toBe('音频截取.mp3');
+    expect(audioTrimDisplayName('', 'ogg')).toBe('音频截取.ogg');
+    expect(audioTrimDisplayName(42, 'flac')).toBe('音频截取.flac');
   });
 
   it('占位卡：源卡右侧 +60px、generating、身份冻结贴边省略形态的 lastInput', () => {
@@ -93,7 +93,7 @@ describe('audioTrim 会话身份与占位卡（IKHB7A，mediaExtract 同族先�
       sourceAssetId: null,
     });
     expect(fullSelect.data.audioTrim).toBeUndefined();
-    expect(fullSelect.data.fileName).toBe('音频截取(截取).mp3');
+    expect(fullSelect.data.fileName).toBe('音频截取.mp3');
     const withEnd = buildAudioTrimPlaceholderNode({
       jobId: 9,
       outputFormat: 'mp3',
