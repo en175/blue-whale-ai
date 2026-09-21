@@ -49,6 +49,9 @@ public class JobStateMachineService {
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
 
+    /** video_scene_split 进度续租秒数（与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值）。 */
+    private static final int VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS = 420;
+
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -281,6 +284,29 @@ public class JobStateMachineService {
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
         LocalDateTime leaseExpiresAt = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.updateMediaExtractProgress(
+                jobIdLong, input.workerId(), input.fencingToken(),
+                clampedProgress, leaseExpiresAt);
+        return affected == 1;
+    }
+
+    /**
+     * 更新 video_scene_split 进度（IKH8BP 审查修复；属本类保留的 progress 续租族）：
+     * 0-99 钳制 + 续租。
+     * <p>
+     * completed 相逐段下载转存是长窗口（N 段串行，单段可达源视频体量），claim 时的
+     * 420s 租约覆盖不了全程——每段转存前调本方法把租约推回 now+420s，否则 recovery
+     * 会在租约过期后判孤儿重投，新 claim 从头重新下载全部段（每轮重复带宽消耗）；
+     * 创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     * 续租秒数与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值（单段转存窗口），
+     * 不复用 LEASE_SECONDS(120s)——大段下载+TOS 上传可超 120s，段中途即会过期。
+     */
+    public boolean updateVideoSceneSplitProgress(
+            com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+        int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(ZoneOffset.UTC)
+                .plusSeconds(VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS);
+        int affected = jobMapper.updateVideoSceneSplitProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
                 clampedProgress, leaseExpiresAt);
         return affected == 1;

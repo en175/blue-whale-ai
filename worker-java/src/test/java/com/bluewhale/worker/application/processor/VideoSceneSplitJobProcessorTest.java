@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
+import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -74,6 +75,9 @@ class VideoSceneSplitJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        // 段转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
+        when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
+                .thenReturn(true);
     }
 
     /** 源视频素材（宽高/时长供段 Asset 近似回填）。 */
@@ -510,6 +514,63 @@ class VideoSceneSplitJobProcessorTest {
                 eq("第 2 段切片下载转存失败: 段切片下载失败: HTTP 404"),
                 any(), eq("worker-1"), eq(5L));
         verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+    }
+
+    @Test
+    @DisplayName("completed 3 段 → 每段转存前心跳续租一次，进度按已完成段占比递增（0/33/66）")
+    void pollCompleted_renewsLeasePerSegment() {
+        stubPollClaim(input("standard"), 3);
+        stubSourceAsset();
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.5, List.of(
+                        new SegmentObservation(0.0, 31.2, "https://volc/seg1.mp4"),
+                        new SegmentObservation(31.2, 64.8, "https://volc/seg2.mp4"),
+                        new SegmentObservation(64.8, 95.5, "https://volc/seg3.mp4")),
+                        null, null));
+        when(mediaRelay.persist("https://volc/seg1.mp4", "9")).thenReturn(stored(1));
+        when(mediaRelay.persist("https://volc/seg2.mp4", "9")).thenReturn(stored(2));
+        when(mediaRelay.persist("https://volc/seg3.mp4", "9")).thenReturn(stored(3));
+        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        ArgumentCaptor<UpdateVideoSceneSplitProgressDto> renewCaptor =
+                ArgumentCaptor.forClass(UpdateVideoSceneSplitProgressDto.class);
+        verify(stateMachine, times(3)).updateVideoSceneSplitProgress(renewCaptor.capture());
+        // 续租请求携带 claim 的 worker/fencing；进度 = 转存前已完成段占比（终态 100 由 publish 置）
+        renewCaptor.getAllValues().forEach(dto -> {
+            assertThat(dto.jobId()).isEqualTo("100");
+            assertThat(dto.workerId()).isEqualTo("worker-1");
+            assertThat(dto.fencingToken()).isEqualTo(5L);
+        });
+        assertThat(renewCaptor.getAllValues())
+                .extracting(UpdateVideoSceneSplitProgressDto::progress)
+                .containsExactly(0, 33, 66);
+        verify(stateMachine).publishVideoSceneSplitResult(any());
+    }
+
+    @Test
+    @DisplayName("段转存续租未命中（已被接管/终态）→ 中止转存，不发布不落失败（stale worker 静默退出）")
+    void segmentLeaseRenewMissed_abortsTransferWithoutTerminal() {
+        stubPollClaim(input("standard"), 3);
+        stubSourceAsset();
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
+                        new SegmentObservation(0.0, 31.2, "https://volc/seg1.mp4"),
+                        new SegmentObservation(31.2, 95.0, "https://volc/seg2.mp4")),
+                        null, null));
+        when(mediaRelay.persist("https://volc/seg1.mp4", "9")).thenReturn(stored(1));
+        // 第 1 段续租放行、第 2 段续租守卫未命中
+        when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
+                .thenReturn(true, false);
+
+        processor.handle("100");
+
+        verify(mediaRelay, times(1)).persist(anyString(), anyString());
+        verify(mediaRelay, never()).persist("https://volc/seg2.mp4", "9");
+        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test

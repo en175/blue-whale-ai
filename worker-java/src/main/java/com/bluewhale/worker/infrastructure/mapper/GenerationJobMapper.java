@@ -101,6 +101,32 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
+     * 更新 video_scene_split 进度：CAS 更新 + 续租（IKH8BP 审查修复；SQL 语义与
+     * updateMediaExtractProgress 同款，仅租约时长由调用侧按场景切分的单段转存窗口传入）。
+     * <p>
+     * SET progress=clamp(0,99,round(?)), last_polled_at=now, lease_expires_at=?, version=version+1
+     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET progress = #{progress},
+                last_polled_at = NOW(),
+                lease_expires_at = #{leaseExpiresAt},
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int updateVideoSceneSplitProgress(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("progress") Integer progress,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
+    );
+
+    /**
      * 发布 media_extract 结果：CAS 守卫（media-extract-ops.ts:47-63）。
      * <p>
      * SET status='succeeded', progress=100, next_action_at=null, next_poll_at=null,

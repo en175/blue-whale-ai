@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
+import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -41,17 +42,18 @@ import java.util.Set;
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
  *       续排；failed → 分类终态；completed → **逐段下载切片转存自家 TOS（火山
- *       segment_video_url 仅 24h 有效）** → 单事务逐段建 Asset + 契约 result 回传 → 终态
- *       succeeded</li>
+ *       segment_video_url 仅 24h 有效；每段转存前心跳续租防长窗口租约过期）** → 单事务逐段
+ *       建 Asset + 契约 result 回传 → 终态 succeeded</li>
  * </ol>
  * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
  * TOS 公开读 → md5）；切片链接 24h 失效故**强依赖 TOS，不降级直存**（去字幕家族口径）。
  * <p>
  * **逐段转存与部分失败口径（工单验收标准）**：completed 后先逐段下载转存收集产物列表，
- * 全部段转存成功才进 publish 事务（单事务逐段建 Asset + output_asset_ids + 契约 result
- * 回传）；任一段下载/转存失败即整体失败（契约：video_scene_split_failed 1046 归并），
- * 此时无任何段 Asset 落库（不建半成品资产行），已上传的 TOS 孤儿对象与家族先例同口径
- * （转存后守卫未命中同款，无 Asset 引用即无悬挂）。
+ * 每段转存前 updateVideoSceneSplitProgress 心跳续租（N 段串行总时长可远超 claim 的 420s
+ * 租约，审查修复细节见该方法 javadoc）；全部段转存成功才进 publish 事务（单事务逐段建
+ * Asset + output_asset_ids + 契约 result 回传）；任一段下载/转存失败即整体失败（契约：
+ * video_scene_split_failed 1046 归并），此时无任何段 Asset 落库（不建半成品资产行），
+ * 已上传的 TOS 孤儿对象与家族先例同口径（转存后守卫未命中同款，无 Asset 引用即无悬挂）。
  * <p>
  * 出站映射：只传 model / video_url / segment_threshold——min_duration（默认 3s）/
  * max_duration（默认 30s）/ enable_clip_fade（默认 false）/ return_segment_videos（默认
@@ -285,8 +287,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
                 claim.id(), claim.providerTaskId(), claim.pollCount(),
                 observation.segments() != null ? observation.segments().size() : 0);
         if (observation.segments() == null || observation.segments().isEmpty()) {
-            // return_segment_videos 走默认 true 恒返回切片；无段 = 异常形态（含 segments
-            // 字段缺失 / 全部行形状非法被客户端跳过），落兜底不特判 1 段
+            // return_segment_videos 走默认 true 恒返回切片；无段 = 异常形态（segments
+            // 字段缺失/空数组；行形状非法已在客户端抛整体失败），落兜底不特判 1 段
             failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
                     "场景切分任务成功但未返回场景段");
             return;
@@ -296,8 +298,9 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
     /**
      * 结果发布：逐段立即下载转存（火山 segment_video_url 仅 24h 有效，官方明确「请及时
-     * 下载保存」；任一段失败即整体失败——异常上抛由 handle 归并 1046，此前已转存的段无
-     * Asset 行、不留半成品资产悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
+     * 下载保存」；每段转存前心跳续租防长窗口租约过期，续租未命中即中止；任一段失败即
+     * 整体失败——异常上抛由 handle 归并 1046，此前已转存的段无 Asset 行、不留半成品资产
+     * 悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
      * + 契约 result 回传（段序 / 起止秒 / 段资产引用 / 总时长）→ 终态 succeeded。
      */
     private void publishResult(ClaimedVideoSceneSplitJobDto claim,
@@ -333,10 +336,17 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         Integer widthFinal = width;
         Integer heightFinal = height;
 
-        // 逐段下载转存（官方顺序；段序 1 起编号，与前端段卡标注「第 N 段」同源）
+        // 逐段下载转存（官方顺序；段序 1 起编号，与前端段卡标注「第 N 段」同源）。
+        // 每段转存前心跳续租（IKH8BP 审查修复）：N 段串行总时长可远超 claim 的 420s 租约，
+        // 不续租则 recovery 判孤儿重投、新 claim 从头重复下载全部段，创建后 120 分钟重投
+        // 窗口耗尽后任务静默卡 processing；续租未命中（已被接管/终态）即中止，stale worker
+        // 静默退出不抢终态。
         List<SegmentObservation> observed = observation.segments();
         List<PublishVideoSceneSplitDto.Segment> segments = new ArrayList<>(observed.size());
         for (int i = 0; i < observed.size(); i++) {
+            if (!renewLeaseForSegmentTransfer(claim, i, observed.size())) {
+                return;
+            }
             SegmentObservation segment = observed.get(i);
             TosVideoMediaRelay.StoredVideo stored;
             try {
@@ -378,6 +388,30 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         } else {
             log.warn("[video_scene_split] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
+        }
+    }
+
+    /**
+     * 段转存前心跳续租 + 进度上报（进度 = 已完成段占比，0-99 由状态机钳制；发布终态才置 100）。
+     * 守卫未命中或 DB 异常均返回 false：任务已被新 worker 接管（或已终态），本 worker
+     * 静默退出，已转存 TOS 对象成孤儿与家族口径一致（无 Asset 行、不留半成品悬挂）。
+     */
+    private boolean renewLeaseForSegmentTransfer(
+            ClaimedVideoSceneSplitJobDto claim, int transferred, int total) {
+        int progress = (int) Math.floor(transferred * 100.0 / total);
+        try {
+            boolean renewed = stateMachine.updateVideoSceneSplitProgress(
+                    new UpdateVideoSceneSplitProgressDto(
+                            claim.id(), claim.workerId(), claim.fencingToken(), progress));
+            if (!renewed) {
+                log.warn("[video_scene_split] 段转存续租未命中(已被接管/终态)，中止转存 jobId={} segment={}/{}",
+                        claim.id(), transferred + 1, total);
+            }
+            return renewed;
+        } catch (Exception e) {
+            log.warn("[video_scene_split] 段转存续租 DB 异常，中止转存 jobId={}: {}",
+                    claim.id(), e.getMessage(), e);
+            return false;
         }
     }
 

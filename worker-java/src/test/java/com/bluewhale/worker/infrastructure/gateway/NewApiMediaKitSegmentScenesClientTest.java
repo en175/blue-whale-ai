@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 /**
  * NewApiMediaKitSegmentScenesClient 接口级 mock 网关测试（IKH8BP，父规格 IKH86V）。
@@ -234,6 +235,39 @@ class NewApiMediaKitSegmentScenesClientTest {
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.segments()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("段行缺 segment_video_url → 1046 整体失败（与转存环节口径对齐，不静默跳过）")
+    void segmentRowMissingUrl_wholeJobFails() {
+        responseJson.set("{\"task_id\":\"amk-task-1\",\"status\":\"completed\","
+                + "\"result\":{\"duration\":95.0,\"segments\":["
+                + "{\"start_time\":0.0,\"end_time\":31.2,\"segment_video_url\":\"https://volc/seg1.mp4\"},"
+                + "{\"start_time\":31.2,\"end_time\":64.8}]}}");
+
+        VideoSceneSplitError error = catchThrowableOfType(
+                () -> new NewApiMediaKitSegmentScenesClient(baseUrl).poll("sk-token", "amk-task-1"),
+                VideoSceneSplitError.class);
+
+        assertThat(error.getCode())
+                .isEqualTo(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
+        assertThat(error.getMessage()).contains("第 2 段");
+    }
+
+    @Test
+    @DisplayName("段行 start_time 非数字 → 1046 整体失败（任一行形状非法即失败，带段序）")
+    void segmentRowNonNumericStart_wholeJobFails() {
+        responseJson.set("{\"task_id\":\"amk-task-1\",\"status\":\"completed\","
+                + "\"result\":{\"duration\":95.0,\"segments\":["
+                + "{\"start_time\":\"0.0\",\"end_time\":31.2,\"segment_video_url\":\"https://volc/seg1.mp4\"}]}}");
+
+        VideoSceneSplitError error = catchThrowableOfType(
+                () -> new NewApiMediaKitSegmentScenesClient(baseUrl).poll("sk-token", "amk-task-1"),
+                VideoSceneSplitError.class);
+
+        assertThat(error.getCode())
+                .isEqualTo(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
+        assertThat(error.getMessage()).contains("第 1 段");
     }
 
     @Test

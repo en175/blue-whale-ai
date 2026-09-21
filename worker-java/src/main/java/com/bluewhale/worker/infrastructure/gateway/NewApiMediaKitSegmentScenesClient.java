@@ -289,20 +289,34 @@ public class NewApiMediaKitSegmentScenesClient {
 
     /**
      * 官方 result.segments[] 解析：按返回顺序逐段取 start_time / end_time /
-     * segment_video_url（两阶段切分结果照单全收；段内字段缺失的行跳过收集，全空由
-     * processor 判「未返回场景段」落兜底失败）。
+     * segment_video_url（两阶段切分结果照单全收）。段行形状非法（任一字段缺失/类型
+     * 不符）即抛错整体失败（IKH8BP 审查修复）：与转存环节「任一段失败即整体失败」
+     * 口径对齐——静默跳过会缺段，且 processor 的 i+1 重编段序与官方顺序错位，时间轴
+     * 出现无告警空洞；segments 非数组 / 空数组仍返回空列表，由 processor 判
+     * 「未返回场景段」落兜底失败。
      */
     private static List<SegmentObservation> parseSegments(JsonNode segmentsNode) {
         if (!segmentsNode.isArray()) {
             return List.of();
         }
         List<SegmentObservation> segments = new ArrayList<>();
+        int index = 0;
         for (JsonNode item : segmentsNode) {
+            index++;
             JsonNode url = item.path("segment_video_url");
             JsonNode start = item.path("start_time");
             JsonNode end = item.path("end_time");
             if (!url.isTextual() || !start.isNumber() || !end.isNumber()) {
-                continue;
+                String raw = item.toString();
+                if (raw.length() > 200) {
+                    raw = raw.substring(0, 200) + "…";
+                }
+                log.warn("[video_scene_split] 官方段数据形状非法（整体失败口径）第 {} 段: {}",
+                        index, raw);
+                throw new VideoSceneSplitError(
+                        VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
+                        "场景切分返回段数据不完整（第 " + index
+                                + " 段缺少 segment_video_url/start_time/end_time）");
             }
             segments.add(new SegmentObservation(start.asDouble(), end.asDouble(), url.asText()));
         }
