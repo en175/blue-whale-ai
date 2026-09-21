@@ -308,6 +308,43 @@ public class JobStateMachineService {
         return finalizer.publishVideoSceneSplitResult(input);
     }
 
+    // ========== video_frame_interpolation 直通（DTO 形态，VideoFrameInterpolationJobProcessor
+    //            专用，IKHLKJ；失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
+
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto>
+            claimVideoFrameInterpolation(String jobId, String workerId) {
+        return claimService.claimVideoFrameInterpolation(jobId, workerId);
+    }
+
+    public boolean publishVideoFrameInterpolationResult(
+            com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto input) {
+        return finalizer.publishVideoFrameInterpolationResult(input);
+    }
+
+    /**
+     * 取消 video_frame_interpolation 作业（IKHLKJ；CAS 与
+     * {@link #cancelVideoBeforeDispatch} 同款，按是否已提交上游分派到两条 SQL）。
+     * <p>
+     * providerTaskId == null（未提交上游）→ {@code cancelVideoBeforeDispatch}（家族既有件，
+     * 带 {@code provider_task_id IS NULL} 限定）；已提交 → {@code cancelVideoAfterDispatch}
+     * （官方无取消端点，上游任务不可撤，本仓侧停止接纳其结果）。两条 SQL 都只允许
+     * status='processing' + 当前 lease_owner + 当前 fencing_token 命中，故已到终态的任务
+     * 不会被取消改写，取消也抢不过先生效的终态（fencing/终态权威）。
+     */
+    public boolean cancelVideoFrameInterpolation(String jobId, String workerId,
+                                                 long fencingToken, String providerTaskId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int affected = providerTaskId == null
+                ? jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken)
+                : jobMapper.cancelVideoAfterDispatch(jobIdLong, workerId, fencingToken);
+        boolean ok = affected == 1;
+        if (!ok) {
+            log.warn("[video_frame_interpolation] cancel 守卫未命中(stale/已终态) jobId={} workerId={} token={}",
+                    jobId, workerId, fencingToken);
+        }
+        return ok;
+    }
+
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========
 
     /**

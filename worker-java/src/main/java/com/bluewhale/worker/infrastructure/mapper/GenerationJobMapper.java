@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.mapper;
 
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
+import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -678,6 +679,39 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
+     * 取消**已提交上游**的视频作业（IKHLKJ；与 {@link #cancelVideoBeforeDispatch} 同款 CAS，
+     * 唯一差异 = 不带 {@code provider_task_id IS NULL} 限定）。
+     * <p>
+     * 语义：官方无取消端点（规格 Out of Scope：上游任务发出即不撤），故本 SQL 撤销不了上游任务，
+     * 它做的是**本仓侧停止接纳该任务结果**——把 job 落到确定终态 cancelled，此后任何迟到结果都
+     * 过不了 publish 守卫（{@code WHERE status='processing'}），卡片不会被复活为成功
+     * （平台同款口径见 backend cancelImageJob 注释「已停止接纳本任务结果」；先生效的终态获胜）。
+     * <p>
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     * SET status='cancelled', progress=0, next_action_at=null, next_poll_at=null,
+     *     lease_owner=null, lease_expires_at=null, version+1
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'cancelled',
+                progress = 0,
+                next_action_at = NULL,
+                next_poll_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int cancelVideoAfterDispatch(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken
+    );
+
+    /**
      * 按 id 查 provider_task_id（IKEA26 parent-reuse 用：retry job 查父 job 的上游 task）。
      */
     @Select("""
@@ -817,6 +851,16 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
                 List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
+
+    /** 视频插帧到点/孤儿（IKHLKJ，父需求 IKHLES）：套 source 白名单（与 claim 同源，
+     *  单源 video_frame_interpolation；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。
+     *  已取消（status='cancelled'）的任务不在扫描条件内，取消后不再被重投。 */
+    default List<Long> listDueVideoFrameInterpolationJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                VideoFrameInterpolationContract.TAG,
+                List.of(VideoFrameInterpolationContract.SOURCE),
                 limit, maxAgeMinutes);
     }
 }

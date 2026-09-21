@@ -58,6 +58,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> videoEnhanceProducer;
     private final ObjectProvider<GenerationMessageProducer> vocalSplitProducer;
     private final ObjectProvider<GenerationMessageProducer> videoSceneSplitProducer;
+    private final ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProducer;
     private final int maxAgeMinutes;
 
     public RecoveryService(
@@ -88,6 +89,8 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> vocalSplitProducer,
             @Qualifier("videoSceneSplitRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> videoSceneSplitProducer,
+            @Qualifier("videoFrameInterpolationRecoveryProducer")
+            ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProducer,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
         this.jobMapper = jobMapper;
@@ -104,6 +107,7 @@ public class RecoveryService {
         this.videoEnhanceProducer = videoEnhanceProducer;
         this.vocalSplitProducer = vocalSplitProducer;
         this.videoSceneSplitProducer = videoSceneSplitProducer;
+        this.videoFrameInterpolationProducer = videoFrameInterpolationProducer;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -146,6 +150,8 @@ public class RecoveryService {
                     jobMapper.listDueVocalSplitJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT, videoSceneSplitProducer.getIfAvailable(),
                     jobMapper.listDueVideoSceneSplitJobIds(SCAN_LIMIT, maxAgeMinutes));
+            reenqueue(GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION, videoFrameInterpolationProducer.getIfAvailable(),
+                    jobMapper.listDueVideoFrameInterpolationJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
         }
