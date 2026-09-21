@@ -238,6 +238,30 @@ describe('IKH28U 音视频分离编辑态单条（容器三令牌 + 24px 胶囊�
   });
 });
 
+/* ---- IKHB7A 音频截取编辑态发送条（1 成员，24px 胶囊家族单条对齐分离形态：
+   X/截取/时间范围/格式下拉/⚡0 徽标/发送钮五要素单条承载） ---- */
+
+describe('IKHB7A 音频截取发送条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {
+  const trimBarCss = readFileSync(
+    fileURLToPath(new URL('../pages/CanvasPage/components/AudioTrimBar/index.module.css', import.meta.url)),
+    'utf-8',
+  );
+
+  it('源音频卡下方发送条（单条）容器三件套引用令牌、圆角 24px 胶囊、无硬编码容器色值', () => {
+    const block = ruleBlockOf(trimBarCss, '.sendBar');
+    expect(block).toContain('background-color: var(--color-bg-overlay)');
+    expect(block).toContain('border: 1px solid var(--color-border-overlay)');
+    expect(block).toContain('border-radius: 24px');
+    expect(block).toContain('box-shadow: var(--shadow-overlay)');
+    expectNoHardcoded(block);
+  });
+
+  it('截取格式菜单浮层入 IKGZ8C 浮层菜单家族（容器四件套引用令牌，12px 档）', () => {
+    expectOverlayContainer(ruleBlockOf(trimBarCss, '.formatMenu'));
+    expectNoHardcoded(ruleBlockOf(trimBarCss, '.formatMenu'), [...HARDCODED_CONTAINER_COLORS, '#262626', '#363636']);
+  });
+});
+
 /* ---- IKH8BR 场景切分会话单条家族（1 成员，24px 胶囊对齐去字幕家族形态） ---- */
 
 describe('IKH8BR 场景切分会话单条（容器三令牌 + 24px 胶囊，无硬编码容器色值）', () => {

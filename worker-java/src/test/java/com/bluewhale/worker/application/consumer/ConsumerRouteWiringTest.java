@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.AudioTrimJobProcessor;
 import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
@@ -46,9 +47,10 @@ import static org.mockito.Mockito.mock;
  */
 class ConsumerRouteWiringTest {
 
-    /** 各消费者按 {@link GenerationMqRouteEnum} 的顺序对位（前七个走 workerProps 并发度，video 顺序消费）。 */
+    /** 各消费者按 {@link GenerationMqRouteEnum} 的顺序对位（前八个走 workerProps 并发度，video 顺序消费）。 */
     private static final List<GenerationMqRouteEnum> ROUTES = List.of(
             GenerationMqRouteEnum.MEDIA_EXTRACT,
+            GenerationMqRouteEnum.AUDIO_TRIM,
             GenerationMqRouteEnum.AUDIO,
             GenerationMqRouteEnum.IMAGE,
             GenerationMqRouteEnum.IMAGE_ENHANCE,
@@ -81,10 +83,12 @@ class ConsumerRouteWiringTest {
         // 全类唯一的连接配置构建点：残留属性只喂到这里，且绑不到任何 topic / tag 分量。
         ClientConfiguration clientConfig = config.rocketMqClientConfiguration(env);
 
-        // 顺序与 ROUTES 对位：前七个走 workerProps 并发度，video 顺序消费不带并发度。
+        // 顺序与 ROUTES 对位：前八个走 workerProps 并发度，video 顺序消费不带并发度。
         List<AbstractGenerationConsumer> consumers = List.of(
                 config.mediaExtractConsumer(
                         mock(MediaExtractJobProcessor.class), workerProps, clientConfig),
+                config.audioTrimConsumer(
+                        mock(AudioTrimJobProcessor.class), workerProps, clientConfig),
                 config.audioConsumer(mock(AudioJobProcessor.class), workerProps, clientConfig),
                 config.imageConsumer(mock(ImageJobProcessor.class), workerProps, clientConfig),
                 config.imageEnhanceConsumer(

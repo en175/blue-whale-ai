@@ -4,6 +4,11 @@ export const GENERATION_TASK_QUEUE = "generation-task";
 /** 媒体提取（视频→音频）任务 tag/jobName（IKARDY）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。 */
 export const MEDIA_EXTRACT_TAG = "media_extract";
 
+/** 音频截取（音频卡「截取」，火山 MediaKit trim-audio）任务 tag（IKHB6S，契约见
+ *  @lib/contracts/audio-trim）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / AUDIO_TRIM_JOB_TYPE（@lib/contracts）保持一致。 */
+export const AUDIO_TRIM_TAG = "audio_trim";
+
 /** 图片生成任务 tag（IKBGKA）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。 */
 export const IMAGE_GENERATION_TAG = "image";
 
@@ -45,13 +50,14 @@ export const VIDEO_SCENE_SPLIT_TAG = "video_scene_split";
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
 export const VIDEO_GENERATION_TAG = "video";
 
-/** 十一个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
+/** 十三个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
  *  发明一个字符串不会有任何运行时报错，只会静默滞留）。 */
 export type GenerationTag =
   | typeof VIDEO_GENERATION_TAG
   | typeof IMAGE_GENERATION_TAG
   | typeof AUDIO_GENERATION_TAG
   | typeof MEDIA_EXTRACT_TAG
+  | typeof AUDIO_TRIM_TAG
   | typeof IMAGE_ENHANCE_TAG
   | typeof IMAGE_ERASE_TAG
   | typeof IMAGE_CUTOUT_TAG

@@ -109,6 +109,7 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(),
   createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
+  createAudioTrim: vi.fn(),
   createImageErase: vi.fn(),
   createImageCutout: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
@@ -159,6 +160,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
   createImageErase: apiMocks.createImageErase,
   createImageCutout: apiMocks.createImageCutout,
   readJobFailText: apiMocks.readJobFailText,
@@ -212,11 +214,25 @@ function seedDoc() {
           position: { x: 400, y: 0 },
           data: { title: '文生文卡', text: '初始文案', textGen: true, prompt: '' },
         },
+        {
+          id: 'a1',
+          type: 'mediaNode',
+          position: { x: 800, y: 0 },
+          data: {
+            src: 'http://aud/a1.mp3',
+            mediaType: 'audio',
+            fileName: '播客片头.mp3',
+            assetId: '8',
+            duration: 15,
+            mime: 'audio/mpeg',
+          },
+        },
       ],
       edges: [],
     },
     assets: {
       5: { asset_id: 5, type: 'image', access_url: 'http://img/i1.png', width: 1600, height: 900 },
+      8: { asset_id: 8, type: 'audio', access_url: 'http://aud/a1.mp3', duration: 15 },
     },
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
@@ -316,6 +332,8 @@ const SESSION_UI_TESTID: Record<string, string> = {
   crop: 'crop-confirm',
   outpaint: 'outpaint-dialog',
   subtitleErase: 'subtitle-erase-send-bar',
+  audioVideoSplit: 'audio-video-split-send-bar',
+  audioTrim: 'audio-trim-send-bar',
 };
 const sessionToolUi = (kind: keyof typeof SESSION_UI_TESTID) =>
   document.body.querySelector(`[data-testid="${SESSION_UI_TESTID[kind]}"]`);
@@ -351,6 +369,19 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     await pressEscape();
     expect(cutoutToolbar()).toBeNull();
     expect(soloToolbarHidden('i1')).toBe(false);
+  });
+
+  it('进入音频截取会话（第七 kind，IKHB7A）：源卡工具条隐藏、发送条浮出，Esc 退出恢复', async () => {
+    await renderPage();
+    expect(soloToolbarHidden('a1')).toBe(false);
+    await act(async () => {
+      (fullNode('a1').data as Record<string, (id: string) => void>).onTrimAudio!('a1');
+    });
+    expect(sessionToolUi('audioTrim')).toBeTruthy();
+    expect(soloToolbarHidden('a1')).toBe(true);
+    await pressEscape();
+    expect(sessionToolUi('audioTrim')).toBeNull();
+    expect(soloToolbarHidden('a1')).toBe(false);
   });
 
   it('会话模态门控钉屏幕工具条容器：唯一选中卡进入会话 show 关闭，退出恢复（IKGZ5O×IKGYYD 缝合）', async () => {
@@ -513,8 +544,8 @@ describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
     // 钉屏幕容器 show 门随高清面板关闭（showEnhanceDialog 分支）
     expect(mediaFollowToolbarShow()).toBe(false);
     const nodes = () => (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
-    // 源卡、既有草稿卡与新建高清草稿卡的悬浮工具条一律隐藏
-    expect(nodes().length).toBe(3);
+    // 源卡、既有草稿卡、新建高清草稿卡（与截取源音频卡 a1）的悬浮工具条一律隐藏
+    expect(nodes().length).toBe(4);
     for (const n of nodes()) {
       expect((n.data as Record<string, unknown>).soloToolbarHidden).toBe(true);
     }

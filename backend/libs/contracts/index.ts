@@ -46,6 +46,7 @@ export {
   // ── 生成任务域错误码（字符串契约 + 数值表 + 信号 + 类型）──
   ERROR_ALL_OUTPUTS_FAILED,
   ERROR_AUDIO_GENERATION_FAILED,
+  ERROR_AUDIO_TRIM_FAILED,
   ERROR_CONTENT_REJECTED,
   ERROR_CONTENT_REVIEW_UNAVAILABLE,
   ERROR_ENQUEUE_FAILED,
@@ -246,6 +247,22 @@ export {
   type VideoEnhanceResolution,
   type VideoEnhanceInput,
 } from "./video-enhance.js";
+export {
+  AUDIO_TRIM_JOB_TYPE,
+  AUDIO_TRIM_SOURCE,
+  AUDIO_TRIM_INPUT_KEYS,
+  AUDIO_TRIM_OUTPUT_FORMATS,
+  AUDIO_TRIM_FALLBACK_OUTPUT_FORMAT,
+  AUDIO_TRIM_SUBMIT_PATH,
+  AUDIO_TRIM_POLL_PATH_PREFIX,
+  defaultAudioTrimOutputFormat,
+  roundAudioTrimSeconds,
+  buildAudioTrimTimeParams,
+  audioTrimInputSchema,
+  type AudioTrimOutputFormat,
+  type AudioTrimInput,
+  type AudioTrimTimeRange,
+} from "./audio-trim.js";
 export {
   VOCAL_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_SOURCE,

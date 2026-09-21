@@ -13,9 +13,11 @@
  * 工具条 DOM 不再位于节点卡内：点击按钮天然不触发节点拖拽/选中变化（原 nodrag/nopan 与
  * stopPropagation 防护随迁移移除），点击也不落在 React Flow pane 上（不触发 PaneClick）。
  * IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支「详情+下载」改为「截取、调速、混合、
- * 音视频合成、转码」五功能置灰占位钮 + 竖直分隔线 + 下载。五钮本期全部占位（aria-disabled
- * 置灰沿用画质横排先例口径，悬停提示「即将上线」，不绑定任何点击行为），各功能交互由后续
- * 独立任务逐个点亮；详情钮随改版对音频退役（信息稀薄，右键菜单与双击重命名已覆盖），
+ * 音视频合成、转码」五功能占位钮 + 竖直分隔线 + 下载。IKHB6Y 首位「截取」从占位点亮为
+ * 可点入口（门槛见 audioTrim.ts：音频 URL 缺失或时长缺失/为 0 置灰，不照搬家族
+ * 「数据缺失不拦」口径；点击派发 onTrimAudio，编辑态行为归 IKHB7A），其余四钮
+ * （调速/混合/音视频合成/转码）维持置灰占位「即将上线」，各功能交互由后续独立任务
+ * 逐个点亮；详情钮随改版对音频退役（信息稀薄，右键菜单与双击重命名已覆盖），
  * 图片/视频分支的详情不变；音频不出现「替换」入口；@（mention）对音频保持隐藏。
  * IKH8BJ 视频卡追加「场景切分」入口：图标+文字单按钮（无下拉），形态同「音视频分离」，
  * 落其之后、分隔线之前；置灰门槛见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据），
@@ -32,6 +34,7 @@ import { imageEraseGateReason } from '../../imageErase';
 import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
+import { audioTrimGateReason } from '../../audioTrim';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
@@ -60,13 +63,13 @@ interface MediaNodeToolbarProps {
   data: MediaNodeData;
 }
 
-/** 音频卡五功能占位钮（IKH8Q3，ADR-0109）：本期全部置灰占位，无门槛、无回调依赖，
- *  故为模块级静态配置（区别于画质横排的组件内数组）；顺序即 ADR-0109 拍板顺序，
- *  图标按序：剪刀（截取）、仪表盘（调速）、层叠（混合）、场记板（音视频合成）、循环箭头（转码），
+/** 音频卡四功能占位钮（IKH8Q3 剩余项，ADR-0109）：置灰占位，无门槛、无回调依赖，
+ *  故为模块级静态配置（区别于画质横排的组件内数组）；首位「截取」已点亮（IKHB6Y）
+ *  不在本数组，单独渲染接门槛与回调；图标按序：剪刀（截取）、仪表盘（调速）、
+ *  层叠（混合）、场记板（音视频合成）、循环箭头（转码），
  *  形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
 const AUDIO_TOOL_PLACEHOLDER_HINT = '即将上线';
 const audioToolItems: Array<{ id: string; label: string; icon: LucideIcon }> = [
-  { id: 'trim', label: '截取', icon: Scissors },
   { id: 'speed', label: '调速', icon: Gauge },
   { id: 'mix', label: '混合', icon: Layers },
   { id: 'compose', label: '音视频合成', icon: Clapperboard },
@@ -102,6 +105,12 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  进入编辑态，原单按钮直启链路零变化；置灰预检见 audioVideoSplit.ts（assetId 缺失唯一置灰） */
   const handleAudioVideoSplit = useCallback(() => data.onAudioVideoSplit?.(id), [data, id]);
   const audioVideoSplitDisabledReason = audioVideoSplitGateReason(data);
+  /** 音频截取（IKHB6Y，父单 IKHB08）：首位「截取」点亮为可点入口，点击派发 onTrimAudio
+   *  进入截取编辑态（编辑态行为归 IKHB7A，本票只透出回调）；置灰预检见 audioTrim.ts
+   *  （音频 URL 缺失或时长缺失/为 0 置灰——手柄时间换算硬性依赖时长，缺失即拦，
+   *  不照搬家族「数据缺失不拦」口径） */
+  const handleTrimAudio = useCallback(() => data.onTrimAudio?.(id), [data, id]);
+  const audioTrimDisabledReason = audioTrimGateReason(data);
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
    *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
   const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
@@ -255,6 +264,25 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           triggerHint={AUDIO_VIDEO_SPLIT_ENTRY_HINT}
         />
       )}
+      {/* 音频卡「截取」入口（IKHB6Y）：从占位点亮为可点——aria-disabled 门槛置灰口径
+          同画质横排（.toolBtn[aria-disabled='true']），置灰 title 悬停原因、可用态无
+          默认悬停文案（口径同智能去字幕触发钮）；点击守卫后派发 onTrimAudio */}
+      {toolbar.audioTools && (
+        <button
+          type="button"
+          className={styles.toolBtn}
+          onClick={() => {
+            if (audioTrimDisabledReason !== null) return;
+            handleTrimAudio();
+          }}
+          title={audioTrimDisabledReason ?? undefined}
+          aria-disabled={audioTrimDisabledReason !== null || undefined}
+          data-testid="audio-tool-trim"
+        >
+          <Scissors size={14} strokeWidth={2} />
+          <span>截取</span>
+        </button>
+      )}
       {/* 场景切分（IKH8BJ）：仅视频卡显示，落「音视频分离」之后、分隔线之前；同音视频分离
           形态（图标+文字单按钮、native disabled 置灰 + title 悬停原因/可用态 hint） */}
       {data.mediaType === 'video' && (
@@ -268,7 +296,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <span>场景切分</span>
         </button>
       )}
-      {/* 音频卡五功能占位（IKH8Q3）：aria-disabled 置灰保持渲染（口径同画质横排
+      {/* 音频卡四功能占位（IKH8Q3 剩余项）：aria-disabled 置灰保持渲染（口径同画质横排
           .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}
       {toolbar.audioTools && audioToolItems.map((item) => {
         const Icon = item.icon;

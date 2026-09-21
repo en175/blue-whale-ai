@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
@@ -150,6 +151,14 @@ public class JobClaimService {
     private static final List<String> VOCAL_SPLIT_CLAIM_SOURCES =
             List.of(VocalSplitContract.SOURCE);
 
+    /**
+     * audio_trim 租约 420s（IKHB6S，父单 IKHB08；火山异步链）：轮询到点步是短查询，但
+     * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
+     * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投，
+     * media_extract 同款语义）。
+     */
+    private static final int AUDIO_TRIM_LEASE_SECONDS = 420;
+
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
         String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
@@ -199,6 +208,50 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new ClaimedMediaExtractJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    /**
+     * 领取 audio_trim 作业（IKHB6S，父单 IKHB08，附录 C 触点④）。
+     * <p>
+     * 候选查询复用参数化 {@code findCandidateByTypeAndSources}（type=audio_trim，
+     * **不套 source 白名单**——audio / media_extract 同形态：契约票口径「任务来源值随
+     * 接线票定死后补录」，专属来源值不在白名单，套了漏真卡任务，IKC9EJ 教训）；
+     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 只含 id / fencing_token / status，
+     * 与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
+     * 分相判据与超限判定，media_extract 同款富投影）。
+     */
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
+            String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, AudioTrimContract.TAG, List.of());
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(AUDIO_TRIM_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[audio_trim] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

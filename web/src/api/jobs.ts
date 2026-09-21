@@ -10,15 +10,16 @@ import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
+import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
-/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图与视频去字幕任务
- *  （IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase';
+/** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
+ *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -318,6 +319,33 @@ export function createMediaExtraction(
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/audio-trims 请求体（四键，键名与 backend/libs/contracts/audio-trim.ts
+ *  契约恒等；IKHB6N 创建入口 strict zod 复核：source_asset_id 数字串、start_time/end_time
+ *  可选（贴边省略口径，选区贴 0/贴全长不传）、output_format 五枚举）。 */
+export type CreateAudioTrimPayload = AudioTrimInput;
+
+/** 创建音频截取任务返回（IKHB7A）；免费口径同 media_extract——不带幂等头、无积分预估、
+ *  不走余额拦截门。截取占位卡由前端在创建成功后本地插入（源音频卡右侧 +60px），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（duration 以火山返回为权威时长）。 */
+export interface AudioTrimCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建音频截取任务（IKHB7A，编辑态发送闭环）。 */
+export function createAudioTrim(
+  projectId: string,
+  payload: CreateAudioTrimPayload,
+): Promise<AudioTrimCreatedData> {
+  return apiRequest<AudioTrimCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-trims`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -109,6 +109,11 @@ public class JobStateMachineService {
         return claimService.claimMediaExtract(jobId, workerId);
     }
 
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
+            String jobId, String workerId) {
+        return claimService.claimAudioTrim(jobId, workerId);
+    }
+
     public Optional<ClaimedJobDto> claimAudioJobById(String jobId, String workerId) {
         return claimService.claimAudioJobById(jobId, workerId);
     }
@@ -224,6 +229,16 @@ public class JobStateMachineService {
         return finalizer.failMediaExtractJob(
                 input.jobId(), input.code(), input.message(), input.details(),
                 input.workerId(), input.fencingToken());
+    }
+
+    // ========== audio_trim 直通（DTO 形态，AudioTrimJobProcessor 专用，IKHB6S） ==========
+
+    public boolean publishAudioTrimResult(com.bluewhale.worker.domain.dto.PublishAudioTrimDto input) {
+        return finalizer.publishAudioTrimResult(input);
+    }
+
+    public boolean failAudioTrimJob(com.bluewhale.worker.domain.dto.FailAudioTrimDto input) {
+        return finalizer.failAudioTrimJob(input);
     }
 
     // ========== image_enhance 直通（DTO 形态，ImageEnhanceJobProcessor 专用；失败复用通用 failJob） ==========
