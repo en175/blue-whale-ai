@@ -96,10 +96,72 @@ export const VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR: VideoMattingBackgroundColor
  *  （前端生成、每次发送与失败重试都新生成），出站请求不发）。 */
 export const VIDEO_MATTING_CLIENT_TOKEN_PATTERN = /^[\x20-\x7E]{1,64}$/;
 
+/** input 冻结键名（画布创建入口对客 body 的业务键，创建时定死、重试原样沿用；
+ *  IKHK98 按 IKH8BO 扩展先例补齐——videoSceneSplitInputSchema 同款）。基础设施键
+ *  provider_credential（请求头冻结）与 client_token（提交幂等键，消费方是
+ *  command_idempotency 表）在业务键之上由创建侧处理（均不进本 zod——它校验的是客户端
+ *  业务 payload）。mode 是**创建入口入参**（决定走哪个火山端点），故进 input 冻结形态；
+ *  它不进出站提交参数（videoMattingSubmitSchema——双端点已按模式分流，见
+ *  VIDEO_MATTING_SUBMIT_PATHS）：worker 出站按 input.mode 取提交路径，前端扇出 /
+ *  失败重试按冻结 input 读回原参数。 */
+export const VIDEO_MATTING_INPUT_KEYS = {
+  /** 源素材身份（被抠像的视频 Asset id；命名沿用 media_extract / video_enhance /
+   *  video_scene_split 的 source_asset_id）。 */
+  sourceAssetId: "source_asset_id",
+  /** 画布任务占位卡节点绑定（前端发送前本地建占位卡生成的节点 id；video_enhance /
+   *  video_subtitle_erase / video_scene_split 的 target_node_id 同款语义——画布单写入方
+   *  架构〔IKFS5W：后端停写 nodes_json，前端唯一写入方〕下「任务与画布占位数据同事务
+   *  创建」的落法 = 本键随任务 input 原子落库，前端按它把 job 映射到本地占位卡）。 */
+  targetNodeId: "target_node_id",
+  /** 抠像模式（见 VIDEO_MATTING_MODES；必填无默认——双模式必选一，选择前置在入口
+   *  下拉直选，ADR-0112）。 */
+  mode: "mode",
+  /** 输出格式（见 VIDEO_MATTING_FORMATS；冻结后恒在——创建请求体可缺省，创建入口补
+   *  VIDEO_MATTING_DEFAULT_FORMAT 后过本 schema）。 */
+  format: "format",
+  /** MP4 纯色背景色（见 VIDEO_MATTING_BACKGROUND_COLORS；仅 format=MP4 时存在——
+   *  创建入口补 VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR 后过本 schema，WEBM 冻结
+   *  形态恒无本键，见下方 refine）。 */
+  backgroundColor: "background_color",
+} as const;
+
+/** input 冻结结构（创建入口复核与重试沿用都用本 schema；strict 防多余键）。**冻结后**
+ *  形态：format 恒在（创建请求体缺省时补默认）、background_color 仅 MP4 时存在
+ *  （缺省补 white；vocal_split 的「缺省补默认后过 schema」同款口径）。refine 两条与
+ *  videoMattingSubmitSchema 同口径：format=MP4 时 background_color 必填、format=WEBM
+ *  （透明）时不接受 background_color。 */
+export const videoMattingInputSchema = z
+  .object({
+    [VIDEO_MATTING_INPUT_KEYS.sourceAssetId]: z.string().regex(/^[1-9][0-9]*$/),
+    [VIDEO_MATTING_INPUT_KEYS.targetNodeId]: z.string().min(1),
+    [VIDEO_MATTING_INPUT_KEYS.mode]: z.enum(VIDEO_MATTING_MODES),
+    [VIDEO_MATTING_INPUT_KEYS.format]: z.enum(VIDEO_MATTING_FORMATS),
+    [VIDEO_MATTING_INPUT_KEYS.backgroundColor]: z
+      .enum(VIDEO_MATTING_BACKGROUND_COLORS)
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.format === "MP4" && value.background_color == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "format 为 MP4（纯色背景）时 background_color 必填",
+        path: ["background_color"],
+      });
+    }
+    if (value.format === "WEBM" && value.background_color != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "format 为 WEBM（透明背景）时不接受 background_color",
+        path: ["background_color"],
+      });
+    }
+  });
+export type VideoMattingInput = z.infer<typeof videoMattingInputSchema>;
+
 /** 提交参数键名（两模式共用同一组官方 body 参数；文档出处：官方 PDF 提交示例 +
- * 「进阶使用」节。模式不进提交参数——双端点已按模式分流，见 VIDEO_MATTING_SUBMIT_PATHS；
- *  画布创建入口的 input 冻结形态〔source_asset_id / target_node_id 等〕由创建入口票
- *  按家族先例在本文件扩展，IKH8BO 扩展同款）。 */
+ *  「进阶使用」节。模式不进提交参数——双端点已按模式分流，见 VIDEO_MATTING_SUBMIT_PATHS；
+ *  创建入口的入参形态见上方 VIDEO_MATTING_INPUT_KEYS / videoMattingInputSchema）。 */
 export const VIDEO_MATTING_SUBMIT_KEYS = {
   /** 待处理视频的公网可访问 URL（worker 出站前由源 Asset url 解析，Asset url 落库即
    *  public-read；官方参数，必填）。 */
@@ -170,12 +232,20 @@ export const videoMattingResultSchema = z
   .strict();
 export type VideoMattingResult = z.infer<typeof videoMattingResultSchema>;
 
+/** 时长门槛：10 分钟**产品上限**（对齐去字幕 VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS 的
+ *  10 分钟口径，ADR-0112 定案——官方处理耗时为视频时长的 1~3 倍而 worker 轮询上限约
+ *  60 分钟，不拦等于让长视频注定超时失败；官方 API 无视频时长上限，纯产品决策）。
+ *  消费方 = backend 创建入口服务端复核 + web 按钮门槛预检（两端判定与数值只此一份，
+ *  前端时长数据缺失放行时的后端兜底）；duration_ms 缺失放行（权威值缺位不臆造，
+ *  video_scene_split / video_subtitle_erase 同口径）。 */
+export const VIDEO_MATTING_MAX_DURATION_MS = 10 * 60 * 1000;
+
 /** 使用限制口径（文档出处：官方 PDF「参考信息」表——支持 mp4 / flv / ts / avi / mov /
  *  mkv / wmv 等主流视频格式〔开放式列举〕，建议单输入 ≤10 GB，处理耗时通常为视频时长
  *  1~3 倍）：不做格式预检白名单与大小预检（家族 video_scene_split / video_subtitle_erase
  *  同款——我方上传面 video/* 全部在官方支持面内，家族先例均未加大小预检），不设格式/
- *  大小常量，本注释即口径单源；时长门槛（对齐去字幕 10 分钟置灰）与 worker 轮询窗口
- *  上限由创建入口票 / worker 票按 ADR-0112 定值（处理耗时 1~3 倍口径下须保证轮询
+ *  大小常量，本注释即口径单源；时长门槛已定值于上方 VIDEO_MATTING_MAX_DURATION_MS，
+ *  worker 轮询窗口上限由 worker 票按 ADR-0112 定值（处理耗时 1~3 倍口径下须保证轮询
  *  窗口覆盖）。 */
 
 /** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_VIDEO_MATTING_FAILED=1049，

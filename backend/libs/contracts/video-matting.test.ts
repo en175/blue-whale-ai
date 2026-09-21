@@ -24,7 +24,9 @@ import {
   VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
   VIDEO_MATTING_DEFAULT_FORMAT,
   VIDEO_MATTING_FORMATS,
+  VIDEO_MATTING_INPUT_KEYS,
   VIDEO_MATTING_JOB_TYPE,
+  VIDEO_MATTING_MAX_DURATION_MS,
   VIDEO_MATTING_MODES,
   VIDEO_MATTING_MODEL_NAMES,
   VIDEO_MATTING_POLL_PATH_PREFIX,
@@ -32,6 +34,7 @@ import {
   VIDEO_MATTING_SOURCE,
   VIDEO_MATTING_SUBMIT_KEYS,
   VIDEO_MATTING_SUBMIT_PATHS,
+  videoMattingInputSchema,
   videoMattingResultSchema,
   videoMattingSubmitSchema,
 } from "./video-matting.js";
@@ -200,6 +203,108 @@ describe("video_matting 契约不变量（官方 PDF 口径，TS 侧）", () => 
       "resolution",
       "duration",
     ]);
+  });
+
+  it("input 键名冻结（IKHK98 创建入口冻结形态）：source_asset_id / target_node_id / mode / format / background_color", () => {
+    expect(Object.values(VIDEO_MATTING_INPUT_KEYS)).toEqual([
+      "source_asset_id",
+      "target_node_id",
+      "mode",
+      "format",
+      "background_color",
+    ]);
+  });
+
+  it("input schema（冻结后形态）：双模式×双格式过、MP4 必填背景色、WEBM 拒背景色、MOV / 非法 mode 拒、strict 拒、资产 id 非数字拒、target_node_id 空、门槛常量 = 10 分钟", () => {
+    // 合法主路径：portrait / greenscreen × WEBM / MP4（MP4 三底色）。
+    for (const mode of VIDEO_MATTING_MODES) {
+      expect(
+        videoMattingInputSchema.safeParse({
+          source_asset_id: "88",
+          target_node_id: "node-1",
+          mode,
+          format: "WEBM",
+        }).success,
+      ).toBe(true);
+      for (const backgroundColor of VIDEO_MATTING_BACKGROUND_COLORS) {
+        expect(
+          videoMattingInputSchema.safeParse({
+            source_asset_id: "88",
+            target_node_id: "node-1",
+            mode,
+            format: "MP4",
+            background_color: backgroundColor,
+          }).success,
+        ).toBe(true);
+      }
+    }
+    // mode 必填无默认（入口下拉直选），枚举外拒。
+    for (const mode of [undefined, "human", 1, null]) {
+      expect(
+        videoMattingInputSchema.safeParse({
+          source_asset_id: "88",
+          target_node_id: "node-1",
+          format: "WEBM",
+          ...(mode === undefined ? {} : { mode }),
+        }).success,
+      ).toBe(false);
+    }
+    // format 枚举外拒（MOV 档不暴露，非法值明确拒绝不给隐式降档）。
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "88",
+        target_node_id: "node-1",
+        mode: "portrait",
+        format: "MOV",
+      }).success,
+    ).toBe(false);
+    // refine 两条与提交 schema 同口径：MP4 缺背景色拒、WEBM 带背景色拒。
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "88",
+        target_node_id: "node-1",
+        mode: "portrait",
+        format: "MP4",
+      }).success,
+    ).toBe(false);
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "88",
+        target_node_id: "node-1",
+        mode: "portrait",
+        format: "WEBM",
+        background_color: VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
+      }).success,
+    ).toBe(false);
+    // strict：多余键拒（client_token / provider_credential 是基础设施键，不进本 zod）。
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "88",
+        target_node_id: "node-1",
+        mode: "portrait",
+        format: "WEBM",
+        client_token: "tok-001",
+      }).success,
+    ).toBe(false);
+    // source_asset_id 非数字串拒、target_node_id 空拒。
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "08x",
+        target_node_id: "node-1",
+        mode: "portrait",
+        format: "WEBM",
+      }).success,
+    ).toBe(false);
+    expect(
+      videoMattingInputSchema.safeParse({
+        source_asset_id: "88",
+        target_node_id: "",
+        mode: "portrait",
+        format: "WEBM",
+      }).success,
+    ).toBe(false);
+    // 时长门槛：10 分钟产品上限（对齐去字幕口径，ADR-0112；官方无时长限制）。
+    expect(VIDEO_MATTING_MAX_DURATION_MS).toBe(10 * 60 * 1000);
   });
 
   it("result schema：官方 result 三键同名透传（video_url 为转存自有存储后地址）、strict 多余键拒、时长负数拒", () => {
