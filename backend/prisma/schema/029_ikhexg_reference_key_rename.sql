@@ -24,6 +24,12 @@
 -- ⚠️ 判定「哪个值原本生效」的依据是**行类型**：行的 capability_type 决定哪把键被读，因此两键
 --    同现时保留原本被读的那把，行为逐字不变。这一点机器能安全推断（不是猜语义）。
 --
+-- ⚠️ **上线顺序：本迁移必须先于新镜像生效**。worker-java 的图片链路是**现查库**读 features
+--    （`ImageJobProcessor` → `capabilityMapper.findByModelId`），不是读冻结快照。若新 worker 先上线、
+--    本迁移还没跑，图片行里仍带旧键 → 新代码读不到 → 回落 DEFAULT_IMAGE_REFERENCE_MAX = 10：
+--    `doubao-seedream-4-0` 会从 4 变 10（过宽）、`gpt-image-2` 从 16 变 10（过紧）。
+--    另注：TS 侧能力行有 5 分钟缓存（仅供热路径），迁移后最多 5 分钟才全量刷新。
+--
 -- ⚠️ 不按 provider_id 过滤：本仓 seed 写的是 'new-api'，线上存量行的 provider_id 实为
 --    'volcengine'（早期导入），按 'new-api' 过滤会静默漏改。
 --
