@@ -8090,6 +8090,11 @@ export default function CanvasPage() {
       showToast('warn', '插帧参数不合法，请调整后重试');
       return false;
     }
+    // 票面 IKHLKX 验收 2：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
+    // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；口径同家族「立刻落库」的
+    //  best-effort 吞错：保存失败不阻断发送，前端保存状态条与防抖自动保存兜底；
+    //  发送与失败重试共用本函数，两条路径同款保证）
+    await flushCanvasSave(currentId).catch(() => {});
     try {
       const created = await createFrameInterpolation(currentId, input);
       // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）

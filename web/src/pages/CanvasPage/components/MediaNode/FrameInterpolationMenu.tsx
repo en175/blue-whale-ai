@@ -51,6 +51,10 @@ export default function FrameInterpolationMenu({ items, triggerDisabledReason }:
   /** 点击触发钮直启首项「HD 高清」（口径同家族「点击触发钮直启所显示工具」，ADR-0101 规则二） */
   const primaryItem = items[0];
   const triggerDisabled = triggerDisabledReason != null;
+  /** 触发钮悬停说明（ADR-0113 决策四）：整钮原因（未关联资产）优先；整钮可用而首项被分辨率
+   *  门槛拦住时，原因从菜单项升到触发钮——触发钮文字是「高清」、点击随之无操作，用户不必展开
+   *  菜单才知道为什么点不动。两项都可用时无 title（可用态不占悬停说明，菜单项各显自己的 hint）。 */
+  const triggerTitle = triggerDisabledReason ?? primaryItem?.disabledReason ?? undefined;
 
   const cancelScheduledClose = () => {
     if (closeTimerRef.current != null) {
@@ -117,7 +121,7 @@ export default function FrameInterpolationMenu({ items, triggerDisabledReason }:
           if (triggerDisabled || primaryItem.disabledReason != null) return;
           launch(primaryItem);
         }}
-        title={triggerDisabledReason ?? undefined}
+        title={triggerTitle}
         aria-haspopup="menu"
         aria-expanded={open || undefined}
         aria-disabled={triggerDisabled || undefined}

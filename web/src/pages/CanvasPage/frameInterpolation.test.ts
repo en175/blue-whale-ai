@@ -110,6 +110,18 @@ describe('frameInterpolationErrorText（失败文案家族映射，IKHLKX 消费
     expect(frameInterpolationErrorText({ code: 'enqueue_failed' })).toBe('任务入队失败，请重试');
   });
 
+  it('入队失败（enqueue_failed / 1028）恒为逐字全文「任务入队失败，请重试」，不让后端半句 msg 透传', () => {
+    // 后端 1028 落库 msg 是「任务入队失败」（contracts/error-codes.ts 码表）——票面 IKHLKX
+    // 验收 5 要求逐字全文，故入队失败码优先于「后端 msg 优先」的既有口径
+    expect(frameInterpolationErrorText({ code: 1028, msg: '任务入队失败' })).toBe('任务入队失败，请重试');
+    expect(frameInterpolationErrorText({ code: 'enqueue_failed', msg: '任务入队失败' })).toBe('任务入队失败，请重试');
+    // msg 是别的可读原因或内部调试原文时同样固定全文（入队失败不对客透传上游原文）
+    expect(frameInterpolationErrorText({ code: 1028, msg: '输入视频时长超出限制' })).toBe('任务入队失败，请重试');
+    expect(frameInterpolationErrorText({ code: 'enqueue_failed', message: 'RocketMQ 入队失败' })).toBe('任务入队失败，请重试');
+    // 数值与字符串两形态同源同句；msg 缺失亦同
+    expect(frameInterpolationErrorText({ code: 1028 })).toBe('任务入队失败，请重试');
+  });
+
   it('无错误对象/未知码兜底同句，失败态不空白', () => {
     expect(frameInterpolationErrorText(null)).toBe('视频插帧失败，请重试');
     expect(frameInterpolationErrorText(undefined)).toBe('视频插帧失败，请重试');

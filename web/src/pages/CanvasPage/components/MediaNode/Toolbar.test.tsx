@@ -1049,6 +1049,26 @@ describe('MediaNodeToolbar 「高清 ▾」下拉入口（IKH3VG 原链路 / IKH
     expect(onFrameInterpolation).toHaveBeenCalledWith('video-node');
   });
 
+  it('HD 项置灰时触发钮带该项原因 title（ADR-0113 决策四）：点击不派发，用户知道「高清」为什么点不动', async () => {
+    // 超输入上限：整钮不置灰（只看未关联资产），但触发钮直启的 HD 项已被拦——原因须挂到触发钮
+    await renderToolbar('video', { data: { assetId: 'a1', width: 2561, height: 1440 } });
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
+    expect(trigger().getAttribute('title')).toContain('1920');
+
+    // 低于输入下限（短边 < 360）同款
+    await renderToolbar('video', { id: 'floor', data: { assetId: 'a1', width: 640, height: 359 } });
+    expect(trigger().getAttribute('title')).toContain('360');
+
+    // 两项都可用：触发钮维持无 title（可用态原因通道为空，菜单项仍各自的 hint）
+    await renderToolbar('video', { id: 'ok', data: { assetId: 'a1', width: 1280, height: 720 } });
+    expect(trigger().getAttribute('title')).toBeNull();
+
+    // 未关联资产：整钮原因优先（触发钮与两项同句，通道由 aria-disabled 区分）
+    await renderToolbar('video', { id: 'noasset', data: {} });
+    expect(trigger().getAttribute('aria-disabled')).toBe('true');
+    expect(trigger().getAttribute('title')).toContain('尚未关联资产');
+  });
+
   it('HD 项置灰之短边不足 360：项 title 为原因；恰 360 放行（竖屏 1080×1920 同口径）', async () => {
     await renderToolbar('video', { data: { assetId: 'a1', width: 640, height: 359 } });
     await hoverIn();

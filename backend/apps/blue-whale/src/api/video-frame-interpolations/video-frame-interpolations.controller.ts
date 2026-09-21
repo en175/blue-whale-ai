@@ -40,8 +40,10 @@ export class VideoFrameInterpolationsController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      // 入队失败仍返回 200（任务已持久化，终态由 GET /api/jobs/:id 轮询呈现）：
-      // code = enqueue_failed（数值 1028），对客文案由码表/前端映射给出「任务入队失败，请重试」；
+      // 入队失败仍返回 200：job 已持久化，终态由 GET /api/jobs/:id 轮询呈现。
+      // 落库 job 错误码 = ERROR_ENQUEUE_FAILED（字符串 enqueue_failed / 数值 1028），
+      // 此处 msg 只是码表半句「任务入队失败」；对客逐字全文「任务入队失败，请重试」由前端
+      // 映射给出（frameInterpolationErrorText 对入队失败码固定返回该句，不取后端 msg）。
       // details.raw 是内部调试原文（RocketMQ 报错），ADR-0078 禁展示用户。
       await this.videoFrameInterpolations
         .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {

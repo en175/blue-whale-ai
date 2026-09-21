@@ -130,22 +130,33 @@ export function buildFrameInterpolationInput(
     : null;
 }
 
-/** 插帧失败文案家族映射（IKHLKX 消费，口径同 videoEnhanceErrorText）：后端 msg 优先；
- *  msg 为空时按错误码兜底——video_frame_interpolation_failed / 1049（契约执行面统一归并，
- *  含官方门槛拒绝与转存失败）→「视频插帧失败，请重试」，入队失败同款兜底；再兜同句防空白。 */
+/** 入队失败固定对客全文（票面 IKHLKX 验收 5 逐字要求）。后端落库的 msg 只是半句
+ *  「任务入队失败」（契约码表 1028 文案），不足以拼成逐字口径，故入队失败码**优先**返回
+ *  本句、不让后端 msg 透传（内部调试原文 details.raw 更不可对客，ADR-0078）。 */
+const FRAME_INTERPOLATION_ENQUEUE_FAILED_TEXT = '任务入队失败，请重试';
+
+/** 入队失败码的两个形态（契约字符串码 enqueue_failed / 数值码 1028）同源同一文案 */
+const FRAME_INTERPOLATION_ENQUEUE_FAILED_CODES: readonly string[] = ['enqueue_failed', '1028'];
+
+/** 插帧失败文案家族映射（IKHLKX 消费，口径同 videoEnhanceErrorText）：入队失败码先按上一组
+ *  常量固定全文；其余码后端 msg 优先，msg 为空时按错误码兜底——video_frame_interpolation_failed
+ *  / 1049（契约执行面统一归并，含官方门槛拒绝与转存失败）→「视频插帧失败，请重试」；再兜同句防空白。 */
 const FRAME_INTERPOLATION_ERROR_CODE_TEXT: Record<string, string> = {
   video_frame_interpolation_failed: '视频插帧失败，请重试',
   '1049': '视频插帧失败，请重试',
-  enqueue_failed: '任务入队失败，请重试',
 };
 
 export function frameInterpolationErrorText(
   error?: { code?: string | number; message?: string; msg?: string } | null,
 ): string {
+  const code = error?.code != null ? String(error.code) : '';
+  if (code !== '' && FRAME_INTERPOLATION_ENQUEUE_FAILED_CODES.includes(code)) {
+    return FRAME_INTERPOLATION_ENQUEUE_FAILED_TEXT;
+  }
   const text = readJobFailText(error);
   if (text) return text;
-  if (error?.code != null && FRAME_INTERPOLATION_ERROR_CODE_TEXT[String(error.code)]) {
-    return FRAME_INTERPOLATION_ERROR_CODE_TEXT[String(error.code)];
+  if (code !== '' && FRAME_INTERPOLATION_ERROR_CODE_TEXT[code]) {
+    return FRAME_INTERPOLATION_ERROR_CODE_TEXT[code];
   }
   return '视频插帧失败，请重试';
 }

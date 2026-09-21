@@ -204,6 +204,44 @@ describe('IKHLKX 发送创建闭环', () => {
     expect(edges().find((e) => e.target === draftId)?.source).toBe('v1');
   });
 
+  it('发送前先冲刷画布保存（票面 IKHLKX 验收 2）：草稿卡与来源边落盘请求早于创建请求，受理后立即关页也不丢卡', async () => {
+    seedDoc();
+    apiMocks.createFrameInterpolation.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 0, asset: null });
+    await renderPage();
+    await frameInterpolation();
+    const draftId = draftNodes()[0]!.id;
+    await sendPanel();
+
+    // 发送前已发生落盘：请求体含新建的插帧草稿卡与带 origin 的来源边（受理即已持久化）
+    // （harness 的 saveCanvasDoc 桩未声明形参，取参处显式断言成 (projectId, payload, version) 形态）
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    const saved = (apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[string, {
+      nodes: Array<{ id: string }>;
+      edges: Array<{ id: string; source: string; target: string }>;
+    }]>).at(-1)![1];
+    expect(saved.nodes.map((n) => n.id)).toContain(draftId);
+    expect(saved.edges.find((e) => e.target === draftId)?.source).toBe('v1');
+    // 顺序即口径：保存请求先于创建请求
+    expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder.at(-1)!)
+      .toBeLessThan(apiMocks.createFrameInterpolation.mock.invocationCallOrder[0]!);
+
+    // 失败重试走同一发送核心（startFrameInterpolationJob），故重试亦先冲刷；
+    // 画布无变化时冲刷按既有「签名未变不发 PUT」口径幂等跳过，不产生多余保存请求
+    await unmountPage();
+    seedDoc('failed');
+    apiMocks.saveCanvasDoc.mockClear();
+    apiMocks.createFrameInterpolation.mockClear();
+    apiMocks.createFrameInterpolation.mockResolvedValue({ job_id: 'j2', status: 'queued' });
+    await renderPage();
+    await act(async () => {
+      (dataOf('i1').onRetryJob as (nodeId: string) => void)('i1');
+    });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
+  });
+
   it('提交往返期间：面板保留、参数只读、发送置灰防重（重复点击只发一次创建请求）', async () => {
     seedDoc();
     let resolveCreate: (value: { job_id: string; status: 'queued' }) => void = () => {};
@@ -333,6 +371,17 @@ describe('IKHLKX 终态回填与插帧身份清除', () => {
     // 失败态保留插帧身份（可重试）与来源边
     expect(identityOf(mediaNode('i1'))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
     expect(edges().find((e) => e.target === 'i1')?.source).toBe('v1');
+  });
+
+  it('failed：入队失败（数值码 1028 + 后端半句 msg）仍显示逐字「任务入队失败，请重试」', async () => {
+    seedDoc('generating');
+    // 真实链路形态：后端落 enqueue_failed（数值 1028）且 msg 是码表半句「任务入队失败」
+    apiMocks.fetchJobStatus.mockResolvedValue({
+      job_id: 'j9', status: 'failed', progress: 0, error: { code: 1028, msg: '任务入队失败' },
+    });
+    await renderPage();
+    expect(dataOf('i1').genStatus).toBe('failed');
+    expect(dataOf('i1').errorText).toBe('任务入队失败，请重试');
   });
 });
 
