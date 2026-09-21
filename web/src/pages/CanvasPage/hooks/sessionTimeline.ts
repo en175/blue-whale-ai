@@ -312,6 +312,32 @@ export function applyLiveEvent(live: LiveRun, ev: TimelineEvent, now: number = D
     return text ? { ...live, text: live.text + text, reasonings: endReasoning(live.reasonings, when) } : live;
   }
 
+  /**
+   * 断线续跑：把已经上屏的正文截回第 `keep_chars` 个字（IKHCJ2）。
+   *
+   * Agent 到模型网关的连接断掉时，服务端从上一个步骤边界接着跑。断掉的那一步如果已经说出口
+   * 半句话，模型重说时不会一字不差——不擦掉旧的，用户看到的就是「半句话 + 另一个开头」。
+   *
+   * **它带的是绝对长度，所以重复执行是安全的**：SSE 至少一次投递，重连重放会把同一条指令
+   * 再放一遍，而「截到第 N 个字」放几遍都是同一个结果。
+   *
+   * 思考不擦：模型重想一遍的代价远小于整轮失败，那一段留在思考区里。这是服务端知情的取舍，
+   * 不是这里漏了。
+   */
+  if (t === 'assistant.rewind.v1') {
+    const keep = typeof payload.keep_chars === 'number' ? payload.keep_chars : null;
+    // 要保留的比现有的还多，就当没这回事：一条迟到的指令不该凭空造出字来，也不该改任何东西。
+    if (keep === null || keep < 0 || keep >= live.text.length) return live;
+    return {
+      ...live,
+      text: live.text.slice(0, keep),
+      // 工具行与思考段用正文偏移挂在正文上。挂在截口之外的跟着回到截口，否则它们会指向一个
+      // 不存在的位置，在时间线上排到正文后面去。
+      toolCalls: live.toolCalls.map((c) => (c.at > keep ? { ...c, at: keep } : c)),
+      reasonings: live.reasonings.map((r) => (r.at > keep ? { ...r, at: keep } : r)),
+    };
+  }
+
   if (t === 'assistant.reasoning.delta') {
     const chunk = str(payload.text);
     if (!chunk) return live;
@@ -1034,6 +1060,8 @@ const LIVE_INCREMENT_EVENTS = new Set([
   'tool.activity',
   'assistant.reasoning.delta',
   'assistant.delta',
+  // 断线续跑的擦除（IKHCJ2）：它改的是同一份进行中的正文，和 delta 走同一条路。
+  'assistant.rewind.v1',
   'prompt_card.partial.v1',
 ]);
 
