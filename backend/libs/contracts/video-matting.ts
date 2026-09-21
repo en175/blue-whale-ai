@@ -248,7 +248,9 @@ export const VIDEO_MATTING_MAX_DURATION_MS = 10 * 60 * 1000;
  *  同款——我方上传面 video/* 全部在官方支持面内，家族先例均未加大小预检），不设格式/
  *  大小常量，本注释即口径单源；时长门槛已定值于上方 VIDEO_MATTING_MAX_DURATION_MS，
  *  worker 轮询窗口上限由 worker 票按 ADR-0112 定值（处理耗时 1~3 倍口径下须保证轮询
- *  窗口覆盖）。 */
+ *  窗口覆盖）；**成品转存上限**（worker 侧，1GiB）是执行面基础设施常量不是创建门槛，
+ *  定值在 worker 契约 VideoMattingContract.MAX_RESULT_BYTES（审查修复 P2——家族字节数组
+ *  转存路径 200MB 与堆绑死，成品可超，故走流式并单列上限）。 */
 
 /** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_VIDEO_MATTING_FAILED=1049，
  *  TS 侧常量单源在 error-codes.ts，本文件不重复定义——video_scene_split / video-enhance

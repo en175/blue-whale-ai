@@ -320,6 +320,7 @@ import {
   createVideoMatting,
   newIdempotencyKey,
   readJobFailText,
+  type CreateVideoMattingPayload,
   type CreateFrameInterpolationPayload,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -1887,6 +1888,13 @@ export default function CanvasPage() {
     showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
     return true;
   };
+  /** 智能抠像创建（审查修复 S1）：新增服务端写入按请求治理规则承载 mutation
+   *  （frontend-delivery/references/request.md「Mutations」）；家族既有工具是历史形态，
+   *  不随本单迁移。失败提示单源 = HTTP 层默认 toast，页面只落占位卡失败态，不再二次提示。 */
+  const createVideoMattingMutation = useMutation({
+    mutationFn: (vars: { projectId: string; payload: CreateVideoMattingPayload }) =>
+      createVideoMatting(vars.projectId, vars.payload),
+  });
   const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
@@ -6228,7 +6236,7 @@ export default function CanvasPage() {
         stopJobPolling(nodeId, jobTimersRef.current);
         patchMediaNode(nodeId, {
           genStatus: 'failed',
-          // 失败文案走智能抠像家族映射（1049 兜底「智能抠像失败，请重试」）
+          // 失败文案走智能抠像家族映射（1050 兜底「智能抠像失败，请重试」）
           errorText: smartMattingErrorText(detail.error),
         });
         return 'terminal';
@@ -7589,7 +7597,11 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoMatting(currentId, { ...smartMattingIdentity.lastInput, client_token: newIdempotencyKey() })
+      createVideoMattingMutation
+        .mutateAsync({
+          projectId: currentId,
+          payload: { ...smartMattingIdentity.lastInput, client_token: newIdempotencyKey() },
+        })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -9329,9 +9341,9 @@ export default function CanvasPage() {
     setMediaNodes(next);
     addCanvasEdge(sourceNodeId, placeholderId, undefined, { origin: SMART_MATTING_EDGE_ORIGIN });
     try {
-      const created = await createVideoMatting(currentId, {
-        ...lastInput,
-        client_token: newIdempotencyKey(),
+      const created = await createVideoMattingMutation.mutateAsync({
+        projectId: currentId,
+        payload: { ...lastInput, client_token: newIdempotencyKey() },
       });
       // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startSceneSplitJob）
       const activeAtCreate = newNodeId('pending-generation');
@@ -9343,12 +9355,12 @@ export default function CanvasPage() {
       await flushCanvasSave(currentId).catch(() => {});
       return true;
     } catch (e: unknown) {
-      // 创建失败：占位卡转失败态（卡上重试原参数重发，client_token 重试时另生成）
+      // 创建失败：占位卡转失败态（卡上重试原参数重发，client_token 重试时另生成）。
+      // 提示单源 = HTTP 层默认 toast——页面不再二次提示（审查修复 S1，原为全局+画布双提示）
       patchMediaNode(placeholderId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '智能抠像任务创建失败，请重试',
       });
-      showToast('error', isApiError(e) ? e.message : '智能抠像任务创建失败，请重试');
       return false;
     }
   };
@@ -12131,7 +12143,7 @@ export default function CanvasPage() {
 
       {/* Toast 提示 */}
       {toast && (
-        <div style={{
+        <div data-testid="canvas-toast" style={{
           position: 'fixed',
           top: '24px',
           left: '50%',

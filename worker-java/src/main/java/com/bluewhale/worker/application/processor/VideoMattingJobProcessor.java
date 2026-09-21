@@ -37,16 +37,19 @@ import java.util.Set;
  *       matte-greenscreen-video，路径与模型名走契约常量；出站 model / video_url / format /
  *       background_color〔仅 MP4 显式携带——两端点官方默认底色不同，本仓冻结 white 防歧义〕，
  *       不发 client_token / callback_* / queue_id / media_output_destination——家族轮询口径 +
- *       worker 转存自家 TOS，ADR-0112），返 task_id）→ markVideoSubmitted（存
+ *       worker 转存自家 TOS，ADR-0112），返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务（两工具共用 tasks 查询）→ 瞬时错误
- *       rescheduleVideoPoll 续排；processing → 续排（超限 1049）；failed → 分类终态；
+ *       rescheduleProviderPoll 续排（**同样受轮询上限约束**，超限归 1049——上游持续故障
+ *       不得无限续排）；processing → 续排（超限 1049）；failed → 分类终态；
  *       completed → **转存前心跳续租（防单产物大文件下载+上传超 420s 租约）→ 立即下载
  *       转存自家 TOS（火山 video_url 仅 24h 有效）** → 建 Asset（type=video /
  *       source='generated'）→ 契约 result 三键回传 → 终态 succeeded</li>
  * </ol>
- * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
- * TOS 公开读 → md5）；结果 URL 24h 失效故**强依赖 TOS，不降级直存**（去字幕家族口径）。
+ * 下载与转存复用 {@link TosVideoMediaRelay}（同套校验：fetch → video/ mime 校验 → TOS
+ * 公开读 → md5），但走**流式** {@code persistStreaming} 并带本工具上限（审查修复 P2：
+ * 家族字节数组路径 200MB 上限与堆绑死，本工具 10 分钟档成品可超）；结果 URL 24h 失效故
+ * **强依赖 TOS，不降级直存**（去字幕家族口径）。
  * 转存失败 = 整体失败（归并 1049）：无 Asset 行落库、不留半成品资产悬挂，已上传的 TOS
  * 孤儿对象与家族先例同口径（无 Asset 引用即无悬挂）。
  * <p>
@@ -186,7 +189,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
     // ========== submit 相 ==========
 
     /**
-     * 提交相：解析冻结 input + 源视频 → 网关按模式分流提交 → markVideoSubmitted → 续排轮询。
+     * 提交相：解析冻结 input + 源视频 → 网关按模式分流提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoMattingJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -248,9 +251,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
         log.info("[video_matting] 上游已提交 jobId={} providerTaskId={} mode={} format={} backgroundColor={}",
                 claim.id(), taskId, mode, format, "MP4".equals(format) ? backgroundColor : null);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s；
         //    SQL 无 type 过滤，video_matting 直接复用）
-        boolean updated = stateMachine.markVideoSubmitted(
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), VIDEO_MATTING_POLL_INTERVAL_MS);
@@ -269,9 +272,19 @@ public class VideoMattingJobProcessor implements JobProcessor {
             observation = matteVideoClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoMattingError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（审查修复 P1）：上游持续故障（超时 / 429 / 5xx）
+                // 时每次瞬时错误都走续排，若此处不判上限，poll_count 涨到 720 也进不了失败
+                // 终态——卡片永远停在生成中。与 processing 分支同一判定、同一兜底码。
+                if (claim.pollCount() >= MAX_VIDEO_MATTING_POLLS) {
+                    log.warn("[video_matting] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failClaimed(claim, VideoMattingContract.ERROR_VIDEO_MATTING_FAILED,
+                            "智能抠像轮询超时（超过 " + MAX_VIDEO_MATTING_POLLS + " 次）");
+                    return;
+                }
                 log.warn("[video_matting] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), VIDEO_MATTING_POLL_INTERVAL_MS);
@@ -288,7 +301,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
                         "智能抠像轮询超时（超过 " + MAX_VIDEO_MATTING_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), VIDEO_MATTING_POLL_INTERVAL_MS);
@@ -375,7 +388,11 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         TosVideoMediaRelay.StoredVideo stored;
         try {
-            stored = mediaRelay.persist(observation.videoUrl(), claim.user_id());
+            // 流式 + 本工具上限（审查修复 P2）：家族字节数组路径的 200MB 上限与堆绑死，而本工具
+            // 源素材上限就是 200MB、成品为 10 分钟档重编码（WEBM 带 alpha 可更大）——走
+            // persistStreaming（下载落临时文件、上传流式读），上限按契约 MAX_RESULT_BYTES
+            stored = mediaRelay.persistStreaming(observation.videoUrl(), claim.user_id(),
+                    VideoMattingContract.MAX_RESULT_BYTES);
         } catch (Exception e) {
             // 下载/转存失败 → 整体失败（契约口径）：上抛由 handle 归并兜底码；无 Asset 行
             // 落库，不留半成品资产悬挂（TOS 孤儿对象与家族先例同口径）

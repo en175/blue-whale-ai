@@ -144,6 +144,22 @@ public final class VideoMattingContract {
     //            时长门槛 10 分钟已定值于 TS 契约 VIDEO_MATTING_MAX_DURATION_MS（IKHK98 服务端
     //            复核同源），轮询窗口上限 720 次由执行票 IKHK99 定值 ==========
 
+    /**
+     * 成品转存上限 1 GiB（IKHJRC 审查修复 P2）。
+     * <p>
+     * 为什么不能吃家族的 200MB 常量（{@code TosVideoMediaRelay.MAX_VIDEO_BYTES}）：那是**结果
+     * 整段进堆**的字节数组路径上限，与堆绑死；本工具成品是 10 分钟档重编码视频（WEBM 透明还能
+     * 因 alpha 通道大于源），而创建入口的源素材上限本身就是 200MB（{@code MAX_BYTES.video}，
+     * 上传口与自家生成产物同值）——成品超过同值的概率不低，撞上即本地转存失败、原参数重试
+     * 也救不回来，是能力缺口而非产品限制。
+     * <p>
+     * 取值口径：输入上限 200MB ⇒ 10 分钟档源码率 ≤2.7Mbps，成品按主流编码 1080p ≤8Mbps 估
+     * ≈600MB，1 GiB 给 ≈1.7 倍余量；同时该值只作转存判据（**不是创建门槛**，前端与创建入口
+     * 均不做大小预检——协议常量不因此改变），超限归 1049 兜底失败、错误信息带 MB 值。
+     * 消费方 = {@code TosVideoMediaRelay.persistStreaming}（流式，与堆解绑）。
+     */
+    public static final long MAX_RESULT_BYTES = 1024L * 1024 * 1024;
+
     // ========== 错误码（数值 1049 见 error-codes.ts ERROR_VIDEO_MATTING_FAILED；
     //            1048 已由音频截取占用） ==========
 

@@ -1,5 +1,9 @@
 package com.bluewhale.worker.infrastructure.storage;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -30,6 +34,26 @@ final class ContentDigest {
             // JLS 要求所有 JVM 提供 MD5，正常环境走不到这里；真走到了说明运行环境被改坏，
             // 那种情况下宁可让上传显式失败，也不要静默写入一个空的 md5。
             throw new IllegalStateException("运行环境缺少 MD5 实现", e);
+        }
+    }
+
+    /**
+     * 落盘内容的 MD5（IKHJRC 审查修复 P2，流式转存用）：与 {@link #md5Hex(byte[])} 同一算法、
+     * 同一输出，只是分块读文件算——大结果转存不整段进堆，hash 也不必进堆。
+     */
+    static String md5Hex(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("运行环境缺少 MD5 实现", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("读取转存临时文件失败: " + e.getMessage(), e);
         }
     }
 }

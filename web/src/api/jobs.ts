@@ -628,7 +628,9 @@ export interface VideoMattingCreatedData {
 /** 创建视频智能抠像任务（IKHK9N）；免费口径同 image_enhance / media_extract / 场景切分
  *  ——不带幂等头（幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡
  *  由前端在发送前本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id
- *  轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结 input 原参数重试）。 */
+ *  轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结 input 原参数重试）。
+ *  错误面单源（审查修复 S1）：**不传 silent**——失败由 HTTP 层默认 toast 提示一次，调用方
+ *  （画布页）只落占位卡失败态，不得再 showToast 二次提示（request.md「Do not toast again」）。 */
 export function createVideoMatting(
   projectId: string,
   payload: CreateVideoMattingPayload,

@@ -400,6 +400,55 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1049 轮询超时，不再续排（审查修复 P1）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoMattingError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 智能抠像任务查询超时"));
+
+        processor.handle("100");
+
+        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1049 轮询超时，不再续排（审查修复 P1）")
+    void pollTransientServerErrorAtLimit_fails() {
+        stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
+        VideoMattingError rateLimited = new VideoMattingError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 智能抠像任务查询失败: HTTP 429");
+        rateLimited.initCause(new NewApiVideoClient.HttpStatusException(429));
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(rateLimited);
+
+        processor.handle("100");
+
+        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误（provider_timeout）+ 未到上限（719）→ 仍续排，不落终态")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS - 1);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoMattingError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 智能抠像任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1049 兜底")
     void pollHardError_fails() {
         stubPollClaim(webmInput("portrait"), 3);
@@ -452,7 +501,8 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm?auth_key=...", "1080p", 65.5, null, null));
-        when(mediaRelay.persist("https://volc/out.webm?auth_key=...", "9"))
+        when(mediaRelay.persistStreaming("https://volc/out.webm?auth_key=...", "9",
+                VideoMattingContract.MAX_RESULT_BYTES))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 123_456L, "0123456789abcdef0123456789abcdef"));
@@ -469,7 +519,8 @@ class VideoMattingJobProcessorTest {
         assertThat(renewCaptor.getValue().fencingToken()).isEqualTo(5L);
         assertThat(renewCaptor.getValue().progress()).isEqualTo(0);
         // URL 24h 有效：completed 后立即转存（同步链路，无续排）
-        verify(mediaRelay).persist("https://volc/out.webm?auth_key=...", "9");
+        verify(mediaRelay).persistStreaming("https://volc/out.webm?auth_key=...", "9",
+                VideoMattingContract.MAX_RESULT_BYTES);
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
         verify(stateMachine).publishVideoMattingResult(captor.capture());
@@ -496,7 +547,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.mp4", "1080p", null, null, null));
-        when(mediaRelay.persist(anyString(), eq("9")))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
@@ -524,7 +575,7 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -541,7 +592,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
     }
 
     @Test
@@ -555,7 +606,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
     }
 
     @Test
@@ -585,7 +636,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm", "1080p", 65.5, null, null));
-        when(mediaRelay.persist(anyString(), eq("9")))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 1L, null));
@@ -604,7 +655,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm", "1080p", 65.5, null, null));
-        when(mediaRelay.persist(anyString(), eq("9")))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
                 .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
 
         processor.handle("100");

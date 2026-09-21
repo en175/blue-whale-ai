@@ -12,10 +12,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
@@ -28,7 +33,9 @@ import java.util.UUID;
  * key 格式：{@code generated/{userId}/video/{uuid去横线}.{ext}}（:96）。
  * 扩展名映射（:150-154 videoExtension）：webm → webm, quicktime → mov, 其余 → mp4。
  * <p>
- * 上限：200MB（:76 maxVideoBytes）。
+ * 上限：{@link #persist} 200MB（:76 maxVideoBytes，结果整段进堆故上限与堆绑）；大结果走
+ * {@link #persistStreaming}——上限由调用方按工具口径给，下载落临时文件、上传从文件流式读，
+ * 与堆解绑（IKHJRC 审查修复 P2：智能抠像 10 分钟档成品可超 200MB）。
  * <p>
  * GENERATION_MEDIA_RELAY_MODE env：tos（默认）/ passthrough（:21-29）。
  * passthrough 返回源 URL 不变（:125-136），生产环境禁止（:25-28）。
@@ -42,6 +49,20 @@ public class TosVideoMediaRelay {
 
     /** 视频转存大小上限（tos-video-media-relay.ts:76，200MB）。 */
     static final long MAX_VIDEO_BYTES = 200L * 1024 * 1024;
+
+    /**
+     * 流式转存的响应头等待超时 60s（同字节数组路径值）。探针实证：{@code BodyHandlers.ofInputStream}
+     * 语义下 {@code HttpRequest.timeout} 只覆盖到响应头（1s 超时 + 4s 慢 body 实测正常读完），
+     * 故此值不约束大文件下载本身，body 段由 {@link #STREAM_COPY_DEADLINE} 兜底。
+     */
+    private static final Duration STREAM_HEADER_TIMEOUT = Duration.ofSeconds(60);
+
+    /**
+     * 流式下载整段兜底时限 10 分钟：流式 body 不受 request timeout 约束，对端「连上但不吐数据」
+     * 会把 worker 线程挂死（字节数组路径无此缺口——整段读取受 60s 全交换超时兜）；同时给
+     * 1GiB 级结果留出 ≥1.7MB/s 的可用带宽。
+     */
+    private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
 
     private final TOSV2 client;
     private final String bucket;
@@ -159,6 +180,123 @@ public class TosVideoMediaRelay {
         String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
         return new StoredVideo(publicUrl, storageKey, mime, (long) bytes.length,
                 ContentDigest.md5Hex(bytes));
+    }
+
+    /**
+     * 流式转存（IKHJRC 审查修复 P2）：与 {@link #persist} 同流程（下载 → video/ mime 校验 →
+     * TOS PUT → public-read），差异只在**内容不整段进堆**——下载分块落临时文件、边落边判
+     * {@code maxBytes}、边算 md5，上传再从文件流式读。故上限由调用方按工具口径给（字节数组
+     * 路径的 200MB 是与堆绑死的常量），成品超过上限即失败（终态失败由调用方归并，重试不解决）。
+     * <p>
+     * 临时文件落在系统临时目录，正常与异常路径都删（失败留垃圾会把容器盘吃满）。同一
+     * {@code maxBytes} 语义与字节数组路径一致：等于上限通过、大于上限拒绝。
+     *
+     * @param sourceUrl 上游生成的视频 URL
+     * @param userId    归属用户（key 路径用）
+     * @param maxBytes  成品大小上限（调用方按本工具输出规模给；超出即拒）
+     * @return 转存结果
+     * @throws RuntimeException 下载 / 校验 / 上传失败（同 {@link #persist} 的错误类型）
+     */
+    public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes) {
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("video-relay-", ".part");
+
+            // 1. 下载到临时文件（响应头等待走 60s，body 段走兜底时限 + 上限边读边判）
+            long size;
+            String mime;
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(sourceUrl))
+                    .timeout(STREAM_HEADER_TIMEOUT)
+                    .GET()
+                    .build();
+            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            String contentType = resp.headers().firstValue("content-type").orElse(null);
+            mime = contentType != null ? contentType.split(";", 2)[0].trim() : "video/mp4";
+            try (InputStream body = resp.body()) {
+                if (resp.statusCode() >= 400) {
+                    String errBody = new String(body.readNBytes(4096), java.nio.charset.StandardCharsets.UTF_8);
+                    String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                            "生成视频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
+                }
+                // 2. 校验 mime 在校验体之前（不是视频就不必落盘）
+                if (!mime.startsWith("video/")) {
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成结果不是视频");
+                }
+                size = copyToFile(body, tempFile, maxBytes, sourceUrl);
+            }
+            if (size == 0) {
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
+            }
+            String md5 = ContentDigest.md5Hex(tempFile);
+
+            // 3. 上传（与字节数组路径同 key 格式、同 ACL）
+            String extension = videoExtension(mime);
+            String uuid = UUID.randomUUID().toString().replace("-", "");
+            String storageKey = "generated/" + userId + "/video/" + uuid + "." + extension;
+            try (InputStream fileIn = Files.newInputStream(tempFile)) {
+                ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                        .setHeaders(Map.of("Content-Type", mime));
+                PutObjectInput putInput = new PutObjectInput()
+                        .setBucket(bucket)
+                        .setKey(storageKey)
+                        .setContent(fileIn)
+                        .setContentLength(size)
+                        .setOptions(options);
+                client.putObject(putInput);
+            } catch (Exception e) {
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频转存失败: " + e.getMessage(), e);
+            }
+
+            PutObjectACLInput aclInput = new PutObjectACLInput()
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setAcl(ACLType.ACL_PUBLIC_READ);
+            client.putObjectAcl(aclInput);
+
+            log.info("流式转存完成 storageKey={} size={} mime={}", storageKey, size, mime);
+            String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
+            return new StoredVideo(publicUrl, storageKey, mime, size, md5);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "生成视频下载失败: " + e.getMessage(), e);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.warn("转存临时文件清理失败 path={} err={}", tempFile, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** 分块落盘：边读边判上限与兜底时限（上限语义同字节数组路径——等于上限通过）。 */
+    private long copyToFile(InputStream in, Path target, long maxBytes, String sourceUrl)
+            throws IOException {
+        long deadlineNanos = System.nanoTime() + STREAM_COPY_DEADLINE.toNanos();
+        long total = 0;
+        byte[] buffer = new byte[64 * 1024];
+        try (OutputStream out = Files.newOutputStream(target)) {
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBytes) {
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                            "生成视频超过转存上限（> " + (maxBytes / (1024 * 1024)) + "MB）: " + sourceUrl);
+                }
+                if (System.nanoTime() > deadlineNanos) {
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                            "生成视频下载超时（超过 " + STREAM_COPY_DEADLINE.toMinutes() + " 分钟）");
+                }
+                out.write(buffer, 0, read);
+            }
+        }
+        return total;
     }
 
     /**

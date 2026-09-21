@@ -584,8 +584,11 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(sendBar()).toBeNull();
     const placeholder = placeholderNode()!;
     expect(placeholder.data.genStatus).toBe('failed');
-    // 非 ApiError 的网络异常走家族兜底文案（口径同场景切分创建失败 toast/卡态）
+    // 非 ApiError 的网络异常走家族兜底文案（卡态承载可读原因，不再 toast 二次提示）
     expect(placeholder.data.errorText).toBe('智能抠像任务创建失败，请重试');
+    // 提示单源（审查修复 S1）：一次请求失败只有一个提示入口——全局提示归 HTTP 层
+    // （jobs.test 锁「恰好一次」），画布不再叠一层 toast；卡态不是 toast，保留供原参数重试
+    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
   });
 });
 
