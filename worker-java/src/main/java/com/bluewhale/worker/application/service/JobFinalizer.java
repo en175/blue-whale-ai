@@ -808,7 +808,7 @@ public class JobFinalizer {
      * {@code if (job.project_id != null)}；与通用 createAsset 的恒发不同）。
      * <p>
      * 日志 payload = asset_ids + extraLogPayload（video_enhance 的 resolution/fps 先例，
-     * LinkedHashMap 保插入序；null = 无附加键）。
+     * 键序由调用方构造 extraLogPayload 时决定；null = 无附加键）。
      */
     private boolean publishSingleAssetResult(SingleAssetPublish p) {
         Long jobIdLong = Long.parseLong(p.jobId());

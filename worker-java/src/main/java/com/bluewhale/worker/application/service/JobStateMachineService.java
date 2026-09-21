@@ -363,7 +363,7 @@ public class JobStateMachineService {
     }
 
     /**
-     * 标记视频已提交（video-ops.ts:14-30）：provider_task_id + 释放租约 + next+5s。
+     * 标记生成任务已提交（generation-worker-video-ops.ts 对应实现）：provider_task_id + 释放租约 + next+5s。
      */
     public boolean markProviderSubmitted(String jobId, String workerId,
                                       long fencingToken, String providerTaskId) {
@@ -378,7 +378,7 @@ public class JobStateMachineService {
     }
 
     /**
-     * 重排视频轮询（video-ops.ts:32-57）：poll_count+1 + 钳制 + 释放租约 + next+5s。
+     * 重排生成任务轮询（generation-worker-video-ops.ts 对应实现）：poll_count+1 + 钳制 + 释放租约 + next+5s。
      */
     public boolean rescheduleProviderPoll(String jobId, String workerId,
                                        long fencingToken, int progress) {
