@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './http';
 import {
   createAudioTrim,
+  createFrameInterpolation,
   createMediaExtraction,
   createVocalSplit,
   createVideoEnhancement,
@@ -65,6 +66,39 @@ describe('createVideoEnhancement', () => {
       source_asset_id: '5',
       target_node_id: 'media-draft-1',
       resolution: '2k',
+    });
+  });
+});
+
+describe('createFrameInterpolation', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目视频插帧端点提交冻结三键（IKHLKX / IKHLK3 端点，契约键名恒等、fps 整型直传、无幂等头）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '902', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createFrameInterpolation('project/1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 120,
+      }),
+    ).resolves.toEqual({ job_id: '902', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/video-frame-interpolations');
+    expect(init.method).toBe('POST');
+    // 免费口径（ADR-0113 同 HD 高清）：无幂等头，body 也不带 client_token
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '3985',
+      target_node_id: 'media-draft-7',
+      fps: 120,
     });
   });
 });

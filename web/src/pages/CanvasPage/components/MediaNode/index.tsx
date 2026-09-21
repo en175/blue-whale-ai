@@ -419,6 +419,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isMediaExtraction = isMediaExtractNodeId(id);
   /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
   const isAudioTrimCard = isAudioTrimNodeId(id);
+  /** 插帧草稿卡（IKHLKX）：插帧卡与 HD 卡共用 media-draft- 前缀，无法按 id 分流，故按身份判定
+   *  ——失败重试须带冻结源素材（frameInterpolation.sourceAssetId），重试据此原样重发创建接口；
+   *  身份残缺的失败卡不渲染重试钮（同 media_extract / audio_trim 身份守卫口径）。 */
+  const frameInterpolationIdentity = data.frameInterpolation as { sourceAssetId?: string } | undefined;
+  const frameInterpolationRetryable =
+    frameInterpolationIdentity == null
+    || (typeof frameInterpolationIdentity.sourceAssetId === 'string' && frameInterpolationIdentity.sourceAssetId !== '');
   const hideCancel = isMediaExtraction
     || isAudioTrimCard
     || isCanvasToolGeneration(data as Record<string, unknown>);
@@ -502,10 +509,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (isGenDone) {
       /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
           才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
-          重试——IKHB7A lastInput 原参数重发；存量无身份失败卡不渲染） */
+          重试——IKHB7A lastInput 原参数重发；插帧卡带冻结源素材才可重试——IKHLKX 原 fps
+          重发创建接口；存量无身份失败卡不渲染） */
       const canRetry = data.genStatus === 'failed'
         && (!isMediaExtraction || data.mediaExtract != null)
-        && (!isAudioTrimCard || data.audioTrim != null);
+        && (!isAudioTrimCard || data.audioTrim != null)
+        && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
@@ -787,7 +796,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
             {data.genStatus === 'failed'
               && (!isMediaExtraction || data.mediaExtract != null)
-              && (!isAudioTrimCard || data.audioTrim != null) && (
+              && (!isAudioTrimCard || data.audioTrim != null)
+              && frameInterpolationRetryable && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>

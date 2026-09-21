@@ -9,6 +9,7 @@ import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
+import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-interpolation';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
@@ -487,6 +488,34 @@ export function createVideoEnhancement(
 ): Promise<VideoEnhancementCreatedData> {
   return apiRequest<VideoEnhancementCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-enhancements`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-frame-interpolations 请求体（三键，键名与
+ *  backend/libs/contracts/video-frame-interpolation.ts 契约恒等；IKHLK3 创建入口 strict zod 复核：
+ *  source_asset_id 正整数字符串、target_node_id 非空、fps ∈ 30/60/120 **整型直传**）。 */
+export type CreateFrameInterpolationPayload = VideoFrameInterpolationInput;
+
+/** 创建视频插帧任务返回（IKHLK3）；同 HD 高清：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface FrameInterpolationCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频插帧任务（IKHLK3 端点；免费口径同 HD 高清 / 去字幕——不带幂等头、
+ *  无 body 内 client_token、无积分预估、不走余额拦截门）。
+ *  插帧草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+export function createFrameInterpolation(
+  projectId: string,
+  payload: CreateFrameInterpolationPayload,
+): Promise<FrameInterpolationCreatedData> {
+  return apiRequest<FrameInterpolationCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

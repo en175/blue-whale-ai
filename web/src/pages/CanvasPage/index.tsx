@@ -132,8 +132,10 @@ import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 import {
   FRAME_INTERPOLATION_DEFAULT_FPS,
   FRAME_INTERPOLATION_EDGE_ORIGIN,
+  buildFrameInterpolationInput,
   frameInterpolationDisplayName,
   frameInterpolationDraftPosition,
+  frameInterpolationErrorText,
   frameInterpolationGateReason,
   restoreFrameInterpolationFps,
   type FrameInterpolationFps,
@@ -295,6 +297,7 @@ import {
   createImageOutpaint,
   createVideoSubtitleErase,
   createVideoEnhancement,
+  createFrameInterpolation,
   createMediaExtraction,
   createAudioTrim,
   createVocalSplit,
@@ -600,6 +603,9 @@ export default function CanvasPage() {
   const [frameInterpolationSeed, setFrameInterpolationSeed] = useState<{ ts: number; initialFps: FrameInterpolationFps } | null>(null);
   /** 插帧面板隐藏豁免（口径同 enhancePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const frameInterpolationPanelHiddenRef = useRef(false);
+  /** 插帧面板发送中（IKHLKX）：创建往返期间面板参数只读、发送钮置灰防重（口径同
+   *  videoEnhanceSubmitting）；创建失败复位（面板与配置保留可重发） */
+  const [frameInterpolationSubmitting, setFrameInterpolationSubmitting] = useState(false);
   /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
    *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
    *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
@@ -6120,6 +6126,9 @@ export default function CanvasPage() {
       stopJobPolling(nodeId, jobTimersRef.current);
       const originalType = node.data?.mediaType;
       const assetType = detail.asset?.type;
+      /** 插帧草稿卡（IKHLKX）：本品成功即身份结束——清除 frameInterpolation 身份（选中进入
+       *  普通视频面板，与源卡/成品 HD 卡一致；身份只在失败态承担「原 fps 冻结重试」职责）。 */
+      const wasFrameInterpolation = ((node.data ?? {}) as Record<string, unknown>).frameInterpolation != null;
       patchMediaNode(nodeId, {
         genStatus: undefined,
         progress: 100,
@@ -6137,6 +6146,7 @@ export default function CanvasPage() {
         // 原位草稿成功（IKDMQQ）：草稿身份结束转为普通成品卡；
         // draftModelId/draftSize/draftRatio 保留为该卡的生成参数记录（再次编辑复制切片复用）
         draft: undefined,
+        ...(wasFrameInterpolation ? { frameInterpolation: undefined } : {}),
       });
       // IKFM3S §4：成功任务把快照冻结的文本输入签名回写目标（刷新持久、提示按签名派生清除）；
       // 乱序保护（nextUsedInputState）：仅更新的 jobId 覆盖——旧任务成功不清除更晚编辑的提示。
@@ -6158,10 +6168,14 @@ export default function CanvasPage() {
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         // HD 卡失败文案走家族映射（IKH3VH）：msg 为空时按 1045 兜底「视频画质增强失败，请重试」
-        //（含 SDR/超限供应商拒绝场景）；其余卡维持 msg 透传
+        //（含 SDR/超限供应商拒绝场景）；插帧卡同款家族映射（IKHLKX）：msg 为空时按 1049 /
+        // video_frame_interpolation_failed 兜底「视频插帧失败，请重试」、入队失败「任务入队失败，请重试」；
+        // 其余卡维持 msg 透传
         errorText: ((node.data ?? {}) as Record<string, unknown>).videoEnhance
           ? videoEnhanceErrorText(detail.error)
-          : readJobFailText(detail.error),
+          : ((node.data ?? {}) as Record<string, unknown>).frameInterpolation
+            ? frameInterpolationErrorText(detail.error)
+            : readJobFailText(detail.error),
       });
       return 'terminal';
     }
@@ -6898,6 +6912,10 @@ export default function CanvasPage() {
         }
         if (detail?.status === 'cancelled') {
           stopJobPolling(nodeId, jobTimersRef.current);
+          // 取消已获权威终态（IKHLKX）：注销本任务的活跃登记——用户点「取消生成」前已发出、
+          // 取消确认后才回来的那次迟到轮询响应（即使载荷是 succeeded）不得再回填成品
+          //（终态权威；重发新任务时 startXxxJob 会重新登记接管，不受影响）
+          activeJobByNodeRef.current.delete(nodeId);
           settleCancelledNode(nodeId);
           return;
         }
@@ -7203,6 +7221,18 @@ export default function CanvasPage() {
       // 创建接口（源素材与分辨率档随 lastParams 冻结，原参数重试）。
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       void startVideoEnhanceJob(nodeId, restoreVideoEnhanceResolution(videoEnhanceIdentity.lastParams));
+      return;
+    }
+    const frameInterpolationIdentity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as
+      | FrameInterpolationIdentity
+      | undefined;
+    if (frameInterpolationIdentity != null) {
+      // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 冻结输入原样重发创建接口
+      //——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自提交时随卡持久化的
+      //  lastParams（面板后来改动未落卡的状态不参与），每次重试都是全新创建请求（免费口径无
+      //  幂等头 / 无 client_token，不存在复用旧 token 重放旧任务的问题）。
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      void startFrameInterpolationJob(nodeId, restoreFrameInterpolationFps(frameInterpolationIdentity.lastParams));
       return;
     }
     const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
@@ -8032,11 +8062,74 @@ export default function CanvasPage() {
     });
   };
 
-  /** 插帧面板发送（IKHLKX 接线点）：本票不接任务创建——空实现不写任何卡态（genStatus/jobId
-   *  不动、不建任务、不关面板、不制造「任务已受理」假象），返回 false 面板保留。
-   *  后续票在此调 createFrameInterpolation（contract buildFrameInterpolationInput 三键）并把
-   *  结果接轮询与终态回填。 */
-  const handleFrameInterpolationDialogSend = (_fps: FrameInterpolationFps): boolean => false;
+  /** 插帧任务发送核心（IKHLKX，逐点照映 HD 的 startVideoEnhanceJob）：契约三键
+   *  （source_asset_id 冻结自插帧身份、target_node_id=插帧卡节点 id、fps 面板所选档）经
+   *  buildFrameInterpolationInput 契约 zod 校验后 POST video-frame-interpolations。
+   *  创建成功：插帧卡原地转生成中（lastParams 随提交写卡 = 失败重试的冻结输入）+ jobId 登记
+   *  + 启动轮询（终态回填见 applyJobTerminal：成功转普通视频卡并清插帧身份），返回 true（面板据此关闭）。
+   *  创建失败（网络/契约拒/入队前异常）：插帧卡保持草稿原状（不转生成中、不写 jobId），toast
+   *  可读原因，返回 false（面板与配置保留可调档重发——父单第 28 条口径）。免费口径：无幂等头
+   *  /无 body 内 client_token、无积分预估、不走余额拦截门。 */
+  const startFrameInterpolationJob = async (
+    nodeId: string,
+    fps: FrameInterpolationFps,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起插帧');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as FrameInterpolationIdentity | undefined;
+    const sourceAssetId = identity?.sourceAssetId;
+    if (!sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起插帧');
+      return false;
+    }
+    const input = buildFrameInterpolationInput(String(sourceAssetId), nodeId, fps);
+    if (!input) {
+      showToast('warn', '插帧参数不合法，请调整后重试');
+      return false;
+    }
+    try {
+      const created = await createFrameInterpolation(currentId, input);
+      // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      patchMediaNode(nodeId, {
+        genStatus: 'generating',
+        progress: 0,
+        errorText: undefined,
+        jobId: created.job_id,
+        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
+        frameInterpolation: { ...identity, lastParams: { fps } },
+      });
+      pollJob(nodeId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '插帧任务创建失败，请重试');
+      return false;
+    }
+  };
+
+  /** 插帧面板发送（IKHLKX，逐点照映 handleVideoEnhanceDialogSend）：面板只交付目标帧率档；
+   *  创建成功才关面板（置隐藏标记避免紧随的选中事件回弹重开——家族已知缺陷模式），创建失败
+   *  面板保留、配置保留可重发（父单第 28 条：覆盖「先关闭面板」的歧义）；创建往返期间
+   *  submitting 置位使参数只读、发送钮置灰防重。 */
+  const handleFrameInterpolationDialogSend = (fps: FrameInterpolationFps): boolean => {
+    const nodeId = frameInterpolationDraftId;
+    if (!nodeId || frameInterpolationSubmitting) return false;
+    setFrameInterpolationSubmitting(true);
+    void startFrameInterpolationJob(nodeId, fps)
+      .then((issued) => {
+        if (issued) {
+          frameInterpolationPanelHiddenRef.current = true;
+          setShowFrameInterpolationDialog(false);
+        }
+      })
+      .finally(() => setFrameInterpolationSubmitting(false));
+    return true;
+  };
 
   /** 视频 HD 高清任务发送核心（IKH3VH，先例 startAudioVideoSplitJob 的 await 口径 + 高清放大
    *  的原地承接）：契约三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、
@@ -11114,6 +11207,7 @@ export default function CanvasPage() {
               ((mediaNodes.find((n) => n.id === frameInterpolationDraftId)?.data ?? {}) as Record<string, unknown>)
                 ?.genStatus === 'generating'
             }
+            submitting={frameInterpolationSubmitting}
             followAnchor={frameInterpolationDraftId ? frameInterpolationFollowAnchor : null}
           />
         )}

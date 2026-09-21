@@ -3,7 +3,8 @@
    与面板跟随弹出、切档即时改名与 lastParams 持久化、关闭后再点草稿卡重开档位恢复、
    刷新（水合）后档位与来源边恢复、面板打开全局工具条门（soloToolbarHidden + 钉屏幕容器 show 门）、
    门槛兜底（未关联资产不建卡）、跟随锚定接通、自定义卡名保护（hasCustomName 口径）。
-   本票不接任务创建：切档/发送均无创建 API 调用（发送接线归 IKHLKX）。
+   发送闭环（创建请求三键 / 提交期只读 / 关面板时序 / 终态回填）归 IKHLKX：其页面级用例见
+   frameInterpolationSend.test.tsx；本文件只保留「切档不建任务」与「创建失败不制造受理假象」两条。
    渲染沿用 testing/canvasPageTestHarness（页面级共享夹具）。 */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ import type { Node } from '@xyflow/react';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
 import { FRAME_INTERPOLATION_EDGE_ORIGIN, frameInterpolationDisplayName } from './frameInterpolation';
 import {
+  apiMocks,
   canvasDocMock,
   enableReactActEnvironment,
   flowProps,
@@ -252,12 +254,14 @@ describe('IKHLKR 切档即时改名与持久化', () => {
     expect(identityOf(mediaNode(draftId))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
   });
 
-  it('发送钮点击（IKHLKX 接线前空实现）：不改卡态、不关面板、无受理假象', async () => {
+  it('发送钮点击（IKHLKX 已接线）：创建失败时面板与草稿原状保留——不制造受理假象', async () => {
     seedDoc();
+    apiMocks.createFrameInterpolation.mockRejectedValueOnce(new Error('network down'));
     await renderPage();
     await frameInterpolation();
     const draftId = draftNode()!.id;
     await click(panelSend());
+    expect(apiMocks.createFrameInterpolation).toHaveBeenCalledTimes(1);
     expect(panelSend()).toBeTruthy();
     expect((mediaNode(draftId).data as Record<string, unknown>).genStatus).toBe('draft');
     expect((mediaNode(draftId).data as Record<string, unknown>).jobId).toBeUndefined();

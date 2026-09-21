@@ -270,6 +270,56 @@ describe('MediaNode failed overlay', () => {
   });
 });
 
+describe('MediaNode 插帧草稿卡（IKHLKX）', () => {
+  it('生成中：仅转圈与「取消生成」，不展示百分比/进度条（插帧不属钱已扣画布工具卡，可取消）', async () => {
+    const onCancelJob = vi.fn();
+    await renderNode('video', {
+      id: 'media-draft-7',
+      genStatus: 'generating',
+      progress: 42,
+      selected: false,
+      data: { src: '', draft: true, onCancelJob, frameInterpolation: { sourceAssetId: '5', lastParams: { fps: 60 } } },
+    });
+    expect(labels()).toEqual(['取消生成']);
+    expect(mountNode.querySelector('[role="progressbar"]')).toBeNull();
+    expect(mountNode.textContent).not.toContain('42');
+    expect(mountNode.textContent).not.toContain('预计');
+    await act(async () => {
+      [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.trim() === '取消生成')!.click();
+    });
+    expect(onCancelJob).toHaveBeenCalledWith('media-draft-7');
+  });
+
+  it('失败：带冻结源素材的插帧卡渲染重试钮并派发 onRetryJob（原 fps 重发）', async () => {
+    const onRetryJob = vi.fn();
+    await renderNode('video', {
+      id: 'media-draft-7',
+      genStatus: 'failed',
+      errorText: '视频插帧失败，请重试',
+      selected: false,
+      data: { src: '', draft: true, onRetryJob, frameInterpolation: { sourceAssetId: '5', lastParams: { fps: 30 } } },
+    });
+    expect(mountNode.textContent).toContain('视频插帧失败，请重试');
+    expect(labels()).toEqual(['重试']);
+    await act(async () => {
+      [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.trim() === '重试')!.click();
+    });
+    expect(onRetryJob).toHaveBeenCalledWith('media-draft-7');
+  });
+
+  it('失败但身份残缺（无冻结源素材）：不渲染重试钮（同 media_extract / audio_trim 身份守卫口径）', async () => {
+    await renderNode('video', {
+      id: 'media-draft-7',
+      genStatus: 'failed',
+      errorText: '视频插帧失败，请重试',
+      selected: false,
+      data: { src: '', draft: true, frameInterpolation: { lastParams: { fps: 30 } } },
+    });
+    expect(mountNode.textContent).toContain('视频插帧失败，请重试');
+    expect(labels()).not.toContain('重试');
+  });
+});
+
 describe('MediaNode failed overlay with old media (IKDMQV)', () => {
   it('重新生成失败的成品卡保留旧素材，失败原因与重试收进底部角标', async () => {
     await renderNode('image', {

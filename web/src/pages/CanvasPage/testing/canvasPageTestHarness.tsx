@@ -41,7 +41,9 @@ vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null 
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 /** API 打桩：fetchProjects 默认单项目、fetchGenerationModels 默认空、fetchJobStatus 默认无实现——
- *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖 */
+ *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖。
+ *  cancelGenerationJob 默认成功返回（取消确认链 .then 需要 promise）；createFrameInterpolation
+ *  默认无实现（IKHLKX 插帧发送：需要的测试显式 mockResolvedValue）。 */
 export const apiMocks = {
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   createProject: vi.fn(),
@@ -56,6 +58,9 @@ export const apiMocks = {
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
+  cancelGenerationJob: vi.fn(async () => null),
+  retryGenerationJob: vi.fn(),
+  createFrameInterpolation: vi.fn(),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -94,10 +99,11 @@ vi.mock('@/api/canvas', () => ({
 }));
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: vi.fn(),
-  cancelGenerationJob: vi.fn(),
-  retryGenerationJob: vi.fn(),
+  cancelGenerationJob: apiMocks.cancelGenerationJob,
+  retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: vi.fn(),
+  createFrameInterpolation: apiMocks.createFrameInterpolation,
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createVocalSplit: vi.fn(),
