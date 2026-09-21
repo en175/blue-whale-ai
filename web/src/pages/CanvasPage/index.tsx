@@ -304,6 +304,7 @@ import { uploadAssetFile, probeMediaMeta } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
+import { fetchRemoteMedia } from './fetchRemoteMedia';
 import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
@@ -8604,14 +8605,10 @@ export default function CanvasPage() {
   };
 
   /** 拉取远程素材为 blob；失败则 null（组下载不再 window.open，避免只弹出第一个）。
-   *  开发模式下跨域素材走 Vite /__tos-fetch 代理，避免浏览器 CORS 拦截 fetch blob */
+   *  开发模式走 Vite /__tos-fetch；测试/生产直连 TOS 时绕开 <img> 无 CORS 缓存以免报跨域 */
   const fetchAssetBlob = async (src: string): Promise<Blob | null> => {
-    const fetchUrl =
-      import.meta.env.DEV && /^https?:\/\//.test(src) && !src.startsWith(window.location.origin)
-        ? `/__tos-fetch?url=${encodeURIComponent(src)}`
-        : src;
     try {
-      const res = await fetch(fetchUrl);
+      const res = await fetchRemoteMedia(src);
       if (!res.ok) return null;
       return await res.blob();
     } catch {
@@ -9838,7 +9835,7 @@ export default function CanvasPage() {
   /** 从 URL fetch 文件为 Blob → File（用于画布选取时没有原始 File 的场景） */
   const fetchUrlAsFile = async (url: string, name: string, _type: string): Promise<File | null> => {
     try {
-      const res = await fetch(url);
+      const res = await fetchRemoteMedia(url);
       if (!res.ok) return null;
       const blob = await res.blob();
       // 使用 blob 自带的 MIME 类型，而非硬编码
