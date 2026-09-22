@@ -100,9 +100,12 @@ public final class VideoMattingContract {
     /** 格式两值 WEBM（透明背景，默认）/ MP4（纯色背景）。官方另有 MOV（透明 ProRes 4444）
      *  但本仓不暴露——Chrome 无法预览（ADR-0112 否决项），面向 AE/PR 诉求出现后随时可加档。 */
     public static final List<String> SUPPORTED_FORMATS = List.of("WEBM", "MP4");
-
     /** 缺省格式 WEBM（产品口径「默认透明」= 官方 format 默认值；创建请求体未传时补本值后冻结）。 */
     public static final String DEFAULT_FORMAT = "WEBM";
+
+    /** MP4 纯色档（值域同 SUPPORTED_FORMATS）：背景色出站的唯一条件判断按本常量取，
+     *  客户端禁散落 "MP4" 字面量（契约单源口径）。 */
+    public static final String FORMAT_MP4 = "MP4";
 
     /** MP4 纯色背景色三值（官方 background_color 参数）。 */
     public static final List<String> SUPPORTED_BACKGROUND_COLORS = List.of("white", "black", "green");

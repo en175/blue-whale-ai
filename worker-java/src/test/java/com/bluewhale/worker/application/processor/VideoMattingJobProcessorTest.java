@@ -39,7 +39,7 @@ import static org.mockito.Mockito.*;
 /**
  * VideoMattingJobProcessor 单测（IKHK99，父规格 IKHJRC，契约 IKHK7F）。
  * <p>
- * 覆盖：异步两段式状态机（submit 按模式分流提交并存 task_id → markVideoSubmitted +
+ * 覆盖：异步两段式状态机（submit 按模式分流提交并存 task_id → markProviderSubmitted +
  * scheduleNext / poll processing 续排 / 轮询超限 / completed 转存前心跳续租 → 立即转存
  * 发布——契约 result 三键、源宽高近似、官方 duration 优先 / failed 归 1049 + 上游原因
  * 透传）、双模式出站形状（WEBM 不带 background_color、MP4 显式带）、input 业务键兜底
@@ -248,21 +248,21 @@ class VideoMattingJobProcessorTest {
     // ========== submit 相：双模式分流 + 状态机（端点/模型名/出站 JSON 映射在客户端测试钉） ==========
 
     @Test
-    @DisplayName("submit WEBM/portrait：client 收 null 背景色（出站不带）→ markVideoSubmitted + scheduleNext(5s)")
+    @DisplayName("submit WEBM/portrait：client 收 null 背景色（出站不带）→ markProviderSubmitted + scheduleNext(5s)")
     void submitWebmPortrait_transportsNullBackgroundColor() {
         stubSubmitClaim(webmInput("portrait"));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4",
                 "portrait", "WEBM", null))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 "portrait", "WEBM", null);
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -276,25 +276,25 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4",
                 "greenscreen", "MP4", "white"))
                 .thenReturn("amk-task-2");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 "greenscreen", "MP4", "white");
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-2");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-2");
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(webmInput("portrait"));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.submit(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -350,18 +350,18 @@ class VideoMattingJobProcessorTest {
     // ========== poll 相：状态机 ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll + scheduleNext(5s)")
+    @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)")
     void pollProcessing_reschedules() {
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("processing", null, null, null,
                         null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -378,7 +378,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -389,12 +389,12 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoMattingError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 智能抠像任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

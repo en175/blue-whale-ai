@@ -4,14 +4,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ERROR_ENQUEUE_FAILED, ok } from "@lib/contracts";
 
-vi.mock("@lib/shared/generation/video-queue.js", () => ({
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoMattingJob: vi.fn(),
 }));
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn() },
 }));
 
-const { enqueueVideoMattingJob } = await import("@lib/shared/generation/video-queue.js");
+const { enqueueVideoMattingJob } = await import("@lib/shared/generation/generation-queue.js");
 const { VideoMattingsController } = await import("./video-mattings.controller.js");
 
 function makeController(serviceOverrides: { create?: unknown; markFailed?: unknown } = {}) {
