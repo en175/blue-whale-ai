@@ -359,6 +359,42 @@ class TosVideoMediaRelayTest {
     }
 
     @Test
+    @DisplayName("上传期间外部中止（IKHSFD）：guarding 流 read 被拦截 → putObject 失败归并为 TransferAbortedException，不做 ACL")
+    @Timeout(30)
+    void persistStreaming_externalAbort_duringUpload_stopsUpload() throws Exception {
+        // 下载正常完成（4KiB 正常发完），中止发生在上传途中
+        byte[] payload = new byte[4096];
+        System.arraycopy(patternBlock(), 0, payload, 0, payload.length);
+        String url = serve("video/mp4", 200, payload.length, payload);
+        TOSV2 client = mock(TOSV2.class);
+        TosVideoMediaRelay.TransferAbortHandle handle = new TosVideoMediaRelay.TransferAbortHandle();
+        List<String> tempBefore = relayTempFiles();
+        doAnswer(invocation -> {
+            PutObjectInput input = invocation.getArgument(0);
+            try (InputStream in = input.getContent()) {
+                byte[] buf = new byte[1024];
+                if (in.read(buf) <= 0) {
+                    throw new IOException("首读失败");
+                }
+                // 模拟上传途中失去所有权：心跳触发中止
+                handle.abort("结果转存期租约未命中（已被接管/终态）");
+                while (in.read(buf) != -1) {
+                    // guarding 包装流应在此抛 IOException，读不到 EOF
+                }
+                throw new IllegalStateException("中止后上传流仍可读完（guarding 未拦截）");
+            }
+        }).when(client).putObject(any(PutObjectInput.class));
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES, handle))
+                .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
+                .hasMessageContaining("租约未命中");
+
+        verify(client, never()).putObjectAcl(any());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
     @DisplayName("中止句柄传入但未触发 → 成功路径不受影响（接线不误伤）")
     void persistStreaming_unusedAbortHandle_doesNotDisturbSuccess() throws Exception {
         byte[] payload = new byte[4096];
