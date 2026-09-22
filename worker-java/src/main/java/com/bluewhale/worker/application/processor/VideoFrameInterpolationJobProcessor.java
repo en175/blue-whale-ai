@@ -32,9 +32,10 @@ import java.util.Set;
  * <ol>
  *   <li>claimVideoFrameInterpolation（富投影：providerTaskId / pollCount / progress / cancelRequested）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（video_url + 整型 fps
- *       原样透传）→ markVideoSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleVideoPoll 续排；processing →
- *       续排（超限 1049）；failed → 分类终态；completed → **立即下载转存（火山 video_url
+ *       原样透传）→ markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误与 processing 续排**共用同一轮询预算**
+ *       （pollCount 上限 720，超限一律 1049 终态并停止续排，IKHSFI）；failed →
+ *       分类终态；completed → **立即下载转存（火山 video_url
  *       仅 24h 有效）** → 建 Asset（type=video / source='generated'）→ 终态 succeeded</li>
  * </ol>
  * 下载与转存复用 {@link TosVideoMediaRelay}（视频家族同套：fetch → video/ mime 校验 →
@@ -65,7 +66,8 @@ import java.util.Set;
  *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
  *       §5 分类信号（网关错误与火山 failed 双路），保留既有码投影</li>
  *   <li>video_frame_interpolation_failed（1049）：其余一律归并兜底——网关 provider_failed /
- *       提交超时 / 轮询超时 / 火山任务 failed（**含入口未前置判定的官方门槛拒绝**：目标帧率
+ *       提交超时 / 轮询超时（**瞬时错误与 processing 续排耗尽同一 720 次预算即落终态，
+ *       不再无限轮询**，IKHSFI）/ 火山任务 failed（**含入口未前置判定的官方门槛拒绝**：目标帧率
  *       实际落在 [15,120] 外、输入规格不符、文件大小或时长超上游限制）/ 源素材不可用 /
  *       结果下载转存失败（超时也归并是家族口径：宁可不重试也不双跑），上游可读原因随 message
  *       透传前端投影</li>
@@ -192,7 +194,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
     // ========== submit 相 ==========
 
     /**
-     * 提交相：解析冻结 input + 源视频 → 网关提交 → markVideoSubmitted → 续排轮询。
+     * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoFrameInterpolationJobDto claim, String providerToken) {
         Map<String, Object> input = claim.input();
@@ -230,8 +232,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         log.info("[video_frame_interpolation] 上游已提交 jobId={} providerTaskId={} fps={}",
                 claim.id(), taskId, fps);
 
-        // 4. markVideoSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
-        boolean updated = stateMachine.markVideoSubmitted(
+        // 4. markProviderSubmitted（视频骨架复用件：存 provider_task_id + 释放租约 + next+5s）
+        boolean updated = stateMachine.markProviderSubmitted(
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
@@ -241,8 +243,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
     // ========== poll 相 ==========
 
     /**
-     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
-     * completed 立即下载转存发布。
+     * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（两路**共用 pollCount 轮询预算**，
+     * 超限一律 1049 终态并停止续排，IKHSFI）/ failed 终态 / completed 立即下载转存发布。
      */
     private void pollPhase(ClaimedVideoFrameInterpolationJobDto claim, String providerToken) {
         InterpolateVideoTaskObservation observation;
@@ -250,9 +252,23 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             observation = interpolateVideoClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoFrameInterpolationError pollError) {
             if (isTransientPollError(pollError)) {
+                // IKHSFI：瞬时错误续排与 processing 续排共用同一预算——pollCount 由
+                // rescheduleProviderPoll 单点累计（两条路径同一条 SQL），claim 读到的即
+                // 此前已续排次数；耗尽即落可读失败终态，不派发下一次轮询（防上游持续
+                // 超时 / 连接失败 / 503 时无限轮询打爆网关与 MQ）。
+                if (claim.pollCount() >= MAX_VIDEO_FRAME_INTERPOLATION_POLLS) {
+                    String reason = pollError.getMessage() != null
+                            ? pollError.getMessage() : "上游持续瞬时错误";
+                    log.warn("[video_frame_interpolation] 轮询瞬时错误且预算耗尽 jobId={} pollCount={} err={}，落终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failClaimed(claim, VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
+                            "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS
+                                    + " 次持续瞬时错误: " + reason + "）");
+                    return;
+                }
                 log.warn("[video_frame_interpolation] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                boolean updated = stateMachine.rescheduleVideoPoll(
+                boolean updated = stateMachine.rescheduleProviderPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
                     scheduleNext(claim.id(), VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
@@ -269,7 +285,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                         "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS + " 次）");
                 return;
             }
-            boolean updated = stateMachine.rescheduleVideoPoll(
+            boolean updated = stateMachine.rescheduleProviderPoll(
                     claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
             if (updated) {
                 scheduleNext(claim.id(), VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);

@@ -427,6 +427,82 @@ class VideoFrameInterpolationJobProcessorTest {
                 anyString(), anyLong());
     }
 
+    // ========== IKHSFI：瞬时错误续排与 processing 续排共用轮询预算（超限即终态） ==========
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（timeout + pollCount=720）→ 1049 终态，不续排不重提交（IKHSFI）")
+    void pollTransientTimeoutAtLimit_timesOut() {
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 视频插帧任务查询超时"));
+
+        processor.handle("100");
+
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                contains("持续瞬时错误"), any(), eq("worker-1"), eq(5L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        // 不新增自动重新提交供应商任务的行为：超限只落终态，用户手动重试才走新 job
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    void pollTransient503AtLimit_timesOut() {
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
+        VideoFrameInterpolationError unavailable = new VideoFrameInterpolationError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 视频插帧任务查询失败: HTTP 503");
+        unavailable.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unavailable);
+
+        processor.handle("100");
+
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                contains("503"), any(), eq("worker-1"), eq(5L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误上限前一次（pollCount=719）→ 仍续排，不落终态（计数边界：共 720 次续排）")
+    void pollTransientErrorJustBelowLimit_reschedules() {
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS - 1);
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 视频插帧任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误续排守卫未命中（stale worker / 已取消已终态）→ 不自投下一步（fencing/终态权威）")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input(60), 3);
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 视频插帧任务查询超时"));
+        // reschedule CAS 要求 status='processing' + 当前 lease_owner + fencing_token：
+        // 已取消 / 已终态 / 旧 worker 一律不命中 → 不派发下一次轮询
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
     @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1049 兜底")
     void pollHardError_fails() {
