@@ -24,6 +24,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 视频媒体转存（tos-video-media-relay.ts 移植；IKGS73 起非逐字——出参多带 {@code md5}）。
@@ -59,10 +63,24 @@ public class TosVideoMediaRelay {
 
     /**
      * 流式下载整段兜底时限 10 分钟：流式 body 不受 request timeout 约束，对端「连上但不吐数据」
-     * 会把 worker 线程挂死（字节数组路径无此缺口——整段读取受 60s 全交换超时兜）；同时给
-     * 1GiB 级结果留出 ≥1.7MB/s 的可用带宽。
+     * 必须由 {@link StreamWatchdog} 到点主动 close 响应流中止（截止检查只在 read 返回后执行，
+     * 停流时永远走不到）；同时给 1GiB 级结果留出 ≥1.7MB/s 的可用带宽。
      */
     private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
+
+    /**
+     * 错误响应正文读取截止 60s（IKHSFC）：错误体至多读 4096 字节，正常毫秒级完成；此前
+     * {@code readNBytes} 无任何约束，错误响应停流同样挂死工作线程，与正文停流同口径由看门狗中止。
+     */
+    private static final Duration STREAM_ERROR_BODY_TIMEOUT = Duration.ofSeconds(60);
+
+    /** 看门狗定时器（daemon 单线程，进程级共享）：只负责到点 close 响应流，无状态轮询。 */
+    private static final ScheduledExecutorService WATCHDOG_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "video-relay-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
 
     private final TOSV2 client;
     private final String bucket;
@@ -198,13 +216,33 @@ public class TosVideoMediaRelay {
      * @throws RuntimeException 下载 / 校验 / 上传失败（同 {@link #persist} 的错误类型）
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes) {
+        return persistStreaming(sourceUrl, userId, maxBytes, null);
+    }
+
+    /**
+     * 流式转存（带外部中止句柄）：句柄触发（如 IKHSFD 的转存期租约心跳未命中）会主动中止
+     * 正在进行的下载/上传，以 {@link TransferAbortedException} 退出——调用方据此静默放弃
+     * 本 worker 的发布（任务已被接管），不落失败终态。句柄可为 null（无外部中止源）。
+     */
+    public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
+                                        TransferAbortHandle abortHandle) {
+        return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle,
+                STREAM_COPY_DEADLINE, STREAM_ERROR_BODY_TIMEOUT);
+    }
+
+    /**
+     * 全参内部版（IKHSFC）：截止时间可注入，测试用短截止验证停流主动中止（不真等 10 分钟）。
+     */
+    StoredVideo persistStreamingInternal(String sourceUrl, String userId, long maxBytes,
+                                         TransferAbortHandle abortHandle,
+                                         Duration copyDeadline, Duration errorBodyTimeout) {
         Path tempFile = null;
         try {
             tempFile = Files.createTempFile("video-relay-", ".part");
 
-            // 1. 下载到临时文件（响应头等待走 60s，body 段走兜底时限 + 上限边读边判）
+            // 1. 下载到临时文件（响应头等待走 60s；错误体与正文段各自布防看门狗——停流时
+            //    截止检查在阻塞 read 里走不到，必须由看门狗到点主动 close 响应流打断读取）
             long size;
-            String mime;
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(sourceUrl))
                     .timeout(STREAM_HEADER_TIMEOUT)
@@ -212,10 +250,17 @@ public class TosVideoMediaRelay {
                     .build();
             HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
             String contentType = resp.headers().firstValue("content-type").orElse(null);
-            mime = contentType != null ? contentType.split(";", 2)[0].trim() : "video/mp4";
-            try (InputStream body = resp.body()) {
+            String mime = contentType != null ? contentType.split(";", 2)[0].trim() : "video/mp4";
+            try (InputStream body = resp.body();
+                 StreamWatchdog watchdog = new StreamWatchdog(body, abortHandle)) {
                 if (resp.statusCode() >= 400) {
-                    String errBody = new String(body.readNBytes(4096), java.nio.charset.StandardCharsets.UTF_8);
+                    watchdog.armTimeout(errorBodyTimeout);
+                    String errBody;
+                    try {
+                        errBody = new String(body.readNBytes(4096), java.nio.charset.StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        throw watchdog.translateReadFailure(e, true, errorBodyTimeout);
+                    }
                     String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                             "生成视频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
@@ -224,41 +269,50 @@ public class TosVideoMediaRelay {
                 if (!mime.startsWith("video/")) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成结果不是视频");
                 }
-                size = copyToFile(body, tempFile, maxBytes, sourceUrl);
-            }
-            if (size == 0) {
-                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
-            }
-            String md5 = ContentDigest.md5Hex(tempFile);
+                watchdog.armTimeout(copyDeadline);
+                try {
+                    size = copyToFile(body, tempFile, maxBytes, sourceUrl, copyDeadline);
+                } catch (IOException e) {
+                    throw watchdog.translateReadFailure(e, false, copyDeadline);
+                }
+                watchdog.disarm();
+                if (size == 0) {
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
+                }
+                String md5 = ContentDigest.md5Hex(tempFile);
 
-            // 3. 上传（与字节数组路径同 key 格式、同 ACL）
-            String extension = videoExtension(mime);
-            String uuid = UUID.randomUUID().toString().replace("-", "");
-            String storageKey = "generated/" + userId + "/video/" + uuid + "." + extension;
-            try (InputStream fileIn = Files.newInputStream(tempFile)) {
-                ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
-                        .setHeaders(Map.of("Content-Type", mime));
-                PutObjectInput putInput = new PutObjectInput()
+                // 3. 上传（与字节数组路径同 key 格式、同 ACL；deadline 已撤防，中止只看外部信号）
+                String extension = videoExtension(mime);
+                String uuid = UUID.randomUUID().toString().replace("-", "");
+                String storageKey = "generated/" + userId + "/video/" + uuid + "." + extension;
+                try (InputStream fileIn = watchdog.guarding(tempFile)) {
+                    ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                            .setHeaders(Map.of("Content-Type", mime));
+                    PutObjectInput putInput = new PutObjectInput()
+                            .setBucket(bucket)
+                            .setKey(storageKey)
+                            .setContent(fileIn)
+                            .setContentLength(size)
+                            .setOptions(options);
+                    client.putObject(putInput);
+                } catch (Exception e) {
+                    if (watchdog.isExternallyAborted()) {
+                        throw new TransferAbortedException(watchdog.externalReason());
+                    }
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                            "生成视频转存失败: " + e.getMessage(), e);
+                }
+
+                PutObjectACLInput aclInput = new PutObjectACLInput()
                         .setBucket(bucket)
                         .setKey(storageKey)
-                        .setContent(fileIn)
-                        .setContentLength(size)
-                        .setOptions(options);
-                client.putObject(putInput);
-            } catch (Exception e) {
-                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "生成视频转存失败: " + e.getMessage(), e);
+                        .setAcl(ACLType.ACL_PUBLIC_READ);
+                client.putObjectAcl(aclInput);
+
+                log.info("流式转存完成 storageKey={} size={} mime={}", storageKey, size, mime);
+                String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
+                return new StoredVideo(publicUrl, storageKey, mime, size, md5);
             }
-
-            PutObjectACLInput aclInput = new PutObjectACLInput()
-                    .setBucket(bucket)
-                    .setKey(storageKey)
-                    .setAcl(ACLType.ACL_PUBLIC_READ);
-            client.putObjectAcl(aclInput);
-
-            log.info("流式转存完成 storageKey={} size={} mime={}", storageKey, size, mime);
-            String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-            return new StoredVideo(publicUrl, storageKey, mime, size, md5);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -275,10 +329,10 @@ public class TosVideoMediaRelay {
         }
     }
 
-    /** 分块落盘：边读边判上限与兜底时限（上限语义同字节数组路径——等于上限通过）。 */
-    private long copyToFile(InputStream in, Path target, long maxBytes, String sourceUrl)
-            throws IOException {
-        long deadlineNanos = System.nanoTime() + STREAM_COPY_DEADLINE.toNanos();
+    /** 分块落盘：边读边判上限与截止（上限语义同字节数组路径——等于上限通过；停流的阻塞中止由看门狗兜）。 */
+    private long copyToFile(InputStream in, Path target, long maxBytes, String sourceUrl,
+                            Duration copyDeadline) throws IOException {
+        long deadlineNanos = System.nanoTime() + copyDeadline.toNanos();
         long total = 0;
         byte[] buffer = new byte[64 * 1024];
         try (OutputStream out = Files.newOutputStream(target)) {
@@ -291,7 +345,7 @@ public class TosVideoMediaRelay {
                 }
                 if (System.nanoTime() > deadlineNanos) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                            "生成视频下载超时（超过 " + STREAM_COPY_DEADLINE.toMinutes() + " 分钟）");
+                            "生成视频下载超时（超过 " + describeDuration(copyDeadline) + "）");
                 }
                 out.write(buffer, 0, read);
             }
@@ -310,6 +364,160 @@ public class TosVideoMediaRelay {
 
     /** 转存结果（video-job-runner.ts:89-94 StoredVideo 逐字移植，IKGS73 起多带 {@code md5}）。 */
     public record StoredVideo(String url, String storageKey, String mime, Long size, String md5) {}
+
+    /**
+     * 传输中止句柄（IKHSFC 建通道，IKHSFD 消费）：调用方（如转存期租约心跳）在确认应放弃
+     * 本次传输时 {@link #abort(String)}；传输内部接线后到点主动 close 响应流 / 拦截上传流读，
+     * 以 {@link TransferAbortedException} 退出。接线前触发同样生效（wire 时补触发）。
+     */
+    public static final class TransferAbortHandle {
+        private volatile Runnable action;
+        private volatile String reason;
+
+        /** 请求中止（幂等，首次生效；可从任意线程调用）。 */
+        public void abort(String reason) {
+            if (this.reason != null) return;
+            this.reason = reason;
+            Runnable wired = action;
+            if (wired != null) wired.run();
+        }
+
+        public boolean aborted() {
+            return reason != null;
+        }
+
+        String reason() {
+            return reason;
+        }
+
+        void wire(Runnable action) {
+            this.action = action;
+            if (reason != null) action.run();
+        }
+    }
+
+    /** 传输被外部信号中止（非失败口径）：调用方应静默放弃本 worker 的发布（如租约已被接管）。 */
+    public static final class TransferAbortedException extends RuntimeException {
+        public TransferAbortedException(String reason) {
+            super(reason);
+        }
+    }
+
+    /**
+     * 传输看门狗（IKHSFC）：截止到期或外部句柄触发时主动 close 正在读取的响应流，打断阻塞中的
+     * read（JDK HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read
+     * 返回后执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
+     * {@link #translateReadFailure} 归因；上传侧经 {@link #guarding} 包装流与外部中止状态检查
+     * 同口径中止。每个 {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
+     */
+    private static final class StreamWatchdog implements AutoCloseable {
+        private final InputStream body;
+        private final TransferAbortHandle handle;
+        private volatile ScheduledFuture<?> timeoutTask;
+        private volatile boolean timeoutAbort;
+        private volatile boolean externalAbort;
+
+        StreamWatchdog(InputStream body, TransferAbortHandle handle) {
+            this.body = body;
+            this.handle = handle;
+            if (handle != null) {
+                handle.wire(this::abortFromExternal);
+            }
+        }
+
+        /** 布防截止（错误体 / 正文拷贝阶段各自布防；重复布防替换旧任务）。 */
+        void armTimeout(Duration deadline) {
+            ScheduledFuture<?> previous = timeoutTask;
+            if (previous != null) previous.cancel(false);
+            timeoutTask = WATCHDOG_SCHEDULER.schedule(this::abortFromTimeout,
+                    deadline.toNanos(), TimeUnit.NANOSECONDS);
+        }
+
+        /** 撤防（下载正常完成后取消定时；外部中止通道保持接通直到 {@link #close()}）。 */
+        void disarm() {
+            ScheduledFuture<?> task = timeoutTask;
+            if (task != null) task.cancel(false);
+        }
+
+        private void abortFromTimeout() {
+            timeoutAbort = true;
+            closeBodyQuietly();
+        }
+
+        private void abortFromExternal() {
+            externalAbort = true;
+            closeBodyQuietly();
+        }
+
+        private void closeBodyQuietly() {
+            try {
+                body.close();
+            } catch (IOException ignored) {
+                // 对端已断/流已关：中止目的已达成
+            }
+        }
+
+        boolean isExternallyAborted() {
+            return externalAbort;
+        }
+
+        String externalReason() {
+            return handle != null ? handle.reason() : null;
+        }
+
+        /** 读取侧 IOException 归因：外部中止优先 → 超时 → 其余包供应商错误。 */
+        RuntimeException translateReadFailure(IOException e, boolean errorBodyPhase, Duration deadline) {
+            if (externalAbort) {
+                return new TransferAbortedException(externalReason());
+            }
+            if (timeoutAbort) {
+                String phase = errorBodyPhase ? "错误响应正文读取超时" : "生成视频下载超时";
+                return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        phase + "（超过 " + describeDuration(deadline) + "）", e);
+            }
+            return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "生成视频下载失败: " + e.getMessage(), e);
+        }
+
+        /** 上传流包装：read 前查外部中止（下载完成后 deadline 已撤防，中止只看外部信号）。 */
+        InputStream guarding(Path file) throws IOException {
+            InputStream delegate = Files.newInputStream(file);
+            return new InputStream() {
+                @Override
+                public int read() throws IOException {
+                    requireNotAborted();
+                    return delegate.read();
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    requireNotAborted();
+                    return delegate.read(b, off, len);
+                }
+
+                private void requireNotAborted() throws IOException {
+                    if (externalAbort) {
+                        throw new IOException("传输已中止: " + externalReason());
+                    }
+                }
+
+                @Override
+                public void close() throws IOException {
+                    delegate.close();
+                }
+            };
+        }
+
+        @Override
+        public void close() {
+            disarm();
+        }
+    }
+
+    /** 时限文案：≥1 分钟按分钟，不足按毫秒（测试注入亚秒级截止时也说得通）。 */
+    private static String describeDuration(Duration d) {
+        return d.toMillis() >= 60_000 ? d.toMinutes() + " 分钟" : d.toMillis() + "ms";
+    }
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();

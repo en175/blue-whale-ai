@@ -10,6 +10,7 @@ import com.volcengine.tos.model.object.PutObjectInput;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -80,6 +82,31 @@ class TosVideoMediaRelayTest {
                     out.write(block, 0, chunk);
                     remaining -= chunk;
                 }
+            }
+        });
+        server.start();
+        return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
+    }
+
+    /**
+     * 停流桩（IKHSFC）：发响应头 + 可选首块后挂住连接——连接保持、正文停止发送、不关闭，
+     * 模拟上游「已返回响应头但停流」的真实阻塞输入（不是 mock 探针）。首块取 64KiB（超内核
+     * socket 缓冲必已送达），保证客户端确实进入「读过头块、阻塞在下一个 read」的状态。
+     */
+    private String serveStalled(String contentType, int status, long declaredLength, int firstBytes)
+            throws IOException {
+        byte[] block = patternBlock();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", contentType);
+            exchange.sendResponseHeaders(status, declaredLength);
+            try (OutputStream out = exchange.getResponseBody()) {
+                if (firstBytes > 0) {
+                    out.write(block, 0, firstBytes);
+                }
+                Thread.sleep(30_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         });
         server.start();
@@ -252,5 +279,100 @@ class TosVideoMediaRelayTest {
         verify(client).putObjectAcl(aclCaptor.capture());
         assertThat(aclCaptor.getValue().getAcl()).isEqualTo(ACLType.ACL_PUBLIC_READ);
         assertThat(aclCaptor.getValue().getKey()).isEqualTo(stored.storageKey());
+    }
+
+    // ========== IKHSFC：停流主动中止（截止时间只在 read 返回后检查 → 停流挂死） ==========
+
+    @Test
+    @DisplayName("成功响应停流（头已到、正文停发、连接保持）→ 截止时间到主动中止读取，不等对端发数据或断连")
+    @Timeout(30)
+    void persistStreaming_stalledBody_abortsAtDeadline() throws Exception {
+        String url = serveStalled("video/webm", 200, 8L * 1024 * 1024, 64 * 1024);
+        TOSV2 client = mock(TOSV2.class);
+        List<String> tempBefore = relayTempFiles();
+        long startNanos = System.nanoTime();
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        null, Duration.ofMillis(200), Duration.ofSeconds(5)))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessageContaining("下载超时");
+
+        // 及时性即证明：中止是主动触发（deadline 200ms），不是等对端超时/断连
+        assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
+                .isLessThan(Duration.ofSeconds(5));
+        verify(client, never()).putObject(any(PutObjectInput.class));
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @DisplayName("错误响应正文停流（500 头已到、正文零字节不发）→ 受有效截止约束主动退出，不留后台读取")
+    @Timeout(30)
+    void persistStreaming_stalledErrorBody_abortsAtDeadline() throws Exception {
+        String url = serveStalled("video/webm", 500, 4096, 0);
+        TOSV2 client = mock(TOSV2.class);
+        List<String> tempBefore = relayTempFiles();
+        long startNanos = System.nanoTime();
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        null, Duration.ofMinutes(10), Duration.ofMillis(200)))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessageContaining("错误响应正文");
+
+        assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
+                .isLessThan(Duration.ofSeconds(5));
+        verify(client, never()).putObject(any(PutObjectInput.class));
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @DisplayName("外部中止句柄触发（租约丢失先例）→ 停流传输立即中止为 TransferAbortedException，原因透传")
+    @Timeout(30)
+    void persistStreaming_externalAbort_stopsStalledTransfer() throws Exception {
+        String url = serveStalled("video/webm", 200, 8L * 1024 * 1024, 64 * 1024);
+        TOSV2 client = mock(TOSV2.class);
+        TosVideoMediaRelay.TransferAbortHandle handle = new TosVideoMediaRelay.TransferAbortHandle();
+        List<String> tempBefore = relayTempFiles();
+        long startNanos = System.nanoTime();
+        Thread aborter = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            handle.abort("结果转存租约丢失");
+        });
+        aborter.start();
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        handle, Duration.ofMinutes(10), Duration.ofSeconds(5)))
+                .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
+                .hasMessageContaining("结果转存租约丢失");
+
+        aborter.join(5_000);
+        assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
+                .isLessThan(Duration.ofSeconds(5));
+        verify(client, never()).putObject(any(PutObjectInput.class));
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @DisplayName("中止句柄传入但未触发 → 成功路径不受影响（接线不误伤）")
+    void persistStreaming_unusedAbortHandle_doesNotDisturbSuccess() throws Exception {
+        byte[] payload = new byte[4096];
+        System.arraycopy(patternBlock(), 0, payload, 0, payload.length);
+        String url = serve("video/mp4", 200, payload.length, payload);
+        TOSV2 client = mock(TOSV2.class);
+        AtomicLong uploadedBytes = new AtomicLong();
+        captureUploads(client, uploadedBytes);
+
+        TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        new TosVideoMediaRelay.TransferAbortHandle());
+
+        assertThat(stored.size()).isEqualTo(payload.length);
+        assertThat(uploadedBytes.get()).isEqualTo(payload.length);
     }
 }
