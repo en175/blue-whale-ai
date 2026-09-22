@@ -13,8 +13,9 @@
 !packages/**
 !backend/
 !backend/**
-# IKHJ0Q：适配器补丁已迁到 backend/patches/，落在上面的 !backend/** 放行范围内，
-# 无需再单开白名单（补丁不进 context 会让 pnpm install --frozen-lockfile 直接 ENOENT）。
+# IKHJ0Q：适配器补丁在 backend/patches/，落在上面的 !backend/** 放行范围内，无需单开白名单。
+# ⚠️ 新增补丁必须放在被放行的子树内（如 backend/patches/）：放仓库根 patches/ 的话它进不了
+# build context，而后端镜像的 COPY 也只覆盖 backend/patches，构建会在 pnpm install 时 ENOENT。
 # 前端镜像改为仓库根 context 后，必须放行 web/（否则 COPY web/... 是空的）。
 !web/
 !web/**
