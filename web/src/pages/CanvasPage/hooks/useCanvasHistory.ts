@@ -1,10 +1,12 @@
 /* ============================================
  * useCanvasHistory 画布撤销/重做栈（IKD0JT A2）
  * 命令条目式历史：移动/删除/复制/连线/删边各存撤销所需的精确数据，
- * 成组/解组等后续接入（预留同栈扩展）。撤销栈深度 50（OD-A7 推荐值）。
+ * 同一次手势（批量拷贝、成组连线等）经 beginBatch/endBatch 聚合成一条。
+ * 撤销栈深度 50（OD-A7 推荐值）。
  * 约束（PRD §7.2）：
  *  - 文本内文字编辑不进栈（move 回退只还原坐标，节点 data 保持当前值）
- *  - 生成任务不回退：生成类节点删除路径不登记（由调用方保证）
+ *  - 生成任务不回退：生成中节点删除路径不登记（由调用方保证）
+ *  - 工具栏新建草稿卡算落节点，由调用方 pushAddNodes 登记
  *  - 撤销栈不跨会话（切换项目由调用方 clear）
  * ============================================ */
 import { useRef, useState, useCallback } from 'react';
@@ -73,11 +75,16 @@ type HistoryEntry =
   /** 删除组（连同成员节点）：undo = 全部塞回；redo = 全部再删 */
   | { kind: 'deleteGroup'; group: CanvasGroup; nodes: Node[]; edges: Edge[] }
   /** 整组拖动：undo/redo 回放矩形、成员位移与排除名单（组盖住的节点） */
-  | ({ kind: 'groupMove' } & GroupFrameDragResult);
+  | ({ kind: 'groupMove' } & GroupFrameDragResult)
+  /** 一次手势内的多条命令：undo 逆序回放，redo 正序回放 */
+  | { kind: 'batch'; entries: HistoryEntry[] };
 
 export function useCanvasHistory(handles: CanvasHistoryHandles) {
   const undoStack = useRef<HistoryEntry[]>([]);
   const redoStack = useRef<HistoryEntry[]>([]);
+  /** 批次嵌套深度：>0 时 push 先写入缓冲，endBatch 再合成一条 */
+  const batchDepthRef = useRef(0);
+  const batchBufferRef = useRef<HistoryEntry[]>([]);
   /** 栈变化时递增触发重渲染（canUndo/canRedo 消费方刷新） */
   const [, bumpVersion] = useState(0);
   const bump = useCallback(() => bumpVersion((v) => v + 1), []);
@@ -92,7 +99,7 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   };
   const slots = Object.keys(setters) as NodeSlot[];
 
-  const push = useCallback(
+  const commitEntry = useCallback(
     (entry: HistoryEntry) => {
       undoStack.current.push(entry);
       if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
@@ -101,6 +108,35 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     },
     [bump],
   );
+
+  const push = useCallback(
+    (entry: HistoryEntry) => {
+      if (batchDepthRef.current > 0) {
+        batchBufferRef.current.push(entry);
+        return;
+      }
+      commitEntry(entry);
+    },
+    [commitEntry],
+  );
+
+  const beginBatch = useCallback(() => {
+    batchDepthRef.current += 1;
+  }, []);
+
+  const endBatch = useCallback(() => {
+    if (batchDepthRef.current === 0) return;
+    batchDepthRef.current -= 1;
+    if (batchDepthRef.current > 0) return;
+    const entries = batchBufferRef.current;
+    batchBufferRef.current = [];
+    if (entries.length === 0) return;
+    if (entries.length === 1) {
+      commitEntry(entries[0]);
+      return;
+    }
+    commitEntry({ kind: 'batch', entries });
+  }, [commitEntry]);
 
   const allCurrentNodes = (): Node[] => {
     const h = handlesRef.current;
@@ -226,6 +262,12 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
         );
         return entry;
       }
+      case 'batch': {
+        for (let i = entry.entries.length - 1; i >= 0; i -= 1) {
+          entry.entries[i] = undoEntry(entry.entries[i]);
+        }
+        return entry;
+      }
     }
   };
 
@@ -248,10 +290,10 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
         if (entry.nodes) readdNodes(entry.nodes);
         return;
       case 'addEdges':
-        removeEdges(entry.edges);
+        readdEdges(entry.edges);
         return;
       case 'removeEdges':
-        readdEdges(entry.edges);
+        removeEdges(entry.edges);
         return;
       case 'createGroup':
         handlesRef.current.setGroups(() => entry.groupsAfter);
@@ -276,6 +318,9 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
           }),
         );
         return;
+      case 'batch':
+        entry.entries.forEach(redoEntry);
+        return;
     }
   };
 
@@ -297,6 +342,8 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   const clear = useCallback(() => {
     undoStack.current = [];
     redoStack.current = [];
+    batchDepthRef.current = 0;
+    batchBufferRef.current = [];
     bump();
   }, [bump]);
 
@@ -391,6 +438,8 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     undo,
     redo,
     clear,
+    beginBatch,
+    endBatch,
     pushMove,
     pushDelete,
     pushAddNodes,
