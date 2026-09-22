@@ -18,7 +18,7 @@
 
 | 机制 | 位置 | 管什么 |
 | --- | --- | --- |
-| `@prisma/adapter-mariadb` 补丁 | `patches/@prisma__adapter-mariadb@7.9.0.patch` | Node 侧 `DATETIME` 字面量的**读写偏移** |
+| `@prisma/adapter-mariadb` 补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | Node 侧 `DATETIME` 字面量的**读写偏移** |
 | `timezone: "+08:00"` | `backend/libs/shared/persistence/db.ts` `buildPoolConfig` | Node 侧连接**会话时区**（`NOW()` / `DEFAULT CURRENT_TIMESTAMP`） |
 | `WorkerClock` + `connectionInitSql` | `worker-java/.../WorkerClock`、`DataSourceConfig` | Java 侧写库时刻 + 会话时区 |
 

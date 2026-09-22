@@ -15,5 +15,11 @@ allowBuilds:
   unrs-resolver: true
   ffmpeg-static: true
 
+# ⚠️ 注册必须留在根 manifest：pnpm 只读根 pnpm-workspace.yaml 的 patchedDependencies，
+#    写进 backend/package.json 会被**静默忽略**（不报错、不告警、lockfile 无条目）。
+# 补丁文件放 backend/patches/，与它作用的 workspace 成员同层。
+# ⚠️ 新增补丁也必须落在 backend/patches/：pnpm patch-commit 默认写根 patches/，而根 patches/
+#    已被 .dockerignore 排除、Dockerfile 也不 COPY——本地与门禁全绿，只在镜像构建时 ENOENT。
+#    生成用：pnpm patch-commit --patches-dir=backend/patches <dir>
 patchedDependencies:
-  '@prisma/adapter-mariadb@7.9.0': patches/@prisma__adapter-mariadb@7.9.0.patch
+  '@prisma/adapter-mariadb@7.9.0': backend/patches/@prisma__adapter-mariadb@7.9.0.patch

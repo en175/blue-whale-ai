@@ -19,8 +19,9 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
 # IKHJ0Q：pnpm-workspace.yaml 的 patchedDependencies 指向这里的补丁，必须在 pnpm install 之前到位，
-# 否则 --frozen-lockfile 解析补丁路径时 ENOENT。.dockerignore 已同步放行 patches/。
-COPY patches patches
+# 否则 --frozen-lockfile 解析补丁路径时 ENOENT。容器内路径须与 pnpm-workspace.yaml 里
+# backend/patches/... 一致；该子树已由 .dockerignore 的 !backend/** 放行，无需单独开白名单。
+COPY backend/patches backend/patches
 
 # 国内 npm 镜像加速
 ENV npm_config_registry=https://registry.npmmirror.com
