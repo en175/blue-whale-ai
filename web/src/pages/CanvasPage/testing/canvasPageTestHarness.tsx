@@ -13,6 +13,7 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
+import type { FrameInterpolationCurrentData } from '@/api/jobs';
 
 vi.mock('../components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
@@ -43,7 +44,8 @@ vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => nu
 /** API 打桩：fetchProjects 默认单项目、fetchGenerationModels 默认空、fetchJobStatus 默认无实现——
  *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖。
  *  cancelGenerationJob 默认成功返回（取消确认链 .then 需要 promise）；createFrameInterpolation
- *  默认无实现（IKHLKX 插帧发送：需要的测试显式 mockResolvedValue）。 */
+ *  默认无实现（IKHLKX 插帧发送：需要的测试显式 mockResolvedValue）；fetchFrameInterpolationCurrent
+ *  默认 null（IKHSFF 关页恢复：无关联任务时水合恢复查询为 no-op，需要恢复的测试显式覆盖）。 */
 export const apiMocks = {
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   createProject: vi.fn(),
@@ -61,6 +63,7 @@ export const apiMocks = {
   cancelGenerationJob: vi.fn(async () => null),
   retryGenerationJob: vi.fn(),
   createFrameInterpolation: vi.fn(),
+  fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -104,6 +107,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: vi.fn(),
   createFrameInterpolation: apiMocks.createFrameInterpolation,
+  fetchFrameInterpolationCurrent: apiMocks.fetchFrameInterpolationCurrent,
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createVocalSplit: vi.fn(),

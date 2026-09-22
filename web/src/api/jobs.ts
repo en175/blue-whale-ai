@@ -9,6 +9,10 @@ import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
+import {
+  VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+} from '@lib/contracts/video-frame-interpolation';
 import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-interpolation';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
@@ -524,6 +528,36 @@ export function createFrameInterpolation(
       body: JSON.stringify(payload),
       ...(init?.silent === true ? { silent: true } : {}),
     },
+  );
+}
+
+/** GET /api/projects/:projectId/video-frame-interpolations/current 返回（IKHSFE 恢复契约）：
+ *  键名与契约 VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS 恒等；目标节点无任何关联任务时
+ *  data 为 null（不另设空对象形态）。响应不含 input（凭证不外泄），成品/失败详情走
+ *  GET /api/jobs/:id。status 不过滤——failed / cancelled 也能查回（前端决定是否复活轮询）。 */
+export interface FrameInterpolationCurrentData {
+  /** 当前关联任务 id（同节点多历史任务按 gmt_create/id 降序取最新） */
+  job_id: string;
+  /** 任务状态（generation_jobs.status 原值） */
+  status: JobStatus;
+  /** 进度百分比原值（终态恒 0 或 100） */
+  progress: number;
+  /** 创建时间 ISO 串 */
+  created_at: string;
+}
+
+/** 查询目标节点当前关联的插帧任务（IKHSFE 恢复契约；路由段与查询键均契约同源）：
+ *  浏览器未收到创建响应就关页时，前端只持有草稿卡的 target_node_id（本地生成），
+ *  服务端按「同 user + 同 project + 同 target_node_id 的未软删任务取最新」查回当前关联，
+ *  供重新进入画布恢复原卡与任务（IKHSFF 关页恢复闭环）。 */
+export function fetchFrameInterpolationCurrent(
+  projectId: string,
+  targetNodeId: string,
+): Promise<FrameInterpolationCurrentData | null> {
+  return apiRequest<FrameInterpolationCurrentData | null>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations/${VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT}` +
+      `?${VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId}=${encodeURIComponent(targetNodeId)}`,
+    { silent: true },
   );
 }
 

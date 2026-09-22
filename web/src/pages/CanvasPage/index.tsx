@@ -299,6 +299,7 @@ import {
   createVideoSubtitleErase,
   createVideoEnhancement,
   createFrameInterpolation,
+  fetchFrameInterpolationCurrent,
   createMediaExtraction,
   createAudioTrim,
   createVocalSplit,
@@ -595,8 +596,6 @@ export default function CanvasPage() {
   const [videoEnhanceSeed, setVideoEnhanceSeed] = useState<{ ts: number; initialResolution: VideoEnhanceResolution } | null>(null);
   /** HD 面板隐藏豁免（口径同 enhancePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const videoEnhancePanelHiddenRef = useRef(false);
-  /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
-  const videoEnhanceBoundRef = useRef<string | null>(null);
   /** 视频插帧面板（IKHLKR，父单 IKHLES）：绑定插帧草稿卡的极简参数面板（骨架与口径
    *  同 showVideoEnhanceDialog 家族；发送闭环归 IKHLKX，本票只交付建卡与参数持久化） */
   const [showFrameInterpolationDialog, setShowFrameInterpolationDialog] = useState(false);
@@ -619,6 +618,8 @@ export default function CanvasPage() {
    *  归属守卫——A 卡提交未返回期间面板切到 B（或关闭）的，A 的回调不再关面板/复位
    *  B 的提交中状态（提交会话隔离，IKHSFH）。 */
   const frameInterpolationBoundRef = useRef<string | null>(null);
+  /** 当前已打开 HD 面板绑定的卡 id（同步写，口径同 enhanceBoundRef） */
+  const videoEnhanceBoundRef = useRef<string | null>(null);
   /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
    *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
    *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
@@ -2500,6 +2501,16 @@ export default function CanvasPage() {
           !settledExtractNodesRef.current.has(n.id),
       )
       .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
+    // 水合恢复（IKHSFF）：带插帧身份但未承接任务的草稿卡（创建响应前 / 响应后自动保存前
+    // 关页，jobId 未随画布落盘）——查服务端权威关联恢复原卡与任务；已承接任务的卡
+    // （jobId 落盘，无论进行中还是已收敛终态）不查，交上面轮询分支或保持既有终态呈现
+    m
+      .filter(
+        (n) =>
+          ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null &&
+          n.data.jobId == null,
+      )
+      .forEach((n) => recoverFrameInterpolationRef.current(n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
@@ -3406,10 +3417,11 @@ export default function CanvasPage() {
         openEnhanceDraftDialog(node.id);
       } else if (node.type === 'mediaNode' && data.videoEnhance) {
         openVideoEnhanceDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.frameInterpolation) {
+        // 插帧草稿卡（IKHLKR）：点卡开插帧面板（不进视频生成面板；身份卡优先口径同 HD）
+        openFrameInterpolationDraftDialog(node.id);
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
         openImageDraftDialog(node.id);
-      } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video' && data.frameInterpolation) {
-        openFrameInterpolationDraftDialog(node.id);
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
         openVideoDraftDialog(node.id);
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
@@ -6259,6 +6271,8 @@ export default function CanvasPage() {
 
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
   const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
+  /** 插帧关页恢复函数引用（IKHSFF，同 pollJobRef 模式：水合 effect 声明在前） */
+  const recoverFrameInterpolationRef = useRef<(nodeId: string) => void>(() => {});
 
   /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛。
    *  启动即登记本任务为节点活跃任务（IKDMQV）：后启动的轮询覆盖登记，
@@ -8107,6 +8121,7 @@ export default function CanvasPage() {
    *  创建成功：插帧卡原地转生成中 + frozenParams 随受理写卡（= 最后受理任务的冻结输入，
    *  失败重试的权威来源；面板编辑值 lastParams 不随受理回写，IKHSFH）+ jobId 登记
    *  + 启动轮询（终态回填见 applyJobTerminal：成功转普通视频卡并清插帧身份），返回 true（面板据此关闭）。
+   *  发送前保存失败/项目切换（IKHSFF 整改）：不发起创建请求，面板保留可重发。
    *  创建失败（网络/契约拒/入队前异常）：插帧卡保持草稿原状（不转生成中、不写 jobId），toast
    *  可读原因（silent 传输 + 此处统一提示一次，http 层不重复 toast，IKHSFH），返回 false
    *  （面板与配置保留可调档重发——父单第 28 条口径）。
@@ -8121,6 +8136,7 @@ export default function CanvasPage() {
       showToast('warn', '未选中项目，无法发起插帧');
       return false;
     }
+    const projectId = currentId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const identity = ((node?.data ?? {}) as Record<string, unknown>).frameInterpolation as FrameInterpolationIdentity | undefined;
     const sourceAssetId = identity?.sourceAssetId;
@@ -8138,12 +8154,23 @@ export default function CanvasPage() {
     if (frameInterpolationInFlightRef.current.has(nodeId)) return false;
     frameInterpolationInFlightRef.current.add(nodeId);
     try {
-      // 票面 IKHLKX 验收 2：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
-      // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；口径同家族「立刻落库」的
-      //  best-effort 吞错：保存失败不阻断发送，前端保存状态条与防抖自动保存兜底；
-      //  发送与失败重试共用本函数，两条路径同款保证）
-      await flushCanvasSave(currentId).catch(() => {});
-      const created = await createFrameInterpolationMutation.mutateAsync({ projectId: currentId, payload: input });
+      // 票面 IKHSFF 验收 1：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
+      // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；发送与失败重试共用本函数，
+      //  两条路径同款保证）。保存结果三态处置（不吞失败当成功）：
+      //  · 抛错（网络 / 412 乐观锁冲突，flushCanvasSave 已置保存状态条为 error）→ 不发起
+      //    创建请求，卡留在可恢复的配置草稿态，面板保留可重发（保存重试成功后原参数重发）；
+      //  · 返回 false（无效草稿不可继续 / 等待期间项目已切换的起始检查）→ 同样中止；
+      //  · 等待期间项目切换的收尾双检（口径同家族提交链路：flush 返回后再核对 activeProjectRef）。
+      let flushed: boolean;
+      try {
+        flushed = await flushCanvasSave(projectId);
+      } catch {
+        showToast('error', '画布保存失败，未发起插帧，请重试');
+        return false;
+      }
+      if (!flushed) return false;
+      if (activeProjectRef.current !== projectId) return false;
+      const created = await createFrameInterpolationMutation.mutateAsync({ projectId, payload: input });
       // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
@@ -8200,6 +8227,75 @@ export default function CanvasPage() {
       });
     return true;
   };
+
+  /** 插帧关页恢复（IKHSFF）：画布水合发现带插帧身份但未承接任务的草稿卡（创建响应前关页、
+   *  或响应后自动保存前关页——jobId 未随画布落盘）时，查服务端权威关联恢复原卡与任务：
+   *  · 处理中（queued/processing）：卡原地转生成中、写回 jobId 并恢复轮询（状态随下次自动
+   *    保存落盘；卡上冻结的 lastParams / 来源边 / 位置一律不动、不重复建卡、不改源卡）；
+   *  · 终态（succeeded/failed）：先登记活跃任务，取 GET /api/jobs/:id 权威详情后直接走
+   *    applyJobTerminal 现有口径收敛（成功回填成品并清插帧身份、失败走 frameInterpolation
+   *    ErrorText 家族文案），不闪「生成中」占位态；
+   *  · cancelled：不复活——保持草稿态，不写 jobId 不重启轮询（现有取消口径 = 草稿卡回待生成）；
+   *  · data=null（无关联任务）：从未发送或创建未受理，保持草稿态。
+   *  竞态防线：等待期间项目已切换 / 卡已删除 / 卡已被新任务接管（用户重发）时丢弃恢复响应。 */
+  const recoverFrameInterpolation = (nodeId: string) => {
+    const projectId = activeProjectRef.current;
+    if (!projectId) return;
+    fetchFrameInterpolationCurrent(projectId, nodeId)
+      .then((current) => {
+        if (activeProjectRef.current !== projectId) return;
+        if (!current) return;
+        const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+        if (!node) return;
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        // 已被新任务接管（用户在恢复响应到达前重发）或 jobId 已随画布承接：不覆盖
+        if (data.jobId != null || activeJobByNodeRef.current.has(nodeId)) return;
+        if (current.status === 'cancelled') return;
+        if (current.status === 'queued' || current.status === 'processing') {
+          stopJobPolling(nodeId, jobTimersRef.current);
+          patchMediaNode(nodeId, {
+            genStatus: 'generating',
+            progress: current.progress,
+            errorText: undefined,
+            jobId: current.job_id,
+          });
+          pollJob(nodeId, current.job_id);
+          return;
+        }
+        // 终态：登记活跃任务（迟到响应防线）+ 写回 jobId（成品卡 jobId≠null 是来源连线
+        // target Handle 的渲染依据，家族口径同 applyJobTerminal 通用成功分支），详情到达
+        // 前不转生成中；详情仍在处理中/查询失败则回退处理中口径续轮询兜底
+        activeJobByNodeRef.current.set(nodeId, String(current.job_id));
+        patchMediaNode(nodeId, { jobId: current.job_id });
+        void fetchJobStatus(current.job_id)
+          .then((detail) => {
+            if (!jobResponseGuarded(nodeId, current.job_id)) return;
+            if (applyJobTerminal(nodeId, current.job_id, detail) === 'processing') {
+              patchMediaNode(nodeId, {
+                genStatus: 'generating',
+                progress: detail.progress,
+                errorText: undefined,
+              });
+              pollJob(nodeId, current.job_id);
+            }
+          })
+          .catch(() => {
+            if (!jobResponseGuarded(nodeId, current.job_id)) return;
+            patchMediaNode(nodeId, {
+              genStatus: 'generating',
+              progress: current.progress,
+              errorText: undefined,
+            });
+            pollJob(nodeId, current.job_id);
+          });
+      })
+      .catch((e: unknown) => {
+        // 恢复查询失败（网络抖动等）：best-effort 静默降级——卡保持草稿态，用户可重发；
+        // 任务若仍在跑不丢（服务端权威关联仍在，下次水合再恢复）
+        console.warn('[frame-interpolation] 恢复查询失败:', e);
+      });
+  };
+  recoverFrameInterpolationRef.current = recoverFrameInterpolation;
 
   /** 视频 HD 高清任务发送核心（IKH3VH，先例 startAudioVideoSplitJob 的 await 口径 + 高清放大
    *  的原地承接）：契约三键（source_asset_id 冻结自 HD 身份、target_node_id=HD 卡节点 id、
@@ -10751,17 +10847,21 @@ export default function CanvasPage() {
             //  四件套（接管指针不冒泡开音频面板），发送条由本页 AudioTrimBar 承担
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：仅编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/
-            //  音频截取等）注入 soloToolbarHidden。高清/HD 参数面板与普通生成面板相同，
-            //  打开期间不藏上方操作条（IKHFUF：成品高清卡要点卡仍能用去字幕/分离等工具）。
-            //  标记迁出后不再控制渲染，退为集成测试可观测；模态显隐由 followToolbarLayer 的 show 门承担
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/音频截取）
+            //  或插帧面板打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记
+            //  不再控制渲染，退为集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担。
+            //  高清/HD 参数面板不在此列（IKHFUF：与普通生成面板相同，打开期间不藏上方操作条，
+            //  成品高清卡仍可用去字幕/分离等工具）；插帧面板按其规格（ADR-0113「面板打开期间
+            //  悬浮工具条整条不渲染，同 HD 面板全局会话门口径」）保留模态——两条口径并存是
+            //  合流时的有意取舍，插帧面板是否改为并存口径待需求方拍板。
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showFrameInterpolationDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               || audioTrimTargetNodeId || vocalSplitTargetNodeId || sceneSplitTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
-                    showFrameInterpolationDialog || n.id === eraseTargetNodeId
+                    n.id === eraseTargetNodeId
+                    || showFrameInterpolationDialog
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
                     || n.id === outpaintNodeId
@@ -10829,8 +10929,10 @@ export default function CanvasPage() {
             <>
               {/* IKGYYD：媒体卡悬浮工具条迁入钉屏幕层（NodeFollowToolbar 容器 + MediaNodeToolbar
                   内容）——渲染于画布缩放层之外，任何缩放级别屏幕尺寸恒定，拖动/平移缩放实时跟随。
-                  IKGZ5O 工具会话模态：擦除/抠图等编辑会话激活时整条不渲染。高清/HD 参数面板
-                  与普通生成面板一样，打开时仍露出上方操作条（IKHFUF）。 */}
+                  IKGZ5O 工具会话模态：编辑会话激活或插帧面板打开期间整条不渲染（词条「工具会话」
+                  模态口径；editSessionActive / showFrameInterpolationDialog 为全局布尔，对全部
+                  媒体卡生效）。高清/HD 参数面板与普通生成面板一样，打开时仍露出上方操作条
+                  （IKHFUF）；插帧面板按其规格（ADR-0113）保留模态。 */}
               {soloMediaToolbarNode ? (
                 <NodeFollowToolbar
                   nodeId={soloMediaToolbarNode.id}
