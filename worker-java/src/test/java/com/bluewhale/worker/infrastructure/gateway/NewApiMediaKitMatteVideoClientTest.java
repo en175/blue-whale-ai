@@ -211,7 +211,7 @@ class NewApiMediaKitMatteVideoClientTest {
     }
 
     @Test
-    @DisplayName("200 但缺 task_id → 1049 兜底")
+    @DisplayName("200 但缺 task_id → 1050 兜底")
     void missingTaskId_fallsBackToContractCode() {
         responseJson.set("{\"success\":true}");
 
@@ -222,7 +222,7 @@ class NewApiMediaKitMatteVideoClientTest {
     }
 
     @Test
-    @DisplayName("非 JSON 响应 → 1049 兜底")
+    @DisplayName("非 JSON 响应 → 1050 兜底")
     void nonJsonResponse_fallsBack() {
         responseJson.set("not-json<");
 

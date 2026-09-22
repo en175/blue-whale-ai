@@ -158,12 +158,12 @@ public final class VideoMattingContract {
      * <p>
      * 取值口径：输入上限 200MB ⇒ 10 分钟档源码率 ≤2.7Mbps，成品按主流编码 1080p ≤8Mbps 估
      * ≈600MB，1 GiB 给 ≈1.7 倍余量；同时该值只作转存判据（**不是创建门槛**，前端与创建入口
-     * 均不做大小预检——协议常量不因此改变），超限归 1049 兜底失败、错误信息带 MB 值。
+     * 均不做大小预检——协议常量不因此改变），超限归 1050 兜底失败、错误信息带 MB 值。
      * 消费方 = {@code TosVideoMediaRelay.persistStreaming}（流式，与堆解绑）。
      */
     public static final long MAX_RESULT_BYTES = 1024L * 1024 * 1024;
 
-    // ========== 错误码（数值 1049 见 error-codes.ts ERROR_VIDEO_MATTING_FAILED；
+    // ========== 错误码（数值 1050 见 error-codes.ts ERROR_VIDEO_MATTING_FAILED；
     //            1048 已由音频截取占用） ==========
 
     /** 执行兜底失败码：网关分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 /

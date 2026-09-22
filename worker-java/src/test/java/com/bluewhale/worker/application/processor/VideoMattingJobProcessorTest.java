@@ -41,7 +41,7 @@ import static org.mockito.Mockito.*;
  * <p>
  * 覆盖：异步两段式状态机（submit 按模式分流提交并存 task_id → markProviderSubmitted +
  * scheduleNext / poll processing 续排 / 轮询超限 / completed 转存前心跳续租 → 立即转存
- * 发布——契约 result 三键、源宽高近似、官方 duration 优先 / failed 归 1049 + 上游原因
+ * 发布——契约 result 三键、源宽高近似、官方 duration 优先 / failed 归 1050 + 上游原因
  * 透传）、双模式出站形状（WEBM 不带 background_color、MP4 显式带）、input 业务键兜底
  * 校验（模式/格式枚举、MP4 缺背景色、WEBM 拒背景色）、凭证缺失分类、§5 信号保留与
  * 兜底归并、瞬时轮询错误判定。不连真实 MQ/DB/TOS/网关。
@@ -216,7 +216,7 @@ class VideoMattingJobProcessorTest {
     // ========== 源素材 / 凭证 ==========
 
     @Test
-    @DisplayName("源素材不可用（非 video）→ 1049 兜底 + 可读原因，不提交上游")
+    @DisplayName("源素材不可用（非 video）→ 1050 兜底 + 可读原因，不提交上游")
     void sourceAssetNotVideo_mattingFailed() {
         stubSubmitClaim(webmInput("portrait"));
         AssetEntity image = new AssetEntity();
@@ -302,7 +302,7 @@ class VideoMattingJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
-    // ========== submit 相：错误归并（§5 信号保留，其余归 1049；无自动重试） ==========
+    // ========== submit 相：错误归并（§5 信号保留，其余归 1050；无自动重试） ==========
 
     @Test
     @DisplayName("submit content_rejected → 保留既有码投影（§5 信号）")
@@ -319,7 +319,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit provider_failed → 归并 1049 兜底（无自动重试）")
+    @DisplayName("submit provider_failed → 归并 1050 兜底（无自动重试）")
     void submitProviderFailed_normalized() {
         stubSubmitClaim(webmInput("portrait"));
         stubSourceAsset(1920, 1080);
@@ -333,7 +333,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("submit 超时（provider_timeout）→ 归并 1049（宁可不重试也不双跑，家族口径）")
+    @DisplayName("submit 超时（provider_timeout）→ 归并 1050（宁可不重试也不双跑，家族口径）")
     void submitTimeout_normalized() {
         stubSubmitClaim(webmInput("portrait"));
         stubSourceAsset(1920, 1080);
@@ -368,7 +368,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 超限（pollCount>=720）→ 1049 轮询超时，不再续排")
+    @DisplayName("poll 超限（pollCount>=720）→ 1050 轮询超时，不再续排")
     void pollExceedsLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -401,7 +401,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1049 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
     void pollTransientErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -416,7 +416,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1049 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
     void pollTransientServerErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         VideoMattingError rateLimited = new VideoMattingError(
@@ -450,7 +450,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1049 兜底")
+    @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1050 兜底")
     void pollHardError_fails() {
         stubPollClaim(webmInput("portrait"), 3);
         VideoMattingError notFound = new VideoMattingError(
@@ -464,7 +464,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll failed → 1049 + 上游可读原因透传（前端投影）")
+    @DisplayName("poll failed → 1050 + 上游可读原因透传（前端投影）")
     void pollFailed_transportsUpstreamReason() {
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -681,7 +681,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("completed 未返回结果视频 URL → 1049 兜底（转存前判定，无 TOS 孤儿）")
+    @DisplayName("completed 未返回结果视频 URL → 1050 兜底（转存前判定，无 TOS 孤儿）")
     void pollCompletedWithoutUrl_fails() {
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -695,7 +695,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("completed 未返回分辨率档位 → 1049 兜底（契约 result.resolution 必填）")
+    @DisplayName("completed 未返回分辨率档位 → 1050 兜底（契约 result.resolution 必填）")
     void pollCompletedWithoutResolution_fails() {
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -709,7 +709,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("TOS 未配置 → 1049（结果 URL 24h 失效，强依赖不降级直存）")
+    @DisplayName("TOS 未配置 → 1050（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoMattingJobProcessor noRelayProcessor = new VideoMattingJobProcessor(
                 stateMachine, new AssetSourceService(assetMapper),
@@ -748,7 +748,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("转存失败（下载 404）→ 1049 整体失败，不发布（无半成品资产悬挂）")
+    @DisplayName("转存失败（下载 404）→ 1050 整体失败，不发布（无半成品资产悬挂）")
     void relayFails_fails() {
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))

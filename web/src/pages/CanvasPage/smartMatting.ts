@@ -221,7 +221,7 @@ export function buildSmartMattingPlaceholderNode(input: {
   };
 }
 
-/** 智能抠像任务失败文案：优先服务端 msg（错误码 1049「智能抠像失败，请重试」已在
+/** 智能抠像任务失败文案：优先服务端 msg（错误码 1050「智能抠像失败，请重试」已在
  *  error-codes 契约映射，经顶层 msg 透传），缺失时本地兜底同文案。 */
 export function smartMattingErrorText(
   error?: { code?: string | number; message?: string; msg?: string } | null,

@@ -378,10 +378,10 @@ describe("video_matting 双端一致性（读 worker-java 源码文本，防漂�
     }
   });
 
-  it("执行面兜底码 video_matting_failed → 1049（1048 已由音频截取占用），Java 契约侧常量同步", () => {
+  it("执行面兜底码 video_matting_failed → 1050（1049 已由 !820 插帧先行合入占用，让号取 1050），Java 契约侧常量同步", () => {
     expect(ERROR_VIDEO_MATTING_FAILED).toBe("video_matting_failed");
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1049);
-    expect(ERROR_CODES[1049]).toBeTruthy();
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1050);
+    expect(ERROR_CODES[1050]).toBeTruthy();
     // worker 执行面引用侧防漂移：Java 契约常量与错误类常量同值口径（先例
     // VideoSceneSplitError；本票契约先行只落契约类常量，错误类由 worker 票注册时引用本值）。
     expect(contractJava).toContain(

@@ -44,8 +44,8 @@ import java.util.concurrent.TimeUnit;
  *       worker 转存自家 TOS，ADR-0112），返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
  *   <li>providerTaskId!=null → 查询任务（两工具共用 tasks 查询）→ 瞬时错误
- *       rescheduleProviderPoll 续排（**同样受轮询上限约束**，超限归 1049——上游持续故障
- *       不得无限续排）；processing → 续排（超限 1049）；failed → 分类终态；
+ *       rescheduleProviderPoll 续排（**同样受轮询上限约束**，超限归 1050——上游持续故障
+ *       不得无限续排）；processing → 续排（超限 1050）；failed → 分类终态；
  *       completed → **转存前续租 + 转存全程心跳续租 60s（IKHSFD，防大文件下载+上传跨
  *       420s 租约窗被 recovery 孤儿重领；心跳未命中即中止传输静默退出）→ 立即下载
  *       转存自家 TOS（火山 video_url 仅 24h 有效）** → 建 Asset（type=video /
@@ -55,7 +55,7 @@ import java.util.concurrent.TimeUnit;
  * 公开读 → md5），但走**流式** {@code persistStreaming} 并带本工具上限（审查修复 P2：
  * 家族字节数组路径 200MB 上限与堆绑死，本工具 10 分钟档成品可超）；结果 URL 24h 失效故
  * **强依赖 TOS，不降级直存**（去字幕家族口径）。
- * 转存失败 = 整体失败（归并 1049）：无 Asset 行落库、不留半成品资产悬挂，已上传的 TOS
+ * 转存失败 = 整体失败（归并 1050）：无 Asset 行落库、不留半成品资产悬挂，已上传的 TOS
  * 孤儿对象与家族先例同口径（无 Asset 引用即无悬挂）。
  * <p>
  * 结果元数据：抠像不改变分辨率 → 宽高取源 Asset 近似值（官方不返回输出像素；源宽高缺失
@@ -64,9 +64,9 @@ import java.util.concurrent.TimeUnit;
  * video_url、duration 一并按契约 RESULT_KEY_* 三键进终态日志 payload 与 status_changed
  * 事件 payload 的 result 键跨进程回传（双通道承载，video_scene_split 同款；video_url
  * 语义 = 转存自有存储后的公开读地址，官方 24h 临时链接不跨进程落库）。completed 未返回
- * 结果视频或分辨率档位 → 1049 兜底失败（转存前判定，无 TOS 孤儿）。
+ * 结果视频或分辨率档位 → 1050 兜底失败（转存前判定，无 TOS 孤儿）。
  * <p>
- * 错误码口径（契约：数值 1049，双模式共享一码、错误信息透传区分，无 worker 级自动重试，
+ * 错误码口径（契约：数值 1050，双模式共享一码、错误信息透传区分，无 worker 级自动重试，
  * 用户在任务占位卡手动重试沿用冻结 input）：
  * <ul>
  *   <li>provider_credential_missing：任务缺少冻结凭证（与视频/去字幕同构）</li>
@@ -74,7 +74,7 @@ import java.util.concurrent.TimeUnit;
  *       （创建入口复核是权威，worker 兜底防御）</li>
  *   <li>content_rejected / content_rejected_reference / quota_exhausted：NewApiErrorClassifier
  *       §5 分类信号，保留既有码投影</li>
- *   <li>video_matting_failed（1049）：其余一律归并兜底——提交失败 / 轮询超时 / 供应商任务
+ *   <li>video_matting_failed（1050）：其余一律归并兜底——提交失败 / 轮询超时 / 供应商任务
  *       failed（error 对象 code / message / param / type——TaskError / ApiError）/ 源素材
  *       不可用 / 结果形态缺失 / 下载转存失败（超时也归并是家族口径：宁可不重试也不双跑），
  *       上游可读原因随 message 透传前端投影</li>
@@ -85,7 +85,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VideoMattingJobProcessor.class);
 
-    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 video_matting_failed(1049)。 */
+    /** §5 分类信号白名单：这些既有码直接投影，其余全部归并 video_matting_failed(1050)。 */
     private static final Set<String> PRESERVED_ERROR_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
@@ -334,7 +334,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         if ("failed".equals(observation.status())) {
             // 上游可读原因透传；额度/内容政策信号按 §5 保留既有码（去字幕分类链同款：
-            // 版权 → 内容政策 → 额度 → 兜底 1049）
+            // 版权 → 内容政策 → 额度 → 兜底 1050）
             String message = observation.upstreamMessage() != null && !observation.upstreamMessage().isEmpty()
                     ? observation.upstreamMessage() : "智能抠像任务失败";
             String code = classifyUpstreamFailure(observation.upstreamCode(), observation.upstreamMessage());
@@ -368,7 +368,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 逐段续租先例的单产物形态；续租未命中即中止——任务已被新 worker 接管或已终态，本
      * worker 静默退出）→ 立即下载转存（火山 video_url 仅 24h 有效，官方明确「请及时下载
      * 保存」；下载失败 = 整体失败，无 Asset 行落库不留半成品资产悬挂——异常上抛由 handle
-     * 归并 1049）→ 单事务建 Asset（type=video / source='generated'）+ 契约 result 三键
+     * 归并 1050）→ 单事务建 Asset（type=video / source='generated'）+ 契约 result 三键
      * （video_url=转存后地址 / resolution / duration）回传 → 终态 succeeded。
      */
     private void publishResult(ClaimedVideoMattingJobDto claim,
@@ -531,7 +531,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
     /**
      * 失败码归一（契约）：§5 分类信号（额度/内容政策）保留既有码，其余一律归并兜底
-     * video_matting_failed（1049）。
+     * video_matting_failed（1050）。
      */
     private static String resolveFailCode(Exception e) {
         if (e instanceof VideoMattingError vm && PRESERVED_ERROR_CODES.contains(vm.getCode())) {
@@ -542,7 +542,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
     /**
      * 上游任务 failed 的错误码分类（§5 优先级；去字幕分类链同款：
-     * 版权 → 内容政策 → 额度 → 兜底 1049）。
+     * 版权 → 内容政策 → 额度 → 兜底 1050）。
      */
     private static String classifyUpstreamFailure(String upstreamCode, String upstreamMessage) {
         String text = (upstreamCode != null ? upstreamCode : "") + " "

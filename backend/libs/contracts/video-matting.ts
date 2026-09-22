@@ -18,7 +18,7 @@ import { z } from "zod";
    24h 有效）→ 落对象存储公开读 → 建产物 Asset → 终态 succeeded，video_url /
    resolution / duration 按本文件 result 契约跨进程回传，前端完成事件驱动移除任务占位卡、
    就地回填普通成品视频卡（一对一输出，ADR-0112）；失败时落 failed 与既有错误码投影
-   （兜底 video_matting_failed，数值 1049——1048 已由音频截取占用），无 worker 级自动
+   （兜底 video_matting_failed，数值 1050——1049 已由 !820 插帧先行合入占用，让号取 1050），无 worker 级自动
    重试，用户在任务占位卡手动重试并沿用冻结 input。执行面（消费者、处理器、领取 SQL、
    终态收口）由 worker 票按附录 C 触点注册，创建入口行为由创建入口票承载。 */
 
@@ -252,7 +252,7 @@ export const VIDEO_MATTING_MAX_DURATION_MS = 10 * 60 * 1000;
  *  定值在 worker 契约 VideoMattingContract.MAX_RESULT_BYTES（审查修复 P2——家族字节数组
  *  转存路径 200MB 与堆绑死，成品可超，故走流式并单列上限）。 */
 
-/** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_VIDEO_MATTING_FAILED=1049，
+/** 执行面错误码归并口径（数值码注册在 error-codes.ts ERROR_VIDEO_MATTING_FAILED=1050，
  *  TS 侧常量单源在 error-codes.ts，本文件不重复定义——video_scene_split / video-enhance
  *  同款）：三类映射——① 网关错误（HTTP 非 2xx / 成功态 error 信封 / 提交 SocketTimeout）
  *  复用既有通用码分类链（额度 1001 / 内容 1018 / 版权 1038 / provider_failed 1011 /
@@ -260,6 +260,6 @@ export const VIDEO_MATTING_MAX_DURATION_MS = 10 * 60 * 1000;
  *  对象节，错误信封口径 = 家族先例而非本 PDF）；② 火山任务失败（轮询 status=failed，
  *  error 对象 code / message / param / type——TaskError / ApiError）与 ③ 转存失败
  *  （result.video_url 24h 临时链接 → 自家 TOS 失败）统一归并本工具兜底码
- *  video_matting_failed（1049，双模式共享一码、错误信息透传区分——segment-scenes 单码
+ *  video_matting_failed（1050，双模式共享一码、错误信息透传区分——segment-scenes 单码
  *  家族口径），无 worker 级自动重试，上游可读原因随 message 透传前端投影，用户手动
  *  重试沿用冻结 input。 */

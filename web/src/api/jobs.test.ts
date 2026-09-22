@@ -88,7 +88,7 @@ describe('createVideoMatting', () => {
       'fetch',
       vi.fn().mockResolvedValue(
         new Response(
-          JSON.stringify({ code: 1049, msg: '智能抠像失败，请重试', data: null }),
+          JSON.stringify({ code: 1050, msg: '智能抠像失败，请重试', data: null }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ),
       ),

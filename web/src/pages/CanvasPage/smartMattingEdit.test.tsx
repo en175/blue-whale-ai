@@ -9,7 +9,7 @@
    先退会话再建任务占位卡（target_node_id 取占位卡、模式展示名标题、生成中骨架、
    smartMatting 身份）、client_token 每次发送/重试新生成、job_id 回写后轮询、飞行期
    发送钮防重复提交；契约 strict：WEBM 形态不带 background_color 键、MP4 形态必带。
-   任务失败占位卡转失败态（1049 兜底文案），重试按钮按冻结参数原参数重发。轮询终态
+   任务失败占位卡转失败态（1050 兜底文案），重试按钮按冻结参数原参数重发。轮询终态
    succeeded（IKHKAC 完成回填）：占位卡就地转普通成品视频卡（src/assetId/宽高时长取
    产物、标题保持模式展示名、按产物格式冻结 transparentOutput 透明标记供视频区垫棋盘格、
    清掉 smartMatting 身份——结果卡不记抠像身份、选中开普通视频面板、可再发起全部视频
@@ -593,18 +593,18 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
 });
 
 describe('IKHK9N 轮询终态与失败重试', () => {
-  it('轮询终态 failed：占位卡转失败态（1049 兜底文案），重试按冻结参数原参数重发 + 新 client_token', async () => {
+  it('轮询终态 failed：占位卡转失败态（1050 兜底文案），重试按冻结参数原参数重发 + 新 client_token', async () => {
     apiMocks.createVideoMatting.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
     apiMocks.fetchJobStatus.mockResolvedValueOnce({
       job_id: 'j1', status: 'failed', progress: 1,
-      error: { code: 1049 },
+      error: { code: 1050 },
     });
     await renderPage();
     await enterSmartMatting('portrait');
     await sendSmartMatting();
     const failed = placeholderNode()!;
     expect(failed.data.genStatus).toBe('failed');
-    // W 票错误码面：1049 →「智能抠像失败，请重试」（msg 缺失走本地兜底）
+    // W 票错误码面：1050 →「智能抠像失败，请重试」（msg 缺失走本地兜底）
     expect(failed.data.errorText).toBe('智能抠像失败，请重试');
 
     // 重试：lastInput（源素材+绑定+模式/格式）原样重发创建接口（新 job、新 client_token）
