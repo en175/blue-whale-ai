@@ -160,7 +160,7 @@ describe('IKHSFF 发送前保存失败拦截', () => {
       source_asset_id: '5',
       target_node_id: draftId,
       fps: 120,
-    });
+    }, { silent: true });
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(dataOf(draftId).jobId).toBe('j2');

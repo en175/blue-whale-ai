@@ -37,7 +37,7 @@ import static org.mockito.Mockito.*;
 /**
  * VideoFrameInterpolationJobProcessor 单测（IKHLKJ，父需求 IKHLES）。
  * <p>
- * 覆盖：异步两段式状态机（submit 存 task_id → markVideoSubmitted + scheduleNext / poll
+ * 覆盖：异步两段式状态机（submit 存 task_id → markProviderSubmitted + scheduleNext / poll
  * processing 续排 / 轮询超限 720≈60 分钟 / completed 立即转存发布——官方 duration、源宽高近似、
  * resolution/fps 随发布 payload / failed 归 1049 + 上游原因透传）、input 业务键兜底校验
  * （含整型 fps 三档）、凭证缺失与 **per-job 凭证隔离**、§5 信号保留与兜底归并、瞬时轮询错误
@@ -265,19 +265,19 @@ class VideoFrameInterpolationJobProcessorTest {
     // ========== submit 相：参数 + 状态机（出站 JSON 映射在客户端测试钉） ==========
 
     @Test
-    @DisplayName("submit：整型 fps 透传 → markVideoSubmitted 存 task_id + scheduleNext(5s)")
+    @DisplayName("submit：整型 fps 透传 → markProviderSubmitted 存 task_id + scheduleNext(5s)")
     void submitTransportsFpsAndSchedulesNext() {
         stubSubmitClaim(input(120));
         stubSourceAsset(1920, 1080);
         when(interpolateVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4", 120))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
 
         processor.handle("100");
 
         verify(interpolateVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4", 120);
-        verify(stateMachine).markVideoSubmitted("100", "worker-1", 5L, "amk-task-1");
+        verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -292,7 +292,7 @@ class VideoFrameInterpolationJobProcessorTest {
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(interpolateVideoClient.submit("sk-frozen-token", "https://example.com/src.mp4", 60))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
                 .thenReturn(true);
         processor.handle("100");
 
@@ -306,7 +306,7 @@ class VideoFrameInterpolationJobProcessorTest {
         when(interpolateVideoClient.poll("sk-other-token", "amk-task-2"))
                 .thenReturn(new InterpolateVideoTaskObservation("processing", null, null, null, null,
                         null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("200"), eq("worker-1"), eq(6L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("200"), eq("worker-1"), eq(6L), anyInt()))
                 .thenReturn(true);
         processor.handle("200");
 
@@ -315,13 +315,13 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
-    @DisplayName("markVideoSubmitted 守卫未命中（stale worker）→ 不自投下一步")
+    @DisplayName("markProviderSubmitted 守卫未命中（stale worker）→ 不自投下一步")
     void submitGuardMissed_noScheduleNext() {
         stubSubmitClaim(input(60));
         stubSourceAsset(1920, 1080);
         when(interpolateVideoClient.submit(anyString(), anyString(), anyInt()))
                 .thenReturn("amk-task-1");
-        when(stateMachine.markVideoSubmitted(anyString(), anyString(), anyLong(), anyString()))
+        when(stateMachine.markProviderSubmitted(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(false);
 
         processor.handle("100");
@@ -377,18 +377,18 @@ class VideoFrameInterpolationJobProcessorTest {
     // ========== poll 相：状态机 ==========
 
     @Test
-    @DisplayName("poll processing → rescheduleVideoPoll + scheduleNext(5s)（每步释放租约 + 自投驱动下一步）")
+    @DisplayName("poll processing → rescheduleProviderPoll + scheduleNext(5s)（每步释放租约 + 自投驱动下一步）")
     void pollProcessing_reschedules() {
         stubPollClaim(input(60), 3);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new InterpolateVideoTaskObservation("processing", null, null, null, null,
                         null, null));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -405,7 +405,7 @@ class VideoFrameInterpolationJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED);
-        verify(stateMachine, never()).rescheduleVideoPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
@@ -416,12 +416,12 @@ class VideoFrameInterpolationJobProcessorTest {
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 视频插帧任务查询超时"));
-        when(stateMachine.rescheduleVideoPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
                 .thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).rescheduleVideoPoll("100", "worker-1", 5L, 0);
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

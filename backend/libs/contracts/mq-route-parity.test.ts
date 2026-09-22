@@ -35,7 +35,8 @@ const mqRouteJava = readFileSync(
 );
 
 /** 路由注册总数（IKHKMR）：与 EXPECTED_ROUTES 清单互锁的唯一计数源——只改清单不改此数
- * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。 */
+ * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。
+ * 14 = 13（IKHKMR 钉死值）+ 视频插帧 VIDEO_FRAME_INTERPOLATION（IKHLK3）。 */
 const EXPECTED_ROUTE_COUNT = 14;
 
 /** 入口清单（项数须恒等于 EXPECTED_ROUTE_COUNT）↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */

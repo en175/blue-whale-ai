@@ -1203,7 +1203,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @DisplayName("publishVideoFrameInterpolationResult: asset + 终态日志 payload 带官方 result 键（IKHLKJ）")
     void publishVideoFrameInterpolationResult_happyPath() {
         // given
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
         when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             AssetEntity asset = (AssetEntity) invocation.getArgument(0);
             asset.setId(910L); // 模拟 DB 自增
@@ -1259,7 +1259,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("publishVideoFrameInterpolationResult: stale token / 已取消 → false（不落资产，迟到结果不复活）")
     void publishVideoFrameInterpolationResult_staleToken() {
-        when(jobMapper.publishMediaExtractGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
 
         PublishVideoFrameInterpolationDto input = new PublishVideoFrameInterpolationDto(
                 "300", "42", "9", "worker-1", 5L,
