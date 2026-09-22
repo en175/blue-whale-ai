@@ -69,12 +69,14 @@ export class VideoFrameInterpolationsController {
   }
 
   /** 恢复查询（IKHSFE）：GET .../current?target_node_id=xxx。只挑契约单键透传，判定与投影
-   *  归 service.findCurrent（契约口径见 video-frame-interpolation.ts 恢复查询节）。 */
+   *  归 service.findCurrent（契约口径见 video-frame-interpolation.ts 恢复查询节）。
+   *  query 空入参防御在 service 判定入口（safeParse(query ?? {})）单点收口：Nest @Query()
+   *  无查询串时注入空对象，controller 不再做默认值双重防御（IKHSFE review 修订）。 */
   @Get(VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT)
   async findCurrent(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
-    @Query() query: Record<string, string> = {},
+    @Query() query: Record<string, string>,
   ) {
     return this.videoFrameInterpolations.findCurrent(user.userId, projectId, {
       [VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId]:
