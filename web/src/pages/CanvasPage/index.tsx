@@ -6016,7 +6016,7 @@ export default function CanvasPage() {
     asset: { id?: string; url?: string; type?: string; width?: number | null; height?: number | null } | null | undefined,
     fallbackType: 'image' | 'video' | 'audio',
   ) => {
-    if (!asset?.id || !asset.url) return;
+    if (!asset?.id || !asset.url || typeof upsertAssets !== 'function') return;
     const type = asset.type === 'audio' || asset.type === 'video' || asset.type === 'image'
       ? asset.type
       : fallbackType;
