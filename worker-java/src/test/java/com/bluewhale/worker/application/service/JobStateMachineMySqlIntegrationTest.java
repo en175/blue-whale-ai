@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
@@ -391,6 +392,135 @@ class JobStateMachineMySqlIntegrationTest {
                     WorkerClock.now().minusSeconds(10));
 
             assertThat(service.claimImageJobById(String.valueOf(id), "w")).isEmpty();
+        }
+    }
+
+    // ========== 1b. audio_trim claim 真库路径（IKHPK9） ==========
+
+    /**
+     * IKHPK9：audio_trim 的 claim 此前传 {@code List.of()} 给参数化
+     * {@code findCandidateByTypeAndSources}，而 MyBatis 对空集合什么都不输出，渲染出
+     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL——语法错误只在
+     * **真执行 SQL** 时暴露，golden mirror（Mockito 桩）永远拦不住，故本组必须跑真库。
+     */
+    @Nested
+    @DisplayName("audio_trim claim 真库路径")
+    class AudioTrimClaimTests {
+
+        @Test
+        @DisplayName("queued 行 → claim 成功，token+1，DB 转 processing")
+        void claimAudioTrim_queued_success() {
+            long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10));
+
+            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+                    String.valueOf(id), "worker-1");
+
+            assertThat(result).isPresent();
+            assertThat(result.get().fencingToken()).isEqualTo(1L);
+            GenerationJobEntity row = readJob(id);
+            assertThat(row.getStatus()).isEqualTo("processing");
+            assertThat(row.getLeaseOwner()).isEqualTo("worker-1");
+            assertThat(row.getFencingToken()).isEqualTo(1L);
+        }
+
+        @Test
+        @DisplayName("source 非 dock（无白名单）→ 仍能 claim（锁死不套 source 白名单语义）")
+        void claimAudioTrim_anySource_success() {
+            long id = seedJob(7L, "audio_trim", "unexpected_source", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10));
+
+            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+                    String.valueOf(id), "worker-1");
+
+            assertThat(result).isPresent();
+            assertThat(readJob(id).getStatus()).isEqualTo("processing");
+        }
+
+        @Test
+        @DisplayName("processing + lease null → 孤儿接管，token+1")
+        void claimAudioTrim_orphanNullLease_success() {
+            long id = seedJob(7L, "audio_trim", "dock", "processing", 4L,
+                    WorkerClock.now().minusSeconds(10));
+            jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
+
+            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+                    String.valueOf(id), "worker-new");
+
+            assertThat(result).isPresent();
+            assertThat(result.get().fencingToken()).isEqualTo(5L);
+        }
+
+        @Test
+        @DisplayName("type 不匹配（audio）→ 候选排除 → empty")
+        void claimAudioTrim_wrongType_empty() {
+            long id = seedJob(7L, "audio", "dock", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10));
+
+            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("processing + 租约未过期 → 非孤儿 → empty")
+        void claimAudioTrim_validLease_empty() {
+            long id = seedJob(7L, "audio_trim", "dock", "processing", 0L,
+                    WorkerClock.now().minusSeconds(10));
+            jdbc.update("""
+                    UPDATE generation_jobs SET lease_owner='other', lease_expires_at=?
+                    WHERE id=?
+                    """,
+                    WorkerClock.now().plusMinutes(5), id);
+
+            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("processing + 租约已过期 → 孤儿接管，token+1")
+        void claimAudioTrim_expiredLease_success() {
+            long id = seedJob(7L, "audio_trim", "dock", "processing", 2L,
+                    WorkerClock.now().minusSeconds(10));
+            jdbc.update("""
+                    UPDATE generation_jobs SET lease_owner='stale', lease_expires_at=?
+                    WHERE id=?
+                    """,
+                    WorkerClock.now().minusMinutes(1), id);
+
+            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+                    String.valueOf(id), "worker-fresh");
+
+            assertThat(result).isPresent();
+            assertThat(result.get().fencingToken()).isEqualTo(3L);
+        }
+
+        @Test
+        @DisplayName("富投影：providerTaskId / pollCount / progress 如实带回")
+        void claimAudioTrim_projection() {
+            long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10));
+            jdbc.update("""
+                    UPDATE generation_jobs SET poll_count=7, progress=33,
+                      provider_task_id='pt-42', input='{"start_time":"1.5"}'
+                    WHERE id=?
+                    """, id);
+
+            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+                    String.valueOf(id), "worker-1");
+
+            assertThat(result).isPresent();
+            ClaimedAudioTrimJobDto dto = result.get();
+            assertThat(dto.fencingToken()).isEqualTo(1L);
+            assertThat(dto.pollCount()).isEqualTo(7);
+            assertThat(dto.progress()).isEqualTo(33);
+            assertThat(dto.providerTaskId()).isEqualTo("pt-42");
+        }
+
+        @Test
+        @DisplayName("next_action_at 未来 → 候选过滤排除 → empty")
+        void claimAudioTrim_futureNextAction_empty() {
+            long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
+                    WorkerClock.now().plusMinutes(5));
+
+            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
         }
     }
 

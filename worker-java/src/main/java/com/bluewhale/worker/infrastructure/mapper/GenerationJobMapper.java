@@ -247,6 +247,42 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
+    // ========== 音频截取路径（IKHPK9） ==========
+
+    /**
+     * 领取 audio_trim 作业：候选查询（不套 source 白名单，对齐 findAudioCandidate /
+     * findMediaExtractCandidate）。
+     * <p>
+     * 与图片路径的参数化 {@code findCandidateByTypeAndSources} 不同，本方法**不拼接 source
+     * 条件**：audio_trim 的唯一创建入口落库 {@code source='dock'}，但按 IKCR78 / IKC9EJ
+     * 教训，套白名单会漏掉非预期来源的真卡任务。
+     * <p>
+     * 此前实现传 {@code List.of()} 给参数化方法来表达同一语义，而 MyBatis 对空集合
+     * **什么都不输出**（连 open / close 都不输出），渲染出
+     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL，claim 恒抛
+     * 语法错误，任务永久卡 queued（IKHPK9）。专属查询是「不套白名单」在本仓的既有表达方式。
+     * <p>
+     * WHERE id=? AND type='audio_trim' AND is_delete=false AND next_action_at&lt;=now
+     * AND (queued OR processing+孤儿)
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'audio_trim'
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findAudioTrimCandidate(@Param("jobId") Long jobId);
+
     // ========== 图片路径（blade-③ IKELJA） ==========
 
     /**
@@ -257,6 +293,17 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * image_enhance 路径（契约 §14）：type='image_enhance'，白名单单源 ['image_enhance']
      * （唯一创建入口 = 画布图片卡工具条，media_extract 的 source="dock" 同款专属来源值模式）。
      * 两路径仅 type / source 差异，其余条件逐字同 TS——故参数化共用，防逐字复制漂移。
+     * <p>
+     * ⚠️ {@code sources} **必须非空**。MyBatis 对空集合**什么都不输出**（连 {@code open} /
+     * {@code close} 的括号都不输出），渲染成
+     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL → MySQL 1064。
+     * 想表达「不套 source 白名单」**不要传 {@code List.of()}**，改用专属 type-only 查询：
+     * {@code findMediaExtractCandidate} / {@code findAudioCandidate} /
+     * {@code findAudioTrimCandidate} / {@code findVideoCandidate}（IKHPK9 教训：audio_trim 曾
+     * 传空列表，claim 恒抛语法错误、recovery 无限重投，任务永久卡 queued）。
+     * <p>
+     * 本方法**不加** {@code <if>} 兜空：那会让「空列表 = 静默不过滤」成为隐藏语义，误传空列表时
+     * source 过滤无声消失（漏真卡任务，IKC9EJ 同族风险）。
      */
     @Select("""
             <script>
