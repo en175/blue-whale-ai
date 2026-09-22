@@ -46,6 +46,7 @@ export {
   // ── 生成任务域错误码（字符串契约 + 数值表 + 信号 + 类型）──
   ERROR_ALL_OUTPUTS_FAILED,
   ERROR_AUDIO_GENERATION_FAILED,
+  ERROR_AUDIO_SPEED_FAILED,
   ERROR_AUDIO_TRIM_FAILED,
   ERROR_AUDIO_MIX_FAILED,
   ERROR_CONTENT_REJECTED,
@@ -292,6 +293,25 @@ export {
   type AudioTrimInput,
   type AudioTrimTimeRange,
 } from "./audio-trim.js";
+export {
+  AUDIO_SPEED_JOB_TYPE,
+  AUDIO_SPEED_SOURCE,
+  AUDIO_SPEED_INPUT_KEYS,
+  AUDIO_SPEED_MIN_SPEED,
+  AUDIO_SPEED_MAX_SPEED,
+  AUDIO_SPEED_STEP,
+  AUDIO_SPEED_SLIDER_MIN_POS,
+  AUDIO_SPEED_SLIDER_MID_POS,
+  AUDIO_SPEED_SLIDER_MAX_POS,
+  AUDIO_SPEED_SUBMIT_PATH,
+  AUDIO_SPEED_POLL_PATH_PREFIX,
+  roundAudioSpeed,
+  posToSpeed,
+  speedToPos,
+  audioSpeedInputSchema,
+  buildAudioSpeedInput,
+  type AudioSpeedInput,
+} from "./audio-speed.js";
 export {
   VOCAL_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_SOURCE,
