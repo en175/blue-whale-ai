@@ -19,6 +19,7 @@ import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -501,8 +502,8 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm?auth_key=...", "1080p", 65.5, null, null));
-        when(mediaRelay.persistStreaming("https://volc/out.webm?auth_key=...", "9",
-                VideoMattingContract.MAX_RESULT_BYTES))
+        when(mediaRelay.persistStreaming(eq("https://volc/out.webm?auth_key=..."), eq("9"),
+                eq(VideoMattingContract.MAX_RESULT_BYTES), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 123_456L, "0123456789abcdef0123456789abcdef"));
@@ -519,8 +520,8 @@ class VideoMattingJobProcessorTest {
         assertThat(renewCaptor.getValue().fencingToken()).isEqualTo(5L);
         assertThat(renewCaptor.getValue().progress()).isEqualTo(0);
         // URL 24h 有效：completed 后立即转存（同步链路，无续排）
-        verify(mediaRelay).persistStreaming("https://volc/out.webm?auth_key=...", "9",
-                VideoMattingContract.MAX_RESULT_BYTES);
+        verify(mediaRelay).persistStreaming(eq("https://volc/out.webm?auth_key=..."), eq("9"),
+                eq(VideoMattingContract.MAX_RESULT_BYTES), any());
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
         verify(stateMachine).publishVideoMattingResult(captor.capture());
@@ -547,7 +548,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.mp4", "1080p", null, null, null));
-        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
@@ -575,7 +576,81 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong(), any());
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    // ========== IKHSFD：转存全程持续续租 + 所有权丢失中止 ==========
+
+    /** mock 长转存：睡到外部中止或时限——模拟「下载/上传进行中」的受控长传输。 */
+    private static TosVideoMediaRelay.StoredVideo simulateLongTransfer(
+            org.mockito.invocation.InvocationOnMock invocation,
+            TosVideoMediaRelay.StoredVideo success) throws InterruptedException {
+        TosVideoMediaRelay.TransferAbortHandle handle =
+                invocation.getArgument(3);
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!handle.aborted() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        if (handle.aborted()) {
+            throw new TosVideoMediaRelay.TransferAbortedException(handle.reason());
+        }
+        return success;
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("长转存期间持续续租（IKHSFD）：心跳跨传输全程保持命中 → 正常发布一次，不落失败")
+    void longTransfer_keepsRenewingLease() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
+                "https://tos/out.webm", "generated/9/video/abc.webm",
+                "video/webm", 123_456L, "0123456789abcdef0123456789abcdef");
+        // 受控长传输：200ms（跨 ≥4 个 40ms 心跳周期），不真等分钟级
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(inv -> {
+                    Thread.sleep(200);
+                    return stored;
+                });
+        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        processor.leaseRenewIntervalMs = 40;
+
+        processor.handle("100");
+
+        // 首次续租 + 传输期心跳 ≥2 次：跨原单次续租窗口的所有权保持是本票要钉的行为
+        verify(stateMachine, atLeast(3)).updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class));
+        verify(stateMachine).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("转存期间租约被接管（心跳未命中，IKHSFD）→ 中止传输，本 worker 静默退出：不发布、不落失败、不覆盖新 worker 状态")
+    void leaseLostDuringTransfer_abortsAndSilentlyExits() throws Exception {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        // 首次续租命中（进入传输），此后未命中（recovery 已重新领取，新 fencing token 生效）
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenReturn(true, false, false, false, false);
+        TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
+                "https://tos/out.webm", "generated/9/video/abc.webm",
+                "video/webm", 1L, null);
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(inv -> simulateLongTransfer(inv, stored));
+        processor.leaseRenewIntervalMs = 40;
+
+        processor.handle("100");
+
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
@@ -592,7 +667,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong(), any());
     }
 
     @Test
@@ -606,7 +681,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong());
+        verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong(), any());
     }
 
     @Test
@@ -636,7 +711,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm", "1080p", 65.5, null, null));
-        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 1L, null));
@@ -655,7 +730,7 @@ class VideoMattingJobProcessorTest {
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
                         "https://volc/out.webm", "1080p", 65.5, null, null));
-        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong()))
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
                 .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
 
         processor.handle("100");

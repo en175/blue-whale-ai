@@ -386,7 +386,8 @@ public class TosVideoMediaRelay {
             return reason != null;
         }
 
-        String reason() {
+        /** 中止原因（未中止为 null）：调用方与测试透传日志用。 */
+        public String reason() {
             return reason;
         }
 

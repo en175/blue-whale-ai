@@ -25,6 +25,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * video_matting（智能抠像，火山 MediaKit 双端点人像/绿幕抠像）作业处理器（IKHK99，父规格
@@ -42,7 +46,8 @@ import java.util.Set;
  *   <li>providerTaskId!=null → 查询任务（两工具共用 tasks 查询）→ 瞬时错误
  *       rescheduleProviderPoll 续排（**同样受轮询上限约束**，超限归 1049——上游持续故障
  *       不得无限续排）；processing → 续排（超限 1049）；failed → 分类终态；
- *       completed → **转存前心跳续租（防单产物大文件下载+上传超 420s 租约）→ 立即下载
+ *       completed → **转存前续租 + 转存全程心跳续租 60s（IKHSFD，防大文件下载+上传跨
+ *       420s 租约窗被 recovery 孤儿重领；心跳未命中即中止传输静默退出）→ 立即下载
  *       转存自家 TOS（火山 video_url 仅 24h 有效）** → 建 Asset（type=video /
  *       source='generated'）→ 契约 result 三键回传 → 终态 succeeded</li>
  * </ol>
@@ -96,6 +101,21 @@ public class VideoMattingJobProcessor implements JobProcessor {
      */
     public static final int MAX_VIDEO_MATTING_POLLS = 720;
 
+    /**
+     * 结果转存期租约心跳周期 60s（IKHSFD）：claim 租约 420s 的 1/7——下载整段兜底 10 分钟 +
+     * TOS 上传全程持续续租，合法的长时间转存不被 recovery 当孤儿重复领取；心跳未命中（已被
+     * 接管/终态）即经 {@link TosVideoMediaRelay.TransferAbortHandle} 中止传输、本 worker 静默退出。
+     */
+    static final long RESULT_TRANSFER_LEASE_RENEW_INTERVAL_MS = 60_000;
+
+    /** 心跳定时器（daemon 单线程，进程级共享）：只承载转存期周期续租，无状态轮询。 */
+    private static final ScheduledExecutorService LEASE_HEARTBEAT_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "vmatt-lease-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
+
     private final JobStateMachineService stateMachine;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
@@ -103,6 +123,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
     private final TosVideoMediaRelay mediaRelay;
     private final GenerationMessageProducer producer;
     private final String workerId;
+
+    /** 心跳周期（包私有可覆写：测试注入亚秒级周期做确定性长传输回归，不真等 60s）。 */
+    long leaseRenewIntervalMs = RESULT_TRANSFER_LEASE_RENEW_INTERVAL_MS;
 
     public VideoMattingJobProcessor(
             JobStateMachineService stateMachine,
@@ -387,12 +410,28 @@ public class VideoMattingJobProcessor implements JobProcessor {
                 ? observation.durationSec() : sourceDurationSec;
 
         TosVideoMediaRelay.StoredVideo stored;
+        // 转存全程心跳续租（IKHSFD）：下载 + 上传可远超单次 420s 租约窗，心跳保持所有权；
+        // 未命中（已被接管/终态/DB 异常）即经中止句柄停下传输——旧 worker 不发布资产、
+        // 不覆盖终态，新 worker / recovery 兜底。首次续租已在上方完成，心跳首跳即一个周期后。
+        TosVideoMediaRelay.TransferAbortHandle abortHandle = new TosVideoMediaRelay.TransferAbortHandle();
+        ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(
+                () -> {
+                    if (!renewLeaseForResultTransfer(claim)) {
+                        abortHandle.abort("结果转存期租约未命中（已被接管/终态）");
+                    }
+                },
+                leaseRenewIntervalMs, leaseRenewIntervalMs, TimeUnit.MILLISECONDS);
         try {
             // 流式 + 本工具上限（审查修复 P2）：家族字节数组路径的 200MB 上限与堆绑死，而本工具
             // 源素材上限就是 200MB、成品为 10 分钟档重编码（WEBM 带 alpha 可更大）——走
             // persistStreaming（下载落临时文件、上传流式读），上限按契约 MAX_RESULT_BYTES
             stored = mediaRelay.persistStreaming(observation.videoUrl(), claim.user_id(),
-                    VideoMattingContract.MAX_RESULT_BYTES);
+                    VideoMattingContract.MAX_RESULT_BYTES, abortHandle);
+        } catch (TosVideoMediaRelay.TransferAbortedException e) {
+            // 外部信号中止（租约已失）≠ 任务失败：本 worker 静默退出，不落失败终态——
+            // failVideoJob 的旧 fencing token 会被守卫拒绝，任务由新 worker / recovery 继续
+            log.warn("[video_matting] 结果转存被中止，本 worker 静默退出 jobId={}: {}", claim.id(), e.getMessage());
+            return;
         } catch (Exception e) {
             // 下载/转存失败 → 整体失败（契约口径）：上抛由 handle 归并兜底码；无 Asset 行
             // 落库，不留半成品资产悬挂（TOS 孤儿对象与家族先例同口径）
@@ -401,6 +440,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
                     "抠像结果视频下载转存失败: " + e.getMessage());
             transferFailure.initCause(e);
             throw transferFailure;
+        } finally {
+            // 成功、失败、中止都停心跳，释放定时资源
+            heartbeat.cancel(false);
         }
         log.info("[video_matting] 转存完成 jobId={} storageKey={} size={} resolution={}",
                 claim.id(), stored.storageKey(), stored.size(), observation.resolution());
@@ -429,10 +471,10 @@ public class VideoMattingJobProcessor implements JobProcessor {
     }
 
     /**
-     * 结果转存前心跳续租（场景切分 renewLeaseForSegmentTransfer 的单产物形态：一次调用
-     * 同时续租〔lease_expires_at 顺延〕+ 保持进度不倒退）。守卫未命中或 DB 异常均返回
-     * false：任务已被新 worker 接管（或已终态），本 worker 静默退出，已转存 TOS 对象成
-     * 孤儿与家族口径一致（无 Asset 行、不留半成品悬挂）。
+     * 结果转存期续租（转存前一次 + 全程心跳每跳复用，IKHSFD）：一次调用同时续租
+     * 〔lease_expires_at 顺延〕+ 保持进度不倒退。守卫未命中或 DB 异常均返回 false：
+     * 任务已被新 worker 接管（或已终态），调用方据此中止转存——本 worker 静默退出，
+     * 已转存 TOS 对象成孤儿与家族口径一致（无 Asset 行、不留半成品悬挂）。
      */
     private boolean renewLeaseForResultTransfer(ClaimedVideoMattingJobDto claim) {
         try {
