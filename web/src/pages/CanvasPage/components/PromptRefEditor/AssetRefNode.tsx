@@ -17,7 +17,7 @@ import {
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AlertTriangle, AudioLines } from 'lucide-react';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from '../mediaChip.module.css';
 
 export type SerializedAssetRefNode = Spread<
@@ -123,8 +123,8 @@ function AssetRefChipComponent({
       }}
       onMouseLeave={closePreview}
     >
-      {info?.url && isImage && <img className={styles.mediaChipThumb} src={info.url} crossOrigin={remoteImageCrossOrigin(info.url)} alt="" />}
-      {info?.url && info.mediaType === 'video' && <video className={styles.mediaChipThumb} src={info.url} muted playsInline preload="metadata" />}
+      {info?.url && isImage && <img className={styles.mediaChipThumb} src={resolveMediaSrc(info.url)} crossOrigin={remoteImageCrossOrigin(info.url)} alt="" />}
+      {info?.url && info.mediaType === 'video' && <video className={styles.mediaChipThumb} src={resolveMediaSrc(info.url)} muted playsInline preload="metadata" />}
       {info?.mediaType === 'audio' && <span className={styles.mediaChipAudioIcon} aria-hidden="true">♫</span>}
       <span className={styles.mediaChipLabel}>{label ?? '素材?'}</span>
       {previewOpen && info && (
@@ -137,8 +137,8 @@ function AssetRefChipComponent({
             contentEditable={false}
             data-testid="asset-ref-preview"
           >
-            {isImage && info.url && <img src={info.url} crossOrigin={remoteImageCrossOrigin(info.url)} alt="" />}
-            {info.mediaType === 'video' && <video src={info.url} muted autoPlay loop playsInline />}
+            {isImage && info.url && <img src={resolveMediaSrc(info.url)} crossOrigin={remoteImageCrossOrigin(info.url)} alt="" />}
+            {info.mediaType === 'video' && <video src={resolveMediaSrc(info.url)} muted autoPlay loop playsInline />}
             {info.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
             <div className={styles.chipPreviewName}>{info.name}</div>
           </div>

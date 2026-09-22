@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, useReactFlow, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Plus, Crosshair, RefreshCw, Trash2, AudioLines } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import { commitCardName } from '../cardName';
 import CanvasContextMenu from '../CanvasContextMenu';
@@ -1057,8 +1057,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
       {chipPreview && createPortal(
         <div className={`${chipStyles.chipPreview} ${chipPreview.below ? chipStyles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
-          {chipPreview.chip.dataset.mediaType === 'image' && <img src={chipPreview.chip.dataset.mediaUrl} crossOrigin={remoteImageCrossOrigin(chipPreview.chip.dataset.mediaUrl)} alt="" />}
-          {chipPreview.chip.dataset.mediaType === 'video' && <video src={chipPreview.chip.dataset.mediaUrl} muted autoPlay loop playsInline />}
+          {chipPreview.chip.dataset.mediaType === 'image' && <img src={resolveMediaSrc(chipPreview.chip.dataset.mediaUrl)} crossOrigin={remoteImageCrossOrigin(chipPreview.chip.dataset.mediaUrl)} alt="" />}
+          {chipPreview.chip.dataset.mediaType === 'video' && <video src={resolveMediaSrc(chipPreview.chip.dataset.mediaUrl)} muted autoPlay loop playsInline />}
           {chipPreview.chip.dataset.mediaType === 'audio' && <div className={chipStyles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
           <div className={chipStyles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
         </div>,

@@ -8,7 +8,7 @@ import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageO
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
@@ -411,9 +411,9 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                         <ImageOff size={16} strokeWidth={1.8} color="#666" />
                       </div>
                     ) : ref.type === 'video' ? (
-                      <video src={ref.src} className={styles.refThumbImg} muted playsInline />
+                      <video src={resolveMediaSrc(ref.src)} className={styles.refThumbImg} muted playsInline />
                     ) : (
-                      <img src={ref.src} crossOrigin={remoteImageCrossOrigin(ref.src)} alt="参考图" className={styles.refThumbImg} />
+                      <img src={resolveMediaSrc(ref.src)} crossOrigin={remoteImageCrossOrigin(ref.src)} alt="参考图" className={styles.refThumbImg} />
                     )}
                     <button
                       className={styles.refRemove}

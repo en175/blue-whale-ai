@@ -24,7 +24,7 @@ import {
 } from '@/api/material';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '@/components/ConfirmModal';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
 
@@ -228,11 +228,11 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
         <div className={styles.detailPreviewPane}>
           {asset.URL ? (
             asset.AssetType === 'Video' ? (
-              <video className={styles.detailMedia} src={asset.URL} controls autoPlay playsInline />
+              <video className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} controls autoPlay playsInline />
             ) : asset.AssetType === 'Audio' ? (
-              <audio className={styles.detailMedia} src={asset.URL} controls />
+              <audio className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} controls />
             ) : (
-              <img className={styles.detailMedia} src={asset.URL} crossOrigin={remoteImageCrossOrigin(asset.URL)} alt={asset.Name} draggable={false} />
+              <img className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} crossOrigin={remoteImageCrossOrigin(asset.URL)} alt={asset.Name} draggable={false} />
             )
           ) : (
             <div className={styles.detailEmpty}>媒体文件不可用</div>
@@ -284,7 +284,7 @@ function MeasuredThumb({
   return (
     <div className={`${styles.assetThumb} ${measured ? styles.assetThumbMeasured : ''}`}>
       <img
-        src={src}
+        src={resolveMediaSrc(src)}
         crossOrigin={remoteImageCrossOrigin(src)}
         alt={alt}
         loading="lazy"

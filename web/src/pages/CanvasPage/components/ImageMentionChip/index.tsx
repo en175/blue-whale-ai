@@ -12,7 +12,7 @@ import {
   useInteractions,
 } from '@floating-ui/react';
 import { X } from 'lucide-react';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface ImageMentionChipProps {
@@ -50,7 +50,7 @@ export function ImageMentionChip({ url, label, title, onRemove }: ImageMentionCh
         aria-label={`查看原图：${title ?? label}`}
         {...getReferenceProps()}
       >
-        <img className={styles.thumb} src={url} crossOrigin={remoteImageCrossOrigin(url)} alt="" />
+        <img className={styles.thumb} src={resolveMediaSrc(url)} crossOrigin={remoteImageCrossOrigin(url)} alt="" />
         <span className={styles.label} title={title ?? label}>{label}</span>
         {onRemove && (
           <button
@@ -74,7 +74,7 @@ export function ImageMentionChip({ url, label, title, onRemove }: ImageMentionCh
             role="tooltip"
             {...getFloatingProps()}
           >
-            <img src={url} crossOrigin={remoteImageCrossOrigin(url)} alt={title ?? label} />
+            <img src={resolveMediaSrc(url)} crossOrigin={remoteImageCrossOrigin(url)} alt={title ?? label} />
           </span>
         </FloatingPortal>
       )}

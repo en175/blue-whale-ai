@@ -1,3 +1,5 @@
+import { resolveMediaSrc } from '@/utils/remoteImageCors';
+
 /**
  * 资产库媒体展示地址。
  *
@@ -9,5 +11,5 @@ export function assetMediaDisplay(
   url: string,
   reloadGeneration = 0,
 ): { src: string; nodeKey: string } {
-  return { src: url, nodeKey: `${url}::${reloadGeneration}` };
+  return { src: resolveMediaSrc(url), nodeKey: `${url}::${reloadGeneration}` };
 }

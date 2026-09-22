@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import {
   fetchSkillContent,
@@ -492,7 +492,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                         </div>
                       )}
                     </div>
-                    <img className={styles.coverImg} src={s.cover_url!} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
+                    <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
@@ -556,7 +556,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                         </div>
                       )}
                     </div>
-                    <img className={styles.coverImg} src={s.cover_url!} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
+                    <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <div className={styles.cardTitleRow}>
                         <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
