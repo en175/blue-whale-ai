@@ -8,6 +8,12 @@ import com.volcengine.tos.comm.common.ACLType;
 import com.volcengine.tos.model.object.ObjectMetaRequestOptions;
 import com.volcengine.tos.model.object.PutObjectACLInput;
 import com.volcengine.tos.model.object.PutObjectInput;
+import com.volcengine.tos.model.object.PreSignedURLInput;
+import okhttp3.Call;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,6 +87,16 @@ public class TosVideoMediaRelay {
                 t.setDaemon(true);
                 return t;
             });
+
+    // SDK 仅负责签名；逐请求持有 Call，失租时能取消 socket 写入和响应等待。
+    private static final OkHttpClient UPLOAD_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .readTimeout(Duration.ofSeconds(60))
+            .writeTimeout(Duration.ofSeconds(60))
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .build();
 
     private final TOSV2 client;
     private final String bucket;
@@ -281,33 +297,22 @@ public class TosVideoMediaRelay {
                 }
                 String md5 = ContentDigest.md5Hex(tempFile);
 
-                // 3. 上传（与字节数组路径同 key 格式、同 ACL；deadline 已撤防，中止只看外部信号）
+                // 3. 同 key / mime / ACL；ACL 随 PUT 原子提交，避免上传后再发不可取消的 ACL 请求。
                 String extension = videoExtension(mime);
                 String uuid = UUID.randomUUID().toString().replace("-", "");
                 String storageKey = "generated/" + userId + "/video/" + uuid + "." + extension;
-                try (InputStream fileIn = watchdog.guarding(tempFile)) {
-                    ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
-                            .setHeaders(Map.of("Content-Type", mime));
-                    PutObjectInput putInput = new PutObjectInput()
-                            .setBucket(bucket)
-                            .setKey(storageKey)
-                            .setContent(fileIn)
-                            .setContentLength(size)
-                            .setOptions(options);
-                    client.putObject(putInput);
-                } catch (Exception e) {
-                    if (watchdog.isExternallyAborted()) {
-                        throw new TransferAbortedException(watchdog.externalReason());
-                    }
-                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                            "生成视频转存失败: " + e.getMessage(), e);
-                }
-
-                PutObjectACLInput aclInput = new PutObjectACLInput()
-                        .setBucket(bucket)
-                        .setKey(storageKey)
-                        .setAcl(ACLType.ACL_PUBLIC_READ);
-                client.putObjectAcl(aclInput);
+                watchdog.requireNotAborted();
+                Map<String, String> headers = Map.of(
+                        "Content-Type", mime, "x-tos-acl", "public-read");
+                var signed = client.preSignedURL(new PreSignedURLInput()
+                        .setHttpMethod("PUT").setBucket(bucket).setKey(storageKey)
+                        .setExpires(3600).setHeader(headers).setSignedAllHeaders(true));
+                Request.Builder upload = new Request.Builder().url(signed.getSignedUrl())
+                        .put(RequestBody.create(tempFile.toFile(), okhttp3.MediaType.parse(mime)));
+                headers.forEach(upload::header);
+                signed.getSignedHeader().forEach(upload::header);
+                watchdog.upload(UPLOAD_CLIENT.newCall(upload.build()));
+                watchdog.requireNotAborted();
 
                 log.info("流式转存完成 storageKey={} size={} mime={}", storageKey, size, mime);
                 String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
@@ -367,7 +372,7 @@ public class TosVideoMediaRelay {
 
     /**
      * 传输中止句柄（IKHSFC 建通道，IKHSFD 消费）：调用方（如转存期租约心跳）在确认应放弃
-     * 本次传输时 {@link #abort(String)}；传输内部接线后到点主动 close 响应流 / 拦截上传流读，
+     * 本次传输时 {@link #abort(String)}；传输内部接线后到点主动 close 响应流 / 取消上传 HTTP 请求，
      * 以 {@link TransferAbortedException} 退出。接线前触发同样生效（wire 时补触发）。
      */
     public static final class TransferAbortHandle {
@@ -376,9 +381,12 @@ public class TosVideoMediaRelay {
 
         /** 请求中止（幂等，首次生效；可从任意线程调用）。 */
         public void abort(String reason) {
-            if (this.reason != null) return;
-            this.reason = reason;
-            Runnable wired = action;
+            Runnable wired;
+            synchronized (this) {
+                if (this.reason != null) return;
+                this.reason = java.util.Objects.requireNonNull(reason);
+                wired = action;
+            }
             if (wired != null) wired.run();
         }
 
@@ -391,9 +399,13 @@ public class TosVideoMediaRelay {
             return reason;
         }
 
-        void wire(Runnable action) {
+        synchronized void wire(Runnable action) {
             this.action = action;
             if (reason != null) action.run();
+        }
+
+        synchronized void unwire() {
+            action = null;
         }
     }
 
@@ -408,7 +420,7 @@ public class TosVideoMediaRelay {
      * 传输看门狗（IKHSFC）：截止到期或外部句柄触发时主动 close 正在读取的响应流，打断阻塞中的
      * read（JDK HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read
      * 返回后执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
-     * {@link #translateReadFailure} 归因；上传侧经 {@link #guarding} 包装流与外部中止状态检查
+     * {@link #translateReadFailure} 归因；上传侧经逐请求 Call.cancel 与外部中止状态检查
      * 同口径中止。每个 {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
      */
     private static final class StreamWatchdog implements AutoCloseable {
@@ -417,6 +429,7 @@ public class TosVideoMediaRelay {
         private volatile ScheduledFuture<?> timeoutTask;
         private volatile boolean timeoutAbort;
         private volatile boolean externalAbort;
+        private volatile Call activeUpload;
 
         StreamWatchdog(InputStream body, TransferAbortHandle handle) {
             this.body = body;
@@ -447,6 +460,8 @@ public class TosVideoMediaRelay {
 
         private void abortFromExternal() {
             externalAbort = true;
+            Call upload = activeUpload;
+            if (upload != null) upload.cancel();
             closeBodyQuietly();
         }
 
@@ -456,10 +471,6 @@ public class TosVideoMediaRelay {
             } catch (IOException ignored) {
                 // 对端已断/流已关：中止目的已达成
             }
-        }
-
-        boolean isExternallyAborted() {
-            return externalAbort;
         }
 
         String externalReason() {
@@ -480,38 +491,35 @@ public class TosVideoMediaRelay {
                     "生成视频下载失败: " + e.getMessage(), e);
         }
 
-        /** 上传流包装：read 前查外部中止（下载完成后 deadline 已撤防，中止只看外部信号）。 */
-        InputStream guarding(Path file) throws IOException {
-            InputStream delegate = Files.newInputStream(file);
-            return new InputStream() {
-                @Override
-                public int read() throws IOException {
-                    requireNotAborted();
-                    return delegate.read();
-                }
+        void requireNotAborted() {
+            if (externalAbort) throw new TransferAbortedException(externalReason());
+        }
 
-                @Override
-                public int read(byte[] b, int off, int len) throws IOException {
+        void upload(Call call) {
+            activeUpload = call;
+            try {
+                requireNotAborted();
+                try (Response response = call.execute()) {
                     requireNotAborted();
-                    return delegate.read(b, off, len);
-                }
-
-                private void requireNotAborted() throws IOException {
-                    if (externalAbort) {
-                        throw new IOException("传输已中止: " + externalReason());
+                    if (!response.isSuccessful()) {
+                        throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                                "生成视频转存失败: HTTP " + response.code());
                     }
                 }
-
-                @Override
-                public void close() throws IOException {
-                    delegate.close();
-                }
-            };
+            } catch (IOException e) {
+                requireNotAborted();
+                // 不带签名 URL / SDK 凭证进入用户错误或日志。
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频转存网络失败", e);
+            } finally {
+                activeUpload = null;
+            }
         }
 
         @Override
         public void close() {
             disarm();
+            if (handle != null) handle.unwire();
         }
     }
 

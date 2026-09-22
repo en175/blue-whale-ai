@@ -612,10 +612,13 @@ class VideoMattingJobProcessorTest {
         TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
                 "https://tos/out.webm", "generated/9/video/abc.webm",
                 "video/webm", 123_456L, "0123456789abcdef0123456789abcdef");
-        // 受控长传输：200ms（跨 ≥4 个 40ms 心跳周期），不真等分钟级
+        // 传输只在两个实际心跳完成后返回，不用固定休眠猜测调度次数。
+        var renewals = new java.util.concurrent.CountDownLatch(3);
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenAnswer(inv -> { renewals.countDown(); return true; });
         when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
                 .thenAnswer(inv -> {
-                    Thread.sleep(200);
+                    assertThat(renewals.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
                     return stored;
                 });
         when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
@@ -651,6 +654,27 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("传输返回成功前已失租：不再尝试发布或落失败终态")
+    void abortedTransferReturningResult_doesNotPublish() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(inv -> {
+                    TosVideoMediaRelay.TransferAbortHandle handle = inv.getArgument(3);
+                    handle.abort("lease lost before return");
+                    return new TosVideoMediaRelay.StoredVideo("https://tos/out.webm",
+                            "generated/9/video/a.webm", "video/webm", 1L, null);
+                });
+        processor.handle("100");
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());

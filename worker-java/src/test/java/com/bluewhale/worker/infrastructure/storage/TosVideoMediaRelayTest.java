@@ -4,8 +4,8 @@ import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.sun.net.httpserver.HttpServer;
 import com.volcengine.tos.TOSV2;
-import com.volcengine.tos.comm.common.ACLType;
-import com.volcengine.tos.model.object.PutObjectACLInput;
+import com.volcengine.tos.model.object.PreSignedURLInput;
+import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.volcengine.tos.model.object.PutObjectInput;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,7 +44,7 @@ import static org.mockito.Mockito.verify;
  *   <li>与字节数组路径同契约：mime 校验 / 空内容拒 / HTTP 错误透传 / key 与 ACL 同款 /
  *       md5 两种算法逐字节相等（分块算 md5 不得偏离 {@code computeFileMd5} 口径）</li>
  * </ol>
- * 桩服务用 JDK 自带 HttpServer（网关客户端测试同款），TOS 用 mock——本套件不打真实网络。
+ * 桩服务用 JDK 自带 HttpServer（网关客户端测试同款），签名用 mock，上传/下载走本地 HTTP/TCP——不连接真实供应商。
  */
 class TosVideoMediaRelayTest {
 
@@ -52,6 +52,11 @@ class TosVideoMediaRelayTest {
     private static final int BLOCK_BYTES = 1024 * 1024;
 
     private HttpServer server;
+    private HttpServer uploadServer;
+    private volatile String uploadedMd5;
+    private volatile String uploadedMime;
+    private volatile String uploadedAcl;
+    private final java.util.concurrent.CountDownLatch releaseStall = new java.util.concurrent.CountDownLatch(1);
 
     private static byte[] patternBlock() {
         byte[] block = new byte[BLOCK_BYTES];
@@ -104,7 +109,7 @@ class TosVideoMediaRelayTest {
                 if (firstBytes > 0) {
                     out.write(block, 0, firstBytes);
                 }
-                Thread.sleep(30_000);
+                releaseStall.await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -113,23 +118,38 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
-    /** 上传侧 mock：记录 PutObjectInput 并在调用内经流式读完（完成后 relay 会关流）。 */
-    private static List<PutObjectInput> captureUploads(TOSV2 client, AtomicLong uploadedBytes) {
-        List<PutObjectInput> uploads = new ArrayList<>();
-        doAnswer(invocation -> {
-            PutObjectInput input = invocation.getArgument(0);
-            uploads.add(input);
-            long total = 0;
-            try (InputStream in = input.getContent()) {
+    /** 仅替代 SDK 本地签名；上传走真实 HTTP 流，服务端校验实际收到的字节和元数据。 */
+    private List<PreSignedURLInput> captureUploads(TOSV2 client, AtomicLong uploadedBytes) throws IOException {
+        List<PreSignedURLInput> uploads = new ArrayList<>();
+        uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        uploadServer.createContext("/", exchange -> {
+            try (InputStream in = exchange.getRequestBody()) {
+                MessageDigest digest;
+                try { digest = MessageDigest.getInstance("MD5"); }
+                catch (java.security.NoSuchAlgorithmException e) { throw new IOException(e); }
                 byte[] buffer = new byte[64 * 1024];
+                long total = 0;
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     total += read;
+                    digest.update(buffer, 0, read);
                 }
+                uploadedBytes.set(total);
+                uploadedMd5 = HexFormat.of().formatHex(digest.digest());
+                uploadedMime = exchange.getRequestHeaders().getFirst("Content-Type");
+                uploadedAcl = exchange.getRequestHeaders().getFirst("x-tos-acl");
+                exchange.sendResponseHeaders(200, -1);
+            } finally {
+                exchange.close();
             }
-            uploadedBytes.set(total);
-            return null;
-        }).when(client).putObject(any(PutObjectInput.class));
+        });
+        uploadServer.start();
+        doAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            uploads.add(input);
+            return new PreSignedURLOutput("http://127.0.0.1:" + uploadServer.getAddress().getPort()
+                    + "/" + input.getKey(), input.getHeader());
+        }).when(client).preSignedURL(any(PreSignedURLInput.class));
         return uploads;
     }
 
@@ -157,6 +177,8 @@ class TosVideoMediaRelayTest {
 
     @AfterEach
     void stopServer() {
+        releaseStall.countDown();
+        if (uploadServer != null) uploadServer.stop(0);
         if (server != null) {
             server.stop(0);
         }
@@ -170,7 +192,7 @@ class TosVideoMediaRelayTest {
         String url = serve("video/webm", 200, payloadBytes, block);
         TOSV2 client = mock(TOSV2.class);
         AtomicLong uploadedBytes = new AtomicLong();
-        List<PutObjectInput> uploads = captureUploads(client, uploadedBytes);
+        List<PreSignedURLInput> uploads = captureUploads(client, uploadedBytes);
         List<String> tempBefore = relayTempFiles();
 
         TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
@@ -182,7 +204,7 @@ class TosVideoMediaRelayTest {
         assertThat(stored.size()).isEqualTo(payloadBytes);
         assertThat(uploadedBytes.get()).isEqualTo(payloadBytes);
         assertThat(uploads).hasSize(1);
-        assertThat(uploads.get(0).getContentLength()).isEqualTo(payloadBytes);
+        assertThat(uploadedMd5).isEqualTo(expectedMd5(block, 201));
         assertThat(uploads.get(0).getKey()).startsWith("generated/9/video/").endsWith(".webm");
         assertThat(stored.md5()).isEqualTo(expectedMd5(block, 201));
         // 成功路径同样不留临时文件（201MiB 落盘再上传，最后必须删干净）
@@ -259,7 +281,7 @@ class TosVideoMediaRelayTest {
         String url = serve("video/quicktime; charset=binary", 200, payload.length, payload);
         TOSV2 client = mock(TOSV2.class);
         AtomicLong uploadedBytes = new AtomicLong();
-        List<PutObjectInput> uploads = captureUploads(client, uploadedBytes);
+        List<PreSignedURLInput> uploads = captureUploads(client, uploadedBytes);
 
         TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES);
@@ -270,15 +292,16 @@ class TosVideoMediaRelayTest {
         assertThat(stored.url()).isEqualTo("https://bkt.tos.example.com/" + stored.storageKey());
         assertThat(uploadedBytes.get()).isEqualTo(payload.length);
         assertThat(uploads.get(0).getBucket()).isEqualTo("bkt");
-        assertThat(uploads.get(0).getOptions().getHeaders())
+        assertThat(uploads.get(0).getHeader())
                 .containsEntry("Content-Type", "video/quicktime");
         // 分块算的 md5 必须与整段算的相等——否则上传件与生成件命不中 assets.md5 去重
         assertThat(stored.md5()).isEqualTo(ContentDigest.md5Hex(payload));
 
-        var aclCaptor = org.mockito.ArgumentCaptor.forClass(PutObjectACLInput.class);
-        verify(client).putObjectAcl(aclCaptor.capture());
-        assertThat(aclCaptor.getValue().getAcl()).isEqualTo(ACLType.ACL_PUBLIC_READ);
-        assertThat(aclCaptor.getValue().getKey()).isEqualTo(stored.storageKey());
+        assertThat(uploadedAcl).isEqualTo("public-read");
+        assertThat(uploadedMime).isEqualTo("video/quicktime");
+        assertThat(uploadedMd5).isEqualTo(ContentDigest.md5Hex(payload));
+        assertThat(uploads.get(0).getHeader()).containsEntry("x-tos-acl", "public-read");
+        verify(client, never()).putObjectAcl(any());
     }
 
     // ========== IKHSFC：停流主动中止（截止时间只在 read 返回后检查 → 停流挂死） ==========
@@ -359,39 +382,88 @@ class TosVideoMediaRelayTest {
     }
 
     @Test
-    @DisplayName("上传期间外部中止（IKHSFD）：guarding 流 read 被拦截 → putObject 失败归并为 TransferAbortedException，不做 ACL")
-    @Timeout(30)
-    void persistStreaming_externalAbort_duringUpload_stopsUpload() throws Exception {
-        // 下载正常完成（4KiB 正常发完），中止发生在上传途中
-        byte[] payload = new byte[4096];
-        System.arraycopy(patternBlock(), 0, payload, 0, payload.length);
-        String url = serve("video/mp4", 200, payload.length, payload);
+    @Timeout(15)
+    @DisplayName("上传正文发完后等待响应：失租主动断开上传连接，不依赖下一次文件读取")
+    void externalAbort_disconnectsUploadWaitingForResponse() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
         TOSV2 client = mock(TOSV2.class);
-        TosVideoMediaRelay.TransferAbortHandle handle = new TosVideoMediaRelay.TransferAbortHandle();
-        List<String> tempBefore = relayTempFiles();
-        doAnswer(invocation -> {
-            PutObjectInput input = invocation.getArgument(0);
-            try (InputStream in = input.getContent()) {
-                byte[] buf = new byte[1024];
-                if (in.read(buf) <= 0) {
-                    throw new IOException("首读失败");
+        var handle = new TosVideoMediaRelay.TransferAbortHandle();
+        var received = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            org.mockito.Mockito.when(client.preSignedURL(any(com.volcengine.tos.model.object.PreSignedURLInput.class)))
+                    .thenReturn(new com.volcengine.tos.model.object.PreSignedURLOutput(
+                            "http://127.0.0.1:" + socketServer.getLocalPort() + "/upload", java.util.Map.of()));
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(5000);
+                    InputStream in = socket.getInputStream();
+                    var header = new java.io.ByteArrayOutputStream();
+                    int next;
+                    while ((next = in.read()) != -1) {
+                        header.write(next);
+                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+                    }
+                    String headers = header.toString(StandardCharsets.US_ASCII);
+                    assertThat(headers.toLowerCase()).contains("content-length: 4096");
+                    assertThat(in.readNBytes(4096)).hasSize(4096);
+                    received.countDown();
+                    // 服务端保持连接且不发响应；取消必须真正关闭客户端 socket。
+                    return in.read();
                 }
-                // 模拟上传途中失去所有权：心跳触发中止
-                handle.abort("结果转存期租约未命中（已被接管/终态）");
-                while (in.read(buf) != -1) {
-                    // guarding 包装流应在此抛 IOException，读不到 EOF
-                }
-                throw new IllegalStateException("中止后上传流仍可读完（guarding 未拦截）");
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES, handle));
+            try {
+                assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("流式上传必须到达真实 HTTP 传输层").isTrue();
+                handle.abort("lease lost");
+                assertThatThrownBy(() -> transfer.get(2, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(TosVideoMediaRelay.TransferAbortedException.class);
+                assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                assertThat(relayTempFiles()).isEqualTo(before);
+                verify(client, never()).putObjectAcl(any());
+            } finally {
+                handle.abort("test cleanup");
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
             }
-        }).when(client).putObject(any(PutObjectInput.class));
+        }
+    }
 
-        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
-                .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES, handle))
-                .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
-                .hasMessageContaining("租约未命中");
-
-        verify(client, never()).putObjectAcl(any());
-        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    @Test
+    @DisplayName("真实 SDK 签名覆盖上传元数据，实际上传失败不得返回成功且清理临时文件")
+    void signedUpload_rejectsServerFailure() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var query = new java.util.concurrent.atomic.AtomicReference<String>();
+        uploadServer.createContext("/", exchange -> {
+            exchange.getRequestBody().transferTo(OutputStream.nullOutputStream());
+            query.set(exchange.getRequestURI().getRawQuery());
+            uploadedAcl = exchange.getRequestHeaders().getFirst("x-tos-acl");
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        uploadServer.start();
+        var config = com.volcengine.tos.TOSClientConfiguration.builder()
+                .region("cn-beijing").endpoint("http://127.0.0.1:" + uploadServer.getAddress().getPort())
+                .credentials(new com.volcengine.tos.auth.StaticCredentials("test-ak", "test-sk"))
+                .build().setCustomDomain(true);
+        List<String> before = relayTempFiles();
+        try (TOSV2 client = new com.volcengine.tos.TOSV2ClientBuilder().build(config)) {
+            assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES))
+                    .isInstanceOf(VideoProviderError.class).hasMessageContaining("HTTP 503");
+        }
+        assertThat(java.net.URLDecoder.decode(query.get(), StandardCharsets.UTF_8))
+                .contains("X-Tos-SignedHeaders=content-type;host;x-tos-acl");
+        assertThat(uploadedAcl).isEqualTo("public-read");
+        assertThat(relayTempFiles()).isEqualTo(before);
     }
 
     @Test

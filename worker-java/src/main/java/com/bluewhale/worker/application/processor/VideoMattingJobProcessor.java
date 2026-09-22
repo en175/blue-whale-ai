@@ -444,6 +444,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             // 成功、失败、中止都停心跳，释放定时资源
             heartbeat.cancel(false);
         }
+        if (abortHandle.aborted()) return;
         log.info("[video_matting] 转存完成 jobId={} storageKey={} size={} resolution={}",
                 claim.id(), stored.storageKey(), stored.size(), observation.resolution());
 
