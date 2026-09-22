@@ -16,14 +16,14 @@ public record WorkerProperties(
 
     public WorkerProperties {
         concurrency = concurrency == null
-                ? new Concurrency(20, 5, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5) : concurrency;
+                ? new Concurrency(20, 5, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5) : concurrency;
     }
 
     /** 各消费者的在制品上限，等价 TS 侧 Semaphore；取值范围与 TS 校验一致。 */
     public record Concurrency(int image, int audio, int mediaExtract, int audioTrim, int imageEnhance,
                               int imageErase, int imageCutout, int imageOutpaint,
                               int videoSubtitleErase, int videoEnhance,
-                              int vocalSplit, int videoSceneSplit) {
+                              int vocalSplit, int videoSceneSplit, int videoFrameInterpolation) {
         public Concurrency {
             if (image < 1 || image > 64) {
                 throw new IllegalArgumentException("IMAGE_CONCURRENCY 超出 1-64 范围: " + image);
@@ -60,6 +60,9 @@ public record WorkerProperties(
             }
             if (videoSceneSplit < 1 || videoSceneSplit > 64) {
                 throw new IllegalArgumentException("VIDEO_SCENE_SPLIT_CONCURRENCY 超出 1-64 范围: " + videoSceneSplit);
+            }
+            if (videoFrameInterpolation < 1 || videoFrameInterpolation > 64) {
+                throw new IllegalArgumentException("VIDEO_FRAME_INTERPOLATION_CONCURRENCY 超出 1-64 范围: " + videoFrameInterpolation);
             }
         }
     }

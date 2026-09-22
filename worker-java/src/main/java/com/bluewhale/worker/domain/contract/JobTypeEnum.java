@@ -56,7 +56,13 @@ public enum JobTypeEnum {
     /** 视频场景切分（tag=video_scene_split，IKH8BH，父规格 IKH86V；契约 =
      *  backend/libs/contracts/video-scene-split.ts，火山 MediaKit segment-scenes
      *  一对多逐段扇出，设计定案 ADR-0108）；消费者与处理器由 worker 票按附录 C 触点注册。 */
-    VIDEO_SCENE_SPLIT("video_scene_split");
+    VIDEO_SCENE_SPLIT("video_scene_split"),
+
+    /** 视频插帧（tag=video_frame_interpolation，IKHLK3，父需求 IKHLES；契约 =
+     *  backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
+     *  video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ
+     *  按附录 C 触点注册。 */
+    VIDEO_FRAME_INTERPOLATION("video_frame_interpolation");
 
     private final String value;
 

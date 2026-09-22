@@ -45,6 +45,7 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> videoEnhanceProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> vocalSplitProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> videoSceneSplitProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> videoFrameInterpolationProvider;
     @Mock private GenerationMessageProducer videoProducer;
     @Mock private GenerationMessageProducer imageProducer;
     @Mock private GenerationMessageProducer audioProducer;
@@ -58,6 +59,7 @@ class RecoveryServiceTest {
     @Mock private GenerationMessageProducer videoEnhanceProducer;
     @Mock private GenerationMessageProducer vocalSplitProducer;
     @Mock private GenerationMessageProducer videoSceneSplitProducer;
+    @Mock private GenerationMessageProducer videoFrameInterpolationProducer;
 
     private RecoveryService service;
 
@@ -76,6 +78,7 @@ class RecoveryServiceTest {
         when(videoEnhanceProvider.getIfAvailable()).thenReturn(videoEnhanceProducer);
         when(vocalSplitProvider.getIfAvailable()).thenReturn(vocalSplitProducer);
         when(videoSceneSplitProvider.getIfAvailable()).thenReturn(videoSceneSplitProducer);
+        when(videoFrameInterpolationProvider.getIfAvailable()).thenReturn(videoFrameInterpolationProducer);
         when(jobMapper.listDueVideoJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
@@ -89,10 +92,12 @@ class RecoveryServiceTest {
         when(jobMapper.listDueVideoEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVocalSplitJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVideoSceneSplitJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueVideoFrameInterpolationJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
                 audioProvider, extractProvider, audioTrimProvider, imageEnhanceProvider,
                 imageEraseProvider, imageCutoutProvider, imageOutpaintProvider,
-                videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider, videoSceneSplitProvider, MAX_AGE_MINUTES);
+                videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider, videoSceneSplitProvider,
+                videoFrameInterpolationProvider, MAX_AGE_MINUTES);
     }
 
     @Test
@@ -127,6 +132,7 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueVideoEnhanceJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueVocalSplitJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueVideoSceneSplitJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueVideoFrameInterpolationJobIds(100, MAX_AGE_MINUTES);
     }
 
     @Test

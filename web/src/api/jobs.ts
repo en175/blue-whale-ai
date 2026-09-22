@@ -9,6 +9,11 @@ import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
+import {
+  VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+} from '@lib/contracts/video-frame-interpolation';
+import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-interpolation';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
@@ -19,7 +24,7 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
 
 /** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim';
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'video_frame_interpolation';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -262,7 +267,7 @@ export interface JobDetail {
 
 /** GET /api/jobs 列表项 */
 export interface JobRecord {
-  job_id: number;
+  job_id: number | string;
   type: JobType;
   status: JobStatus;
   progress: number;
@@ -494,6 +499,68 @@ export function createVideoEnhancement(
   );
 }
 
+/** POST /api/projects/:id/video-frame-interpolations 请求体（三键，键名与
+ *  backend/libs/contracts/video-frame-interpolation.ts 契约恒等；IKHLK3 创建入口 strict zod 复核：
+ *  source_asset_id 正整数字符串、target_node_id 非空、fps ∈ 30/60/120 **整型直传**）。 */
+export type CreateFrameInterpolationPayload = VideoFrameInterpolationInput;
+
+/** 创建视频插帧任务返回（IKHLK3）；同 HD 高清：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface FrameInterpolationCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频插帧任务（IKHLK3 端点；免费口径同 HD 高清 / 去字幕——不带幂等头、
+ *  无 body 内 client_token、无积分预估、不走余额拦截门）。
+ *  插帧草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。
+ *  init.silent 透传 apiRequest（IKHSFH「请求错误只提示一次」）：静默传输失败仍抛 ApiError
+ *  但 http 层不 toast，由调用方 catch 统一提示一次（先例 createConversationQuote）。 */
+export function createFrameInterpolation(
+  projectId: string,
+  payload: CreateFrameInterpolationPayload,
+  init?: { silent?: boolean },
+): Promise<FrameInterpolationCreatedData> {
+  return apiRequest<FrameInterpolationCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...(init?.silent === true ? { silent: true } : {}),
+    },
+  );
+}
+
+/** GET /api/projects/:projectId/video-frame-interpolations/current 返回（IKHSFE 恢复契约）：
+ *  键名与契约 VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS 恒等；目标节点无任何关联任务时
+ *  data 为 null（不另设空对象形态）。响应不含 input（凭证不外泄），成品/失败详情走
+ *  GET /api/jobs/:id。status 不过滤——failed / cancelled 也能查回（前端决定是否复活轮询）。 */
+export interface FrameInterpolationCurrentData {
+  /** 当前关联任务 id（同节点多历史任务按 gmt_create/id 降序取最新） */
+  job_id: string;
+  /** 任务状态（generation_jobs.status 原值） */
+  status: JobStatus;
+  /** 进度百分比原值（终态恒 0 或 100） */
+  progress: number;
+  /** 创建时间 ISO 串 */
+  created_at: string;
+}
+
+/** 查询目标节点当前关联的插帧任务（IKHSFE 恢复契约；路由段与查询键均契约同源）：
+ *  浏览器未收到创建响应就关页时，前端只持有草稿卡的 target_node_id（本地生成），
+ *  服务端按「同 user + 同 project + 同 target_node_id 的未软删任务取最新」查回当前关联，
+ *  供重新进入画布恢复原卡与任务（IKHSFF 关页恢复闭环）。 */
+export function fetchFrameInterpolationCurrent(
+  projectId: string,
+  targetNodeId: string,
+): Promise<FrameInterpolationCurrentData | null> {
+  return apiRequest<FrameInterpolationCurrentData | null>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations/${VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT}` +
+      `?${VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId}=${encodeURIComponent(targetNodeId)}`,
+    { silent: true },
+  );
+}
+
 /** POST /api/projects/:id/video-scene-splits 请求体（四键，业务键名与
  *  backend/libs/contracts/video-scene-split.ts 契约恒等；IKH8BO 创建入口 strict 复核：
  *  source_asset_id 正整数字符串、target_node_id 非空（发送前本地建的占位卡节点 id）、
@@ -583,7 +650,7 @@ export interface FetchJobsParams {
 }
 
 /** 列出任务 GET /api/jobs（画布水合恢复时按状态批量查询） */
-export function fetchJobs(params: FetchJobsParams = {}) {
+export function fetchJobs(params: FetchJobsParams = {}, init?: { silent?: boolean }) {
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('projectId', params.projectId);
   if (params.status) qs.set('status', params.status);
@@ -591,5 +658,5 @@ export function fetchJobs(params: FetchJobsParams = {}) {
   if (params.ids?.length) qs.set('ids', params.ids.join(','));
   if (params.page !== undefined) qs.set('page', String(params.page));
   const suffix = qs.toString();
-  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`);
+  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`, init);
 }

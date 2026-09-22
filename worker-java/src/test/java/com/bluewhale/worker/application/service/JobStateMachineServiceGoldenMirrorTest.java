@@ -10,6 +10,7 @@ import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
+import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -1198,8 +1199,81 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(assetMapper, never()).insert(any(AssetEntity.class));
     }
 
-    private GenerationJobEntity createJob(Long id, Long projectId, String type, String status, int progress) {
-        GenerationJobEntity job = new GenerationJobEntity();
+    @Test
+    @DisplayName("publishVideoFrameInterpolationResult: asset + 终态日志 payload 带官方 result 键（IKHLKJ）")
+    void publishVideoFrameInterpolationResult_happyPath() {
+        // given
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(1);
+        when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
+            AssetEntity asset = (AssetEntity) invocation.getArgument(0);
+            asset.setId(910L); // 模拟 DB 自增
+            return 1;
+        });
+        when(jobMapper.selectById(300L)).thenReturn(
+                createJob(300L, 42L, "video_frame_interpolation", "succeeded", 100));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        PublishVideoFrameInterpolationDto input = new PublishVideoFrameInterpolationDto(
+                "300", "42", "9", "worker-1", 5L,
+                "https://tos/out.mp4", "generated/9/video/out.mp4", "video/mp4", 123_456L, "md5-x",
+                1920, 1080, 65.5, "1080p", 60.0);
+
+        // when
+        boolean result = service.publishVideoFrameInterpolationResult(input);
+
+        // then
+        assertThat(result).isTrue();
+
+        // 单槽单 asset：type=video / source=generated / 宽高取源近似 / duration 官方秒换算 ms
+        ArgumentCaptor<AssetEntity> assetCaptor = ArgumentCaptor.forClass(AssetEntity.class);
+        verify(assetMapper).insert(assetCaptor.capture());
+        AssetEntity asset = assetCaptor.getValue();
+        assertThat(asset.getType()).isEqualTo("video");
+        assertThat(asset.getSource()).isEqualTo("generated");
+        assertThat(asset.getWidth()).isEqualTo(1920);
+        assertThat(asset.getHeight()).isEqualTo(1080);
+        assertThat(asset.getDurationMs()).isEqualTo(65_500);
+
+        verify(jobMapper).updateOutputAssetIds(300L, "[910]");
+
+        // 终态日志 payload 引用契约结果键（duration / resolution / fps——assets 无对应列）
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(jobLogMapper).insert(logCaptor.capture());
+        GenerationJobLogEntity capturedLog = logCaptor.getValue();
+        assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
+        assertThat(capturedLog.getMessage()).isEqualTo("视频插帧完成");
+        assertThat(capturedLog.getPayload())
+                .contains("\"asset_ids\":[\"910\"]")
+                .contains("\"duration\":65.5")
+                .contains("\"resolution\":\"1080p\"")
+                .contains("\"fps\":60.0");
+
+        // 双事件：asset.created + generation_job.status_changed（前端按 target_node_id 回填结果卡）
+        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
+        verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues())
+                .extracting(ProjectEventEntity::getEventType)
+                .containsExactlyInAnyOrder("asset.created", "generation_job.status_changed");
+    }
+
+    @Test
+    @DisplayName("publishVideoFrameInterpolationResult: stale token / 已取消 → false（不落资产，迟到结果不复活）")
+    void publishVideoFrameInterpolationResult_staleToken() {
+        when(jobMapper.publishResultGuard(anyLong(), anyString(), anyLong())).thenReturn(0);
+
+        PublishVideoFrameInterpolationDto input = new PublishVideoFrameInterpolationDto(
+                "300", "42", "9", "worker-1", 5L,
+                "https://tos/out.mp4", "generated/9/video/out.mp4", "video/mp4", 123_456L, "md5-x",
+                1920, 1080, 65.5, "1080p", 60.0);
+
+        boolean result = service.publishVideoFrameInterpolationResult(input);
+
+        assertThat(result).isFalse();
+        verify(assetMapper, never()).insert(any(AssetEntity.class));
+        verify(jobMapper, never()).updateOutputAssetIds(anyLong(), anyString());
+    }
+
+    private GenerationJobEntity createJob(Long id, Long projectId, String type, String status, int progress) {        GenerationJobEntity job = new GenerationJobEntity();
         job.setId(id);
         job.setProjectId(projectId);
         job.setType(type);

@@ -12,6 +12,7 @@ import { isAudioTrimNodeId } from '../../audioTrim';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
+import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
@@ -80,6 +81,9 @@ export interface MediaNodeData {
   /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
    *  据此分流 HD 面板（不进视频生成面板），lastParams 随面板切换即时写卡 */
   videoEnhance?: VideoEnhanceIdentity;
+  /** 视频插帧身份标记（IKHLKR）：本卡由「高清 ▾」下拉第二项创建；点卡据此分流插帧面板
+   *  （不进视频生成面板），lastParams.fps 随面板切换即时写卡并同步卡名 */
+  frameInterpolation?: FrameInterpolationIdentity;
   /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
    *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
   imageCutout?: ImageCutoutIdentity;
@@ -207,6 +211,9 @@ export interface MediaNodeData {
   /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
    *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
   onVideoEnhance?: (id: string) => void;
+  /** 视频插帧（IKHLKR，父单 IKHLES）：在源卡右侧建插帧草稿卡并弹出插帧面板
+   *  （「高清 ▾」下拉第二项派发；置灰门槛见 frameInterpolation.ts，发送闭环归 IKHLKX） */
+  onFrameInterpolation?: (id: string) => void;
   /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：进入音视频分离编辑态（「音视频分离 ▾」
    *  下拉首项与触发钮直启派发，原单按钮链路不变；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
@@ -412,6 +419,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isMediaExtraction = isMediaExtractNodeId(id);
   /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
   const isAudioTrimCard = isAudioTrimNodeId(id);
+  /** 插帧草稿卡（IKHLKX）：插帧卡与 HD 卡共用 media-draft- 前缀，无法按 id 分流，故按身份判定
+   *  ——失败重试须带冻结源素材（frameInterpolation.sourceAssetId），重试据此原样重发创建接口；
+   *  身份残缺的失败卡不渲染重试钮（同 media_extract / audio_trim 身份守卫口径）。 */
+  const frameInterpolationIdentity = data.frameInterpolation as { sourceAssetId?: string } | undefined;
+  const frameInterpolationRetryable =
+    frameInterpolationIdentity == null
+    || (typeof frameInterpolationIdentity.sourceAssetId === 'string' && frameInterpolationIdentity.sourceAssetId !== '');
   const hideCancel = isMediaExtraction
     || isAudioTrimCard
     || isCanvasToolGeneration(data as Record<string, unknown>);
@@ -447,11 +461,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       const isVideoDraft = data.mediaType === 'video';
       // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
       // 视频 HD 高清草稿（IKH3VG）同款专属占位；面板由本票接入
+      // 视频插帧草稿（IKHLKR）同款专属占位（父单指定文案）；面板由本票接入
       const draftHint = isImageDraft && data.imageEnhance
         ? '配置参数生成高清图像'
         : isVideoDraft && data.videoEnhance
           ? '配置参数生成高清视频'
-          : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
+          : isVideoDraft && data.frameInterpolation
+            ? '配置参数生成插帧视频'
+            : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
@@ -492,10 +509,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (isGenDone) {
       /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
           才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
-          重试——IKHB7A lastInput 原参数重发；存量无身份失败卡不渲染） */
+          重试——IKHB7A lastInput 原参数重发；插帧卡带冻结源素材才可重试——IKHLKX 原 fps
+          重发创建接口；存量无身份失败卡不渲染） */
       const canRetry = data.genStatus === 'failed'
         && (!isMediaExtraction || data.mediaExtract != null)
-        && (!isAudioTrimCard || data.audioTrim != null);
+        && (!isAudioTrimCard || data.audioTrim != null)
+        && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
@@ -777,7 +796,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
             {data.genStatus === 'failed'
               && (!isMediaExtraction || data.mediaExtract != null)
-              && (!isAudioTrimCard || data.audioTrim != null) && (
+              && (!isAudioTrimCard || data.audioTrim != null)
+              && frameInterpolationRetryable && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>

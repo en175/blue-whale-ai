@@ -11,6 +11,7 @@ import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -138,6 +139,19 @@ public class JobClaimService {
     /** video_scene_split claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「场景切分」）。 */
     private static final List<String> VIDEO_SCENE_SPLIT_CLAIM_SOURCES =
             List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE);
+
+    /**
+     * video_frame_interpolation 租约 420s（IKHLKJ，父需求 IKHLES）：轮询到点步是短查询，但
+     * completed 步要在同一租约窗口内完成插帧结果视频下载（输出与源同规格，可达数 GB 体量）+
+     * TOS 转存——取 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判
+     * 孤儿重投，去字幕 / HD 高清 / 场景切分同款语义）。
+     */
+    private static final int VIDEO_FRAME_INTERPOLATION_LEASE_SECONDS = 420;
+
+    /** video_frame_interpolation claim 的单源白名单（唯一创建入口 = 画布视频卡「高清 ▾」
+     *  下拉第二项「插帧」；专属来源值口径，video_enhance 同款模式）。 */
+    private static final List<String> VIDEO_FRAME_INTERPOLATION_CLAIM_SOURCES =
+            List.of(com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.SOURCE);
 
     /**
      * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
@@ -709,8 +723,53 @@ public class JobClaimService {
                 candidate.getProgress() != null ? candidate.getProgress() : 0));
     }
 
-    // ========== 内部工具 ==========
+    /**
+     * 领取 video_frame_interpolation 作业（IKHLKJ，父需求 IKHLES，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
+     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）
+     * 与 cancelRequested（软取消入口对本类型生效，处理器据它落 cancelled 终态）。
+     */
+    public Optional<ClaimedVideoFrameInterpolationJobDto> claimVideoFrameInterpolation(
+            String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
 
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.TAG,
+                VIDEO_FRAME_INTERPOLATION_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = WorkerClock.now()
+                .plusSeconds(VIDEO_FRAME_INTERPOLATION_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[video_frame_interpolation] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedVideoFrameInterpolationJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                candidate.getCancelRequestedAt() != null,
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    // ========== 内部工具 ==========
     Map<String, Object> parseJson(String json) {
         if (json == null || json.isBlank()) {
             return null;

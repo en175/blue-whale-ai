@@ -50,6 +50,7 @@ import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
 import { VideoEnhancementsApiModule } from "./api/video-enhancements/video-enhancements.module.js";
+import { VideoFrameInterpolationsApiModule } from "./api/video-frame-interpolations/video-frame-interpolations.module.js";
 import { VideoSubtitleErasuresApiModule } from "./api/video-subtitle-erasures/video-subtitle-erasures.module.js";
 import { VocalSplitsApiModule } from "./api/vocal-splits/vocal-splits.module.js";
 import { VideoSceneSplitsApiModule } from "./api/video-scene-splits/video-scene-splits.module.js";
@@ -95,6 +96,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     ImageCutoutsApiModule,
     ImageOutpaintsApiModule,
     VideoEnhancementsApiModule,
+    VideoFrameInterpolationsApiModule,
     VideoSubtitleErasuresApiModule,
     VocalSplitsApiModule,
     VideoSceneSplitsApiModule,

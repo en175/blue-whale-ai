@@ -26,6 +26,11 @@
  * 移出延时关/点触发钮直启首项，形态同「智能去字幕 ▾」）；菜单两项 = 首项原「音视频分离」
  * 直进（功能不改名）+ 次项「人声背景分离」，次项置灰门槛见 vocalSplit.ts（未关联资产）、
  * 点击派发 onVocalBackgroundSplit 进入编辑态（编辑态本体由 IKHA2W 交付）。
+ * IKHLKR 视频卡首位「HD」单按钮升为「高清 ▾」下拉（FrameInterpolationMenu，ADR-0113）：
+ * 首项「HD 高清」直启原链路零变化，次项「插帧」派发 onFrameInterpolation 建插帧草稿卡
+ * （发送闭环由 IKHLKX 交付）。门槛分两层：整钮置灰只看未关联资产（triggerDisabledReason），
+ * HD 的分辨率上下限降为「HD 高清」项级（videoEnhanceDisabledReason）——源视频超上限时
+ * HD 项置灰而插帧可用；触发钮文字是「高清」，HD 项被拦时点击不派发（不自动改派插帧）。
  * ============================================ */
 import { useCallback } from 'react';
 import { Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Repeat, Film, type LucideIcon } from 'lucide-react';
@@ -37,9 +42,11 @@ import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../a
 import { audioTrimGateReason } from '../../audioTrim';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
+import { FRAME_INTERPOLATION_ENTRY_HINT, frameInterpolationGateReason } from '../../frameInterpolation';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import AudioVideoSplitMenu, { type AudioVideoSplitMenuItem } from './AudioVideoSplitMenu';
+import FrameInterpolationMenu, { type FrameInterpolationMenuItem } from './FrameInterpolationMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
 
@@ -122,6 +129,11 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
   const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
   const videoEnhanceDisabledReason = videoEnhanceGateReason(data);
+  /** 视频插帧（IKHLKR，ADR-0113）：「高清 ▾」下拉第二项——在源卡右侧建插帧草稿卡并弹出
+   *  插帧面板；门槛见 frameInterpolation.ts（未关联资产唯一前置，不做时长/源帧率前置） */
+  const handleFrameInterpolation = useCallback(() => data.onFrameInterpolation?.(id), [data, id]);
+  /** 整钮与插帧项共用门槛（未关联资产，两功能公共交集） */
+  const frameInterpolationDisabledReason = frameInterpolationGateReason(data);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
@@ -216,6 +228,28 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     },
   ];
 
+  /** 「高清 ▾」下拉菜单项（IKHLKR，ADR-0113）：首位「HD 高清」直启原链路零变化
+   *  （点击触发钮=直启首项），次项「插帧」为新增入口。**两层门槛分开**（家族差异）：
+   *  整钮置灰只看未关联资产（frameInterpolationDisabledReason，经 triggerDisabledReason
+   *  单传给组件），HD 的分辨率上下限从整钮降为『HD 高清』项级（videoEnhanceDisabledReason）；
+   *  故源视频超上限时 HD 项置灰而插帧项仍可用——触发钮文字是「高清」，此时点击不派发。 */
+  const videoEnhanceMenuItems: FrameInterpolationMenuItem[] = [
+    {
+      id: 'hd',
+      label: 'HD 高清',
+      hint: VIDEO_ENHANCE_ENTRY_HINT,
+      disabledReason: videoEnhanceDisabledReason,
+      onSelect: handleVideoEnhance,
+    },
+    {
+      id: 'interpolation',
+      label: '插帧',
+      hint: FRAME_INTERPOLATION_ENTRY_HINT,
+      disabledReason: frameInterpolationDisabledReason,
+      onSelect: handleFrameInterpolation,
+    },
+  ];
+
   /* 数据门（同迁移前 MediaNode 内判定）：生成流程卡 / 素材缺失 / 空壳上传卡不显；
    *  谓词与 CanvasPage 显隐门共用（mediaCardToolbarVisible，IKGYYB 审查消双实现） */
   if (!mediaCardToolbarVisible(data)) return null;
@@ -223,16 +257,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   return (
     <div className={styles.toolbar}>
       {toolbar.videoEnhance && (
-        <button
-          className={styles.toolBtn}
-          onClick={handleVideoEnhance}
-          disabled={videoEnhanceDisabledReason !== null}
-          title={videoEnhanceDisabledReason ?? VIDEO_ENHANCE_ENTRY_HINT}
-          data-testid="video-enhance-btn"
-        >
-          <span className={styles.hdBadge}>HD</span>
-          <span>高清</span>
-        </button>
+        <FrameInterpolationMenu
+          items={videoEnhanceMenuItems}
+          triggerDisabledReason={frameInterpolationDisabledReason}
+        />
       )}
       {toolbar.videoSubtitleErase && (
         <SubtitleEraseMenu items={subtitleEraseMenuItems} />

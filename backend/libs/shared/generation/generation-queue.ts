@@ -11,6 +11,7 @@ import {
   IMAGE_OUTPAINT_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_ENHANCE_TAG,
+  VIDEO_FRAME_INTERPOLATION_TAG,
   VIDEO_GENERATION_TAG,
   VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
@@ -31,6 +32,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueVocalSplitJob（tag=vocal_split，IKHA2I）
  *  / enqueueAudioTrimJob（tag=audio_trim，IKHB6N）
  *  / enqueueVideoSceneSplitJob（tag=video_scene_split，IKH8BO）
+ *  / enqueueVideoFrameInterpolationJob（tag=video_frame_interpolation，IKHLK3）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -296,6 +298,21 @@ export async function enqueueVideoSceneSplitJob(
   await createRocketMqGenerationProducer(
     producer,
     VIDEO_SCENE_SPLIT_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 视频插帧 job 入队（IKHLK3，父需求 IKHLES，契约 @lib/contracts/video-frame-interpolation）：
+ *  复用生成任务 topic/queue，用独立 tag「video_frame_interpolation」区分任务类型
+ *  （tag 与 type 同值，worker 侧 GenerationMqRoute 同款入口，错配即静默滞留）。 */
+export async function enqueueVideoFrameInterpolationJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqGenerationProducer(
+    producer,
+    VIDEO_FRAME_INTERPOLATION_TAG,
   ).enqueue(jobId, options);
 }
 

@@ -788,6 +788,52 @@ public class JobFinalizer {
         return true;
     }
 
+    /**
+     * 发布 video_frame_interpolation 结果（IKHLKJ，父需求 IKHLES，附录 C 触点⑤）。
+     * <p>
+     * 免费工具无结算联动，走 {@link #publishSingleAssetResult} 模板（单槽单 asset、双事件），
+     * 本方法仅填家族参数（tag / asset type / 时长换算 / 日志文案 / 附加日志键）。差异 =
+     * **宽高取源近似值**：官方明示「插帧不改变分辨率，跟随原片」，故无档位推导（HD 的档位
+     * 短边表不复制，插帧无档位表、也不设门槛）。结果四键中 duration / resolution / fps 落
+     * 终态日志 payload（assets 无对应列），键名引用冻结契约
+     * {@link VideoFrameInterpolationContract#RESULT_KEY_DURATION} 等——fps 只作结果契约字段，
+     * 不新增卡片 / 资产 fps 元数据链（ADR-0113）。
+     * 守卫由模板复用 publishResultGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 语义 = 单槽免费工具终态收口；守卫要求 status='processing'，故已取消任务的迟到结果
+     * 过不了守卫，卡片不会被复活为成功）。
+     */
+    @Transactional
+    public boolean publishVideoFrameInterpolationResult(
+            com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto input) {
+        // 结果字段入库承载位：assets 承载 url/宽高/时长；官方 result 的 duration / resolution /
+        // fps 落日志 payload（键名 = 契约 RESULT_KEYS，assets 无对应列），经模板 extraLogPayload
+        // 合并（键序 duration→resolution→fps）。
+        java.util.Map<String, Object> extraLogPayload = new java.util.LinkedHashMap<>();
+        if (input.durationSec() != null) {
+            extraLogPayload.put(
+                    com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.RESULT_KEY_DURATION,
+                    input.durationSec());
+        }
+        if (input.resolution() != null) {
+            extraLogPayload.put(
+                    com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.RESULT_KEY_RESOLUTION,
+                    input.resolution());
+        }
+        if (input.fps() != null) {
+            extraLogPayload.put(
+                    com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.RESULT_KEY_FPS,
+                    input.fps());
+        }
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[video_frame_interpolation] publishVideoFrameInterpolationResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                input.width(), input.height(),
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "视频插帧完成", extraLogPayload));
+    }
+
     // ========== 家族模板（IKHKMJ 同构收敛） ==========
     // 单槽免费工具 publish（8 家族）与轮询型免费工具 fail（media_extract / audio_trim，
     // 及复用 failMediaExtractJob 守卫的 vocal_split）的骨架逐字同构，差异全为数据参数。

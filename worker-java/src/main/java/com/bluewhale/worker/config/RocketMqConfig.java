@@ -407,6 +407,33 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * video_frame_interpolation（视频插帧，火山 MediaKit video-frame-interpolation）consumer
+     * （IKHLKJ，父需求 IKHLES；以 videoEnhance 接线为模板）。
+     * <p>
+     * consumer group = "generation-video-frame-interpolation-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#VIDEO_FRAME_INTERPOLATION}（= TS
+     * `VIDEO_FRAME_INTERPOLATION_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VideoFrameInterpolationConsumer videoFrameInterpolationConsumer(
+            com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-video-frame-interpolation-worker";
+        int concurrency = workerProps.concurrency().videoFrameInterpolation();
+
+        return new com.bluewhale.worker.application.consumer.VideoFrameInterpolationConsumer(
+                processor,
+                GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -514,6 +541,21 @@ public class RocketMqConfig {
                 GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.tag());
     }
 
+    /**
+     * video_frame_interpolation 轮询自投生产者（IKHLKJ；HD videoEnhanceMessageProducer 同款）。
+     * <p>
+     * VideoFrameInterpolationJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = video_frame_interpolation）——复用 video 的 producer 会把消息投到
+     * video tag，被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoFrameInterpolationMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION.topic(),
+                GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION.tag());
+    }
+
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，九类全部无条件装配。
 
     /** recovery 重投 image。 */
@@ -586,6 +628,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoSceneSplitRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_SCENE_SPLIT);
+    }
+
+    /** recovery 重投 video_frame_interpolation（IKHLKJ，父需求 IKHLES）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoFrameInterpolationRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */

@@ -92,6 +92,12 @@ export const ERROR_AUDIO_TRIM_FAILED = "audio_trim_failed";
  *  （父规格 IKH86V——网关分类链外的火山任务 failed 与逐段转存失败〔任一段失败即整体失败〕
  *  统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_VIDEO_SCENE_SPLIT_FAILED = "video_scene_split_failed";
+/** IKHLK3：视频插帧（video_frame_interpolation，火山 MediaKit video-frame-interpolation）执行兜底
+ *  失败码（父需求 IKHLES——网关分类链外的火山任务失败〔轮询 status=failed，含入口未前置判定的
+ *  官方门槛拒绝：目标帧率越界、输入规格不符、文件大小/时长超上游限制〕与转存失败统一归并，
+ *  异步任务轮询失败终态，无 worker 级重试；契约 = backend/libs/contracts/video-frame-interpolation.ts）。
+ *  入队失败不走本码，落 ERROR_ENQUEUE_FAILED（同家族口径）。 */
+export const ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = "video_frame_interpolation_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -176,6 +182,9 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_VIDEO_SCENE_SPLIT_FAILED]: 1046,
   // IKHA2C 注：1046 已由场景切分占用（与 !789 并行开发撞号），人声背景分离兜底码让号取 1047（契约 = vocal-split.ts）。
   [ERROR_VOCAL_SPLIT_FAILED]: 1047,
+  // IKHLK3 注：1045-1048 已由 HD 高清 / 场景切分 / 人声背景分离 / 音频截取占用
+  // （落码前全仓 grep 1049 零命中，无并行分支撞号），插帧兜底码取下一空号 1049（父需求 IKHLES）。
+  [ERROR_VIDEO_FRAME_INTERPOLATION_FAILED]: 1049,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -462,6 +471,7 @@ export const ERROR_CODES: Record<number, string> = {
   1046: "场景切分失败，请重试", // video_scene_split_failed（火山 MediaKit segment-scenes）
   1047: "人声背景分离失败，请重试", // vocal_split_failed（火山 MediaKit 人声背景音分离）
   1048: "音频截取失败，请重试", // audio_trim_failed（火山 MediaKit trim-audio；1046 场景切分/1047 人声分离已占，让位取 1048）
+  1049: "视频插帧失败，请重试", // video_frame_interpolation_failed（火山 MediaKit video-frame-interpolation）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

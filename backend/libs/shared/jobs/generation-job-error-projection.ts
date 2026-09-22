@@ -16,6 +16,7 @@ import {
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_PROVIDER_FAILED,
   ERROR_UNSUPPORTED_INPUT,
+  ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VOCAL_SPLIT_FAILED,
   GENERATION_ERROR_NUMERIC_CODES,
@@ -48,13 +49,17 @@ export function resolveErrorCode(code: string): string {
 }
 
 /** 投影兜底：按任务类型生成 fallback 码（只对白名单外历史码触发）。
- *  与 messageFor 兜底保持一致（video/audio/image/media_extract/vocal_split），音频任务兜到专属 audio 码。 */
+ *  与 messageFor 兜底保持一致（video/audio/image/media_extract/vocal_split/video_frame_interpolation），
+ *  音频任务兜到专属 audio 码。 */
 export function fallbackErrorCode(type: string): string {
   if (type === "video") return ERROR_VIDEO_GENERATION_FAILED;
   if (type === "media_extract") return ERROR_MEDIA_EXTRACT_FAILED;
   if (type === "audio") return ERROR_AUDIO_GENERATION_FAILED;
   // IKHA2I：人声分离失败无 stored_error 时兜到契约 1047（不落到图片生成的默认文案）。
   if (type === "vocal_split") return ERROR_VOCAL_SPLIT_FAILED;
+  // IKHLK3：插帧失败无 stored_error 时兜到契约 1049（同 vocal_split 先例；本分支只覆盖插帧，
+  // video_enhance / video_scene_split / audio_trim 的历史缺口不在本票范围内，见票内未决点）。
+  if (type === "video_frame_interpolation") return ERROR_VIDEO_FRAME_INTERPOLATION_FAILED;
   return ERROR_IMAGE_GENERATION_FAILED;
 }
 
