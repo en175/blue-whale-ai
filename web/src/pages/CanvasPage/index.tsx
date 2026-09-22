@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
@@ -299,7 +300,6 @@ import {
   createVideoSubtitleErase,
   createVideoEnhancement,
   createFrameInterpolation,
-  fetchFrameInterpolationCurrent,
   createMediaExtraction,
   createAudioTrim,
   createVocalSplit,
@@ -614,6 +614,8 @@ export default function CanvasPage() {
    *  state 的 submitting 是渲染期快照，慢网连点/同帧连点会读到旧值，防重以本集合为准）；
    *  失败解锁（finally 移除）后允许再试。 */
   const frameInterpolationInFlightRef = useRef<Set<string>>(new Set());
+  /** 权威恢复未完成或失败时，禁止把编辑值当作受理参数重试。面板主动发送新配置不受影响。 */
+  const frameInterpolationRecoveryBlockedRef = useRef<Set<string>>(new Set());
   /** 当前已打开插帧面板绑定的卡 id（同步写，口径同 videoEnhanceBoundRef）：提交回调的
    *  归属守卫——A 卡提交未返回期间面板切到 B（或关闭）的，A 的回调不再关面板/复位
    *  B 的提交中状态（提交会话隔离，IKHSFH）。 */
@@ -2497,20 +2499,18 @@ export default function CanvasPage() {
       .filter(
         (n) =>
           n.data.genStatus === 'generating' &&
+          !((n.data ?? {}) as Record<string, unknown>).frameInterpolation &&
           (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
           !settledExtractNodesRef.current.has(n.id),
       )
       .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
-    // 水合恢复（IKHSFF）：带插帧身份但未承接任务的草稿卡（创建响应前 / 响应后自动保存前
-    // 关页，jobId 未随画布落盘）——查服务端权威关联恢复原卡与任务；已承接任务的卡
-    // （jobId 落盘，无论进行中还是已收敛终态）不查，交上面轮询分支或保持既有终态呈现
+    // 插帧卡统一核对服务端当前关联：重发受理后关页时，持久化可能仍带上一次任务的 jobId。
     m
       .filter(
         (n) =>
-          ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null &&
-          n.data.jobId == null,
+          ((n.data ?? {}) as Record<string, unknown>).frameInterpolation != null,
       )
-      .forEach((n) => recoverFrameInterpolationRef.current(n.id));
+      .forEach((n) => recoverFrameInterpolationRef.current(n.id, n.data.jobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
@@ -6272,7 +6272,7 @@ export default function CanvasPage() {
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
   const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
   /** 插帧关页恢复函数引用（IKHSFF，同 pollJobRef 模式：水合 effect 声明在前） */
-  const recoverFrameInterpolationRef = useRef<(nodeId: string) => void>(() => {});
+  const recoverFrameInterpolationRef = useRef<(nodeId: string, savedJobId?: unknown) => void>(() => {});
 
   /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛。
    *  启动即登记本任务为节点活跃任务（IKDMQV）：后启动的轮询覆盖登记，
@@ -7272,6 +7272,10 @@ export default function CanvasPage() {
       | FrameInterpolationIdentity
       | undefined;
     if (frameInterpolationIdentity != null) {
+      if (frameInterpolationRecoveryBlockedRef.current.has(nodeId)) {
+        showToast('warn', '插帧任务参数尚未恢复，请刷新后重试');
+        return;
+      }
       // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 受理冻结输入原样重发
       // 创建接口——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自受理时
       // 随卡冻结的 frozenParams（IKHSFH：60fps 任务失败后面板改 120fps，重试仍发 60fps；
@@ -8171,6 +8175,7 @@ export default function CanvasPage() {
       if (!flushed) return false;
       if (activeProjectRef.current !== projectId) return false;
       const created = await createFrameInterpolationMutation.mutateAsync({ projectId, payload: input });
+      frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
       // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
@@ -8228,29 +8233,36 @@ export default function CanvasPage() {
     return true;
   };
 
-  /** 插帧关页恢复（IKHSFF）：画布水合发现带插帧身份但未承接任务的草稿卡（创建响应前关页、
-   *  或响应后自动保存前关页——jobId 未随画布落盘）时，查服务端权威关联恢复原卡与任务：
-   *  · 处理中（queued/processing）：卡原地转生成中、写回 jobId 并恢复轮询（状态随下次自动
-   *    保存落盘；卡上冻结的 lastParams / 来源边 / 位置一律不动、不重复建卡、不改源卡）；
-   *  · 终态（succeeded/failed）：先登记活跃任务，取 GET /api/jobs/:id 权威详情后直接走
-   *    applyJobTerminal 现有口径收敛（成功回填成品并清插帧身份、失败走 frameInterpolation
-   *    ErrorText 家族文案），不闪「生成中」占位态；
-   *  · cancelled：不复活——保持草稿态，不写 jobId 不重启轮询（现有取消口径 = 草稿卡回待生成）；
-   *  · data=null（无关联任务）：从未发送或创建未受理，保持草稿态。
-   *  竞态防线：等待期间项目已切换 / 卡已删除 / 卡已被新任务接管（用户重发）时丢弃恢复响应。 */
-  const recoverFrameInterpolation = (nodeId: string) => {
+  /** 水合后核对最新关联（含已保存的旧 jobId），同时恢复该任务的冻结输入。
+   *  Query 按项目/节点去重，现有终态与轮询负责结果；恢复失败时保留卡片并阻止错误参数重试。 */
+  const recoverFrameInterpolation = (nodeId: string, savedJobId?: unknown) => {
     const projectId = activeProjectRef.current;
     if (!projectId) return;
-    fetchFrameInterpolationCurrent(projectId, nodeId)
-      .then((current) => {
+    const activeAtStart = activeJobByNodeRef.current.get(nodeId);
+    frameInterpolationRecoveryBlockedRef.current.add(nodeId);
+    queryClient.fetchQuery(frameInterpolationRecoveryOptions(projectId, nodeId))
+      .then(({ current, input }) => {
         if (activeProjectRef.current !== projectId) return;
-        if (!current) return;
         const node = mediaNodesRef.current.find((n) => n.id === nodeId);
         if (!node) return;
         const data = (node.data ?? {}) as Record<string, unknown>;
-        // 已被新任务接管（用户在恢复响应到达前重发）或 jobId 已随画布承接：不覆盖
-        if (data.jobId != null || activeJobByNodeRef.current.has(nodeId)) return;
-        if (current.status === 'cancelled') return;
+        // 核对水合时的身份；查询期间的新提交、取消和删除优先于恢复结果。
+        if (data.jobId !== savedJobId ||
+          activeJobByNodeRef.current.get(nodeId) !== activeAtStart ||
+          frameInterpolationInFlightRef.current.has(nodeId) ||
+          locallyRemovedGenerationNodesRef.current.has(nodeId) || !data.frameInterpolation) return;
+        frameInterpolationRecoveryBlockedRef.current.delete(nodeId);
+        if (!current) return;
+        if (current.status === 'cancelled') {
+          stopJobPolling(nodeId, jobTimersRef.current);
+          activeJobByNodeRef.current.delete(nodeId);
+          settleCancelledNode(nodeId);
+          return;
+        }
+        const identity = data.frameInterpolation as FrameInterpolationIdentity;
+        if (input) patchMediaNode(nodeId, {
+          frameInterpolation: { ...identity, sourceAssetId: input.source_asset_id, frozenParams: { fps: input.fps } },
+        });
         if (current.status === 'queued' || current.status === 'processing') {
           stopJobPolling(nodeId, jobTimersRef.current);
           patchMediaNode(nodeId, {
@@ -8290,8 +8302,7 @@ export default function CanvasPage() {
           });
       })
       .catch((e: unknown) => {
-        // 恢复查询失败（网络抖动等）：best-effort 静默降级——卡保持草稿态，用户可重发；
-        // 任务若仍在跑不丢（服务端权威关联仍在，下次水合再恢复）
+        // 保留原卡；失败重试保持阻断，刷新可重新读取，面板仍可主动发送新配置。
         console.warn('[frame-interpolation] 恢复查询失败:', e);
       });
   };

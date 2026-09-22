@@ -13,7 +13,7 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
-import type { FrameInterpolationCurrentData } from '@/api/jobs';
+import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/api/jobs';
 
 vi.mock('../components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
@@ -64,6 +64,7 @@ export const apiMocks = {
   retryGenerationJob: vi.fn(),
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
+  fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -108,6 +109,7 @@ vi.mock('@/api/jobs', () => ({
   createVideoEnhancement: vi.fn(),
   createFrameInterpolation: apiMocks.createFrameInterpolation,
   fetchFrameInterpolationCurrent: apiMocks.fetchFrameInterpolationCurrent,
+  fetchJobs: apiMocks.fetchJobs,
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createVocalSplit: vi.fn(),

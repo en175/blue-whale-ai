@@ -49,6 +49,12 @@ function seedDoc(mode: 'draft' | 'generating' | 'failed' = 'draft') {
     7: { asset_id: 7, type: 'video', access_url: 'http://vid/v1.mp4', width: 1280, height: 720 },
   };
   if (mode === 'generating') {
+    apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j9', status: 'processing', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
+    apiMocks.fetchJobs.mockResolvedValue({ records: [{
+      job_id: 'j9', type: 'video_frame_interpolation', status: 'processing', progress: 0,
+      input: { source_asset_id: '5', target_node_id: 'i1', fps: 120 },
+      created_at: '2026-09-22T05:00:00.000Z', output_assets: [],
+    }], total: 1, size: 1, current: 1 });
     nodes.push({
       id: 'i1',
       type: 'mediaNode',
@@ -373,7 +379,7 @@ describe('IKHLKX 终态回填与插帧身份清除', () => {
     expect(dataOf('i1').genStatus).toBe('failed');
     expect(dataOf('i1').errorText).toBe('任务入队失败，请重试');
     // 失败态保留插帧身份（可重试）与来源边
-    expect(identityOf(mediaNode('i1'))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
+    expect(identityOf(mediaNode('i1'))).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 120 } });
     expect(edges().find((e) => e.target === 'i1')?.source).toBe('v1');
   });
 

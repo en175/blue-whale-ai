@@ -24,7 +24,7 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
 
 /** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim';
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'video_frame_interpolation';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -267,7 +267,7 @@ export interface JobDetail {
 
 /** GET /api/jobs 列表项 */
 export interface JobRecord {
-  job_id: number;
+  job_id: number | string;
   type: JobType;
   status: JobStatus;
   progress: number;
@@ -650,7 +650,7 @@ export interface FetchJobsParams {
 }
 
 /** 列出任务 GET /api/jobs（画布水合恢复时按状态批量查询） */
-export function fetchJobs(params: FetchJobsParams = {}) {
+export function fetchJobs(params: FetchJobsParams = {}, init?: { silent?: boolean }) {
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('projectId', params.projectId);
   if (params.status) qs.set('status', params.status);
@@ -658,5 +658,5 @@ export function fetchJobs(params: FetchJobsParams = {}) {
   if (params.ids?.length) qs.set('ids', params.ids.join(','));
   if (params.page !== undefined) qs.set('page', String(params.page));
   const suffix = qs.toString();
-  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`);
+  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`, init);
 }

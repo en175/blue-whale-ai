@@ -67,6 +67,11 @@ function reseedFromPersisted() {
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   };
+  const acceptedInput = structuredClone(apiMocks.createFrameInterpolation.mock.calls.at(-1)![1]);
+  apiMocks.fetchJobs.mockImplementation(async (params) => ({ records: [{
+    job_id: String(params!.ids![0]), type: 'video_frame_interpolation', status: 'processing', progress: 0,
+    input: acceptedInput, created_at: '2026-09-22T05:00:00.000Z', output_assets: [],
+  }], total: 1, size: 1, current: 1 }));
   return persisted;
 }
 
@@ -199,6 +204,33 @@ describe('IKHSFF 发送前保存失败拦截', () => {
 });
 
 describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
+  it('失败任务重发后响应前关页：持久化仍带旧 jobId，重进恢复新任务', async () => {
+    seedDoc();
+    apiMocks.createFrameInterpolation.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, asset: null, error: { code: 1049 } });
+    await renderPage();
+    await frameInterpolation();
+    const draftId = draftNodes()[0]!.id;
+    await sendPanel();
+    await flush();
+    expect(dataOf(draftId).genStatus).toBe('failed');
+
+    apiMocks.createFrameInterpolation.mockImplementation(() => new Promise(() => {}));
+    await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
+    await flush();
+    await unmountPage();
+    const persisted = reseedFromPersisted();
+    expect((persisted.nodes.find((n) => n.id === draftId)!.data as Record<string, unknown>).jobId).toBe('j1');
+
+    apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 35, created_at: '2026-09-22T05:00:00.000Z' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 35, asset: null });
+    await renderPage();
+    await flush();
+    expect(dataOf(draftId).jobId).toBe('j2');
+    expect(dataOf(draftId).genStatus).toBe('generating');
+    expect(mediaNodes()).toHaveLength(2);
+  });
+
   /** 首轮进入并真实发送：建卡 → 冲刷落盘 → create 挂起（响应未达即关页）。
    *  返回草稿卡 id 与实际持久化的 payload（发送前那次保存请求的 nodes/edges）。 */
   async function sendAndCloseBeforeCreateResponse(): Promise<{
@@ -242,7 +274,7 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     expect(dataOf(draftId).genStatus).toBe('generating');
     expect(dataOf(draftId).jobId).toBe('j1');
     expect(dataOf(draftId).progress).toBe(40);
-    expect(identityOf(draftId)).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
+    expect(identityOf(draftId)).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 120 } });
     expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
     expect(mediaNodes().length).toBe(2);
     expect(edges().find((e) => e.target === draftId)?.source).toBe('v1');
@@ -331,8 +363,95 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
 
     expect(dataOf(draftId).genStatus).toBe('failed');
     expect(dataOf(draftId).errorText).toBe('视频插帧失败，请重试');
-    expect(identityOf(draftId)).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 } });
+    expect(identityOf(draftId)).toEqual({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 120 } });
     expect(mediaNodes().length).toBe(2);
+  });
+
+  it('关页恢复失败任务后编辑为60fps：失败重试仍提交受理时的120fps', async () => {
+    seedDoc();
+    const { draftId } = await sendAndCloseBeforeCreateResponse();
+    await unmountPage();
+    reseedFromPersisted();
+    apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, asset: null, error: { code: 1049 } });
+    await renderPage();
+    await flush();
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    await click(panelFps(60));
+    apiMocks.createFrameInterpolation.mockResolvedValue({ job_id: 'j2', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 1, asset: null });
+    await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).toHaveBeenLastCalledWith('p1', {
+      source_asset_id: '5', target_node_id: draftId, fps: 120,
+    }, { silent: true });
+    expect(identityOf(draftId)?.lastParams).toEqual({ fps: 60 });
+  });
+
+  it('冻结输入读取失败：不按面板值重试，不创建新任务', async () => {
+    seedDoc();
+    const { draftId } = await sendAndCloseBeforeCreateResponse();
+    await unmountPage();
+    reseedFromPersisted();
+    apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j1', status: 'failed', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
+    apiMocks.fetchJobs.mockRejectedValue(new Error('network down'));
+    apiMocks.createFrameInterpolation.mockClear();
+    await renderPage();
+    await flush();
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    await click(panelFps(60));
+    await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
+    await flush();
+    expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('插帧任务参数尚未恢复');
+    expect(identityOf(draftId)?.frozenParams).toBeUndefined();
+  });
+
+  it('恢复查询迟到：不能覆盖同卡新受理任务及冻结参数', async () => {
+    seedDoc();
+    const { draftId } = await sendAndCloseBeforeCreateResponse();
+    await unmountPage();
+    reseedFromPersisted();
+    let resolveCurrent!: (value: { job_id: string; status: 'failed'; progress: number; created_at: string }) => void;
+    apiMocks.fetchFrameInterpolationCurrent.mockImplementation(() => new Promise((resolve) => { resolveCurrent = resolve; }));
+    await renderPage();
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    await click(panelFps(30));
+    apiMocks.createFrameInterpolation.mockResolvedValue({ job_id: 'j2', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'processing', progress: 15, asset: null });
+    await sendPanel();
+    await act(async () => { resolveCurrent({ job_id: 'j1', status: 'failed', progress: 0, created_at: '2026-09-22T05:00:00.000Z' }); });
+    await flush();
+    expect(dataOf(draftId).jobId).toBe('j2');
+    expect(dataOf(draftId).genStatus).toBe('generating');
+    expect(identityOf(draftId)?.frozenParams).toEqual({ fps: 30 });
+  });
+
+  it('重复水合恢复到取消的新任务：旧任务迟到成功不得回填草稿', async () => {
+    seedDoc();
+    apiMocks.createFrameInterpolation.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    let resolveOldPoll!: (value: Record<string, unknown>) => void;
+    apiMocks.fetchJobStatus.mockImplementation(() => new Promise((resolve) => { resolveOldPoll = resolve; }));
+    await renderPage();
+    await frameInterpolation();
+    const draftId = draftNodes()[0]!.id;
+    await sendPanel();
+    expect(dataOf(draftId).genStatus).toBe('generating');
+
+    // 模拟 acceptDoc 推来完整画布快照，页面不卸载，旧轮询仍在途。
+    canvasDocMock.current.doc = {
+      id: 11, version: 5, viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: JSON.parse(JSON.stringify(mediaNodes())), edges: JSON.parse(JSON.stringify(edges())),
+    };
+    apiMocks.fetchFrameInterpolationCurrent.mockResolvedValue({ job_id: 'j2', status: 'cancelled', progress: 0, created_at: '2026-09-22T05:00:00.000Z' });
+    await act(async () => { flowProps.current.onNodeClick(mediaNode(draftId)); });
+    await flush();
+    expect(dataOf(draftId).genStatus).toBe('draft');
+    await act(async () => { resolveOldPoll({ job_id: 'j1', status: 'succeeded', progress: 100, asset: { id: '77', type: 'video', url: 'https://old/result.mp4' } }); });
+    await flush();
+    expect(dataOf(draftId).genStatus).toBe('draft');
+    expect(dataOf(draftId).src).not.toBe('https://old/result.mp4');
+    expect(identityOf(draftId)).toBeDefined();
   });
 
   it('关页期间任务已取消：不复活——保持草稿态、不写 jobId、不启动轮询', async () => {
