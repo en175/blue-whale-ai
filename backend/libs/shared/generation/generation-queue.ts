@@ -13,6 +13,7 @@ import {
   VIDEO_ENHANCE_TAG,
   VIDEO_FRAME_INTERPOLATION_TAG,
   VIDEO_GENERATION_TAG,
+  VIDEO_MATTING_TAG,
   VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
   VOCAL_SPLIT_TAG,
@@ -32,6 +33,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueVocalSplitJob（tag=vocal_split，IKHA2I）
  *  / enqueueAudioTrimJob（tag=audio_trim，IKHB6N）
  *  / enqueueVideoSceneSplitJob（tag=video_scene_split，IKH8BO）
+ *  / enqueueVideoMattingJob（tag=video_matting，IKHK98）
  *  / enqueueVideoFrameInterpolationJob（tag=video_frame_interpolation，IKHLK3）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
@@ -298,6 +300,21 @@ export async function enqueueVideoSceneSplitJob(
   await createRocketMqGenerationProducer(
     producer,
     VIDEO_SCENE_SPLIT_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 智能抠像 job 入队（IKHK98，契约 @lib/contracts/video-matting）：复用生成任务
+ *  topic/queue，用独立 tag「video_matting」区分任务类型（tag 常量 IKHK7F 已建，
+ *  本函数补齐发布侧先例位；producer 工厂随 IKHKMK 模板收敛统一走 createRocketMqGenerationProducer）。 */
+export async function enqueueVideoMattingJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqGenerationProducer(
+    producer,
+    VIDEO_MATTING_TAG,
   ).enqueue(jobId, options);
 }
 

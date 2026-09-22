@@ -22,6 +22,7 @@ import {
   VIDEO_SCENE_SPLIT_TAG,
   VIDEO_SUBTITLE_ERASE_TAG,
   VIDEO_ENHANCE_TAG,
+  VIDEO_MATTING_TAG,
   VOCAL_SPLIT_TAG,
 } from "../shared/generation/queue.constants.js";
 
@@ -36,8 +37,8 @@ const mqRouteJava = readFileSync(
 
 /** 路由注册总数（IKHKMR）：与 EXPECTED_ROUTES 清单互锁的唯一计数源——只改清单不改此数
  * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。
- * 14 = 13（IKHKMR 钉死值）+ 视频插帧 VIDEO_FRAME_INTERPOLATION（IKHLK3）。 */
-const EXPECTED_ROUTE_COUNT = 14;
+ * 15 = 13（IKHKMR 钉死值）+ 视频插帧 VIDEO_FRAME_INTERPOLATION（IKHLK3）+ 智能抠像 VIDEO_MATTING（IKHJRC）。 */
+const EXPECTED_ROUTE_COUNT = 15;
 
 /** 入口清单（项数须恒等于 EXPECTED_ROUTE_COUNT）↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
 const EXPECTED_ROUTES = [
@@ -54,6 +55,7 @@ const EXPECTED_ROUTES = [
   { entry: "VIDEO_ENHANCE", tag: VIDEO_ENHANCE_TAG },
   { entry: "VOCAL_SPLIT", tag: VOCAL_SPLIT_TAG },
   { entry: "VIDEO_SCENE_SPLIT", tag: VIDEO_SCENE_SPLIT_TAG },
+  { entry: "VIDEO_MATTING", tag: VIDEO_MATTING_TAG },
   { entry: "VIDEO_FRAME_INTERPOLATION", tag: VIDEO_FRAME_INTERPOLATION_TAG },
 ] as const;
 

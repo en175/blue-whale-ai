@@ -51,6 +51,9 @@ public class JobStateMachineService {
     /** video_scene_split 进度续租秒数（与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值）。 */
     private static final int VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS = 420;
 
+    /** video_matting 进度续租秒数（与 JobClaimService.VIDEO_MATTING_LEASE_SECONDS 同值）。 */
+    private static final int VIDEO_MATTING_PROGRESS_LEASE_SECONDS = 420;
+
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -308,6 +311,19 @@ public class JobStateMachineService {
         return finalizer.publishVideoSceneSplitResult(input);
     }
 
+    // ========== video_matting 直通（DTO 形态，VideoMattingJobProcessor 专用；
+    //            失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
+
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto> claimVideoMatting(
+            String jobId, String workerId) {
+        return claimService.claimVideoMatting(jobId, workerId);
+    }
+
+    public boolean publishVideoMattingResult(
+            com.bluewhale.worker.domain.dto.PublishVideoMattingDto input) {
+        return finalizer.publishVideoMattingResult(input);
+    }
+
     // ========== video_frame_interpolation 直通（DTO 形态，VideoFrameInterpolationJobProcessor
     //            专用，IKHLKJ；失败复用视频版 failVideoJob——轮询型任务守卫多清 next_poll_at） ==========
 
@@ -378,6 +394,27 @@ public class JobStateMachineService {
         LocalDateTime leaseExpiresAt = WorkerClock.now()
                 .plusSeconds(VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS);
         int affected = jobMapper.updateVideoSceneSplitProgress(
+                jobIdLong, input.workerId(), input.fencingToken(),
+                clampedProgress, leaseExpiresAt);
+        return affected == 1;
+    }
+
+    /**
+     * 更新 video_matting 进度（IKHK99；updateVideoSceneSplitProgress 的单产物形态）：
+     * 0-99 钳制 + 续租。
+     * <p>
+     * completed 相单产物下载转存是长窗口（输入可达 10GB 级），claim 时的 420s 租约可能
+     * 覆盖不了全程——转存前调本方法把租约推回 now+420s（progress 沿用 claim 快照不倒退），
+     * 否则 recovery 会在租约过期后判孤儿重投，新 claim 重复下载同一产物；创建后 120 分钟
+     * 重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     */
+    public boolean updateVideoMattingProgress(
+            com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+        int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
+        LocalDateTime leaseExpiresAt = WorkerClock.now()
+                .plusSeconds(VIDEO_MATTING_PROGRESS_LEASE_SECONDS);
+        int affected = jobMapper.updateVideoMattingProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
                 clampedProgress, leaseExpiresAt);
         return affected == 1;

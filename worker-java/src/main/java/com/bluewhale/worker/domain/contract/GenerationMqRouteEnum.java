@@ -57,6 +57,9 @@ public enum GenerationMqRouteEnum {
     /** 视频场景切分（IKH8BH，父规格 IKH86V；契约 = backend/libs/contracts/video-scene-split.ts）。 */
     VIDEO_SCENE_SPLIT("generation-task", "video_scene_split"),
 
+    /** 智能抠像（IKHK7F，父规格 IKHJRC；契约 = backend/libs/contracts/video-matting.ts）。 */
+    VIDEO_MATTING("generation-task", "video_matting"),
+
     /** 视频插帧（IKHLK3，父需求 IKHLES；契约 = backend/libs/contracts/video-frame-interpolation.ts）。 */
     VIDEO_FRAME_INTERPOLATION("generation-task", "video_frame_interpolation");
 

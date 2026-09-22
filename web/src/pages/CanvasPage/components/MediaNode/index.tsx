@@ -16,6 +16,7 @@ import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+import type { SmartMattingMode } from '../../smartMatting';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
@@ -228,6 +229,10 @@ export interface MediaNodeData {
   /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
    *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
   onSceneSplit?: (id: string) => void;
+  /** 智能抠像（IKHK7N）：进入抠像编辑态（视频卡工具条「智能抠像 ▾」下拉菜单项与触发钮
+   *  直启首项派发，mode 由菜单项决定：portrait=人像抠像、greenscreen=绿幕抠像）；
+   *  置灰门槛见 smartMatting.ts；编辑态本体由 IKHK9N 交付，本票只接通入口事件 */
+  onSmartMatting?: (id: string, mode: SmartMattingMode) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -710,6 +715,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           />
         ) : data.mediaType === 'video' ? (
           <>
+            {/* 透明结果卡棋盘格垫底层（IKHKAC）：垫在 video 之下的静态棋盘格，透明 WebM 的
+                透明区域透出格纹，一眼认出这是可合成的透明素材（视觉语言沿用图片抠图结果卡
+                imageCutout 先例）；仅 transparentOutput 标记卡渲染——标记在任务完成回填时
+                按产物格式冻结（WEBM 透明=true，MP4 纯色不设），aria-hidden 纯视觉 */}
+            {data.transparentOutput === true && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="video-transparent-checkerboard" />
+            )}
             <video
               ref={videoRef}
               className={styles.mediaVideo}
@@ -722,6 +734,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               onLoadedMetadata={handleVideoMetadata}
               style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
             />
+            {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
+                左下角半透明胶囊标注「透明背景 · WEBM」，与棋盘格一起标识透明产物；
+                仅 transparentOutput 标记卡渲染，MP4 纯色结果不渲染 */}
+            {data.transparentOutput === true && (
+              <span className={styles.transparentTag} data-testid="video-transparent-tag">
+                透明背景 · WEBM
+              </span>
+            )}
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
                 仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}
             {data.subtitleEraseEditing && (

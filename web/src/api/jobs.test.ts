@@ -8,6 +8,7 @@ import {
   createMediaExtraction,
   createVocalSplit,
   createVideoEnhancement,
+  createVideoMatting,
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
@@ -40,6 +41,72 @@ describe('createMediaExtraction', () => {
       source_asset_id: '3985',
       output_format: 'mp3',
     });
+  });
+});
+
+describe('createVideoMatting', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('向项目智能抠像端点提交冻结五键（源素材/占位卡/模式/格式/token）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '77', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVideoMatting('project/1', {
+        source_asset_id: '3985',
+        target_node_id: 'smart-matting-1',
+        mode: 'greenscreen',
+        format: 'MP4',
+        background_color: 'green',
+        client_token: 'token-01',
+      }),
+    ).resolves.toEqual({ job_id: '77', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/video-mattings');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '3985',
+      target_node_id: 'smart-matting-1',
+      mode: 'greenscreen',
+      format: 'MP4',
+      background_color: 'green',
+      client_token: 'token-01',
+    });
+  });
+
+  it('创建失败：错误提示单源——HTTP 层恰好提示一次（审查修复 S1，调用方不得二次 toast）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ code: 1050, msg: '智能抠像失败，请重试', data: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(
+      createVideoMatting('p1', {
+        source_asset_id: '1',
+        target_node_id: 'smart-matting-1',
+        mode: 'portrait',
+        format: 'WEBM',
+        client_token: 'token-02',
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    // 不传 silent = 失败提示由 HTTP 层承担且只承担一次；页面只落占位卡失败态
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('智能抠像失败，请重试');
   });
 });
 

@@ -123,6 +123,32 @@ describe('MediaNode 抠图结果卡渲染（IKGXMT）', () => {
   });
 });
 
+describe('MediaNode 智能抠像透明结果卡渲染（IKHKAC）', () => {
+  it('透明结果卡（transparentOutput 标记）：视频区垫棋盘格底底层 + 左下角「透明背景 · WEBM」角标；无标记卡（MP4 纯色）都不渲染', async () => {
+    await renderNode('video', {
+      data: { mime: 'video/webm', transparentOutput: true },
+    });
+    const checker = mountNode.querySelector('[data-testid="video-transparent-checkerboard"]');
+    expect(checker).toBeTruthy();
+    expect(checker!.getAttribute('aria-hidden')).toBe('true');
+    // 角标（形态取交互验收基准原型 done 态）：标注透明产物格式，与棋盘格同条件渲染
+    const tag = mountNode.querySelector('[data-testid="video-transparent-tag"]');
+    expect(tag).toBeTruthy();
+    expect(tag!.textContent).toBe('透明背景 · WEBM');
+    // MP4 纯色结果卡不设标记：棋盘格与角标都不渲染
+    await renderNode('video', { data: { mime: 'video/mp4' } });
+    expect(mountNode.querySelector('[data-testid="video-transparent-checkerboard"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="video-transparent-tag"]')).toBeNull();
+    // 生成中占位态不渲染（棋盘格与角标仅成品视频分支）
+    await renderNode('video', {
+      genStatus: 'generating',
+      data: { mime: 'video/webm', transparentOutput: true },
+    });
+    expect(mountNode.querySelector('[data-testid="video-transparent-checkerboard"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="video-transparent-tag"]')).toBeNull();
+  });
+});
+
 describe('MediaNode draft overlay (IKDMQQ)', () => {
   it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {
     await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });

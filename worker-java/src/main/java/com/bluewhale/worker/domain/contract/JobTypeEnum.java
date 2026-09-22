@@ -58,6 +58,12 @@ public enum JobTypeEnum {
      *  一对多逐段扇出，设计定案 ADR-0108）；消费者与处理器由 worker 票按附录 C 触点注册。 */
     VIDEO_SCENE_SPLIT("video_scene_split"),
 
+    /** 智能抠像（tag=video_matting，IKHK7F，父规格 IKHJRC；契约 =
+     *  backend/libs/contracts/video-matting.ts，火山 MediaKit matte-portrait-video /
+     *  matte-greenscreen-video 双端点人像/绿幕抠像，一对一产物，设计定案 ADR-0112）；
+     *  消费者与处理器由 worker 票按附录 C 触点注册。 */
+    VIDEO_MATTING("video_matting"),
+
     /** 视频插帧（tag=video_frame_interpolation，IKHLK3，父需求 IKHLES；契约 =
      *  backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
      *  video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ

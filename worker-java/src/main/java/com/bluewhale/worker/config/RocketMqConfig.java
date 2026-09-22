@@ -408,6 +408,32 @@ public class RocketMqConfig {
     }
 
     /**
+     * video_matting（智能抠像，火山 MediaKit 双端点人像/绿幕抠像）consumer（IKHK99，父规格
+     * IKHJRC，契约 IKHK7F；以 videoSceneSplit 接线为模板）。
+     * <p>
+     * consumer group = "generation-video-matting-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#VIDEO_MATTING}（= TS `VIDEO_MATTING_TAG`）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.VideoMattingConsumer videoMattingConsumer(
+            com.bluewhale.worker.application.processor.VideoMattingJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-video-matting-worker";
+        int concurrency = workerProps.concurrency().videoMatting();
+
+        return new com.bluewhale.worker.application.consumer.VideoMattingConsumer(
+                processor,
+                GenerationMqRouteEnum.VIDEO_MATTING.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
      * video_frame_interpolation（视频插帧，火山 MediaKit video-frame-interpolation）consumer
      * （IKHLKJ，父需求 IKHLES；以 videoEnhance 接线为模板）。
      * <p>
@@ -542,6 +568,21 @@ public class RocketMqConfig {
     }
 
     /**
+     * video_matting 轮询自投生产者（IKHK99；去字幕 videoSubtitleEraseMessageProducer 同款）。
+     * <p>
+     * VideoMattingJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = video_matting）——复用 video 的 producer 会把消息投到
+     * video tag，被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoMattingMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.VIDEO_MATTING.topic(),
+                GenerationMqRouteEnum.VIDEO_MATTING.tag());
+    }
+
+    /**
      * video_frame_interpolation 轮询自投生产者（IKHLKJ；HD videoEnhanceMessageProducer 同款）。
      * <p>
      * VideoFrameInterpolationJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
@@ -628,6 +669,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer videoSceneSplitRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_SCENE_SPLIT);
+    }
+
+    /** recovery 重投 video_matting（IKHK99，父规格 IKHJRC，契约 IKHK7F）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer videoMattingRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.VIDEO_MATTING);
     }
 
     /** recovery 重投 video_frame_interpolation（IKHLKJ，父需求 IKHLES）。 */

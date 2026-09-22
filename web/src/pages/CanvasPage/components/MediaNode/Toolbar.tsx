@@ -26,6 +26,11 @@
  * 移出延时关/点触发钮直启首项，形态同「智能去字幕 ▾」）；菜单两项 = 首项原「音视频分离」
  * 直进（功能不改名）+ 次项「人声背景分离」，次项置灰门槛见 vocalSplit.ts（未关联资产）、
  * 点击派发 onVocalBackgroundSplit 进入编辑态（编辑态本体由 IKHA2W 交付）。
+ * IKHK7N 视频卡追加「智能抠像 ▾」下拉入口（ADR-0112）：模式选择前置到入口下拉
+ * （SmartMattingMenu，形态同「智能去字幕 ▾」家族），落「场景切分」之后、分隔线之前；
+ * 两项纯文字「人像抠像」「绿幕抠像」分别派发 onSmartMatting(id, mode) 进入编辑态
+ * （编辑态本体由 IKHK9N 交付）；置灰门槛见 smartMatting.ts（未关联资产 / 时长超
+ * 10 分钟且有时长数据，缺失放行），触发钮点击直启首项「人像抠像」。
  * IKHLKR 视频卡首位「HD」单按钮升为「高清 ▾」下拉（FrameInterpolationMenu，ADR-0113）：
  * 首项「HD 高清」直启原链路零变化，次项「插帧」派发 onFrameInterpolation 建插帧草稿卡
  * （发送闭环由 IKHLKX 交付）。门槛分两层：整钮置灰只看未关联资产（triggerDisabledReason），
@@ -41,11 +46,18 @@ import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { audioTrimGateReason } from '../../audioTrim';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
+import {
+  SMART_MATTING_ENTRY_HINT,
+  SMART_MATTING_GREENSCREEN_HINT,
+  SMART_MATTING_PORTRAIT_HINT,
+  smartMattingGateReason,
+} from '../../smartMatting';
 import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
 import { FRAME_INTERPOLATION_ENTRY_HINT, frameInterpolationGateReason } from '../../frameInterpolation';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import AudioVideoSplitMenu, { type AudioVideoSplitMenuItem } from './AudioVideoSplitMenu';
+import SmartMattingMenu, { type SmartMattingMenuItem } from './SmartMattingMenu';
 import FrameInterpolationMenu, { type FrameInterpolationMenuItem } from './FrameInterpolationMenu';
 import type { MediaNodeData } from './index';
 import styles from './index.module.css';
@@ -125,6 +137,18 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  置灰预检见 sceneSplit.ts（未关联资产 / 时长超 2 小时且有时长数据，缺失放行） */
   const handleSceneSplit = useCallback(() => data.onSceneSplit?.(id), [data, id]);
   const sceneSplitDisabledReason = sceneSplitGateReason(data);
+  /** 智能抠像（IKHK7N）：菜单项与触发钮直启派发 onSmartMatting 进入抠像编辑态
+   *  （编辑态本体归 IKHK9N，本票只接通入口事件）；置灰预检见 smartMatting.ts
+   *  （未关联资产 / 时长超 10 分钟且有时长数据，缺失放行） */
+  const handleSmartMattingPortrait = useCallback(
+    () => data.onSmartMatting?.(id, 'portrait'),
+    [data, id],
+  );
+  const handleSmartMattingGreenscreen = useCallback(
+    () => data.onSmartMatting?.(id, 'greenscreen'),
+    [data, id],
+  );
+  const smartMattingDisabledReason = smartMattingGateReason(data);
   /** 视频 HD 高清（IKH3VG）：点击在源卡右侧建 HD 草稿卡并弹出 HD 面板；置灰预检见
    *  videoEnhance.ts（未关联资产 / 短长边超上限 / 短边不足 360，宽高缺失放行） */
   const handleVideoEnhance = useCallback(() => data.onVideoEnhance?.(id), [data, id]);
@@ -228,6 +252,27 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
     },
   ];
 
+  /** 「智能抠像 ▾」下拉菜单项（IKHK7N，ADR-0112 模式前置到入口）：两项纯文字、
+   *  分别直启人像/绿幕抠像编辑态（模式是发起前的分类问题，不进编辑态再选）；
+   *  门槛同源整卡预检（未关联资产/超 10 分钟两项一并置灰，点击无效但悬停仍可展开
+   *  看两项说明与置灰原因），各项 title 恒为自己的 hint（同去字幕规格故事 7 口径）。 */
+  const smartMattingMenuItems: SmartMattingMenuItem[] = [
+    {
+      id: 'portrait',
+      label: '人像抠像',
+      hint: SMART_MATTING_PORTRAIT_HINT,
+      disabledReason: smartMattingDisabledReason,
+      onSelect: handleSmartMattingPortrait,
+    },
+    {
+      id: 'greenscreen',
+      label: '绿幕抠像',
+      hint: SMART_MATTING_GREENSCREEN_HINT,
+      disabledReason: smartMattingDisabledReason,
+      onSelect: handleSmartMattingGreenscreen,
+    },
+  ];
+
   /** 「高清 ▾」下拉菜单项（IKHLKR，ADR-0113）：首位「HD 高清」直启原链路零变化
    *  （点击触发钮=直启首项），次项「插帧」为新增入口。**两层门槛分开**（家族差异）：
    *  整钮置灰只看未关联资产（frameInterpolationDisabledReason，经 triggerDisabledReason
@@ -323,6 +368,15 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <Film size={14} strokeWidth={2} />
           <span>场景切分</span>
         </button>
+      )}
+      {/* 智能抠像（IKHK7N，ADR-0112）：仅视频卡显示，落「场景切分」之后、分隔线之前；
+          模式前置到入口下拉（SmartMattingMenu，形态同「智能去字幕 ▾」家族），触发钮
+          点击直启首项「人像抠像」；门槛置灰走 aria-disabled（hover 仍展开看原因） */}
+      {data.mediaType === 'video' && (
+        <SmartMattingMenu
+          items={smartMattingMenuItems}
+          triggerHint={SMART_MATTING_ENTRY_HINT}
+        />
       )}
       {/* 音频卡四功能占位（IKH8Q3 剩余项）：aria-disabled 置灰保持渲染（口径同画质横排
           .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}

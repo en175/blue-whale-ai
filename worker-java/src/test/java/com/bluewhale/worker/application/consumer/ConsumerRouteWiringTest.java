@@ -61,6 +61,7 @@ class ConsumerRouteWiringTest {
             GenerationMqRouteEnum.VIDEO_ENHANCE,
             GenerationMqRouteEnum.VOCAL_SPLIT,
             GenerationMqRouteEnum.VIDEO_SCENE_SPLIT,
+            GenerationMqRouteEnum.VIDEO_MATTING,
             GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION);
 
     /** 残留旧名的部署环境（修正六之前的 topic / tag 取值）。 */
@@ -109,6 +110,9 @@ class ConsumerRouteWiringTest {
                         workerProps, clientConfig),
                 config.videoSceneSplitConsumer(
                         mock(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class),
+                        workerProps, clientConfig),
+                config.videoMattingConsumer(
+                        mock(com.bluewhale.worker.application.processor.VideoMattingJobProcessor.class),
                         workerProps, clientConfig),
                 config.videoFrameInterpolationConsumer(
                         mock(com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor.class),

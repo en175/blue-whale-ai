@@ -129,6 +129,32 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
+     * 更新 video_matting 进度：CAS 更新 + 续租（IKHK99；updateVideoSceneSplitProgress 的
+     * 单产物形态——completed 相结果转存前的心跳续租通道，租约时长由调用侧传入）。
+     * <p>
+     * SET progress=clamp(0,99,round(?)), last_polled_at=now, lease_expires_at=?, version=version+1
+     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET progress = #{progress},
+                last_polled_at = NOW(),
+                lease_expires_at = #{leaseExpiresAt},
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int updateVideoMattingProgress(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("progress") Integer progress,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
+    );
+
+    /**
      * 发布 media_extract 结果：CAS 守卫（media-extract-ops.ts:47-63）。
      * <p>
      * SET status='succeeded', progress=100, next_action_at=null, next_poll_at=null,
@@ -851,6 +877,15 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources(
                 com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
                 List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE),
+                limit, maxAgeMinutes);
+    }
+
+    /** 智能抠像到点/孤儿（IKHK99，父规格 IKHJRC，契约 IKHK7F）：套 source 白名单（与 claim
+     *  同源，单源 video_matting；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueVideoMattingJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources(
+                com.bluewhale.worker.domain.contract.VideoMattingContract.TAG,
+                List.of(com.bluewhale.worker.domain.contract.VideoMattingContract.SOURCE),
                 limit, maxAgeMinutes);
     }
 

@@ -14,7 +14,12 @@
    IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
    独立实例），第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）。
    IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
-   置灰门槛与悬停原因断言同族（门槛纯逻辑另见 sceneSplit.test.ts）。 */
+   置灰门槛与悬停原因断言同族（门槛纯逻辑另见 sceneSplit.test.ts）。
+   IKHK7N 视频卡追加「智能抠像 ▾」下拉入口（ADR-0112 模式前置）：落「场景切分」之后、
+   分隔线之前，两项纯文字「人像抠像」「绿幕抠像」分别派发 onSmartMatting(id, mode)
+   进入编辑态（编辑态本体归 IKHK9N），触发钮点击直启首项「人像抠像」；置灰门槛
+   （未关联资产 / 时长超 10 分钟且有时长数据，缺失放行）断言同族，门槛纯逻辑另见
+   smartMatting.test.ts。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -93,9 +98,9 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
     expect(addToChat.classList.contains(styles.toolBtn)).toBe(true);
   });
 
-  it('视频卡保留 HD（首位）与智能去字幕与 @，隐藏「高清 ▾」，音视频分离后多场景切分（IKH8BJ）', async () => {
+  it('视频卡保留 HD（首位）与智能去字幕与 @，隐藏「高清 ▾」，音视频分离后多场景切分与智能抠像（IKH8BJ/IKHK7N）', async () => {
     await renderToolbar('video');
-    expect(labels()).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', '智能抠像', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('「重新编辑」「生成图片」「生成视频」不再渲染（IKH3WE：派生新卡走拖线类型菜单、原卡重跑走点卡片）', async () => {
@@ -1112,7 +1117,8 @@ describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
         ? 'divider'
         : (el.textContent?.trim() || el.getAttribute('title') || ''),
     );
-    expect(seq).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', 'divider', '详情', '下载', '添加到 Agent 聊天']);
+    // IKHK7N 起「智能抠像 ▾」插在「场景切分」之后、分隔线之前
+    expect(seq).toEqual(['HD高清', '智能去字幕', '音视频分离', '场景切分', '智能抠像', 'divider', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('仅视频卡显示：图片卡与音频卡不出现「场景切分」入口', async () => {
@@ -1170,6 +1176,200 @@ describe('MediaNodeToolbar 场景切分入口（IKH8BJ）', () => {
       sceneBtn.click();
     });
     expect(onSceneSplit).toHaveBeenCalledWith('video-node');
+  });
+});
+
+/* IKHK7N（ADR-0112）：视频卡「智能抠像 ▾」下拉入口，交互口径与「智能去字幕 ▾」/
+   「音视频分离 ▾」同构但独立实例（悬停自动展开、移出 120ms 延迟关闭、Esc/点外立即关闭、
+   点击触发钮直启首项）。家族差异：模式选择前置到入口下拉——两项纯文字「人像抠像」
+   （任意视频只识别人物主体）+「绿幕抠像」（绿幕/纯色背景素材，主体可为人、物品、动物），
+   各自派发 onSmartMatting(id, mode) 进入编辑态（编辑态本体归 IKHK9N，本套只验收回调
+   被正确调用）；触发钮可用态 title 保留入口效果边界说明（同音视频分离 triggerHint 口径）。
+   门槛两条（未关联资产 / 时长超 10 分钟且有时长数据，缺失放行，ADR-0112 对齐去字幕）：
+   整钮 aria-disabled 置灰、点击无效，hover 仍展开菜单看两项说明与置灰原因。
+   合成事件口径同上：mouseover/mouseout + relatedTarget 在 wrap 外。 */
+describe('MediaNodeToolbar 「智能抠像 ▾」下拉入口（IKHK7N）', () => {
+  const trigger = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="smart-matting-menu-trigger"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="smart-matting-menu"]');
+  const item = (id: string) =>
+    mountNode.querySelector<HTMLButtonElement>(`[data-testid="smart-matting-menu-item-${id}"]`);
+
+  async function hoverIn() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  async function hoverOut() {
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  /** 推进 hover 延迟关闭的等待时间（120ms 窗口 + 余量） */
+  async function settleHoverClose() {
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('仅视频卡渲染，位次在「场景切分」之后、分隔线（详情）之前；图片/音频卡不出现', async () => {
+    await renderToolbar('video');
+    const order = labels();
+    expect(order.indexOf('智能抠像')).toBeGreaterThan(order.indexOf('场景切分'));
+    expect(order.indexOf('智能抠像')).toBeLessThan(order.indexOf('详情'));
+    await renderToolbar('image');
+    expect(labels().includes('智能抠像')).toBe(false);
+    await renderToolbar('audio');
+    expect(labels().includes('智能抠像')).toBe(false);
+  });
+
+  it('触发钮形态：WandSparkles 图标 + 「智能抠像」文字 + ChevronDown 下拉箭头（默认收起）', async () => {
+    await renderToolbar('video');
+    const btn = trigger();
+    expect(btn.textContent).toBe('智能抠像');
+    expect(btn.querySelector('svg.lucide-wand-sparkles')).not.toBeNull();
+    expect(btn.querySelector('svg.lucide-chevron-down')).not.toBeNull();
+    expect(btn.getAttribute('aria-haspopup')).toBe('menu');
+    expect(menu()).toBeNull();
+  });
+
+  it('悬停自动展开两项纯文字菜单：人像抠像 + 绿幕抠像，各项 title 为自己的 hint', async () => {
+    await renderToolbar('video', { data: { onSmartMatting: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    const rendered = [...mountNode.querySelectorAll('[data-testid^="smart-matting-menu-item-"]')];
+    expect(rendered.map((b) => b.textContent)).toEqual(['人像抠像', '绿幕抠像']);
+    // 纯文字：菜单项内不渲染图标（svg）
+    expect(rendered.every((b) => b.querySelector('svg') === null)).toBe(true);
+    expect(item('portrait')!.getAttribute('title')).toContain('人物');
+    expect(item('greenscreen')!.getAttribute('title')).toContain('纯色背景');
+  });
+
+  it('移出触发钮延迟后关闭；延迟窗口内重新进入不关闭', async () => {
+    await renderToolbar('video', { data: { onSmartMatting: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    await hoverOut();
+    // 延迟窗口内菜单保持（指针可从触发钮滑向菜单项）
+    expect(menu()).not.toBeNull();
+    await settleHoverClose();
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await hoverOut();
+    await hoverIn();
+    await settleHoverClose();
+    expect(menu()).not.toBeNull();
+  });
+
+  it('Esc 与点外立即关闭（不等待延迟窗口）', async () => {
+    await renderToolbar('video', { data: { onSmartMatting: vi.fn(), assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('点击触发钮直启首项「人像抠像」（携带节点 id 与 mode=portrait），菜单收起', async () => {
+    const onSmartMatting = vi.fn();
+    await renderToolbar('video', { data: { onSmartMatting, assetId: 'a1' } });
+    await act(async () => {
+      trigger().click();
+    });
+    expect(onSmartMatting).toHaveBeenCalledWith('video-node', 'portrait');
+    expect(menu()).toBeNull();
+  });
+
+  it('两菜单项各自派发：人像抠像派发 portrait、绿幕抠像派发 greenscreen（携带节点 id 与 mode）', async () => {
+    const onSmartMatting = vi.fn();
+    await renderToolbar('video', { data: { onSmartMatting, assetId: 'a1' } });
+    await hoverIn();
+    await act(async () => {
+      item('greenscreen')!.click();
+    });
+    expect(onSmartMatting).toHaveBeenCalledWith('video-node', 'greenscreen');
+    // 选择后菜单收起
+    expect(menu()).toBeNull();
+
+    await hoverIn();
+    await act(async () => {
+      item('portrait')!.click();
+    });
+    expect(onSmartMatting).toHaveBeenLastCalledWith('video-node', 'portrait');
+  });
+
+  it('未关联资产：整钮 aria-disabled 置灰 + title 展示原因、点击无效；hover 仍展开菜单且两项一并置灰', async () => {
+    const onSmartMatting = vi.fn();
+    await renderToolbar('video', { data: { onSmartMatting } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.disabled).toBe(false); // aria-disabled 而非原生 disabled：hover 仍需可展开
+    expect(btn.getAttribute('title')).toContain('尚未关联资产');
+    await act(async () => {
+      btn.click();
+    });
+    expect(onSmartMatting).not.toHaveBeenCalled();
+
+    // hover 仍可展开看说明与原因：两项 title 恒为自己的 hint，点击均不派发
+    await hoverIn();
+    expect(menu()).not.toBeNull();
+    const portrait = item('portrait')!;
+    const greenscreen = item('greenscreen')!;
+    expect(portrait.getAttribute('aria-disabled')).toBe('true');
+    expect(greenscreen.getAttribute('aria-disabled')).toBe('true');
+    expect(portrait.getAttribute('title')).toContain('人物');
+    expect(greenscreen.getAttribute('title')).toContain('纯色背景');
+    await act(async () => {
+      portrait.click();
+      greenscreen.click();
+    });
+    expect(onSmartMatting).not.toHaveBeenCalled();
+  });
+
+  it('时长超 10 分钟且有时长数据：置灰并悬停原因，点击不派发；恰 600 放行', async () => {
+    const onSmartMatting = vi.fn();
+    await renderToolbar('video', { data: { onSmartMatting, assetId: 'a1', duration: 600.001 } });
+    const over = trigger();
+    expect(over.getAttribute('aria-disabled')).toBe('true');
+    expect(over.getAttribute('title')).toContain('10 分钟');
+    await act(async () => {
+      over.click();
+    });
+    expect(onSmartMatting).not.toHaveBeenCalled();
+
+    await renderToolbar('video', { id: 'exact-node', data: { onSmartMatting, assetId: 'a1', duration: 600 } });
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('时长数据缺失放行：关联资产即可点击，可用态触发钮 title 为入口效果边界说明（后端按权威数据复核）', async () => {
+    const onSmartMatting = vi.fn();
+    await renderToolbar('video', { data: { onSmartMatting, assetId: 'a1' } });
+    const btn = trigger();
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    expect(btn.getAttribute('title')).toContain('背景'); // SMART_MATTING_ENTRY_HINT
+    await act(async () => {
+      btn.click();
+    });
+    expect(onSmartMatting).toHaveBeenCalledWith('video-node', 'portrait');
+  });
+
+  it('分辨率不参与置灰（4K/8K 视频关联资产即可用，超限由任务失败口径兜底）', async () => {
+    await renderToolbar('video', { data: { assetId: 'a1', width: 3840, height: 2160 } });
+    expect(trigger().getAttribute('aria-disabled')).toBeNull();
   });
 });
 
