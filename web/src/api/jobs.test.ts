@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
   createAudioTrim,
@@ -11,6 +12,10 @@ import {
   isGenerationDomainError,
   readJobFailText,
 } from './jobs';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 describe('createMediaExtraction', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -100,6 +105,50 @@ describe('createFrameInterpolation', () => {
       target_node_id: 'media-draft-7',
       fps: 120,
     });
+  });
+
+  it('silent 透传：创建失败仍抛 ApiError 但 http 层不 toast（调用方 catch 统一提示一次，IKHSFH）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 1028, msg: '任务入队失败', data: null }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(toast.error).mockClear();
+
+    await expect(
+      createFrameInterpolation('p1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 60,
+      }, { silent: true }),
+    ).rejects.toThrow('任务入队失败');
+
+    // silent：http 层不弹（面板保留可重发的错误由 CanvasPage catch 提示，全链路只一次）
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('缺省 init：维持家族默认 toast 口径（不传 silent 时 http 层照常提示）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 1028, msg: '任务入队失败', data: null }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(toast.error).mockClear();
+
+    await expect(
+      createFrameInterpolation('p1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 60,
+      }),
+    ).rejects.toThrow('任务入队失败');
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('任务入队失败');
   });
 });
 

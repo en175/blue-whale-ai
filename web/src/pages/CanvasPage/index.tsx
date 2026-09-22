@@ -138,6 +138,7 @@ import {
   frameInterpolationErrorText,
   frameInterpolationGateReason,
   restoreFrameInterpolationFps,
+  restoreFrameInterpolationRetryFps,
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from './frameInterpolation';
@@ -304,6 +305,7 @@ import {
   createVideoSceneSplit,
   newIdempotencyKey,
   readJobFailText,
+  type CreateFrameInterpolationPayload,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
@@ -604,8 +606,19 @@ export default function CanvasPage() {
   /** 插帧面板隐藏豁免（口径同 enhancePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const frameInterpolationPanelHiddenRef = useRef(false);
   /** 插帧面板发送中（IKHLKX）：创建往返期间面板参数只读、发送钮置灰防重（口径同
-   *  videoEnhanceSubmitting）；创建失败复位（面板与配置保留可重发） */
+   *  videoEnhanceSubmitting）；创建失败复位（面板与配置保留可重发）。IKHSFH 后语义收敛为
+   *  「当前打开面板绑定卡的创建在途」：打开面板时按在途集合重算、回调按绑定守卫复位，
+   *  A 卡在途不再冻结/解锁 B 卡的面板。 */
   const [frameInterpolationSubmitting, setFrameInterpolationSubmitting] = useState(false);
+  /** 插帧创建在途集合（IKHSFH 同步防重）：nodeId 维度，从开始保存（flushCanvasSave）至
+   *  创建返回期间持有——同卡在该窗口内只受理一次提交，面板发送与失败重试共用（React
+   *  state 的 submitting 是渲染期快照，慢网连点/同帧连点会读到旧值，防重以本集合为准）；
+   *  失败解锁（finally 移除）后允许再试。 */
+  const frameInterpolationInFlightRef = useRef<Set<string>>(new Set());
+  /** 当前已打开插帧面板绑定的卡 id（同步写，口径同 videoEnhanceBoundRef）：提交回调的
+   *  归属守卫——A 卡提交未返回期间面板切到 B（或关闭）的，A 的回调不再关面板/复位
+   *  B 的提交中状态（提交会话隔离，IKHSFH）。 */
+  const frameInterpolationBoundRef = useRef<string | null>(null);
   /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
    *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
    *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
@@ -1820,6 +1833,15 @@ export default function CanvasPage() {
   const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const referencePlanMutation = useMutation({ mutationFn: (input: Parameters<typeof referencePromptPlan>[0]) => referencePromptPlan(input) });
+  /** 插帧创建写请求（IKHSFH）：useMutation 承载 POST video-frame-interpolations——silent
+   *  传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例 createConversationQuote）。
+   *  提交与请求归属按节点划分：mutateAsync 每次独立在途（不同卡可各自提交、乱序完成），
+   *  同卡防重与回调归属由 startFrameInterpolationJob 的在途集合 + 面板绑定守卫显式承载，
+   *  不把使用 useMutation 本身当作竞态已解决。 */
+  const createFrameInterpolationMutation = useMutation({
+    mutationFn: (vars: { projectId: string; payload: CreateFrameInterpolationPayload }) =>
+      createFrameInterpolation(vars.projectId, vars.payload, { silent: true }),
+  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -3574,6 +3596,7 @@ export default function CanvasPage() {
   };
   const closeFrameInterpolationDialog = () => {
     frameInterpolationPanelHiddenRef.current = true;
+    frameInterpolationBoundRef.current = null;
     setShowFrameInterpolationDialog(false);
   };
   const dismissAllGenPanels = () => {
@@ -4132,13 +4155,17 @@ export default function CanvasPage() {
     setShowEnhanceDialog(false);
     setShowVideoEnhanceDialog(true);
     setShowFrameInterpolationDialog(false);
+    frameInterpolationBoundRef.current = null; // 切 HD 面板：插帧会话结束（IKHSFH 归属守卫）
   };
 
   /** 打开绑定插帧卡的插帧面板（IKHLKR）：lastParams 恢复目标帧率（无持久化参数回落契约
-   *  默认档 60fps）；生成中重开为只读查看（generating 由挂载处按节点状态传入） */
+   *  默认档 60fps）；生成中重开为只读查看（generating 由挂载处按节点状态传入）。
+   *  IKHSFH：打开即重算 submitting=该卡创建是否在途（在途重开显示提交中只读；A 卡在途
+   *  期间打开 B 卡面板不受 A 冻结），并同步绑定镜像（提交回调归属守卫）。 */
   const openFrameInterpolationDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
     frameInterpolationPanelHiddenRef.current = false;
+    frameInterpolationBoundRef.current = nodeId;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
@@ -4148,6 +4175,9 @@ export default function CanvasPage() {
       ts: Date.now(),
       initialFps: restoreFrameInterpolationFps(identity?.lastParams),
     });
+    // IKHSFH：submitting 重算为「该卡创建是否在途」——A 卡在途打开 B 面板不被冻结；
+    // 在途期间重开该卡面板显示提交中只读
+    setFrameInterpolationSubmitting(frameInterpolationInFlightRef.current.has(nodeId));
     exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowBottomDialog(false);
     setShowImageDialog(false);
@@ -4260,6 +4290,7 @@ export default function CanvasPage() {
     const d = (node?.data ?? {}) as Record<string, unknown>;
     if (!node || (d.draft !== true && !hasGenerationRecord(node)) || !d.frameInterpolation) {
       setFrameInterpolationDraftId(null);
+      frameInterpolationBoundRef.current = null; // 绑定结束：在途回调不再归属本面板（IKHSFH）
       setShowFrameInterpolationDialog(false);
     }
   }, [frameInterpolationDraftId, mediaNodes]);
@@ -7227,12 +7258,20 @@ export default function CanvasPage() {
       | FrameInterpolationIdentity
       | undefined;
     if (frameInterpolationIdentity != null) {
-      // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 冻结输入原样重发创建接口
-      //——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自提交时随卡持久化的
-      //  lastParams（面板后来改动未落卡的状态不参与），每次重试都是全新创建请求（免费口径无
-      //  幂等头 / 无 client_token，不存在复用旧 token 重放旧任务的问题）。
+      // 插帧卡分流（IKHLKX，镜像 HD 高清）：契约无 retry 端点，重试 = 受理冻结输入原样重发
+      // 创建接口——源素材取自插帧身份 sourceAssetId（不回读源卡当前配置），fps 取自受理时
+      // 随卡冻结的 frozenParams（IKHSFH：60fps 任务失败后面板改 120fps，重试仍发 60fps；
+      // 旧持久化卡回落 lastParams），每次重试都是全新创建请求（免费口径无幂等头 / 无
+      // client_token，不存在复用旧 token 重放旧任务的问题）。
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-      void startFrameInterpolationJob(nodeId, restoreFrameInterpolationFps(frameInterpolationIdentity.lastParams));
+      // 面板正绑定该卡时联动提交中（在途期间面板只读）；回调同样按绑定守卫复位，
+      // 面板已切到其他卡的互不干扰（IKHSFH 提交会话隔离）
+      const panelBound = frameInterpolationBoundRef.current === nodeId;
+      if (panelBound) setFrameInterpolationSubmitting(true);
+      void startFrameInterpolationJob(nodeId, restoreFrameInterpolationRetryFps(frameInterpolationIdentity))
+        .finally(() => {
+          if (frameInterpolationBoundRef.current === nodeId) setFrameInterpolationSubmitting(false);
+        });
       return;
     }
     const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
@@ -8063,13 +8102,17 @@ export default function CanvasPage() {
   };
 
   /** 插帧任务发送核心（IKHLKX，逐点照映 HD 的 startVideoEnhanceJob）：契约三键
-   *  （source_asset_id 冻结自插帧身份、target_node_id=插帧卡节点 id、fps 面板所选档）经
+   *  （source_asset_id 冻结自插帧身份、target_node_id=插帧卡节点 id、fps 提交所选档）经
    *  buildFrameInterpolationInput 契约 zod 校验后 POST video-frame-interpolations。
-   *  创建成功：插帧卡原地转生成中（lastParams 随提交写卡 = 失败重试的冻结输入）+ jobId 登记
+   *  创建成功：插帧卡原地转生成中 + frozenParams 随受理写卡（= 最后受理任务的冻结输入，
+   *  失败重试的权威来源；面板编辑值 lastParams 不随受理回写，IKHSFH）+ jobId 登记
    *  + 启动轮询（终态回填见 applyJobTerminal：成功转普通视频卡并清插帧身份），返回 true（面板据此关闭）。
    *  创建失败（网络/契约拒/入队前异常）：插帧卡保持草稿原状（不转生成中、不写 jobId），toast
-   *  可读原因，返回 false（面板与配置保留可调档重发——父单第 28 条口径）。免费口径：无幂等头
-   *  /无 body 内 client_token、无积分预估、不走余额拦截门。 */
+   *  可读原因（silent 传输 + 此处统一提示一次，http 层不重复 toast，IKHSFH），返回 false
+   *  （面板与配置保留可调档重发——父单第 28 条口径）。
+   *  同步防重（IKHSFH）：从开始保存（flushCanvasSave）至创建返回，同卡在途集合持有该
+   *  nodeId——面板发送与失败重试共用此门，慢网连续点击只创建一个任务；失败/完成解锁后允许再试。
+   *  免费口径：无幂等头 /无 body 内 client_token、无积分预估、不走余额拦截门。 */
   const startFrameInterpolationJob = async (
     nodeId: string,
     fps: FrameInterpolationFps,
@@ -8090,13 +8133,17 @@ export default function CanvasPage() {
       showToast('warn', '插帧参数不合法，请调整后重试');
       return false;
     }
-    // 票面 IKHLKX 验收 2：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
-    // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；口径同家族「立刻落库」的
-    //  best-effort 吞错：保存失败不阻断发送，前端保存状态条与防抖自动保存兜底；
-    //  发送与失败重试共用本函数，两条路径同款保证）
-    await flushCanvasSave(currentId).catch(() => {});
+    // 同步防重（IKHSFH）：检查与登记在同一同步段完成（置于首个 await 前），React 渲染
+    // 周期外连点也只受理一次；面板发送与失败重试都经过本函数，两条路径同款保证
+    if (frameInterpolationInFlightRef.current.has(nodeId)) return false;
+    frameInterpolationInFlightRef.current.add(nodeId);
     try {
-      const created = await createFrameInterpolation(currentId, input);
+      // 票面 IKHLKX 验收 2：受理后立即关页也不丢卡/结果——草稿卡与来源边先落盘再 POST
+      // （插帧卡由入口建卡、本函数只发送，故冲刷在 POST 之前；口径同家族「立刻落库」的
+      //  best-effort 吞错：保存失败不阻断发送，前端保存状态条与防抖自动保存兜底；
+      //  发送与失败重试共用本函数，两条路径同款保证）
+      await flushCanvasSave(currentId).catch(() => {});
+      const created = await createFrameInterpolationMutation.mutateAsync({ projectId: currentId, payload: input });
       // 提交立即接管节点（防旧取消/轮询响应解除本次生成状态，口径同 startVideoEnhanceJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
@@ -8106,33 +8153,51 @@ export default function CanvasPage() {
         progress: 0,
         errorText: undefined,
         jobId: created.job_id,
-        // 提交即写 lastParams（契约单键形态）：失败重试原样重发、重新编辑回填共用
-        frameInterpolation: { ...identity, lastParams: { fps } },
+        // 受理即冻结（IKHSFH）：frozenParams = 最后受理任务的输入（失败重试原样重发的
+        // 权威来源，面板主动发送新配置成功受理后才更新）；lastParams 保留面板编辑值不回写
+        frameInterpolation: { ...identity, frozenParams: { fps } },
       });
       pollJob(nodeId, created.job_id);
       return true;
     } catch (e: unknown) {
+      // 请求错误只提示一次（IKHSFH）：创建走 silent 传输（http 层不 toast），此处统一提示
       showToast('error', isApiError(e) ? e.message : '插帧任务创建失败，请重试');
       return false;
+    } finally {
+      // 失败/完成即解锁（允许再试）；在途期间 genStatus 未变（仍 draft/failed），防重
+      // 只靠本集合——解锁必须先于任何下一次提交的检查
+      frameInterpolationInFlightRef.current.delete(nodeId);
     }
   };
 
   /** 插帧面板发送（IKHLKX，逐点照映 handleVideoEnhanceDialogSend）：面板只交付目标帧率档；
    *  创建成功才关面板（置隐藏标记避免紧随的选中事件回弹重开——家族已知缺陷模式），创建失败
    *  面板保留、配置保留可重发（父单第 28 条：覆盖「先关闭面板」的歧义）；创建往返期间
-   *  submitting 置位使参数只读、发送钮置灰防重。 */
+   *  submitting 置位使参数只读、发送钮置灰防重。
+   *  提交会话隔离（IKHSFH）：回调以绑定镜像守卫归属——A 提交未返回期间关闭 A、打开 B 的，
+   *  A 的成功/失败回调不再关闭、重置或错误冻结 B（面板与 submitting 都只属于当前绑定卡）；
+   *  同卡连点的最终防重由 startFrameInterpolationJob 的在途集合同步兜底。 */
   const handleFrameInterpolationDialogSend = (fps: FrameInterpolationFps): boolean => {
     const nodeId = frameInterpolationDraftId;
     if (!nodeId || frameInterpolationSubmitting) return false;
     setFrameInterpolationSubmitting(true);
     void startFrameInterpolationJob(nodeId, fps)
       .then((issued) => {
-        if (issued) {
+        // 仅当面板仍绑定发起卡时才关面板：A 在途回调返回时面板已切到 B / 已关闭的，
+        // 关闭动作属于 B 的会话，不得由 A 的结果触发（IKHSFH）
+        if (issued && frameInterpolationBoundRef.current === nodeId) {
           frameInterpolationPanelHiddenRef.current = true;
+          frameInterpolationBoundRef.current = null;
           setShowFrameInterpolationDialog(false);
         }
       })
-      .finally(() => setFrameInterpolationSubmitting(false));
+      .finally(() => {
+        // 仅当面板仍绑定发起卡时复位提交中：面板已切走时 submitting 属于新会话
+        //（B 自己的提交置位 / 打开面板时按在途集合重算），A 不得代为解锁（IKHSFH）
+        if (frameInterpolationBoundRef.current === nodeId) {
+          setFrameInterpolationSubmitting(false);
+        }
+      });
     return true;
   };
 

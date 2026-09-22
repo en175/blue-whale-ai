@@ -509,16 +509,20 @@ export interface FrameInterpolationCreatedData {
 
 /** 创建视频插帧任务（IKHLK3 端点；免费口径同 HD 高清 / 去字幕——不带幂等头、
  *  无 body 内 client_token、无积分预估、不走余额拦截门）。
- *  插帧草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。 */
+ *  插帧草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。
+ *  init.silent 透传 apiRequest（IKHSFH「请求错误只提示一次」）：静默传输失败仍抛 ApiError
+ *  但 http 层不 toast，由调用方 catch 统一提示一次（先例 createConversationQuote）。 */
 export function createFrameInterpolation(
   projectId: string,
   payload: CreateFrameInterpolationPayload,
+  init?: { silent?: boolean },
 ): Promise<FrameInterpolationCreatedData> {
   return apiRequest<FrameInterpolationCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...(init?.silent === true ? { silent: true } : {}),
     },
   );
 }

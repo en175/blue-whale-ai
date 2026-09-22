@@ -54,8 +54,13 @@ export function frameInterpolationDisplayName(fps: FrameInterpolationFps): strin
 export interface FrameInterpolationIdentity {
   /** 源素材身份（assetId 归一字符串）：提交冻结 source_asset_id 与面板回填共用 */
   sourceAssetId?: string;
-  /** 上次参数（fps 单键，契约形态；切换即时生效写入） */
+  /** 面板编辑值（fps 单键，契约形态；切档即时写卡）——只反映用户当前面板选择，
+   *  与「最后受理任务的冻结输入」分离（IKHSFH） */
   lastParams?: Record<string, unknown>;
+  /** 最后受理任务的冻结输入（fps 单键，契约形态；创建成功受理时写入）——失败重试
+   *  的权威来源：60fps 任务失败后面板改 120fps，重试仍按这里的 60fps 原样重发；
+   *  面板主动发送新配置成功受理后才更新（IKHSFH）。旧持久化卡无此键，回落 lastParams */
+  frozenParams?: Record<string, unknown>;
 }
 
 /** 门槛判定输入：与 MediaNode data 字段同名（assetId 视频关联资产 id）。 */
@@ -108,6 +113,16 @@ export function restoreFrameInterpolationFps(
   return (VIDEO_FRAME_INTERPOLATION_FPS_VALUES as readonly unknown[]).includes(fps)
     ? (fps as FrameInterpolationFps)
     : FRAME_INTERPOLATION_DEFAULT_FPS;
+}
+
+/** 恢复失败重试应使用的帧率档（IKHSFH）：优先最后受理任务的冻结输入 frozenParams
+ *  （创建成功受理时写入，面板后来的编辑只改 lastParams 不改它）；旧持久化卡无
+ *  frozenParams（受理值与编辑值同居 lastParams）回落 lastParams 尽力兼容。
+ *  非法值回落契约默认档 60（与 restoreFrameInterpolationFps 同源）。 */
+export function restoreFrameInterpolationRetryFps(
+  identity: FrameInterpolationIdentity | undefined,
+): FrameInterpolationFps {
+  return restoreFrameInterpolationFps(identity?.frozenParams ?? identity?.lastParams);
 }
 
 /* ============ 发送闭环（IKHLKX 接线点）：契约三键组装与失败文案家族映射 ============ */

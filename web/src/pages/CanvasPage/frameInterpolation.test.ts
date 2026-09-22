@@ -16,6 +16,7 @@ import {
   frameInterpolationErrorText,
   frameInterpolationGateReason,
   restoreFrameInterpolationFps,
+  restoreFrameInterpolationRetryFps,
 } from './frameInterpolation';
 import { VIDEO_ENHANCE_MISSING_ASSET_REASON } from './videoEnhance';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
@@ -60,6 +61,25 @@ describe('restoreFrameInterpolationFps（lastParams 恢复）', () => {
     expect(restoreFrameInterpolationFps({ fps: '60' })).toBe(60);
     expect(restoreFrameInterpolationFps({ fps: 45 })).toBe(60);
     expect(restoreFrameInterpolationFps({ fps: 240 })).toBe(60);
+  });
+});
+
+describe('restoreFrameInterpolationRetryFps（失败重试冻结输入恢复，IKHSFH）', () => {
+  it('frozenParams 优先于面板编辑值：60fps 受理冻结后面板改 120（lastParams），重试仍取 60', () => {
+    expect(
+      restoreFrameInterpolationRetryFps({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 60 } }),
+    ).toBe(60);
+  });
+
+  it('旧持久化卡无 frozenParams：回落 lastParams（旧口径兼容）', () => {
+    expect(restoreFrameInterpolationRetryFps({ sourceAssetId: '5', lastParams: { fps: 30 } })).toBe(30);
+  });
+
+  it('identity 缺失或 frozenParams 非法：回落契约默认档 60（不取 lastParams 猜测）', () => {
+    expect(restoreFrameInterpolationRetryFps(undefined)).toBe(60);
+    expect(
+      restoreFrameInterpolationRetryFps({ sourceAssetId: '5', lastParams: { fps: 120 }, frozenParams: { fps: 45 } }),
+    ).toBe(60);
   });
 });
 
