@@ -400,7 +400,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimAudioTrim: no candidate → empty")
     void claimAudioTrim_noCandidate() {
-        when(jobMapper.findCandidateByTypeAndSources(300L, "audio_trim", List.of())).thenReturn(null);
+        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(null);
 
         Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
                 service.claimAudioTrim("300", "worker-1");
@@ -416,7 +416,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(4L);
         candidate.setStatus("queued");
 
-        when(jobMapper.findCandidateByTypeAndSources(300L, "audio_trim", List.of())).thenReturn(candidate);
+        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(candidate);
         when(jobMapper.claimImageCas(
                 eq(300L),
                 eq("worker-1"),
