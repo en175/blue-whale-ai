@@ -253,3 +253,12 @@ export function cropOutputFormat(source: CropFormatSource): CropOutputFormat {
  *  这条边表达「裁切结果卡由该图裁切而来」，是纯视觉来源记录而非生成参考输入——
  *  图片参考推导会跳过带此标记的边，源图不占参考位、不参与 @ 编号与媒体索引。 */
 export const IMAGE_CROP_EDGE_ORIGIN = 'image-crop';
+
+/** 裁切身份标记（node.data.imageCrop，形态对齐 imageCutout.ts 的 ImageCutoutIdentity）：
+ *  裁切是纯客户端操作无服务端任务（无 jobId），结果卡若不带任何生成宿主标记则 MediaNode
+ *  不会渲染左侧 target Handle，导致来源连线无法绘制。本标记让结果卡在成品态仍被识别为
+ *  生成宿主以渲染 target Handle 接收来源边，同时保持成品图片正常展示（非草稿占位）。 */
+export interface ImageCropIdentity {
+  /** 源素材身份（assetId 归一字符串）：裁切源图资产 id */
+  sourceAssetId?: string;
+}

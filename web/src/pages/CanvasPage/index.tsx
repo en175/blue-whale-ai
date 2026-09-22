@@ -212,6 +212,7 @@ import {
   type CropOutputFormat,
   type CropPresetKey,
   type CropRect,
+  type ImageCropIdentity,
 } from './imageCrop';
 import OutpaintDialog from './components/OutpaintDialog';
 import CutoutToolbar from './components/CutoutToolbar';
@@ -8217,8 +8218,12 @@ export default function CanvasPage() {
             height: uploaded.height,
             mime: uploaded.mime,
             size: uploaded.size,
+            // 裁切是客户端即时成品（无服务端任务/jobId）：清掉草稿态占位，成品图片正常展示；
+            // 同时挂 imageCrop 身份标记——MediaNode 据此渲染左侧 target Handle 接收来源连线
+            // （裁切无 jobId 走不通 jobId 通道，靠身份标记让成品态仍被识别为生成宿主）。
             genStatus: undefined,
             draft: undefined,
+            imageCrop: { sourceAssetId: String(uploaded.asset_id) } satisfies ImageCropIdentity,
           },
         });
         addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
