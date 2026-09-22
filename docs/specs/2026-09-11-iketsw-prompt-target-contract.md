@@ -1,5 +1,7 @@
 # 方案引用与生图接纳契约（IKETSW）
 
+> **该接口已退役**（IKHQ0C / IKHQ0D，2026-09-22）：本文「引用命令」一节描述的 `POST /api/canvases/:projectId/prompt-references` 已于 0915 批次退役（提交 `7a3f05c0`，2026-09-18，IKG99G）——前端改为纯本地建「方案 → 草稿」方案边、把绑定写在边上的 `promptReference`，后端路由与实现随之删除。**本文档保留为当时的决策记录**；方案边 `promptReference` / 媒体边 `inputSources` 的数据形状，以及「接纳与执行」一节的 `prompt_plan_snapshot` 下游契约仍然有效。
+
 ## 时间
 
 2026-09-11

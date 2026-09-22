@@ -1,9 +1,5 @@
-import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { NewApiError } from "@lib/core";
-import { promptReferenceRequestSchema, releaseRemovedPromptSources, type CanvasEdge } from "@lib/contracts";
-import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
-import { createAssetOwnershipOps } from "@lib/shared/persistence/asset-ownership-repo.js";
-import { confirmPlanEdges, nodeAssetId, planError, syncDraftModeOnPlanMedia, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
+import { releaseRemovedPromptSources, type CanvasEdge } from "@lib/contracts";
+import { nodeAssetId, planError } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
@@ -246,52 +242,6 @@ export class CanvasService {
       }
     }
     throw new ConflictException("画布正在被修改，请重试应用");
-  }
-
-  async referencePrompt(ownerId: string, projectId: string, body: unknown) {
-    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
-    const parsed = promptReferenceRequestSchema.safeParse(body);
-    if (!parsed.success) throw new BadRequestException("方案引用参数无效");
-    const { planNodeId, targetNodeId, expectedVersion, modelId, syncBindings } = parsed.data;
-    const canvas = await this.repo.getByProject(projectId);
-    if (canvas.version !== expectedVersion) throw new NewApiError("Canvas 版本冲突", 412);
-    const nodes = JSON.parse(canvas.nodes ?? "[]");
-    const result = confirmPlanEdges(nodes, JSON.parse(canvas.edges ?? "[]"), planNodeId, targetNodeId, syncBindings);
-    const target = nodes.find((n: { id: string }) => n.id === targetNodeId);
-    const isVideo = target.data?.mediaType === "video";
-    const models = await createModelCapabilityRepo(this.prisma.client).listEnabledByType(isVideo ? "video" : "image");
-    const targetModel = modelId ?? nodes.find((n: { id: string }) => n.id === targetNodeId)?.data?.draftModelId;
-    const model = targetModel ? models.find(m => m.model_id === targetModel) : models.find(m => m.is_default) ?? models[0];
-    if (!isVideo) validatePlanModel(planNodeId, result.plan.bindings, result.assetIds.length, model);
-    const assets = await createAssetOwnershipOps(this.prisma.client).resolveInputAssets(result.assetIds, ownerId, projectId);
-    for (const id of result.assetIds) {
-      if (!assets.some(a => a.id === id && (isVideo || a.type === "image"))) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === id), "素材已删除或无权访问");
-    }
-    if (isVideo) {
-      const refs = result.assetIds.map(id => {
-        const asset = assets.find(a => a.id === id)!;
-        const edge = result.edges.find(e => e.target === targetNodeId && nodes.some((n: { id: string; data: Record<string, unknown> }) => n.id === e.source && String(n.data?.assetId) === id));
-        const role = edge?.data?.refRole === "first" ? "first_frame" : edge?.data?.refRole === "last" ? "last_frame" : "reference";
-        return { ...asset, role };
-      });
-      const materials = (Array.isArray(target.data?.draftMaterialRefs) ? target.data.draftMaterialRefs : []) as Array<{ materialId: string; mediaType: "image" | "video"; role: string }>;
-      const materialRefs = materials.map(m => ({ id: m.materialId, type: m.mediaType, role: m.role === "first" ? "first_frame" : m.role === "last" ? "last_frame" : "reference" }));
-      validateVideoPlan(planNodeId, result.plan.bindings, [...refs, ...materialRefs], model, target.data?.draftMode);
-      // IKHBDO：参考上限与支持位一律读能力行 features（本模块不再有任何模型名/上限硬编码）。
-      try { validateReferences(model!.features, refs.filter(r => r.role === "reference"), materialRefs.filter(r => r.role === "reference")); }
-      catch (error) { planError(planNodeId, result.plan.bindings, error instanceof Error ? error.message : "素材不受支持"); }
-    }
-    // IKFC26：校验按既有 draftMode 口径执行（validateVideoPlan 对 prompt 无特判），模式切换仅影响持久化
-    const nextNodes = isVideo ? syncDraftModeOnPlanMedia(nodes, targetNodeId, result.plan.bindings) : nodes;
-    try {
-      const saved = await this.repo.saveIfVersion(projectId, expectedVersion, canvas.viewport, nextNodes === nodes ? canvas.nodes : JSON.stringify(nextNodes), JSON.stringify(result.edges),
-        { ownerId, items: assets.map(a => ({ assetId: a.id, mediaType: a.type as "image" | "video" | "audio" })) });
-      if (!saved) throw new NewApiError("Canvas 版本冲突", 412);
-      return ok(saved);
-    } catch (error) {
-      if (error instanceof PromptMaterialUnavailableError) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === error.assetId), "素材已删除或无权访问");
-      throw error;
-    }
   }
 
   async save(
