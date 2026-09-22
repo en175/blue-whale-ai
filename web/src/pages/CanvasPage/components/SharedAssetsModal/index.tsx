@@ -619,14 +619,14 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
     case 'media': {
       const snap = item.snapshot as SharedAssetMediaSnapshot;
       if (item.kind === 'video') {
-        return <video className={styles.previewMedia} src={snap.url} controls />;
+        return <video className={styles.previewMedia} src={resolveMediaSrc(snap.url)} controls />;
       }
       if (item.kind === 'audio') {
         return (
           <div className={styles.previewAudioBox}>
             <AudioLines size={48} strokeWidth={1.5} className={styles.previewAudioIcon} />
             <p className={styles.previewAudioName}>{titleFromAsset(item)}</p>
-            <audio className={styles.previewAudio} src={snap.url} controls />
+            <audio className={styles.previewAudio} src={resolveMediaSrc(snap.url)} crossOrigin={remoteImageCrossOrigin(snap.url)} controls />
           </div>
         );
       }
@@ -647,7 +647,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.voice && (
             <div className={styles.previewVoice}>
               <span className={styles.previewVoiceName}>音色：{snap.voice.name}</span>
-              <audio className={styles.previewAudio} src={resolveMediaSrc(snap.voice.src)} controls />
+              <audio className={styles.previewAudio} src={resolveMediaSrc(snap.voice.src)} crossOrigin={remoteImageCrossOrigin(snap.voice.src)} controls />
             </div>
           )}
         </div>

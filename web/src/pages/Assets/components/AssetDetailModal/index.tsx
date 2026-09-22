@@ -81,7 +81,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
       {!loaded && <Skeleton className={styles.audioSkeleton} />}
       <AudioPlayer
         className={`${styles.audioPlayer} ${loaded ? '' : styles.previewMediaLoading}`}
-        src={asset.url}
+        src={resolveMediaSrc(asset.url)}
         onLoadedMetadata={() => setLoaded(true)}
         onError={() => setLoaded(true)}
       />

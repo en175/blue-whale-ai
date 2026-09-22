@@ -9,6 +9,7 @@
  * ============================================ */
 import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Play, Pause } from 'lucide-react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 /** 截取选区（秒，内部全精度；形状对齐 audioTrimGeometry.AudioTrimSelection，
  *  此处本地声明避免无谓依赖方向）。 */
@@ -55,7 +56,8 @@ const BARS = 72;
 
 /** 从真实音频解码数据生成波形条高度百分比（RMS 归一化） */
 async function computeWaveform(src: string, bars: number, signal: AbortSignal): Promise<number[]> {
-  const res = await fetch(src, { signal });
+  const fetchUrl = resolveMediaSrc(src);
+  const res = await fetch(fetchUrl, { signal });
   if (!res.ok) throw new Error('fetch failed');
   const arrayBuffer = await res.arrayBuffer();
   const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
@@ -292,7 +294,8 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
     <div className={styles.audioPlayer}>
       <audio
         ref={audioRef}
-        src={src}
+        src={resolveMediaSrc(src)}
+        crossOrigin={remoteImageCrossOrigin(src)}
         preload="metadata"
         onLoadedMetadata={onLoaded}
         onTimeUpdate={onTimeUpdate}

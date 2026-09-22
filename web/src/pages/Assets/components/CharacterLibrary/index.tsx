@@ -230,7 +230,7 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
             asset.AssetType === 'Video' ? (
               <video className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} controls autoPlay playsInline />
             ) : asset.AssetType === 'Audio' ? (
-              <audio className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} controls />
+              <audio className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} crossOrigin={remoteImageCrossOrigin(asset.URL)} controls />
             ) : (
               <img className={styles.detailMedia} src={resolveMediaSrc(asset.URL)} crossOrigin={remoteImageCrossOrigin(asset.URL)} alt={asset.Name} draggable={false} />
             )

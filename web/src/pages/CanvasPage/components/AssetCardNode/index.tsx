@@ -295,7 +295,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           resolve(0);
           audio.src = '';
         };
-        audio.src = src;
+        audio.src = resolveMediaSrc(src);
       });
       if (duration <= MAX_VOICE_DURATION) {
         results.push({ id: `voice-${Date.now()}-${results.length}`, src, name: f.name, duration });
@@ -551,7 +551,8 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                     <div key={v.id} className={styles.voicePlayer}>
                       <audio
                         className={styles.voiceAudio}
-                        src={v.src}
+                        src={resolveMediaSrc(v.src)}
+                        crossOrigin={remoteImageCrossOrigin(v.src)}
                         controls
                         preload="metadata"
                       />
