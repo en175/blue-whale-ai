@@ -36,6 +36,10 @@ interface AudioPlayerProps {
   /** 服务端权威时长（秒，story 15）：有值时优先于浏览器实测（ogg/flac 等格式 metadata 支持不稳） */
   duration?: number;
   onDownload?: () => void;
+  /** 调速编辑态骨架标记（IKHW5C）：true 即编辑态——false→true（进入）暂停+播放头
+   *  归零（对齐截取编辑态进入手势 IKHB7A 口径）；退出标记移除即恢复。播放速率本票
+   *  不改（天然 1.0 原速），试听/倍速控件与播放速率接管由 IKHW5S 承担。 */
+  speedEditing?: boolean;
   /** 截取编辑态选区（IKHB7A）：非 null 即编辑态——进入（null→非 null）暂停+播放头
    *  归零；选区变化（拖抓手）暂停+播放头被挤出时钳回边界；试听钳制见头注。 */
   trimSelection?: AudioPlayerTrimSelection | null;
@@ -100,7 +104,7 @@ function fallbackWaveform(src: string, duration: number, bars: number): number[]
 }
 
 const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer(
-  { src, duration: authoritativeDuration, trimSelection, trimOverlay },
+  { src, duration: authoritativeDuration, speedEditing, trimSelection, trimOverlay },
   ref,
 ) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -153,6 +157,21 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
     }
     return stopRaf;
   }, [playing, tick, stopRaf]);
+
+  /** 调速编辑态进入手势（IKHW5C 骨架）：false→true 暂停 + 播放头归零（对齐截取
+   *  编辑态「进入即暂停、播放头归零」IKHB7A 口径，从一致的起始状态开始试听）。
+   *  依赖布尔稳定值不靠引用比较；退出（true→false）本票无动作——播放速率未改，
+   *  音频天然恢复 1.0 倍速播放（IKHW5S 接 playbackRate 后退出复位归其承担）。 */
+  const prevSpeedEditingRef = useRef(false);
+  useEffect(() => {
+    const a = audioRef.current;
+    const prev = prevSpeedEditingRef.current;
+    prevSpeedEditingRef.current = speedEditing === true;
+    if (!a || !speedEditing || prev) return;
+    if (!a.paused) a.pause();
+    a.currentTime = 0;
+    setCurrentTime(0);
+  }, [speedEditing]);
 
   /** 截取编辑态手势（进入/拖抓手）统一暂停与播放头钳制（IKHB7A）：
    *  - null → 非 null（进入编辑态）：暂停 + 播放头归零（红色定位条归零）；

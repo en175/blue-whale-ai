@@ -244,6 +244,12 @@ export interface MediaNodeData {
     duration: number;
     onSelectionChange: (selection: { start: number; end: number }) => void;
   };
+  /** 音频调速编辑态骨架标记（IKHW5C，渲染期派生注入，不持久化）：本卡为调速会话源
+   *  音频卡时由 CanvasPage 注入——进入即暂停+播放头归零（AudioPlayer 承担）；源卡
+   *  悬浮工具条隐藏由 CanvasPage 会话模态（editSessionActive）承担，波形区不加遮罩
+   *  （调速无选区，试听/倍速控件由 IKHW5S 接手）。播放速率本票不改（天然 1.0），
+   *  退出标记移除即恢复；IKHW5S 接 playbackRate 后退出复位由其退出函数承担。 */
+  speedEditing?: true;
   /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
    *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
    *  失败卡无身份不渲染，口径同家族身份分流先例） */
@@ -291,6 +297,10 @@ export interface MediaNodeData {
    *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
   onTrimAudio?: (id: string) => void;
   onMixAudio?: (id: string) => void;
+  /** 音频调速（IKHW5C，父单 IKHVYO）：音频卡工具条第二钮「调速」入口点亮派发（进入
+   *  调速编辑态骨架归本票，编辑态本体——滑杆/发送条/提交——归 IKHW5S；置灰门槛见
+   *  audioSpeed.ts——音频 URL 与 assetId 皆缺失唯一置灰，时长缺失不拦） */
+  onAudioSpeed?: (id: string) => void;
   /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
    *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
    *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
@@ -884,6 +894,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             fileName={data.fileName}
             duration={typeof data.duration === 'number' ? data.duration : undefined}
             onDownload={() => data.onDownload?.(id)}
+            speedEditing={data.speedEditing === true}
             trimSelection={data.trimEditing ? data.trimEditing.selection : null}
             trimOverlay={
               data.trimEditing ? (

@@ -723,6 +723,13 @@ export default function CanvasPage() {
   const audioMixUnpersistedCardsRef = useRef(new Set<string>());
   const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
   const audioMixDeleteWaitingRef = useRef(new Set<string>());
+  /** 音频调速编辑态骨架（IKHW5C，父单 IKHVYO）：处于调速会话的源音频卡 node id，
+   *  null=未进入。进入即暂停+播放头归零（speedEditing 注入由 AudioPlayer 承担），
+   *  源卡悬浮工具条随会话模态（editSessionActive）隐藏；四路退出（X/Esc/点其他卡/
+   *  点画布空白）不建任务不建卡，退出标记移除音频天然恢复 1.0 倍速。编辑态本体
+   *  （倍速滑杆/发送条/提交/占位卡）归 IKHW5S——本票只留会话 state 与进入/退出
+   *  接缝，本字段即编辑态状态位。 */
+  const [audioSpeedTargetNodeId, setAudioSpeedTargetNodeId] = useState<string | null>(null);
 
   /** 人声背景分离编辑态（IKHA2W，会话口径同音视频分离）：处于人声背景分离编辑的源视频卡
    *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
@@ -2214,6 +2221,7 @@ export default function CanvasPage() {
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+          onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -3201,6 +3209,10 @@ export default function CanvasPage() {
      *  按钮派发）；首帧渲染前经由 actionsRef.current.trimAudio 分派到 handleNodeTrimAudio */
     trimAudio: (_id: string) => {},
     mixAudio: (_id: string) => {},
+    /** 音频调速（IKHW5C 通道/接线，父单 IKHVYO）：进入调速编辑态骨架（音频卡工具条
+     *  第二钮「调速」派发，编辑态本体归 IKHW5S）；首帧渲染前经由
+     *  actionsRef.current.audioSpeed 分派到 handleNodeAudioSpeed */
+    audioSpeed: (_id: string) => {},
     /** 人声背景分离（IKHA2E 通道 / IKHA2W 接线）：进入人声背景分离编辑态（视频卡工具条
      *  「音视频分离 ▾」下拉第二项派发）；首帧渲染前经由
      *  actionsRef.current.vocalBackgroundSplit 分派到 handleNodeVocalBackgroundSplit */
@@ -3827,6 +3839,7 @@ export default function CanvasPage() {
       audioVideoSplit: audioVideoSplitTargetNodeId,
       audioTrim: audioTrimTargetNodeId,
       audioMix: audioMixSourceNodeId,
+      audioSpeed: audioSpeedTargetNodeId,
       vocalSplit: vocalSplitTargetNodeId,
       sceneSplit: sceneSplitTargetNodeId,
       smartMatting: smartMattingTargetNodeId,
@@ -3840,6 +3853,7 @@ export default function CanvasPage() {
       audioVideoSplit: exitAudioVideoSplitEditing,
       audioTrim: exitAudioTrimEditing,
       audioMix: exitAudioMixEditing,
+      audioSpeed: exitAudioSpeedEditing,
       vocalSplit: exitVocalSplitEditing,
       sceneSplit: exitSceneSplitEditing,
       smartMatting: exitSmartMattingEditing,
@@ -3852,12 +3866,12 @@ export default function CanvasPage() {
     enterToolSession(kind, buildToolSessionDeps(), init);
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离/
-   *  音频截取/场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求
+   *  音频截取/音频调速/场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求
    *  先退会话再放行，见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
     || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null
-    || audioTrimTargetNodeId != null || audioMixSourceNodeId != null || vocalSplitTargetNodeId != null || sceneSplitTargetNodeId != null
+    || audioTrimTargetNodeId != null || audioMixSourceNodeId != null || audioSpeedTargetNodeId != null || vocalSplitTargetNodeId != null || sceneSplitTargetNodeId != null
     || smartMattingTargetNodeId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
@@ -4068,7 +4082,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, audioMixSourceNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, smartMattingTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, audioMixSourceNodeId, audioSpeedTargetNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, smartMattingTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -4540,6 +4554,14 @@ export default function CanvasPage() {
     if (!mediaNodes.some((node) => node.id === audioMixSourceNodeId)) exitAudioMixEditing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioMixSourceNodeId, mediaNodes]);
+  /** 调速编辑态绑定清理（IKHW5C）：源音频卡被删除时退出调速会话（防编辑态标记悬挂，
+   *  口径同截取绑定清理） */
+  useEffect(() => {
+    if (!audioSpeedTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === audioSpeedTargetNodeId)) exitAudioSpeedEditing();
+    // exitAudioSpeedEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioSpeedTargetNodeId, mediaNodes]);
   /** 人声背景分离编辑态绑定清理（IKHA2W）：目标源视频卡被删除时退出编辑态，防浮条悬挂
    *  （口径同音视频分离绑定清理） */
   useEffect(() => {
@@ -4751,6 +4773,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -4802,6 +4825,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -4865,6 +4889,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -5363,6 +5388,7 @@ export default function CanvasPage() {
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
       onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
       onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+      onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
       onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
       onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
       onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -5757,6 +5783,7 @@ export default function CanvasPage() {
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+          onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
           onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -6752,6 +6779,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
         onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -8886,6 +8914,13 @@ export default function CanvasPage() {
     setAudioMixFormat('mp3');
     setAudioMixSubmitting(false);
   };
+  /** 退出调速编辑态（IKHW5C 四退出共用：Esc/点其他卡/点画布空白，X 钮随 IKHW5S
+   *  发送条交付后接入同一函数）：未发送无卡无边无任务；本票无会话参数可复位，仅清
+   *  会话身份——speedEditing 注入移除后音频天然恢复 1.0 倍速（本票不改播放速率），
+   *  退出复位回调（IKHW5S 接 playbackRate 后）挂本函数即可。 */
+  const exitAudioSpeedEditing = () => {
+    setAudioSpeedTargetNodeId(null);
+  };
 
   /** 退出人声背景分离编辑态（IKHA2W 四退出共用）：会话参数（场景/格式）与发送中复位——
    *  参数不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
@@ -9031,6 +9066,20 @@ export default function CanvasPage() {
       setAudioMixSelectedInputs([]);
       setAudioMixFormat('mp3');
       setAudioMixSourceNodeId(id);
+    });
+  };
+
+  /** 音频调速（IKHW5C 入口 / IKHW5S 编辑态闭环）：把目标音频卡置为调速编辑态骨架。
+   *  置灰门槛（音频 URL 与 assetId 皆缺失唯一条件，时长缺失不拦）已在工具条按钮置灰
+   *  层完成（audioSpeedGateReason），此处只管进入；互斥退出与生成面板关闭经
+   *  toolSessionCoordinator（与截取/去字幕等既有会话互斥互踢）、不动视角；进入即暂停+
+   *  播放头归零由 speedEditing 注入承担（AudioPlayer），工具条随会话模态隐藏。编辑态
+   *  本体（滑杆/发送条/提交）归 IKHW5S——init 接缝在此，无会话参数可重置。 */
+  const handleNodeAudioSpeed = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    runToolSessionEntry('audioSpeed', () => {
+      setAudioSpeedTargetNodeId(id);
     });
   };
 
@@ -9993,6 +10042,7 @@ export default function CanvasPage() {
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
   actionsRef.current.trimAudio = handleNodeTrimAudio;
   actionsRef.current.mixAudio = handleNodeMixAudio;
+  actionsRef.current.audioSpeed = handleNodeAudioSpeed;
   actionsRef.current.vocalBackgroundSplit = handleNodeVocalBackgroundSplit;
   actionsRef.current.sceneSplit = handleNodeSceneSplit;
   actionsRef.current.smartMatting = handleNodeSmartMatting;
@@ -10610,6 +10660,7 @@ export default function CanvasPage() {
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
               onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
               onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+              onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
               onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
               onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
               onSmartMatting: (id: string, mode: SmartMattingMode) => actionsRef.current.smartMatting(id, mode),
@@ -11552,9 +11603,12 @@ export default function CanvasPage() {
             // 音频截取编辑态（IKHB7A）：目标源音频卡渲染期注入 trimEditing（选区/全长/抓手
             //  上抛，不持久化）——MediaNode 据此暂停音频+播放头归零并在波形区叠加截取遮罩
             //  四件套（接管指针不冒泡开音频面板），发送条由本页 AudioTrimBar 承担
+            // 音频调速编辑态骨架（IKHW5C）：目标源音频卡渲染期注入 speedEditing（不持久化）
+            //  ——AudioPlayer 据此暂停音频+播放头归零；无遮罩无发送条（编辑态本体归 IKHW5S），
+            //  悬浮工具条随会话模态隐藏
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
-            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/音频截取）
+            // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/音频截取/音频调速）
             //  或插帧面板打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记
             //  不再控制渲染，退为集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担。
             //  高清/HD 参数面板不在此列（IKHFUF：与普通生成面板相同，打开期间不藏上方操作条，
@@ -11564,7 +11618,8 @@ export default function CanvasPage() {
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showFrameInterpolationDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
-              || audioTrimTargetNodeId || vocalSplitTargetNodeId || sceneSplitTargetNodeId
+              || audioTrimTargetNodeId || audioSpeedTargetNodeId
+              || vocalSplitTargetNodeId || sceneSplitTargetNodeId
               || smartMattingTargetNodeId
               ? mediaNodes.map((n) => {
                   const hideToolbar =
@@ -11575,12 +11630,14 @@ export default function CanvasPage() {
                     || n.id === outpaintNodeId
                     || n.id === subtitleEraseTargetNodeId
                     || n.id === audioVideoSplitTargetNodeId
-                    || n.id === audioTrimTargetNodeId || n.id === vocalSplitTargetNodeId || n.id === sceneSplitTargetNodeId
+                    || n.id === audioTrimTargetNodeId || n.id === audioSpeedTargetNodeId
+                    || n.id === vocalSplitTargetNodeId || n.id === sceneSplitTargetNodeId
                     || n.id === smartMattingTargetNodeId;
                   if (
                     n.id !== eraseTargetNodeId && n.id !== submittingNodeId && n.id !== cropTargetNodeId
                     && n.id !== subtitleEraseTargetNodeId
                     && n.id !== audioTrimTargetNodeId
+                    && n.id !== audioSpeedTargetNodeId
                     && !hideToolbar
                   ) return n;
                   const data: Record<string, unknown> = { ...n.data };
@@ -11608,6 +11665,7 @@ export default function CanvasPage() {
                     }
                   }
                   if (n.id === audioVideoSplitTargetNodeId) data.splitEditing = true;
+                  if (n.id === audioSpeedTargetNodeId) data.speedEditing = true;
                   if (n.id === audioTrimTargetNodeId) {
                     // 截取遮罩注入：选区（抓手拖拽实时上抛回写）与全长（遮罩几何权威驱动，
                     // 波形解码失败不阻塞）；时长缺失的兜底不会到达——入口门槛已拦。

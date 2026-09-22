@@ -31,6 +31,11 @@
  * 两项纯文字「人像抠像」「绿幕抠像」分别派发 onSmartMatting(id, mode) 进入编辑态
  * （编辑态本体由 IKHK9N 交付）；置灰门槛见 smartMatting.ts（未关联资产 / 时长超
  * 10 分钟且有时长数据，缺失放行），触发钮点击直启首项「人像抠像」。
+ * IKHW5C（父单 IKHVYO）音频卡第二钮「调速」点亮（ADR-0109 第二钮）：自占位数组移出
+ * 单独渲染接门槛与回调（形态同「截取」钮 IKHB6Y 先例：图标+文字、aria-disabled 置灰、
+ * 点击守卫后派发 onAudioSpeed，编辑态本体归 IKHW5S）；置灰唯一条件 = 音频 URL 与
+ * assetId 皆缺失（audioSpeed.ts，悬停「音频不可用，无法调速」；时长缺失不拦，无截取
+ * 的时长门槛），混合/音视频合成/转码三钮维持置灰占位「即将上线」不变。
  * IKHLKR 视频卡首位「HD」单按钮升为「高清 ▾」下拉（FrameInterpolationMenu，ADR-0113）：
  * 首项「HD 高清」直启原链路零变化，次项「插帧」派发 onFrameInterpolation 建插帧草稿卡
  * （发送闭环由 IKHLKX 交付）。门槛分两层：整钮置灰只看未关联资产（triggerDisabledReason），
@@ -46,6 +51,7 @@ import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { audioTrimGateReason } from '../../audioTrim';
 import { audioMixSourceError } from '../../audioMix';
+import { audioSpeedGateReason } from '../../audioSpeed';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import {
   SMART_MATTING_ENTRY_HINT,
@@ -83,11 +89,11 @@ interface MediaNodeToolbarProps {
   data: MediaNodeData;
 }
 
-/** 音频卡四功能占位钮（IKH8Q3 剩余项，ADR-0109）：置灰占位，无门槛、无回调依赖，
- *  故为模块级静态配置（区别于画质横排的组件内数组）；首位「截取」已点亮（IKHB6Y）
- *  不在本数组，单独渲染接门槛与回调；图标按序：剪刀（截取）、仪表盘（调速）、
- *  层叠（混合）、场记板（音视频合成）、循环箭头（转码），
- *  形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
+/** 音频卡三占位钮（IKH8Q3 剩余项，ADR-0109；IKHW5C 起「调速」移出点亮不在本数组）：
+ *  置灰占位，无门槛、无回调依赖，故为模块级静态配置（区别于画质横排的组件内数组）；
+ *  「截取」（IKHB6Y）与「调速」（IKHW5C）已点亮单独渲染各接门槛与回调；
+ *  图标按序：剪刀（截取）、仪表盘（调速）、层叠（混合）、场记板（音视频合成）、
+ *  循环箭头（转码），形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
 const AUDIO_TOOL_PLACEHOLDER_HINT = '即将上线';
 const audioToolItems: Array<{ id: string; label: string; icon: LucideIcon }> = [
   { id: 'compose', label: '音视频合成', icon: Clapperboard },
@@ -130,6 +136,12 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const handleTrimAudio = useCallback(() => data.onTrimAudio?.(id), [data, id]);
   const audioTrimDisabledReason = audioTrimGateReason(data);
   const audioMixDisabledReason = audioMixSourceError({ id, type: 'mediaNode', position: { x: 0, y: 0 }, data: data as unknown as Record<string, unknown> });
+  /** 音频调速（IKHW5C，父单 IKHVYO）：第二钮「调速」点亮，点击派发 onAudioSpeed 进入
+   *  调速编辑态骨架（编辑态本体归 IKHW5S）；置灰预检见 audioSpeed.ts（音频 URL 与
+   *  assetId 皆缺失唯一置灰——悬停「音频不可用，无法调速」；时长缺失不拦，无截取
+   *  的时长门槛） */
+  const handleAudioSpeed = useCallback(() => data.onAudioSpeed?.(id), [data, id]);
+  const audioSpeedDisabledReason = audioSpeedGateReason(data);
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
    *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
   const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
@@ -356,9 +368,21 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <span>截取</span>
         </button>
       )}
+      {/* 音频卡「调速」入口（IKHW5C，父单 IKHVYO）：第二钮自占位点亮——形态与置灰口径
+          同「截取」钮先例（aria-disabled 置灰保持渲染、置灰 title 悬停原因、可用态无
+          默认悬停文案）；点击守卫后派发 onAudioSpeed，编辑态本体归 IKHW5S */}
       {toolbar.audioTools && (
-        <button type="button" className={styles.toolBtn} title={AUDIO_TOOL_PLACEHOLDER_HINT}
-          aria-disabled="true" data-testid="audio-tool-speed">
+        <button
+          type="button"
+          className={styles.toolBtn}
+          onClick={() => {
+            if (audioSpeedDisabledReason !== null) return;
+            handleAudioSpeed();
+          }}
+          title={audioSpeedDisabledReason ?? undefined}
+          aria-disabled={audioSpeedDisabledReason !== null || undefined}
+          data-testid="audio-tool-speed"
+        >
           <Gauge size={14} strokeWidth={2} />
           <span>调速</span>
         </button>
