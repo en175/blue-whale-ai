@@ -2380,7 +2380,7 @@ export default function CanvasPage() {
 
   /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
    *  - 命中 → src 替换为 access_url；material_status === Active 视为已通过合规校验
-   *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
+   *  - 无 assetId 或字典查不到 → 整页水合（fromHistory）标缺失；增量刷新字典时若节点已有可播放 src 则保留，避免刚生成产物尚未写入打开时快照而被误标「素材已被删除」
    *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
   const resolveNodeAssets = (node: Node, fromHistory = false): Node => {
     const data = (node.data ?? {}) as Record<string, unknown>;
@@ -2413,6 +2413,12 @@ export default function CanvasPage() {
       if (fromHistory) {
         if (data.assetMissing && !data.complianceBusy) return node;
         return { ...node, data: { ...data, assetMissing: true, complianceBusy: undefined } };
+      }
+      // 增量刷新字典时：节点已有可播放地址说明素材仍在（刚生成/刚上传尚未写入打开时的快照），
+      // 不得误标「素材已被删除」。整页水合仍以字典为准（fromHistory）。
+      const existingSrc = typeof data.src === 'string' ? data.src : '';
+      if (existingSrc !== '' && !existingSrc.startsWith('blob:')) {
+        return data.assetMissing ? { ...node, data: { ...data, assetMissing: undefined } } : node;
       }
       return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
     }
@@ -6004,6 +6010,27 @@ export default function CanvasPage() {
     );
   };
 
+  /** 生成产物写入快照资产字典：否则字典仍停留在打开画布时的旧快照，后续 resolveNodeAssets
+   *  增量刷新会把刚成功的成品卡误标「素材已被删除」（IKFPOT 同因，生成回填此前未补字典）。 */
+  const rememberGeneratedAsset = (
+    asset: { id?: string; url?: string; type?: string; width?: number | null; height?: number | null } | null | undefined,
+    fallbackType: 'image' | 'video' | 'audio',
+  ) => {
+    if (!asset?.id || !asset.url) return;
+    const type = asset.type === 'audio' || asset.type === 'video' || asset.type === 'image'
+      ? asset.type
+      : fallbackType;
+    upsertAssets([{
+      asset_id: Number(asset.id),
+      type,
+      access_url: asset.url,
+      width: typeof asset.width === 'number' ? asset.width : null,
+      height: typeof asset.height === 'number' ? asset.height : null,
+      material_id: null,
+      material_status: null,
+    }]);
+  };
+
   /** 浏览器实测媒体尺寸回填：仅写缺失/不一致字段，避免触发无谓自动保存 */
   const handleMediaDims = (nodeId: string, dims: MediaDims) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -6068,6 +6095,10 @@ export default function CanvasPage() {
     const current = mediaNodesRef.current;
     // 幂等判重：已存在的轨卡（重复终态/重复水合）不重建；占位卡移除（其连线由级联清理收走）
     const fresh = plan.filter((item) => !current.some((n) => n.id === item.node.id));
+    rememberGeneratedAsset(detail.asset, 'audio');
+    for (const track of tracks) {
+      rememberGeneratedAsset({ id: track.asset_id, url: track.url, type: 'audio' }, 'audio');
+    }
     const next = [
       ...current.filter((n) => n.id !== placeholderNodeId),
       ...fresh.map((item) => attachCallbacks(item.node as Node)),
@@ -6159,6 +6190,9 @@ export default function CanvasPage() {
         },
       };
     });
+    for (const asset of outputAssets) {
+      rememberGeneratedAsset(asset, 'video');
+    }
     // 同步写 ref 再 setState（扇出后 flush 才能读到本轮节点，口径同 startSceneSplitJob）
     const next = mediaNodesRef.current
       .filter((n) => n.id !== placeholderId)
@@ -6224,6 +6258,7 @@ export default function CanvasPage() {
           | undefined;
         const transparent = mattingIdentity?.lastInput?.format === 'WEBM';
         stopJobPolling(nodeId, jobTimersRef.current);
+        rememberGeneratedAsset(detail.asset, 'video');
         patchMediaNode(nodeId, {
           genStatus: undefined,
           progress: 100,
@@ -6258,6 +6293,7 @@ export default function CanvasPage() {
       if (extractPatch) {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
+        if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
         patchMediaNode(nodeId, extractPatch);
         return 'terminal';
       }
@@ -6272,6 +6308,7 @@ export default function CanvasPage() {
       if (trimPatch) {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
+        if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
         patchMediaNode(nodeId, trimPatch);
         return 'terminal';
       }
@@ -6301,6 +6338,12 @@ export default function CanvasPage() {
       /** 插帧草稿卡（IKHLKX）：本品成功即身份结束——清除 frameInterpolation 身份（选中进入
        *  普通视频面板，与源卡/成品 HD 卡一致；身份只在失败态承担「原 fps 冻结重试」职责）。 */
       const wasFrameInterpolation = ((node.data ?? {}) as Record<string, unknown>).frameInterpolation != null;
+      const mediaType = (assetType === 'audio' || assetType === 'video' || assetType === 'image')
+        ? assetType
+        : (originalType === 'audio' || originalType === 'video' || originalType === 'image')
+          ? originalType
+          : 'image';
+      rememberGeneratedAsset(detail.asset, mediaType);
       patchMediaNode(nodeId, {
         genStatus: undefined,
         progress: 100,
