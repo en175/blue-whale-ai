@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   AUDIO_GENERATION_TAG,
   AUDIO_MIX_TAG,
+  AUDIO_SPEED_TAG,
   AUDIO_TRIM_TAG,
   GENERATION_TASK_QUEUE,
   IMAGE_CUTOUT_TAG,
@@ -38,8 +39,8 @@ const mqRouteJava = readFileSync(
 
 /** 路由注册总数（IKHKMR）：与 EXPECTED_ROUTES 清单互锁的唯一计数源——只改清单不改此数
  * （或反之），下方长度断言即红。历史上计数注释曾发生 11→12→13 三次漂移，故钉死。
- * 16 = 13（IKHKMR 钉死值）+ 视频插帧 VIDEO_FRAME_INTERPOLATION（IKHLK3）+ 智能抠像 VIDEO_MATTING（IKHJRC）+ 音频混合 AUDIO_MIX（IKI68N）。 */
-const EXPECTED_ROUTE_COUNT = 16;
+ * 17 = 13（IKHKMR 钉死值）+ 视频插帧、智能抠像、音频混合、音频调速。 */
+const EXPECTED_ROUTE_COUNT = 17;
 
 /** 入口清单（项数须恒等于 EXPECTED_ROUTE_COUNT）↔ TS tag 常量（期望值全取自 TS 侧；Java 侧只提供入口名）。 */
 const EXPECTED_ROUTES = [
@@ -49,6 +50,7 @@ const EXPECTED_ROUTES = [
   { entry: "MEDIA_EXTRACT", tag: MEDIA_EXTRACT_TAG },
   { entry: "AUDIO_MIX", tag: AUDIO_MIX_TAG },
   { entry: "AUDIO_TRIM", tag: AUDIO_TRIM_TAG },
+  { entry: "AUDIO_SPEED", tag: AUDIO_SPEED_TAG },
   { entry: "IMAGE_ENHANCE", tag: IMAGE_ENHANCE_TAG },
   { entry: "IMAGE_ERASE", tag: IMAGE_ERASE_TAG },
   { entry: "IMAGE_CUTOUT", tag: IMAGE_CUTOUT_TAG },

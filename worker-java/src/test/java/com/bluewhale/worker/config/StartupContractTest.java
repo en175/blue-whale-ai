@@ -156,9 +156,9 @@ class StartupContractTest {
      * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
      */
     @Test
-    @DisplayName("GenerationMqRoute 十六个入口的 topic / tag 与契约 §1 冻结值一致")
+    @DisplayName("GenerationMqRoute 十七个入口的 topic / tag 与契约 §1 冻结值一致")
     void mqRouteTopicAndTagPinnedToContractValues() {
-        // Map.of 最多 10 对；audio_mix 加入后共有 16 个入口，故使用 Map.ofEntries。
+        // Map.of 最多 10 对；17 个入口使用 Map.ofEntries。
         Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
                 Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
                 Map.entry(GenerationMqRouteEnum.IMAGE, "image"),
@@ -166,6 +166,7 @@ class StartupContractTest {
                 Map.entry(GenerationMqRouteEnum.MEDIA_EXTRACT, "media_extract"),
                 Map.entry(GenerationMqRouteEnum.AUDIO_MIX, "audio_mix"),
                 Map.entry(GenerationMqRouteEnum.AUDIO_TRIM, "audio_trim"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_SPEED, "audio_speed"),
                 Map.entry(GenerationMqRouteEnum.IMAGE_ENHANCE, "image_enhance"),
                 Map.entry(GenerationMqRouteEnum.IMAGE_ERASE, "image_erase"),
                 Map.entry(GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout"),
@@ -194,6 +195,7 @@ class StartupContractTest {
         assertThat(GenerationMqRouteEnum.MEDIA_EXTRACT.tag()).isEqualTo(JobTypeEnum.MEDIA_EXTRACT.value());
         assertThat(GenerationMqRouteEnum.AUDIO_MIX.tag()).isEqualTo(JobTypeEnum.AUDIO_MIX.value());
         assertThat(GenerationMqRouteEnum.AUDIO_TRIM.tag()).isEqualTo(JobTypeEnum.AUDIO_TRIM.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_SPEED.tag()).isEqualTo(JobTypeEnum.AUDIO_SPEED.value());
         assertThat(GenerationMqRouteEnum.IMAGE_ENHANCE.tag()).isEqualTo(JobTypeEnum.IMAGE_ENHANCE.value());
         assertThat(GenerationMqRouteEnum.IMAGE_ERASE.tag()).isEqualTo(JobTypeEnum.IMAGE_ERASE.value());
         assertThat(GenerationMqRouteEnum.IMAGE_CUTOUT.tag()).isEqualTo(JobTypeEnum.IMAGE_CUTOUT.value());

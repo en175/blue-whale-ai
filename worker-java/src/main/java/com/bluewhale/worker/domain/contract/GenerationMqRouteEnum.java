@@ -36,6 +36,9 @@ public enum GenerationMqRouteEnum {
     /** 音频截取（IKHB6S，父单 IKHB08；契约 = backend/libs/contracts/audio-trim.ts，ADR-0111）。 */
     AUDIO_TRIM("generation-task", "audio_trim"),
 
+    /** 音频调速（IKHW5A，父单 IKHVYO；契约 = backend/libs/contracts/audio-speed.ts，ADR-0113）。 */
+    AUDIO_SPEED("generation-task", "audio_speed"),
+
     /** 高清放大（契约 §14 / IKGM8U）。 */
     IMAGE_ENHANCE("generation-task", "image_enhance"),
 

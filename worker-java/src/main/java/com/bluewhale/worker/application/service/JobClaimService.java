@@ -195,6 +195,14 @@ public class JobClaimService {
      */
     private static final int AUDIO_TRIM_LEASE_SECONDS = 420;
 
+    /**
+     * audio_speed 租约 420s（IKHW5A，父单 IKHVYO；火山异步链）：轮询到点步是短查询，但
+     * completed 步要在同一租约窗口内完成结果音频下载（默认 m4a 输出，无损源极端情况可达
+     * 数百 MB）+ TOS 转存——取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery
+     * 把在跑任务判孤儿重投，audio_trim / media_extract 同款语义）。
+     */
+    private static final int AUDIO_SPEED_LEASE_SECONDS = 420;
+
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
         String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
@@ -306,6 +314,50 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
+    /**
+     * 领取 audio_speed 作业（IKHW5A，父单 IKHVYO；claimAudioTrim 同款形态）。
+     * <p>
+     * 候选查询用专属 {@code findAudioSpeedCandidate}（type=audio_speed，**不套 source
+     * 白名单**——audio_trim / media_extract 同形态：专属来源值不在白名单，套了漏真卡任务，
+     * IKC9EJ 教训；专属查询是「不套白名单」在本仓的既有表达，IKHPK9）。
+     * <p>
+     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 只含 id / fencing_token / status，
+     * 与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
+     * 分相判据与超限判定，media_extract / audio_trim 同款富投影）。
+     */
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto> claimAudioSpeed(
+            String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findAudioSpeedCandidate(jobIdLong);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(AUDIO_SPEED_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[audio_speed] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

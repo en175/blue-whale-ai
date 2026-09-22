@@ -323,6 +323,31 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     GenerationJobEntity findAudioTrimCandidate(@Param("jobId") Long jobId);
 
+    /**
+     * 领取 audio_speed 作业：候选查询（IKHW5A，父单 IKHVYO；不套 source 白名单，
+     * 对齐 findAudioTrimCandidate——IKHPK9 教训同源：专属查询是「不套白名单」的既有表达）。
+     * <p>
+     * WHERE id=? AND type='audio_speed' AND is_delete=false AND next_action_at&lt;=now
+     * AND (queued OR processing+孤儿)
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'audio_speed'
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findAudioSpeedCandidate(@Param("jobId") Long jobId);
+
     // ========== 图片路径（blade-③ IKELJA） ==========
 
     /**
@@ -838,6 +863,12 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /** 音频混合到点/孤儿：处理可超过通用 2h 扫描窗；由处理器的轮询预算收敛终态。 */
     default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
+    }
+
+    /** 音频调速到点/孤儿（IKHW5A，父单 IKHVYO）：**不套 source 白名单**（claim 同形态
+     *  ——audio_trim 同款；轮询自投消息丢失时由本扫描兜底重投，复用视频骨架语义）。 */
+    default List<Long> listDueAudioSpeedJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("audio_speed", List.of(), limit, maxAgeMinutes);
     }
 
     /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */

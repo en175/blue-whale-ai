@@ -1,16 +1,18 @@
 // IKHW48：audio_speed（音频调速，画布音频卡「调速」，火山 MediaKit adjust-audio-speed）
 // 跨进程契约一致性断言。对齐 audio-trim.test.ts 接缝（TS 侧常量直接 import 断言值；
-// 零新增测试设施）。worker-java 侧常量类 AudioSpeedContract.java 由执行票 IKHW5A 落地，
-// 落地后在本文件补「读 Java 源码文本逐值对账」用例（audio-trim.test.ts 同款防漂移模式）；
-// backend 入队 tag（queue.constants.ts 的 AUDIO_SPEED_TAG）与 worker-java 枚举注册由接线票
-// 落地并由 mq-route-parity.test.ts 自动对账——本票不单侧先加（IKHB6F 同款口径）。
+// 零新增测试设施）。防漂移约定（audio-trim.test.ts 同款）：worker-java 无法 import TS
+// 常量，下方「双端一致性」组直接读 Java 源码文本逐值对账——任一侧改动未同步即红
+// （AudioSpeedContract.java 已随执行票 IKHW5A 落地，对账组同步补齐；audio-trim.test.ts
+// 「已接线」组的演进先例）。backend 入队 tag（queue.constants.ts 的 AUDIO_SPEED_TAG）
+// 由 IKHW59 落地，mq-route-parity.test.ts 对枚举表自动对账。
 // 官方 API 口径 = 火山引擎 AI MediaKit adjust-audio-speed 官方 CLI 参考文档
 // （volcengine/mediakit-cli 仓库，Cloud 模式契约）：speed 范围 [0.1, 4] 默认 1；
 // 终态 result.audio_url（24h 临时链接）/ result.duration（秒）——字段名已对官方文档逐字复核
 // 证实（非视频侧示例推测）；官方另有可选 format 参数（默认 m4a），本产品不传、产物格式
 // 跟随官方输出。产品口径 = ADR-0113 + 父单 IKHVYO 实现决策 1-3（分段中点映射、0.05 步进、
-// 贴原速省略）。后续票（IKHW59 backend / IKHW5A worker / IKHW5C+IKHW5S web）照抄本契约
+// 贴原速省略）。后续票（IKHW59 backend / IKHW5C+IKHW5S web）照抄本契约
 // 与 audio-speed.ts，不得发明字段名。
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -37,6 +39,36 @@ import {
   roundAudioSpeed,
   speedToPos,
 } from "./audio-speed.js";
+
+// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根；IKHW5A 已落地）。
+const contractJava = readFileSync(
+  new URL(
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioSpeedContract.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const audioSpeedErrorJava = readFileSync(
+  new URL(
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/error/AudioSpeedError.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const jobTypeJava = readFileSync(
+  new URL(
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const mqRouteJava = readFileSync(
+  new URL(
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("audio_speed 契约不变量（官方 CLI 参考文档口径，TS 侧）", () => {
   it("任务类型 audio_speed（generation_jobs.type 与 MQ tag 同值口径），来源 dock", () => {
@@ -190,5 +222,41 @@ describe("执行面兜底码（error-codes.ts 注册）", () => {
     expect(
       new Set(Object.values(GENERATION_ERROR_NUMERIC_CODES)).size,
     ).toBe(Object.keys(GENERATION_ERROR_NUMERIC_CODES).length);
+  });
+});
+
+describe("audio_speed 双端一致性（读 worker-java 源码文本，防漂移，IKHW5A 落地后补齐）", () => {
+  it("AudioSpeedContract：tag 转发 GenerationMqRouteEnum.AUDIO_SPEED（字面量单处在该枚举，audio_trim 先例）", () => {
+    expect(contractJava).toContain(
+      "String TAG = GenerationMqRouteEnum.AUDIO_SPEED.tag();",
+    );
+  });
+
+  it("AudioSpeedContract：两 input 键名与 TS 同值 + 转存格式 m4a（官方 format 默认值，本产品不传）", () => {
+    for (const key of Object.values(AUDIO_SPEED_INPUT_KEYS)) {
+      expect(contractJava).toContain(`= "${key}";`);
+    }
+    expect(contractJava).toContain('String TRANSFER_OUTPUT_FORMAT = "m4a";');
+  });
+
+  it("AudioSpeedContract：网关端点两常量与 TS 同值", () => {
+    expect(contractJava).toContain(`String SUBMIT_PATH = "${AUDIO_SPEED_SUBMIT_PATH}";`);
+    expect(contractJava).toContain(
+      `String POLL_PATH_PREFIX = "${AUDIO_SPEED_POLL_PATH_PREFIX}";`,
+    );
+  });
+
+  it("AudioSpeedContract 与 AudioSpeedError：兜底错误码与 TS 同值", () => {
+    expect(contractJava).toContain(
+      'String ERROR_AUDIO_SPEED_FAILED = "audio_speed_failed";',
+    );
+    expect(audioSpeedErrorJava).toContain(
+      'String AUDIO_SPEED_FAILED = "audio_speed_failed";',
+    );
+  });
+
+  it("已接线：两侧枚举注册 audio_speed（JobTypeEnum 与 GenerationMqRouteEnum，tag = TS 任务类型同值）", () => {
+    expect(jobTypeJava).toContain("audio_speed");
+    expect(mqRouteJava).toContain(`("${"generation-task"}", "${AUDIO_SPEED_JOB_TYPE}")`);
   });
 });

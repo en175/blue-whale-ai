@@ -27,6 +27,10 @@ public enum JobTypeEnum {
      * backend/libs/contracts/audio-trim.ts，ADR-0111；消费者与处理器由 IKHB6S 按附录 C 触点注册）。 */
     AUDIO_TRIM("audio_trim"),
 
+    /** 音频调速（tag=audio_speed，画布音频卡「调速」，Semaphore 2；契约 =
+     * backend/libs/contracts/audio-speed.ts，ADR-0113；消费者与处理器由 IKHW5A 按附录 C 触点注册）。 */
+    AUDIO_SPEED("audio_speed"),
+
     /** 高清放大（tag=image_enhance，契约 §14 / IKGM8U；消费者与处理器由 IKGM9D 按附录 C 触点注册）。 */
     IMAGE_ENHANCE("image_enhance"),
 
@@ -68,9 +72,9 @@ public enum JobTypeEnum {
     VIDEO_MATTING("video_matting"),
 
     /** 视频插帧（tag=video_frame_interpolation，IKHLK3，父需求 IKHLES；契约 =
-     *  backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
-     *  video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ
-     *  按附录 C 触点注册。 */
+     * backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
+     * video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ
+     * 按附录 C 触点注册。 */
     VIDEO_FRAME_INTERPOLATION("video_frame_interpolation");
 
     private final String value;

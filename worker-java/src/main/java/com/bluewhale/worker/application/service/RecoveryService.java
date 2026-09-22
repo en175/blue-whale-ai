@@ -51,6 +51,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
     private final ObjectProvider<GenerationMessageProducer> audioTrimProducer;
     private final ObjectProvider<GenerationMessageProducer> audioMixProducer;
+    private final ObjectProvider<GenerationMessageProducer> audioSpeedProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEraseProducer;
     private final ObjectProvider<GenerationMessageProducer> imageCutoutProducer;
@@ -77,6 +78,8 @@ public class RecoveryService {
         ObjectProvider<GenerationMessageProducer> audioTrimProducer,
         @Qualifier("audioMixRecoveryProducer")
         ObjectProvider<GenerationMessageProducer> audioMixProducer,
+        @Qualifier("audioSpeedRecoveryProducer")
+        ObjectProvider<GenerationMessageProducer> audioSpeedProducer,
             @Qualifier("imageEnhanceRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> imageEnhanceProducer,
             @Qualifier("imageEraseRecoveryProducer")
@@ -106,6 +109,7 @@ public class RecoveryService {
         this.mediaExtractProducer = mediaExtractProducer;
         this.audioTrimProducer = audioTrimProducer;
         this.audioMixProducer = audioMixProducer;
+        this.audioSpeedProducer = audioSpeedProducer;
         this.imageEnhanceProducer = imageEnhanceProducer;
         this.imageEraseProducer = imageEraseProducer;
         this.imageCutoutProducer = imageCutoutProducer;
@@ -142,6 +146,8 @@ public class RecoveryService {
                     jobMapper.listDueAudioTrimJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.AUDIO_MIX, audioMixProducer.getIfAvailable(),
                     jobMapper.listDueAudioMixJobIds(SCAN_LIMIT, 0));
+            reenqueue(GenerationMqRouteEnum.AUDIO_SPEED, audioSpeedProducer.getIfAvailable(),
+                    jobMapper.listDueAudioSpeedJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.AUDIO, audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),
