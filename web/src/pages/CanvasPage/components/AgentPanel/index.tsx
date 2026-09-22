@@ -58,7 +58,7 @@ import {
   persistPanelWidth,
   readPersistedPanelWidth,
 } from './drawerWidth';
-import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
+import { isProcessItem, itemsFromBlocks, itemsFromLive, showsTurnFooter, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
 import { collectKnownAssets, type KnownAsset } from './assetMentions';
 import { Markdown } from './Markdown';
 import { AssetMentionChip } from './AssetMentionChip';
@@ -1788,7 +1788,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                     />
                   ))}
                   {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
-                  {turn.account && !turn.live && (
+                  {turn.account && showsTurnFooter(turn) && (
                     <TurnFooter
                       account={turn.account}
                       onRetryCard={
