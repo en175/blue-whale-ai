@@ -13,7 +13,6 @@ import type { CSSProperties } from 'react';
 import { ArrowUp, X, Zap } from 'lucide-react';
 import {
   AUDIO_SPEED_SLIDER_MAX_POS,
-  AUDIO_SPEED_SLIDER_MID_POS,
   AUDIO_SPEED_SLIDER_MIN_POS,
   posToSpeed,
   speedToPos,
