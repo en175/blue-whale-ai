@@ -11,6 +11,7 @@ import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucid
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
 import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/lib/model-reference-limits';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
@@ -491,7 +492,7 @@ export default function AudioDialog({
                     }}
                   >
                     {it.mediaType === 'image' ? (
-                      <img className={styles.pickerThumb} src={it.src} alt="" />
+                      <img className={styles.pickerThumb} src={it.src} crossOrigin={remoteImageCrossOrigin(it.src)} alt="" />
                     ) : (
                       <div className={styles.pickerAudio}>
                         <AudioLines size={14} strokeWidth={2} />

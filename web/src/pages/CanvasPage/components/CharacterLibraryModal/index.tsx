@@ -28,6 +28,7 @@ import { isApiError } from '@/api/http';
 import { toast } from 'sonner';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** Tab 定义（真人人像库 tab 仅视频入口启用，真人素材只用于视频生成） */
@@ -88,6 +89,7 @@ function MeasuredThumb({
     <div className={`${styles.assetThumb} ${measured ? styles.assetThumbMeasured : ''}`}>
       <img
         src={src}
+        crossOrigin={remoteImageCrossOrigin(src)}
         alt={alt}
         loading="lazy"
         onLoad={(e) => {

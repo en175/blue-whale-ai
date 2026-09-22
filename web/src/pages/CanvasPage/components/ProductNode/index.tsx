@@ -8,6 +8,7 @@ import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import { isFileRejected } from '@/utils/fileSignature';
 import styles from './index.module.css';
 
@@ -299,7 +300,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                   ) : img.type === 'video' ? (
                     <video src={img.src} draggable={false} muted playsInline />
                   ) : (
-                    <img src={img.src} alt="" draggable={false} />
+                    <img src={img.src} crossOrigin={remoteImageCrossOrigin(img.src)} alt="" draggable={false} />
                   )}
                   <button
                     className={styles.thumbRemove}

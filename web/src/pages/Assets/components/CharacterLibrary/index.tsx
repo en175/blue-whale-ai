@@ -24,6 +24,7 @@ import {
 } from '@/api/material';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '@/components/ConfirmModal';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
 
@@ -231,7 +232,7 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
             ) : asset.AssetType === 'Audio' ? (
               <audio className={styles.detailMedia} src={asset.URL} controls />
             ) : (
-              <img className={styles.detailMedia} src={asset.URL} alt={asset.Name} draggable={false} />
+              <img className={styles.detailMedia} src={asset.URL} crossOrigin={remoteImageCrossOrigin(asset.URL)} alt={asset.Name} draggable={false} />
             )
           ) : (
             <div className={styles.detailEmpty}>媒体文件不可用</div>
@@ -284,6 +285,7 @@ function MeasuredThumb({
     <div className={`${styles.assetThumb} ${measured ? styles.assetThumbMeasured : ''}`}>
       <img
         src={src}
+        crossOrigin={remoteImageCrossOrigin(src)}
         alt={alt}
         loading="lazy"
         onLoad={(e) => {
