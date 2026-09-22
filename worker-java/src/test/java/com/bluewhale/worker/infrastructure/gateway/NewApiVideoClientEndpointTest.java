@@ -126,6 +126,47 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("TEMP FIX：doubao-seedance-2-5 带参考视频 → duration 强制 -1、ratio 强制 adaptive")
+    void seedance25WithVideoReferenceForcesAdaptiveAndAutoDuration() throws Exception {
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
+                null);
+
+        new NewApiVideoClient(baseUrl).submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("duration").asDouble()).isEqualTo(-1.0);
+        assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(-1.0);
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("adaptive");
+        // 其余字段不受影响
+        assertThat(body.get("model").asText()).isEqualTo("doubao-seedance-2-5-260628");
+        assertThat(body.get("metadata").get("resolution").asText()).isEqualTo("720p");
+    }
+
+    @Test
+    @DisplayName("TEMP FIX 边界：无参考视频的 seedance-2-5、或其他模型带参考视频 → 原值不动")
+    void seedance25OverrideOnlyWhenVideoReferencePresent() throws Exception {
+        // 只有图片参考（含首尾帧）→ 不触发
+        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("image", "https://tos.test/a.png", null)),
+                null));
+        JsonNode imageOnly = JSON.readTree(lastBody.get());
+        assertThat(imageOnly.get("duration").asDouble()).isEqualTo(5.0);
+        assertThat(imageOnly.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+
+        // 其他 model id 带参考视频 → 不触发
+        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-0-260128", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
+                List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
+                null));
+        JsonNode otherModel = JSON.readTree(lastBody.get());
+        assertThat(otherModel.get("duration").asDouble()).isEqualTo(5.0);
+        assertThat(otherModel.get("metadata").get("ratio").asText()).isEqualTo("16:9");
+    }
+
+    @Test
     @DisplayName("回归：旧字段路径的独立首尾帧仍转 first_frame/last_frame，本地参考 role 不变")
     void legacyFrameFieldsKeepRoles() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(

@@ -65,6 +65,9 @@ public class NewApiVideoClient {
     /** poll 超时 10s（默认）。 */
     private static final int POLL_TIMEOUT_MS = 10_000;
 
+    /** TEMP FIX（2026-09-22）：doubao-seedance-2-5 系模型名前缀，仅用于下面的线上临时兜底。 */
+    static final String SEEDANCE_25_MODEL_PREFIX = "doubao-seedance-2-5";
+
     private static final Map<String, Boolean> SUCCESS_STATUSES = Map.of(
             "success", true, "succeeded", true, "completed", true);
     private static final Map<String, Boolean> FAILED_STATUSES = Map.of(
@@ -125,11 +128,23 @@ public class NewApiVideoClient {
             content.add(buildContentItem(typeKey, ref.url(), role));
         }
 
+        // ===== TEMP FIX 线上临时兜底（2026-09-22，待正式方案落地后删除）=====
+        // 现象：doubao-seedance-2-5 系带参考视频时，上游按提示词把任务判为「视频编辑」，
+        // 出参比例/时长须跟随被编辑的输入视频，故强制要求 ratio=adaptive、duration=-1，
+        // 否则回 provider_failed（"`ratio` must be `adaptive` / `duration` must be -1"）。
+        // 上游按提示词分类，我们按关键词分类（resolveVideoTaskType），两者必然有错位；
+        // 这里对上游分类结果做事后追认。**正式方案**应在接纳侧冻结快照前按 taskType 决定
+        // 并落到能力行字段，届时删除本块。
+        boolean seedance25VideoEdit = input.model().startsWith(SEEDANCE_25_MODEL_PREFIX)
+                && hasVideoReference(input.references());
+        double effectiveDuration = seedance25VideoEdit ? -1 : input.duration();
+        String effectiveRatio = seedance25VideoEdit ? "adaptive" : input.ratio();
+
         // 构建 body（new-api-generation-ops.ts:229-240）
         ObjectNode metadata = JSON.createObjectNode();
-        metadata.put("duration", input.duration());
+        metadata.put("duration", effectiveDuration);
         if (input.resolution() != null) metadata.put("resolution", input.resolution());
-        if (input.ratio() != null) metadata.put("ratio", input.ratio());
+        if (effectiveRatio != null) metadata.put("ratio", effectiveRatio);
         // IKG0LP：用户选的「是否带音频」，缺省 true；仅能力位允许时接纳侧才会冻结进快照。
         // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
         if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
@@ -138,7 +153,7 @@ public class NewApiVideoClient {
         ObjectNode body = JSON.createObjectNode();
         body.put("model", input.model());
         body.put("prompt", input.prompt());
-        body.put("duration", input.duration());
+        body.put("duration", effectiveDuration);
         body.put("response_format", "url");
         body.set("metadata", metadata);
 
@@ -346,6 +361,14 @@ public class NewApiVideoClient {
     }
 
     // ========== 工具方法 ==========
+
+    /** TEMP FIX（2026-09-22）：references 中是否存在「参考视频」（首尾帧为 image，type 不混淆）。 */
+    private static boolean hasVideoReference(List<VideoReference> references) {
+        for (VideoReference ref : references) {
+            if ("video".equals(ref.type())) return true;
+        }
+        return false;
+    }
 
     private ObjectNode buildContentItem(String typeKey, String url, String role) {
         ObjectNode item = JSON.createObjectNode();
