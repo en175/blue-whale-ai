@@ -6010,9 +6010,15 @@ export default function CanvasPage() {
     if (!node) return;
     const data = (node.data ?? {}) as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
-    if (data.width !== dims.width) patch.width = dims.width;
-    if (data.height !== dims.height) patch.height = dims.height;
-    if (typeof dims.duration === 'number' && typeof data.duration !== 'number') patch.duration = dims.duration;
+    if (typeof dims.width === 'number' && dims.width > 0 && data.width !== dims.width) {
+      patch.width = dims.width;
+    }
+    if (typeof dims.height === 'number' && dims.height > 0 && data.height !== dims.height) {
+      patch.height = dims.height;
+    }
+    if (typeof dims.duration === 'number' && dims.duration > 0 && typeof data.duration !== 'number') {
+      patch.duration = dims.duration;
+    }
     if (Object.keys(patch).length === 0) return;
     patchMediaNode(nodeId, patch);
   };
