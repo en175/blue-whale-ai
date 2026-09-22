@@ -39,6 +39,7 @@ import {
   type SharedAssetSceneSnapshot,
 } from '@/api/sharedAssets';
 import { isApiError } from '@/api/http';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** Tab 定义（对齐现有画布卡片类型） */
@@ -499,6 +500,7 @@ export default function SharedAssetsModal({
                           <img
                             className={styles.coverImg}
                             src={cUrl}
+                            crossOrigin={remoteImageCrossOrigin(cUrl)}
                             alt={titleFromAsset(item)}
                             loading="lazy"
                           />
@@ -628,7 +630,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           </div>
         );
       }
-      return <img className={styles.previewMedia} src={snap.url} alt={titleFromAsset(item)} />;
+      return <img className={styles.previewMedia} src={snap.url} crossOrigin={remoteImageCrossOrigin(snap.url)} alt={titleFromAsset(item)} />;
     }
     case 'card': {
       const snap = item.snapshot as SharedAssetCardSnapshot;
@@ -637,7 +639,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.referenceImages?.length > 0 && (
             <div className={styles.previewImgGrid}>
               {snap.referenceImages.map((img) => (
-                <img key={img.id} className={styles.previewImgItem} src={img.src} alt="参考图" />
+                <img key={img.id} className={styles.previewImgItem} src={img.src} crossOrigin={remoteImageCrossOrigin(img.src)} alt="参考图" />
               ))}
             </div>
           )}
@@ -659,7 +661,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.images?.length > 0 && (
             <div className={styles.previewImgGrid}>
               {snap.images.map((img) => (
-                <img key={img.id} className={styles.previewImgItem} src={img.src} alt={snap.name} />
+                <img key={img.id} className={styles.previewImgItem} src={img.src} crossOrigin={remoteImageCrossOrigin(img.src)} alt={snap.name} />
               ))}
             </div>
           )}

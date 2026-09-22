@@ -27,6 +27,7 @@ import {
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import Modal from '@/components/Modal';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
 import styles from './index.module.css';
 
@@ -203,7 +204,7 @@ export default function SiteConfig() {
                   </td>
                   <td>
                     {thumb ? (
-                      <img className={styles.thumb} src={thumb} alt="" />
+                      <img className={styles.thumb} src={thumb} crossOrigin={remoteImageCrossOrigin(thumb)} alt="" />
                     ) : (
                       <span className={styles.dash}>—</span>
                     )}
@@ -414,6 +415,7 @@ function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: Her
                 data-testid="hero-cover-preview"
                 className={styles.preview}
                 src={coverUrl}
+                crossOrigin={remoteImageCrossOrigin(coverUrl)}
                 alt="封面图预览"
               />
             </div>

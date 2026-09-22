@@ -8,6 +8,7 @@ import {
   type AtMentionKind,
 } from '../../atMention';
 import { computeFlyoutOffset } from './flyoutAnchor';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 const KIND_META: Array<{ kind: AtMentionKind; label: string }> = [
@@ -26,7 +27,7 @@ function KindGlyph({ kind }: { kind: AtMentionKind }) {
 
 function ItemThumb({ item }: { item: AtMentionItem }) {
   if (item.kind === 'image' && item.thumbUrl) {
-    return <img className={styles.thumb} src={item.thumbUrl} alt="" />;
+    return <img className={styles.thumb} src={item.thumbUrl} crossOrigin={remoteImageCrossOrigin(item.thumbUrl)} alt="" />;
   }
   if (item.kind === 'video' && item.thumbUrl) {
     return <video className={styles.thumb} src={item.thumbUrl} muted preload="metadata" />;

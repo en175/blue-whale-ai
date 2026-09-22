@@ -12,6 +12,7 @@ import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
 import { PANEL_REF_MEDIA_TYPES } from '@/pages/CanvasPage/refSourceTypes';
 import { type AssetRecord } from '@/api/assets';
 import { getCurrentUser, subscribe } from '@/utils/auth';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
@@ -973,7 +974,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     {keyframeRefs.first ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={keyframeRefs.first.preview} alt="" className={styles.refThumbMedia} />
+                          <img src={keyframeRefs.first.preview} crossOrigin={remoteImageCrossOrigin(keyframeRefs.first.preview)} alt="" className={styles.refThumbMedia} />
                           <span className={styles.refSlotBadge}>首帧</span>
                           <button
                             className={styles.refThumbRemove}
@@ -996,7 +997,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     {keyframeRefs.last ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={keyframeRefs.last.preview} alt="" className={styles.refThumbMedia} />
+                          <img src={keyframeRefs.last.preview} crossOrigin={remoteImageCrossOrigin(keyframeRefs.last.preview)} alt="" className={styles.refThumbMedia} />
                           <span className={styles.refSlotBadge}>尾帧</span>
                           <button
                             className={styles.refThumbRemove}
@@ -1025,7 +1026,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       {item.type === 'video' ? (
                         <video src={item.preview} className={styles.refThumbMedia} />
                       ) : (
-                        <img src={item.preview} alt="" className={styles.refThumbMedia} />
+                        <img src={item.preview} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
                       )}
                       <button
                         className={styles.refThumbRemove}
@@ -1245,7 +1246,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 {imageRefFiles.map((item, idx) => (
                   <div key={idx} className={styles.refThumbWrap}>
                     <div className={styles.refThumb}>
-                      <img src={item.preview} alt="" className={styles.refThumbMedia} />
+                      <img src={item.preview} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
                       <button
                         className={styles.refThumbRemove}
                         onClick={() => removeImageRefFile(idx)}
@@ -1428,7 +1429,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <div key={f.id} className={styles.refThumbWrap}>
                     <div className={styles.refThumb}>
                       {f.kind === 'image' && (
-                        <img className={styles.refThumbMedia} src={f.url} alt={f.name} />
+                        <img className={styles.refThumbMedia} src={f.url} crossOrigin={remoteImageCrossOrigin(f.url)} alt={f.name} />
                       )}
                       {f.kind === 'video' && (
                         <video className={styles.refThumbMedia} src={f.url} muted />

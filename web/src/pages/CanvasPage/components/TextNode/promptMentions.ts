@@ -82,7 +82,10 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
     const media = document.createElement(identity.mediaType === 'image' ? 'img' : 'video');
     media.src = identity.url;
     media.className = chipStyles.mediaChipThumb;
-    if (media instanceof HTMLImageElement) media.alt = '';
+    if (media instanceof HTMLImageElement) {
+      media.alt = '';
+      media.crossOrigin = 'anonymous';
+    }
     else { media.preload = 'metadata'; media.muted = true; }
     thumb.append(media);
   }
@@ -124,7 +127,10 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
     const media = document.createElement(material.mediaType === 'image' ? 'img' : 'video');
     media.src = material.url;
     media.className = chipStyles.mediaChipThumb;
-    if (media instanceof HTMLImageElement) media.alt = '';
+    if (media instanceof HTMLImageElement) {
+      media.alt = '';
+      media.crossOrigin = 'anonymous';
+    }
     else { media.preload = 'metadata'; media.muted = true; }
     chip.append(media);
   }

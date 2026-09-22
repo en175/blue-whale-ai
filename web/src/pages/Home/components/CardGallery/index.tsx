@@ -18,6 +18,7 @@ import {
   type TemplateTag,
   type TemplateRecord,
 } from '@/api/agent';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import {
   galleryCoverSrc,
   mediaKindFromTagCode,
@@ -99,12 +100,12 @@ function GalleryCard({
         {cover ? (
           <>
             {first && (
-              <img className={`${styles.stackImg} ${styles.stackLeft}`} src={first} alt="" loading="lazy" />
+              <img className={`${styles.stackImg} ${styles.stackLeft}`} src={first} crossOrigin={remoteImageCrossOrigin(first)} alt="" loading="lazy" />
             )}
             {third && (
-              <img className={`${styles.stackImg} ${styles.stackRight}`} src={third} alt="" loading="lazy" />
+              <img className={`${styles.stackImg} ${styles.stackRight}`} src={third} crossOrigin={remoteImageCrossOrigin(third)} alt="" loading="lazy" />
             )}
-            <img className={`${styles.stackImg} ${styles.stackTop}`} src={cover} alt={record.title} loading="lazy" />
+            <img className={`${styles.stackImg} ${styles.stackTop}`} src={cover} crossOrigin={remoteImageCrossOrigin(cover)} alt={record.title} loading="lazy" />
           </>
         ) : mediaKind === 'image' ? (
           <div className={styles.imagePlaceholder} data-testid="gallery-image-placeholder" />

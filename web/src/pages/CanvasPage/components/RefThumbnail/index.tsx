@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AtSign, AudioLines, Crosshair, FileText, X } from 'lucide-react';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import type { StripDragItemProps } from './strip-dnd';
 
@@ -86,6 +87,7 @@ export function RefPreviewOverlay({ kind, url, name, audioDuration, textPreview,
         <img
           className={styles.previewMedia}
           src={url}
+          crossOrigin={remoteImageCrossOrigin(url)}
           style={{ maxWidth: PREVIEW_MAX, maxHeight: PREVIEW_MAX }}
           alt={name}
         />
@@ -210,7 +212,7 @@ export function RefThumbnail({
       {...dragProps}
     >
       {/* draggable=false：图片/视频原生拖拽会劫持手势（拖出图片 ghost 而非缩略图项），统一由根节点承载 */}
-      {kind === 'image' && url ? <img src={url} alt={name} draggable={false} /> : null}
+      {kind === 'image' && url ? <img src={url} crossOrigin={remoteImageCrossOrigin(url)} alt={name} draggable={false} /> : null}
       {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" draggable={false} disablePictureInPicture /> : null}
       {kind === 'audio' ? <AudioLines className={styles.kindIcon} aria-hidden="true" /> : null}
       {kind === 'text' ? <FileText className={styles.kindIcon} aria-hidden="true" /> : null}
