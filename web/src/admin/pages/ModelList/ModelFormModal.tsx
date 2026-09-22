@@ -545,8 +545,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             <>
               <div className={styles.sectionTitle}>尺寸选项</div>
               <p className={styles.hint}>
-                id 是能力行内部标识；api_value 是**出站实际提交给上游**的档位值（如 4k），留空则回落用 id；
-                宽 / 高只被 generation worker 消费（留空 = 不写）。
+                id 是能力行内部标识；api_value 是**出站实际提交给上游**的档位值（如 4k），留空则回落用 id。
               </p>
               {sizes.map((size, index) => (
                 <div className={styles.sizeRow} key={index}>
@@ -567,18 +566,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
                     placeholder="上游值 api_value，如 4k"
                     value={size.apiValue ?? ''}
                     onChange={(e) => updateSize(index, { apiValue: e.target.value })}
-                  />
-                  <input
-                    className={styles.input}
-                    placeholder="宽"
-                    value={size.width ?? ''}
-                    onChange={(e) => updateSize(index, { width: e.target.value })}
-                  />
-                  <input
-                    className={styles.input}
-                    placeholder="高"
-                    value={size.height ?? ''}
-                    onChange={(e) => updateSize(index, { height: e.target.value })}
                   />
                   <button className={styles.iconBtn} onClick={() => removeSize(index)} title="删除尺寸行">
                     <X size={14} strokeWidth={2} />
@@ -634,25 +621,27 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
                 ))}
               </select>
 
+              {/* IKHU8P：矩阵转置成「行=比例、列=尺寸」。原方向是行=尺寸、列=比例，而 gpt 的比例最多 13 个，
+                  14 列把单元格压到约 40px——下拉框左右 padding 加原生箭头就把正文吃光，值看着是空的。 */}
               {parser === 'gpt' && (
                 <div className={styles.mapWrap}>
-                  <p className={styles.hint}>行=尺寸选项，列=比例选项，格子填官方 size（含 auto）。1K × 16:9 / 9:16 可留空。</p>
+                  <p className={styles.hint}>行=比例选项，列=尺寸选项，格子填官方 size（含 auto）。1K × 16:9 / 9:16 可留空。</p>
                   <div className={styles.mapScroll}>
                     <table className={styles.mapTable}>
                       <thead>
                         <tr>
-                          <th>尺寸</th>
-                          {ratios.map((ratio) => (
-                            <th key={ratio}>{ratio}</th>
+                          <th>比例</th>
+                          {sizes.map((size) => (
+                            <th key={size.id || size.label}>{size.label || size.id || '—'}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {sizes.map((size) => (
-                          <tr key={size.id || size.label}>
-                            <td>{size.label || size.id || '—'}</td>
-                            {ratios.map((ratio) => (
-                              <td key={ratio}>
+                        {ratios.map((ratio) => (
+                          <tr key={ratio}>
+                            <td>{ratio}</td>
+                            {sizes.map((size) => (
+                              <td key={size.id || size.label}>
                                 <select
                                   className={styles.select}
                                   value={gptMatrix[size.id]?.[ratio] ?? ''}
@@ -716,28 +705,29 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
                 </div>
               )}
 
+              {/* IKHU8P：与 gpt 同因同改——转置成「行=比例、列=尺寸」，免得比例一多就把格子压到看不见。 */}
               {parser === 'seedream' && (
                 <div className={styles.mapWrap}>
                   <p className={styles.hint}>
-                    行=尺寸选项，列=比例选项，格子填出站像素尺寸（如 2048x2048）。worker 按「分辨率 × 宽高比」查这张表换算尺寸；
+                    行=比例选项，列=尺寸选项，格子填出站像素尺寸（如 2048x2048）。worker 按「分辨率 × 宽高比」查这张表换算尺寸；
                     整张清空会让出站尺寸回落成 provider 原值（上游会 400），所以至少保留一格。
                   </p>
                   <div className={styles.mapScroll}>
                     <table className={styles.mapTable}>
                       <thead>
                         <tr>
-                          <th>尺寸</th>
-                          {ratios.map((ratio) => (
-                            <th key={ratio}>{ratio}</th>
+                          <th>比例</th>
+                          {sizes.map((size) => (
+                            <th key={size.id || size.label}>{size.label || size.id || '—'}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {sizes.map((size) => (
-                          <tr key={size.id || size.label}>
-                            <td>{size.label || size.id || '—'}</td>
-                            {ratios.map((ratio) => (
-                              <td key={ratio}>
+                        {ratios.map((ratio) => (
+                          <tr key={ratio}>
+                            <td>{ratio}</td>
+                            {sizes.map((size) => (
+                              <td key={size.id || size.label}>
                                 <input
                                   className={`${styles.input} ${styles.inputSm}`}
                                   placeholder="留空"

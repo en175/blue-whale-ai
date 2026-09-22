@@ -4,13 +4,14 @@ export type ModelType = 'image' | 'video' | 'text' | 'audio';
 
 /** IKHBDO：表单态尺寸行。库里 `supported_sizes` 元素除 id/label 外还带出站值与像素宽高
  *  （字段集见 backend `model-capability-repo.ts` 的 `SizeJson`），原先表单只认 id/label，
- *  保存时整包覆盖 → 这三个字段每次保存都被抹掉。宽高是**输入框字符串**（空串 = 不写）。 */
+ *  保存时整包覆盖 → 这三个字段每次保存都被抹掉。宽高是**字符串**（空串 = 不写）。 */
 export interface SizeForm {
   id: string;
   label?: string;
   /** 出站实际用到的档位值（如 `4k`）；留空时消费端回落用 id。 */
   apiValue?: string;
-  /** 像素宽（仅 generation worker 消费）。 */
+  /** 像素宽 / 高：**当前无任何消费方**（图片侧 worker 读了不用，视频侧零引用，见 IKHTVR）——
+   *  表单不再显示这两列，但字段保留：库里已有的值原样读回、原样写回，保存不丢数据。 */
   width?: string;
   height?: string;
 }
@@ -206,14 +207,32 @@ export function sizeToWire(size: SizeForm): ModelSizeWire {
   return out;
 }
 
+/** 库里矩阵键 → 表单键的规范化匹配：命中返回**表单自己的拼写**，未命中返回 undefined。
+ *  IKHTL0：同一行的 `supported_sizes[].id` 与 `request_mapping.matrix` 键由两次迁移分别写入，
+ *  大小写可能不一致（id 写小写 `1k`，IK629 的矩阵键写大写 `1K`）。worker 查表本来就走
+ *  大小写不敏感口径（`ImageChannelMapper.resolveSeedreamSize` 有显式兜底），读侧用精确匹配
+ *  会让这些行的矩阵整张显空白。读侧必须与 worker 同口径。 */
+function matchFormKey(formKeys: string[], raw: string): string | undefined {
+  if (formKeys.includes(raw)) return raw;
+  const lower = raw.toLowerCase();
+  return formKeys.find((key) => key.toLowerCase() === lower);
+}
+
 export function parseGptMatrix(mapping: unknown, sizes: SizeForm[], ratios: string[]): GptMatrix {
   const base = emptyGptMatrix(sizes, ratios);
   if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return base;
   const matrix = (mapping as { matrix?: unknown }).matrix;
   if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return base;
-  for (const [sizeId, row] of Object.entries(matrix as Record<string, unknown>)) {
+  const sizeIds = sizes.map((size) => size.id).filter((id) => id.trim());
+  for (const [rawSizeId, row] of Object.entries(matrix as Record<string, unknown>)) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-    base[sizeId] = { ...(base[sizeId] ?? {}), ...(row as Record<string, string>) };
+    // 命中表单尺寸 → 归一到表单 id；命不中则**原样保留**——表单外的键在保存时不得被静默抹掉。
+    const sizeId = matchFormKey(sizeIds, rawSizeId) ?? rawSizeId;
+    const cells: Record<string, string> = {};
+    for (const [rawRatio, cell] of Object.entries(row as Record<string, string>)) {
+      cells[matchFormKey(ratios, rawRatio) ?? rawRatio] = cell;
+    }
+    base[sizeId] = { ...(base[sizeId] ?? {}), ...cells };
   }
   return base;
 }
@@ -285,6 +304,21 @@ export function validateSeedreamMatrix(matrix: GptMatrix): string | null {
   return null;
 }
 
+/** IKHTL0：seedream 行的矩阵键必须是该档位的 **api_value**，不是 `supported_sizes[].id`。
+ *  worker 的查找链是「按 id 命中 supported_sizes 条目 → 取该条目的 api_value 当 providerSize
+ *  → 再用它当矩阵查找键」（`ImageChannelMapper.matchSupportedSize` / `resolveSeedreamSize`）。
+ *  表单内部按 `size.id` 存键（渲染要按 id 取格），提交时在这里换回 api_value 拼写——
+ *  否则一次「什么都没改」的保存就会把库里 `1K` 的键改写成 `1k`，靠 worker 的大小写兜底
+ *  才不出事，等于把一个隐性不变式悄悄写坏。没有 api_value 的档位回落到 id。 */
+function seedreamWireMatrix(matrix: GptMatrix, sizes: SizeForm[]): GptMatrix {
+  const wireKey = new Map(sizes.map((size) => [size.id, (size.apiValue ?? '').trim() || size.id]));
+  const out: GptMatrix = {};
+  for (const [sizeId, row] of Object.entries(matrix)) {
+    out[wireKey.get(sizeId) ?? sizeId] = row;
+  }
+  return out;
+}
+
 /** 提交用的 request_mapping 意图（IKHBDO，与 backend `parseParserAndMapping` 契约对齐）：
  *  - `undefined`：本次**不提交**该字段——库里原样保留（seedream→seedream 的唯一正确表达：
  *    界面上没有「清空矩阵」入口，diff 提交里那个 null 不是运营意图）；
@@ -294,7 +328,7 @@ export function validateSeedreamMatrix(matrix: GptMatrix): string | null {
 export function buildRequestMapping(form: FormSnapshot): unknown | undefined {
   if (form.type !== 'image') return undefined;
   if (form.parser === 'seedream') {
-    const matrix = compactGptMatrix(form.seedreamMatrix);
+    const matrix = compactGptMatrix(seedreamWireMatrix(form.seedreamMatrix, form.sizes));
     if (Object.keys(matrix).length) return { matrix };
     return form.originalParser === 'seedream' ? undefined : null;
   }

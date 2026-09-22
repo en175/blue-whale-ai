@@ -617,10 +617,10 @@
   margin-bottom: 8px;
 }
 
-/* IKHBDO：尺寸行要放 id / label / api_value / 宽 / 高 五个输入 + 删除按钮。 */
+/* IKHBDO：尺寸行放 id / label / api_value 三个输入 + 删除按钮。 */
 .sizeRow {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 80px 80px auto;
+  grid-template-columns: 1fr 1fr 1fr auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;

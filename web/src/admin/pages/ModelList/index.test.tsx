@@ -280,6 +280,17 @@ describe('ModelList 按类型分表单', () => {
       editBtn?.click();
     });
     await settle();
+    // IKHU8P：矩阵转置成「行=比例、列=尺寸」——表头首列是「比例」，后面依次是各尺寸档。
+    // 这条钉住方向：行列若再被换回去（正是 IKHU8P 要修的那个缺陷），下面按 select 取值的断言全都不受影响。
+    // 页面里不止这一张 table（模型列表本身也是），按首列表头文本定位到矩阵那张。
+    const matrixTable = [...document.body.querySelectorAll('table')].find(
+      (table) => table.querySelector('thead th')?.textContent === '比例',
+    );
+    expect([...(matrixTable?.querySelectorAll('thead th') ?? [])].map((th) => th.textContent)).toEqual([
+      '比例',
+      '1K',
+      '2K',
+    ]);
     const before = [...document.body.querySelectorAll('select')].map((el) => el.value);
     expect(before).toContain('1024x1024');
     expect(before).toContain('2048x2048');
