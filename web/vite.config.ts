@@ -139,9 +139,10 @@ function tosFetchProxy(): Plugin {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
             'Access-Control-Allow-Headers': '*',
+            'Accept-Ranges': 'bytes',
           }
           forwardRes.headers.forEach((value, key) => {
-            if (!['transfer-encoding', 'connection', 'accept-ranges'].includes(key.toLowerCase())) {
+            if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
               respHeaders[key] = value
             }
           })

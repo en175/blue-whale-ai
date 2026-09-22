@@ -12,6 +12,7 @@ import {
   useInteractions,
 } from '@floating-ui/react';
 import { AudioLines, X } from 'lucide-react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface VideoMentionChipProps {
@@ -57,7 +58,7 @@ function MediaMentionChip({ url, label, title, onRemove, mediaType }: VideoMenti
         aria-label={`预览${mediaType === 'audio' ? '音频' : '视频'}：${title ?? label}`}
         {...getReferenceProps()}
       >
-        {mediaType === 'audio' ? <AudioLines size={15} /> : <video className={styles.thumb} src={url} muted playsInline preload="metadata" />}
+        {mediaType === 'audio' ? <AudioLines size={15} /> : <video className={styles.thumb} src={resolveMediaSrc(url)} muted playsInline preload="metadata" />}
         <span className={styles.label} title={title ?? label}>{label}</span>
         {onRemove && (
           <button
@@ -82,7 +83,7 @@ function MediaMentionChip({ url, label, title, onRemove, mediaType }: VideoMenti
             contentEditable={false}
             {...getFloatingProps()}
           >
-            {mediaType === 'audio' ? <audio src={url} controls preload="metadata" aria-label={`播放音频：${label}`} /> : <video src={url} autoPlay muted loop playsInline />}
+            {mediaType === 'audio' ? <audio src={resolveMediaSrc(url)} crossOrigin={remoteImageCrossOrigin(url)} controls preload="metadata" aria-label={`播放音频：${label}`} /> : <video src={resolveMediaSrc(url)} autoPlay muted loop playsInline />}
           </span>
         </FloatingPortal>
       )}

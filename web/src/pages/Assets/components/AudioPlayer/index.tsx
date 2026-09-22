@@ -1,5 +1,6 @@
 import { Pause, Play } from 'lucide-react';
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export type AudioPlayerVariant = 'compact' | 'full';
@@ -191,7 +192,8 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
     >
       <audio
         ref={audioRef}
-        src={src}
+        src={resolveMediaSrc(src)}
+        crossOrigin={remoteImageCrossOrigin(src)}
         preload="metadata"
         onLoadedMetadata={() => syncMetadata(true)}
         onDurationChange={() => syncMetadata()}

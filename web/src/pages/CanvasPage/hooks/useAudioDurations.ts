@@ -5,6 +5,7 @@
  *  调用方须以 useMemo 稳定 sources 引用（引用不变不重探测）。
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 
 /** 探测输入项：key 为面板内参考项唯一键（与渲染 key 同源），src 为音频地址 */
 export interface AudioDurationSource {
@@ -40,6 +41,8 @@ export function useAudioDurations(sources: readonly AudioDurationSource[]): Map<
     for (const { key, src } of sources) {
       if (!src || entriesRef.current.has(key)) continue;
       const audio = new Audio();
+      const cors = remoteImageCrossOrigin(src);
+      if (cors) audio.crossOrigin = cors;
       audio.preload = 'metadata';
       let disposed = false;
       const entry: AudioDurationEntry = {
@@ -65,7 +68,7 @@ export function useAudioDurations(sources: readonly AudioDurationSource[]): Map<
         });
       };
       audio.addEventListener('loadedmetadata', onLoaded, { once: true });
-      audio.src = src;
+      audio.src = resolveMediaSrc(src);
       entriesRef.current.set(key, entry);
     }
 
