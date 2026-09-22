@@ -237,6 +237,7 @@ import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-m
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
 import { flattenPromptDocForSend, restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
+import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -407,7 +408,7 @@ function cropImageToFile(
       }
     };
     img.onerror = () => resolve(null);
-    img.src = src;
+    img.src = resolveMediaSrc(src);
   });
 }
 

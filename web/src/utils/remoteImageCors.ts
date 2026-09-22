@@ -1,4 +1,18 @@
+/** 开发模式把跨域远程图片/音视频地址转到 Vite 同域代理，避免本地直连被 CORS 拦截 */
+export function resolveMediaSrc(src?: string | null): string {
+  if (!src) return '';
+  if (
+    import.meta.env.DEV &&
+    /^https?:\/\//.test(src) &&
+    (typeof window === 'undefined' || !src.startsWith(window.location.origin)) &&
+    !src.startsWith('/__tos-fetch')
+  ) {
+    return `/__tos-fetch?url=${encodeURIComponent(src)}`;
+  }
+  return src;
+}
+
 /** TOS 等 http(s) 图从加载起走 CORS，让缓存里永远是带 ACAO 的那份 */
 export function remoteImageCrossOrigin(src?: string | null): 'anonymous' | undefined {
-  return src && /^https?:\/\//.test(src) ? 'anonymous' : undefined;
+  return src && (/^https?:\/\//.test(src) || src.startsWith('/__tos-fetch')) ? 'anonymous' : undefined;
 }

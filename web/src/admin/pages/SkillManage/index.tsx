@@ -13,7 +13,7 @@ import {
   type AdminSkill,
   type AdminSkillCategory,
 } from '@/api/admin';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import styles from './index.module.css';
@@ -300,7 +300,7 @@ export default function SkillManage() {
                   </td>
                   <td>
                     {s.cover_url ? (
-                      <img className={styles.cover} src={s.cover_url} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt="" />
+                      <img className={styles.cover} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt="" />
                     ) : (
                       <span className={styles.coverNone}>—</span>
                     )}

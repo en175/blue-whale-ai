@@ -21,7 +21,7 @@ import {
 } from '@/api/projects';
 import { isApiError } from '@/api/http';
 import { defaultProjectName } from '@/lib/projectName';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** 页面向用户展示的日期；坏数据不让整张卡片失去可用性。 */
@@ -94,7 +94,7 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
         <img
           key={`${url}-${index}`}
           className={styles.previewImage}
-          src={url}
+          src={resolveMediaSrc(url)}
           crossOrigin={remoteImageCrossOrigin(url)}
           alt={`${project.name} 图片预览 ${index + 1}`}
           loading="lazy"

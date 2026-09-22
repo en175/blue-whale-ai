@@ -4,7 +4,7 @@ import type { AssetRecord } from '@/api/assets';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
 import { formatFileSize } from '@/utils/format-file-size';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { assetAspectRatio } from '../../assetGrid';
 import AudioPlayer from '../AudioPlayer';
 import {
@@ -49,7 +49,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
         {!loaded && <Skeleton className={styles.previewSkeleton} />}
         <img
           className={`${styles.previewMedia} ${styles.imagePreview} ${loaded ? '' : styles.previewMediaLoading}`}
-          src={asset.url}
+          src={resolveMediaSrc(asset.url)}
           crossOrigin={remoteImageCrossOrigin(asset.url)}
           alt="资产预览"
           onLoad={() => setLoaded(true)}
@@ -65,7 +65,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
         {!loaded && <Skeleton className={styles.previewSkeleton} />}
         <video
           className={`${styles.previewMedia} ${loaded ? '' : styles.previewMediaLoading}`}
-          src={asset.url}
+          src={resolveMediaSrc(asset.url)}
           controls
           playsInline
           preload="metadata"

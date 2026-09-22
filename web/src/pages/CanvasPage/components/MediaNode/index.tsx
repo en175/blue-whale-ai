@@ -25,7 +25,7 @@ import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generation
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
@@ -736,7 +736,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
             <img
               className={styles.mediaImage}
-              src={data.src}
+              src={resolveMediaSrc(data.src)}
               crossOrigin={remoteImageCrossOrigin(data.src)}
               alt={data.fileName || 'image'}
               draggable={false}
