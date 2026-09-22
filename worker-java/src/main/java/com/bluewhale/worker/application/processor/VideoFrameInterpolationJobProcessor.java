@@ -261,9 +261,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                             ? pollError.getMessage() : "上游持续瞬时错误";
                     log.warn("[video_frame_interpolation] 轮询瞬时错误且预算耗尽 jobId={} pollCount={} err={}，落终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failClaimed(claim, VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
-                            "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS
-                                    + " 次持续瞬时错误: " + reason + "）");
+                    failPollBudgetExhausted(claim, "持续瞬时错误: " + reason);
                     return;
                 }
                 log.warn("[video_frame_interpolation] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
@@ -281,8 +279,7 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         if ("processing".equals(observation.status())) {
             if (claim.pollCount() >= MAX_VIDEO_FRAME_INTERPOLATION_POLLS) {
                 // 轮询超时归并兜底码（家族口径：宁可不重试也不双跑；用户手动重试会重新提交）
-                failClaimed(claim, VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
-                        "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS + " 次）");
+                failPollBudgetExhausted(claim, "");
                 return;
             }
             boolean updated = stateMachine.rescheduleProviderPoll(
@@ -470,6 +467,14 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             return GenerationError.ERROR_QUOTA_EXHAUSTED;
         }
         return VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED;
+    }
+
+    /** 轮询预算耗尽的统一终态落点（IKHSFI）：瞬时错误续排与 processing 续排两路共用，
+     *  一律归并兜底 1049 并停止续排（不 reschedule / 不 enqueue）。detail 为空串时即
+     *  processing 超限原文案；非空时追加瞬时错误原因（上游可读，随 message 透传投影）。 */
+    private void failPollBudgetExhausted(ClaimedVideoFrameInterpolationJobDto claim, String detail) {
+        failClaimed(claim, VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
+                "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS + " 次" + detail + "）");
     }
 
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at；插帧无输出槽位，

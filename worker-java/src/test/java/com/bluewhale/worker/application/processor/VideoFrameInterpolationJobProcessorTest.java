@@ -467,6 +467,44 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 429 + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    void pollTransient429AtLimit_timesOut() {
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
+        VideoFrameInterpolationError rateLimited = new VideoFrameInterpolationError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 视频插帧任务查询失败: HTTP 429");
+        rateLimited.initCause(new NewApiVideoClient.HttpStatusException(429));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(rateLimited);
+
+        processor.handle("100");
+
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                contains("429"), any(), eq("worker-1"), eq(5L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（连接错误 ConnectException + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    void pollTransientConnectErrorAtLimit_timesOut() {
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
+        VideoFrameInterpolationError connectError = new VideoFrameInterpolationError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 视频插帧任务查询失败: 连接被拒");
+        connectError.initCause(new java.net.ConnectException("Connection refused"));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(connectError);
+
+        processor.handle("100");
+
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                contains("连接被拒"), any(), eq("worker-1"), eq(5L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        // 超限只落终态，不自动重新提交供应商任务（用户手动重试才走新 job）
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+    }
+
+    @Test
     @DisplayName("poll 瞬时错误上限前一次（pollCount=719）→ 仍续排，不落终态（计数边界：共 720 次续排）")
     void pollTransientErrorJustBelowLimit_reschedules() {
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS - 1);
@@ -501,6 +539,38 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("超限落 failed 终态后：重复唤醒 claim 不命中 → 静默返回，不复活不续排（IKHSFI）")
+    void pollBudgetExhaustedTerminalRewake_noRevival() {
+        // 第一步：瞬时错误超限 → failVideoJob 写终态 failed（清 next_poll_at，不自投消息）
+        stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 视频插帧任务查询超时"));
+        processor.handle("100");
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                anyString(), any(), eq("worker-1"), eq(5L));
+
+        // 第二步：终态后的重复唤醒（MQ 迟到重投，或 recovery 扫描兜底重投同一条消息）。
+        // claim 候选查询（findCandidateByTypeAndSources）只认 queued / processing(+空或过期
+        // 租约) 且 next_action_at 到期——failed 终态一律不命中 → claim 返回空 → 处理器静默
+        // 返回，不产生任何状态机写或自投（claimReturnsEmpty_silentReturn 同款语义，
+        // 锚定超限终态场景：claim 与 recovery 两条唤醒路径都不复活已终态任务）。
+        clearInvocations(stateMachine, interpolateVideoClient, producer);
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.empty());
+        processor.handle("100");
+
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(interpolateVideoClient, never()).poll(anyString(), anyString());
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
