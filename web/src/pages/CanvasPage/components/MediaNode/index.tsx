@@ -58,6 +58,40 @@ function HandlePlus() {
 const durationLabel = (duration?: number) =>
   typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
 
+/** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
+const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
+
+/** 生成 MP4 常把 moov 放在文件尾，preload=metadata 只拿到时长，画面停在黑底。
+ *  暂停时微调 currentTime 逼解码器吐出一帧；解码完成（seeked）再回调回填宽高。 */
+function paintVideoFirstFrame(
+  video: HTMLVideoElement | null,
+  onSeeked?: (video: HTMLVideoElement) => void,
+) {
+  if (!video) return;
+  if (video.readyState < 1) return;
+  if (!video.paused) return;
+  const duration = video.duration;
+  const epsilon = Number.isFinite(duration) && duration > 0 ? Math.min(0.04, duration / 4) : 0.04;
+  if (video.currentTime >= epsilon) {
+    onSeeked?.(video);
+    return;
+  }
+  if (pendingFirstFrameSeek.has(video)) return;
+  pendingFirstFrameSeek.add(video);
+  const handleSeeked = () => {
+    pendingFirstFrameSeek.delete(video);
+    video.removeEventListener('seeked', handleSeeked);
+    onSeeked?.(video);
+  };
+  video.addEventListener('seeked', handleSeeked, { once: true });
+  try {
+    video.currentTime = epsilon;
+  } catch {
+    pendingFirstFrameSeek.delete(video);
+    video.removeEventListener('seeked', handleSeeked);
+  }
+}
+
 /** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
 
@@ -391,16 +425,35 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onMediaDims?.(id, { width: w, height: h });
   }, [data, id]);
 
-  const handleVideoMetadata = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const { videoWidth: w, videoHeight: h, duration } = e.currentTarget;
-    if (!w || !h) return;
-    const dims: MediaDims = { width: w, height: h };
+  const syncVideoDims = useCallback((video: HTMLVideoElement) => {
+    const { videoWidth: w, videoHeight: h, duration } = video;
+    const dims: MediaDims = {};
+    if (w > 0) dims.width = w;
+    if (h > 0) dims.height = h;
     if (Number.isFinite(duration) && duration > 0 && typeof data.duration !== 'number') {
       dims.duration = duration;
     }
-    if (data.width === w && data.height === h && dims.duration === undefined) return;
+    const widthUnchanged = dims.width === undefined || data.width === dims.width;
+    const heightUnchanged = dims.height === undefined || data.height === dims.height;
+    if (widthUnchanged && heightUnchanged && dims.duration === undefined) return;
     data.onMediaDims?.(id, dims);
   }, [data, id]);
+
+  /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高 */
+  const hydratePausedVideo = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    syncVideoDims(video);
+    paintVideoFirstFrame(video, syncVideoDims);
+  }, [syncVideoDims]);
+
+  const handleVideoReady = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    hydratePausedVideo(e.currentTarget);
+  }, [hydratePausedVideo]);
+
+  /** 缓存命中时 loadedmetadata 可能早于监听绑定，挂载后再补画一帧 */
+  useEffect(() => {
+    hydratePausedVideo(videoRef.current);
+  }, [data.src, hydratePausedVideo]);
 
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
@@ -729,14 +782,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
             <video
               ref={videoRef}
-              className={styles.mediaVideo}
+              className={`${styles.mediaVideo}${isSelect && !subtitleEraseLocked ? ' nodrag nopan' : ''}`}
               src={data.src}
               controls={isSelect && !subtitleEraseLocked}
+              playsInline
               preload="metadata"
               disablePictureInPicture
               disableRemotePlayback
               controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-              onLoadedMetadata={handleVideoMetadata}
+              onLoadedMetadata={handleVideoReady}
+              onLoadedData={handleVideoReady}
               style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
             />
             {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
