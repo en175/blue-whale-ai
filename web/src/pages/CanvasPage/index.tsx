@@ -741,6 +741,21 @@ export default function CanvasPage() {
   /** 撤销/重做栈（IKD0JT A2）：在节点 refs 就绪后实例化并回填；
    *  此前的消费方（addCanvasEdge 等）经该 ref 惰性调用 */
   const historyRef = useRef<CanvasHistoryApi | null>(null);
+  /** 同一次手势内的多次 push 聚合成一条历史（IKHR6J / IKHM3P） */
+  const withHistoryBatch = (fn: () => void) => {
+    historyRef.current?.beginBatch();
+    try {
+      fn();
+    } finally {
+      historyRef.current?.endBatch();
+    }
+  };
+  /** 擦除会话内的撤回/重做：Ctrl+Z 走遮罩小栈，不误伤画布历史（IKHCVJ） */
+  const eraseHistoryRef = useRef({
+    active: false,
+    undo: () => {},
+    redo: () => {},
+  });
   /** 成组（IKD0JT A3）：组 = 节点 ID 名单；底框由 Canvas 按成员包围盒派生。
    *  持久化走伪节点（type: 'groupFrame' 混入 nodes JSON），水合剥离还原 */
   const [groups, setGroups] = useState<CanvasGroup[]>([]);
@@ -1048,7 +1063,9 @@ export default function CanvasPage() {
   const handleConnectGroupToTarget = useCallback(
     (memberIds: string[], targetId: string) => {
       if (memberIds.length === 0 || !targetId) return;
-      memberIds.forEach((m) => connectPair(m, targetId));
+      withHistoryBatch(() => {
+        memberIds.forEach((m) => connectPair(m, targetId));
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
@@ -1057,7 +1074,9 @@ export default function CanvasPage() {
   const handleConnectSourceToGroup = useCallback(
     (sourceId: string, memberIds: string[]) => {
       if (!sourceId || memberIds.length === 0) return;
-      memberIds.forEach((m) => connectPair(sourceId, m));
+      withHistoryBatch(() => {
+        memberIds.forEach((m) => connectPair(sourceId, m));
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
@@ -4350,7 +4369,7 @@ export default function CanvasPage() {
     mode?: string;
     /** IKG0LP：是否带音频（随草稿 data 持久化） */
     generateAudio?: boolean;
-  }, position?: { x: number; y: number }, overrides?: { fileName?: string; data?: Record<string, unknown> }): string => {
+  }, position?: { x: number; y: number }, overrides?: { fileName?: string; data?: Record<string, unknown>; recordHistory?: boolean }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -4397,11 +4416,15 @@ export default function CanvasPage() {
     mediaNodesRef.current = nextMedia;
     setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
+    if (overrides?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
     return nodeId;
   };
 
   /** 音频生成草稿卡，落在指定点 */
-  const createAudioDraftCard = (position?: { x: number; y: number }): string => {
+  const createAudioDraftCard = (
+    position?: { x: number; y: number },
+    opts?: { recordHistory?: boolean },
+  ): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -4440,6 +4463,7 @@ export default function CanvasPage() {
     mediaNodesRef.current = nextMedia;
     setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
+    if (opts?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
     return nodeId;
   };
 
@@ -4450,7 +4474,7 @@ export default function CanvasPage() {
    *  不发 selectRequest（默认 false，既有调用点行为不变）。 */
   const createImageDraftCard = (
     position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string; skipSelect?: boolean },
+    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string; skipSelect?: boolean; recordHistory?: boolean },
   ): string => {
     const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
     const skipSelect = overrides?.skipSelect === true;
@@ -4497,15 +4521,16 @@ export default function CanvasPage() {
       const nextMedia = [...mediaNodesRef.current, node];
       mediaNodesRef.current = nextMedia;
       setMediaNodes(nextMedia);
-      return nodeId;
+    } else {
+      setTextNodes(deselect);
+      setProductNodes(deselect);
+      setAssetNodes(deselect);
+      const nextMedia = [...deselect(mediaNodesRef.current), node];
+      mediaNodesRef.current = nextMedia;
+      setMediaNodes(nextMedia);
+      setSelectRequest({ id: nodeId, ts: Date.now() });
     }
-    setTextNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    const nextMedia = [...deselect(mediaNodesRef.current), node];
-    mediaNodesRef.current = nextMedia;
-    setMediaNodes(nextMedia);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
+    if (overrides?.recordHistory) historyRef.current?.pushAddNodes([nodeId]);
     return nodeId;
   };
 
@@ -4618,28 +4643,30 @@ export default function CanvasPage() {
     const sourceIds = connectMenu.sourceIds;
     const position = spawnNearScreen({ x: connectMenu.x, y: connectMenu.y });
     setConnectMenu(null);
-    let targetId = '';
-    if (kind === 'video') {
-      targetId = createVideoDraftCard(undefined, position);
-      connectMenuSourcesToDraft(sourceIds, targetId, 'video');
-      openVideoDraftDialog(targetId);
-      return;
-    }
-    if (kind === 'image') {
-      targetId = createImageDraftCard(position);
-      connectMenuSourcesToDraft(sourceIds, targetId, 'image');
-      openImageDraftDialog(targetId);
-      return;
-    }
-    if (kind === 'audio') {
-      targetId = createAudioDraftCard(position);
-      connectMenuSourcesToDraft(sourceIds, targetId, 'audio');
-      openAudioDraftDialog(targetId);
-      return;
-    }
-    targetId = createTextGenDraft(position);
-    sourceIds.forEach((id) => addCanvasEdge(id, targetId));
-    openTextGenDialog(targetId);
+    withHistoryBatch(() => {
+      let targetId = '';
+      if (kind === 'video') {
+        targetId = createVideoDraftCard(undefined, position, { recordHistory: true });
+        connectMenuSourcesToDraft(sourceIds, targetId, 'video');
+        openVideoDraftDialog(targetId);
+        return;
+      }
+      if (kind === 'image') {
+        targetId = createImageDraftCard(position, { recordHistory: true });
+        connectMenuSourcesToDraft(sourceIds, targetId, 'image');
+        openImageDraftDialog(targetId);
+        return;
+      }
+      if (kind === 'audio') {
+        targetId = createAudioDraftCard(position, { recordHistory: true });
+        connectMenuSourcesToDraft(sourceIds, targetId, 'audio');
+        openAudioDraftDialog(targetId);
+        return;
+      }
+      targetId = createTextGenDraft(position);
+      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      openTextGenDialog(targetId);
+    });
   };
 
   /** 屏幕点下的画布内容节点 id。加号在节点盒外，连线预览也会盖住把手，需穿透叠层查找。 */
@@ -5667,7 +5694,7 @@ export default function CanvasPage() {
   /** 商品节点最新列表（避免闭包陈旧） */
   const productNodesRef = useRef<Node[]>([]);
   productNodesRef.current = productNodes;
-  /** 撤销/重做栈（IKD0JT A2）：覆盖移动/删除/复制/连线/删边；生成类操作不登记（PRD §7.2） */
+  /** 撤销/重做栈（IKD0JT A2）：覆盖移动/删除/复制/连线/删边；生成任务不登记（PRD §7.2），工具栏新建草稿卡由调用方登记 */
   const canvasHistory = useCanvasHistory({
     getTextNodes: () => textNodesRef.current,
     getMediaNodes: () => mediaNodesRef.current,
@@ -5703,6 +5730,11 @@ export default function CanvasPage() {
       if (action === 'ignore') return;
       e.preventDefault();
       e.stopPropagation();
+      if (eraseHistoryRef.current.active) {
+        if (action === 'redo') eraseHistoryRef.current.redo();
+        else eraseHistoryRef.current.undo();
+        return;
+      }
       if (action === 'redo') canvasHistory.redo();
       else canvasHistory.undo();
     };
@@ -8277,6 +8309,11 @@ export default function CanvasPage() {
 
   const handleEraseUndo = () => setEraseMaskState((state) => undoMaskEdit(state));
   const handleEraseRedo = () => setEraseMaskState((state) => redoMaskEdit(state));
+  eraseHistoryRef.current = {
+    active: eraseTargetNodeId != null,
+    undo: handleEraseUndo,
+    redo: handleEraseRedo,
+  };
 
   /* ===== 去字幕框指针交互（IKGZ83）：SubtitleEraseBoxesLayer 上抛显示坐标点，
    *  此处经 subtitleEraseBoxes 纯逻辑落框；拉满 20 个上限时 toast 提示（规格故事 9） ===== */
@@ -10333,7 +10370,7 @@ export default function CanvasPage() {
       mode: seed.mode,
       // IKG0LP：首页带的音频选择必须落进草稿卡，否则关掉面板重开就丢了
       generateAudio: seed.generateAudio,
-    });
+    }, undefined, { recordHistory: true });
     openVideoDraftDialog(nodeId, seed);
   };
   actionsRef.current.firePendingVideoDraft = firePendingVideoDraft;
@@ -10567,7 +10604,11 @@ export default function CanvasPage() {
             // 多选删除一次传入全部 id，避免每个节点各入一栈（IKFO73）。
             removeCanvasNodes(ids);
           }}
-          onDuplicateSelected={(ids) => ids.forEach((id) => actionsRef.current.duplicate(id))}
+          onDuplicateSelected={(ids) => {
+            withHistoryBatch(() => {
+              ids.forEach((id) => actionsRef.current.duplicate(id));
+            });
+          }}
           onCopySelected={handleCopySelectedNodes}
           onPasteClipboard={handlePasteClipboard}
           groups={groups}
@@ -10609,8 +10650,8 @@ export default function CanvasPage() {
                   { key: 'add-audio', label: '音频' },
                 ],
               },
-              { key: 'undo', label: '撤销', disabled: !canvasHistory.canUndo },
-              { key: 'redo', label: '重做', disabled: !canvasHistory.canRedo },
+              { key: 'undo', label: '撤销', disabled: eraseTargetNodeId ? !canUndoMaskEdit(eraseMaskState) : !canvasHistory.canUndo },
+              { key: 'redo', label: '重做', disabled: eraseTargetNodeId ? !canRedoMaskEdit(eraseMaskState) : !canvasHistory.canRedo },
             ]}
             onClose={() => setPaneMenu(null)}
             onSelect={(key) => {
@@ -10623,16 +10664,22 @@ export default function CanvasPage() {
               }               else if (key === 'add-text') handleAddTextNode(flow);
               else if (key === 'add-image') {
                 if (!canOpenEditor()) return;
-                openImageDraftDialog(createImageDraftCard(flow));
+                openImageDraftDialog(createImageDraftCard(flow, { recordHistory: true }));
               } else if (key === 'add-video') {
                 if (!canOpenEditor()) return;
-                openVideoDraftDialog(createVideoDraftCard(undefined, flow));
+                openVideoDraftDialog(createVideoDraftCard(undefined, flow, { recordHistory: true }));
               } else if (key === 'add-audio') {
                 if (!canOpenEditor()) return;
-                openAudioDraftDialog(createAudioDraftCard(flow));
+                openAudioDraftDialog(createAudioDraftCard(flow, { recordHistory: true }));
               }
-              else if (key === 'undo') canvasHistory.undo();
-              else if (key === 'redo') canvasHistory.redo();
+              else if (key === 'undo') {
+                if (eraseTargetNodeId) handleEraseUndo();
+                else canvasHistory.undo();
+              }
+              else if (key === 'redo') {
+                if (eraseTargetNodeId) handleEraseRedo();
+                else canvasHistory.redo();
+              }
             }}
           />
         )}
@@ -10669,7 +10716,7 @@ export default function CanvasPage() {
             setPickMode(null);
             setPickTarget(null);
             setPickRefRole(null);
-            const draftId = createVideoDraftCard();
+            const draftId = createVideoDraftCard(undefined, undefined, { recordHistory: true });
             openVideoDraftDialog(draftId);
           }}
           onToggleImageDialog={() => {
@@ -10678,7 +10725,7 @@ export default function CanvasPage() {
             setPickMode(null);
             setPickTarget(null);
             setImagePickResult(null);
-            const draftId = createImageDraftCard();
+            const draftId = createImageDraftCard(undefined, { recordHistory: true });
             openImageDraftDialog(draftId);
           }}
           onToggleAudioDialog={() => {
@@ -10686,7 +10733,7 @@ export default function CanvasPage() {
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            const draftId = createAudioDraftCard();
+            const draftId = createAudioDraftCard(undefined, { recordHistory: true });
             openAudioDraftDialog(draftId);
           }}
           showVideoDialog={showBottomDialog}
