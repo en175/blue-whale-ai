@@ -19,7 +19,7 @@ import { PrismaClient } from "@prisma/client";
  *
  *   1. 下面的 `timezone: "+08:00"` —— 管【DB 端求值】：NOW()、CURRENT_TIMESTAMP(0)、
  *      以及 DDL 的 DEFAULT CURRENT_TIMESTAMP(0)。驱动据此发 SET time_zone='+08:00'。
- *   2. patches/@prisma__adapter-mariadb@7.9.0.patch —— 管【字面量读写】：
+ *   2. backend/patches/@prisma__adapter-mariadb@7.9.0.patch —— 管【字面量读写】：
  *      adapter 在每条查询上强制 dateStrings: true 并硬编码 UTC（读 `new Date(\`${v}Z\`)`、
  *      写 getUTC*），且无配置项。补丁把它改成按 +08:00 读写。
  *

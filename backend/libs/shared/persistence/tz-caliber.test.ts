@@ -23,7 +23,7 @@ describe("时间口径机制守卫（IKHJ0Q）", () => {
 
   it("安装的 @prisma/adapter-mariadb 确实带着补丁", () => {
     // 读**实际被解析到的**那份 dist，而不是仓库里的 patch 文件——只有安装副本被打上才算数。
-    // 覆盖的失效模式：patches/ 没被 pnpm 应用、patchedDependencies key 与解析版本不匹配
+    // 覆盖的失效模式：backend/patches/ 没被 pnpm 应用、patchedDependencies key 与解析版本不匹配
     // （backend/package.json 已锁死精确版本 7.9.0 来防这一条）、有人把 patch 文件删了。
     const entry = createRequire(import.meta.url).resolve("@prisma/adapter-mariadb");
     const source = readFileSync(entry, "utf8");

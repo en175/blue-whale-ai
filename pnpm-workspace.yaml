@@ -16,4 +16,4 @@ allowBuilds:
   ffmpeg-static: true
 
 patchedDependencies:
-  '@prisma/adapter-mariadb@7.9.0': patches/@prisma__adapter-mariadb@7.9.0.patch
+  '@prisma/adapter-mariadb@7.9.0': backend/patches/@prisma__adapter-mariadb@7.9.0.patch
