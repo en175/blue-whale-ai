@@ -306,9 +306,10 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」点亮与三占位�
 });
 
 /* IKHW5C（父单 IKHVYO）：音频卡第二钮「调速」点亮断言（对齐「截取」钮 IKHB6Y 先例）。
-   置灰唯一条件 = 音频 URL 与 assetId 皆缺失（悬停「音频不可用，无法调速」）；有 URL
-   或有 assetId 任一即放行；时长缺失不拦（用户故事 4，无截取的时长门槛）。达标可点
-   派发 onAudioSpeed，点击后的调速编辑态本体归 IKHW5S，本套只验收回调被正确调用。 */
+   置灰唯一条件 = 音频 URL 缺失（悬停「音频不可用，无法调速」；assetId 不参与门槛、
+   资产关联性留给发送时拦截，对齐截取口径——IKHW5S 门槛核对后由「URL 与 assetId
+   皆缺失」收窄）；时长缺失不拦（用户故事 4，无截取的时长门槛）。达标可点派发
+   onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被正确调用）。 */
 describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
   const speedBtn = () =>
     mountNode.querySelector<HTMLButtonElement>('[data-testid="audio-tool-speed"]')!;
@@ -329,13 +330,13 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
     expect(speedBtn().getAttribute('title')).toBeNull();
   });
 
-  it('置灰唯一矩阵之 URL 与 assetId 皆缺失：调速置灰、悬停「音频不可用，无法调速」、点击不派发', async () => {
+  it('置灰唯一矩阵之音频 URL 缺失：调速置灰、悬停「音频不可用，无法调速」、点击不派发', async () => {
     const onAudioSpeed = vi.fn();
-    // 默认 fixture 自带 src: 'blob:test'，须显式覆盖才能隔离「皆缺失」单一条件
+    // 默认 fixture 自带 src: 'blob:test'，须显式覆盖才能隔离「URL 缺失」单一条件
     const cases: Array<Record<string, unknown>> = [
-      { src: undefined, assetId: undefined },
-      { src: null, assetId: null },
-      { src: '', assetId: '' },
+      { src: undefined },
+      { src: null },
+      { src: '' },
     ];
     for (const data of cases) {
       await renderToolbar('audio', { id: 'gate-node', data: { onAudioSpeed, ...data } });
@@ -349,7 +350,7 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
     expect(onAudioSpeed).not.toHaveBeenCalled();
   });
 
-  it('有 URL 无 assetId（本地可播）与有 assetId 无 URL（可提交）任一即放行', async () => {
+  it('有 URL 无 assetId（本地可播）放行；有 assetId 无 URL（试听无从谈起）置灰（对齐截取口径，IKHW5S 门槛核对）', async () => {
     const onAudioSpeed = vi.fn();
     // 仅有 URL（blob 直传未关联资产）
     await renderToolbar('audio', { data: { onAudioSpeed, assetId: undefined } });
@@ -359,13 +360,14 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
     });
     expect(onAudioSpeed).toHaveBeenCalledWith('audio-node');
 
-    // 仅有 assetId（URL 缺失）
+    // 仅有 assetId（URL 缺失）：无 src 无从试听，置灰（资产关联性留给发送时拦截）
     await renderToolbar('audio', { id: 'asset-node', data: { onAudioSpeed, src: '', assetId: 'a1' } });
-    expect(speedBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(speedBtn().getAttribute('aria-disabled')).toBe('true');
+    expect(speedBtn().getAttribute('title')).toBe('音频不可用，无法调速');
     await act(async () => {
       speedBtn().click();
     });
-    expect(onAudioSpeed).toHaveBeenLastCalledWith('asset-node');
+    expect(onAudioSpeed).toHaveBeenCalledTimes(1);
   });
 
   it('时长缺失不拦调速（用户故事 4）：duration 缺失/为 0 均可点，与「截取」门槛对照', async () => {

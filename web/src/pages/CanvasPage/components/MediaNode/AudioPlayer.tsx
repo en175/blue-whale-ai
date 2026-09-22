@@ -6,6 +6,11 @@
  * 进入编辑态）即暂停且播放头被挤出选区时钳回边界；进入编辑态（selection 由 null
  * 变非 null）播放头归零。定位条（红色 playhead）在选区内可点可拖由卡内遮罩层
  * （AudioTrimOverlay）接管，经父级（MediaNode）桥接本组件命令式句柄 seek。
+ * IKHW5S 调速试听（父单 IKHVYO）：扩 speedFactor props——playbackRate + preservesPitch
+ * 按所选倍速播放（音调自然），播放中拖滑杆只改 rate 不中断，退出恢复 1.0；卡内时间行
+ * 按倍速折算预览产物时长（播放头位置按源波形不动）。调速无遮罩，波形点击/按住拖拽
+ * 定位走本组件既有 handleTrackDown（只定位不改播放状态：播放中拖完续播、暂停态保持
+ * 暂停，同 ADR-0111 定位条口径）。
  * ============================================ */
 import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Play, Pause } from 'lucide-react';
@@ -37,9 +42,13 @@ interface AudioPlayerProps {
   duration?: number;
   onDownload?: () => void;
   /** 调速编辑态骨架标记（IKHW5C）：true 即编辑态——false→true（进入）暂停+播放头
-   *  归零（对齐截取编辑态进入手势 IKHB7A 口径）；退出标记移除即恢复。播放速率本票
-   *  不改（天然 1.0 原速），试听/倍速控件与播放速率接管由 IKHW5S 承担。 */
+   *  归零（对齐截取编辑态进入手势 IKHB7A 口径）；退出标记移除即恢复。 */
   speedEditing?: boolean;
+  /** 调速试听倍速（IKHW5S，父单 IKHVYO）：编辑态 = 当前滑杆倍速——audio.playbackRate
+   *  按其播放、preservesPitch 保持音调（父单实现决策 6，与火山算法同向）；播放中变化
+   *  只改 rate 不中断（不碰 currentTime/播放状态）；undefined（退出）恢复 1.0。卡内
+   *  时间行按其折算（fmt(current/speed) / fmt(duration/speed)），播放头位置按源波形不动。 */
+  speedFactor?: number;
   /** 截取编辑态选区（IKHB7A）：非 null 即编辑态——进入（null→非 null）暂停+播放头
    *  归零；选区变化（拖抓手）暂停+播放头被挤出时钳回边界；试听钳制见头注。 */
   trimSelection?: AudioPlayerTrimSelection | null;
@@ -104,7 +113,7 @@ function fallbackWaveform(src: string, duration: number, bars: number): number[]
 }
 
 const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer(
-  { src, duration: authoritativeDuration, speedEditing, trimSelection, trimOverlay },
+  { src, duration: authoritativeDuration, speedEditing, speedFactor, trimSelection, trimOverlay },
   ref,
 ) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -160,8 +169,8 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
 
   /** 调速编辑态进入手势（IKHW5C 骨架）：false→true 暂停 + 播放头归零（对齐截取
    *  编辑态「进入即暂停、播放头归零」IKHB7A 口径，从一致的起始状态开始试听）。
-   *  依赖布尔稳定值不靠引用比较；退出（true→false）本票无动作——播放速率未改，
-   *  音频天然恢复 1.0 倍速播放（IKHW5S 接 playbackRate 后退出复位归其承担）。 */
+   *  依赖布尔稳定值不靠引用比较；退出（true→false）复位由下方倍速 effect 承担
+   *  （rate 回 1.0，IKHW5S）。 */
   const prevSpeedEditingRef = useRef(false);
   useEffect(() => {
     const a = audioRef.current;
@@ -172,6 +181,22 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
     a.currentTime = 0;
     setCurrentTime(0);
   }, [speedEditing]);
+
+  /** 调速试听倍速（IKHW5S）：playbackRate 实时跟随滑杆（播放中拖动只改 rate 不中断、
+   *  不碰 currentTime），preservesPitch 保持音调自然（父单实现决策 6，webkit 前缀兼容
+   *  旧 Safari）；speedFactor 缺失（非编辑态/退出）恢复 1.0——退出复位归本 effect。 */
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    const rate = typeof speedFactor === 'number' && speedFactor > 0 ? speedFactor : 1;
+    a.playbackRate = rate;
+    const pitched = a as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+    if ('preservesPitch' in a) a.preservesPitch = true;
+    pitched.webkitPreservesPitch = true;
+  }, [speedFactor]);
+
+  /** 折算倍速（时间行展示用）：speedFactor 合法值直接用，否则 1（非编辑态/退出恢复）。 */
+  const effectiveSpeed = typeof speedFactor === 'number' && speedFactor > 0 ? speedFactor : 1;
 
   /** 截取编辑态手势（进入/拖抓手）统一暂停与播放头钳制（IKHB7A）：
    *  - null → 非 null（进入编辑态）：暂停 + 播放头归零（红色定位条归零）；
@@ -348,10 +373,11 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
         {trimOverlay}
       </div>
 
-      {/* 底部控制区：时间 + 播放按钮（卡内时间行 = 当前试听位置 / 总时长） */}
+      {/* 底部控制区：时间 + 播放按钮（卡内时间行 = 当前试听位置 / 总时长；
+          调速编辑态按倍速折算预览产物时长，退出恢复源时长） */}
       <div className={styles.audioControls}>
         <div className={styles.audioTime}>
-          {formatTime(currentTime)} / {formatTime(duration)}
+          {formatTime(currentTime / effectiveSpeed)} / {formatTime(duration / effectiveSpeed)}
         </div>
         <button
           className={`${styles.audioPlayBtn} nodrag nopan`}

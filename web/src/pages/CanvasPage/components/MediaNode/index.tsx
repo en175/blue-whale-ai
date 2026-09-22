@@ -244,12 +244,13 @@ export interface MediaNodeData {
     duration: number;
     onSelectionChange: (selection: { start: number; end: number }) => void;
   };
-  /** 音频调速编辑态骨架标记（IKHW5C，渲染期派生注入，不持久化）：本卡为调速会话源
-   *  音频卡时由 CanvasPage 注入——进入即暂停+播放头归零（AudioPlayer 承担）；源卡
-   *  悬浮工具条隐藏由 CanvasPage 会话模态（editSessionActive）承担，波形区不加遮罩
-   *  （调速无选区，试听/倍速控件由 IKHW5S 接手）。播放速率本票不改（天然 1.0），
-   *  退出标记移除即恢复；IKHW5S 接 playbackRate 后退出复位由其退出函数承担。 */
-  speedEditing?: true;
+  /** 音频调速编辑态标记（IKHW5C 骨架 / IKHW5S 闭环，渲染期派生注入，不持久化）：本卡为
+   *  调速会话源音频卡时由 CanvasPage 注入——true（IKHW5C 骨架形态）或携带倍速对象
+   *  { speed }（IKHW5S）：进入即暂停+播放头归零（AudioPlayer 承担）、试听按倍速播放
+   *  （playbackRate + preservesPitch）且卡内时间行按倍速折算，退出标记移除即恢复 1.0
+   *  与源时长；源卡悬浮工具条隐藏由 CanvasPage 会话模态（editSessionActive）承担，
+   *  波形区不加遮罩（调速无选区）；发送条（AudioSpeedBar）由 CanvasPage 浮出。 */
+  speedEditing?: true | { speed: number };
   /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
    *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
    *  失败卡无身份不渲染，口径同家族身份分流先例） */
@@ -894,7 +895,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             fileName={data.fileName}
             duration={typeof data.duration === 'number' ? data.duration : undefined}
             onDownload={() => data.onDownload?.(id)}
-            speedEditing={data.speedEditing === true}
+            speedEditing={data.speedEditing != null}
+            speedFactor={data.speedEditing && data.speedEditing !== true ? data.speedEditing.speed : undefined}
             trimSelection={data.trimEditing ? data.trimEditing.selection : null}
             trimOverlay={
               data.trimEditing ? (
