@@ -11,7 +11,9 @@ import { z } from "zod";
    （输出音频时长，秒）。⚠️ 官方复核结论（2026-09-22，工单 IKHW48 落地前置）：result 两个字段名
    audio_url / duration 已对官方 CLI 参考文档**逐字证实，非视频侧示例推测**；官方另有可选
    format 参数（mp3/m4a/ogg/flac/wav，默认 m4a）——本产品不传（父单决策：无格式下拉），
-   产物格式跟随官方输出，命名 `源名(调速{值}x).{格式}` 的格式取产物真实格式。
+   产物格式跟随官方默认输出 m4a；命名 `源名(调速{值}x).m4a` 的后缀默认 m4a（本文件
+   AUDIO_SPEED_OUTPUT_FORMAT 单源，web 占位/成品命名同引），成功终态补丁按可得的真实
+   格式（产物 URL 末段扩展名）校正后缀，URL 不可解析时保持 m4a 默认。
    本仓经 new-api 网关调用；参数名以官方文档为准，出处逐条标注在常量注释，禁止引用二手信息。
    跨进程字段在本文件定死后双端实现（红线：契约先行）：worker-java 侧同名常量类
    AudioSpeedContract（domain/contract）由执行票 IKHW5A 落地；backend 入队 tag 常量
@@ -26,6 +28,14 @@ import { z } from "zod";
  *  口径，claim 只按 type 过滤）。 */
 export const AUDIO_SPEED_JOB_TYPE = "audio_speed";
 export const AUDIO_SPEED_SOURCE = "dock";
+
+/** 产物输出格式（文档出处：官方 CLI 参考文档 format 节「输出音频格式……默认值为 m4a」）：
+ *  官方可选 format 参数（mp3/m4a/ogg/flac/wav）的默认值——本产品不传 format（父单决策：
+ *  无格式下拉），产物格式跟随官方默认输出 m4a。本仓展示命名单源：web 占位卡/成品命名
+ *  后缀默认取本值（audioSpeed.ts 引用不复制），成功终态补丁按可得的真实格式（产物 URL
+ *  末段扩展名）校正后缀；worker-java 转存扩展名/mime 单源在 AudioSpeedContract
+ *  .TRANSFER_OUTPUT_FORMAT（Java 无法 import TS，双端一致性测试读源码文本对账同值）。 */
+export const AUDIO_SPEED_OUTPUT_FORMAT = "m4a";
 
 /** input 冻结键名（创建时定死，重试原样沿用）。
  *  基础设施键 provider_credential 在业务键之上由创建侧冻结落库（同 audio-trim 先例，

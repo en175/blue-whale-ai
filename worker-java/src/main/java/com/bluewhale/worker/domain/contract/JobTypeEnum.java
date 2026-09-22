@@ -72,9 +72,9 @@ public enum JobTypeEnum {
     VIDEO_MATTING("video_matting"),
 
     /** 视频插帧（tag=video_frame_interpolation，IKHLK3，父需求 IKHLES；契约 =
-     * backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
-     * video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ
-     * 按附录 C 触点注册。 */
+     *  backend/libs/contracts/video-frame-interpolation.ts，火山 MediaKit
+     *  video-frame-interpolation，出站仅 video_url + 整型 fps）；消费者与处理器由 IKHLKJ
+     *  按附录 C 触点注册。 */
     VIDEO_FRAME_INTERPOLATION("video_frame_interpolation");
 
     private final String value;

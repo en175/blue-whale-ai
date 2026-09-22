@@ -47,7 +47,8 @@ interface AudioPlayerProps {
   /** 调速试听倍速（IKHW5S，父单 IKHVYO）：编辑态 = 当前滑杆倍速——audio.playbackRate
    *  按其播放、preservesPitch 保持音调（父单实现决策 6，与火山算法同向）；播放中变化
    *  只改 rate 不中断（不碰 currentTime/播放状态）；undefined（退出）恢复 1.0。卡内
-   *  时间行按其折算（fmt(current/speed) / fmt(duration/speed)），播放头位置按源波形不动。 */
+   *  时间行编辑态按其折算且先 round 再进 formatTime（fmt(round(current/speed)) /
+   *  fmt(round(duration/speed))，规格用户故事 23 口径），播放头位置按源波形不动。 */
   speedFactor?: number;
   /** 截取编辑态选区（IKHB7A）：非 null 即编辑态——进入（null→非 null）暂停+播放头
    *  归零；选区变化（拖抓手）暂停+播放头被挤出时钳回边界；试听钳制见头注。 */
@@ -374,10 +375,14 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
       </div>
 
       {/* 底部控制区：时间 + 播放按钮（卡内时间行 = 当前试听位置 / 总时长；
-          调速编辑态按倍速折算预览产物时长，退出恢复源时长） */}
+          调速编辑态按倍速折算预览产物时长——折算值先 Math.round 再进 formatTime
+          （规格 IKHVYO 用户故事 23 例证：12s @1.35x ≈ 8.89 → 显示 09 秒，round 口径），
+          只改调速路径；非编辑态保持既有 floor 显示，退出恢复源时长） */}
       <div className={styles.audioControls}>
         <div className={styles.audioTime}>
-          {formatTime(currentTime / effectiveSpeed)} / {formatTime(duration / effectiveSpeed)}
+          {speedEditing
+            ? `${formatTime(Math.round(currentTime / effectiveSpeed))} / ${formatTime(Math.round(duration / effectiveSpeed))}`
+            : `${formatTime(currentTime)} / ${formatTime(duration)}`}
         </div>
         <button
           className={`${styles.audioPlayBtn} nodrag nopan`}

@@ -136,6 +136,32 @@ describe('audioSpeed 终态补丁（轮询收敛，IKHW5S）', () => {
     });
   });
 
+  it('succeeded 命名后缀按产物 URL 真实扩展名校正（审查修复 C：URL .mp3 → 占位名 .m4a 换 .mp3）', () => {
+    const patch = audioSpeedTerminalPatch(
+      { status: 'succeeded', asset: { id: 'a9', url: 'https://bucket.ep.com/generated/7/audio/uuid.mp3' } },
+      '播客片头(调速1.35x).m4a',
+    );
+    expect(patch?.fileName).toBe('播客片头(调速1.35x).mp3');
+  });
+
+  it('succeeded URL 不可解析扩展名：保持占位名默认 m4a 后缀（裸 key / 仅 query / 点开头或结尾）', () => {
+    const keep = (url: string) =>
+      audioSpeedTerminalPatch(
+        { status: 'succeeded', asset: { id: 'a1', url } },
+        'a(调速2.00x).m4a',
+      )?.fileName;
+    expect(keep('https://bucket.ep.com/generated/7/audio/uuid')).toBe('a(调速2.00x).m4a');
+    expect(keep('https://bucket.ep.com/generated/7/audio/uuid?x=1.m4a')).toBe('a(调速2.00x).m4a');
+    expect(keep('https://bucket.ep.com/.m4a/')).toBe('a(调速2.00x).m4a');
+    // URL 缺失（asset null / url 空）同样保持占位名
+    expect(
+      audioSpeedTerminalPatch({ status: 'succeeded', asset: null }, 'a(调速2.00x).m4a')?.fileName,
+    ).toBe('a(调速2.00x).m4a');
+    expect(
+      audioSpeedTerminalPatch({ status: 'succeeded', asset: { id: 'a1', url: '' } }, 'a(调速2.00x).m4a')?.fileName,
+    ).toBe('a(调速2.00x).m4a');
+  });
+
   it('succeeded 且资产缺 duration：不写 duration 键（不落本地折算秒数）', () => {
     const patch = audioSpeedTerminalPatch(
       { status: 'succeeded', asset: { id: 'a1', url: 'http://tos/x.m4a', duration: null } },

@@ -9,7 +9,11 @@
  * 与发送条只引用不复制。
  * ============================================ */
 import { readJobFailText } from '@/api/jobs';
-import { buildAudioSpeedInput, type AudioSpeedInput } from '@lib/contracts/audio-speed';
+import {
+  AUDIO_SPEED_OUTPUT_FORMAT,
+  buildAudioSpeedInput,
+  type AudioSpeedInput,
+} from '@lib/contracts/audio-speed';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 /** 唯一置灰原因（工单拍板文案：URL 缺失各情形共用一句） */
@@ -32,10 +36,11 @@ export function audioSpeedGateReason(source: AudioSpeedGateSource): string | nul
 
 /* ============ 产物格式与倍速标签（IKHW5S） ============ */
 
-/** 调速产物展示格式（官方默认输出）：本产品不传 format 参数（父单决策：无格式下拉），
- *  产物格式跟随官方输出——官方 CLI 参考文档 format 节「默认 m4a」（契约
- *  audio-speed.ts 头注同口径）；发送无格式参数，占位卡与成品命名恒用本值。 */
-export const AUDIO_SPEED_OUTPUT_FORMAT = 'm4a';
+/** 调速产物展示格式：契约 @lib/contracts/audio-speed 单源常量（官方 CLI 参考文档
+ *  format 节「默认 m4a」；本产品不传 format，产物格式跟随官方默认输出）。占位卡与
+ *  成品命名后缀默认用本值，成功终态补丁按可得的真实格式（产物 URL 末段扩展名）
+ *  校正（见 audioSpeedSettledFileName）；此处 re-export 供 web 消费方引用不复制。 */
+export { AUDIO_SPEED_OUTPUT_FORMAT };
 
 /** 倍速展示标签（两位小数 + x，如 1.5 → "1.50x"；发送条当前值/占位卡命名/失败
  *  重试钮共用一个格式化口径）。 */
@@ -50,6 +55,31 @@ export function audioSpeedDisplayName(sourceFileName: unknown, speed: number): s
   const name = typeof sourceFileName === 'string' ? sourceFileName.trim() : '';
   if (!name) return `音频调速.${AUDIO_SPEED_OUTPUT_FORMAT}`;
   return `${name.replace(/\.[^./]+$/, '')}(调速${audioSpeedLabel(speed)}).${AUDIO_SPEED_OUTPUT_FORMAT}`;
+}
+
+/** 从产物 URL 末段取扩展名（审查修复 C：终态补丁「可得的产物真实格式」唯一渠道——
+ *  GET /api/jobs/:id 的 asset 只投 { id, url, type }，无 mimeType/format 字段；url 是
+ *  自家 TOS 公开读链接，worker 转存 storageKey 恒以 `.{格式}` 后缀结尾）。URL 无扩展
+ *  名（裸 key / 仅 query / 以点开头或结尾）返回 null，调用方保持默认 m4a 后缀。 */
+function extensionFromUrl(url: string | null | undefined): string | null {
+  if (typeof url !== 'string' || !url) return null;
+  const lastSegment = url.split('?')[0].split('/').pop() ?? '';
+  const dot = lastSegment.lastIndexOf('.');
+  if (dot <= 0 || dot === lastSegment.length - 1) return null;
+  return lastSegment.slice(dot + 1).toLowerCase();
+}
+
+/** 调速成品命名后缀校正（审查修复 C）：占位名默认 m4a 后缀，成功补丁按产物 URL
+ *  末段真实扩展名替换（名实一致——上游转存格式变化时命名自动跟随）；URL 不可解析
+ *  出扩展名时保持占位名（默认 m4a）。仅调速路径使用，截取家族命名由用户所选格式
+ *  构造、无此校正。 */
+export function audioSpeedSettledFileName(
+  currentFileName: string,
+  assetUrl: string | null | undefined,
+): string {
+  const ext = extensionFromUrl(assetUrl);
+  if (!ext) return currentFileName;
+  return `${currentFileName.replace(/\.[^./]+$/, '')}.${ext}`;
 }
 
 /* ============ 会话身份与占位卡（IKHW5S，audioTrim 同族先例） ============ */
@@ -162,7 +192,8 @@ export function audioSpeedErrorText(
 
 /** 调速任务终态的本地节点补丁（形态对齐 audioTrimTerminalPatch）；进行中返回 null，
  *  调用方继续轮询。成功只写展示与播放必需字段；duration 用服务端权威值（火山返回
- *  duration 经轮询产物回填，「权威时长以火山返回为准」，不取本地折算秒数）。 */
+ *  duration 经轮询产物回填，「权威时长以火山返回为准」，不取本地折算秒数）；fileName
+ *  按产物 URL 真实扩展名校正后缀（审查修复 C，默认 m4a 占位名的名实一致收口）。 */
 export function audioSpeedTerminalPatch(
   detail: {
     status: string;
@@ -177,7 +208,9 @@ export function audioSpeedTerminalPatch(
       progress: 100,
       src: detail.asset?.url ?? '',
       mediaType: 'audio',
-      ...(currentFileName ? { fileName: currentFileName } : {}),
+      ...(currentFileName
+        ? { fileName: audioSpeedSettledFileName(currentFileName, detail.asset?.url) }
+        : {}),
       assetId: detail.asset?.id,
       ...(detail.asset?.duration != null ? { duration: detail.asset.duration } : {}),
     };

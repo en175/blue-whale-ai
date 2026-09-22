@@ -27,6 +27,7 @@ import {
   AUDIO_SPEED_JOB_TYPE,
   AUDIO_SPEED_MAX_SPEED,
   AUDIO_SPEED_MIN_SPEED,
+  AUDIO_SPEED_OUTPUT_FORMAT,
   AUDIO_SPEED_POLL_PATH_PREFIX,
   AUDIO_SPEED_SLIDER_MAX_POS,
   AUDIO_SPEED_SLIDER_MID_POS,
@@ -85,6 +86,10 @@ describe("audio_speed 契约不变量（官方 CLI 参考文档口径，TS 侧�
     // 对客路径按家族规律 /v1/mediakit/{上游同名工具段} 取值，网关配置票定稿后回填。
     expect(AUDIO_SPEED_SUBMIT_PATH).toBe("/v1/mediakit/adjust-audio-speed");
     expect(AUDIO_SPEED_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
+  });
+
+  it("产物输出格式默认 m4a（官方 format 节默认值，本产品不传；审查修复 D 进契约单源）", () => {
+    expect(AUDIO_SPEED_OUTPUT_FORMAT).toBe("m4a");
   });
 });
 
@@ -232,11 +237,13 @@ describe("audio_speed 双端一致性（读 worker-java 源码文本，防漂移
     );
   });
 
-  it("AudioSpeedContract：两 input 键名与 TS 同值 + 转存格式 m4a（官方 format 默认值，本产品不传）", () => {
+  it("AudioSpeedContract：两 input 键名与 TS 同值 + 转存格式与 TS 常量同值（官方 format 默认值，本产品不传；审查修复 D 收口单源对账）", () => {
     for (const key of Object.values(AUDIO_SPEED_INPUT_KEYS)) {
       expect(contractJava).toContain(`= "${key}";`);
     }
-    expect(contractJava).toContain('String TRANSFER_OUTPUT_FORMAT = "m4a";');
+    expect(contractJava).toContain(
+      `String TRANSFER_OUTPUT_FORMAT = "${AUDIO_SPEED_OUTPUT_FORMAT}";`,
+    );
   });
 
   it("AudioSpeedContract：网关端点两常量与 TS 同值", () => {

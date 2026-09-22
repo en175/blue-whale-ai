@@ -37,22 +37,37 @@ function stubCurrentTime(el: HTMLAudioElement, value: number) {
   Object.defineProperty(el, 'currentTime', { configurable: true, writable: true, value });
 }
 
-function renderPlayer(trimSelection: AudioPlayerTrimSelection | null) {
+/** 调速编辑态时间行用例的可选 props（IKHVYO 审查修复 round 口径测试用）。 */
+type SpeedProps = { speedEditing?: boolean; speedFactor?: number; duration?: number };
+
+function renderPlayer(trimSelection: AudioPlayerTrimSelection | null, speedProps?: SpeedProps) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   return act(() => {
     root!.render(
-      createElement(AudioPlayer, { src: 'http://aud/trim.mp3', duration: 30, trimSelection }),
+      createElement(AudioPlayer, {
+        src: 'http://aud/trim.mp3',
+        duration: speedProps?.duration ?? 30,
+        trimSelection,
+        ...(speedProps?.speedEditing != null ? { speedEditing: speedProps.speedEditing } : {}),
+        ...(speedProps?.speedFactor != null ? { speedFactor: speedProps.speedFactor } : {}),
+      }),
     );
   });
 }
 
 /** 同一 root 二次 render 触发 trimSelection 变化（进入编辑态 / 拖抓手改选区路径）。 */
-function rerenderPlayer(trimSelection: AudioPlayerTrimSelection | null) {
+function rerenderPlayer(trimSelection: AudioPlayerTrimSelection | null, speedProps?: SpeedProps) {
   return act(() => {
     root!.render(
-      createElement(AudioPlayer, { src: 'http://aud/trim.mp3', duration: 30, trimSelection }),
+      createElement(AudioPlayer, {
+        src: 'http://aud/trim.mp3',
+        duration: speedProps?.duration ?? 30,
+        trimSelection,
+        ...(speedProps?.speedEditing != null ? { speedEditing: speedProps.speedEditing } : {}),
+        ...(speedProps?.speedFactor != null ? { speedFactor: speedProps.speedFactor } : {}),
+      }),
     );
   });
 }
@@ -178,5 +193,34 @@ describe('AudioPlayer 截取编辑态试听钳制（IKHB7A）', () => {
       clickPlayButton(); // 播放头停在终点（>= end）再点 → 归选区头重播
     });
     expect(audio.currentTime).toBe(5);
+  });
+});
+
+describe('AudioPlayer 调速编辑态时间行折算（IKHVYO 审查修复：round 口径）', () => {
+  it('编辑态 12s @1.35x：总时长折算 12/1.35≈8.89 → round 显示 0:09（规格用户故事 23 例证）', () => {
+    renderPlayer(null, { duration: 12, speedEditing: true, speedFactor: 1.35 });
+    expect(container!.textContent).toContain('0:00 / 0:09');
+  });
+
+  it('编辑态播放中当前位同口径折算：源推进到 12s @1.35x → 当前位也显示 0:09', async () => {
+    await renderPlayer(null, { duration: 12, speedEditing: true, speedFactor: 1.35 });
+    const audio = audioEl();
+    stubCurrentTime(audio, 0);
+    await act(async () => {
+      clickPlayButton(); // 编辑态无选区，直接起播（playing=true 注册 rAF）
+    });
+    audio.currentTime = 12; // 一帧内源时间推进到 12s
+    await driveFrame(); // tick setCurrentTime(12) → 折算 round(12/1.35)=9
+    expect(container!.textContent).toContain('0:09 / 0:09');
+  });
+
+  it('非编辑态保持既有 floor 显示，退出编辑态恢复源时长：12.6s → 0:12（round 会得 0:13，锁口径不外溢）', () => {
+    renderPlayer(null, { duration: 12.6 });
+    expect(container!.textContent).toContain('0:00 / 0:12');
+    // 进入编辑态（round 折算：round(12.6/1.35)=9）再退出，恢复 floor 的 0:12
+    rerenderPlayer(null, { duration: 12.6, speedEditing: true, speedFactor: 1.35 });
+    expect(container!.textContent).toContain('0:00 / 0:09');
+    rerenderPlayer(null, { duration: 12.6 });
+    expect(container!.textContent).toContain('0:00 / 0:12');
   });
 });
