@@ -44,9 +44,10 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
         supported_formats: ["png"],
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
-        features: {},
+        // 当前面板对连线参考的模型能力门控（IKA72G 链路）：无 reference_image 能力时阻止发送
+        features: { reference_image: true },
       },
-      update: { supported_sizes: sizes, default_size: "1024x1024" },
+      update: { supported_sizes: sizes, default_size: "1024x1024", features: { reference_image: true } },
     });
     // 能力上限更小的模型：验证「参考图上限读取模型能力配置」校验延续（IKA72G 链路）
     await prisma.client.generation_model_capability.upsert({
@@ -61,9 +62,9 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
         supported_formats: ["png"],
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
-        features: { max_reference_images: 2 },
+        features: { image_reference_max: 2 },
       },
-      update: { features: { max_reference_images: 2 } },
+      update: { features: { image_reference_max: 2 } },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
@@ -99,11 +100,11 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
     await prisma.client.$disconnect();
   });
 
-  function draftNode(id: string, prompt = "") {
+  function draftNode(id: string, prompt = "", x = 420, y = 160) {
     return {
       id,
       type: "mediaNode",
-      position: { x: 420, y: 160 },
+      position: { x, y },
       data: {
         src: "",
         mediaType: "image",
@@ -268,24 +269,30 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
   });
 
   // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL。
-  // 场景：Dock 选择建线 → Dock 移除断线 → 画布拖线 → 画布剪刀断线 → 非法来源拒绝 →
-  // 文本附件回归 → 刷新恢复 → 提交冻结输入与 Dock 显示一致。
-  it.runIf(process.env.IKDMQR_BROWSER)("browser: dock pick ↔ edge two-way sync, invalid rejection, frozen input", async () => {
+  // 场景：Dock 选择立即建线并落盘（IKFDFT，不等发送）→ 多项顺序 → 关闭重开 → A→B→A →
+  // 保存失败保留/阻断/重试 → Dock 移除断线 → 画布拖线 → 画布剪刀断线 → 非法来源拒绝 →
+  // 文本附件回归 → 刷新恢复（从未生成）→ 提交冻结输入与 Dock 显示一致。
+  it.runIf(process.env.IKDMQR_BROWSER)("browser: dock pick ↔ edge two-way sync, immediate persist, failure retry, frozen input", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKDMQR browser")).id;
     const imageAssetId = await createAsset(projectId, "image", "https://example.com/ref-one.png");
+    const imageAssetId2 = await createAsset(projectId, "image", "https://example.com/ref-two.png");
     const videoAssetId = await createAsset(projectId, "video", "https://example.com/ref-video.mp4");
     expect(
       (await saveCanvas(
         projectId,
         [
           readyImageNode("m1", imageAssetId, "参考图一", 100, 80),
-          readyVideoNode("v1", videoAssetId, "参考视频", 100, 420),
+          readyImageNode("m2", imageAssetId2, "参考图二", 100, 260),
+          readyVideoNode("v1", videoAssetId, "参考视频", 100, 460),
           textNode("t1", "故事文案正文", "故事文案"),
+          // 第二张图片草稿 d2：固定落位（避开侧栏新建草稿的随机中心落位抖动），供 A→B→A 切换
+          draftNode("d2", "", 1100, 60),
         ],
         [],
         "missing",
+        JSON.stringify({ x: 0, y: 0, zoom: 1 }),
       )).status,
     ).toBe(200);
 
@@ -295,7 +302,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
     await vite.listen();
     const browser = await chromium.launch({ headless: true });
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
       const generationRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -309,68 +316,147 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
 
       const edges = page.locator(".react-flow__edge");
       const dockRefs = page.locator('[data-testid="dock-media-ref"]');
+      const dockTexts = page.locator('[data-testid="dock-text-ref"]');
+      const editor = page.locator('[contenteditable="true"]');
       const nodeById = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
-      /** 画布拖线：从 source 节点右连接点拖到 target 节点左连接点 */
+      const savedPairs = async () => {
+        const canvas = await getCanvas(projectId);
+        return (JSON.parse(canvas.edges) as Array<{ source: string; target: string }>).map((e) => `${e.source}->${e.target}`);
+      };
+      /** Dock「从节点添加素材」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单；IKFE8T 起文案统一） */
+      async function enterPickMode() {
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+        await page.getByText("从节点添加素材", { exact: true }).click();
+        await page.getByText("点击画布中的图片节点").waitFor();
+      }
+      /** 画布拖线：从 source 节点右连接点拖到 target 节点左连接点。
+       *  连接点仅伸出节点盒 16px，中心仍压在卡体边缘上——按把点取伸出侧外缘 1/4 处，
+       *  避免 mousedown 落在卡体与把手的命中边界上时而连线时而拖卡的抖动 */
       async function dragConnect(sourceId: string, targetId: string) {
         const src = page.locator(`.react-flow__node[data-id="${sourceId}"] .react-flow__handle-right`);
         const dst = page.locator(`.react-flow__node[data-id="${targetId}"] .react-flow__handle-left`);
         const sb = (await src.boundingBox())!;
         const db = (await dst.boundingBox())!;
-        await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2);
+        await page.mouse.move(sb.x + sb.width * 0.75, sb.y + sb.height / 2);
         await page.mouse.down();
-        await page.mouse.move(db.x + db.width / 2, db.y + db.height / 2, { steps: 12 });
+        await page.mouse.move(db.x + db.width * 0.25, db.y + db.height / 2, { steps: 24 });
         await page.mouse.up();
       }
 
       // 预置素材就绪渲染（不缺失）
       await nodeById("m1").locator("img").waitFor();
+      await nodeById("m2").locator("img").waitFor();
       await nodeById("v1").locator("video").waitFor();
       await nodeById("t1").waitFor();
 
       // 0) 侧栏建草稿：面板打开，无任何连线
-      await page.locator('button[aria-label="图片对话"]').click();
-      await page.locator("textarea").waitFor();
-      const draftNodeLocator = page.locator(".react-flow__node-mediaNode", { hasText: "待生成" });
+      await page.locator('button[aria-label="图片"]').click();
+      await editor.waitFor();
+      const draftNodeLocator = page.locator('.react-flow__node-mediaNode:not([data-id="d2"])', { hasText: "图片生成" });
       const draftId = (await draftNodeLocator.getAttribute("data-id"))!;
       expect(await edges.count()).toBe(0);
       expect(generationRequests, "建卡不创建生成任务").toEqual([]);
 
-      // 1) 添加路径 A（Dock 选择）：到节点选择 → 点击 m1 → 建立连线，Dock 显示同一输入
-      await page.locator('button[title="到节点选择"]').click();
-      await page.getByText("点击画布中的图片节点").waitFor();
+      // 1) 添加路径 A（Dock 选择）：从节点添加素材 → 点击 m1 → 立即建立连线，Dock 显示同一输入（IKFDFT）
+      await enterPickMode();
       await nodeById("m1").locator('[data-testid="media-content"]').click();
-      await vi.waitFor(async () => expect(await edges.count(), "Dock 选择建立连线").toBe(1));
+      await vi.waitFor(async () => expect(await edges.count(), "Dock 选择立即建立连线").toBe(1));
       await vi.waitFor(async () => expect(await dockRefs.count(), "Dock 显示连线参考").toBe(1));
       expect(await dockRefs.first().locator("img").getAttribute("alt")).toBe("参考图一");
 
-      // 2) 移除路径 A（Dock 移除）：连线断开；来源素材卡保留
-      await dockRefs.first().locator('button[title="移除"]').click();
-      await vi.waitFor(async () => expect(await edges.count(), "Dock 移除断开连线").toBe(0));
-      expect(await dockRefs.count()).toBe(0);
-      await nodeById("m1").locator("img").waitFor();
+      // 1b) 不等待发送：连线随既有自动保存落盘（真实业务 API + 隔离库回读证明）
+      await vi.waitFor(async () => {
+        expect(await savedPairs(), "参考连线未发送即落盘").toContain(`m1->${draftId}`);
+      }, { timeout: 10_000 });
+      expect(generationRequests, "保存参考不创建生成任务").toEqual([]);
 
-      // 3) 添加路径 B（画布拖线）：m1 → 草稿，Dock 同步显示
-      await dragConnect("m1", draftId);
-      await vi.waitFor(async () => expect(await page.locator(`.react-flow__edge[data-id^="xy-edge__m1-${draftId}"]`).count(), "画布拖线建立 m1→草稿 连线").toBe(1));
-      await vi.waitFor(async () => expect(await dockRefs.count(), "连线后 Dock 同步显示").toBe(1));
-
-      // 4) 文本附件回归：t1 → 草稿拖线，附件区照常展示
-      await dragConnect("t1", draftId);
+      // 2) 多项参考：再选 m2 → 第二条连线，Dock 按边序显示两项
+      await enterPickMode();
+      await nodeById("m2").locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await edges.count()).toBe(2));
-      await page.getByText("文本附件（1）").waitFor();
-      await page.getByText("故事文案").first().waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
+      expect(await dockRefs.nth(0).locator("img").getAttribute("alt")).toBe("参考图一");
+      expect(await dockRefs.nth(1).locator("img").getAttribute("alt")).toBe("参考图二");
 
-      // 5) 非法来源拒绝：Dock 选取视频节点 → 明确提示，不产生新连线
-      await page.locator('button[title="到节点选择"]').click();
+      // 3) 关闭按钮结束面板 → 点击草稿卡重开：两项参考完整恢复
+      // （跟随面板随 live viewport 逐帧跟位，Playwright 稳定性判定可能等不到静止帧；
+      //  用 DOM 派发直触发 onClose，真实链路 ImageDialog onClose → 父级关闭不变）
+      await page.locator('button[title="关闭"]').dispatchEvent("click");
+      await vi.waitFor(async () => expect(await editor.count(), "关闭后面板退出").toBe(0));
+      await nodeById(draftId).locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "关闭重开恢复全部参考").toBe(2));
+
+      // 4) A→B→A：点击预置草稿 d2 换绑 B（B 不串入 A 的参考）；点回 A 完整恢复
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "B 不串入 A 的参考").toBe(0));
+      // 发布基线跟随面板覆盖 A：先关闭 B，再以真实点击返回 A。
+      await page.locator('button[title="关闭"]').dispatchEvent("click");
+      await vi.waitFor(async () => expect(await editor.count()).toBe(0));
+      await nodeById(draftId).locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "切回 A 恢复全部参考").toBe(2));
+
+      // 5) 保存失败：保留当前页面全部选择并显示未保存，阻止切换其他目标，重试成功恢复
+      let failSave = true;
+      await page.route("**/api/canvases/*", async (route) => {
+        if (failSave && route.request().method() === "PUT") return route.abort();
+        return route.continue();
+      });
+      await editor.click();
+      await page.keyboard.type("失败保留");
+      await page.getByText("保存失败，请重试").first().waitFor();
+      expect(await dockRefs.count(), "保存失败保留当前页面选择").toBe(2);
+      expect(await page.locator('button[title="发送"]').isDisabled(), "保存失败时阻止发送").toBe(true);
+      // 阻止切换其他目标：点 B 草稿，B 的面板不打开（选中变化先收起 A 面板，切换被拦截后无面板完成换绑）；
+      // 点回 A 放行重开，参考仍在（真实链路与页面级「阻止切换」断言互补）
+      const draftB = nodeById("d2");
+      await draftB.locator('[data-testid="media-content"]').click();
+      await vi.waitFor(async () => expect(await editor.count(), "保存失败时 B 面板不打开").toBe(0));
+      await nodeById(draftId).locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "重开原目标保留全部选择").toBe(2));
+      // 重试成功恢复：落盘含全部参考连线
+      failSave = false;
+      await page.getByRole("button", { name: "重试保存" }).click();
+      await page.getByText("已保存").waitFor();
+      await vi.waitFor(async () => {
+        const pairs = await savedPairs();
+        expect(pairs).toContain(`m1->${draftId}`);
+        expect(pairs).toContain(`m2->${draftId}`);
+      }, { timeout: 10_000 });
+      await page.unroute("**/api/canvases/*");
+
+      // 6) 移除路径 A（Dock 移除 m2）：连线断开；来源素材卡保留
+      await dockRefs.nth(1).locator('button[title="移除"]').click();
+      await vi.waitFor(async () => expect(await edges.count(), "Dock 移除断开连线").toBe(1));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      await nodeById("m2").locator("img").waitFor();
+
+      // 7) 添加路径 B（画布拖线）：m2 → 草稿，Dock 同步显示
+      await dragConnect("m2", draftId);
+      await vi.waitFor(async () => expect(await page.locator(`.react-flow__edge[data-id="e-m2-${draftId}"]`).count(), "画布拖线建立 m2→草稿 连线").toBe(1));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "连线后 Dock 同步显示").toBe(2));
+
+      // IKFEWF：从统一来源菜单接纳普通文本，后续刷新与任务快照继续验证同一身份。
+      await enterPickMode();
+      await nodeById("t1").dispatchEvent("click");
+      await vi.waitFor(async () => expect(await edges.count()).toBe(3));
+      await vi.waitFor(async () => expect(await dockTexts.count(), "文本附件进参考栏").toBe(1));
+      expect(await dockTexts.first().getAttribute("title")).toBe("故事文案");
+
+      // 9) 非法来源拒绝：Dock 选取视频节点 → 明确提示，不产生新连线
+      await enterPickMode();
       await nodeById("v1").locator('[data-testid="media-content"]').click();
       await page.getByText("图片参考仅支持图片素材").waitFor();
-      expect(await edges.count(), "非法来源不产生连线").toBe(2);
+      expect(await edges.count(), "非法来源不产生连线").toBe(3);
 
-      // 6) 移除路径 B（画布剪刀断线）：仅 m1 连线断开，Dock 同步移除，t1 附件保留
+      // 10) 移除路径 B（画布剪刀断线）：仅 m2 连线断开，Dock 同步移除，t1 附件保留
       // 按连线身份定位（first 可能是被节点遮挡的 t1 连线）；悬停点取连线近源端（避开节点盒遮挡）
-      const mediaEdge = page.locator('.react-flow__edge[data-id^="xy-edge__m1-"]');
+      const mediaEdge = page.locator(`.react-flow__edge[data-id="e-m2-${draftId}"]`);
       await mediaEdge.waitFor();
-      const srcBox = (await page.locator('.react-flow__node[data-id="m1"] .react-flow__handle-right').boundingBox())!;
+      const srcBox = (await page.locator('.react-flow__node[data-id="m2"] .react-flow__handle-right').boundingBox())!;
       const dstBox = (await page.locator(`.react-flow__node[data-id="${draftId}"] .react-flow__handle-left`).boundingBox())!;
       await page.mouse.move(srcBox.x + (dstBox.x - srcBox.x) * 0.25, srcBox.y + (dstBox.y - srcBox.y) * 0.25);
       const cut = mediaEdge.locator('g[class*="deleteBtn"]');
@@ -378,32 +464,29 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       // 剪刀中点可能被 Dock 覆盖（草稿出生点避让预留高度有限）：悬停可见性已断言，
       // 点击用 DOM 派发直触发剪刀（真实链路 CustomEdge → onEdgesChange remove 不变）
       await cut.dispatchEvent("click");
-      await vi.waitFor(async () => expect(await edges.count(), "画布断线").toBe(1));
-      await vi.waitFor(async () => expect(await dockRefs.count(), "断线后 Dock 同步移除").toBe(0));
-      await page.getByText("文本附件（1）").waitFor();
-      await nodeById("m1").locator("img").waitFor();
+      await vi.waitFor(async () => expect(await edges.count(), "画布断线").toBe(2));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "断线后 Dock 同步移除").toBe(1));
+      await vi.waitFor(async () => expect(await dockTexts.count()).toBe(1));
+      await nodeById("m2").locator("img").waitFor();
 
-      // 7) 参考关系随草稿保存：断线状态落盘后恢复一致；重新连入再刷新恢复
-      await dragConnect("m1", draftId);
-      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      // 11) 刷新恢复（从未生成）：m1 参考与 t1 附件经落盘状态恢复；不恢复选取模式
       await vi.waitFor(async () => {
-        const canvas = await getCanvas(projectId);
-        const savedEdges = JSON.parse(canvas.edges) as Array<{ source: string; target: string }>;
-        expect(
-          savedEdges.some((e) => e.source === "m1" && e.target === draftId),
-          "参考连线随草稿落盘",
-        ).toBe(true);
+        expect(await savedPairs(), "断线状态落盘").toEqual(
+          expect.arrayContaining([`m1->${draftId}`, `t1->${draftId}`]),
+        );
       }, { timeout: 10_000 });
       await page.reload();
       await nodeById(draftId).waitFor();
       await vi.waitFor(async () => expect(await edges.count(), "刷新恢复连线").toBe(2));
       await nodeById(draftId).locator('[data-testid="media-content"]').click();
-      await page.locator("textarea").waitFor();
+      await editor.waitFor();
       await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后 Dock 显示同一参考").toBe(1));
-      await page.getByText("文本附件（1）").waitFor();
+      await vi.waitFor(async () => expect(await dockTexts.count()).toBe(1));
+      expect(await page.getByText("点击画布中的图片节点").count(), "选取模式不恢复").toBe(0);
 
-      // 8) 提交：冻结输入与 Dock 显示及请求一致（先落盘后建任务）
-      await page.locator("textarea").fill("参考这张图重新绘制");
+      // 12) 提交：冻结输入与 Dock 显示及请求一致（先落盘后建任务）
+      await editor.click();
+      await page.keyboard.type("参考这张图重新绘制");
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       const sent = generationRequests[0].body;
@@ -420,11 +503,11 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
         expect(job!.input.text_attachments).toEqual([{ node_id: "t1", title: "故事文案", text: "故事文案正文" }]);
       }, { timeout: 10_000 });
 
-      // 9) 执行中输入只读：面板禁用、Dock 移除隐藏、画布断线被拦截
+      // 13) 执行中输入只读：面板禁用（编辑器退出可编辑态）、Dock 移除隐藏、画布断线被拦截
       await page.getByText("生成中，参数与连线只读").waitFor();
-      expect(await page.locator("textarea").isDisabled()).toBe(true);
+      expect(await page.locator('[data-lexical-editor]').getAttribute("contenteditable"), "生成中编辑器只读").toBe("false");
       expect(await page.locator('[data-testid="dock-media-ref"] button[title="移除"]').count()).toBe(0);
-      const cutDuringRun = page.locator('.react-flow__edge[data-id^="xy-edge__m1-"] g[class*="deleteBtn"]');
+      const cutDuringRun = page.locator(`.react-flow__edge[data-id="e-m1-${draftId}"] g[class*="deleteBtn"]`);
       await cutDuringRun.waitFor({ state: "visible" });
       await cutDuringRun.dispatchEvent("click");
       await page.getByText("生成中，输入连线只读").waitFor();
@@ -432,5 +515,5 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
 
       await page.screenshot({ path: "/tmp/ikdmqr-browser.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
-  }, 120_000);
+  }, 180_000);
 });

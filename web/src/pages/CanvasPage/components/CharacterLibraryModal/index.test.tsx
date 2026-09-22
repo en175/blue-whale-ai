@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CharacterLibraryModal from './index';
 import styles from './index.module.css';
 
-const { listAssetGroups, listAssets } = vi.hoisted(() => ({
+const { listAssetGroups, listAssets, uploadMaterialLibraryFiles } = vi.hoisted(() => ({
   listAssetGroups: vi.fn(),
   listAssets: vi.fn(),
+  uploadMaterialLibraryFiles: vi.fn(),
 }));
 
 vi.mock('@/api/material', () => ({
@@ -18,6 +19,8 @@ vi.mock('@/api/material', () => ({
   listAssets,
   updateAssetGroup: vi.fn(),
 }));
+
+vi.mock('../../characterLibraryUpload', () => ({ uploadMaterialLibraryFiles }));
 
 vi.mock('@/api/http', () => ({ isApiError: () => false }));
 
@@ -54,30 +57,57 @@ afterEach(async () => {
 });
 
 describe('CharacterLibraryModal', () => {
-  it('loads assets only after opening a group', async () => {
+  it('loads virtual portrait assets as a flat list without groups', async () => {
     await renderLibrary();
-
-    expect(listAssetGroups).toHaveBeenCalledTimes(1);
-    expect(listAssets).not.toHaveBeenCalled();
-
-    const groupCard = [...document.body.querySelectorAll('span')]
-      .find((element) => element.textContent === '虚拟人像')
-      ?.closest(`.${styles.groupCard}`) as HTMLDivElement | null;
-    expect(groupCard).not.toBeNull();
-
     await act(async () => {
-      groupCard?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
       await Promise.resolve();
     });
 
+    expect(listAssetGroups).toHaveBeenCalledWith({
+      Filter: { GroupType: 'AIGC' },
+      PageNumber: 1,
+      PageSize: 100,
+    });
     expect(listAssets).toHaveBeenCalledWith({
       Filter: { GroupIds: ['group-1'], GroupType: 'AIGC' },
       PageNumber: 1,
       PageSize: 100,
     });
+    expect(document.body.querySelector(`.${styles.groupCard}`)).toBeNull();
+    expect(document.body.textContent).not.toContain('点击查看素材');
     expect(document.body.querySelector('img[alt="人像图片"]')).not.toBeNull();
     expect(document.body.querySelector('video[src="https://example.test/video.mp4"]')).not.toBeNull();
     expect(document.body.textContent).toContain('图片');
     expect(document.body.textContent).toContain('视频');
+    expect(document.body.querySelector('[aria-label="上传素材"]')).not.toBeNull();
+  });
+
+  it('弹窗内本地上传失败时 toast 提示请重试', async () => {
+    const { toast } = await import('sonner');
+    const toastError = vi.spyOn(toast, 'error').mockImplementation(() => 0 as never);
+    uploadMaterialLibraryFiles.mockResolvedValue({
+      errors: ['素材服务异常，请重试'],
+      createdIds: [],
+    });
+    await renderLibrary();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const input = document.body.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('file input missing');
+    const file = new File(['x'], 'clip.mp4', { type: 'video/mp4' });
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(uploadMaterialLibraryFiles).toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith('素材服务异常，请重试');
+    toastError.mockRestore();
   });
 });

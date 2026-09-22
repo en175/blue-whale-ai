@@ -19,7 +19,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createProductEventRepo } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
@@ -116,6 +116,32 @@ export class ProjectsController {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) return fail(FAILURE_CODE, "项目名不能为空");
     const project = await this.project.rename(id, user.userId, name);
+    if (!project) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    return ok(project);
+  }
+
+  /** PUT /api/projects/:id/last-opened — 进入画布时记一笔「上次打开」（IKH1YI）。无 body。 */
+  @Put(":id/last-opened")
+  async touchLastOpened(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    const touched = await this.project.touchLastOpened(id, user.userId);
+    if (!touched) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    return ok(null);
+  }
+
+  /** PUT /api/projects/:id/pin — 置顶/取消置顶（IKH1YI）。body { pinned: boolean }。 */
+  @Put(":id/pin")
+  async pin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() body: { pinned?: unknown },
+  ) {
+    if (typeof body.pinned !== "boolean") {
+      return fail(FAILURE_CODE, "pinned 必须为布尔值");
+    }
+    const project = await this.project.setPinned(id, user.userId, body.pinned);
     if (!project) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     return ok(project);
   }

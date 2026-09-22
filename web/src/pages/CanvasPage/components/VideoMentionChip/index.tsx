@@ -17,6 +17,8 @@ import styles from './index.module.css';
 export interface VideoMentionChipProps {
   url: string;
   label: string;
+  /** 悬停提示，不给就是 label。胶囊上写「视频3」时放素材全名。 */
+  title?: string | undefined;
   /** 输入框里的胶囊要移除按钮；历史消息里不要。 */
   onRemove?: (() => void) | undefined;
 }
@@ -25,15 +27,15 @@ export interface VideoMentionChipProps {
  * 画布视频提及胶囊：小视频缩略图 + 文件名；悬浮静音循环播放。
  * 视觉对齐 ImageMentionChip，交互对齐 AssetChip 的视频预览。
  */
-export function VideoMentionChip({ url, label, onRemove }: VideoMentionChipProps) {
-  return <MediaMentionChip url={url} label={label} onRemove={onRemove} mediaType="video" />;
+export function VideoMentionChip({ url, label, title, onRemove }: VideoMentionChipProps) {
+  return <MediaMentionChip url={url} label={label} title={title} onRemove={onRemove} mediaType="video" />;
 }
 
 export function AudioMentionChip({ url, label, onRemove }: VideoMentionChipProps) {
   return <MediaMentionChip url={url} label={label} onRemove={onRemove} mediaType="audio" />;
 }
 
-function MediaMentionChip({ url, label, onRemove, mediaType }: VideoMentionChipProps & { mediaType: 'video' | 'audio' }) {
+function MediaMentionChip({ url, label, title, onRemove, mediaType }: VideoMentionChipProps & { mediaType: 'video' | 'audio' }) {
   const [open, setOpen] = useState(false);
   const { refs, floatingStyles, context } = useFloating({
     open,
@@ -52,11 +54,11 @@ function MediaMentionChip({ url, label, onRemove, mediaType }: VideoMentionChipP
         ref={refs.setReference}
         className={styles.chip}
         contentEditable={false}
-        aria-label={`预览${mediaType === 'audio' ? '音频' : '视频'}：${label}`}
+        aria-label={`预览${mediaType === 'audio' ? '音频' : '视频'}：${title ?? label}`}
         {...getReferenceProps()}
       >
         {mediaType === 'audio' ? <AudioLines size={15} /> : <video className={styles.thumb} src={url} muted playsInline preload="metadata" />}
-        <span className={styles.label} title={label}>{label}</span>
+        <span className={styles.label} title={title ?? label}>{label}</span>
         {onRemove && (
           <button
             type="button"

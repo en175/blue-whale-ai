@@ -20,8 +20,8 @@ export interface ImageCapabilitySnapshot {
   api_size: string | null;
   width: number | null;
   height: number | null;
-  /** 参考图数量上限（features.max_reference_images 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
-  max_reference_images: number;
+  /** 参考图数量上限（features.image_reference_max 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
+  image_reference_max: number;
   channel_parser: string;
   request_mapping: unknown;
   default_size: string;
@@ -50,9 +50,9 @@ export interface ClaimedVideoJob {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
-  /** 已轮询次数（rescheduleVideoPoll 累计）。IKBBXH：轮询上限判定用。 */
+  /** 已轮询次数（rescheduleProviderPoll 累计）。IKBBXH：轮询上限判定用。 */
   pollCount: number;
-  /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+  /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleProviderPoll 落库用）。 */
   progress: number;
   /** IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
    *  第 3 层防双扣：retry job 先查上游旧 task 状态，SUCCESS 则复用结果不重新 submit。 */
@@ -115,13 +115,13 @@ export interface WorkerRepo {
   /** 领取一个待 submit/poll 的视频短步骤；过期 processing 可被新 Worker 接管。 */
   claimNextVideoJob(workerId: string): Promise<ClaimedVideoJob | null>;
   /** submit 接纳后持久化上游 taskId，并释放租约等待下一次短 poll。 */
-  markVideoSubmitted(input: {
+  markProviderSubmitted(input: {
     jobId: string;
     workerId: string;
     fencingToken: number;
     providerTaskId: string;
   }): Promise<boolean>;
-  rescheduleVideoPoll(input: {
+  rescheduleProviderPoll(input: {
     jobId: string;
     workerId: string;
     fencingToken: number;
@@ -193,22 +193,6 @@ export interface WorkerRepo {
     message: string;
     /** IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等），落 error.details，禁展示用户。 */
     details?: Record<string, unknown>;
-  }): Promise<boolean>;
-  /** 提取成功：把画布占位节点更新为最终音频节点（IKARDY）。 */
-  updateMediaExtractNodeToAudio(input: {
-    jobId: string;
-    projectId: string;
-    url: string;
-    mime: string;
-    size: number;
-    duration: number | null;
-  }): Promise<boolean>;
-  /** 提取失败：把画布占位节点置 failed（IKARDY）。 */
-  failMediaExtractNode(input: {
-    jobId: string;
-    projectId: string;
-    code: string;
-    message: string;
   }): Promise<boolean>;
   /** 按任务归属解析输入素材；返回顺序与 assetIds 一致。 */
   resolveInputAssets(

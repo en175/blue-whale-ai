@@ -1,6 +1,6 @@
 import type { RedisOptions } from "ioredis";
 
-/** Redis 连接：显式 REDIS_HOST/PORT/DB/PASSWORD 优先，缺失回退解析 REDIS_CONN_STRING（与 video-queue 同源）。
+/** Redis 连接：显式 REDIS_HOST/PORT/DB/PASSWORD 优先，缺失回退解析 REDIS_CONN_STRING（与 generation-queue 同源）。
  *  生产环境两者皆缺 → 启动即抛（fail-fast，避免静默连本地 Redis 污染会话）。 */
 export function redisConnectionOptions(
   env: Readonly<Record<string, string | undefined>> = process.env,

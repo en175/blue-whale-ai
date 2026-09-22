@@ -52,7 +52,9 @@ const apiMocks = vi.hoisted(() => ({
   fetchJobStatus: vi.fn(),
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
+  createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
+  createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async () => [
     {
@@ -76,6 +78,8 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/projects', () => ({
+  touchProjectLastOpened: vi.fn(async () => undefined),
+  pinProject: vi.fn(async () => undefined),
   fetchProjects: apiMocks.fetchProjects,
   createProject: vi.fn(),
   renameProject: vi.fn(),
@@ -117,7 +121,9 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
+  createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
 
@@ -514,7 +520,7 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
       return calls <= 1 ? { ...PROCESSING } : { ...CANCELLED };
     });
 
-    await act(async () => { flowProps.current.onDeleteNode('d1'); });
+    await act(async () => { flowProps.current.onDeleteNode(['d1']); });
 
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false));

@@ -1,0 +1,308 @@
+/* ============================================
+ * ImageEnhanceDialog 高清放大参数面板（IKGM9O）
+ * 轻量面板：无提示词框/无参考栏；下拉与分段按钮视觉模式沿用 ImageDialog
+ * （selectBtn/selectDropdown/selectOption/ratioGroup），跟随定位同 dialogWrapFollow。
+ * ============================================ */
+
+/* 定位外壳：与 ImageDialog 同构（跟随锚定时绝对定位到高清卡下方） */
+.dialogWrap {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  max-width: 90%;
+  z-index: 20;
+  animation: enhanceFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: enhanceFadeInFollow 0.2s ease;
+}
+
+@keyframes enhanceFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes enhanceFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* ---- 标题行 ---- */
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 生成中只读提示（同 ImageDialog readOnlyHint） ---- */
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+/* ---- 字段区 ---- */
+.fieldWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.providerModelRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.providerModelRow .fieldWrap {
+  gap: 6px;
+}
+
+/* ---- 下拉（视觉模式沿用 ImageDialog selectBtn/selectDropdown/selectOption） ---- */
+.selectBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: #262626;
+  border: 1px solid #363636;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.selectBtn:hover {
+  border-color: var(--color-border-hover);
+}
+
+.selectBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.selectArrow {
+  transition: transform var(--transition-fast);
+}
+
+.selectArrowUp {
+  transform: rotate(180deg);
+}
+
+.selectDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 12px;
+  padding: var(--spacing-xs);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.providerModelRow .fieldWrap,
+.fieldWrap {
+  position: relative;
+}
+
+.selectOption {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.selectOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.selectOptionActive {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.selectOption[aria-disabled='true'] {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- 分段按钮（视觉模式沿用 ImageDialog 宽高比 ratioGroup/ratioBtn，单行文本变体） ---- */
+.multipleGroup {
+  display: flex;
+  gap: 4px;
+  background-color: #262626;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.multipleBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  border-radius: 10px;
+  font-size: var(--font-size-sm);
+  color: #999;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.multipleBtn:hover {
+  color: #ddd;
+}
+
+.multipleBtnActive {
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: 700;
+}
+
+.multipleBtn:disabled,
+.multipleBtn[aria-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.multipleBtn:disabled:hover,
+.multipleBtn[aria-disabled='true']:hover {
+  color: #666;
+}
+
+/* ---- 色彩校正开关行 ---- */
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.switchRow[aria-disabled='true'] {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.switchRow input[type='checkbox'] {
+  accent-color: #4a4a4a;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* ---- 三档全不可用提示 ---- */
+.allDisabledHint {
+  font-size: 12px;
+  color: #e5484d;
+  line-height: 1.4;
+}
+
+/* ---- 底部栏：免费提示 + 发送按钮（视觉模式沿用 ImageDialog sendBtn） ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.freeHint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  user-select: none;
+}
+
+.sendBtn {
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}

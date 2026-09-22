@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { SharedAssetKind, SharedAssetType } from "@blue-whale/contracts";
+import type { SharedAssetKind, SharedAssetType } from "@lib/contracts";
 import { SharedAssetUnsupportedTypeError } from "../shared-asset-error.js";
 import {
   SHARED_ASSET_TYPE_STRATEGY,

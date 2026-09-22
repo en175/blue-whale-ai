@@ -12,6 +12,10 @@
   padding-top: 22.5px;
 }
 
+.pickBlocked {
+  opacity: 0.4;
+}
+
 /* 外部常驻标题行（宽度随内容主体） */
 .titleRow {
   position: absolute;
@@ -44,12 +48,14 @@
 }
 
 .titleName {
+  flex: 1;
   font-size: var(--node-title-name);
   color: #888;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: none;
+  min-width: 0;
 }
 
 .titleMeta {
@@ -81,8 +87,22 @@
   border-radius: 11px;
 }
 
+/* 音频节点深灰卡片：贴合设计稿（ charcoal #1a1a1a + 浅灰边框） */
+.contentCard.audioCard {
+  background-color: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
 .wrapper:hover .contentCard {
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+.wrapper:hover .contentCard.audioCard {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
 /* 连接点：平时隐藏，悬停/选中/连接中可见（锚定内容区左右中点，Handle 在 .contentCard 内） */
@@ -99,22 +119,18 @@
   opacity: 1;
 }
 
-/* 选中态悬浮工具条（节点上方居中） */
+/* 选中态悬浮工具条（卡片上方居中）：IKGYYD 迁出节点卡后由 NodeFollowToolbar 钉屏幕容器
+   定位（中心点居中 + 顶边锚，屏幕尺寸恒定），此处只保留工具条本体视觉 */
 .toolbar {
-  position: absolute;
-  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 6px 10px;
-  background-color: rgba(24, 24, 24, 0.96);
-  border: 1px solid #333;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
   white-space: nowrap;
-  z-index: 10;
 }
 
 .toolBtn {
@@ -136,7 +152,34 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
+/* 视频 HD 高清入口文字徽标（IKH3VG）：描边小方标形态（非图标），随 toolBtn 继承前景色
+   与悬停高亮（hover 白字 + 浅底，徽标描边 currentColor 跟随变化）；外框高度对齐同排
+   lucide 图标（size 14 / strokeWidth 2），避免徽标在工具条里视觉重于图标 */
+.hdBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 14px;
+  padding: 0 2px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
 .toolBtn:disabled {
+  color: #666;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* 画质工具横排按钮（IKH3XZ）对当前卡不可用（IKGZ5P）：aria-disabled 整钮置灰（非原生 disabled，
+   hover 只显示 title 不可用原因，无下拉可改选），口径同 qualityMenuItem 置灰项 */
+.toolBtn[aria-disabled='true'] {
   color: #666;
   cursor: not-allowed;
   background: transparent;
@@ -154,6 +197,22 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+/* 抠图结果卡棋盘格垫底层（IKGXMT）：absolute 铺满内容区、z-index 低于 img（img z-index:1），
+   透明 png 的透明区域透出格纹，一眼确认背景已移除（规格故事 21）；静态纯视觉、aria-hidden。
+   双向 repeating-conic-gradient 拼出棋盘格（8px 格）——先例 EraseMaskLayer 用 SVG pattern 做叠加层，
+   垫底层无组件需求，CSS 背景即够。 */
+.cutoutCheckerboard {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 11px;
+  background-image:
+    repeating-conic-gradient(#3a3a3a 0% 25%, #2c2c2c 0% 50%);
+  background-size: 16px 16px;
 }
 
 .mediaVideo {
@@ -164,205 +223,157 @@
   background-color: #000;
 }
 
+/* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单 */
+.mediaVideo::-webkit-media-controls-overflow-button {
+  display: none;
+}
+
+/* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
+.complianceBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.complianceBadge img {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.complianceSpinner {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #555;
+  border-top-color: #ddd;
+  border-radius: 50%;
+  animation: genSpin 0.9s linear infinite;
+}
+
+.complianceFailedText {
+  flex-shrink: 0;
+  color: #E53935;
+  font-size: var(--node-title-name);
+  line-height: var(--node-title-line);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* ============================================
- * 音频播放器
+ * 音频播放器（IKH8PU 横矩形改版：480×240，深槽波形区占主区 +
+ * 底部「左时间 / 居中播放钮」控制行，视觉对齐 audio-card-landscape 原型）
  * ============================================ */
 .audioPlayer {
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 18px 20px;
+  padding: 16px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  background: linear-gradient(145deg, #161626 0%, #1a1a2e 55%, #141422 100%);
-  border-radius: 11px;
+  justify-content: flex-start;
+  gap: 16px;
+  background-color: #1a1a1a;
+  border-radius: 16px;
   overflow: hidden;
+  color: #e5e5e5;
 }
 
-/* 背景装饰：稀疏网格噪点感 */
-.audioPlayer::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-  background-size: 14px 14px;
-  pointer-events: none;
-}
-
-/* 唱片封面区 */
-.audioCoverWrap {
+/* 波形区（内嵌深槽：暗底 + 内阴影，原型的唯一大面积元素） */
+.audioWaveBox {
   position: relative;
-  width: 120px;
-  height: 120px;
-  margin-top: 4px;
-  flex-shrink: 0;
-}
-
-.audioDisc {
   width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background:
-    repeating-radial-gradient(
-      circle at center,
-      #1a1a28 0px,
-      #1a1a28 3px,
-      #24243a 3px,
-      #24243a 6px
-    );
-  box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  transition: transform 0.4s ease;
-}
-
-.audioDiscSpinning {
-  animation: discSpin 6s linear infinite;
-}
-
-@keyframes discSpin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-.audioDiscCenter {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #2d2d44, #1c1c2e);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  flex: 1;
+  min-height: 0;
+  background-color: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-/* 播放按钮浮在唱片上 */
-.audioPlayBtn {
+/* 静态波形条：72 根细条 space-between 铺满（细密观感） */
+.audioWaveBars {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 40px;
-  height: 40px;
+  inset: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.audioWaveBar {
+  width: 2px;
+  background-color: #9db2a3;
+  border-radius: 1px;
+  flex-shrink: 0;
+  transition: height 0.12s ease;
+}
+
+/* 红色 playhead：唯一彩色焦点（红色辉光对齐原型） */
+.audioPlayhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: #f0434a;
+  border-radius: 1px;
+  box-shadow: 0 0 6px rgba(240, 67, 74, 0.45);
+  pointer-events: none;
+  transform: translateX(-50%);
+  /* 由音频 timeupdate 高频直接驱动 left，不加 transition 避免卡顿 */
+}
+
+/* 底部控制区：三列 grid——左时间、中播放钮、右空列补平 */
+.audioControls {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.audioTime {
+  justify-self: start;
+  font-size: 15px;
+  font-weight: 500;
+  color: #e8e8e8;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.audioPlayBtn {
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  border: none;
-  background: rgba(91, 154, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: #2e2e2e;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 2px 12px rgba(91, 154, 255, 0.5);
-  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s ease, background-color 0.12s ease;
 }
 
 .audioPlayBtn:hover {
-  background: #6ba8ff;
-  transform: translate(-50%, -50%) scale(1.06);
-  box-shadow: 0 4px 16px rgba(91, 154, 255, 0.6);
+  transform: scale(1.06);
+  background-color: #3a3a3a;
 }
 
 .audioPlayBtn:active {
-  transform: translate(-50%, -50%) scale(0.96);
-}
-
-/* 频谱律动条 */
-.audioSpectrum {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 22px;
-  width: 100%;
-  justify-content: center;
-}
-
-.audioBar {
-  width: 3px;
-  height: 4px;
-  background: linear-gradient(180deg, #5b9aff 0%, rgba(91, 154, 255, 0.2) 100%);
-  border-radius: 2px;
-  transition: height 0.12s ease;
-}
-
-.audioBarAnim {
-  animation: barBounce 0.7s ease-in-out infinite alternate;
-}
-
-@keyframes barBounce {
-  0%   { height: 4px; }
-  100% { height: 18px; }
-}
-
-/* 文件名 */
-.audioName {
-  font-size: 12px;
-  color: #c0c0d0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-  line-height: 1.3;
-}
-
-/* 进度条 */
-.audioProgress {
-  position: relative;
-  width: 100%;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.audioProgressFill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: linear-gradient(90deg, #5b9aff, #7dd8fa);
-  border-radius: 2px;
-  pointer-events: none;
-}
-
-.audioProgressThumb {
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  background: #fff;
-  border-radius: 50%;
-  transform: translateY(-50%);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-
-.audioPlayer:hover .audioProgressThumb {
-  opacity: 1;
-}
-
-/* 时长 */
-.audioTime {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-  font-size: 10px;
-  color: rgba(200, 200, 210, 0.55);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  margin-top: -6px;
+  transform: scale(0.96);
 }
 
 .audioErr {
@@ -371,10 +382,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e5484d;
+  color: #ef4444;
   font-size: 13px;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 11px;
+  background: rgba(26, 26, 26, 0.9);
+  border-radius: 16px;
 }
 
 /* 生成中/失败占位区（填满内容主体） */
@@ -578,4 +589,171 @@
 .contextDanger:hover {
   color: #ff6b6b;
   background-color: rgba(229, 72, 77, 0.12);
+}
+
+.contextItem:disabled {
+  color: #777;
+  cursor: default;
+}
+
+.emptyShell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: #2a2a2a;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.emptyShellHint {
+  color: #888;
+}
+
+/* 「输入已更新」徽标 + 下方操作菜单 */
+.inputStaleWrap {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  right: 0;
+  z-index: 40;
+}
+
+.inputStaleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  appearance: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #eab308;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inputStaleLabel:hover {
+  color: #facc15;
+}
+
+.inputStaleMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 132px;
+  padding: var(--spacing-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  z-index: 41;
+}
+
+.inputStaleMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inputStaleMenuItem:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.inputStaleMenuItem:disabled {
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾 */
+.pickMarkedBadge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  background: #22c55e;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(34, 197, 94, 0.5);
+  pointer-events: none;
+}
+
+/* 下拉锚定包裹层（原「高清 ▾」下拉 IKGOT7，图片侧已随 IKH3XZ 横排退役）：现服务视频卡
+   SubtitleEraseMenu 与 AudioVideoSplitMenu 两个下拉，下拉浮层锚定其下方 */
+.qualityWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.qualityMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 148px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xs);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: var(--shadow-overlay);
+}
+
+.qualityMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.qualityMenuItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 置灰项（口径同工具条 disabled）：不响应悬停高亮，title 由组件保留悬停原因 */
+.qualityMenuItem[aria-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+  background: transparent;
 }

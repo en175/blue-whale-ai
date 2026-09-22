@@ -4,14 +4,26 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import cookieParser from "cookie-parser";
-import { NewApiError } from "@blue-whale/core";
-import { closeDefaultTlsLogWriter } from "@blue-whale/core/logging";
+import { NewApiError } from "@lib/core";
+import { closeDefaultTlsLogWriter } from "@lib/core/logging";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
-import { assertAgentModelGatewayConfig } from "./api/agent/agent-model-gateway.controller.js";
+import {
+  assertAgentModelGatewayConfig,
+  drainAgentModelStreams,
+} from "./api/agent/agent-model-gateway.controller.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
+
+/**
+ * 等 `app.close()` 多久就不等了（IKHCJ2 复审）。
+ *
+ * 必须比容器停止超时小一截，否则闸没合上进程已经被 SIGKILL 了。测试站与生产的停止超时分别是
+ * 30 秒和 120 秒，而这条路径前面还有排空（默认 8 秒）、后面还有 TLS 冲刷（5 秒）：
+ * 8 + 10 + 5 = 23 秒，落在 30 秒里还有余量。
+ */
+const APP_CLOSE_TIMEOUT_MS = Number(process.env.SHUTDOWN_APP_CLOSE_TIMEOUT_MS) || 10_000;
 
 async function bootstrap(): Promise<void> {
   // 模型网关凭证在这里查，不留到第一个请求才发现（IKCGDX review）。前缀配错会让整条
@@ -69,16 +81,63 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  app.enableShutdownHooks();
+  // 这里曾有 `app.enableShutdownHooks()`。它只做一件事：替我们监听 SIGTERM/SIGINT 然后调
+  // `app.close()`。而下面本来就有一对自己的处理器做同样的事——两份监听器在同一个信号上并发
+  // 跑，Nest 那份会立刻开始 `callDestroyHook()` 关掉 Redis，把我们刚开始的排空连同进程一起
+  // 掀翻（IKHCJ2，见下面 shutdown 的说明）。生命周期钩子由 `app.close()` 照常触发，不受影响。
 
   await app.listen(port);
   logger.info(`backend listening on :${port}`);
 
   // 优雅停机（IK9RSS）：app.close() 触发 OnModuleDestroy 链，之后冲刷 TLS 缓冲。
   // closeDefaultTlsLogWriter 自带 5s 超时，TLS 不可达不反噬进程退出。
+  //
+  // **排空必须排在 app.close() 之前**（IKHCJ2）。Nest 的停机顺序是 onModuleDestroy →
+  // beforeApplicationShutdown → 关 HTTP server，第一步就把 Redis 关了；在途请求挂着的 Redis
+  // 命令被 ioredis 的 flushQueue 以一个未处理的拒绝掀翻，整个进程当场死。2026-09-20 实测：
+  // 排空日志打出了「在途 1 条，最多等 90000ms」，0.2 秒后进程就没了，ioredis 的堆栈留在
+  // stdout 上。所以在途模型流不能靠 Nest 的生命周期排空，只能在它开始拆之前排干净。
   const shutdown = async (): Promise<void> => {
-    await app.close();
+    await drainAgentModelStreams();
+
+    // `app.close()` **可以永远不返回**，所以给它一个闸（IKHCJ2 复审，2026-09-21 测试站实测）。
+    //
+    // Node 的 `server.close()` 只是停止接受新连接，它**不会**主动断开已经建立的 keep-alive
+    // 连接——而 Agent 的连接池一直挂着几条。于是 `app.close()` 一直等，等到容器的停止超时被
+    // SIGKILL，后面两行一次都执行不到。
+    //
+    // 实测（测试站，三轮都一样）：排空 8 秒正常收尾，之后 **21 秒一行日志都没有**，然后进程
+    // 被杀。代价很具体：**TLS 日志冲刷没跑**，`shutdown_abort`（这次部署打断了几条）只进了
+    // 容器 stdout，而容器一删就没了——那正是我们想留的那笔账。
+    //
+    // 这不是本次引入的，换成 `app.enableShutdownHooks()` 一样挂；以前没人发现，是因为流水线
+    // 用 `docker rm -f` 直接 SIGKILL，这段代码从来没机会跑。但一条不保证结束的优雅停机等于
+    // 没有优雅停机，所以在这里封顶——与 agent 仓 `drainForShutdown` 超时后
+    // `closeAllConnections()` 的做法一致。
+    const closed = await Promise.race([
+      app.close().then(() => true as const),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), APP_CLOSE_TIMEOUT_MS)),
+    ]);
+    if (!closed) {
+      logger.warn(
+        `[shutdown] app.close() ${APP_CLOSE_TIMEOUT_MS}ms 未返回，强断残留连接后继续退出`,
+        { event: "shutdown.app_close_timeout", app_close_timeout_ms: APP_CLOSE_TIMEOUT_MS },
+      );
+      // 挂着的多半就是这些没人再用的 keep-alive 连接，强断它们让还在跑的 close 能收尾。
+      // 拿不到这个方法（Node < 18.2 或 adapter 换了）也不该反噬退出，所以整段吞掉。
+      try {
+        (app.getHttpServer() as { closeAllConnections?: () => void }).closeAllConnections?.();
+      } catch {
+        /* 强断失败也要接着退出——这一步是尽力而为，不是退出的前置条件。 */
+      }
+    }
+
+    // 排在强断之后：这一行要把上面那几条停机日志真正送出去，而它自带 5s 超时，
+    // TLS 不可达也不反噬进程退出。
     await closeDefaultTlsLogWriter(5_000);
+    // 显式退出：没有 Nest 的信号处理器之后，没人再把信号重新抛一次，而残留的句柄
+    // （连接池、计时器）足以让进程挂到容器的停止超时被 SIGKILL。
+    process.exit(0);
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);

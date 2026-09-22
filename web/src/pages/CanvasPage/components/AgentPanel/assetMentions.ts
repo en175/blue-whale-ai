@@ -21,6 +21,10 @@ export interface KnownAsset {
   assetId: string;
   label: string;
   mediaType: 'image' | 'video';
+  /** 胶囊上显示的字，不给就是 label。生成卡正文按 `@图1` 认、胶囊上写「图1」时用。 */
+  display?: string | undefined;
+  /** 悬停时看到的素材全名，不给就是胶囊上的字。 */
+  name?: string | undefined;
   /** 上传当轮本地带着的 URL；历史消息没有，由胶囊按 id 反查。 */
   url?: string | undefined;
 }
@@ -129,11 +133,12 @@ function mentionElement(asset: KnownAsset): HastElement {
     tagName: 'span',
     properties: {
       [ASSET_MENTION_ATTR]: asset.assetId,
-      'data-asset-label': asset.label,
+      'data-asset-label': asset.display ?? asset.label,
       'data-asset-media': asset.mediaType,
+      ...(asset.name ? { 'data-asset-name': asset.name } : {}),
       ...(asset.url ? { 'data-asset-url': asset.url } : {}),
     },
-    children: [{ type: 'text', value: asset.label }],
+    children: [{ type: 'text', value: asset.display ?? asset.label }],
   };
 }
 

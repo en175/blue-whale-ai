@@ -1,7 +1,7 @@
 # 素材关联改造前端对接文档
 
 > 需求：IKDJNZ 原始素材与真人/虚拟素材关联改造。后端任务：IKDJNZ。
-> 版本：v1（2026-09-07）。覆盖两块改动：**素材上传带原始素材 id（关联绑定）** + **视频生成参考素材改单数组 `references`（保序）**。
+> 版本：**v2（2026-09-11，IKEXX8 增补 §6）**；v1（2026-09-07）覆盖：**素材上传带原始素材 id（关联绑定）** + **视频生成参考素材改单数组 `references`（保序）**。
 > 前置阅读：[`docs/api/material-library.md`](./material-library.md)（素材库透传镜像、上游信封、两段式上传等基础契约）。
 
 ---
@@ -210,3 +210,82 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 6. **历史数据不处理**：改造前的本地素材无 `material_id` 关联，生成时照旧走本地 url，不受影响。
 7. **参考音频仅普通参考**：`role` 必须为 `reference`、`type` 必须为 `audio`；音频不能当首尾帧。
 8. **音频生成参考素材（IKE4GC，接口先行）**：`type` 为 `audio` 的生成任务同样支持 `references`，但仅接受 **`type: "audio"` / `type: "image"`**（无首尾帧概念，`role` 必须为 `reference`；`video` 参考对音频无意义 → 400）。数量硬约束（seed-audio 官方限制）：**音频 ≤3 个、图片 ≤1 个、二者不可混用**。**音频生成不支持素材库（真人/虚拟人像库）引用**：`references` 项只能传本地资产的 `asset_id`（→ 本地 url），传 `material_id`（素材库 `asset://`）→ 400 `音频生成不支持素材库引用`（创建期拦截，前端下期接 UI 时只放行本地资产）。`text_prompt` 里的 `@AudioN`/`@ImageN` 内联标记由**前端**负责（后端不改 prompt，只透传 `references` 数组）——前端本期无需改动。
+
+---
+
+## 6. IKEXX8 增补（2026-09-11）：资产读路径暴露关联字段 + 虚拟组查询换源
+
+### 6.1 `/api/assets` 与 snapshot 成对返回关联字段（⭐ 前端新增可读）
+
+以下**既有接口**的每条素材记录新增两个字段（值即 §1 绑定的结果，未关联为 `null`）：
+
+| 接口 | 位置 |
+|---|---|
+| `GET /api/assets`（列表） | 每条 record |
+| 单资产详情 | 同投影 |
+| `GET /api/projects/:id/snapshot` | `assets[asset_id]` map 每项（与 `asset_id`/`access_url`/`type` 并列） |
+
+```ts
+{
+  // ...既有字段
+  material_id: string | null;        // "asset-..."（素材库素材 id）
+  material_group_id: string | null;  // "group-..."（所属组 id）
+}
+```
+
+前端用途：不必再反查素材库即可判断「该本地素材已关联素材库」，可直接用 `material_id` 组装 `references`（§2）或做「已入库」角标。命名 snake_case 与既有字段一致；**请求侧零改动**。
+
+### 6.2 `ListAssetGroups` / `GetAssetGroup` 虚拟组查询换源本地（请求/响应形状不变，前端无感）
+
+后端对这两个 Action 内部分流，**入口、参数、响应信封均与上游一致**，前端代码无需任何改动；仅需知道的行为差异：
+
+- `ListAssetGroups` 且 `Filter.GroupType === "AIGC"` → 返回**后端本地**虚拟组（即 §6.3 自动建的「默认分组：<userId>」，未上传过时为 `TotalCount: 0, Items: []`）；
+- `GetAssetGroup` 的 `Id` 命中本地虚拟组 → 本地返回；**真人组（`LivenessFace`）仍实时查上游**，与改造前行为一致；
+- 本地返回的 `Items[]` 字段：`Id` / `Name` / `GroupType: "AIGC"` / `CreateTime` / `UpdateTime`（ISO8601 秒精度，如 `2026-09-11T02:32:22Z`）；`ResponseMetadata.RequestId` 为后端合成值（`req_<uuid>`），**不要当作真实链路 id 用于排障关联**。
+
+### 6.3 虚拟组自动建组（前端不感知组的存在，复习 + 补参数说明）
+
+向虚拟人像库 `CreateAsset` **不传 `GroupId`** 时：后端自动确保当前用户的虚拟默认组（无则上游建组，`GroupType:"AIGC"` 由后端显式携带），并强制替换 `GroupId` 后透传。前端角色库上传路径继续不传组即可；真人组上传照常显式传 `GroupId`。
+
+---
+
+## 7. IKFYHJ 增补（2026-09-15）：素材读路径带上校验状态
+
+### 7.1 三条读路径每条素材记录新增两个字段
+
+在 §6.1 的 `material_id` / `material_group_id` 之后**并列**再加两个：
+
+| 接口 | 位置 |
+|---|---|
+| `GET /api/assets`（列表） | 每条 record |
+| `GET /api/assets/:assetId`（详情） | 同投影（与 `prompt` 并列） |
+| `GET /api/projects/:id/snapshot` | `assets[asset_id]` map 每项 |
+
+```ts
+{
+  // ...既有字段（asset_id / access_url / type / material_id / material_group_id）
+  material_status: 'Active' | 'Processing' | 'Failed' | null;
+  material_status_checked_at: string | null;  // ISO8601，最后一次向上游确认的时刻
+}
+```
+
+| 取值 | 含义 |
+|---|---|
+| `'Active'` | 校验通过，可用于视频生成 |
+| `'Processing'` | 上游仍在注册中 |
+| `'Failed'` | 校验未通过 |
+| `null` | **未关联素材库**，**或**关联了但后端没有该素材的状态记录（早于本功能入库的存量素材） |
+
+**请求侧零改动**，字段名与 §6.1 同风格（snake_case）。
+
+### 7.2 三条必须知道的口径
+
+1. **这是本地镜像，可能陈旧 —— 不是判定依据。** 后端只跟进素材创建后 10 分钟内的状态；之后上游再变化（比如 `Active` 被撤销）就追不上。**「此刻能不能用」以生成接口为准**（创建/重试时会实时查上游，不通过直接 400）。
+2. **`material_status_checked_at` 是给你判断有多旧的**：离现在越远越不可信。为 `null` 表示这条状态从没被上游确认过。
+3. **不要用它替代生成失败的处理**：用户点生成仍可能因为素材已失效而拿到 400 `invalid_reference`，那条路径必须照常接（见 `material-library.md` §5.1）。
+
+### 7.3 前端用途
+
+开画布首屏、资产库列表即可点亮「校验中 / 校验通过 / 审核失败」角标，**不必为每个素材发一次 `GetAsset`**。需要更准的状态时再按单条素材实时查（`GetAsset`），或等生成接口的判定结果。
+
+> **后端实现口径（供排障，前端不必关心）**：状态走**一次批量 `IN` 查本地镜像表**，不做 N+1、不在读路径打上游；整页一个素材都没关联素材库时不发查询。控制器对 `?size=` 没有上限、前端 `fetchAllAssets` 又是并发翻页全量拉取，所以 `IN` 列表按 500 分批。实测 1200 条/页（800 条有绑定）约 50–70ms。

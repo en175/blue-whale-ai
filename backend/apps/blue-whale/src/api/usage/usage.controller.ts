@@ -1,6 +1,6 @@
 import { Controller, Get, Headers } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { FAILURE_CODE, ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { FAILURE_CODE, ok } from "@lib/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { toAuthError } from "@lib/shared/errors/auth-error.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";

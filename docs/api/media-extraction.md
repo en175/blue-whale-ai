@@ -1,7 +1,10 @@
 # 视频提取音频 API 对接文档（前端）
 
 > 需求：IKARDY 画布视频节点提取音频。后端 `media-extractions` 模块 + `generation-worker` 提取。
-> 版本：v1（2026-08-25）。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 成功，前端 `apiRequest` 已解包 `data`。
+> 版本：v4（2026-09-19，IKH28W 执行面切换）。**worker 执行面已切火山「提交音频提取任务」异步链**（提交/轮询/24h 临时链接转存自家 TOS/发布音频资产），output_format 枚举五值、默认 m4a、非法值拒绝（IKH28T）、错误码面新增火山路径兜底 1044；本地 ffmpeg 链路原地保留（ADR-0103 双路径并存，新任务不再走）。
+> 上一版：v3（2026-09-19，IKH28T 契约扩面）output_format 扩五值与 1044 用位定义。
+> 上上版：v2（2026-09-15，IKFS5W）画布改由前端写。**画布改由前端写**：建任务接口不再注入节点，worker 不再回写画布。
+> 所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 成功，前端 `apiRequest` 已解包 `data`。
 
 ---
 
@@ -9,10 +12,11 @@
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/projects/:projectId/media-extractions` | 视频提取音频：建任务（**画布音频节点由后端自动注入**，前端无需创建节点） |
+| POST | `/api/projects/:projectId/media-extractions` | 视频提取音频：只建任务（**不写画布**） |
 | GET | `/api/jobs/:id` | **轮询任务状态**（复用既有 jobs 接口） |
 
-> 前端只需 1 个新请求（建任务）+ 复用既有 `fetchJobStatus` 轮询。**不需要**为提取写任何画布节点逻辑。
+> 画布只有一个写入方：前端 `PUT /api/canvases/:projectId`。占位节点由前端建任务后本地插入并落库，
+> 终态由轮询结果打本地补丁 —— 与图片/视频/音频生成任务完全同构。
 
 ---
 
@@ -27,14 +31,14 @@ POST /api/projects/:projectId/media-extractions
 { "source_asset_id": "3985", "output_format": "mp3" }
 ```
 - `source_asset_id`：**必填**，画布视频节点的 `data.assetId`（后端校验归属 + 必须 `type=video`，非视频返回失败）
-- `output_format`：可选，目前仅 `mp3`（缺省 `mp3`）
+- `output_format`：可选，**`m4a`（缺省值）/ `mp3` / `ogg` / `flac` / `wav` 五值**（IKH28T 契约口径，对齐火山官方 `format` 参数；缺省落 `m4a`——官方默认值）；**传枚举外值 / 非字符串 / `null` 会被明确拒绝**（不再静默回退 mp3）
 
 响应 `data`：
 ```json
 { "job_id": "1125", "status": "queued" }
 ```
 
-**同时，后端会在画布快照里插入一个音频占位节点**（无需前端创建）：
+**接口只建任务，不碰画布。** 前端拿到 `job_id` 后自己插入占位节点（形状固定如下，`buildMediaExtractPlaceholderNode()` 是唯一构造入口）：
 
 ```json
 {
@@ -52,9 +56,15 @@ POST /api/projects/:projectId/media-extractions
   }
 }
 ```
-- 位置 = 源视频节点**右侧**偏移 340px（同 y）。
-- 节点带 `jobId` + `genStatus:"generating"` —— 前端**水合时对这类节点自动 `fetchJobStatus` 轮询**（对齐既有生成中节点的水合逻辑，无需新代码）。
-- 提取成功后后端把节点更新为最终音频：`src`=音频 URL、`assetId`、`mime/size/duration`、`progress:100`、清 `genStatus`；失败置 `genStatus:"failed"` + `errorText`。
+- 位置 = 源视频节点**右边缘 + 60px**（同 y）：源节点内容宽按 `mediaContentBox` 算（视频 280×比例，16:9 约 498），不再固定 340 —— 固定值会压住宽视频节点。
+- 节点 id 前缀 `media-extract-` 是**轮询与终态补丁的约定**（`mediaExtractNodeId` / `isMediaExtractNodeId`），不可改。
+- 同时补一条 **视频 → 音频的来源边**（`edge.data.origin = "media-extract"`）：表达「这段音频取自那段视频」。
+  它是来源记录、不是生成参考输入——参考推导（`audioMediaRefsOf`）会跳过带该标记的边，否则音频卡重新编辑时
+  会把这个视频判成非法音频参考、禁用发送。服务端本来就只消费「文本节点 → 目标」的边（契约 IKDLQF），
+  媒体→媒体边不参与输入推导；源视频删除时连线随节点级联清理。
+- 落库：插入后前端立即 `flushCanvasSave` 一次（不等 800ms 防抖），避免刚建任务就关页丢节点。
+- 终态由前端打本地补丁：成功写 `src`（音频 URL）、`assetId`、`mediaType:"audio"`、`progress:100`、清 `genStatus`；失败置 `genStatus:"failed"` + `errorText`。
+- 中途刷新/重开：快照里的节点自带 `jobId` + `genStatus:"generating"`，水合按既有逻辑自动恢复轮询，无需额外代码。
 
 ---
 
@@ -79,13 +89,13 @@ GET /api/jobs/:id
 
 ---
 
-## 3. 前端改动清单（极小）
+## 3. 前端改动清单
 
 1. `web/src/api/jobs.ts`（或新文件）加一个请求：`createMediaExtraction(projectId, { source_asset_id })` → `POST media-extractions`，返回 `{ job_id }`。
-2. 视频节点「提取音频」交互（如需触发入口）：拿到节点 `assetId` → 调上一步 → 用 `fetchJobStatus(job_id)` 轮询（复用既有 `pollJob` 形态）。
-3. **画布节点出现/更新全部由后端处理**：刷新或水合即见；无需手拼节点。
+2. 视频节点「提取音频」入口：拿到节点 `assetId` → 调上一步 → **本地插入占位节点**（`buildMediaExtractPlaceholderNode` + `attachCallbacks`，同步写 `mediaNodesRef`）→ `flushCanvasSave` → `pollJob(jobId)`。
+3. 终态由 `mediaExtractTerminalPatch` 打本地补丁，随自动保存落库。
 
-> 当前画布音频节点由后端注入，前端若暂时不做「提取音频」入口按钮，可先通过 API 触发，刷新画布即可看到节点。
+> 建任务接口返回体里**没有**画布或版本信息，也不需要：画布版本只由前端自己的保存推进。
 
 ---
 
@@ -101,16 +111,18 @@ GET /api/jobs/:id
 | `source_asset_unavailable` | 源视频资产不可用 | 提示刷新 |
 | `enqueue_failed` | 任务入队失败（瞬时） | 提示重试 |
 
+> 上表为本地 ffmpeg 链路错误码（链路原地保留，存量已落库任务的投影不变；新任务不再走）。**火山执行路径（IKH28W 已上线）**：网关分类链仅额度/内容政策三信号（1001/1018/1038）直落，其余（含 `provider_failed` 1011、超时 1012、火山任务失败、转存失败）一律归并兜底码 **`media_extract_provider_failed`（数值 1044，「音频提取失败，请重试」）**；映射口径全文 = 迁移契约 §18.4。
+
 ---
 
 ## 5. 注意事项
 
 1. **失败不自动重试**：提取任务内部失败（下载/抽取/上传/无音轨）直接置 `failed`，**不重试**（暂无前端重试入口）。瞬时网络错误也终态——前端可引导用户重新发起。
-2. **任务失败 → 画布节点置 failed**：后端把占位节点 `genStatus` 置 `"failed"` + `errorText`，前端刷新/水合即显示失败态。
+2. **任务失败 → 前端置节点 failed**：轮询到 `failed` 时前端把占位节点 `genStatus` 置 `"failed"` + `errorText`（`mediaExtractTerminalPatch`）；用户关页则下次打开由水合轮询补上。
 3. **异步无同步接口**：建任务后必须轮询 `GET /api/jobs/:id`；不要假设立即出结果。进度 `progress` 0-100（阶段映射：1-20 下载 / 21-90 提取 / 91-99 上传）。
-4. **画布节点注入会 bump 乐观锁版本**：后端写画布快照会 `version + 1`。前端若正持有旧版本做 `If-Match` 保存会收到 `412`——**刷新画布或从服务端重拉最新快照**后再保存。
-5. **节点位置在视频右侧**：若源视频节点在画布上被移动，音频节点不会跟随（注入时按当时位置写死）。刷新后以快照为准。
-6. **音频文件名 = 视频名(audio).mp3**：由后端从视频节点 `fileName` 派生（如 `测试视频.mp4` → `测试视频(audio).mp3`）。
+4. **不再有版本漂移**：画布只由前端 `PUT /api/canvases/:projectId` 写，建任务与 worker 提取都不会 `version + 1`，因此提取过程不会把前端的 `If-Match` 顶成 `412`。
+5. **节点位置在视频右侧**：按发起当刻的源视频节点位置算一次并落库；源视频之后移动，音频节点不跟随。
+6. **音频文件名 = 视频名(audio).mp3**：由前端从视频节点 `fileName` 派生（`audioDisplayName`，如 `测试视频.mp4` → `测试视频(audio).mp3`）。
 7. **大小上限 200MB**：超限任务失败（`video_too_large`）。
 8. **并发**：后端默认同时处理 2 个提取任务（容器 2 核）；多个请求排队，轮询可见。
 9. **归属校验**：`source_asset_id` 必须是**当前项目内**的视频资产，跨项目/他人资产返回失败。
@@ -123,6 +135,6 @@ GET /api/jobs/:id
 **视频节点 → 提取音频 → 画布出现音频节点**：
 1. 取视频节点 `data.assetId`（如 `3985`）
 2. `POST /api/projects/:projectId/media-extractions` `{ "source_asset_id": "3985" }` → `{ job_id: "1125" }`
-3. 后端已同步在画布注入占位节点（视频右侧，`genStatus:"generating"`）
-4. 前端 `GET /api/jobs/1125` 轮询 → `succeeded` 后 `asset.url` 可播放；画布节点已更新为最终音频（或刷新后看到）
-5. 失败 → 展示 `error.message`，画布节点显示失败态
+3. 前端本地插入占位节点（视频右侧，`genStatus:"generating"`）并立刻保存
+4. 前端 `GET /api/jobs/1125` 轮询 → `succeeded` 后 `asset.url` 可播放；节点本地补丁更新为最终音频并随自动保存落库
+5. 失败 → 展示 `error.message`，节点显示失败态；中途关页/刷新由水合轮询补上终态

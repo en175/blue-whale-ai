@@ -1,22 +1,21 @@
-export {
-  createMySqlPool,
-  createMySqlReadinessProbe,
-  loadMySqlConfig,
-  type MySqlConfig,
-} from "./mysql.js";
 export { getPrismaClient, type PrismaClient } from "./db.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
+export {
+  createMaterialAssetRepo,
+  type MaterialAssetRepo,
+  type MaterialAssetStatus,
+  type MaterialAssetView,
+} from "./material-asset-repo.js";
+export {
+  createUserInfoRepo,
+  type UserInfoRepo,
+} from "./user-info-repo.js";
 export {
   createProjectRepo,
   type ProjectPage,
   type ProjectRepo,
   type ProjectView,
 } from "./project-repo.js";
-export {
-  placeMediaExtractPendingNode,
-  updateMediaExtractNodeToAudio,
-  failMediaExtractNode,
-} from "./media-extract-canvas-ops.js";
 export {
   createCanvasRepo,
   type CanvasRepo,
@@ -68,7 +67,9 @@ export {
 } from "./conversation-repo.js";
 export {
   createModelCapabilityRepo,
-  DEFAULT_MAX_REFERENCE_IMAGES,
+  DEFAULT_VIDEO_REFERENCE_MAX,
+  DEFAULT_AUDIO_REFERENCE_MAX,
+  DEFAULT_IMAGE_REFERENCE_MAX,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelSizeOption,
@@ -87,6 +88,7 @@ export {
   assetDurationSeconds,
   type AssetRepo,
   type AssetView,
+  type AssetDetailView,
   type AssetPage,
   type AssetListFilter,
   type AssetInternal,
@@ -207,15 +209,8 @@ export {
   type StoryboardPreviewView,
   type ListStoryboardPreviewsResult,
 } from "./storyboard-preview-repo.js";
-export {
-  createWorkerRepo,
-  createWorkerAssetOps,
-  type WorkerRepo,
-  type ClaimedJob,
-  type ClaimedVideoJob,
-  type ImageCapabilitySnapshot,
-  type WorkerInputAsset,
-} from "./generation-worker-repo.js";
+export { createAssetOwnershipOps } from "./asset-ownership-repo.js";
+export type { AssetOwnershipOps, WorkerInputAsset } from "./asset-ownership-types.js";
 export {
   createTopupTierRepo,
   type TopupTierRepo,

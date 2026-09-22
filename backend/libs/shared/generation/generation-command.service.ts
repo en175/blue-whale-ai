@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import {
   createGenerationCommandRepo,
-  createWorkerAssetOps,
+  createAssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
@@ -22,7 +22,7 @@ export class GenerationCommandService {
   /** IKE7JP：提交时复用 worker 资产归属查询（resolveInputAssets），校验参考素材存在性/类型。
    *  与 worker 同一份归属逻辑（项目直属 ∪ 全局 ∪ project_asset 关联），不会前后漂移。 */
   get assets() {
-    return createWorkerAssetOps(this.prisma.client);
+    return createAssetOwnershipOps(this.prisma.client);
   }
 
   constructor(private readonly prisma: PrismaService) {}
@@ -41,6 +41,10 @@ export class GenerationCommandService {
     userId: string,
     idempotencyKey: string,
     requestHash: string,
+    guardInput?: (
+      input: Record<string, unknown>,
+      jobType: string,
+    ) => Promise<string | null>,
   ) {
     return this.repo.retryJob(
       jobId,
@@ -48,6 +52,7 @@ export class GenerationCommandService {
       userId,
       idempotencyKey,
       requestHash,
+      guardInput,
     );
   }
 

@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   canonicalizeJsonValue,
   type ProviderPromptAsset,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSceneCardGenerationRepo } from "./scene-card-generation-repo.js";
@@ -82,6 +82,60 @@ function sceneCardAsset(
       summary: null,
       content_markdown: "# 正文",
       version: 1,
+    },
+  };
+}
+
+/** IKHBDO：画格参考桩——画格是 scene_card 路径上**唯一真正会送到 worker** 的参考形态
+ *  （mention 组走 validateDerivedReferences fail-closed；scene_card 组无 asset 映射）。
+ *  一次性造出 validateStoryboardFrames / resolveReferenceAssetsToFlat / checkReferenceCountLimits
+ *  三处都要读的行（slot → asset_id → assets.type）。 */
+function frameOverrides(
+  types: Array<"image" | "video" | "audio">,
+  durationsMs: Array<number | null> = [],
+) {
+  const frames: ProviderPromptAsset[] = [];
+  const slots: Array<Record<string, unknown>> = [];
+  const assetRows: Array<Record<string, unknown>> = [];
+  types.forEach((type, index) => {
+    const slotId = BigInt(701 + index);
+    const assetId = BigInt(9100 + index);
+    frames.push({
+      slot_id: slotId.toString(),
+      type: "storyboard_frame",
+      role: "reference",
+    });
+    slots.push({
+      id: slotId,
+      asset_id: assetId,
+      status: "succeeded",
+      generation_job_id: 9001n,
+    });
+    assetRows.push({ id: assetId, type, duration_ms: durationsMs[index] ?? null });
+  });
+  return {
+    frames,
+    overrides: {
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue(slots) },
+      storyboard_previews: {
+        findMany: vi.fn().mockResolvedValue([{ first_generation_job_id: 9001n }]),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+    },
+  };
+}
+
+/** 能力行桩（digest 固定 8 字段，不含 features——与 capabilityDigestFromModelCapability 一致）。 */
+function capabilityWith(features: Record<string, unknown>, base = CAP_FIELDS) {
+  return {
+    generation_model_capability: {
+      findUnique: vi.fn().mockResolvedValue({
+        version: 3,
+        enabled: true,
+        is_delete: false,
+        ...base,
+        features,
+      }),
     },
   };
 }
@@ -182,6 +236,12 @@ function buildTx(
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
+    },
+    // IKHBDO：画格路径的素材归属校验（findAccessibleAssetIds）与参考数量判定
+    //（checkReferenceCountLimits）都读这张表——前者要 id、后者要 type/duration_ms。
+    assets: {
+      findMany: vi.fn().mockResolvedValue([]),
+      ...overrides.assets,
     },
     storyboard_previews: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -403,6 +463,89 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("capability_limit");
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("IKFPYX：首尾帧模式按 task_types 约束校验——基础比例含 16:9，但 first_last_frame 仅允许 adaptive", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    // 16:9 在基础比例列表内，但首尾帧任务的 task_types 只允许 adaptive → 拒
+    expect(result.kind).toBe("capability_limit");
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("IKFPYX：首尾帧 + adaptive 通过 task_types 校验（进入后续校验）", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      parameters: { ...VIDEO_PARAMETERS, aspect_ratio: "adaptive" },
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    expect(result.kind).not.toBe("capability_limit");
   });
 
   it("参数越界（duration 不在档位数组）返回 capability_limit 零写入（AC#1）", async () => {
@@ -760,4 +903,208 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("forbidden");
   });
 
+});
+
+// IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个素材门。
+// 门必须在事务内、建 job 之前——那几个扁平引用字段是事务内从 slot 解析出来的。
+describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("门拒绝：返回 material_blocked，且**零写入**（不建 job / 不更新 preset / 不建 record）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue("该素材未审核通过，不能用于视频生成");
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result).toEqual({
+      kind: "material_blocked",
+      reason: "该素材未审核通过，不能用于视频生成",
+    });
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("门拿到的是事务内解析出的扁平引用（worker 会转 asset:// 的那批字段）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue(null);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result.kind).toBe("applied");
+    expect(guardInput).toHaveBeenCalledOnce();
+    // 建 job 用的 input 与喂给门的对象必须同源，否则门可能在查一批、执行时用另一批。
+    const jobInput = tx.generation_jobs.create.mock.calls[0][0].data.input;
+    const guarded = guardInput.mock.calls[0][0] as Record<string, unknown>;
+    for (const key of ["first_frame_asset_id", "last_frame_asset_id", "reference_asset_ids"]) {
+      expect(guarded[key]).toEqual(jobInput[key]);
+    }
+  });
+
+  it("未接线时不跑门（缺省行为与改造前一致）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard(baseInput);
+
+    expect(result.kind).toBe("applied");
+    expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
+  });
+
+  // ===== IKHBDO：参考上限由能力行驱动（scene_card 再生成路径）=====
+  // 背景：这条路径原先手搓 job.input，不写 reference_limits → worker 回落 LEGACY 常量
+  //（9 图 / 3 视频 / 15 秒）；契约层还自带「参考素材最多 12 个」。两处都让配置输给写死的值。
+
+  it("参考上限按能力行冻结进新 job（与接纳侧同一份 freezeReferenceLimits）", async () => {
+    const { frames, overrides } = frameOverrides(["image"]);
+    const tx = buildTx({
+      ...overrides,
+      ...capabilityWith({
+        image_reference_max: 30,
+        video_reference: true,
+        video_reference_max: 5,
+        audio_reference: true,
+        audio_reference_max: 2,
+        max_reference_duration_sec: 60,
+      }),
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+
+    expect(result.kind).toBe("applied");
+    const input = tx.generation_jobs.create.mock.calls[0][0].data.input;
+    expect(input.reference_limits).toEqual({
+      image_reference_max: 30,
+      video_reference_max: 5,
+      audio_reference_max: 2,
+      max_reference_duration_sec: 60,
+    });
+  });
+
+  it("4 条参考视频：能力行配 5 放行并冻结 5、配 3 在接纳侧就拒（上限随配置，不再写死）", async () => {
+    const { frames, overrides } = frameOverrides([
+      "video",
+      "video",
+      "video",
+      "video",
+    ]);
+
+    // 配 5：必须过（旧 job 快照口径下会被 worker 的 LEGACY 3 拦掉）
+    const looseTx = buildTx({
+      ...overrides,
+      ...capabilityWith({ video_reference: true, video_reference_max: 5 }),
+    });
+    const loose = await repoWith(looseTx).repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+    expect(loose.kind).toBe("applied");
+    expect(
+      looseTx.generation_jobs.create.mock.calls[0][0].data.input.reference_limits,
+    ).toMatchObject({ video_reference_max: 5 });
+
+    // 配 3：同一份请求必须在**接纳侧**就被拒，判词带配置值
+    const strictTx = buildTx({
+      ...overrides,
+      ...capabilityWith({ video_reference: true, video_reference_max: 3 }),
+    });
+    const strict = await repoWith(strictTx).repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+    expect(strict).toEqual({
+      kind: "capability_limit",
+      reason: "参考视频最多 3 个",
+    });
+    expect(strictTx.generation_jobs.create).not.toHaveBeenCalled();
+    expect(
+      strictTx.scene_card_generation_presets.updateMany,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("参考图数量按能力行判定：配 3 时第 4 张拒、配 5 时放行", async () => {
+    const { frames, overrides } = frameOverrides([
+      "image",
+      "image",
+      "image",
+      "image",
+    ]);
+
+    const strict = await repoWith(
+      buildTx({ ...overrides, ...capabilityWith({ image_reference_max: 3 }) }),
+    ).repo.regenerateSceneCard({ ...baseInput, reference_assets: frames });
+    expect(strict).toEqual({
+      kind: "capability_limit",
+      reason: "参考图最多 3 张",
+    });
+
+    const looseTx = buildTx({
+      ...overrides,
+      ...capabilityWith({ image_reference_max: 5 }),
+    });
+    const loose = await repoWith(looseTx).repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+    expect(loose.kind).toBe("applied");
+  });
+
+  it("camelCase features 历史行同样冻结出上限（归一在前，配置不丢）", async () => {
+    const { frames, overrides } = frameOverrides(["image"]);
+    const tx = buildTx({
+      ...overrides,
+      ...capabilityWith({
+        imageReferenceMax: 30,
+        videoReference: true,
+        videoReferenceMax: 5,
+      }),
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+
+    expect(result.kind).toBe("applied");
+    const input = tx.generation_jobs.create.mock.calls[0][0].data.input;
+    expect(input.reference_limits).toMatchObject({
+      image_reference_max: 30,
+      video_reference_max: 5,
+    });
+  });
+
+  it("参考素材超过能力行总时长上限时接纳侧拒绝（数量之外的另一条配置口径）", async () => {
+    const { frames, overrides } = frameOverrides(
+      ["video", "video"],
+      [10_000, 10_000],
+    );
+    const tx = buildTx({
+      ...overrides,
+      ...capabilityWith({
+        video_reference: true,
+        video_reference_max: 3,
+        max_reference_duration_sec: 15,
+      }),
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: frames,
+    });
+
+    expect(result).toEqual({
+      kind: "capability_limit",
+      reason: "参考素材总时长超过 15 秒，请减少素材",
+    });
+  });
 });

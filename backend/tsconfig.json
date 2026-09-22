@@ -8,10 +8,23 @@
     "rootDir": ".",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@lib/*": [
         "libs/*"
+      ],
+      "@lib/contracts": [
+        "libs/contracts/index.ts"
+      ],
+      "@lib/core": [
+        "libs/core/index.ts"
+      ],
+      "@lib/core/logging": [
+        "libs/core/logging.ts"
+      ],
+      "@lib/core/readiness": [
+        "libs/core/readiness.ts"
       ]
     }
   },
@@ -24,12 +37,5 @@
     "**/*.test.ts",
     "**/*.testlib.ts"
   ],
-  "references": [
-    {
-      "path": "../packages/contracts"
-    },
-    {
-      "path": "../packages/core"
-    }
-  ]
+  "references": []
 }

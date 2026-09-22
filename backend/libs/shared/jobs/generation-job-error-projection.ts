@@ -7,7 +7,7 @@
 //
 // 错误码**常量与文案**的唯一来源在 contracts/error-codes.ts（跨包共享，高内聚）。
 // 本文件只含 backend 的投影判定，不做错误码 re-export——需要 ERROR_* 常量的消费方应直接从
-// @blue-whale/contracts 引，不要经过本文件（避免双重来源）。
+// @lib/contracts 引，不要经过本文件（避免双重来源）。
 import {
   ERROR_AUDIO_GENERATION_FAILED,
   ERROR_IMAGE_GENERATION_FAILED,
@@ -17,11 +17,12 @@ import {
   ERROR_PROVIDER_FAILED,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_VIDEO_GENERATION_FAILED,
+  ERROR_VOCAL_SPLIT_FAILED,
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
   messageOf,
   type PublicGenerationError,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 /** 全部 canonical 错误码集合（投影白名单）。
  *  即生成域数值表中所有已登记字符串码——单一来源（contracts），此处不重复定义。 */
@@ -47,11 +48,13 @@ export function resolveErrorCode(code: string): string {
 }
 
 /** 投影兜底：按任务类型生成 fallback 码（只对白名单外历史码触发）。
- *  与 messageFor 兜底保持一致（video/audio/image/media_extract），音频任务兜到专属 audio 码。 */
+ *  与 messageFor 兜底保持一致（video/audio/image/media_extract/vocal_split），音频任务兜到专属 audio 码。 */
 export function fallbackErrorCode(type: string): string {
   if (type === "video") return ERROR_VIDEO_GENERATION_FAILED;
   if (type === "media_extract") return ERROR_MEDIA_EXTRACT_FAILED;
   if (type === "audio") return ERROR_AUDIO_GENERATION_FAILED;
+  // IKHA2I：人声分离失败无 stored_error 时兜到契约 1047（不落到图片生成的默认文案）。
+  if (type === "vocal_split") return ERROR_VOCAL_SPLIT_FAILED;
   return ERROR_IMAGE_GENERATION_FAILED;
 }
 

@@ -1,5 +1,10 @@
 # 视频参考图超限前端提示 + 模型能力配置对齐 Implementation Plan
 
+> ⚠️ **历史记录（IKA72G 时期），键名与其中的 SQL 步骤均已失效——勿照本文执行**。
+> 文中 `features.max_reference_images` 已在 2026-09-21（IKHEXG）并入 `image_reference_max`
+> 并从代码中删除；存量值由 `029_ikhexg_reference_key_rename` 迁移搬入。配置真值见
+> [生产模型能力数据更新清单](2026-09-14-ikfjjt-model-capability-production-data.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** web.master.xfai.cloud 视频生成入口（首页 ChatBox 视频tab + 画布 BottomDialog）在用户上传参考图超过对应模型限量时 toast「参考图最多 N 张，请减少图片」，并把三个 Seedance 2.0 视频模型 `features.max_reference_images` 配成 9（对齐官方上限）。

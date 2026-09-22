@@ -6,8 +6,8 @@ import {
   StreamableFile,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import type { ResultEnvelope } from "@blue-whale/contracts";
-import { SUCCESS_CODE } from "@blue-whale/contracts";
+import type { ResultEnvelope } from "@lib/contracts";
+import { SUCCESS_CODE } from "@lib/contracts";
 import type { Observable } from "rxjs";
 import { map } from "rxjs/operators";
 import { BYPASS_TRANSFORM_KEY } from "@lib/infra/decorators/bypass-transform.decorator.js";

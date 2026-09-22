@@ -2,7 +2,7 @@
 // 命名 *.testlib.ts：tsconfig 排除编译、vitest 不当作用例文件收集。
 import {expect, vi} from "vitest";
 import {bundledAgentRuntimeManifest} from "./agent-runtime-manifest-fixture.js";
-import {canonicalAgentRunPinDigestInput, type AgentRunPin} from "@blue-whale/contracts";
+import {canonicalAgentRunPinDigestInput, type AgentRunPin} from "@lib/contracts";
 import {createHash} from "node:crypto";
 
 // SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：

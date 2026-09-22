@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type Reac
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import QRCodeStyling from 'qr-code-styling';
-import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, RotateCw } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, Music, RotateCw, Check, ZoomIn } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
@@ -24,6 +24,7 @@ import {
 } from '@/api/material';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '@/components/ConfirmModal';
+import { formatAssetCreatedAt } from '../AssetDetailModal/format';
 import styles from './index.module.css';
 
 /* ============================================
@@ -129,7 +130,7 @@ function GroupFormModal({
  * 真人认证二维码弹窗：H5Link 渲染为二维码，手机扫码打开 H5 刷脸页。
  * 认证结果由外层轮询（startAuthPolling），此处关闭弹窗不打断轮询（卡片保持「认证中…」）。
  * 二维码 15 分钟倒计时过期；「重新生成」按钮重新创建会话换新码。
- * 关闭入口仅右上角 ×；底部保留「在当前设备打开」+「重新生成二维码」。
+ * 关闭入口仅右上角 ×；底部保留「重新生成二维码」。
  */
 const QR_EXPIRE_SECONDS = 15 * 60;
 
@@ -200,12 +201,6 @@ function AuthQrModal({
         </div>
         <div className={styles.qrCountdown}>二维码有效期15分钟</div>
         <button
-          className={styles.qrOpenBtn}
-          onClick={() => window.open(h5Link, '_blank')}
-        >
-          在当前设备打开
-        </button>
-        <button
           className={styles.qrResetBtn}
           onClick={onCreateSession}
           disabled={creating}
@@ -233,6 +228,8 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
           {asset.URL ? (
             asset.AssetType === 'Video' ? (
               <video className={styles.detailMedia} src={asset.URL} controls autoPlay playsInline />
+            ) : asset.AssetType === 'Audio' ? (
+              <audio className={styles.detailMedia} src={asset.URL} controls />
             ) : (
               <img className={styles.detailMedia} src={asset.URL} alt={asset.Name} draggable={false} />
             )
@@ -245,7 +242,7 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
         <aside className={styles.detailPane}>
           <div className={styles.detailHeader}>
             <span className={styles.detailTypeBadge}>
-              {asset.AssetType === 'Video' ? '视频' : '图片'}
+              {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
             </span>
             <button className={styles.detailCloseBtn} type="button" onClick={onClose} aria-label="关闭">
               <X size={18} strokeWidth={2} />
@@ -258,7 +255,7 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
             </div>
             <div className={styles.detailItem}>
               <dt>创建时间</dt>
-              <dd>{asset.CreateTime || '暂无数据'}</dd>
+              <dd>{formatAssetCreatedAt(asset.CreateTime ?? null)}</dd>
             </div>
           </dl>
         </aside>
@@ -302,44 +299,228 @@ function MeasuredThumb({
   );
 }
 
-/** 素材卡片上的角标/名称浮层/状态角标/删除按钮（图片/视频卡片共用） */
+/** 素材卡片上的角标/名称浮层/悬浮操作（图片/视频卡片共用）。
+ *  IKGHZ3：picker 模式同样显示删除按钮（ADR-0091，选择弹窗承载素材管理），
+ *  并新增放大预览按钮（仅 picker 模式：资产页点卡即预览，无需按钮）；
+ *  「处理中/失败」状态标并入底部名称条，不再单独占用左上角。 */
 function AssetCardOverlays({
   asset,
   onDeleteAsset,
+  onPreviewAsset,
   onClosePreview,
+  pickerMode = false,
 }: {
   asset: MaterialAsset;
   onDeleteAsset: (asset: MaterialAsset) => void;
+  onPreviewAsset: (asset: MaterialAsset) => void;
   onClosePreview: () => void;
+  pickerMode?: boolean;
 }) {
   return (
     <>
       <div className={styles.assetTypeBadge}>
         {asset.AssetType === 'Video' ? <Video size={14} /> : null}
-        {asset.AssetType === 'Video' ? '视频' : '图片'}
+        {asset.AssetType === 'Audio' ? <Music size={14} /> : null}
+        {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
       </div>
-      {/* 底部名称浮层 */}
+      {/* 底部名称浮层：状态标并入（IKGHZ3） */}
       <div className={styles.assetNameOverlay}>
         <span className={styles.assetName} title={asset.Name}>{asset.Name}</span>
+        {asset.Status === 'Processing' && (
+          <span className={styles.assetNameStatus}>处理中</span>
+        )}
+        {asset.Status === 'Failed' && (
+          <span className={`${styles.assetNameStatus} ${styles.assetNameStatusFailed}`}>失败</span>
+        )}
       </div>
-      {asset.Status === 'Processing' && (
-        <div className={styles.statusBadge}>处理中</div>
-      )}
-      {asset.Status === 'Failed' && (
-        <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
-      )}
-      <button
-        className={styles.assetDeleteBtn}
-        title="删除素材"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClosePreview(); // 关闭预览弹窗，避免层级冲突
-          onDeleteAsset(asset);
-        }}
-      >
-        <Trash2 size={14} strokeWidth={2} />
-      </button>
+      {/* 右下角悬浮操作组：删除在左、放大预览在右（picker 模式，IKGHZ3） */}
+      <div className={styles.assetHoverActions}>
+        <button
+          className={styles.assetDeleteBtn}
+          title="删除素材"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClosePreview(); // 关闭预览弹窗，避免层级冲突
+            onDeleteAsset(asset);
+          }}
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
+        {pickerMode && (
+          <button
+            className={styles.assetPreviewBtn}
+            title="放大预览"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreviewAsset(asset);
+            }}
+          >
+            <ZoomIn size={14} strokeWidth={2} />
+          </button>
+        )}
+      </div>
     </>
+  );
+}
+
+function materialMediaKind(assetType: MaterialAsset['AssetType']): 'image' | 'video' | 'audio' {
+  if (assetType === 'Video') return 'video';
+  if (assetType === 'Audio') return 'audio';
+  return 'image';
+}
+
+/** 素材预览弹窗生命周期桥接（GroupDetail 与 AigcFlatView 共用，IKGHZ3）：
+ *  预览开关上抛给选择弹窗（据此抑制自身 Esc 关闭）；预览打开期间 Esc 只关预览不外泄。 */
+function useMaterialPreviewBridge(
+  previewAsset: MaterialAsset | null,
+  closePreview: () => void,
+  active: boolean,
+  onPickerPreviewChange?: (open: boolean) => void,
+) {
+  useEffect(() => {
+    if (active) onPickerPreviewChange?.(previewAsset !== null);
+  }, [active, previewAsset, onPickerPreviewChange]);
+
+  useEffect(() => {
+    if (!previewAsset) return undefined;
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') closePreview();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewAsset, closePreview]);
+}
+
+/** picker 模式可选判定：Active + 有 URL + 类型在入口允许范围内（无过滤则全放行）；真人分组详情与虚拟平铺视图共用 */
+function isPickerSelectableAsset(
+  asset: MaterialAsset,
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>,
+): boolean {
+  if (asset.Status !== 'Active' || !asset.URL) return false;
+  if (!pickerMediaTypes || pickerMediaTypes.length === 0) return true;
+  return pickerMediaTypes.includes(materialMediaKind(asset.AssetType));
+}
+
+/** 素材卡片（真人分组详情与虚拟平铺视图共用）：图片 MeasuredThumb / 视频缩略 / 音频占位 / 资源不可用四分支，
+ *  picker 勾选/置灰/选中角标与角标浮层在此单点维护；角标浮层与勾选角标以同一份 JSX 供图片/视频两分支复用。
+ *  IKGHZ3：picker 模式透传给 AssetCardOverlays 渲染放大预览按钮（删除按钮两种模式都显示）。 */
+function AssetPickerCard({
+  asset,
+  pickerMode,
+  selected,
+  selectable,
+  onPreview,
+  onPickerToggle,
+  onPickerBlocked,
+  onDeleteAsset,
+  onClosePreview,
+}: {
+  asset: MaterialAsset;
+  pickerMode: boolean;
+  selected: boolean;
+  selectable: boolean;
+  onPreview: (asset: MaterialAsset) => void;
+  onPickerToggle?: (asset: MaterialAsset) => void;
+  onPickerBlocked?: (asset: MaterialAsset) => void;
+  onDeleteAsset: (asset: MaterialAsset) => void;
+  onClosePreview: () => void;
+}) {
+  const overlays = (
+    <>
+      <AssetCardOverlays
+        asset={asset}
+        onDeleteAsset={onDeleteAsset}
+        onPreviewAsset={onPreview}
+        onClosePreview={onClosePreview}
+        pickerMode={pickerMode}
+      />
+      {pickerMode && selectable && (
+        <div className={`${styles.checkToggle} ${selected ? styles.checkToggleOn : ''}`}>
+          {selected && <Check size={14} strokeWidth={2.5} />}
+        </div>
+      )}
+    </>
+  );
+  return (
+    <div
+      className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selected ? styles.assetCardSelected : ''}`}
+      onClick={() => {
+        if (pickerMode) {
+          if (selectable) onPickerToggle?.(asset);
+          else onPickerBlocked?.(asset);
+          return;
+        }
+        onPreview(asset);
+      }}
+    >
+      {asset.URL && asset.AssetType === 'Image' ? (
+        <MeasuredThumb src={asset.URL} alt={asset.Name}>
+          {overlays}
+        </MeasuredThumb>
+      ) : (
+        <div className={styles.assetThumb}>
+          {asset.URL ? (
+            asset.AssetType === 'Video' ? (
+              <video src={asset.URL} muted playsInline preload="metadata" />
+            ) : asset.AssetType === 'Audio' ? (
+              <div className={styles.audioPlaceholder}>
+                <Music size={28} strokeWidth={1.5} />
+              </div>
+            ) : null
+          ) : (
+            <div className={styles.empty}>资源不可用</div>
+          )}
+          {overlays}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 上传卡：优先用 label 包 file input（画布弹窗里对 display:none 再 click() 打不开系统选档）。 */
+function UploadMaterialCard({
+  onUpload,
+  onPickFiles,
+}: {
+  onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
+}) {
+  if (!onUpload && !onPickFiles) return null;
+  const thumb = (
+    <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
+      <Plus size={28} strokeWidth={1.5} />
+      <span className={styles.uploadCardLabel}>上传素材</span>
+    </div>
+  );
+  if (onPickFiles) {
+    return (
+      <label className={`${styles.assetCard} ${styles.uploadAssetCard}`}>
+        <input
+          type="file"
+          multiple
+          accept="image/*,video/*,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
+          className={styles.nativeFileInput}
+          onChange={(e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            onPickFiles(Array.from(files));
+            e.target.value = '';
+          }}
+        />
+        {thumb}
+      </label>
+    );
+  }
+  return (
+    <div
+      className={`${styles.assetCard} ${styles.uploadAssetCard}`}
+      onClick={onUpload}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onUpload?.(); }}
+    >
+      {thumb}
+    </div>
   );
 }
 
@@ -349,15 +530,31 @@ function GroupDetail({
   onBack,
   onDeleteAsset,
   onUpload,
+  onPickFiles,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  onPickerBlockedAsset,
+  pickerMediaTypes,
+  onPickerPreviewChange,
 }: {
   group: MaterialGroup;
   assets: MaterialAsset[];
   onBack: () => void;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
   const closePreview = () => setPreviewAsset(null);
+  const pickerMode = Boolean(onPickerToggleAsset);
+
+  useMaterialPreviewBridge(previewAsset, closePreview, pickerMode, onPickerPreviewChange);
 
   return (
     <div className={styles.detailView}>
@@ -369,40 +566,22 @@ function GroupDetail({
       </div>
 
       <div className={styles.assetGrid}>
-        {/* 第一个位置：上传素材卡片 */}
-        {onUpload && (
-          <div className={`${styles.assetCard} ${styles.uploadAssetCard}`} onClick={onUpload} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter') onUpload(); }}>
-            <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
-              <Plus size={28} strokeWidth={1.5} />
-              <span className={styles.uploadCardLabel}>上传素材</span>
-            </div>
-          </div>
-        )}
+        <UploadMaterialCard onUpload={onUpload} onPickFiles={onPickFiles} />
         {assets.map((asset) => (
-          <div key={asset.Id} className={styles.assetCard}
-            onClick={() => setPreviewAsset(asset)}>
-            {asset.URL && asset.AssetType === 'Image' ? (
-              <MeasuredThumb src={asset.URL} alt={asset.Name}>
-                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
-              </MeasuredThumb>
-            ) : (
-              <div className={styles.assetThumb}>
-                {asset.URL ? (
-                  asset.AssetType === 'Video' ? (
-                    <>
-                      <video src={asset.URL} muted playsInline preload="metadata" />
-                    </>
-                  ) : null
-                ) : (
-                  <div className={styles.empty}>资源不可用</div>
-                )}
-                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
-              </div>
-            )}
-          </div>
+          <AssetPickerCard
+            key={asset.Id}
+            asset={asset}
+            pickerMode={pickerMode}
+            selected={pickerSelectedIds?.has(asset.Id) ?? false}
+            selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
+            onPreview={setPreviewAsset}
+            onPickerToggle={onPickerToggleAsset}
+            onPickerBlocked={onPickerBlockedAsset}
+            onDeleteAsset={onDeleteAsset}
+            onClosePreview={closePreview}
+          />
         ))}
-        {!onUpload && assets.length === 0 && (
+        {!onUpload && !onPickFiles && assets.length === 0 && (
           <div className={styles.empty}>该分组暂无素材</div>
         )}
       </div>
@@ -415,8 +594,189 @@ function GroupDetail({
 }
 
 /* ============================================
+ * AIGC 虚拟人像库平铺视图（去二级分组）
+ * 单层平铺展示全部 AIGC 素材，无分组卡片/新建分组/分组删除；
+ * 底层分组数据保留，上传按文件类型归入对应类型分区组（见 characterLibraryDeposit）。
+ * ============================================ */
+
+/** 平铺视图列表单页大小（与上游 ListAssetGroups/ListAssets 页大小一致） */
+const AIGC_PAGE_SIZE = 100;
+/** 素材聚合单次 ListAssets 携带的分组数上限（防 Filter.GroupIds 数组过长） */
+const AIGC_GROUP_BATCH_SIZE = 50;
+/** 分页拉全防御上限：TotalCount 异常偏大时截断，避免失控请求（50 页 = 5000 条） */
+const AIGC_MAX_PAGES = 50;
+
+/** IKGC0K 分页拉全：按首屏 TotalCount 计算总页数循环拉取聚合全部条目；
+ *  TotalCount 缺省/为 0 视为单页（与旧硬编码单页行为兼容）。 */
+async function fetchAllAigcPages<T>(
+  fetchPage: (pageNumber: number) => Promise<{ TotalCount?: number; Items?: T[] }>,
+): Promise<T[]> {
+  const first = await fetchPage(1);
+  const all = [...(first.Items ?? [])];
+  const totalPages = Math.min(Math.ceil((first.TotalCount ?? 0) / AIGC_PAGE_SIZE), AIGC_MAX_PAGES);
+  for (let page = 2; page <= totalPages; page += 1) {
+    const next = await fetchPage(page);
+    const items = next.Items ?? [];
+    if (items.length === 0) break;
+    all.push(...items);
+  }
+  return all;
+}
+
+function AigcFlatView({
+  onUpload,
+  onPickFiles,
+  refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  onPickerBlockedAsset,
+  pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
+}: {
+  onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
+  refreshTick?: number;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
+}) {
+  const [assets, setAssets] = useState<MaterialAsset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const closePreview = () => setPreviewAsset(null);
+  /** picker 模式（资产选择弹窗）：点卡=勾选；悬浮操作补删除与放大预览（IKGHZ3） */
+  const pickerMode = Boolean(onPickerToggleAsset);
+
+  useMaterialPreviewBridge(previewAsset, closePreview, pickerMode, onPickerPreviewChange);
+
+  const loadAssets = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      // 先查分组（IKGC0K：按 TotalCount 分页拉全，超 100 组不再丢组）；无组 id 时不调素材查询
+      const groups = await fetchAllAigcPages((pageNumber) =>
+        listAssetGroups({
+          Filter: { GroupType: 'AIGC' },
+          PageNumber: pageNumber,
+          PageSize: AIGC_PAGE_SIZE,
+        }),
+      );
+      const groupIds = groups.map((g) => g.Id).filter(Boolean);
+      if (groupIds.length === 0) {
+        setAssets([]);
+        return;
+      }
+      // 素材聚合（IKGC0K）：分组分批防 Filter.GroupIds 过长，批内按 TotalCount 分页拉全，超 100 条不再截断
+      const collected: MaterialAsset[] = [];
+      for (let i = 0; i < groupIds.length; i += AIGC_GROUP_BATCH_SIZE) {
+        const batchGroupIds = groupIds.slice(i, i + AIGC_GROUP_BATCH_SIZE);
+        const batchAssets = await fetchAllAigcPages((pageNumber) =>
+          listAssets({
+            Filter: { GroupIds: batchGroupIds, GroupType: 'AIGC' },
+            PageNumber: pageNumber,
+            PageSize: AIGC_PAGE_SIZE,
+          }),
+        );
+        collected.push(...batchAssets);
+      }
+      setAssets(collected);
+    } catch (err) {
+      if (!isApiError(err)) toast.error('加载失败');
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAssets();
+  }, [loadAssets, refreshTick]);
+
+  // 自动轮询：存在 Processing 素材时每 5s 刷新，直到全部 Active/Failed
+  const hasProcessing = assets.some((a) => a.Status === 'Processing');
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const timer = setInterval(() => loadAssets(), 5000);
+    return () => clearInterval(timer);
+  }, [hasProcessing, loadAssets]);
+
+  const handleDeleteAsset = (asset: MaterialAsset) => {
+    setDeleteTarget({ id: asset.Id, name: asset.Name });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteMaterialAsset(deleteTarget.id);
+      setAssets((prev) => prev.filter((a) => a.Id !== deleteTarget.id));
+      toast.success('已删除');
+      setDeleteTarget(null);
+      if (pickerMode) onPickerAssetRemoved?.(deleteTarget.id);
+    } catch (err) {
+      if (!isApiError(err)) toast.error('删除失败');
+      setDeleteTarget(null);
+    }
+  };
+
+  return (
+    <>
+      <div className={styles.assetGrid}>
+        <UploadMaterialCard onUpload={onUpload} onPickFiles={onPickFiles} />
+        {assets.map((asset) => (
+          <AssetPickerCard
+            key={asset.Id}
+            asset={asset}
+            pickerMode={pickerMode}
+            selected={pickerSelectedIds?.has(asset.Id) ?? false}
+            selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
+            onPreview={setPreviewAsset}
+            onPickerToggle={onPickerToggleAsset}
+            onPickerBlocked={onPickerBlockedAsset}
+            onDeleteAsset={handleDeleteAsset}
+            onClosePreview={closePreview}
+          />
+        ))}
+        {!onUpload && !onPickFiles && assets.length === 0 && !loading && !loadError && (
+          <div className={styles.empty}>暂无素材，请上传</div>
+        )}
+        {(onUpload || onPickFiles) && assets.length === 0 && !loading && !loadError && (
+          <div className={styles.empty}>点击上方上传素材</div>
+        )}
+      </div>
+
+      {loading && (
+        <div className={styles.loadingSpinner}>
+          <Loader2 size={32} className={styles.spin} />
+          <span>加载中...</span>
+        </div>
+      )}
+      {!loading && loadError && <div className={styles.empty}>加载失败，请稍后重试</div>}
+
+      {previewAsset && <MaterialDetailModal asset={previewAsset} onClose={closePreview} />}
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除素材"
+        message={deleteTarget ? `确定要删除素材「${deleteTarget.name}」吗？此操作不可撤销。` : ''}
+        confirmText="确认删除"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </>
+  );
+}
+
+/* ============================================
  * 主组件：人像库（资产库页面）
- * groupType='AIGC' 虚拟人像库；'LivenessFace' 真人人像库
+ * groupType='AIGC' 虚拟人像库（平铺去分组）；'LivenessFace' 真人人像库（保留分组管理）
  * ============================================ */
 
 /** 真人认证轮询间隔与超时（BytedToken 有效期 30 分钟） */
@@ -427,12 +787,99 @@ export default function CharacterLibrary({
   groupType = 'AIGC',
   onDetailViewChange,
   onUpload,
+  onPickFiles,
   refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  onPickerBlockedAsset,
+  pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
 }: {
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
+  /** 画布弹窗：选档后直接回调，避免 display:none input 再 click() 打不开系统对话框 */
+  onPickFiles?: (files: File[]) => void;
   refreshTick?: number;
+  /** 画布资产选择弹窗：勾选素材（真人分组详情与虚拟平铺视图） */
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
+}) {
+  const isLiveness = groupType === 'LivenessFace';
+
+  // AIGC 平铺视图无分组详情，始终通知父组件不在详情中（控制顶栏显隐）
+  useEffect(() => {
+    if (!isLiveness) onDetailViewChange?.(false, null);
+  }, [isLiveness, onDetailViewChange]);
+
+  // AIGC 虚拟人像库：平铺去分组
+  if (!isLiveness) {
+    return (
+      <AigcFlatView
+        onUpload={onUpload}
+        onPickFiles={onPickFiles}
+        refreshTick={refreshTick}
+        pickerSelectedIds={pickerSelectedIds}
+        onPickerToggleAsset={onPickerToggleAsset}
+        onPickerBlockedAsset={onPickerBlockedAsset}
+        pickerMediaTypes={pickerMediaTypes}
+        onPickerAssetRemoved={onPickerAssetRemoved}
+        onPickerPreviewChange={onPickerPreviewChange}
+      />
+    );
+  }
+
+  // 真人人像库：保留分组管理与真人认证
+  return (
+    <LivenessLibrary
+      groupType={groupType}
+      onDetailViewChange={onDetailViewChange}
+      onUpload={onUpload}
+      onPickFiles={onPickFiles}
+      refreshTick={refreshTick}
+      pickerSelectedIds={pickerSelectedIds}
+      onPickerToggleAsset={onPickerToggleAsset}
+      onPickerBlockedAsset={onPickerBlockedAsset}
+      pickerMediaTypes={pickerMediaTypes}
+      onPickerAssetRemoved={onPickerAssetRemoved}
+      onPickerPreviewChange={onPickerPreviewChange}
+    />
+  );
+}
+
+function LivenessLibrary({
+  groupType = 'AIGC',
+  onDetailViewChange,
+  onUpload,
+  onPickFiles,
+  refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  onPickerBlockedAsset,
+  pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
+}: {
+  groupType?: GroupType;
+  onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
+  onUpload?: () => void;
+  onPickFiles?: (files: File[]) => void;
+  refreshTick?: number;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  onPickerBlockedAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
@@ -591,7 +1038,7 @@ export default function CharacterLibrary({
           { silent: true },
         );
         setShowCreateModal(false);
-        // 展示二维码弹窗：手机扫码打开 H5 刷脸页；桌面端可点「在当前设备打开」
+        // 展示二维码弹窗：手机扫码打开 H5 刷脸页
         setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken, Name: name });
         startAuthPolling(session.BytedToken);
       } catch (err) {
@@ -670,6 +1117,7 @@ export default function CharacterLibrary({
             return next;
           });
         }
+        if (onPickerToggleAsset) onPickerAssetRemoved?.(deleteTarget.id);
       }
       toast.success('已删除');
       setDeleteTarget(null);
@@ -700,6 +1148,12 @@ export default function CharacterLibrary({
           onBack={() => setDetailGroupId(null)}
           onDeleteAsset={handleDeleteAsset}
           onUpload={onUpload}
+          onPickFiles={onPickFiles}
+          pickerSelectedIds={pickerSelectedIds}
+          onPickerToggleAsset={onPickerToggleAsset}
+          onPickerBlockedAsset={onPickerBlockedAsset}
+          pickerMediaTypes={pickerMediaTypes}
+          onPickerPreviewChange={onPickerPreviewChange}
         />
 
         {/* 删除确认弹窗：详情视图内点击删除时立即弹出 */}

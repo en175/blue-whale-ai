@@ -4,7 +4,7 @@ import {
   agentAssetResolveRequestSchema,
   resolveAgentAsset,
 } from "@lib/shared/assets/agent-asset-resolver.js";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";

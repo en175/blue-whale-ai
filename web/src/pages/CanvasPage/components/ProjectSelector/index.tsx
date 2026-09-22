@@ -2,13 +2,16 @@
  * ProjectSelector 项目选择器：项目列表下拉切换
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus } from 'lucide-react';
+import { ChevronDown, Trash2, FolderOpen, SquarePen, FolderPlus, Pin, PinOff } from 'lucide-react';
+import { defaultProjectName } from '@/lib/projectName';
 import styles from './index.module.css';
 
 /** 项目数据 */
 export interface CanvasProject {
   id: string;
   name: string;
+  /** 已置顶（pinned_at 非空）；缺省视为未置顶 */
+  pinned?: boolean;
 }
 
 interface ProjectSelectorProps {
@@ -17,6 +20,7 @@ interface ProjectSelectorProps {
   onSelect: (id: string) => void;
   onRename: (id: string, newName: string) => void;
   onDelete: (id: string) => void;
+  onTogglePin?: (id: string, pinned: boolean) => void;
   onNewProject: () => void;
 }
 
@@ -26,48 +30,57 @@ export default function ProjectSelector({
   onSelect,
   onRename,
   onDelete,
+  onTogglePin,
   onNewProject,
 }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  const [renameError, setRenameError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CanvasProject | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const editingIdRef = useRef<string | null>(null);
+  const editingNameRef = useRef('');
+  const onRenameRef = useRef(onRename);
+
+  editingIdRef.current = editingId;
+  editingNameRef.current = editingName;
+  onRenameRef.current = onRename;
 
   const current = projects.find((p) => p.id === currentId);
 
-  // 点击外部关闭
+  const cancelRename = () => {
+    editingIdRef.current = null;
+    setEditingId(null);
+    setEditingName('');
+  };
+
+  /** 保存重命名；名称为空时回落到当前时间 */
+  const saveRename = () => {
+    const id = editingIdRef.current;
+    if (!id) return;
+    const name = editingNameRef.current.trim() || defaultProjectName();
+    onRenameRef.current(id, name);
+    cancelRename();
+  };
+
+  const startRename = (project: CanvasProject) => {
+    editingIdRef.current = project.id;
+    editingNameRef.current = project.name;
+    setEditingId(project.id);
+    setEditingName(project.name);
+  };
+
+  // 点击外部关闭；重命名中途收起时一并提交（空名用当前时间）
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        saveRename();
         setOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
-
-  /** 开始重命名 */
-  const startRename = (project: CanvasProject) => {
-    setEditingId(project.id);
-    setEditingName(project.name);
-    setRenameError('');
-  };
-
-  /** 保存重命名 */
-  const saveRename = () => {
-    if (!editingId) return;
-    const name = editingName.trim();
-    if (!name) {
-      setRenameError('项目名不能为空');
-      return;
-    }
-    onRename(editingId, name);
-    setEditingId(null);
-    setEditingName('');
-    setRenameError('');
-  };
 
   /** 确认删除 */
   const confirmDelete = () => {
@@ -80,7 +93,13 @@ export default function ProjectSelector({
   return (
     <div className={styles.wrapper} ref={ref}>
       {/* 触发按钮 */}
-      <button className={styles.trigger} onClick={() => setOpen(!open)}>
+      <button
+        className={styles.trigger}
+        onClick={() => {
+          if (open) saveRename();
+          setOpen(!open);
+        }}
+      >
         {/* 当前项目名 */}
         <span className={styles.currentName}>
           {current?.name ?? '未命名项目'}
@@ -120,15 +139,12 @@ export default function ProjectSelector({
                     value={editingName}
                     onChange={(e) => {
                       const value = e.target.value;
+                      editingNameRef.current = value;
                       setEditingName(value);
-                      setRenameError(value.trim() ? '' : '项目名不能为空');
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') saveRename();
-                      if (e.key === 'Escape') {
-                        setEditingId(null);
-                        setRenameError('');
-                      }
+                      if (e.key === 'Escape') cancelRename();
                     }}
                     onBlur={saveRename}
                     autoFocus
@@ -138,9 +154,31 @@ export default function ProjectSelector({
                   <span className={styles.projectName}>{project.name}</span>
                 )}
 
-                {editingId === project.id && renameError && (
-                  <p className={styles.renameError} role="alert">{renameError}</p>
+                {/* 置顶项目常显图钉标记 */}
+                {project.pinned && (
+                  <Pin
+                    size={12}
+                    strokeWidth={2}
+                    className={styles.pinnedIcon}
+                    aria-hidden="true"
+                  />
                 )}
+
+                {/* 悬停显示置顶按钮；点击不关闭下拉，可连续操作 */}
+                <button
+                  className={styles.pinBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePin?.(project.id, !project.pinned);
+                  }}
+                  title={project.pinned ? '取消置顶' : '置顶'}
+                >
+                  {project.pinned ? (
+                    <PinOff size={14} strokeWidth={2} />
+                  ) : (
+                    <Pin size={14} strokeWidth={2} />
+                  )}
+                </button>
 
                 {/* 悬停显示删除按钮 */}
                 <button

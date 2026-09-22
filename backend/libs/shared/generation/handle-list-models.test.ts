@@ -36,7 +36,7 @@ function imageView(
     default_duration: null,
     features: {
       reference_image: false,
-      max_reference_images: 10,
+      image_reference_max: 10,
       watermark: false,
       quantity_max: 1,
       sequential_image_generation: false,
@@ -46,6 +46,8 @@ function imageView(
       last_frame: false,
       first_last_frame: false,
       audio: false,
+      i2i_model_name: null,
+      max_prompt_length: null,
     },
     version: 1,
     digest: "sha256:abc",
@@ -92,6 +94,66 @@ describe("handleListModels 消费端剥调用值", () => {
     ]);
     expect(gpt.request_mapping).toBeUndefined();
     expect(gpt.channel_parser).toBeUndefined();
+  });
+
+  // IKESD6 / ADR-0085：消费端透出 max_prompt_length（前端动态上限用），
+  // i2i_model_name 属出站调用值，与像素/request_mapping 同哲学剥除。
+  it("features：max_prompt_length 透出，i2i_model_name 剥除", async () => {
+    const result = await handleListModels("image", {
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue([
+          imageView({
+            features: {
+              reference_image: true,
+              image_reference_max: 10,
+              watermark: false,
+              quantity_max: 1,
+              sequential_image_generation: false,
+              stream: false,
+              tools: false,
+              first_frame: false,
+              last_frame: false,
+              first_last_frame: false,
+              audio: false,
+              i2i_model_name: "gpt-image-2-edit",
+              max_prompt_length: 32000,
+            },
+          }),
+        ]),
+      },
+    });
+
+    expect(JSON.stringify(result)).not.toContain("gpt-image-2-edit");
+    const models = (result as { data: Array<{ features: Record<string, unknown> }> }).data;
+    expect(models[0]!.features.max_prompt_length).toBe(32000);
+    expect(models[0]!.features.i2i_model_name).toBeUndefined();
+  });
+
+  // IKH8AU：下发的是**已算好的生效值**——配了用配置，未配置回落缺省，消费端不必知道缺省口径。
+  // 下列用例复用 imageView() 只是当「一条能力行」使：回落档由 handleListModels 的第一个参数
+  // （capability）决定，与夹具的 model_id / 标签无关。
+  it("未配置时下发图片缺省上限 4000", async () => {
+    const result = await handleListModels("image", {
+      models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },
+    });
+    const models = (result as { data: Array<{ features: Record<string, unknown> }> }).data;
+    expect(models[0]!.features.max_prompt_length).toBe(4000);
+  });
+
+  it("音频档位下发音频缺省上限 3000", async () => {
+    const result = await handleListModels("audio", {
+      models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },
+    });
+    const models = (result as { data: Array<{ features: Record<string, unknown> }> }).data;
+    expect(models[0]!.features.max_prompt_length).toBe(3000);
+  });
+
+  it("text 档不参与上限下发：原样透出，不解析缺省", async () => {
+    const result = await handleListModels("text", {
+      models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },
+    });
+    const models = (result as { data: Array<{ features: Record<string, unknown> }> }).data;
+    expect(models[0]!.features.max_prompt_length).toBeNull();
   });
 
   it("banana 不把 1k / 1x1 调用值透给消费端", async () => {

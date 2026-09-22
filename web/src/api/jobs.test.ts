@@ -2,7 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './http';
 import {
+  createAudioTrim,
   createMediaExtraction,
+  createVocalSplit,
+  createVideoEnhancement,
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
@@ -30,6 +33,146 @@ describe('createMediaExtraction', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       source_asset_id: '3985',
       output_format: 'mp3',
+    });
+  });
+});
+
+describe('createVideoEnhancement', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目视频 HD 高清端点提交冻结三键（IKH3VH，契约键名恒等）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '901', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVideoEnhancement('p1', {
+        source_asset_id: '5',
+        target_node_id: 'media-draft-1',
+        resolution: '2k',
+      }),
+    ).resolves.toEqual({ job_id: '901', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/video-enhancements');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '5',
+      target_node_id: 'media-draft-1',
+      resolution: '2k',
+    });
+  });
+});
+
+describe('createAudioTrim', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** 统一 200 信封桩（键名与 backend/libs/contracts/audio-trim.ts 契约恒等断言用） */
+  function stubCreated(jobId = '1130') {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: jobId, status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('向项目音频截取端点提交中间段四键（URL 编码项目 id、无幂等头）', async () => {
+    const fetchMock = stubCreated();
+
+    await expect(
+      createAudioTrim('project/1', {
+        source_asset_id: '3985',
+        start_time: 2.4,
+        end_time: 13,
+        output_format: 'mp3',
+      }),
+    ).resolves.toEqual({ job_id: '1130', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-trims');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '3985',
+      start_time: 2.4,
+      end_time: 13,
+      output_format: 'mp3',
+    });
+  });
+
+  it('贴边省略：选区贴 0 省略 start_time 键、贴全长省略 end_time 键（走官方默认片头片尾）', async () => {
+    // 每次调用构造新 Response（同一实例 body 只能消费一次）
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1131', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 左缘贴 0：只有 end_time
+    await expect(
+      createAudioTrim('p1', { source_asset_id: '5', end_time: 8.25, output_format: 'wav' }),
+    ).resolves.toEqual({ job_id: '1131', status: 'queued' });
+    // 右缘贴全长：只有 start_time
+    await expect(
+      createAudioTrim('p1', { source_asset_id: '5', start_time: 3, output_format: 'wav' }),
+    ).resolves.toEqual({ job_id: '1131', status: 'queued' });
+    // 双贴边（全选）：起止键都不出现
+    await expect(
+      createAudioTrim('p1', { source_asset_id: '5', output_format: 'wav' }),
+    ).resolves.toEqual({ job_id: '1131', status: 'queued' });
+
+    expect(fetchMock.mock.calls).toHaveLength(3);
+    expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)).toEqual({
+      source_asset_id: '5',
+      end_time: 8.25,
+      output_format: 'wav',
+    });
+    expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string)).toEqual({
+      source_asset_id: '5',
+      start_time: 3,
+      output_format: 'wav',
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2]![1] as RequestInit).body as string)).toEqual({
+      source_asset_id: '5',
+      output_format: 'wav',
+    });
+  });
+});
+
+describe('createVocalSplit', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目人声背景分离端点提交源素材 + 场景 + 格式三键（IKHA2W，契约键名恒等）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '9012', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVocalSplit('p1', { source_asset_id: '5', scene: 'drama', output_format: 'flac' }),
+    ).resolves.toEqual({ job_id: '9012', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/p1/vocal-splits');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '5',
+      scene: 'drama',
+      output_format: 'flac',
     });
   });
 });

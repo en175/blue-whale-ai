@@ -114,6 +114,38 @@
   text-overflow: ellipsis;
 }
 
+/* 置顶项目常显图钉标记 */
+.pinnedIcon {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* 悬停显示置顶按钮（与 deleteBtn 同款显隐机制） */
+.pinBtn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.projectItem:hover .pinBtn {
+  opacity: 1;
+}
+
+.pinBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
 .deleteBtn {
   width: 24px;
   height: 24px;
@@ -153,15 +185,6 @@
 
 .renameInput:focus {
   border-color: var(--color-border-hover);
-}
-
-.renameError {
-  position: absolute;
-  left: var(--spacing-md);
-  bottom: calc(-1 * var(--spacing-md));
-  margin: 0;
-  color: var(--color-error);
-  font-size: var(--font-size-xs);
 }
 
 /* ---- 分隔线 ---- */

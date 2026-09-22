@@ -182,6 +182,32 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('第 2 段');
   });
 
+  /** 另开一件事的卡（IKG793 / IKG78Y）：用户得看见这张是另一张、接的是哪张。 */
+  it('另开一件事的卡显示范围与承接', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        target_media: 'video',
+        solution_card: { ...card!, scope: { kind: 'new_task', label: '视频版', derived_from: '咖啡产地信息图' } },
+      }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('这张卡管的范围');
+    expect(text).toContain('视频版');
+    expect(text).toContain('承接上一张');
+    expect(text).toContain('〈咖啡产地信息图〉');
+  });
+
+  /** 「接下来怎么做」是模型接着要说的话，不是方案的一部分：放在卡外，和正文一样读（IKGH1Y 追加）。 */
+  it('「接下来怎么做」在卡外面，按正文显示，卡里没有这一项', () => {
+    sessionMock.turns = turnWith(understanding({ solution_card: { ...card!, next_steps: '确认后我写卡。' } }));
+    mount();
+    expect(solutionCard()!.textContent).not.toContain('确认后我写卡。');
+    expect(solutionCard()!.textContent).not.toContain('接下来怎么做');
+    const bodies = [...container.querySelectorAll(`.${styles.md}`)].map((el) => el.textContent);
+    expect(bodies).toContain('确认后我写卡。');
+  });
+
   it('没写范围（整条）时不显示那一行', () => {
     sessionMock.turns = turnWith(understanding());
     mount();

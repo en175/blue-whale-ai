@@ -119,5 +119,43 @@ export function useCanvasDoc(projectId: string) {
 
   const refetch = useCallback(() => load(true), [load]);
 
-  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration };
+  /** 回写快照资产上的 material_id / material_status，二次校验只读这份字典 */
+  const patchAsset = useCallback((assetId: string, patch: Partial<SnapshotAsset>) => {
+    if (!assetId) return;
+    setAssets((prev) => {
+      const current = prev[assetId];
+      if (!current) return prev;
+      return { ...prev, [assetId]: { ...current, ...patch } };
+    });
+  }, []);
+
+  /** 增量并入资产字典（IKFPOT）：应用方案卡等本地写入新素材后，服务端已把资产关联进项目，
+   *  但前端字典仍停留在打开画布时的旧快照——水合 resolveNodeAssets 查不到会误标「素材已被删除」。
+   *  这里把调用方从节点 data 提取的资产信息直接并入字典，避免一次全量 refetch 与中间闪烁。
+   *  已存在且关键字段一致则跳过，避免无谓重渲染。 */
+  const upsertAssets = useCallback((items: SnapshotAsset[]) => {
+    if (items.length === 0) return;
+    setAssets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const item of items) {
+        const key = String(item.asset_id);
+        const existing = next[key];
+        if (!existing) {
+          next[key] = item;
+          changed = true;
+        } else if (
+          existing.access_url !== item.access_url ||
+          existing.width !== item.width ||
+          existing.height !== item.height
+        ) {
+          next[key] = { ...existing, ...item };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration, patchAsset, upsertAssets };
 }

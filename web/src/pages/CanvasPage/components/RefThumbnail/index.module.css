@@ -1,0 +1,181 @@
+/* 参考缩略图（IKFCKK）：56×56 圆角 12，三面板统一；三态 = 编号圆钮 / 悬停 × @ / 悬浮放大预览 */
+.thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #333;
+  background-color: #2a2a2a;
+  flex-shrink: 0;
+}
+
+.thumb img,
+.thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 音频/文本形态：图标居中占位（类型靠缩略图形态区分，角标只显示数字） */
+.kindIcon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 20px;
+  height: 20px;
+  color: #9a9a9a;
+}
+
+/* 编号圆钮：16px 半透明黑、白 10px 数字、四角内嵌 3px；两位数自动加宽为胶囊 */
+.badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+
+/* 悬停操作钮：默认透明（不拦截点击），悬停淡入；约 150ms 过渡 */
+.act {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color var(--transition-fast);
+}
+
+.actRemove {
+  top: 3px;
+  right: 3px;
+}
+
+.actRemove:hover {
+  background-color: rgba(229, 72, 77, 0.85);
+}
+
+.actAt {
+  bottom: 3px;
+  right: 3px;
+}
+
+.actAt:hover {
+  background-color: rgba(0, 0, 0, 0.85);
+}
+
+/* 三态切换：悬停 → 编号淡出、× / @ 淡入 */
+.thumb[data-hovered='true'] .badge {
+  opacity: 0;
+}
+
+.thumb[data-hovered='true'] .act {
+  opacity: 1;
+}
+
+/* ---- 悬浮放大预览浮层：上方居中、视口内收敛；媒体预览纯展示鼠标穿透，文本预览由 TSX inline 覆盖为可移入阅读；卡片沿用 AssetChip 常量 ---- */
+.preview {
+  z-index: var(--z-tooltip);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-active);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+
+.previewMedia {
+  display: block;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+/* 音频预览：图标 + 名称 + 时长（对齐 VideoMentionChip audioPreview 宽度规格） */
+.audioCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(300px, 80vw);
+  color: var(--color-text-primary);
+}
+
+.previewName {
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewMeta {
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* 文本预览：正文内容卡片，超限滚动可读全 */
+.textCard {
+  max-width: 280px;
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- 拖拽排序（IKFCKT）：拖起项半透明 + 目标项前/后半插入指示线 ---- */
+.thumb[data-strip-dragging='true'] {
+  opacity: 0.4;
+}
+
+.thumb[data-strip-over='before'] {
+  box-shadow: -2px 0 0 0 var(--color-accent-active);
+}
+
+.thumb[data-strip-over='after'] {
+  box-shadow: 2px 0 0 0 var(--color-accent-active);
+}
+
+/* IKFM3S：锁定条目（文本索引提供）的定位来源按钮——与移除同位，指向来源文本卡 */
+.actLocate {
+  top: 3px;
+  right: 3px;
+}
+
+.actLocate:hover {
+  background-color: rgba(59, 130, 246, 0.85);
+}
+
+/* IKFM3S：锁定条目（文本索引提供）可见标记——橙色虚线描边区分直接参考 */
+.thumbLocked {
+  outline: 1.5px dashed rgba(249, 115, 22, 0.85);
+  outline-offset: 1px;
+}

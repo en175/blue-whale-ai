@@ -325,6 +325,8 @@
 }
 
 .uploadAssetCard {
+  position: relative;
+  display: block;
   background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
@@ -332,10 +334,53 @@
   box-shadow: var(--asset-upload-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
 }
 
+/* 视觉隐藏但保留可点：display:none 再程序 click() 在弹窗里经常打不开系统选档 */
+.nativeFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .assetCard:hover {
   background: transparent;
   transform: none;
   box-shadow: var(--asset-glass-shadow-hover, 0 20px 46px rgba(0, 0, 0, 0.52));
+}
+
+.assetCardDisabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.assetCardSelected {
+  box-shadow: 0 0 0 2px rgba(160, 160, 170, 0.85);
+}
+
+.checkToggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  z-index: 2;
+}
+
+.checkToggleOn {
+  border-color: #7c7c88;
+  background-color: #7c7c88;
 }
 
 .uploadAssetCard:hover {
@@ -367,6 +412,16 @@
   pointer-events: none;
 }
 
+/* 音频素材占位：无封面，用音符图标居中 */
+.audioPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-tertiary);
+}
+
 /* 图片加载完成后解除 1:1 占位，按真实宽高比撑开（视频保持 1:1） */
 .assetThumbMeasured {
   aspect-ratio: auto;
@@ -381,7 +436,7 @@
 .assetTypeBadge {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -417,10 +472,24 @@
   color: inherit;
 }
 
-.assetDeleteBtn {
+/* 卡片右下角悬浮操作组（IKGHZ3：删除在左、放大预览在右，picker 模式）：悬停显现 */
+.assetHoverActions {
   position: absolute;
   bottom: var(--spacing-sm);
   right: var(--spacing-sm);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+}
+
+.assetCard:hover .assetHoverActions {
+  opacity: 1;
+}
+
+.assetDeleteBtn,
+.assetPreviewBtn {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
@@ -429,19 +498,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-  z-index: 2;
   border: none;
   cursor: pointer;
 }
 
-.assetCard:hover .assetDeleteBtn {
-  opacity: 1;
-}
-
 .assetDeleteBtn:hover {
   background-color: var(--color-error);
+}
+
+.assetPreviewBtn:hover {
+  background-color: rgba(0, 0, 0, 0.7);
 }
 
 /* ---- 新建分组弹窗 ---- */
@@ -548,29 +614,6 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin-top: var(--spacing-md);
-}
-
-.qrOpenBtn {
-  width: 100%;
-  margin-top: var(--spacing-lg);
-  padding: 11px 0;
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-  border: 1px solid var(--color-border-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.qrOpenBtn:hover {
-  background-color: var(--color-bg-active);
-  border-color: var(--color-border-hover);
-}
-
-.qrOpenBtn:active {
-  background-color: var(--color-bg-active);
 }
 
 /* 倒计时提示 */
@@ -743,19 +786,23 @@
   cursor: not-allowed;
 }
 
-/* ---- 素材名称 ---- */
+/* ---- 素材名称条（状态标并入，IKGHZ3） ---- */
 .assetNameOverlay {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 8px;
   z-index: 1;
   pointer-events: none;
 }
 
 .assetName {
-  display: block;
+  flex: 1;
+  min-width: 0;
   font-size: var(--font-size-xs);
   color: #fff;
   white-space: nowrap;
@@ -764,21 +811,18 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
 }
 
-/* ---- 状态徽章 ---- */
-.statusBadge {
-  position: absolute;
-  top: var(--spacing-sm);
-  left: var(--spacing-sm);
-  padding: 2px 8px;
+/* 名称条内「处理中/失败」状态标（原左上角独立浮层并入） */
+.assetNameStatus {
+  flex-shrink: 0;
+  padding: 1px 6px;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   background-color: rgba(250, 173, 20, 0.9);
   color: #000;
   font-weight: 500;
-  z-index: 1;
 }
 
-.statusBadge.statusFailed {
+.assetNameStatusFailed {
   background-color: rgba(250, 82, 82, 0.9);
   color: #fff;
 }

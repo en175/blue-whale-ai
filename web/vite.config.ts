@@ -87,6 +87,74 @@ function tosUploadProxy(): Plugin {
   }
 }
 
+/**
+ * TOS 下载代理插件：将 /__tos-fetch?url=<encoded_tos_url> 转发到真实 TOS 地址
+ * 开发模式下避免浏览器 CORS 限制（组下载需 fetch blob 打包，无法用 window.open 兜底）
+ */
+function tosFetchProxy(): Plugin {
+  const ROUTE = '/__tos-fetch'
+  return {
+    name: 'tos-fetch-proxy',
+    configureServer(server) {
+      console.log('[Vite] TOS 下载代理中间件已注册:', ROUTE)
+      server.middlewares.use(ROUTE, async (req, res) => {
+        try {
+          const reqUrl = new URL(req.url ?? '/', 'http://localhost')
+          const targetUrl = reqUrl.searchParams.get('url')
+          if (!targetUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing url parameter' }))
+            return
+          }
+
+          const target = new URL(targetUrl)
+          console.log('[TOS Fetch Proxy]', req.method, '→', target.host + target.pathname + '?' + target.search.substring(0, 80) + '...')
+
+          const forwardHeaders: Record<string, string> = {}
+          for (const [key, value] of Object.entries(req.headers)) {
+            const lk = key.toLowerCase()
+            if (
+              ['host', 'connection', 'origin', 'referer', 'content-length', 'accept-encoding',
+               'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site', 'sec-ch-ua',
+               'sec-ch-ua-mobile', 'sec-ch-ua-platform'].includes(lk)
+            ) {
+              continue
+            }
+            if (value) {
+              forwardHeaders[key] = Array.isArray(value) ? value[0] : value
+            }
+          }
+          forwardHeaders['host'] = target.host
+
+          const forwardRes = await fetch(targetUrl, {
+            method: req.method,
+            headers: forwardHeaders,
+            redirect: 'manual',
+          })
+
+          const respBuf = Buffer.from(await forwardRes.arrayBuffer())
+          console.log('[TOS Fetch Proxy] TOS 响应:', forwardRes.status, `${respBuf.length} bytes`)
+
+          const respHeaders: Record<string, string> = {}
+          forwardRes.headers.forEach((value, key) => {
+            if (!['transfer-encoding', 'connection', 'accept-ranges'].includes(key.toLowerCase())) {
+              respHeaders[key] = value
+            }
+          })
+          res.writeHead(forwardRes.status, respHeaders)
+          res.end(respBuf)
+        } catch (err) {
+          console.error('[TOS Fetch Proxy] middleware error:', err)
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'TOS fetch proxy error', message: (err instanceof Error ? err.message : String(err)) }))
+          }
+        }
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ command, mode }) => {
   // 按当前 mode 加载 .env.[mode] 环境变量（dev/test → https://web.master.xfai.cloud，见 .env.development / .env.test）
@@ -94,14 +162,21 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins: [
-      // 仅开发服务启用，且须先于 React 插件注册以保留组件源码位置信息。
-      command === 'serve' && codeInspectorPlugin({ bundler: 'vite' }),
+      // 仅真正的 Vite dev server 启用。Vitest 的 command 也是 serve，
+      // code-inspector / TOS 代理会挂住连接，导致 `vitest run` 退不出、门禁被 close timeout 误杀。
+      command === 'serve' && !process.env.VITEST && codeInspectorPlugin({ bundler: 'vite' }),
       react(),
-      tosUploadProxy(),
+      !process.env.VITEST && tosUploadProxy(),
+      !process.env.VITEST && tosFetchProxy(),
     ],
+    // spawnSync（验证门禁）把 stdout 接到管道时 Vite 退不干净；Vitest 2 无 CLI --forceExit。
+    test: {
+      forceExit: true,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        '@lib': path.resolve(__dirname, '../backend/libs'),
       },
     },
     build: {

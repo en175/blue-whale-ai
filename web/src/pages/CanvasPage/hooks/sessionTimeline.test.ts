@@ -15,11 +15,14 @@ import {
   formatDuration,
   itemsFromBlocks,
   itemsFromLive,
+  phasesOf,
+  processItemElapsedMs,
   reduceSessionEvent,
   startLiveRun,
   toolLabel,
   type SessionState,
   type TimelineEvent,
+  type ProcessItem,
   type TimelineItem,
   type Turn,
 } from './sessionTimeline';
@@ -126,7 +129,8 @@ describe('夹具重放：读图轮进行中的形状', () => {
     expect(live.runId).toBe(state.runningRunId);
     expect(live.batchId).toBe(turns[0].user[0].inputBatchId);
     const items = itemsOf(turns[0], live.text);
-    expect(kinds(items)).toEqual(['reasoning', 'text', 'tool']);
+    // 思考落在它发生的位置，是一段 thought；轮级步骤不再画成顶上的「思考过程」块（IKFLB9）。
+    expect(kinds(items)).toEqual(['thought', 'text', 'tool']);
     const tool = items[2];
     if (tool.kind !== 'tool') throw new Error('应是工具行');
     expect(tool.status).toBe('running');
@@ -166,7 +170,7 @@ describe('夹具重放：读图轮进行中的形状', () => {
   it('打字动画没追上断点时，工具行不提前跳出来', () => {
     const state = replay(events.slice(0, completed + 1));
     const [turn] = turnsOf(state);
-    expect(kinds(itemsOf(turn, '我先把'))).toEqual(['reasoning', 'text']);
+    expect(kinds(itemsOf(turn, '我先把'))).toEqual(['thought', 'text']);
   });
 
   it('终态：进行中的那份让位给服务端消息，账记在这一轮上', () => {
@@ -378,6 +382,108 @@ describe('条目投影', () => {
   });
 });
 
+function reasoningDelta(runId: string, text: string, at: number): TimelineEvent {
+  return { type: 'assistant.reasoning.delta', data: { occurred_at: iso(at), run_id: runId, payload: { stream_id: `reasoning_${runId}`, text } } };
+}
+
+describe('思考段与等待行（IKFLB9）', () => {
+  it('进行中：每一段思考落在它发生的位置，被正文或工具行打断就结束、记下时长', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      reasoningDelta('run1', '先看图。', 100),
+      reasoningDelta('run1', '再想构图。', 1_100),
+      delta('run1', '我先读一下。', 2_000),
+      activity('run1', '正在读取图片', 2_100, 'read_asset'),
+      { type: 'tool.activity', data: { occurred_at: iso(2_300), run_id: 'run1', payload: { tool: 'read_asset', status: 'completed', summary: '正在读取图片', elapsed_ms: 200 } } },
+      reasoningDelta('run1', '图里是一只猫。', 5_000),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+
+    const items = itemsFromLive(live, live.text);
+    expect(kinds(items)).toEqual(['thought', 'text', 'tool', 'thought']);
+    expect(items[0]).toMatchObject({ kind: 'thought', text: '先看图。再想构图。', running: false, elapsedMs: 1_900 });
+    expect(items[3]).toMatchObject({ kind: 'thought', text: '图里是一只猫。', running: true, elapsedMs: null });
+  });
+
+  it('本地固化的消息与服务端同形：思考段按顺序成块，思考过程块里不再带原话', () => {
+    const state = replay([
+      runEvent('run.started', 'run1', 'A', 0),
+      reasoningDelta('run1', '想。', 100),
+      delta('run1', '好。', 1_000),
+      runEvent('run.cancelled', 'run1', 'A', 2_000),
+    ]);
+    const blocks = state.messages.find((m) => m.sourceRunId === 'run1')?.blocks ?? [];
+    expect(blocks.map((b) => b.type)).toEqual(['reasoning', 'text']);
+    expect(blocks[0]).toMatchObject({ text: '想。', started_ms: 100, ended_ms: 1_000 });
+  });
+
+  it('落库消息：思考段与等待行按顺序画，一秒以内的等待不画，顶上的思考过程块不再画', () => {
+    const items = itemsFromBlocks(
+      [
+        { type: 'thinking', thinking: { steps: ['正在理解创作需求'] } },
+        { type: 'reasoning', text: '先想构图。', started_ms: 0, ended_ms: 57_600 },
+        { type: 'tool_call', tool: 'skill_read', summary: '正在查阅对应的创作方法', status: 'ok', started_ms: 57_600, ended_ms: 57_604, calls: 3 },
+        { type: 'waiting', summary: '正在根据生成结果整理回复', started_ms: 57_604, ended_ms: 57_900 },
+        { type: 'reasoning', text: '', started_ms: 57_900, ended_ms: 60_000 },
+        { type: 'waiting', summary: '正在根据生成结果整理回复', started_ms: 60_000, ended_ms: 62_100 },
+        { type: 'text', text: '卡写好了。' },
+      ],
+      '卡写好了。',
+    );
+
+    expect(kinds(items)).toEqual(['thought', 'tool', 'thought', 'waiting', 'text']);
+    expect(items[1]).toMatchObject({ kind: 'tool', calls: 3 });
+    expect(items[2]).toMatchObject({ kind: 'thought', text: '', elapsedMs: 2_100 });
+    expect(items[3]).toEqual({ kind: 'waiting', summary: '正在根据生成结果整理回复', elapsedMs: 2_100 });
+  });
+
+  it('老记录没有思考段：思考过程块照旧画，原话还在里面', () => {
+    const items = itemsFromBlocks(
+      [{ type: 'thinking', thinking: { steps: ['正在理解创作需求'], reasoning: '老的原话' } }, { type: 'text', text: '好' }],
+      '好',
+    );
+    expect(items[0]).toMatchObject({ kind: 'reasoning', reasoning: '老的原话' });
+  });
+});
+
+describe('过程按阶段分组（IKFLB9 定稿）', () => {
+  const thought = (elapsedMs: number, text = '想'): ProcessItem => ({ kind: 'thought', text, running: false, startedAt: null, elapsedMs });
+  const waiting = (summary: string, elapsedMs: number): ProcessItem => ({ kind: 'waiting', summary, elapsedMs });
+  const tool = (summary: string, elapsedMs: number): ProcessItem => ({ kind: 'tool', tool: 't', summary, status: 'completed', startedAt: null, elapsedMs, substeps: [], calls: 1 });
+
+  it('工具行自成一段，名字是它做的事；两头连续的思考与等待各合成一段', () => {
+    const phases = phasesOf([
+      waiting('正在等待模型响应', 9_800),
+      thought(5_200),
+      waiting('正在等待模型响应', 4_100),
+      tool('正在查阅对应的创作方法', 30),
+      thought(2_500),
+    ]);
+    expect(phases.map((p) => p.name)).toEqual(['理解需求', '查阅对应的创作方法', '整理回复']);
+    expect(phases.map((p) => p.items.length)).toEqual([3, 1, 1]);
+    expect(phases.map((p) => p.items.reduce((acc, i) => acc + processItemElapsedMs(i, 0), 0))).toEqual([19_100, 30, 2_500]);
+  });
+
+  it('段里有带名字的等待就用它命名：那是服务端在那段时间打的标记', () => {
+    const phases = phasesOf([
+      waiting('正在取出这次要用的创作方法', 2_900),
+      thought(8_400),
+      tool('正在查阅对应的创作方法', 300),
+      waiting('正在根据生成结果整理回复', 2_000),
+      thought(36_700),
+      tool('正在写分镜与提示词', 2_200),
+      waiting('正在根据生成结果整理回复', 2_300),
+    ]);
+    expect(phases.map((p) => p.name)).toEqual(['取出这次要用的创作方法', '查阅对应的创作方法', '根据生成结果整理回复', '写分镜与提示词', '根据生成结果整理回复']);
+  });
+
+  it('进行中的思考按现在现算', () => {
+    const running: ProcessItem = { kind: 'thought', text: '', running: true, startedAt: 1_000, elapsedMs: null };
+    expect(processItemElapsedMs(running, 4_500)).toBe(3_500);
+  });
+});
+
 describe('文案', () => {
   it('工具行按状态换时态，不出现「调用」「工具」', () => {
     expect(toolLabel('正在读取图片', 'running')).toBe('正在读取图片');
@@ -523,5 +629,115 @@ describe('方案卡的事件与归位', () => {
     expect(turns).toHaveLength(2);
     expect(turns[0].solutionCards.map((u) => u.version)).toEqual([1]);
     expect(turns[1].solutionCards).toEqual([]);
+  });
+});
+
+function rewind(runId: string, keepChars: number, at: number, fromDeltaIndex = 0): TimelineEvent {
+  return {
+    type: 'assistant.rewind.v1',
+    data: {
+      occurred_at: iso(at),
+      run_id: runId,
+      payload: {
+        stream_id: `assistant_${runId}`,
+        keep_chars: keepChars,
+        from_delta_index: fromDeltaIndex,
+        reason: 'transport_resumed',
+      },
+    },
+  };
+}
+
+/**
+ * 断线续跑把已经上屏的半句话收回来（IKHCJ2 3c）。
+ *
+ * Agent 到模型网关的连接断掉时，服务端从上一个步骤边界接着跑。断掉的那一步如果已经说出口
+ * 半句话，模型重说时不会一字不差——不擦掉旧的，用户看到的就是「半句话 + 另一个开头」。
+ *
+ * 这一组用例盯两件事：擦得干净，以及**擦得幂等**。SSE 是至少一次投递，重连重放会把同一条
+ * 擦除指令再放一遍；正因为它带的是绝对长度而不是增量，重放才不会多砍一刀。
+ */
+describe('断线续跑的擦除（IKHCJ2）', () => {
+  it('把正文截回边界，后面重说的话接在截口上', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '我先从画面节奏', 200),
+      rewind('run1', 4, 300),
+      delta('run1', '我想先定调性。', 400),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子我想先定调性。');
+  });
+
+  it('同一条擦除指令到两次，结果一样——它带的是绝对长度，不是增量', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [delta('run1', '这条片子我先从画面', 100), rewind('run1', 4, 200), rewind('run1', 4, 210)]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子');
+  });
+
+  /** 连断两次：第二条擦除指令要连第一次重说的话一起擦掉，所以两条的 keep_chars 相同。 */
+  it('连断两次：每次都擦回同一个边界', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '第一次说的', 200),
+      rewind('run1', 4, 300),
+      delta('run1', '第二次说的', 400),
+      rewind('run1', 4, 500),
+      delta('run1', '第三次说的。', 600),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子第三次说的。');
+  });
+
+  it('思考不擦：模型重想一遍的代价远小于整轮失败，思考区里留着断线前那一段', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      reasoningDelta('run1', '先确认画幅。', 100),
+      delta('run1', '我先从画面', 200),
+      rewind('run1', 0, 300),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('');
+    expect(live.reasonings.map((r) => r.text)).toEqual(['先确认画幅。']);
+  });
+
+  /**
+   * 工具行与思考段用正文偏移挂在正文上。擦掉一段正文之后，挂在截口之外的条目会指向一个不
+   * 存在的位置——那会让它们在时间线上排到正文后面去，或者干脆排不出来。
+   */
+  it('挂在被擦掉那段上的工具行跟着回到截口，不会指向不存在的位置', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      delta('run1', '这条片子', 100),
+      delta('run1', '我先查一下方法。', 200),
+      activity('run1', '正在查阅对应的创作方法', 300, 'skill_read'),
+      rewind('run1', 4, 400),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+    expect(live.text).toBe('这条片子');
+    expect(live.toolCalls.every((c) => c.at <= live.text.length)).toBe(true);
+  });
+
+  it('要保留的比现有的还多：当没这回事——迟到的擦除指令不该凭空造出字来', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    live = applyLiveEvent(live, delta('run1', '这条片子', 100), 0);
+    const before = live;
+    live = applyLiveEvent(live, rewind('run1', 99, 200), 0);
+    expect(live).toBe(before);
+  });
+
+  it('跑完了就不再接擦除指令——终态那条正式消息已经是退回之后的', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    live = applyLiveEvent(live, delta('run1', '这条片子', 100), 0);
+    live = { ...live, ended: true };
+    expect(applyLiveEvent(live, rewind('run1', 0, 200), 0).text).toBe('这条片子');
   });
 });

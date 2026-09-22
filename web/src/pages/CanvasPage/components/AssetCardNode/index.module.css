@@ -6,22 +6,25 @@
   position: relative;
 }
 
-/* ---- 悬停/选中顶部操作条（与商品节点一致） ---- */
+/* ---- 顶部操作条（IKGYYF 迁出卡内文档流：钉屏幕层悬浮形态，见 Toolbar.tsx；
+ *  显隐由 NodeFollowToolbar 容器条件渲染，不再有 opacity 占位常驻。
+ *  IKGYYB 审查对齐：迁移前 topBar 是 .wrapper 直接子元素、条宽=卡宽（.card 320px）
+ *  两端分布（标签贴左缘、按钮贴右缘）——钉屏幕层内条宽自适应内容，min-width 锚回
+ *  卡宽保持视觉等价（改 .card 宽度时须同步此值）。
+ * IKGZ86 浮层容器视觉统一：顶栏补容器底四件套令牌（背景/描边/圆角/阴影），fit-content 在 min-width 之上按内容收紧 ---- */
 .topBar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--spacing-md);
-  margin-bottom: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition-fast);
-}
-
-.wrapper:hover .topBar,
-.topBarVisible {
-  opacity: 1;
-  pointer-events: auto;
+  justify-content: space-between;
+  width: fit-content;
+  min-width: 320px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
 }
 
 .topLabel {
@@ -36,10 +39,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   cursor: pointer;
@@ -47,7 +50,7 @@
 }
 
 .addToChatBtn:hover {
-  background-color: #3a3a3a;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .card {

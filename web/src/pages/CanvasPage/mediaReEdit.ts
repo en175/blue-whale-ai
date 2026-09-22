@@ -7,17 +7,22 @@
 import type { Node } from '@xyflow/react';
 
 /** 节点 data 是否携带生成任务 id（兼容 string/number 历史形态） */
-function readJobId(data: Record<string, unknown> | undefined): string | number | undefined {
+function readJobId(data: { jobId?: unknown } | undefined): string | number | undefined {
   const raw = data?.jobId;
   return typeof raw === 'string' || typeof raw === 'number' ? raw : undefined;
+}
+
+/** 成品卡「有生成记录」判定（无 Node 上下文）：jobId 存在且非草稿。
+ *  点卡片打开绑定面板（onNodeClick，IKH3WE 起重新编辑唯一入口）与 hasGenerationRecord 共用此口径（IKGX5M）。 */
+export function hasGenerationRecordData(data: { jobId?: unknown; draft?: unknown } | undefined): boolean {
+  return data?.draft !== true && readJobId(data) !== undefined;
 }
 
 /** 成品卡「有生成记录」判定：媒体节点 + 已有生成任务。
  *  含重新生成中的卡（jobId 在、genStatus=generating）；不含待生成草稿与上传素材卡。 */
 export function hasGenerationRecord(node: Node | undefined): boolean {
   if (!node || node.type !== 'mediaNode') return false;
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  return data.draft !== true && readJobId(data) !== undefined;
+  return hasGenerationRecordData(node.data as { jobId?: unknown; draft?: unknown } | undefined);
 }
 
 /** 生成任务原位承接判定（Q1）：草稿身份节点（IKDMQQ）或有生成记录的成品卡（IKDMQU）。

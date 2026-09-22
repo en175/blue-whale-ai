@@ -7,12 +7,13 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
+import type { BeforeApplicationShutdown } from "@nestjs/common";
 import type { Request, Response } from "express";
 import {
   TRACE_ID_HEADER,
   generateTraceId,
   getCurrentTraceId,
-} from "@blue-whale/core/logging";
+} from "@lib/core/logging";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
@@ -37,8 +38,61 @@ const NEW_API_BASE_URL = process.env.NEW_API_BASE_URL?.trim() || "";
  * 有界。**不要沿用 60**——那是上一版按总时长设的数，含义完全不同。
  */
 const UPSTREAM_IDLE_TIMEOUT_MS = Number(process.env.AGENT_MODEL_IDLE_TIMEOUT_MS) || 90_000;
+/**
+ * 停机时等在途模型流自己跑完的预算（IKHCJ2）。
+ *
+ * **默认值压在 Docker 的停止超时之下，这不是保守，是安全边界。** 容器 `docker stop` 默认只给
+ * 10 秒，超时就 SIGKILL。等 90 秒却在第 10 秒被强杀，结果比不等更糟：排空还卡在等待里，
+ * 连那句 `gateway_shutting_down` 都没发出去，Agent 又退回「大概是我这一段断的」的推断，
+ * 而我们连日志都没留下。
+ *
+ * 要真正排空（一次产卡调用可以跑到 100 秒），**必须两处一起改**：把这个值抬到
+ * `AGENT_MODEL_IDLE_TIMEOUT_MS` 那个量级，同时把容器的停止超时调到它之上（compose 的
+ * `stop_grace_period`、K8s 的 `terminationGracePeriodSeconds`），留出余量。
+ * 只改一处都是白改——只抬这个值会被强杀，只抬停止超时则这里 8 秒就把流掐了。
+ */
+const DRAIN_TIMEOUT_MS = Number(process.env.AGENT_MODEL_DRAIN_TIMEOUT_MS) || 8_000;
+/** 排空轮询的间隔。短到不拖慢停机，长到不空转。 */
+const DRAIN_POLL_MS = 200;
 /** 本控制器挂载的路由前缀（含全局 /api）。NewAPI 只认裸 `/v1/...`，转发前必须去掉这段。 */
 const ROUTE_PREFIX = "/api/internal/agent-model";
+
+/**
+ * 在途模型流的登记簿（IKHCJ2）。
+ *
+ * 本进程一重启，这些流全部当场断掉，Agent 那一侧只看到一个没有任何错误码的
+ * `terminated`——它只能推断"大概是我到网关这一段断的"，无从分辨是我们关门了、还是
+ * New API 关门了。2026-09-20 就是这样：一次后端部署打断了一轮已经跑到写卡的对话，
+ * 而库里记成 `model_error`「模型调用失败，请重试」，模型毫发无伤。
+ *
+ * 登记簿的唯一用途是：**关门前把话说清楚。** 见
+ * `blue-whale-agent` 仓 `docs/blueprint/断点归属与传输中断错误码.md`。
+ */
+const inFlightStreams = new Set<{
+  res: import("express").Response;
+  runId: string;
+  traceId: string;
+  /**
+   * 掐断这一条，用于排空超时之后（IKHCJ2）。
+   *
+   * 是个函数而不是一句固定的写法，因为一次调用有**两段**都算在途，收尾方式不同：等上游回
+   * 第一个字的那一段（响应头还没发，只能整个回一个 503），和正在往下游倒字节的那一段
+   * （响应头早发了，只能补一帧 SSE 错误再 `end()`）。
+   *
+   * 2026-09-20 第一版只登记了后一段，于是重启正好打在「等模型回话」时，排空看到的是一本
+   * 空簿子——立刻退出，流照死。两段都要登记。
+   */
+  abort: () => void;
+}>();
+
+/**
+ * 关门时写给在途流的那一帧，OpenAI 兼容的 SSE 错误形状。
+ *
+ * 用 `error.code` 而不是自定义字段：Agent 侧沿着 AI SDK 的错误链找 `code` / `type`，
+ * 这是唯一一种各家 provider adapter 都会保留的位置。值域与 agent 仓的 `GATEWAY_SIGNALS`
+ * 成对，一边加词而另一边不认，Agent 会当作"没说过"退回推断——两边必须同改。
+ */
+const SHUTDOWN_SIGNAL = "gateway_shutting_down";
 
 /** Agent 声明「这次调用属于哪个项目」。计费主体由本层查库解出，不接受 Agent 自报。 */
 const PROJECT_HEADER = "x-blue-whale-project-id";
@@ -166,8 +220,23 @@ function authorizedAgentService(header: string | undefined): boolean {
 @Public()
 @BypassTransform()
 @Controller("internal/agent-model")
-export class AgentModelGatewayController {
+export class AgentModelGatewayController implements BeforeApplicationShutdown {
   private readonly ownerCache = new OwnerCache();
+
+  /**
+   * 保险丝：`app.close()` 被直接调用（测试、非信号路径）时仍然排空一次（IKHCJ2）。
+   *
+   * **正常停机不走这里**，走的是 `main.ts` 的信号处理器直接调用
+   * {@link drainAgentModelStreams}。原因是 Nest 的停机顺序把 `onModuleDestroy` 排在
+   * `beforeApplicationShutdown` **前面**，而第一步就把 Redis 关了：在途请求挂着的 Redis
+   * 命令被 `flushQueue` 以一个未处理的拒绝掀翻，整个进程当场死。2026-09-20 实测——排空日志
+   * 打出了「在途 1 条，最多等 90000ms」，0.2 秒后进程就没了，ioredis 的堆栈留在 stdout 上。
+   *
+   * 排空必须发生在 Nest 拆东西**之前**，不是中间。排过之后簿子是空的，这里会立刻返回。
+   */
+  async beforeApplicationShutdown(): Promise<void> {
+    await drainAgentModelStreams();
+  }
 
   constructor(private readonly project: ProjectService) {}
 
@@ -273,6 +342,58 @@ export class AgentModelGatewayController {
     // 流式与否不再决定有没有闸，只决定闸打在哪儿：两者都用同一个空闲计时器。等首字节的这
     // 一段也归它管，所以计时器在 fetch 之前就起。
     const idle = createIdleTimer(UPSTREAM_IDLE_TIMEOUT_MS);
+
+    // 登记进在途簿（IKHCJ2）——**在 fetch 之前，不是拿到响应之后**。
+    //
+    // 一次调用有两段都算在途：等上游回第一个字的这一段，和之后倒字节的那一段。第一版只登记了
+    // 后一段，2026-09-20 实测重启正好打在前一段（模型想了 9 秒还没开口），排空看到空簿子立刻
+    // 退出，流照死——而日志里一行都没有，看上去像是功能根本没生效。
+    //
+    // `abort` 分两种收尾：响应头还没发就整个回一个 503（带同一个信号），已经发了就补一帧 SSE
+    // 错误。`aborted` 让下面的正常路径知道该闭嘴——否则 fetch 一返回就会往已经发过的响应上
+    // 再写一次头，Express 直接抛 `ERR_HTTP_HEADERS_SENT`。
+    const inFlight = {
+      res,
+      runId: runId ?? "",
+      traceId: headers[TRACE_ID_HEADER] ?? "",
+      aborted: false,
+      abort(): void {
+        this.aborted = true;
+        if (res.headersSent) {
+          if (!res.writableEnded) {
+            res.write(
+              `data: ${JSON.stringify({
+                error: {
+                  message: "模型网关正在停机，本次调用被中断",
+                  type: SHUTDOWN_SIGNAL,
+                  code: SHUTDOWN_SIGNAL,
+                },
+              })}\n\n`,
+            );
+            res.end();
+          }
+          return;
+        }
+        // 还没开口的那一段：503 里带同一个信号。Agent 对「上游明说要关门」的识别不看传输形状
+        // ——SSE 帧和 HTTP 状态两条路落的是同一个码、同一个断点归属。
+        res.status(503).json({
+          code: 503,
+          msg: "模型网关正在停机，本次调用被中断",
+          data: { reason: SHUTDOWN_SIGNAL },
+          error: {
+            message: "模型网关正在停机，本次调用被中断",
+            type: SHUTDOWN_SIGNAL,
+            code: SHUTDOWN_SIGNAL,
+          },
+        });
+        idle.abort();
+      },
+    };
+    inFlightStreams.add(inFlight);
+    const unregister = (): void => {
+      inFlightStreams.delete(inFlight);
+    };
+
     let upstream: globalThis.Response;
     try {
       const init: RequestInit = { method: req.method, headers, signal: idle.signal };
@@ -280,6 +401,9 @@ export class AgentModelGatewayController {
       upstream = await fetch(upstreamUrl, init);
     } catch (error) {
       idle.clear();
+      unregister();
+      // 停机掐的那一次：响应已经由 `abort` 发过了，这里再写就是 ERR_HTTP_HEADERS_SENT。
+      if (inFlight.aborted) return;
       const message = idle.expired
         ? `NewAPI ${idleSeconds()} 秒没有任何响应`
         : "NewAPI 不可用";
@@ -287,6 +411,12 @@ export class AgentModelGatewayController {
         `[internal/agent-model] upstream request failed: ${message} (${error instanceof Error ? error.message : String(error)})`,
       );
       res.status(502).json({ code: 502, msg: message, data: null });
+      return;
+    }
+    if (inFlight.aborted) {
+      // fetch 刚好在掐断之后返回：响应已经发完，上游那份 body 直接丢弃。
+      idle.clear();
+      unregister();
       return;
     }
 
@@ -298,13 +428,26 @@ export class AgentModelGatewayController {
       const stream = Readable.fromWeb(
         upstream.body as import("node:stream/web").ReadableStream,
       );
+      // 登记在 fetch 之前就做了（见上），这里只接收尾：下面每一条结束路径都注销——登记簿
+      // 漏一条，停机排空就会一直等一条已经结束的流，白白耗光预算。
+      //
       // 每来一段字节就把闸往后推。`data` 与 `pipe` 同一个同步块内挂上，中间不可能漏掉一段
       // ——流的事件是异步发的。
       stream.on("data", () => idle.touch());
-      stream.on("end", () => idle.clear());
-      stream.on("close", () => idle.clear());
+      stream.on("end", () => {
+        idle.clear();
+        unregister();
+      });
+      stream.on("close", () => {
+        idle.clear();
+        unregister();
+      });
+      // 客户端（Agent）自己走了也要注销：否则这条流会一直挂在簿上，直到停机时被当成
+      // 「我们害死的」记一笔——那是冤枉自己，而错误的归属和没有归属一样坏。
+      res.on("close", unregister);
       stream.on("error", (error) => {
         idle.clear();
+        unregister();
         logger.error(
           `[internal/agent-model] upstream stream error: ${idle.expired ? `空闲超过 ${idleSeconds()} 秒` : error instanceof Error ? error.message : String(error)}`,
         );
@@ -313,7 +456,9 @@ export class AgentModelGatewayController {
       });
       stream.pipe(res);
     } else {
+      // 非流式响应（上游没给 body）：这一条同样登记过，同样要注销。
       idle.clear();
+      unregister();
       res.end();
     }
   }
@@ -326,6 +471,88 @@ export class AgentModelGatewayController {
     this.ownerCache.set(projectId, ownerId);
     return ownerId;
   }
+}
+
+/**
+ * 停机排空：先等在途模型流自己跑完，等不及的那几条再说一句话掐掉（IKHCJ2）。
+ *
+ * 两件事，顺序不能反：
+ *
+ * 1. **排空**：等到登记簿空了，或者花光 {@link DRAIN_TIMEOUT_MS}。跑完的那些是全须全尾收尾的，
+ *    Agent 那边压根不知道我们重启过——这才是「部署不该杀掉对话」的正解。
+ * 2. **掐断并交代**：排空超时后仍在途的，`abort()` 补一帧 `gateway_shutting_down`（还没开口时
+ *    整个回一个 503）。这一帧把「这次中断是部署造成的」从 Agent 的推断变成本层的陈述：它收到
+ *    之后落 `model_gateway_interrupted` / `break_reporter=gateway` / `break_segment_inferred=false`，
+ *    而不是把账记在模型头上。
+ *
+ * 写失败一律吞掉：对端可能已经先走了，而**停机流程不能被一条写不出去的流拖住**。
+ *
+ * **排空期间 HTTP server 还开着**（`app.close()` 排在这之后），所以同一轮对话接下来的模型调用
+ * 照样进得来、照样登记。这是刻意的，也正是它管用的原因：2026-09-20 实测一次 `docker stop` 打在
+ * 对话中途，排空等了 36.4 秒跨过好几次模型调用，那一轮 run 完整跑完、`completed` 收尾。
+ * 代价是繁忙的服务可能一直有新流进来、直到耗光预算——预算就是为这个封顶的。
+ *
+ * **是模块级函数而不是控制器方法**，因为它必须能在 Nest 生命周期之外被调用——见
+ * `AgentModelGatewayController.beforeApplicationShutdown` 上那段关于 Redis 先被关掉的说明。
+ *
+ * ⚠️ 排空预算与容器停止超时必须配套，见 {@link DRAIN_TIMEOUT_MS}。
+ */
+export async function drainAgentModelStreams(): Promise<void> {
+  if (inFlightStreams.size === 0) return;
+
+  const startedAt = Date.now();
+  const atStart = inFlightStreams.size;
+  logger.warn(
+    `[internal/agent-model] 停机排空开始：在途 ${atStart} 条，最多等 ${DRAIN_TIMEOUT_MS}ms`,
+    {
+      event: "model_gateway.shutdown_drain_start",
+      in_flight_streams: atStart,
+      drain_timeout_ms: DRAIN_TIMEOUT_MS,
+    },
+  );
+  while (inFlightStreams.size > 0 && Date.now() - startedAt < DRAIN_TIMEOUT_MS) {
+    await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
+  }
+  const elapsedMs = Date.now() - startedAt;
+
+  if (inFlightStreams.size === 0) {
+    // 全部自然收尾——这次部署一轮对话都没杀。没有 `shutdown_abort`，因为确实没中断谁。
+    logger.warn(`[internal/agent-model] 停机排空完成：${atStart} 条全部跑完，用时 ${elapsedMs}ms`, {
+      event: "model_gateway.shutdown_drained",
+      drained_streams: atStart,
+      drain_elapsed_ms: elapsedMs,
+    });
+    return;
+  }
+
+  const runIds: string[] = [];
+  for (const entry of inFlightStreams) {
+    runIds.push(entry.runId || "-");
+    try {
+      entry.abort();
+    } catch {
+      // 对端先走了。这条流本来就没人收，没什么可补救的。
+    }
+  }
+  inFlightStreams.clear();
+  // 有了这一行，「这次部署打断了几轮对话」是可查的数字，而不是靠猜。此前后端对自己害死了
+  // 几条在途流毫无记录——四方各知道一小块，没有一方拼得出全貌。
+  //
+  // 排空之后它记的是「等不及的那几条」，不再是「在途的全部」。`drained_streams` 与
+  // `aborted_streams` 一起看，部署的真实代价就是可量的数字。
+  logger.warn(
+    `[internal/agent-model] 停机排空超时，中断在途模型流 ${runIds.length} 条（原 ${atStart} 条，等了 ${elapsedMs}ms）: ${runIds.join(",")}`,
+    {
+      event: "model_gateway.shutdown_abort",
+      aborted_streams: runIds.length,
+      drained_streams: atStart - runIds.length,
+      drain_elapsed_ms: elapsedMs,
+      drain_timeout_ms: DRAIN_TIMEOUT_MS,
+      run_ids: runIds.join(","),
+      break_segment: "agent_to_gateway",
+      break_reporter: "gateway",
+    },
+  );
 }
 
 /** 闸的长度，写成人看的秒数。不用 `Math.round`：测试把窗口压到几百毫秒，round 会说成「0 秒」。 */
@@ -363,6 +590,18 @@ function createIdleTimer(ms: number) {
     clear() {
       if (handle) clearTimeout(handle);
       handle = undefined;
+    },
+    /**
+     * 主动掐断上游请求，用于停机排空超时（IKHCJ2）。
+     *
+     * 与超时共用一个 `AbortController`，但不置 `expired`——这次中断的原因是我们要关门，
+     * 不是「NewAPI 多少秒没响应」。两者落的日志和回给 Agent 的话都不一样，混成一个会让
+     * 「我们重启了」看上去像「上游挂了」。
+     */
+    abort() {
+      if (handle) clearTimeout(handle);
+      handle = undefined;
+      controller.abort();
     },
   };
 }

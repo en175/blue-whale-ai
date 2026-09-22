@@ -10,6 +10,9 @@
   --color-bg-card: #141414;
   --color-bg-hover: #222222;
   --color-bg-active: #2a2a2a;
+  /* 浮层容器背景（IKGZ86/ADR-0100 定稿）：画布悬浮容器（卡工具条/浮层菜单/底部面板家族）
+     统一取此值，基准 = 底部面板家族现值，不再各写各的硬编码色。 */
+  --color-bg-overlay: #1e1e1e;
   /* 滚动列表项的近不透明静态表面，避免主题背景穿透卡片。 */
   --asset-item-surface: rgba(6, 6, 6, 0.92);
 
@@ -23,6 +26,8 @@
   --color-border-primary: #2a2a2a;
   --color-border-secondary: #333333;
   --color-border-hover: #444444;
+  /* 浮层容器描边（IKGZ86/ADR-0100 定稿）。 */
+  --color-border-overlay: #2c2c2c;
 
   /* 主题色 */
   --color-accent-primary: #4c6ef5;
@@ -42,10 +47,13 @@
      此前这个绿散在 .cardBtnPrimary 里写死，状态点那边则误写成
      `var(--color-accent-primary, #d5f06a)`——主题色 token 是有定义的（蓝），
      兜底永远走不到，于是本该同一语义的两处一蓝一绿。 */
-  --color-accent-agent: #d5f06a;
-  --color-accent-agent-hover: #c7e05c;
-  /* 落在强调绿上的前景色。绿是亮色，必须配深色文字。 */
-  --color-accent-agent-ink: #111111;
+  --color-accent-agent: #f2b544;
+  --color-accent-agent-hover: #e6a838;
+  /* 落在强调色上的前景色。暖黄是亮色，必须配深色文字。 */
+  --color-accent-agent-ink: #1a1200;
+  /* 强调色的柔和底：选中态、方案卡卡头的色带用它，不再整块实心（IKFLB9 定稿：柠檬绿太亮，改暖黄且只用在
+     主按钮、进行中、选中描边）。 */
+  --color-accent-agent-soft: rgba(242, 181, 68, 0.16);
 
   /* ---- 尺寸系统 ---- */
   --sidebar-width: 80px;
@@ -87,6 +95,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  /* 浮层容器阴影（IKGZ86/ADR-0100 定稿）。 */
+  --shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.4);
 
   /* ---- 层级 ---- */
   /* 画布上的浮层（Agent 面板等）：要压住画布控件（缩放控件为 10），但不能盖住

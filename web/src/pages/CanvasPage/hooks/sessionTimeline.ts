@@ -14,13 +14,14 @@
  * 录下的事件逐条喂进来，断言 `buildTurns` 的形状。
  */
 import type {
+  AskedQuestion,
   GenerationCardBlock,
   RequirementUnderstanding,
   SessionContentBlock,
   SessionMessage,
   SessionRun,
 } from '@/api/agentSessions';
-import { mergeConfirmedUser as mergeUserMessage } from './userMessageProjection';
+import { mergeConfirmedUser as mergeUserMessage, textOf } from './userMessageProjection';
 import type { PartialCardPreview } from './partialCardPreview';
 import { toPartialCardPreview } from './partialCardPreview';
 import {
@@ -87,6 +88,8 @@ export interface LiveSubstep {
 }
 
 export interface LiveToolCall {
+  /** 与思考段共用的到达序号：两者按它排先后（IKFLB9）。 */
+  seq: number;
   tool: string;
   /** 服务端模板句，进行时态（「正在读取图片」）。展示时按状态换时态，见 {@link toolLabel}。 */
   summary: string;
@@ -99,6 +102,18 @@ export interface LiveToolCall {
   elapsedMs: number | null;
   /** 调用期间报的子步骤（读素材的「打开素材文件」「读取 xxx」）。 */
   substeps: LiveSubstep[];
+}
+
+/**
+ * 进行中的一段思考（IKFLB9）。思考不再是整轮一块、固定排在最前：模型「想 → 说 → 调工具 → 再想」，
+ * 每一段想都落在它发生的位置上。`at` 是它开始时正文缓冲里已有的字数，正文在这里断开。
+ */
+export interface LiveReasoning {
+  seq: number;
+  at: number;
+  text: string;
+  startedAt: number;
+  endedAt: number | null;
 }
 
 /**
@@ -115,9 +130,12 @@ export interface LiveRun {
   steps: string[];
   /** 最近一个活动节点，不分级别。输入框上方的状态行用它。 */
   lastActivity: string | null;
-  reasoning: string;
+  /** 按发生顺序的各段思考。 */
+  reasonings: LiveReasoning[];
   text: string;
   toolCalls: LiveToolCall[];
+  /** 下一个思考段或工具行的到达序号。 */
+  seq: number;
   partialCard: PartialCardPreview | null;
   /** 终态之后仍留在屏幕上（失败、计费门）：不再接收增量，工具全部收口。 */
   ended: boolean;
@@ -130,9 +148,10 @@ export function startLiveRun(runId: string, batchId: string | null, startedAt: n
     startedAt,
     steps: [],
     lastActivity: null,
-    reasoning: '',
+    reasonings: [],
     text: '',
     toolCalls: [],
+    seq: 0,
     partialCard: null,
     ended: false,
   };
@@ -177,6 +196,12 @@ function replaceLast<T>(list: readonly T[], next: T): T[] {
   return [...list.slice(0, -1), next];
 }
 
+/** 还开着的那段思考到此结束：正文或工具行来了，模型不在想了。 */
+function endReasoning(reasonings: readonly LiveReasoning[], when: number): LiveReasoning[] {
+  const last = reasonings[reasonings.length - 1];
+  return last && last.endedAt === null ? replaceLast(reasonings, { ...last, endedAt: when }) : [...reasonings];
+}
+
 /** 一个步骤不该同时出现在两处：进了工具行的子步骤，就不再进思考块。 */
 function isToolFact(live: Pick<LiveRun, 'toolCalls'>, summary: string): boolean {
   return live.toolCalls.some((c) => c.summary === summary || c.substeps.some((s) => s.summary === summary));
@@ -218,8 +243,10 @@ export function applyLiveEvent(live: LiveRun, ev: TimelineEvent, now: number = D
       if (last && last.tool === tool && last.at === live.text.length) return next;
       next.toolCalls = [
         ...live.toolCalls,
-        { tool, summary, at: live.text.length, status: 'running', startedAt: when, endedAt: null, elapsedMs: null, substeps: [] },
+        { seq: live.seq, tool, summary, at: live.text.length, status: 'running', startedAt: when, endedAt: null, elapsedMs: null, substeps: [] },
       ];
+      next.reasonings = endReasoning(live.reasonings, when);
+      next.seq = live.seq + 1;
       return next;
     }
     const running = lastRunning(live);
@@ -253,8 +280,10 @@ export function applyLiveEvent(live: LiveRun, ev: TimelineEvent, now: number = D
         ...live,
         toolCalls: [
           ...live.toolCalls,
-          { tool, summary: summary || tool, at: live.text.length, status: 'running', startedAt: when, endedAt: null, elapsedMs: null, substeps: [] },
+          { seq: live.seq, tool, summary: summary || tool, at: live.text.length, status: 'running', startedAt: when, endedAt: null, elapsedMs: null, substeps: [] },
         ],
+        reasonings: endReasoning(live.reasonings, when),
+        seq: live.seq + 1,
       };
     }
     const terminal: ToolStatus | null =
@@ -280,12 +309,47 @@ export function applyLiveEvent(live: LiveRun, ev: TimelineEvent, now: number = D
 
   if (t === 'assistant.delta') {
     const text = str(payload.text);
-    return text ? { ...live, text: live.text + text } : live;
+    return text ? { ...live, text: live.text + text, reasonings: endReasoning(live.reasonings, when) } : live;
+  }
+
+  /**
+   * 断线续跑：把已经上屏的正文截回第 `keep_chars` 个字（IKHCJ2）。
+   *
+   * Agent 到模型网关的连接断掉时，服务端从上一个步骤边界接着跑。断掉的那一步如果已经说出口
+   * 半句话，模型重说时不会一字不差——不擦掉旧的，用户看到的就是「半句话 + 另一个开头」。
+   *
+   * **它带的是绝对长度，所以重复执行是安全的**：SSE 至少一次投递，重连重放会把同一条指令
+   * 再放一遍，而「截到第 N 个字」放几遍都是同一个结果。
+   *
+   * 思考不擦：模型重想一遍的代价远小于整轮失败，那一段留在思考区里。这是服务端知情的取舍，
+   * 不是这里漏了。
+   */
+  if (t === 'assistant.rewind.v1') {
+    const keep = typeof payload.keep_chars === 'number' ? payload.keep_chars : null;
+    // 要保留的比现有的还多，就当没这回事：一条迟到的指令不该凭空造出字来，也不该改任何东西。
+    if (keep === null || keep < 0 || keep >= live.text.length) return live;
+    return {
+      ...live,
+      text: live.text.slice(0, keep),
+      // 工具行与思考段用正文偏移挂在正文上。挂在截口之外的跟着回到截口，否则它们会指向一个
+      // 不存在的位置，在时间线上排到正文后面去。
+      toolCalls: live.toolCalls.map((c) => (c.at > keep ? { ...c, at: keep } : c)),
+      reasonings: live.reasonings.map((r) => (r.at > keep ? { ...r, at: keep } : r)),
+    };
   }
 
   if (t === 'assistant.reasoning.delta') {
     const chunk = str(payload.text);
-    return chunk ? { ...live, reasoning: live.reasoning + chunk } : live;
+    if (!chunk) return live;
+    const last = live.reasonings[live.reasonings.length - 1];
+    if (last && last.endedAt === null) {
+      return { ...live, reasonings: replaceLast(live.reasonings, { ...last, text: last.text + chunk }) };
+    }
+    return {
+      ...live,
+      reasonings: [...live.reasonings, { seq: live.seq, at: live.text.length, text: chunk, startedAt: when, endedAt: null }],
+      seq: live.seq + 1,
+    };
   }
 
   if (t === 'prompt_card.partial.v1') {
@@ -307,8 +371,20 @@ export function closeLiveRun(live: LiveRun, outcome: RunOutcome, endedAt: number
       ? { ...c, status: forced, endedAt, substeps: c.substeps.map((s) => (s.endedAt === null ? { ...s, endedAt } : s)) }
       : c,
   );
-  return { ...live, toolCalls, partialCard: null, ended: true };
+  return { ...live, toolCalls, reasonings: endReasoning(live.reasonings, endedAt), partialCard: null, ended: true };
 }
+
+/** 工具行与思考段按到达顺序排好（IKFLB9）：正文在每一个断点处切开。 */
+type LiveBreak = { kind: 'tool'; call: LiveToolCall } | { kind: 'reasoning'; reasoning: LiveReasoning };
+
+function liveBreaks(live: LiveRun): LiveBreak[] {
+  return [
+    ...live.toolCalls.map((call): LiveBreak => ({ kind: 'tool', call })),
+    ...live.reasonings.map((reasoning): LiveBreak => ({ kind: 'reasoning', reasoning })),
+  ].sort((a, b) => (a.kind === 'tool' ? a.call.seq : a.reasoning.seq) - (b.kind === 'tool' ? b.call.seq : b.reasoning.seq));
+}
+
+const breakAt = (item: LiveBreak): number => (item.kind === 'tool' ? item.call.at : item.reasoning.at);
 
 /* ============ 进行中的一轮 → 消息部件（本地固化） ============ */
 
@@ -321,13 +397,23 @@ export function closeLiveRun(live: LiveRun, outcome: RunOutcome, endedAt: number
  */
 export function blocksFromLive(live: LiveRun): SessionContentBlock[] {
   const blocks: SessionContentBlock[] = [];
-  if (live.steps.length > 0 || live.reasoning) {
-    blocks.push({ type: 'thinking', thinking: { steps: live.steps, ...(live.reasoning ? { reasoning: live.reasoning } : {}) } });
-  }
+  if (live.steps.length > 0) blocks.push({ type: 'thinking', thinking: { steps: live.steps } });
   let cursor = 0;
-  for (const call of live.toolCalls) {
-    const chunk = live.text.slice(cursor, call.at);
+  for (const item of liveBreaks(live)) {
+    const chunk = live.text.slice(cursor, breakAt(item));
     if (chunk.trim()) blocks.push({ type: 'text', text: chunk });
+    cursor = Math.max(cursor, breakAt(item));
+    if (item.kind === 'reasoning') {
+      const { reasoning } = item;
+      blocks.push({
+        type: 'reasoning',
+        text: reasoning.text,
+        started_ms: reasoning.startedAt - live.startedAt,
+        ended_ms: (reasoning.endedAt ?? reasoning.startedAt) - live.startedAt,
+      });
+      continue;
+    }
+    const { call } = item;
     blocks.push({
       type: 'tool_call',
       tool: call.tool,
@@ -342,7 +428,6 @@ export function blocksFromLive(live: LiveRun): SessionContentBlock[] {
         ended_ms: s.endedAt === null ? null : s.endedAt - live.startedAt,
       })),
     });
-    cursor = call.at;
   }
   const tail = live.text.slice(cursor);
   if (tail.trim()) blocks.push({ type: 'text', text: tail });
@@ -358,11 +443,21 @@ export interface TimelineSubstep {
 }
 
 /**
- * 一轮里的条目。`reasoning`（它在想）、`tool`（它在做）、`text`（它在说）、`card`（它交付了）。
- * 「思考 → 短句 → 工具 → 短句」是这个数组按顺序渲染的自然结果，不需要为交替感单独写逻辑。
+ * 一轮里的条目。`reasoning`（轮级步骤与老记录整块的思考）、`thought`（它在想的一段）、`tool`（它在做）、
+ * `waiting`（两段之间它在等什么）、`text`（它在说）、`card`（它交付了）。
+ * 「思考 → 短句 → 工具 → 等待 → 思考 → 短句」是这个数组按顺序渲染的自然结果，不需要为交替感单独写逻辑。
  */
 export type TimelineItem =
   | { kind: 'reasoning'; steps: string[]; reasoning: string; live: boolean }
+  | {
+      /** 模型的一段思考，落在它发生的位置（IKFLB9）。 */
+      kind: 'thought';
+      text: string;
+      running: boolean;
+      /** 进行中用它读秒；结束后用 elapsedMs。 */
+      startedAt: number | null;
+      elapsedMs: number | null;
+    }
   | {
       kind: 'tool';
       tool: string;
@@ -372,8 +467,16 @@ export type TimelineItem =
       startedAt: number | null;
       elapsedMs: number | null;
       substeps: TimelineSubstep[];
+      /** 并发合成这一行的调用次数；一次时为 1。 */
+      calls: number;
     }
-  | { kind: 'text'; text: string }
+  | {
+      /** 两段之间没有输出的时间（IKFLB9），只在落库之后才有。 */
+      kind: 'waiting';
+      summary: string;
+      elapsedMs: number;
+    }
+  | { kind: 'text'; text: string; questions?: AskedQuestion[] }
   | { kind: 'card'; card: GenerationCardBlock }
   | { kind: 'card_preview'; preview: PartialCardPreview };
 
@@ -394,6 +497,12 @@ function elapsedOf(started: unknown, ended: unknown): number | null {
  *
  * 思考块里与工具行重复的步骤（工具自己的摘要、它的子步骤）不再出现在思考里——同一事实只画一次。
  */
+/**
+ * 短于它的等待不画：一两百毫秒的调度间隔画成一行只是噪音。服务端早已把 300ms 以内的缝并进相邻的段，
+ * 能落到这里的等待至少那么长；一秒以内的仍然不值得占一行。
+ */
+export const MIN_VISIBLE_WAITING_MS = 1000;
+
 export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallbackText: string): TimelineItem[] {
   const toolFacts = new Set<string>();
   for (const b of blocks) {
@@ -402,11 +511,25 @@ export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallback
     for (const s of b.substeps ?? []) toolFacts.add(s.summary);
   }
   const items: TimelineItem[] = [];
+  // 有了按顺序的思考段与等待行（IKFLB9），顶上那块「思考过程」就不再画：它剩下的只有轮级模板句
+  // （「识别意图」「正在理解创作需求」），而那段时间已经由等待行和各段自己说清楚了。老记录没有
+  // 这两种段，照旧画——那些轮的思考原话只在那一块里。
+  const timed = blocks.some((b) => b.type === 'reasoning' || b.type === 'waiting');
   for (const b of blocks) {
     if (b.type === 'thinking') {
+      if (timed) continue;
       const steps = (b.thinking?.steps ?? []).filter((s) => s && !toolFacts.has(s));
       const reasoning = b.thinking?.reasoning ?? '';
       if (steps.length > 0 || reasoning) items.push({ kind: 'reasoning', steps, reasoning, live: false });
+      continue;
+    }
+    if (b.type === 'reasoning') {
+      items.push({ kind: 'thought', text: b.text ?? '', running: false, startedAt: null, elapsedMs: elapsedOf(b.started_ms, b.ended_ms) });
+      continue;
+    }
+    if (b.type === 'waiting' && b.summary) {
+      const elapsed = elapsedOf(b.started_ms, b.ended_ms) ?? 0;
+      if (elapsed >= MIN_VISIBLE_WAITING_MS) items.push({ kind: 'waiting', summary: b.summary, elapsedMs: elapsed });
       continue;
     }
     if (b.type === 'tool_call' && b.summary) {
@@ -423,6 +546,7 @@ export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallback
           status: s.ended_ms === null ? status : 'completed',
           elapsedMs: elapsedOf(s.started_ms, s.ended_ms),
         })),
+        calls: b.calls ?? 1,
       });
       continue;
     }
@@ -430,7 +554,7 @@ export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallback
       items.push({ kind: 'card', card: b.card });
       continue;
     }
-    if (b.type === 'text' && b.text) items.push({ kind: 'text', text: b.text });
+    if (b.type === 'text' && b.text) items.push({ kind: 'text', text: b.text, ...(b.questions?.length ? { questions: b.questions } : {}) });
     // run_actions 不再渲染（IKCPQ1）：它是同一次调用的另一份落库视图，工具行已经画过了。
   }
   if (items.length === 0 && fallbackText) items.push({ kind: 'text', text: fallbackText });
@@ -442,15 +566,28 @@ export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallback
  * 所以还没打到的工具行不会提前跳出来。
  */
 export function itemsFromLive(live: LiveRun, revealedText: string): TimelineItem[] {
+  // 进行中不再画「思考过程」块（IKFLB9）：在想的时候就是一段思考，在等的时候输入框上方的状态行
+  // 说着在等什么（`lastActivity`）。轮级步骤仍然收着——老服务端的轮次落库时只有它。
   const items: TimelineItem[] = [];
-  if (live.steps.length > 0 || live.reasoning) {
-    items.push({ kind: 'reasoning', steps: live.steps, reasoning: live.reasoning, live: !live.ended });
-  }
   let cursor = 0;
-  for (const call of live.toolCalls) {
-    if (call.at > revealedText.length) break;
-    const chunk = revealedText.slice(cursor, call.at);
+  for (const item of liveBreaks(live)) {
+    const at = breakAt(item);
+    if (at > revealedText.length) break;
+    const chunk = revealedText.slice(cursor, at);
     if (chunk.trim()) items.push({ kind: 'text', text: chunk });
+    cursor = Math.max(cursor, at);
+    if (item.kind === 'reasoning') {
+      const { reasoning } = item;
+      items.push({
+        kind: 'thought',
+        text: reasoning.text,
+        running: reasoning.endedAt === null && !live.ended,
+        startedAt: reasoning.startedAt,
+        elapsedMs: reasoning.endedAt === null ? null : reasoning.endedAt - reasoning.startedAt,
+      });
+      continue;
+    }
+    const { call } = item;
     items.push({
       kind: 'tool',
       tool: call.tool,
@@ -463,13 +600,106 @@ export function itemsFromLive(live: LiveRun, revealedText: string): TimelineItem
         status: s.endedAt === null ? 'running' : 'completed',
         elapsedMs: s.endedAt === null ? null : s.endedAt - s.startedAt,
       })),
+      calls: 1,
     });
-    cursor = call.at;
   }
   const tail = revealedText.slice(cursor);
   if (tail.trim()) items.push({ kind: 'text', text: tail });
   if (live.partialCard) items.push({ kind: 'card_preview', preview: live.partialCard });
   return items;
+}
+
+/* ============ 过程组（IKFLB9 定稿） ============ */
+
+/**
+ * 条目里属于「过程」的那几种：思考、工具、等待，以及老记录整块的思考。正文与卡不在其中——但**写正文的那段时间**
+ * 在（`writing`）：一轮 27s 里模型把回复一个字一个字打出来花了 7s，这 7s 不在任何思考、工具、等待段里，
+ * 不记上头上「已处理 27s」就和里面各段加不起来（项目 607 第一轮）。落库的正文部件不带时刻，所以它是用
+ * 这一轮的总时长减去其余各段算出来的，只在落库之后有。
+ */
+export type TimelineProcessItem = Extract<TimelineItem, { kind: 'reasoning' | 'thought' | 'tool' | 'waiting' }>;
+export type ProcessItem = TimelineProcessItem | { kind: 'writing'; elapsedMs: number };
+
+/** 短于它的差额不单独成一段：那是几百毫秒的调度间隔，不是在写回复。 */
+export const MIN_WRITING_MS = 500;
+
+/**
+ * 头上的总时长减去各段之和，剩下的就是写回复的时间（加上零星几百毫秒的调度缝）。
+ * 没有总时长（还在跑）或差额太小就不补。
+ */
+export function withWriting(items: readonly ProcessItem[], totalMs: number | null): ProcessItem[] {
+  if (totalMs === null) return [...items];
+  const summed = items.reduce((acc, item) => acc + processItemElapsedMs(item, 0), 0);
+  const rest = totalMs - summed;
+  if (rest < MIN_WRITING_MS) return [...items];
+  return [...items, { kind: 'writing', elapsedMs: rest }];
+}
+
+export function isProcessItem(item: TimelineItem): item is TimelineProcessItem {
+  return item.kind === 'reasoning' || item.kind === 'thought' || item.kind === 'tool' || item.kind === 'waiting';
+}
+
+/**
+ * 一轮的过程按「阶段」分组。用户读到的是「它做了几件事」，不是十几行碎片。
+ *
+ * 分法：每个工具行自成一个阶段，名字就是它做的事（「查阅对应的创作方法」）；工具行之间连续的思考、等待
+ * 合成一个阶段，名字取其中第一条有名字的等待（「取出这次要用的创作方法」「整理创作方案」——那是服务端在
+ * 那段时间打的标记）；一条都没有时，第一段叫「理解需求」，后面的叫「整理回复」。
+ */
+export interface ProcessPhase {
+  name: string;
+  items: ProcessItem[];
+}
+
+const DEFAULT_WAITING_SUMMARY = '正在等待模型响应';
+
+export function phasesOf(items: readonly ProcessItem[]): ProcessPhase[] {
+  const phases: ProcessPhase[] = [];
+  let open: ProcessPhase | null = null;
+  let nonToolCount = 0;
+  for (const item of items) {
+    if (item.kind === 'tool') {
+      phases.push({ name: stripProgressive(item.summary), items: [item] });
+      open = null;
+      continue;
+    }
+    if (item.kind === 'writing') {
+      phases.push({ name: '写回复', items: [item] });
+      open = null;
+      continue;
+    }
+    if (!open) {
+      open = { name: nonToolCount === 0 ? '理解需求' : '整理回复', items: [] };
+      nonToolCount += 1;
+      phases.push(open);
+    }
+    if (item.kind === 'waiting' && item.summary !== DEFAULT_WAITING_SUMMARY && open.items.every((i) => i.kind !== 'waiting' || i.summary === DEFAULT_WAITING_SUMMARY)) {
+      open.name = stripProgressive(item.summary);
+    }
+    open.items.push(item);
+  }
+  return phases;
+}
+
+/** 一条过程条目还在跑吗。 */
+export function processItemRunning(item: ProcessItem): boolean {
+  if (item.kind === 'writing') return false;
+  if (item.kind === 'thought') return item.running;
+  if (item.kind === 'tool') return item.status === 'running';
+  if (item.kind === 'reasoning') return item.live;
+  return false;
+}
+
+/**
+ * 一条过程条目的耗时，进行中的按 `now` 现算。老记录整块的思考没有时长，算 0。
+ * 落库的段落首尾相接（服务端补过缝），所以把它们加起来就是这一段过程的总长。
+ */
+export function processItemElapsedMs(item: ProcessItem, now: number): number {
+  if (item.kind === 'reasoning') return 0;
+  if (item.kind === 'waiting' || item.kind === 'writing') return item.elapsedMs;
+  if (item.elapsedMs !== null) return item.elapsedMs;
+  if (item.startedAt !== null && processItemRunning(item)) return Math.max(0, now - item.startedAt);
+  return 0;
 }
 
 /* ============ 文案 ============ */
@@ -531,10 +761,17 @@ export interface TurnAccount {
   outcome: RunOutcome;
   /** 从提交到结束的秒数；两端时间缺一就是 null——宁可不显示，也不显示一个算错的耗时。 */
   seconds: number | null;
+  /** 结束的时刻（毫秒时间戳）：输入框上方那一行要说「21:37 完成」。 */
+  finishedAt: number | null;
   tokenUsage: RunTokenUsage | null;
   contextCapacity: RunContextCapacity | null;
   /** 失败时后端的那句人话。 */
   failureText: string | null;
+  /**
+   * 这次失败再试一次有没有用（IKHCJ2 第 5 项）。服务端说了算，缺这个字段时按**可以重试**算：
+   * 少给一次机会，用户就只能重开会话；多给一次，最坏也只是再失败一次。
+   */
+  failureRetryable: boolean;
   /**
    * 这一轮完成了、但要写的生成卡没写出来时，后端的那句人话（IKEV0V）。只在聊天里改卡时出现：
    * 那一轮照常 completed，侧边栏还挂着上一版。不写出来，用户会把旧卡当成这次改出来的。
@@ -572,9 +809,11 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     batchId: run.input_batch_id ?? null,
     outcome: terminalOutcomeOf(run.status),
     seconds: startedAt === null || finishedAt === null ? null : Math.max(0, Math.round((finishedAt - startedAt) / 1000)),
+    finishedAt,
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
+    failureRetryable: run.failure?.retryable !== false,
     cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
     cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };
@@ -745,7 +984,7 @@ function projectServerMessage(msg: SessionMessage): ChatMessage {
   return {
     id: msg.message_id,
     role: msg.role === 'user' ? 'user' : 'assistant',
-    content: blocks.map((b) => (typeof b?.text === 'string' ? b.text : '')).join(''),
+    content: textOf(blocks),
     blocks,
     sequence_no: msg.sequence,
     inputBatchId: msg.input_batch_id ?? null,
@@ -791,6 +1030,7 @@ export function upsertAssistantMessage(messages: readonly ChatMessage[], msg: Se
 function replaceThinkingSteps(message: ChatMessage, steps: string[]): ChatMessage {
   const blocks = message.blocks ?? [];
   const priorReasoning = blocks.find((b) => b.type === 'thinking')?.thinking?.reasoning;
+  // 思考段（type: 'reasoning'）是正文时间线的一部分，留在 rest 里原位不动（IKFLB9）。
   const rest = blocks.filter((b) => b.type !== 'thinking');
   const body = rest.length > 0 ? rest : message.content ? [{ type: 'text', text: message.content }] : [];
   return {
@@ -826,6 +1066,8 @@ const LIVE_INCREMENT_EVENTS = new Set([
   'tool.activity',
   'assistant.reasoning.delta',
   'assistant.delta',
+  // 断线续跑的擦除（IKHCJ2）：它改的是同一份进行中的正文，和 delta 走同一条路。
+  'assistant.rewind.v1',
   'prompt_card.partial.v1',
 ]);
 

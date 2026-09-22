@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE · Agent 侧边栏（最终版）</title>
+<!--
+  PROTOTYPE — 用完即删（IKFLB9 前端 UI 讨论）。
+  问题：Agent 侧边栏里「思考链路 / 追问选项 / 方案卡 / 轮尾统计」该长什么样。
+  经五版对比后定下的最终版（原 F）：A 的外层链路 + E 的阶段分组 + D 的方案卡 + 追问表单（单选 / 多选 / 其他）+ md 查看下载。
+  数据取自本地真跑会话 ses_76de1ab1（海边小镇插画，四轮到出卡），耗时是落库的真实段落。
+  思考原话在真跑里是英文，这里换成了中文意译，只为看排版。
+-->
+<style>
+  :root {
+    --bg: #141414;
+    --panel: #1e1e1e;
+    --bg2: #1a1a1a;
+    --hover: #262626;
+    --line: #333333;
+    --line2: #2a2a2a;
+    --text: #ffffff;
+    --text2: #a0a0a0;
+    --text3: #666666;
+    --accent: #f2b544;
+    --accent-ink: #1a1200;
+    --accent-soft: rgba(242,181,68,.16);
+    --blue: #4c6ef5;
+    --err: #fa5252;
+    --think: #b197fc;
+    --tool: #69db7c;
+    --wait: #5c5f66;
+    --fs: 13px;
+    --fs-sm: 12px;
+    --fs-xs: 11px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs)/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  .stage { display: flex; gap: 24px; justify-content: center; padding: 20px 16px 90px; align-items: flex-start; }
+  .notes { width: 300px; position: sticky; top: 20px; color: var(--text2); font-size: var(--fs-sm); }
+  .notes h2 { color: var(--text); font-size: 15px; margin: 0 0 6px; }
+  .notes h3 { color: var(--text); font-size: 12px; margin: 14px 0 4px; }
+  .notes ul { margin: 0; padding-left: 16px; }
+  .notes li { margin: 2px 0; }
+  .notes .tag { display: inline-block; font-size: 11px; color: #000; background: var(--accent); border-radius: 4px; padding: 0 6px; margin-bottom: 8px; }
+  @media (max-width: 860px) { .notes { display: none; } }
+
+  /* ---- 侧边栏外壳（各方案共用：只有壳，里面的结构各自写） ---- */
+  .panel { width: 440px; max-width: 100%; height: calc(100vh - 110px); min-height: 620px; background: var(--panel); border: 1px solid var(--line2); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line2); font-weight: 600; }
+  .panel-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .panel-head .sub { margin-left: auto; font-weight: 400; color: var(--text3); font-size: var(--fs-xs); white-space: nowrap; }
+  .panel-head { white-space: nowrap; }
+  .scroll { flex: 1; overflow-y: auto; padding: 14px 14px 8px; }
+  .composer { border-top: 1px solid var(--line2); padding: 8px 12px 12px; }
+  .composer .box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text3); background: var(--bg2); }
+  .user { display: flex; justify-content: flex-end; margin: 14px 0 10px; }
+  .user .bubble { max-width: 82%; background: #2c2c2e; border-radius: 12px 12px 4px 12px; padding: 7px 11px; }
+  .say { margin: 6px 0; white-space: pre-wrap; }
+  .muted { color: var(--text2); }
+  .dim { color: var(--text3); }
+  .num { font-variant-numeric: tabular-nums; }
+  .chev { display: inline-block; transition: transform .15s; color: var(--text3); font-size: 10px; }
+  .open > .chev, .chev.open { transform: rotate(90deg); }
+  .spin { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; color: var(--accent); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .btn { border-radius: 8px; padding: 6px 12px; font-size: var(--fs-sm); border: 1px solid var(--line); }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--text2); margin: 2px 4px 2px 0; }
+  .genCard { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 8px 0; }
+  .genCard .img { height: 90px; background: linear-gradient(160deg, #7fb2d9, #f3d59b 60%, #e98f7b); opacity: .8; }
+  .genCard .body { padding: 8px 10px; font-size: var(--fs-sm); }
+
+  /* ---- 固定在底部的统计行（五个方案共用一条规矩：只有一行、在输入框上方、带时间） ---- */
+  .statusbar { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text3); padding: 4px 2px 6px; }
+  .statusbar .sep { color: #444; }
+  .statusbar .live { color: var(--accent); }
+
+  /* ---- 原型切换浮条：不是被评估的设计 ---- */
+  .switcher { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: #fff; color: #111; border-radius: 999px; padding: 6px 8px; box-shadow: 0 6px 24px rgba(0,0,0,.5); z-index: 99; font-size: 13px; }
+  .switcher button { width: 30px; height: 30px; border-radius: 50%; background: #eee; font-size: 16px; }
+  .switcher button:hover { background: #ddd; }
+  .switcher .label { padding: 0 8px; font-weight: 600; }
+  .switcher .toggle { width: auto; height: 30px; border-radius: 999px; padding: 0 12px; font-size: 12px; white-space: nowrap; }
+  .switcher .toggle.on { background: #111; color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="panel" id="panel"></div>
+  <aside class="notes" id="notes"></aside>
+</div>
+<div class="switcher">
+  <div class="label" id="label">Agent 侧边栏 · 最终版</div>
+  <button class="toggle" id="runToggle" title="看最后一轮还在跑的样子">运行中</button>
+</div>
+
+<script>
+/* =============================== 数据 =============================== */
+// 耗时单位秒，全部来自 ses_76de1ab1 落库的 reasoning_trace.segments。
+const TURNS = [
+  {
+    user: '帮我做一张海边小镇的插画，灯塔、彩色屋顶、温暖明亮的水彩风格，横版 16:9，不要文字不要人物。',
+    at: '21:31', total: 30.6, tokens: '1.9k', ctx: 6,
+    chain: [
+      { k: 'wait', label: '等待模型响应', s: 9.8 },
+      { k: 'think', s: 5.2, text: '用户要一张海边小镇插画：灯塔、彩色屋顶、温暖明亮的水彩、16:9、不要文字和人物。这是做图的需求，先按创作方法把需求过一遍，看还缺哪些会决定画面走向的判断。' },
+      { k: 'wait', label: '等待模型响应', s: 4.1 },
+      { k: 'say', text: '我先把这次的创作方向跟你对一下。' },
+      { k: 'tool', label: '查阅对应的创作方法', s: 0.03, detail: ['grilling / SKILL.md'] },
+      { k: 'think', s: 2.5, text: '已经清楚的：主体、风格、画幅、禁用项。还没定的：视角、一天里的时刻、屋顶配色倾向、海面要不要加小元素。这四项会直接改变画面，要让用户拍板，每题给推荐。' },
+    ],
+    reply: {
+      intro: '目标基本清楚（海边小镇插画、灯塔、彩色屋顶、温暖水彩、16:9、无文字无人物），还差几个会决定画面走向的判断需要你拍板。',
+      questions: [
+        { id: 'q1', title: '视角与构图', ask: '从什么角度看这个镇？', rec: 'C',
+          opts: [['A', '港口平视', '从海面方向看小镇，灯塔明显高出一截，前景是港湾和小船。'], ['B', '小镇仰视望向海', '从镇子边缘低处望向海岸，彩色屋顶在前景铺开。'], ['C', '半空俯瞰', '略高于屋顶的视角，屋顶群、灯塔和海岸线同时入画。'], ['D', '对岸远眺', '从海湾对面收进整个镇子，灯塔作视觉中心，水面占下半幅。']],
+          why: '最容易把「彩色屋顶群」和「灯塔」同时立住，又留得出大面积海水走水彩晕染。' },
+        { id: 'q2', title: '时刻与光线', ask: '一天里的什么时刻？', rec: 'B',
+          opts: [['A', '金色清晨', '光线偏暖橙，海面有薄雾。'], ['B', '晴朗正午', '天蓝海蓝，饱和度最高，屋顶颜色最跳。'], ['C', '黄昏夕照', '暖橘到粉紫，灯塔亮灯。'], ['D', '阴天柔光', '对比柔和，色块边界更模糊。']],
+          why: '你说「温暖明亮」，正午的高饱和配色最能撑起「明亮」。' },
+        { id: 'q3', title: '屋顶配色', ask: '彩色屋顶的色调倾向？', rec: 'B',
+          opts: [['A', '地中海风', '白墙 + 蓝 / 赭红屋顶。'], ['B', '北欧童话风', '红、黄、芥末绿、烟粉的彩色木屋。'], ['C', '糖果色', '粉、紫、鹅黄、薄荷绿，偏甜。'], ['D', '写生写实', '砖红、米白、海军蓝，克制有层次。']],
+          why: '和「水彩 + 温暖明亮」最合，色块在晕染下格外柔软。' },
+        { id: 'q4', title: '海面细节', ask: '海面上加点什么？可以多选', multi: true, rec: ['A', 'B'],
+          opts: [['A', '停泊小船', '2–3 艘，撑起中景。'], ['B', '远处小岛', '1–2 座轮廓，拉开层次。'], ['C', '礁石', '前景压一角。'], ['D', '海鸥剪影', '更有生气，但算动物。']],
+          why: '小船加远岛是水彩小镇的经典搭配，不抢主体；海鸥算动物，默认不加。' },
+      ],
+    },
+  },
+  {
+    user: '都按你的推荐来。',
+    at: '21:33', total: 12.2, tokens: '0.8k', ctx: 7,
+    chain: [
+      { k: 'wait', label: '等待模型响应', s: 4.8 },
+      { k: 'think', s: 6.0, text: '四题都按推荐：半空俯瞰、晴朗正午、北欧童话风、小船加远岛。接下来要定出片模型，这一题单独问。' },
+      { k: 'say', text: '好，那我现在把模型路线这道题交出来让你点一下。' },
+      { k: 'wait', label: '等待模型响应', s: 0.6 },
+      { k: 'tool', label: '确认可用的模型', s: 0.8, detail: ['图片路线：Seedream 4.5（默认）、Seedream 5.0 Lite、GPT Image 2'] },
+    ],
+    reply: {
+      questions: [
+        { id: 'm', title: '出片模型', ask: '用哪个模型出片？', rec: 'A',
+          opts: [['A', 'Seedream 4.5', '默认路线，单张水彩插画适配度足够。'], ['B', 'GPT Image 2', '风格化插画和多轮微调更灵活，适合之后反复改稿。']],
+          why: '单张水彩插画、无文字需求、构图清晰，默认版本就够。' },
+      ],
+    },
+  },
+  {
+    user: '按你推荐的模型来。',
+    at: '21:35', total: 16.2, tokens: '0.6k', ctx: 8,
+    chain: [
+      { k: 'wait', label: '等待模型响应', s: 3.2 },
+      { k: 'think', s: 3.7, text: '模型定了 Seedream 4.5。把目标、方向、约束、替用户定的几项、出片参数整理成方案卡。' },
+      { k: 'wait', label: '整理创作方案', s: 4.3 },
+      { k: 'think', s: 0.8, text: '漏填了媒介，补上再交。' },
+      { k: 'wait', label: '整理创作方案', s: 4.1 },
+    ],
+    reply: { card: true },
+  },
+  {
+    user: '确认方案卡',
+    at: '21:37', total: 56.8, tokens: '14.7k', ctx: 9,
+    chain: [
+      { k: 'wait', label: '等待模型响应', s: 1.6 },
+      { k: 'wait', label: '取出这次要用的创作方法', s: 2.9 },
+      { k: 'think', s: 8.4, text: '方案卡已确认。按 seedream-image 的写法走十二步：摄入、定调、构图、光线、配色、材质、禁用项、安全检查、提示词长度自检……先把要看的参考文件读出来。' },
+      { k: 'tool', label: '查阅对应的创作方法', s: 0.3, detail: ['seedream-image / references/prompt-writing.md', 'seedream-image / references/word-budgets.md'] },
+      { k: 'wait', label: '根据结果继续', s: 2.0 },
+      { k: 'think', s: 36.7, text: '1. 摄入：目标清楚，16:9 单张，无素材。\n2. 定调：北欧童话、水彩晕染、温暖明亮。\n3. 构图：半空俯瞰，灯塔偏左立在中景，屋顶群前景到中景层层铺开，海面占下半幅。\n4. 光线：晴朗正午，顶光偏暖，阴影短。\n……\n11. 写提示词：主体在前、风格在后，控制在 300 字以内。\n12. 自检：没有文字、没有人物、没有品牌。' },
+      { k: 'tool', label: '写分镜与提示词', s: 2.2, subs: [['固定本次创作的上下文', 0.005], ['校验生成卡的结构与素材绑定', 0.005]] },
+      { k: 'wait', label: '根据结果继续', s: 2.3 },
+    ],
+    reply: { gen: true, outro: '卡写好了，落在对话里那张「晴日北欧海边小镇」上。' },
+    next: '出片后你看看灯塔的立住感和屋顶的童话度够不够。想换色、挪灯塔位置、或者去掉远岛小船，直接告诉我怎么改。',
+  },
+];
+
+const SOLUTION = {
+  goal: '做一张 16:9 横版的水彩风格海边小镇插画，包含灯塔和彩色屋顶，温暖明亮，无文字无人物。',
+  direction: '晴朗正午下的北欧童话风海边小镇：半空俯瞰，红白灯塔立在画面中心，脚下是层层叠叠的彩色木屋（红黄芥末绿烟粉屋顶），港湾里停着几艘小船，远处两座小岛轮廓浮在钴蓝海面上。整张图走水彩晕染，留白透气，颜色饱和明亮。',
+  media: '图片', model: 'Seedream 4.5', params: ['16:9'],
+  constraints: ['16:9 横版', '不要文字', '不要人物', '温暖明亮的水彩', '海边小镇、灯塔、彩色屋顶'],
+  assumptions: ['半空俯瞰，灯塔偏左 / 居中，屋顶群铺满前景和中景，海面占下半幅', '北欧童话风：红、黄、芥末绿、烟粉屋顶，墙面留白或浅米色', '灯塔红白横纹，深蓝顶', '海面 2–3 艘停泊小船 + 远处 1–2 座小岛（你选的）', '不加海鸥、人物、文字', '边缘晕染、留白、轻笔触，饱和但不写实', '晴朗正午，天蓝海蓝'],
+  why: '单张水彩插画、无文字需求，默认版本就够。',
+};
+
+/* =============================== 小工具 =============================== */
+const $ = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+};
+const dur = s => (s < 0.05 ? '<0.1s' : s < 10 ? `${s.toFixed(1)}s` : s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`);
+const sum = (chain, k) => chain.filter(i => !k || i.k === k).reduce((a, i) => a + (i.s || 0), 0);
+const state = { running: false, picks: {}, confirmed: false };
+let tickers = [];
+const clearTickers = () => { tickers.forEach(clearInterval); tickers = []; };
+/** 运行中：最后一轮停在 36.7s 那段思考上，读秒。 */
+function turnsForView() {
+  if (!state.running) return TURNS.map(t => ({ ...t, done: true }));
+  const last = TURNS[3];
+  const cut = last.chain.findIndex(i => i.k === 'think' && i.s > 30);
+  const chain = last.chain.slice(0, cut + 1).map((i, n) => (n === cut ? { ...i, running: true, s: 12, text: i.text.split('\n').slice(0, 3).join('\n') } : i));
+  return [...TURNS.slice(0, 3).map(t => ({ ...t, done: true })), { ...last, chain, done: false, reply: null, next: null }];
+}
+function ticking(el, start, fmt = dur) {
+  let s = start;
+  el.textContent = fmt(s);
+  tickers.push(setInterval(() => { s += 1; el.textContent = fmt(s); }, 1000));
+  return el;
+}
+function statusbar(turns) {
+  const last = turns[turns.length - 1];
+  const bar = $('div', { class: 'statusbar num' });
+  if (!last.done) {
+    const elapsed = $('span', { class: 'live' });
+    bar.append($('span', { class: 'pulse' }, '✶'), $('span', { class: 'live' }, '思考中 '), elapsed, $('span', { class: 'sep' }, '·'), $('span', {}, '21:38 开始'));
+    ticking(elapsed, sum(last.chain.filter(i => !i.running)) + 12);
+  } else {
+    bar.append($('span', {}, '✻'), `上一轮 ${dur(last.total)}`, $('span', { class: 'sep' }, '·'), `↓ ${last.tokens}`, $('span', { class: 'sep' }, '·'), `上下文 ${last.ctx}%`, $('span', { class: 'sep' }, '·'), `${last.at} 完成`);
+  }
+  return bar;
+}
+function shell(body, turns, subtitle = '', draft = null, placeholder = '说说你想做什么…') {
+  const panel = document.getElementById('panel');
+  panel.replaceChildren(
+    $('div', { class: 'panel-head' }, $('span', { class: 'dot' }), '蓝鲸 Agent', $('span', { class: 'sub' }, subtitle)),
+    body,
+    $('div', { class: 'composer' }, statusbar(turns), draft, $('div', { class: 'box' }, placeholder)),
+  );
+  body.scrollTop = body.scrollHeight;
+}
+function genCard() {
+  return $('div', { class: 'genCard' }, $('div', { class: 'img' }), $('div', { class: 'body' }, $('b', {}, '晴日北欧海边小镇'), $('div', { class: 'dim' }, '1 张 · Seedream 4.5 · 16:9'), $('div', { style: 'margin-top:6px' }, $('button', { class: 'btn primary' }, '应用到画布'))));
+}
+const pickOf = q => state.picks[q.id] ?? q.rec;
+const picksOf = q => q.multi ? (state.picks[q.id] ?? q.rec) : [pickOf(q)];
+const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
+const labelOf = (q, k) => k === '其他' ? '其他' : q.opts.find(o => o[0] === k)?.[1] ?? k;
+
+/* =============================== 方案 F：优化版（E 的过程 + D 的卡 + 「其他」与输入框） =============================== */
+const F = {
+  name: 'Agent 侧边栏 · 最终版',
+  notes: {
+    idea: '外层是 A 的链路：过程折成一行「▶ ✻ 已处理 31s · 思考 2 段 · 工具 1 次」，正文直接铺在对话里（像 libtv 那样，不套消息卡）；点开那一行，里面是 E 的阶段分组。方案卡换成 D 的简报式（卡底一条媒介 / 模型 / 参数色带），追问补上「其他」，并把选答案和输入框接成一条线。右上角「看到哪一步」切对话停在追问 / 方案卡 / 出卡。',
+    chain: ['A 的外层：一行「已处理 31s · 思考 2 段 · 工具 1 次」，默认折起；正文是普通文字，不套卡', '点开是 E 的阶段：理解需求 19s / 查阅对应的创作方法 <0.1s / 整理下一步 2.5s，每阶段再点开看思考原文和读的文件', '正文不再和过程一句一句交替'],
+    q: ['产品拍板：追问保持文字、不点选，用户直接回话', '「原版」= 模型现在写的 markdown 原样', '「排版一」：题头 Qn + 标题加粗，选项字母做小方块、标题加粗说明变灰，推荐单独一条带左色条的框；字一个不动', '「排版二」：每题一个浅底块，推荐项在列表里直接点亮，理由收成一行小字', '两种都是前端认 ❓ / A. / ➡️ 这几种开头做的，模型不改'],
+    gen: ['提示词卡：标题 + 张数/模型/画幅；「参考」一排是素材胶囊；正文里的 #1 #2 也是同一种胶囊，悬浮看大图（产品里已有的 AssetMentionChip，直接复用）；默认 3 行「展开全文」', '三个动作：应用到画布 / 复制提示词 / 打开查看；打开查看在面板里盖一层，把卡渲染成 md（表格、标题、列表）', '出图后缩略图回填到卡头（要卡 ↔ 画布节点的关联，见说明）'],
+    card: ['媒介 / 模型 / 参数那条色带挪到卡头，和「方案卡 · 等你拍板」一行', '原来的胶囊是你一开始提的硬要求，现在写成「你要求的（不会改）」清单，和参数重复的（16:9）不再列', '下面是「我替你定的（不合适就说）」', '卡头「▤ .md」点开在面板里渲染成 md，右上角下载 .md（和提示词卡同一套）', '卡下三个动作：确认按这个写 / 换个思路（展开三种换法） / 我来改（展开输入框）', '确认后动作收成一行「已确认 · 21:37」'],
+    foot: ['统计行固定在底部带完成时间；草稿行只在有待答题目时出现', '强调色定暖黄 #f2b544（替换产品里的 --color-accent-agent 柠檬绿），只用在主按钮、进行中、选中描边'],
+  },
+  stage: 1,
+  phases(t) {
+    const out = [];
+    let cur = null;
+    const phaseOf = i => i.k === 'tool' ? i.label.replace(/^正在/, '') : null;
+    for (const i of t.chain) {
+      const name = phaseOf(i);
+      if (name) { out.push({ name, items: [i] }); cur = null; continue; }
+      if (!cur) { cur = { name: out.length === 0 ? '理解需求' : i.k === 'wait' && i.label !== '等待模型响应' ? i.label : '整理下一步', items: [] }; out.push(cur); }
+      cur.items.push(i);
+    }
+    return out;
+  },
+  render(turns) {
+    if (!state.running) turns = turns.slice(0, [1, 3, 4][F.stage - 1]);
+    const body = $('div', { class: 'scroll' });
+    body.append($('style', {}, `
+      .f-head{display:flex;align-items:center;gap:6px;color:var(--text2);font-size:var(--fs-sm);padding:3px 6px;margin:6px 0 0 -6px;border-radius:6px}
+      .f-head:hover{background:var(--hover);color:var(--text)}
+      .f-proc{margin:4px 0 6px 5px;padding-left:12px;border-left:1px solid var(--line)}
+      .f-ph{display:flex;align-items:center;gap:6px;width:100%;text-align:left;font-size:var(--fs-sm);color:var(--text2);padding:2px 0}
+      .f-ph .n{flex:1}.f-ph .t{color:var(--text3)}
+      .f-sub{margin:0 0 4px 16px;border-left:1px solid var(--line2);padding-left:10px}
+      .f-sub div{display:flex;gap:6px;font-size:var(--fs-xs);color:var(--text3);padding:1px 0}
+      .f-sub div .lb{flex:1}
+      .f-sub pre{margin:2px 0 4px;font:inherit;font-size:var(--fs-xs);color:#a3a6ab;white-space:pre-wrap;max-height:120px;overflow:auto}
+      .f-pc{border:1px solid var(--line);border-radius:10px;margin:8px 0;padding:10px 12px;background:var(--bg2)}
+      .f-pc-hd{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+      .f-pc-hd .ic{color:var(--accent)}
+      .f-pc-assets{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);margin-bottom:6px}
+      .f-pc-text{font-size:var(--fs-sm);color:var(--text2);line-height:1.7}
+      .f-pc-text.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+      .f-chip{position:relative;display:inline-flex;align-items:center;gap:4px;max-width:200px;padding:1px 8px 1px 4px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.06);color:var(--text);font-size:12px;cursor:zoom-in;vertical-align:middle;margin:0 2px;line-height:1.4}
+      .f-chip i{flex:0 0 15px;width:15px;height:15px;border-radius:3px}
+      .f-prev{display:none;position:fixed;width:150px;height:100px;border-radius:6px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.6);align-items:flex-end;padding:4px 6px;pointer-events:none}
+      .f-prev em{font-style:normal;font-size:10px;color:#fff;text-shadow:0 0 3px #000}
+      .f-more{color:var(--text3);font-size:var(--fs-xs);margin:4px 0 6px}
+      .f-more:hover{color:var(--text)}
+      .f-pc-acts{display:flex;gap:6px}
+      .f-ov{position:absolute;inset:0;background:var(--panel);z-index:5;display:flex;flex-direction:column}
+      .f-ov-hd{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line2)}
+      .f-ov-hd button{color:var(--text2);font-size:15px}
+      .f-md{flex:1;overflow:auto;padding:14px 16px;font-size:var(--fs-sm);color:var(--text2)}
+      .f-md h2{color:var(--text);font-size:16px;margin:0 0 10px}.f-md h3{color:var(--text);font-size:13px;margin:14px 0 6px}
+      .f-md table{border-collapse:collapse;width:100%}.f-md td{border:1px solid var(--line);padding:4px 8px}
+      .f-md p{margin:0;line-height:1.7}.f-md ul,.f-md ol{margin:0;padding-left:18px}
+      .f-q0{white-space:pre-wrap;line-height:1.75}
+      .f-qt{margin:10px 0}
+      .f-qt .tip{font-size:var(--fs-xs);color:var(--text3);margin-top:8px}
+      .f-qi{margin:0 0 14px}
+      .f-qi .h{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+      .f-qi .h .n{font-size:var(--fs-xs);color:var(--accent);font-weight:700;letter-spacing:.04em}
+      .f-qi .h .ask{color:var(--text2)}
+      .f-qi .h .multi{font-size:10px;color:var(--text3);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+      .f-qi .opt{display:flex;gap:8px;padding:3px 0;font-size:var(--fs-sm);line-height:1.6}
+      .f-qi .opt .k{flex:none;width:18px;height:18px;border-radius:5px;border:1px solid var(--line);color:var(--text2);font-size:11px;display:inline-flex;align-items:center;justify-content:center;margin-top:2px}
+      .f-qi .opt b{color:var(--text)}
+      .f-qi .opt .d{color:var(--text2)}
+      .f-qi .why{margin-top:6px;padding:6px 10px;border-left:2px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;font-size:var(--fs-sm);color:var(--text2)}
+      .f-qi .why .lb{color:var(--text);font-weight:600;margin-right:6px}
+      /* 排版二：每题一个浅底块，推荐项在列表里直接点亮，理由收成一行小字 */
+      .f-qt.s2 .f-qi{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:10px 12px}
+      .f-qt.s2 .f-qi .h{margin-bottom:6px}
+      .f-qt.s2 .f-qi .opt{padding:2px 0}
+      .f-qt.s2 .f-qi .opt.rec .k{border-color:var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:700}
+      .f-qt.s2 .f-qi .opt.rec b{color:var(--accent)}
+      .f-qt.s2 .f-qi .why{background:none;border:0;padding:4px 0 0;font-size:var(--fs-xs);color:var(--text3)}
+      .f-qt.s2 .f-qi .why .lb{color:var(--text2)}
+      .f-form{border:1px solid var(--line);border-radius:10px;margin:8px 0;overflow:hidden}
+      .f-frow{padding:8px 10px;border-bottom:1px solid var(--line2)}
+      .f-frow .q{font-size:var(--fs-sm);margin-bottom:5px}
+      .f-frow .q .multi{font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;margin-left:6px}
+      .f-seg .ck{display:inline-block;width:10px;height:10px;border:1px solid var(--text3);border-radius:2px;margin-right:4px;vertical-align:-1px}
+      .f-seg .ck.on{background:var(--accent);border-color:var(--accent)}
+      .f-seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+      .f-seg button{flex:1;padding:4px 4px;font-size:var(--fs-sm);color:var(--text2);border-right:1px solid var(--line);position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .f-seg button:last-child{border-right:0}
+      .f-seg button.oth{flex:0 0 auto;padding:4px 10px;color:var(--text3)}
+      .f-seg button.sel{background:var(--accent-soft);color:var(--text);font-weight:600;box-shadow:inset 0 0 0 1px var(--accent)}
+      .f-seg button.oth.sel{background:var(--accent-soft);color:var(--text)}
+      .f-seg button .rd{position:absolute;top:3px;right:5px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+      .f-frow .d{font-size:var(--fs-xs);color:var(--text3);margin-top:4px}
+      .f-frow .d .rec{color:var(--text2)}
+      .f-fbar{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg2);font-size:var(--fs-xs);color:var(--text3)}
+      .f-form.locked .f-seg button{opacity:.55;cursor:default}.f-form.locked .f-seg button.sel{opacity:1}
+      .f-in{display:flex;gap:6px;margin-top:6px}
+      .f-in input{flex:1;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:6px 10px;color:var(--text);font:inherit;font-size:var(--fs-sm);outline:none}
+      .f-in input::placeholder{color:var(--text3)}
+      .f-draft{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:var(--fs-xs);color:var(--text2);padding:4px 2px 6px}
+      .f-draft .k{color:var(--text3)}
+      .f-draft .chip{margin:0}
+      .f-draft .chip.o{border-color:var(--accent);color:var(--text);background:var(--accent-soft)}
+      .f-draft .send{margin-left:auto}
+      .f-brief{border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
+      .f-brief .in{padding:12px}
+      .f-brief .kick{font-size:var(--fs-xs);color:var(--accent);letter-spacing:.05em;display:flex;gap:6px;align-items:baseline;margin-right:auto}
+      .f-brief .kick .st{color:var(--text3);letter-spacing:0}
+      .f-brief .kick .md{font-size:10px;color:var(--text3);border:1px solid var(--line);border-radius:4px;padding:0 5px;letter-spacing:0}
+      .f-brief .kick .md:hover{color:var(--text);border-color:var(--text3)}
+      .f-brief .grp{margin-top:10px;font-size:var(--fs-xs);color:var(--text3)}
+      .f-brief ul{margin:4px 0 0;padding-left:18px;font-size:var(--fs-sm);color:var(--text2)}
+      .f-brief h3{margin:4px 0 8px;font-size:16px;line-height:1.45}
+      .f-brief blockquote{margin:0;padding:6px 10px;border-left:2px solid var(--line);color:var(--text2);font-size:var(--fs-sm)}
+      .f-brief ol{margin:4px 0 0;padding-left:18px;font-size:var(--fs-sm);color:var(--text2)}
+      .f-brief .band{display:flex;gap:14px;padding:8px 12px;background:linear-gradient(90deg,var(--accent-soft),transparent);font-size:var(--fs-sm);align-items:flex-end}
+      .f-brief .band.top{border-bottom:1px solid var(--line2)}
+      .f-brief .band span b{display:block;font-size:var(--fs-xs);color:var(--text3);font-weight:400}
+      .f-acts{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--line2);background:var(--bg2);align-items:center;font-size:var(--fs-xs);color:var(--text3)}
+      .f-acts .sp{flex:1}
+      .f-acts .btn.primary{color:var(--accent-ink)}
+      .f-alt{padding:6px 12px 10px;background:var(--bg2);display:flex;gap:6px;flex-wrap:wrap}
+      .f-alt button{border:1px dashed var(--line);border-radius:999px;padding:2px 10px;font-size:var(--fs-xs);color:var(--text2)}
+      .f-alt button:hover{border-color:var(--accent);color:var(--accent)}
+      .f-edit{padding:6px 12px 10px;background:var(--bg2)}
+      .f-stage{display:flex;gap:2px;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-weight:400}
+      .f-stage button{padding:1px 8px;font-size:10px;color:var(--text3)}
+      .f-stage button.on{background:var(--accent);color:var(--accent-ink)}
+    `));
+    F.pending = null;
+    turns.forEach((t, ti) => {
+      body.append($('div', { class: 'user' }, $('div', { class: 'bubble' }, t.user)));
+      body.append(F.msg(t, ti === turns.length - 1));
+    });
+    F.draftEl = $('div', { class: 'f-draft' });
+    F.paintDraft();
+    const stageSel = $('span', { class: 'f-stage' }, ['追问', '方案卡', '出卡'].map((n, i) => $('button', { class: F.stage === i + 1 && !state.running ? 'on' : '', onclick: () => { F.stage = i + 1; state.running = false; render(); } }, n)));
+    const qSel = $('span', { class: 'f-stage' }, ['原版', '排版一', '排版二'].map((n, i) => $('button', { class: F.qstyle === i ? 'on' : '', onclick: () => { F.qstyle = i; render(); } }, n)));
+    shell(body, turns, $('span', { style: 'display:flex;gap:6px;align-items:center' }, '追问', qSel, '看到', stageSel), F.draftEl, '说说你想做什么…');
+  },
+  msg(t, isLast) {
+    const frag = $('div');
+    const thinks = t.chain.filter(i => i.k === 'think').length;
+    const tools = t.chain.filter(i => i.k === 'tool').length;
+    const proc = $('div', { class: 'f-proc' });
+    let open = !t.done;
+    const head = $('button', { class: 'f-head' });
+    const paintHead = () => {
+      head.replaceChildren(
+        $('span', { class: `chev ${open ? 'open' : ''}` }, '▶'),
+        t.done ? $('span', {}, '✻') : $('span', { class: 'pulse' }, '✶'),
+        t.done ? `已处理 ${dur(t.total)}` : '处理中',
+        $('span', { class: 'dim' }, ` · 思考 ${thinks} 段${tools ? ` · 工具 ${tools} 次` : ''}`));
+      proc.style.display = open ? '' : 'none';
+    };
+    head.onclick = () => { open = !open; paintHead(); };
+    for (const ph of F.phases(t)) {
+      let o = ph.items.some(i => i.running);
+      const sub = $('div', { class: 'f-sub' });
+      ph.items.forEach(i => {
+        if (i.k === 'say') return;
+        sub.append($('div', {}, $('span', { class: 'lb' }, i.k === 'think' ? '思考' : i.k === 'tool' ? `已${i.label}` : i.label), $('span', { class: 'num' }, i.running ? '…' : dur(i.s))));
+        if (i.k === 'think') sub.append($('pre', {}, i.text));
+        if (i.k === 'tool') sub.append($('pre', {}, [...(i.detail || []), ...(i.subs || []).map(([l, s]) => `已${l} ${dur(s)}`)].join('\n')));
+      });
+      const running = ph.items.some(i => i.running);
+      const btn = $('button', { class: 'f-ph' }, $('span', { class: `chev ${o ? 'open' : ''}` }, '▶'), running ? $('span', { class: 'spin' }) : $('span', { style: 'color:var(--tool)' }, '✓'), $('span', { class: 'n' }, ph.name), $('span', { class: 't num' }, running ? '进行中' : dur(sum(ph.items))));
+      sub.style.display = o ? '' : 'none';
+      btn.onclick = () => { o = !o; sub.style.display = o ? '' : 'none'; btn.firstChild.classList.toggle('open', o); };
+      proc.append(btn, sub);
+    }
+    paintHead();
+    frag.append(head, proc);
+    t.chain.filter(i => i.k === 'say').forEach(s => frag.append($('div', { class: 'say muted' }, s.text)));
+    if (t.reply) {
+      if (t.reply.intro) frag.append($('div', { class: 'say' }, t.reply.intro));
+      if (t.reply.questions) frag.append(F.form(t.reply.questions));
+      if (t.reply.card) frag.append(F.brief(!isLast));
+      if (t.reply.gen) frag.append($('div', { class: 'say' }, t.reply.outro), F.promptCard(), $('div', { class: 'say muted' }, t.next));
+    }
+    return frag;
+  },
+  promptCard() {
+    const P = {
+      title: '晴日北欧海边小镇', meta: '1 张 · 图片 · Seedream 4.5 · 16:9',
+      assets: [['#1', 'linear-gradient(135deg,#7fb2d9,#f3d59b)', '海边参考.jpg'], ['#2', 'linear-gradient(135deg,#e98f7b,#b197fc)', '北欧小镇.jpg']],
+      prompt: '16:9 横版水彩插画，半空俯瞰的北欧童话风海边小镇（参考 #1 海边参考.jpg）：红白横纹灯塔立在画面中心偏左，脚下是层层叠叠的彩色木屋（红、黄、芥末绿、烟粉屋顶，墙面留白或浅米色），港湾里停着 2–3 艘小船，远处 1–2 座小岛轮廓浮在钴蓝海面上。晴朗正午，顶光偏暖，阴影短。色调参考 #1 的天空与海面，屋顶配色参考 #2 北欧小镇.jpg。水彩晕染、边缘留白、轻笔触，饱和明亮但不写实。无文字、无人物、无品牌。',
+      md: [['h2', '晴日北欧海边小镇'], ['table', [['媒介', '图片'], ['模型', 'Seedream 4.5'], ['画幅', '16:9'], ['张数', '1']]], ['h3', '提示词'], ['p', null], ['h3', '参考素材'], ['ul', ['#1 海边参考.jpg — 天空与海面色调', '#2 北欧小镇.jpg — 屋顶配色']], ['h3', '禁用项'], ['ul', ['文字', '人物', '品牌标识']]],
+    };
+    const box = $('div', { class: 'f-pc' });
+    let full = false;
+    const promptEl = () => {
+      const el = $('div', { class: `f-pc-text ${full ? '' : 'clamp'}` });
+      el.append(F.rich(P.prompt, P.assets));
+      return el;
+    };
+    const paint = () => box.replaceChildren(
+      $('div', { class: 'f-pc-hd' }, $('span', { class: 'ic' }, '▤'), $('b', {}, P.title), $('span', { class: 'dim', style: 'margin-left:auto;font-size:var(--fs-xs)' }, P.meta)),
+      $('div', { class: 'f-pc-assets' }, $('span', { class: 'dim' }, '参考'), ...P.assets.map(a => F.chip(a, true))),
+      promptEl(),
+      $('button', { class: 'f-more', onclick: () => { full = !full; paint(); } }, full ? '收起 ▴' : '展开全文 ▾'),
+      $('div', { class: 'f-pc-acts' }, $('button', { class: 'btn primary' }, '应用到画布'), $('button', { class: 'btn' }, '复制提示词'), $('button', { class: 'btn', onclick: () => F.sheet(P) }, '打开查看')));
+    paint();
+    return box;
+  },
+  /** 素材胶囊，照产品 ImageMentionChip：胶囊里 15px 小图 + 名字，悬浮 150px 预览。 */
+  /** 把一段文字里的 #1 / #1 海边参考.jpg 换成胶囊。 */
+  rich(text, assets) {
+    const el = document.createDocumentFragment();
+    text.split(/(#\d(?: [^\s（）()，。、]+\.(?:jpg|png|mp4))?)/).forEach(part => { const m = /^(#\d)/.exec(part); const a = m && assets.find(x => x[0] === m[1]); el.append(a ? F.chip(a, true) : part); });
+    return el;
+  },
+  chip([n, bg, name], withName = false) {
+    const prev = () => document.getElementById('f-prev') || document.body.appendChild($('div', { id: 'f-prev', class: 'f-prev' }, $('em', {})));
+    const chip = $('span', { class: 'f-chip', title: name,
+      onmouseenter: e => { const r = e.currentTarget.getBoundingClientRect(); const el = prev(); el.style.background = bg; el.querySelector('em').textContent = name; el.style.left = `${r.left}px`; el.style.top = `${Math.max(8, r.top - 106)}px`; el.style.display = 'flex'; },
+      onmouseleave: () => { const el = document.getElementById('f-prev'); if (el) el.style.display = 'none'; } },
+      $('i', { style: `background:${bg}` }), withName ? `${n} ${name}` : n);
+    return chip;
+  },
+  solutionDoc() {
+    return { title: '方案卡 · 晴日北欧海边小镇', prompt: SOLUTION.direction, md: [['h2', '方案卡'], ['table', [['媒介', SOLUTION.media], ['模型', SOLUTION.model], ['参数', SOLUTION.params.join(' · ')], ['状态', state.card?.confirmed ? '已确认 21:37' : '等你拍板']]], ['h3', '目标'], ['p2', SOLUTION.goal], ['h3', '方向'], ['p', null], ['h3', '你要求的'], ['ul', SOLUTION.constraints], ['h3', '我替你定的'], ['ol', SOLUTION.assumptions]] };
+  },
+  /** 点「打开查看」：面板内弹一层，把卡渲染成 md（真前端直接复用 AgentPanel 里现成的 Markdown 组件）。 */
+  sheet(P) {
+    const panel = document.getElementById('panel');
+    const body = $('div', { class: 'f-md' });
+    for (const [tag, v] of P.md) {
+      if (tag === 'table') body.append($('table', {}, ...v.map(([k, x]) => $('tr', {}, $('td', { class: 'dim' }, k), $('td', {}, x)))));
+      else if (tag === 'ul') body.append($('ul', {}, ...v.map(x => $('li', {}, P.assets ? F.rich(x, P.assets) : x))));
+      else if (tag === 'p') body.append($('p', {}, P.assets ? F.rich(P.prompt, P.assets) : P.prompt));
+      else if (tag === 'p2') body.append($('p', {}, v));
+      else if (tag === 'ol') body.append($('ol', {}, ...v.map(x => $('li', {}, x))));
+      else body.append($(tag, {}, v));
+    }
+    const ov = $('div', { class: 'f-ov' },
+      $('div', { class: 'f-ov-hd' }, $('b', {}, `${P.title}.md`), $('span', { style: 'margin-left:auto;display:flex;gap:10px;align-items:center' }, $('button', { class: 'btn', style: 'font-size:11px;padding:2px 8px' }, '⤓ 下载 .md'), $('button', { onclick: () => ov.remove() }, '✕'))),
+      body);
+    panel.append(ov);
+  },
+  qstyle: 1,
+  /** 追问保持文字、不点选（产品拍板）。三种排版：原版就是模型写的 markdown 原样；一、二只动样式不动字。 */
+  form(qs) {
+    const st = F.qstyle;
+    const recOf = q => (q.multi ? q.rec : [q.rec]);
+    const recLabel = q => recOf(q).map(k => `${k}（${labelOf(q, k)}）`).join('、');
+    if (st === 0) {
+      const lines = qs.map((q, n) => [`❓ Q${n + 1} — ${q.title}：${q.ask}`, '', ...q.opts.map(([k, l, d]) => `${k}. ${l}：${d}`), `➡️ 推荐 ${recLabel(q)}：${q.why}`].join('\n'));
+      return $('div', { class: 'say f-q0' }, lines.join('\n\n'));
+    }
+    return $('div', { class: `f-qt s${st}` }, ...qs.map((q, n) => $('div', { class: 'f-qi' },
+      $('div', { class: 'h' }, $('span', { class: 'n' }, `Q${n + 1}`), $('b', {}, q.title), $('span', { class: 'ask' }, q.ask), q.multi ? $('span', { class: 'multi' }, '可多选') : null),
+      $('div', { class: 'opts' }, ...q.opts.map(([k, l, d]) => $('div', { class: `opt ${recOf(q).includes(k) ? 'rec' : ''}` }, $('span', { class: 'k' }, k), $('span', {}, $('b', {}, l), $('span', { class: 'd' }, `：${d}`))))),
+      $('div', { class: 'why' }, $('span', { class: 'lb' }, `推荐 ${recLabel(q)}`), q.why))),
+      $('div', { class: 'tip' }, '直接回我，比如「都按推荐」或「Q1 选 B，其他按推荐」'));
+  },
+  paintDraft() {
+    const el = F.draftEl;
+    if (!el) return;
+    if (!F.pending) { el.replaceChildren(); el.style.display = 'none'; return; }
+    el.style.display = '';
+    const chips = F.pending.map(q => {
+      const picks = picksOf(q);
+      const other = picks.includes('其他') ? `${state.other?.[q.id] || '…'}` : null;
+      const named = picks.filter(k => k !== '其他');
+      if (!named.length && other !== null) return $('span', { class: 'chip o' }, `${q.title}：${other}`);
+      return $('span', { class: `chip ${other !== null ? 'o' : ''}` }, `${q.title} `, $('span', { class: 'dim' }, named.map(k => labelOf(q, k)).join(' + ') + (other !== null ? ` + ${other}` : '') || '不加'));
+    });
+    const changed = F.pending.filter(q => !sameSet(picksOf(q), q.multi ? q.rec : [q.rec])).length;
+    el.replaceChildren($('span', { class: 'k' }, changed ? `要发的回答（改了 ${changed} 题）` : '要发的回答（都按推荐）'), ...chips, $('button', { class: 'btn primary send', style: 'padding:3px 10px' }, '发送'));
+  },
+  brief(confirmedAlready) {
+    state.card ??= { confirmed: false, mode: null };
+    if (confirmedAlready) state.card.confirmed = true;
+    const box = $('div', { class: 'f-brief' });
+    const paint = () => {
+      const c = state.card;
+      const acts = c.confirmed
+        ? $('div', { class: 'f-acts' }, $('span', { style: 'color:var(--accent)' }, '● 已确认 · 21:37'), $('span', { class: 'sp' }), $('button', { class: 'btn', onclick: () => { c.confirmed = false; c.mode = 'alt'; paint(); } }, '换个思路'))
+        : $('div', { class: 'f-acts' }, $('button', { class: 'btn primary', onclick: () => { c.confirmed = true; c.mode = null; paint(); } }, '确认，按这个写'), $('button', { class: `btn ${c.mode === 'alt' ? 'primary' : ''}`, onclick: () => { c.mode = c.mode === 'alt' ? null : 'alt'; paint(); } }, '换个思路'), $('button', { class: `btn ${c.mode === 'edit' ? 'primary' : ''}`, onclick: () => { c.mode = c.mode === 'edit' ? null : 'edit'; paint(); } }, '我来改'), $('span', { class: 'sp' }), '不确认就不会写卡');
+      const extra = c.mode === 'alt'
+        ? $('div', { class: 'f-alt' }, ['换个构图（黄昏对岸远眺）', '换个风格（地中海白墙蓝顶）', '换个模型（GPT Image 2）', '全部重来一版'].map(x => $('button', {}, x)))
+        : c.mode === 'edit'
+          ? $('div', { class: 'f-edit' }, $('div', { class: 'f-in', style: 'margin:0' }, $('input', { placeholder: '告诉我改哪里，比如「灯塔放右边，去掉小船」' }), $('button', { class: 'btn primary' }, '发送')))
+          : null;
+      box.replaceChildren(
+        $('div', { class: 'band top' }, $('span', { class: 'kick' }, '方案卡', $('span', { class: 'st' }, c.confirmed ? '已确认' : '等你拍板'), $('button', { class: 'md', title: '点开查看 / 下载 .md', onclick: () => F.sheet(F.solutionDoc()) }, '▤ .md')), $('span', {}, $('b', {}, '媒介'), SOLUTION.media), $('span', {}, $('b', {}, '模型'), SOLUTION.model), $('span', {}, $('b', {}, '参数'), SOLUTION.params.join(' · '))),
+        $('div', { class: 'in' },
+          $('h3', {}, SOLUTION.goal),
+          $('blockquote', {}, SOLUTION.direction),
+          $('div', { class: 'grp' }, '你要求的（不会改）'),
+          $('ul', {}, SOLUTION.constraints.filter(x => !SOLUTION.params.some(pp => x.startsWith(pp))).map(x => $('li', {}, x))),
+          $('div', { class: 'grp' }, '我替你定的（不合适就说）'),
+          $('ol', {}, SOLUTION.assumptions.map(a => $('li', {}, a)))),
+        acts, ...(extra ? [extra] : []));
+    };
+    paint();
+    return box;
+  },
+};
+
+/* =============================== 启动 =============================== */
+function renderNotes(v) {
+  const n = v.notes;
+  const sec = (title, items) => [$('h3', {}, title), $('ul', {}, items.map(i => $('li', {}, i)))];
+  document.getElementById('notes').replaceChildren(
+    $('span', { class: 'tag' }, '最终版'), $('h2', {}, v.name), $('div', {}, n.idea),
+    ...sec('① 思考链路', n.chain), ...sec('② 追问选项', n.q), ...sec('③ 方案卡', n.card), ...sec('③b 提示词卡', n.gen), ...sec('④ 统计行', n.foot),
+    $('h3', {}, '试一下'), $('ul', {}, $('li', {}, '点开「已处理」那行，再点阶段'), $('li', {}, '点选项；推荐项默认已选；「海面细节」是多选'), $('li', {}, '点「其他」写自己的；看输入框上方的草稿'), $('li', {}, '方案卡的 ▤ .md、提示词卡的「打开查看」'), $('li', {}, '底部「运行中」看最后一轮还在想的样子')));
+}
+function render() {
+  clearTickers();
+  document.getElementById('runToggle').classList.toggle('on', state.running);
+  renderNotes(F);
+  F.render(turnsForView());
+}
+document.getElementById('runToggle').onclick = () => { state.running = !state.running; render(); };
+render();
+</script>
+</body>
+</html>

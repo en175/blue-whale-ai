@@ -155,6 +155,24 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
 
   it("目标缺失 / 图片 mediaNode / 音频类型携带 / 他人项目 → 明确失败不建任务", async () => {
     const projectId = (await projects.create("987654", "IKDLQG bad target")).id;
+    // 音频类型用例的模型须在白名单内（IKDLQG 后新增的模型白名单校验先于类型校验），
+    // 否则报“model_id 不在可用模型白名单”而非本用例关注的 target_node_id 类型拒绝
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "ikdlqg-test", model_id: "any-audio-model" } },
+      create: {
+        provider_id: "ikdlqg-test",
+        model_id: "any-audio-model",
+        capability_type: "audio",
+        model_label: "IKDLQG Test Audio",
+        supported_sizes: [],
+        supported_aspect_ratios: [],
+        supported_formats: ["mp3"],
+        default_size: "",
+        default_aspect_ratio: "",
+        features: {},
+      },
+      update: {},
+    });
     const nodes = [mediaNode("media-1", "video"), mediaNode("media-i", "image"), textNode("text-1", "正文")];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
@@ -174,7 +192,8 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       parameters: { prompt: "哼一段旋律", model_id: "any-audio-model" },
     });
     expect(audioType.code).toBe(400);
-    expect(audioType.msg).toBe("target_node_id 仅支持图片/视频生成");
+    // 音频类型现已支持音频目标（IKDLQG 后演进）：携带视频目标按「不是音频媒体节点」明确拒绝
+    expect(audioType.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
 
@@ -184,29 +203,28 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect(await jobCount(otherProject)).toBe(0);
   });
 
-  it("仅附件正文、prompt 为空字符串 → 创建成功，prompt 冻结为空串", async () => {
-    const projectId = (await projects.create("987654", "IKDLQG empty prompt")).id;
+  // IKH8AU：正文由提交方给全，空正文即无效请求（附件不再由服务端补正文）。
+  it("正文为空 → 400 prompt 无效，不创建任务", async () => {
+    const projectId = (await projects.create("987654", "IKDLQG empty prompt rejected")).id;
     const nodes = [mediaNode("media-1", "video"), textNode("text-1", "独立正文", "附件")];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, videoJobBody("media-1", ""));
-    expect(created.code).toBe(200);
-    const job = await readJob(created.data.generation_job_id);
-    expect(job!.input.prompt).toBe("");
-    expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "附件", text: "独立正文" }]);
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("prompt 无效");
+    expect(await jobCount(projectId)).toBe(0);
   });
 
-  it("组合后超过 30000 字 → 明确失败、不创建任务", async () => {
-    const projectId = (await projects.create("987654", "IKDLQG composed limit")).id;
+  it("长附件不额外计数：正文短、附件 31000 字 → 创建成功", async () => {
+    const projectId = (await projects.create("987654", "IKDLQG attachments not counted")).id;
     const nodes = [mediaNode("media-1", "video"), textNode("text-1", "文".repeat(31_000))];
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    const created = await createJob(projectId, videoJobBody("media-1", ""));
-    expect(created.code).toBe(400);
-    expect(created.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
-    expect(await jobCount(projectId)).toBe(0);
+    const created = await createJob(projectId, videoJobBody("media-1", "暮色"));
+    expect(created.code).toBe(200);
+    expect(await jobCount(projectId)).toBe(1);
   });
 
   it("删除来源节点与边后新任务不再消费该附件，历史任务快照不改写", async () => {
@@ -289,12 +307,15 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       },
     });
     const assetId = asset.id.toString();
-    // 先建节点不带边（连线由浏览器拖线产生）；viewport 须为合法 {x,y,zoom}，"{}" 会让前端视口 NaN。
-    // media-1 置于右下：选中态工具条在节点上方（须避开视口上沿），且避开出生点（视口中心 ±80）的生成占位节点。
+    // 直接播种连线（IKFCXC 起改）：拖线交互由 IKDLQF 图片浏览器段覆盖，本段聚焦面板→生成→刷新闭环；
+    // 生成目标须为草稿/成品卡身份（成品卡带 jobId 原位打开草稿面板，draft 参数避免恢复出空模型配置错误）。
+    // viewport 须为合法 {x,y,zoom}，"{}" 会让前端视口 NaN。
     const seeded = await saveCanvas(projectId, [
       { id: "text-1", type: "textNode", position: { x: 140, y: 160 }, data: { title: "雨夜", text: "赛博朋克" } },
-      { id: "media-1", type: "mediaNode", position: { x: 900, y: 120 }, data: { mediaType: "video", fileName: "目标视频", assetId, width: 1280, height: 720 } },
-    ], [], "missing", JSON.stringify({ x: 0, y: 0, zoom: 1 }));
+      { id: "media-1", type: "mediaNode", position: { x: 900, y: 120 }, data: { mediaType: "video", fileName: "目标视频", assetId, width: 1280, height: 720, jobId: "ikdlqg-seed-job", draftModelId: MODEL_ID, draftSize: "720p", draftRatio: "16:9", draftDuration: 5 } },
+    ], [
+      { id: "e-t1-m1", source: "text-1", target: "media-1" },
+    ], "missing", JSON.stringify({ x: 0, y: 0, zoom: 1 }));
     expect(seeded.status).toBe(200);
 
     const vite = await createVite({ root: `${process.cwd()}/web`, server: {
@@ -320,40 +341,25 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       await text.waitFor();
       await media.waitFor();
 
-      // 拖线：文本节点 source handle（右）→ 视频节点 target handle（左），命中证据用 RF valid/connectingto 标记
-      await text.locator('[data-testid="text-title"]').click();
-      const connectSaved = page.waitForResponse((response) =>
-        response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
-      const srcBox = (await text.locator(".react-flow__handle-right").boundingBox())!;
-      const dstBox = (await media.locator(".react-flow__handle-left").boundingBox())!;
-      await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2);
-      await page.mouse.down();
-      const dstPoint = { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 };
-      await page.mouse.move(dstPoint.x, dstPoint.y, { steps: 12 });
-      const dstValid = await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y);
-        return el ? el.className.includes("valid") && el.className.includes("connectingto") : false;
-      }, dstPoint);
-      expect(dstValid, "落点连接点应被 RF 标记为有效连接目标").toBe(true);
-      await page.mouse.up();
+      // 播种连线恢复渲染（水合后 GET 边形状与库内一致）；页面加载不触发任何生成
       await vi.waitFor(async () => {
         expect(await page.locator(".react-flow__edge").count(), "连线应渲染（showEdges 默认可见）").toBe(1);
       });
-      expect((await connectSaved).status(), "连线增删参与自动保存").toBe(200);
       const connected = await getCanvas(projectId);
       expect(JSON.parse(connected.edges)).toEqual([
         expect.objectContaining({ source: "text-1", target: "media-1" }),
       ]);
-      // 连线与到此为止的编辑均不触发任何生成
       expect(generationRequests).toEqual([]);
 
-      // 从视频节点工具条打开面板：附件区展示来源标题与正文，目标提示词留白
+      // 从视频节点工具条打开面板：文本附件以图标进参考栏（IKFCKQ 起旧独立正文块下线），
+      // 悬浮浮层显示来源完整正文，目标提示词留白
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成视频" }).click();
-      await page.getByText("文本附件（1）").waitFor();
-      const attachments = page.locator('div:has-text("文本附件（1）")').last();
-      expect(await attachments.innerText()).toContain("雨夜");
-      expect(await attachments.innerText()).toContain("赛博朋克");
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
+      await page.locator('[data-testid="dock-text-ref"]').first().hover();
+      const overlay = page.locator('[data-testid="ref-thumb-preview"]');
+      await overlay.waitFor();
+      expect(await overlay.innerText()).toContain("赛博朋克");
 
       // 第一次发送：请求体携带 target_node_id 且 type=video，库内冻结附件快照与当时画布一致，prompt 冻结为 ""
       await page.locator('button[title="发送"]').click();
@@ -372,36 +378,18 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       expect(firstInput.duration).toBe(5);
       expect(firstInput.resolution).toBe("720p");
 
-      // 编辑正文 → 自动保存；编辑本身不触发第二次生成
+      // 编辑正文 → 自动保存；编辑本身不触发第二次生成（发送后目标进入生成中，
+      // 面板只读、工具条隐藏，「再次发送消费新正文」由 IKFCXC 浏览器段的发送冻结闭环覆盖）
       const editor = text.locator('[data-placeholder="输入内容..."]');
       await editor.dblclick();
       const editSaved = page.waitForResponse((response) =>
         response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await editor.fill("霓虹都市");
-      await page.locator(".react-flow__pane").click({ position: { x: 80, y: 800 } });
+      await page.locator(".react-flow__pane").click({ position: { x: 60, y: 250 } });
       expect((await editSaved).status()).toBe(200);
       expect(generationRequests, "编辑正文不自动执行").toHaveLength(1);
 
-      // 再次从面板发送：新任务读取最新正文，历史任务快照不改写
-      await media.locator('[data-testid="media-content"]').click();
-      await media.getByRole("button", { name: "生成视频" }).click();
-      await page.getByText("文本附件（1）").waitFor();
-      expect(await page.locator('div:has-text("文本附件（1）")').last().innerText()).toContain("霓虹都市");
-      await page.locator('button[title="发送"]').click();
-      await vi.waitFor(() => expect(generationRequests).toHaveLength(2), { timeout: 10_000 });
-      expect(generationRequests[1].body.target_node_id).toBe("media-1");
-      await vi.waitFor(async () => expect(await jobCount(projectId)).toBe(2), { timeout: 10_000 });
-      const rows = await prisma.client.generation_jobs.findMany({
-        where: { project_id: BigInt(projectId) }, orderBy: { id: "asc" },
-      });
-      expect((rows[1].input as Record<string, unknown>).text_attachments).toEqual([
-        { node_id: "text-1", title: "雨夜", text: "霓虹都市" },
-      ]);
-      expect((rows[0].input as Record<string, unknown>).text_attachments).toEqual([
-        { node_id: "text-1", title: "雨夜", text: "赛博朋克" },
-      ]);
-
-      // 刷新：连线恢复渲染，GET edges 仍为该边
+      // 刷新：连线恢复渲染，GET edges 仍为该边；历史任务快照不被编辑改写
       await page.reload();
       await text.waitFor();
       await media.waitFor();

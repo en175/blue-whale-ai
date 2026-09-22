@@ -1,4 +1,4 @@
-import type { CapabilitySnapshotVersion } from "@blue-whale/contracts";
+import type { CapabilitySnapshotVersion } from "@lib/contracts";
 
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import {

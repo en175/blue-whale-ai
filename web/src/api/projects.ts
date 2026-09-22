@@ -3,7 +3,7 @@
  * ============================================ */
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from './http';
-import type { LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {
@@ -17,6 +17,10 @@ export interface ProjectRecord {
   previews: string[];
   /** 创建时间（ISO 字符串） */
   created_at: string;
+  /** 上次打开时间（ISO 字符串）；从未打开过为 null */
+  last_opened_at: string | null;
+  /** 置顶时间（ISO 字符串）；非空即已置顶（组内按此倒序），未置顶为 null */
+  pinned_at: string | null;
 }
 
 /** 项目分页包络：与 GET /api/assets 保持一致。 */
@@ -58,6 +62,14 @@ export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
   return apiRequest<ProjectPageData>(`/api/projects?${params.toString()}`, { silent: true });
 }
 
+/** 打开即记 PUT /api/projects/:id/last-opened（IKH1YK）：失败静默由调用方 catch。 */
+export function touchProjectLastOpened(id: ProjectRecord['id']): Promise<void> {
+  return apiRequest<void>(`/api/projects/${encodeURIComponent(String(id))}/last-opened`, {
+    method: 'PUT',
+    silent: true,
+  });
+}
+
 /** 项目卡片页的 TanStack Query 无限分页配置。 */
 export function projectPageQueryOptions(size = PROJECT_PAGE_SIZE) {
   return infiniteQueryOptions({
@@ -91,6 +103,15 @@ export function renameProject(id: ProjectRecord['id'], name: string, init?: ApiR
     ...init,
     method: 'PUT',
     body: JSON.stringify({ name }),
+  });
+}
+
+/** 置顶/取消置顶项目 PUT /api/projects/:id/pin（成功 data 为更新后项目记录） */
+export function pinProject(id: ProjectRecord['id'], pinned: boolean, init?: ApiRequestInit) {
+  return apiRequest<ProjectRecord>(`/api/projects/${encodeURIComponent(String(id))}/pin`, {
+    ...init,
+    method: 'PUT',
+    body: JSON.stringify({ pinned }),
   });
 }
 
@@ -142,6 +163,12 @@ export interface SnapshotAsset {
   access_url: string;
   width: number | null;
   height: number | null;
+  /** 已关联虚拟人像库则为素材库 id，未关联为 null */
+  material_id?: string | null;
+  material_group_id?: string | null;
+  /** 素材库校验镜像：Active 为已通过合规；Processing / Failed / null 均未通过 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
+  material_status_checked_at?: string | null;
 }
 
 /** GET /api/projects/:id/snapshot 返回：项目信息 + 画布 + 资产字典 + 任务摘要 */
@@ -168,35 +195,4 @@ export function fetchProjectSnapshot(id: string): Promise<ProjectSnapshot> {
   });
   snapshotPending.set(id, p);
   return p;
-}
-
-/* ============ 复制资产到项目 ============ */
-
-/** 复制资产返回：新副本资产记录 */
-export interface CopiedAsset {
-  /** 新副本资产ID */
-  id: number;
-  type: 'image' | 'video' | 'audio';
-  url: string;
-  width: number | null;
-  height: number | null;
-  duration: number | null;
-  /** 来源：copied 表示复制而来 */
-  source: string;
-  created_at: string;
-}
-
-/** 复制资产到项目 POST /api/projects/:id/assets（资产库「添加到项目」） */
-export function copyAssetToProject(
-  projectId: string,
-  sourceAssetId: number,
-): Promise<CopiedAsset> {
-  return apiRequest<CopiedAsset>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ source_asset_id: sourceAssetId }),
-    },
-  );
 }

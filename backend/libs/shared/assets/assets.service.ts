@@ -47,6 +47,20 @@ export class AssetService {
     return this.repo.findOwnedByMd5(userId, md5);
   }
 
+  findOwnedByMaterialId(userId: string, materialId: string) {
+    return this.repo.findOwnedByMaterialId(userId, materialId);
+  }
+
+  /** IKGQWR：绑素材库素材到本地资产（覆盖写，两列一起；ADR-0093 决策 5）。 */
+  bindMaterialId(input: {
+    userId: string;
+    assetId: string;
+    materialId: string;
+    materialGroupId: string | null;
+  }) {
+    return this.repo.bindMaterialId(input);
+  }
+
   findOwnedSource(sourceAssetId: string, userId: string) {
     return this.repo.findOwnedSource(sourceAssetId, userId);
   }
@@ -85,16 +99,13 @@ export class AssetService {
     return this.repo.clearMaterialGroupLink(userId, materialGroupId);
   }
 
-  findAccessible(assetId: string, userId: string) {
-    return this.repo.findAccessible(assetId, userId);
+  /** IKF YHJ：查这批本地 Asset 里已绑素材库素材的 material_id（生成创建期素材门用）。 */
+  findBoundMaterialIds(userId: string, assetIds: readonly string[]) {
+    return this.repo.findBoundMaterialIds(userId, assetIds);
   }
 
-  insertCopy(
-    projectId: string,
-    userId: string,
-    source: Parameters<ReturnType<typeof createAssetRepo>["insertCopy"]>[2],
-  ) {
-    return this.repo.insertCopy(projectId, userId, source);
+  findAccessible(assetId: string, userId: string) {
+    return this.repo.findAccessible(assetId, userId);
   }
 
   /** IKBMDM 管理后台强删：对任意 id 集合做引用核对后物理回收 TOS 对象并删除行。 */

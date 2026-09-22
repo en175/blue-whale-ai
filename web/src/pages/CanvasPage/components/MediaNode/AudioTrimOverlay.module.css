@@ -1,0 +1,84 @@
+/* ============================================
+ * AudioTrimOverlay 截取遮罩层（IKHB7A）：视觉基准 = 验收原型
+ * web/prototypes/audio-trim.prototype.html 的 .ovl 家族（选区白 2px 圆角框 /
+ * 白竖条抓手热区外扩 / 半透明暗区 / 黑底白字胶囊）。
+ * 令牌口径：既有令牌表无「截取遮罩」专属档——白色选区/黑底胶囊为原型验收拍板的
+ * 遮罩专属值（非浮层容器色，不落 IKGZ86 家族黑名单），抓手几何常量以本地变量
+ * 单源（.overlay 内声明，抓手/热区共同引用），暗区透明度沿用原型 --sel-dim。
+ * ============================================ */
+
+.overlay {
+  /* 抓手几何单源：视觉竖条宽 4px / 高 30px、热区两侧各外扩 6px、选区圆角 10px */
+  --trim-handle-w: 4px;
+  --trim-handle-h: 30px;
+  --trim-handle-hit-ext: 6px;
+  --trim-sel-radius: 10px;
+
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+/* 两侧半透明暗区：选区外波形压暗，点击无任何行为 */
+.dim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  cursor: default;
+}
+
+/* 白色 2px 圆角选区框（定位条可点可拖的宿主区域） */
+.selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid #ffffff;
+  border-radius: var(--trim-sel-radius);
+  cursor: pointer;
+}
+
+/* 中央黑底白字胶囊：实时选区秒数（一位小数），纯展示不接指针 */
+.pill {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #000000;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 白色竖条抓手：视觉窄条居中于选区缘，热区向两侧各外扩 6px */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: calc(var(--trim-handle-w) + var(--trim-handle-hit-ext) * 2);
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 3;
+}
+
+.handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--trim-handle-w);
+  height: var(--trim-handle-h);
+  transform: translate(-50%, -50%);
+  background-color: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}

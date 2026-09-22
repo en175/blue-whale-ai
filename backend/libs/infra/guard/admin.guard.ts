@@ -1,5 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import type { Request } from "express";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 

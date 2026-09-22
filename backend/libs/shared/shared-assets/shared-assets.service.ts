@@ -14,7 +14,7 @@ import {
   type SharedAssetListQuery,
   type SharedAssetPageView,
   type SharedAssetView,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { SharedAssetTypeRegistry } from "./type/shared-asset-type.registry.js";
 import { SharedAssetError } from "./shared-asset-error.js";

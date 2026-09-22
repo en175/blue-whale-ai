@@ -4,7 +4,7 @@ import type {
   SharedAssetKind,
   SharedAssetSnapshot,
   SharedAssetType,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 /** 共享资产保存计划：策略校验 + 派生的一次性产出，Service 只负责落库与幂等兜底。 */
 export interface SharedAssetSavePlan {

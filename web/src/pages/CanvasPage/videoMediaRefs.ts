@@ -5,25 +5,40 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { readAssetId } from './mediaRefs';
-import { REF_LIMITS } from '@/utils/ref-overflow';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/lib/video-reference-compliance';
+import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
 export type VideoRefRole = 'reference' | 'first' | 'last';
 
-/** 普通参考中视频素材上限（能力接口无视频参考数量位；沿用前端固定 3，图片上限沿用 REF_LIMITS.image，
- *  与图片 Dock 同口径——能力侧约束由服务端校验兜底） */
-export const MAX_VIDEO_REFS = 3;
+/** 媒体类型归一（IKFE8U）：画布节点 data / 资产记录的 mediaType 收敛为参考三类型；
+ *  调用方已按类型过滤，未知值归图片与历史展示口径一致 */
+export function asVideoRefMediaType(type: unknown): 'image' | 'video' | 'audio' {
+  return type === 'video' ? 'video' : type === 'audio' ? 'audio' : 'image';
+}
+
+/** IKFC1T：目标是否存在任一有效媒体参考（普通参考或首尾帧；invalid 单列不计）——
+ *  文生视频门控（enabledVideoFollowModes）与面板模式冲突判定共用谓词 */
+export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
+  refs.reference.length > 0 || Boolean(refs.first || refs.last);
 
 /** 视频媒体参考项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入提交字段；
- *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials） */
+ *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials）；
+ *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带）；
+ *  textNodeId（IKFM3W 契约 §10）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），
+ *  值为来源文本卡 id。
+ *  planNodeId（IKG99G）：该参考由生成卡（promptSource）经后端方案同步建素材边带入，
+ *  值为来源生成卡 id；展示层据此过滤，参数推导仍全量。 */
 export interface VideoMediaRef {
   nodeId: string;
   url: string;
   name: string;
   assetId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
+  duration?: number;
+  textNodeId?: string;
+  planNodeId?: string;
 }
 
 /** 目标视频草稿的分组参考：首帧/尾帧各至多一项（连线时校验，推导时防御性取首条） */
@@ -44,10 +59,11 @@ export interface VideoMaterialRefData {
   role: VideoRefRole;
 }
 
-/** 防御性解析草稿 data.draftMaterialRefs：字段缺失或形态非法返回空数组（兼容旧快照，零迁移） */
+/** 防御性解析草稿 data.draftMaterialRefs：字段缺失或形态非法返回空数组（兼容旧快照，零迁移）。
+ *  IKFC1T 修复：断言写法错误导致 raw 取到 node.data 整体（非数组恒早退），角色库参考从未被读到 */
 export function readDraftMaterialRefs(node: Node | undefined): VideoMaterialRefData[] {
   if (!node) return [];
-  const raw = (node.data ?? {}) as Record<string, unknown>['draftMaterialRefs'];
+  const raw = ((node.data ?? {}) as Record<string, unknown>).draftMaterialRefs;
   if (!Array.isArray(raw)) return [];
   const items: VideoMaterialRefData[] = [];
   for (const item of raw) {
@@ -68,9 +84,36 @@ export function readDraftMaterialRefs(node: Node | undefined): VideoMaterialRefD
   return items;
 }
 
+/** 参考身份：项目资产数字 ID 与人像库 Asset-/asset- 前缀（materialId）视为同一素材（TC_DG_205） */
+export function videoRefIdentityIds(item: Pick<VideoMediaRef, 'assetId' | 'materialId'>): string[] {
+  const ids = new Set<string>();
+  if (item.assetId) ids.add(item.assetId);
+  if (item.materialId) ids.add(item.materialId);
+  return [...ids];
+}
+
+/** 当前参考占用的全部身份 ID（普通参考 + 首尾帧） */
+export function occupiedVideoRefIds(refs: VideoMediaRefs): Set<string> {
+  const ids = new Set<string>();
+  for (const item of [...refs.reference, refs.first, refs.last]) {
+    if (!item) continue;
+    for (const id of videoRefIdentityIds(item)) ids.add(id);
+  }
+  return ids;
+}
+
+/** 待加入的 ID 是否已被现有参考占用（assetId / materialId 互通） */
+export function incomingVideoRefOccupied(
+  refs: VideoMediaRefs,
+  incomingIds: ReadonlyArray<string | undefined>,
+): boolean {
+  const occupied = occupiedVideoRefIds(refs);
+  return incomingIds.some((id) => Boolean(id && occupied.has(id)));
+}
+
 /** 合并边推导参考与角色库 material 参考：first/last 槽边推导优先，material 同角色项槽已占时落入 invalid；
  *  reference 追加尾部（上限由添加入口联算控制，此处不截断）；material 间按 materialId 去重；
- *  material 与边推导不互相去重（数字 assetId 与 asset- 前缀 materialId 是两个 ID 空间） */
+ *  material 与边推导按身份互通去重（数字 assetId 与 Asset- 前缀 materialId 视为同一素材） */
 export function mergeVideoMaterialRefs(
   refs: VideoMediaRefs,
   materials: VideoMaterialRefData[],
@@ -79,9 +122,10 @@ export function mergeVideoMaterialRefs(
   const merged: VideoMediaRefs = { ...refs, reference: [...refs.reference] };
   const seenMaterialIds = new Set<string>();
   for (const m of materials) {
-    if (seenMaterialIds.has(m.materialId)) continue;
+    if (seenMaterialIds.has(m.materialId) || incomingVideoRefOccupied(merged, [m.materialId])) continue;
     seenMaterialIds.add(m.materialId);
     const item: VideoMediaRef = {
+      // 纯角色库项没有画布节点：nodeId 与 materialId 同值，删除时据此与「连线参考」区分
       nodeId: m.materialId,
       url: m.url,
       name: m.name,
@@ -102,6 +146,14 @@ export function mergeVideoMaterialRefs(
   return merged;
 }
 
+/** 是否为草稿 data 里的纯角色库参考（无画布连线）。
+ *  连线推导的参考也可能带合规 materialId，但不能按「有 materialId」当成角色库项去删。 */
+export function isLibraryOnlyVideoRef(
+  item: Pick<VideoMediaRef, 'nodeId' | 'materialId'>,
+): item is { nodeId: string; materialId: string } {
+  return item.materialId != null && item.nodeId === item.materialId;
+}
+
 /** 边推导 + 角色库 material 的合并推导（显示输入 = 实际任务输入的唯一口径）：
  *  Dock 展示、连线校验、角色改写与提交防线统一走此函数 */
 export function mergedVideoMediaRefsOf(
@@ -116,9 +168,21 @@ export function mergedVideoMediaRefsOf(
   );
 }
 
-/** 当前模型是否支持视频参考（仅 Seedance 2.0 系）：UI 禁用与提交防线共用同一判定 */
-export function supportsVideoReferenceModel(modelId: string): boolean {
-  return modelId === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(modelId);
+/** 快照参考的名称刷新（IKFA8Y）：待提交的暂存参考按来源节点身份取当前名称。
+ *  只改展示名称；槽位、顺序、素材 ID 与角色沿用快照；角色库参考（materialId）与来源节点
+ *  已不在画布的参考保留原名称（取当前值 + 回落快照值，快照本身不被改写）。 */
+export function freshVideoCanvasRefs(refs: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
+  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
+  const fresh = (ref: VideoMediaRef): VideoMediaRef => {
+    if (ref.materialId != null) return ref;
+    const current = cardNameOfNode(byId.get(ref.nodeId));
+    return current === undefined || current === ref.name ? ref : { ...ref, name: current };
+  };
+  const next: VideoMediaRefs = { reference: refs.reference.map(fresh) };
+  if (refs.first) next.first = fresh(refs.first);
+  if (refs.last) next.last = fresh(refs.last);
+  if (refs.invalid) next.invalid = [...refs.invalid];
+  return next;
 }
 
 /** 视频草稿身份判定（IKDMQQ 约定延伸）：draft 标记 + 视频媒体类型 */
@@ -135,33 +199,20 @@ export function readRefRole(edge: Edge): VideoRefRole {
   return role === 'first' || role === 'last' ? role : 'reference';
 }
 
-/** 来源有效性（不含媒体类型检查）：与图片参考同口径——待生成/生成中/失败/失效/上传中/无资产均不可用 */
-function baseSourceError(node: NonNullable<Node>): string | null {
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
-  if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
-  if (data.genStatus === 'failed' || data.genStatus === 'cancelled') return '生成失败的卡片不能作为参考';
-  if (data.assetMissing) return '素材已被删除';
-  const src = typeof data.src === 'string' ? data.src : '';
-  if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
-  if (!src) return '素材已被删除';
-  if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
-  return null;
-}
-
 /** 视频参考来源校验：返回 null 表示可用，否则为用户可读拒绝原因。
  *  有效性口径与图片参考一致（仅有效媒体结果）；普通参考接受图片与视频，首尾帧槽只接受图片。 */
 export function videoRefSourceError(node: Node | undefined, role: VideoRefRole): string | null {
   if (!node) return '素材不存在';
   const data = (node.data ?? {}) as Record<string, unknown>;
-  if (role !== 'reference' && data.mediaType === 'video') return '首尾帧仅支持图片素材';
-  if (data.mediaType !== 'image' && data.mediaType !== 'video') return '视频参考仅支持图片或视频素材';
+  if (role !== 'reference' && data.mediaType !== 'image') return '首尾帧仅支持图片素材';
+  if (data.mediaType !== 'image' && data.mediaType !== 'video' && data.mediaType !== 'audio') return '视频参考仅支持图片、视频或音频素材';
+  if (data.complianceFailed === true) return VIDEO_REFERENCE_NOT_APPROVED_MESSAGE;
   return baseSourceError(node);
 }
 
 /** 目标节点的视频媒体参考分组：连线 target=该节点，普通参考按连线顺序；
  *  有效来源分组消费，失效来源保留原因并阻止提交，连线保留待恢复或用户断开；
- *  同一素材（相同 assetId）跨角色只取首条（历史画布防御，与连线时重复校验同口径）。 */
+ *  同一素材（相同 assetId，或数字 ID 与人像库 materialId 互通）跨角色只取首条。 */
 export function videoMediaRefsOf(
   targetNodeId: string,
   edges: Edge[],
@@ -187,15 +238,30 @@ export function videoMediaRefsOf(
     }
     const data = (source.data ?? {}) as Record<string, unknown>;
     const assetId = readAssetId(data)!;
-    if (seenAssetIds.has(assetId)) continue;
+    const materialId =
+      typeof data.materialId === 'string' && data.materialId
+        ? data.materialId
+        : isMaterialLibraryId(assetId)
+          ? assetId
+          : undefined;
+    if (seenAssetIds.has(assetId) || (materialId && seenAssetIds.has(materialId))) continue;
     if (role !== 'reference' && (role === 'first' ? refs.first : refs.last)) continue;
     seenAssetIds.add(assetId);
+    if (materialId) seenAssetIds.add(materialId);
+    // IKG99G：标记生成卡经后端方案同步建素材边带入的参考（manual=false 且 planNodeIds 非空）
+    const inputSources = (edge.data as { inputSources?: { manual?: boolean; planNodeIds?: string[] } } | undefined)?.inputSources;
+    const planNodeId = inputSources && inputSources.manual === false && Array.isArray(inputSources.planNodeIds) && inputSources.planNodeIds.length > 0
+      ? inputSources.planNodeIds[0]
+      : undefined;
     const item: VideoMediaRef = {
       nodeId: source.id,
       url: data.src as string,
       name: typeof data.fileName === 'string' && data.fileName ? data.fileName : source.id,
       assetId,
-      mediaType: data.mediaType === 'video' ? 'video' : 'image',
+      mediaType: data.mediaType as 'image' | 'video' | 'audio',
+      materialId,
+      duration: typeof data.duration === 'number' && data.duration > 0 ? data.duration : undefined,
+      planNodeId,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;
@@ -204,12 +270,25 @@ export function videoMediaRefsOf(
   return refs;
 }
 
-/** 模型能力（GenerationModel.features 中与视频参考相关的位） */
+/** 模型能力（GenerationModel.features 中与视频参考相关的位 + 分类上限，ADR-0086） */
 export interface VideoRefCapabilities {
   firstFrame: boolean;
   lastFrame: boolean;
   firstLastFrame: boolean;
   referenceImage: boolean;
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。
+   *  以下 ADR-0086 字段可选：旧调用点/测试未传时由消费处回落缺省（与后端缺省一致）。 */
+  videoReference?: boolean;
+  /** ADR-0086：视频生成是否接受音频素材作参考。 */
+  audioReference?: boolean;
+  /** ADR-0086：普通参考中视频素材上限（缺省 3）。 */
+  videoReferenceMax?: number;
+  /** ADR-0086：音频生成中音频参考上限（缺省 3）。 */
+  audioReferenceMax?: number;
+  /** ADR-0086：音频生成中图片参考上限（缺省 1）。 */
+  imageReferenceMax?: number;
+  /** ADR-0086：普通参考中图片素材上限（缺省 9）。 */
+  imageMax?: number;
 }
 
 /** 视频参考组合校验：返回 null 表示当前输入可提交，否则为用户可读的阻止原因。
@@ -249,33 +328,38 @@ export function canAddRefRole(
 }
 
 /** 统一校验「向视频草稿添加参考素材」：重复素材 / 槽位已占 / 首尾帧收视频 / 普通参考超限。
+ *  ADR-0086：分类上限由能力行（videoReferenceMax / audioReferenceMax / imageMax）驱动，不再硬编码 3/9。
  *  返回 null 表示可添加；否则为用户可读的拒绝原因——所有添加入口（连线 / 到节点选择 /
  *  角色库 / 资产 / Dock 角色改写）必须调本函数，禁止各自复制 guard。 */
 export function checkAddVideoRef(
   role: VideoRefRole,
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
   assetId: string | undefined,
   refs: VideoMediaRefs,
+  caps?: VideoRefCapabilities | null,
+  relatedIds?: ReadonlyArray<string | undefined>,
 ): string | null {
   // 首尾帧槽只收图片
   if (role !== 'reference' && mediaType !== 'image') return '首尾帧仅支持图片素材';
   // 槽位已占
   if (role === 'first' && refs.first) return '首帧已指定，请先移除现有首帧';
   if (role === 'last' && refs.last) return '尾帧已指定，请先移除现有尾帧';
-  // 素材已连入同一草稿（跨角色去重）；首尾帧用「素材重复」，普通参考沿用「重复的素材已跳过」
-  if (assetId) {
-    const occupied =
-      refs.reference.some((r) => r.assetId === assetId) ||
-      [refs.first, refs.last].some((r) => r?.assetId === assetId);
-    if (occupied) return role !== 'reference' ? '素材重复' : '重复的素材已跳过';
+  // 素材已连入同一草稿（跨角色、跨 ID 空间去重）；首尾帧用「素材重复」，普通参考沿用「重复的素材已跳过」
+  if (incomingVideoRefOccupied(refs, [assetId, ...(relatedIds ?? [])])) {
+    return role !== 'reference' ? '素材重复' : '重复的素材已跳过';
   }
-  // 普通参考上限
+  // 普通参考上限（ADR-0086：读能力行，缺省回落旧 3/3/9）
   if (role === 'reference') {
+    const videoMax = caps?.videoReferenceMax ?? 3;
+    const audioMax = caps?.audioReferenceMax ?? 3;
+    const imageMax = caps?.imageMax ?? 9;
     if (mediaType === 'video') {
       const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
-      if (videoCount >= MAX_VIDEO_REFS) return `参考视频最多 ${MAX_VIDEO_REFS} 个`;
-    } else if (refs.reference.length >= REF_LIMITS.image) {
-      return `参考图最多 ${REF_LIMITS.image} 张`;
+      if (videoCount >= videoMax) return `参考视频最多 ${videoMax} 个`;
+    } else if (mediaType === 'audio') {
+      if (refs.reference.filter(r => r.mediaType === 'audio').length >= audioMax) return `参考音频最多 ${audioMax} 个`;
+    } else if (refs.reference.filter(r => r.mediaType === 'image').length >= imageMax) {
+      return `参考图最多 ${imageMax} 张`;
     }
   }
   return null;

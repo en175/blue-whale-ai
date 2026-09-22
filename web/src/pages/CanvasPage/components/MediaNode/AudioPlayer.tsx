@@ -1,14 +1,46 @@
 /* ============================================
  * AudioPlayer：画布音频节点的自包含播放器
- * 唱片封面 + 播放按钮 + 频谱律动 + 进度条拖拽
+ * 深灰卡片 + 暗色波形区 + 播放控制，样式参考设计稿
+ * IKHB7A 截取编辑态（父单 IKHB08）：扩选区 props 承载试听钳制——从选区头起播、
+ * 播放中到选区尾自动停且播放头停终点、再点播放重新从选区头播、选区变化（拖抓手/
+ * 进入编辑态）即暂停且播放头被挤出选区时钳回边界；进入编辑态（selection 由 null
+ * 变非 null）播放头归零。定位条（红色 playhead）在选区内可点可拖由卡内遮罩层
+ * （AudioTrimOverlay）接管，经父级（MediaNode）桥接本组件命令式句柄 seek。
  * ============================================ */
-import { useRef, useState, useEffect, useCallback } from 'react';
-import { Play, Pause, AudioLines } from 'lucide-react';
+import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { Play, Pause } from 'lucide-react';
 import styles from './index.module.css';
+/** 截取选区（秒，内部全精度；形状对齐 audioTrimGeometry.AudioTrimSelection，
+ *  此处本地声明避免无谓依赖方向）。 */
+export interface AudioPlayerTrimSelection {
+  start: number;
+  end: number;
+}
+
+/** 命令式句柄（MediaNode 桥接卡内遮罩层定位条拖拽用；拖拽为高频命令式 seek，
+ *  走 state 会为每次 mousemove 重排整卡，先例是遮罩层族「事件上抛+受控渲染」，
+ *  音频 seek 天然非受控，ref 桥是最小形态）。 */
+export interface AudioPlayerHandle {
+  /** 定位条 seek（遮罩层已按选区钳制）：更新播放头。 */
+  seekTo(time: number): void;
+  /** 暂停播放，返回暂停前是否在播放（wasPlaying，供松手续播判定）。 */
+  pause(): boolean;
+  /** 从指定位置起播（定位条拖拽松手续播）。 */
+  playFrom(time: number): void;
+}
 
 interface AudioPlayerProps {
   src: string;
   fileName?: string;
+  /** 服务端权威时长（秒，story 15）：有值时优先于浏览器实测（ogg/flac 等格式 metadata 支持不稳） */
+  duration?: number;
+  onDownload?: () => void;
+  /** 截取编辑态选区（IKHB7A）：非 null 即编辑态——进入（null→非 null）暂停+播放头
+   *  归零；选区变化（拖抓手）暂停+播放头被挤出时钳回边界；试听钳制见头注。 */
+  trimSelection?: AudioPlayerTrimSelection | null;
+  /** 截取遮罩插槽（IKHB7A）：渲染在波形区内（贴合原型 .ovl 于 wave-inner 的结构，
+   *  遮罩天然只覆盖波形区、底部播放控制仍可用）；层内消化指针不冒泡开音频面板。 */
+  trimOverlay?: React.ReactNode;
 }
 
 function formatTime(sec: number): string {
@@ -18,35 +50,178 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const BARS = 18;
+/** 波形竖条数：480×240 横矩形下 72 根细密观感（IKH8PU，对齐原型 audio-card-landscape） */
+const BARS = 72;
 
-export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
+/** 从真实音频解码数据生成波形条高度百分比（RMS 归一化） */
+async function computeWaveform(src: string, bars: number, signal: AbortSignal): Promise<number[]> {
+  const res = await fetch(src, { signal });
+  if (!res.ok) throw new Error('fetch failed');
+  const arrayBuffer = await res.arrayBuffer();
+  const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
+  const buffer = await ctx.decodeAudioData(arrayBuffer);
+  await ctx.close();
+  const data = buffer.getChannelData(0);
+  const samplesPerBar = Math.max(1, Math.floor(data.length / bars));
+  const heights: number[] = [];
+  for (let i = 0; i < bars; i++) {
+    const start = i * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, data.length);
+    let sum = 0;
+    for (let j = start; j < end; j++) {
+      sum += data[j] * data[j];
+    }
+    const rms = Math.sqrt(sum / (end - start || 1));
+    heights.push(rms);
+  }
+  const max = Math.max(...heights, 0.001);
+  return heights.map((h) => 12 + (h / max) * 80);
+}
+
+/** 基于 src 与时长生成稳定但不同的兜底波形，避免不同节点完全一样 */
+function fallbackWaveform(src: string, duration: number, bars: number): number[] {
+  let seed = 0;
+  for (let i = 0; i < src.length; i++) {
+    seed = (seed * 31 + src.charCodeAt(i)) >>> 0;
+  }
+  seed = (seed + Math.round((duration || 0) * 1000)) >>> 0;
+  const rand = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+  return Array.from({ length: bars }, (_, i) => {
+    const t = i / bars;
+    const envelope = Math.sin(t * Math.PI) * 0.3 + 0.7;
+    const noise = rand();
+    return 12 + Math.round((envelope * 0.6 + noise * 0.4) * 78);
+  });
+}
+
+const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer(
+  { src, duration: authoritativeDuration, trimSelection, trimOverlay },
+  ref,
+) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(authoritativeDuration ?? 0);
   const [currentTime, setCurrentTime] = useState(0);
   const [err, setErr] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [waveform, setWaveform] = useState<number[] | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
 
   const onLoaded = useCallback(() => {
-    if (audioRef.current) setDuration(audioRef.current.duration || 0);
-  }, []);
+    // 服务端权威值优先（对齐 video 路径「已有值不覆盖」先例），仅缺失时用浏览器实测兜底
+    if (audioRef.current && authoritativeDuration == null) setDuration(audioRef.current.duration || 0);
+  }, [authoritativeDuration]);
 
+  /** timeupdate 兜底：拖拽时不更新，播放中主要靠 rAF 高频刷新 */
   const onTimeUpdate = useCallback(() => {
     if (audioRef.current && !dragging) setCurrentTime(audioRef.current.currentTime);
   }, [dragging]);
+
+  /** 播放中使用 requestAnimationFrame 高频刷新进度，避免 timeupdate 事件间隔大导致卡顿 */
+  const rafRef = useRef<number | null>(null);
+  const stopRaf = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+  const tick = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      // 编辑态试听钳制：到选区尾自动停且播放头停终点（原型 tick 编辑态分支）
+      if (trimSelection && a.currentTime >= trimSelection.end - 1e-6 && !a.paused) {
+        a.currentTime = trimSelection.end;
+        a.pause();
+        setCurrentTime(trimSelection.end);
+      } else if (!dragging) {
+        setCurrentTime(a.currentTime);
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }, [dragging, trimSelection]);
+
+  useEffect(() => {
+    if (playing) {
+      rafRef.current = requestAnimationFrame(tick);
+    } else {
+      stopRaf();
+    }
+    return stopRaf;
+  }, [playing, tick, stopRaf]);
+
+  /** 截取编辑态手势（进入/拖抓手）统一暂停与播放头钳制（IKHB7A）：
+   *  - null → 非 null（进入编辑态）：暂停 + 播放头归零（红色定位条归零）；
+   *  - 非 null 间变化（拖抓手改选区）：暂停（拖任一抓手即暂停），播放头被挤出
+   *    新选区时钳回最近边界。
+   *  依赖 trimSelection（引用比较）触发，但值未变（起止秒数相同）时早退——父级每轮
+   *  渲染若重建选区对象，不能构成「选区变化」触发暂停（回归：编辑态点播放被打断）。 */
+  const prevSelectionRef = useRef<AudioPlayerTrimSelection | null>(null);
+  useEffect(() => {
+    const a = audioRef.current;
+    const prev = prevSelectionRef.current;
+    prevSelectionRef.current = trimSelection ?? null;
+    if (!a || !trimSelection) return;
+    if (prev && prev.start === trimSelection.start && prev.end === trimSelection.end) return;
+    if (!a.paused) a.pause();
+    if (prev == null) {
+      // 进入编辑态：播放头归零
+      a.currentTime = 0;
+      setCurrentTime(0);
+      return;
+    }
+    const t = a.currentTime;
+    if (t < trimSelection.start || t > trimSelection.end) {
+      const clamped = Math.min(Math.max(t, trimSelection.start), trimSelection.end);
+      a.currentTime = clamped;
+      setCurrentTime(clamped);
+    }
+  }, [trimSelection]);
+
+  /** 命令式句柄：卡内遮罩层定位条拖拽经 MediaNode 桥接（见 AudioPlayerHandle 头注） */
+  useImperativeHandle(ref, () => ({
+    seekTo: (time: number) => {
+      const a = audioRef.current;
+      if (!a) return;
+      a.currentTime = time;
+      setCurrentTime(time);
+    },
+    pause: () => {
+      const a = audioRef.current;
+      if (!a) return false;
+      const wasPlaying = !a.paused;
+      if (wasPlaying) {
+        a.pause();
+        setPlaying(false);
+      }
+      return wasPlaying;
+    },
+    playFrom: (time: number) => {
+      const a = audioRef.current;
+      if (!a) return;
+      a.currentTime = time;
+      setCurrentTime(time);
+      void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    },
+  }), []);
 
   const toggle = useCallback(() => {
     const a = audioRef.current;
     if (!a) return;
     if (a.paused) {
+      // 编辑态试听：从选区头起播（播放头不在选区内时归到选区起点，原型 btnPlay 分支）
+      if (trimSelection && (a.currentTime < trimSelection.start || a.currentTime >= trimSelection.end - 1e-6)) {
+        a.currentTime = trimSelection.start;
+        setCurrentTime(trimSelection.start);
+      }
       void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     } else {
       a.pause();
       setPlaying(false);
     }
-  }, []);
+  }, [trimSelection]);
 
   const ratioFromClientX = useCallback((clientX: number): number => {
     const el = trackRef.current;
@@ -60,6 +235,17 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
     setPlaying(false);
     setCurrentTime(0);
     setErr(false);
+    setWaveform(null);
+    const abort = new AbortController();
+    computeWaveform(src, BARS, abort.signal)
+      .then((heights) => {
+        if (!abort.signal.aborted) setWaveform(heights);
+      })
+      .catch(() => {
+        // 跨域/解码失败时使用 src+时长 生成的稳定兜底波形，避免不同节点完全一样
+        if (!abort.signal.aborted) setWaveform(fallbackWaveform(src, duration, BARS));
+      });
+    return () => abort.abort();
   }, [src]);
 
   // 组件卸载时兜底移除拖拽监听，防止泄漏
@@ -78,7 +264,11 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
 
     const seekTo = (clientX: number) => {
       const r = ratioFromClientX(clientX);
-      const t = r * duration;
+      let t = r * duration;
+      // 编辑态定位条钳制（IKHB7A）：选区内可点可拖，越界钳回边界（原型 phSeekFromEvent）
+      if (trimSelection) {
+        t = Math.min(Math.max(t, trimSelection.start), trimSelection.end);
+      }
       a.currentTime = t;
       setCurrentTime(t);
     };
@@ -93,12 +283,13 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
     };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [duration, ratioFromClientX]);
+  }, [duration, ratioFromClientX, trimSelection]);
 
   const progressPct = duration ? (currentTime / duration) * 100 : 0;
 
+  // 不拦截点击：主体点击需冒泡到节点，才能打开音频对话框（与标题区域一致）
   return (
-    <div className={styles.audioPlayer} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.audioPlayer}>
       <audio
         ref={audioRef}
         src={src}
@@ -111,58 +302,44 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
         onError={() => setErr(true)}
       />
 
-      {/* 唱片封面 */}
-      <div className={`${styles.audioCoverWrap} nodrag nopan`}>
-        <div className={`${styles.audioDisc} ${playing ? styles.audioDiscSpinning : ''}`}>
-          <div className={styles.audioDiscCenter}>
-            <AudioLines size={28} strokeWidth={1.8} color="#bbb" />
-          </div>
+      {/* 暗色波形区：可点击拖拽 seek；红色 playhead 指示当前进度。
+          编辑态下波形区被卡内遮罩层（AudioTrimOverlay）覆盖接管，本层不收事件 */}
+      <div
+        className={`${styles.audioWaveBox} nodrag nopan`}
+        ref={trackRef}
+        onMouseDown={handleTrackDown}
+      >
+        <div className={styles.audioWaveBars}>
+          {(waveform ?? fallbackWaveform(src, duration, BARS)).map((h, i) => (
+            <span
+              key={i}
+              className={styles.audioWaveBar}
+              style={{ height: `${h}%` }}
+            />
+          ))}
         </div>
+        <div
+          className={styles.audioPlayhead}
+          style={{ left: `${progressPct}%` }}
+        />
+        {/* 截取遮罩四件套（编辑态注入）：白选区框/抓手/暗区/秒数胶囊，接管波形区指针 */}
+        {trimOverlay}
+      </div>
 
+      {/* 底部控制区：时间 + 播放按钮（卡内时间行 = 当前试听位置 / 总时长） */}
+      <div className={styles.audioControls}>
+        <div className={styles.audioTime}>
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </div>
         <button
           className={`${styles.audioPlayBtn} nodrag nopan`}
           onClick={toggle}
           aria-label={playing ? '暂停' : '播放'}
         >
           {playing
-            ? <Pause size={18} strokeWidth={2.5} />
-            : <Play size={18} strokeWidth={2.5} style={{ marginLeft: 2 }} />}
+            ? <Pause size={18} strokeWidth={2.5} color="#fff" />
+            : <Play size={18} strokeWidth={2.5} color="#fff" style={{ marginLeft: 2 }} />}
         </button>
-      </div>
-
-      {/* 频谱律动条 */}
-      <div className={styles.audioSpectrum}>
-        {Array.from({ length: BARS }).map((_, i) => (
-          <span
-            key={i}
-            className={`${styles.audioBar} ${playing ? styles.audioBarAnim : ''}`}
-            style={{ animationDelay: `${(i * 0.07) % 0.42}s` }}
-          />
-        ))}
-      </div>
-
-      {/* 文件名 */}
-      <div className={styles.audioName} title={fileName || ''}>
-        {fileName || '未命名音频'}
-      </div>
-
-      {/* 进度条：需要 nodrag nopan 否则拖拽进度条会带动节点 */}
-      <div className={`${styles.audioProgress} nodrag nopan`} ref={trackRef} onMouseDown={handleTrackDown}>
-        <div className={styles.audioProgressTrack} />
-        <div
-          className={styles.audioProgressFill}
-          style={{ width: `${progressPct}%` }}
-        />
-        <div
-          className={styles.audioProgressThumb}
-          style={{ left: `calc(${progressPct}% - 5px)` }}
-        />
-      </div>
-
-      {/* 时长 */}
-      <div className={styles.audioTime}>
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
       </div>
 
       {err && (
@@ -170,4 +347,29 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
       )}
     </div>
   );
+});
+
+export default AudioPlayer;
+
+/** 截取遮罩定位条 → 播放器命令式桥（IKHB7A，MediaNode 消费）：遮罩层只报时点，暂停/
+ *  续播语义在此组装——按下暂停记 wasPlaying；松手按 wasPlaying 与「未拖到选区尾」续播
+ *  （拖到尾 = 停在终点，等价自动暂停，rAF tick 会收敛到终点）。拖拽为高频命令式 seek，
+ *  state 桥会逐帧重排整卡，ref 桥是最小形态。 */
+export function useAudioTrimSeekBridge() {
+  const playerRef = useRef<AudioPlayerHandle | null>(null);
+  const wasPlayingRef = useRef(false);
+  const onSeekStart = useCallback(() => {
+    wasPlayingRef.current = playerRef.current?.pause() ?? false;
+  }, []);
+  const onSeek = useCallback((time: number) => {
+    playerRef.current?.seekTo(time);
+  }, []);
+  const onSeekEnd = useCallback((time: number, selectionEnd?: number) => {
+    const wasPlaying = wasPlayingRef.current;
+    wasPlayingRef.current = false;
+    if (wasPlaying && selectionEnd != null && time < selectionEnd - 1e-6) {
+      playerRef.current?.playFrom(time);
+    }
+  }, []);
+  return { playerRef, onSeekStart, onSeek, onSeekEnd };
 }

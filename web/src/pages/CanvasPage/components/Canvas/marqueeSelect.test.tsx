@@ -94,7 +94,7 @@ beforeEach(async () => {
   const mediaNode = (id: string, x: number, y: number, selected = false) => ({
     id, type: 'mediaNode', position: { x, y },
     initialWidth: 200, initialHeight: 150, selected,
-    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select', onReEdit: vi.fn() },
+    data: { mediaType: 'image', src: 'blob:test', fileName: 'test', toolMode: 'select' },
   });
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,
@@ -228,7 +228,7 @@ describe('Canvas marquee select', () => {
 
   // 用户故事 12 固化：Delete / Backspace 批量删除选中卡片不变。
   // IKDMQW 起 Canvas 内部不再直接移除节点（生成中卡片先取消后移除的异步流程由父级驱动）：
-  // Delete 逐个触发 onDeleteNode，节点消失由父级列表移除后的合并 effect 同步。
+  // Delete 一次回调全部选中 id（IKFO73），节点消失由父级列表移除后的合并 effect 同步。
   it('deletes all selected cards with Delete', async () => {
     await marquee(800, 600, 100, 100);
     expect(node('image-1').classList.contains('selected')).toBe(true);
@@ -238,8 +238,8 @@ describe('Canvas marquee select', () => {
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
     });
 
-    expect(props.onDeleteNode).toHaveBeenCalledWith('image-1');
-    expect(props.onDeleteNode).toHaveBeenCalledWith('image-2');
+    expect(props.onDeleteNode).toHaveBeenCalledTimes(1);
+    expect(props.onDeleteNode).toHaveBeenCalledWith(['image-1', 'image-2']);
     // 模拟父级列表响应删除（CanvasPage 中各列表 setState filter）
     await act(async () => {
       root.render(createElement(FlowCanvas, { ...props, mediaNodes: [] }));

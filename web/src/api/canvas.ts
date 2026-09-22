@@ -1,10 +1,11 @@
-import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
-import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { PromptBinding } from '@lib/contracts/prompt-target';
+import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
+import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 /* ============================================
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
-import { apiRequest } from './http';
+import { apiRequest, isApiError } from './http';
 import { queryOptions } from '@tanstack/react-query';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
@@ -33,6 +34,13 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
       body: JSON.stringify({ source: input.source, position: input.position }),
     },
   );
+}
+
+export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number; syncBindings?: PromptBinding[] }) {
+  const { projectId, ...body } = input;
+  return apiRequest<CanvasRecord>(`/api/canvases/${encodeURIComponent(projectId)}/prompt-references`, {
+    method: 'POST', silent: true, body: JSON.stringify(body),
+  });
 }
 
 /** 对话引用快照（IKDLQJ）：点击「添加到对话」当刻冻结的正文与来源，服务端不可变保存。 */
@@ -167,6 +175,8 @@ export function serializeNodes(nodes: Node[]): string {
       if (typeof v === 'function') return;
       // 派生标记不持久化：重新进画布时按 snapshot 资产字典重新计算
       if (k === 'assetMissing') return;
+      // 校验中 loading 不落盘：二次进入按 snapshot assets.material_status 重算，避免卡在校验中
+      if (k === 'complianceBusy') return;
       // 运行期上下文不持久化：水合时由 CanvasPage 按当前项目重新注入
       if (k === 'projectId') return;
       if ((k === 'images' || k === 'initialRefs') && Array.isArray(v)) {
@@ -193,12 +203,19 @@ export function serializeEdges(edges: Edge[]): string {
   );
 }
 
-/**
- * 保存画布 PUT /api/canvases/:projectId
- * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
- * @throws ApiError status=412 表示版本冲突，调用方需重新加载
- */
-export function saveCanvasDoc(
+const CANVAS_VERSION_CONFLICT_MSG = 'Canvas 版本冲突';
+const CANVAS_SAVE_CONFLICT_RETRIES = 2;
+
+/** 从「Canvas 版本冲突」信封读取服务端当前 version；对不上则返回 undefined。 */
+export function readCanvasConflictVersion(error: unknown): number | null | undefined {
+  if (!isApiError(error) || error.message !== CANVAS_VERSION_CONFLICT_MSG) return undefined;
+  const version = (error.data as { version?: unknown } | null | undefined)?.version;
+  if (version === null) return null;
+  if (typeof version === 'number' && Number.isInteger(version) && version >= 0) return version;
+  return undefined;
+}
+
+function putCanvasDoc(
   projectId: string,
   payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
   version: number | null,
@@ -213,4 +230,29 @@ export function saveCanvasDoc(
       edges: serializeEdges(payload.edges),
     }),
   });
+}
+
+/**
+ * 保存画布 PUT /api/canvases/:projectId
+ * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
+ * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）
+ */
+export async function saveCanvasDoc(
+  projectId: string,
+  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
+  version: number | null,
+): Promise<CanvasSaveData> {
+  let expected = version;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= CANVAS_SAVE_CONFLICT_RETRIES; attempt += 1) {
+    try {
+      return await putCanvasDoc(projectId, payload, expected);
+    } catch (error) {
+      lastError = error;
+      const recovered = readCanvasConflictVersion(error);
+      if (recovered === undefined) throw error;
+      expected = recovered;
+    }
+  }
+  throw lastError;
 }

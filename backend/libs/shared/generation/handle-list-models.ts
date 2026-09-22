@@ -1,4 +1,4 @@
-import { ok } from "@blue-whale/contracts";
+import { ok, resolvePromptMaxLength, type PromptLengthType } from "@lib/contracts";
 import type { ModelCapabilityView } from "@lib/shared/persistence/index.js";
 
 import {
@@ -22,10 +22,19 @@ export async function handleListModels(
   },
 ) {
   const models = await deps.models.listEnabledByType(capability);
-  return ok(models.map(toConsumerModel));
+  const lengthType = asPromptLengthType(capability);
+  return ok(models.map((model) => toConsumerModel(model, lengthType)));
 }
 
-function toConsumerModel(view: CatalogRow) {
+/** text 档不建 GenerationJob、没有提示词长度闸：不解析缺省，`max_prompt_length` 原样透出
+ *  （行里真配了值也照传）。 */
+function asPromptLengthType(capability: string): PromptLengthType | null {
+  return capability === "image" || capability === "video" || capability === "audio"
+    ? capability
+    : null;
+}
+
+function toConsumerModel(view: CatalogRow, lengthType: PromptLengthType | null) {
   const mapping = parseStoredImageRequestMapping(
     view.channel_parser,
     view.request_mapping,
@@ -34,10 +43,21 @@ function toConsumerModel(view: CatalogRow) {
   const {
     channel_parser: _parser,
     request_mapping: _mapping,
+    features,
     ...rest
   } = view;
+  // IKESD6 / ADR-0085：i2i_model_name 是出站调用值，与像素/api_value 同哲学对消费端剥除。
+  // IKH4B8：max_prompt_length 下发的是**已算好的生效值**（模型配置优先、未配置回落缺省），
+  // 消费端拿到即可直接用，不必自己知道缺省口径——目录仍是上限的唯一事实源。
+  const { i2i_model_name: _alias, ...publicFeatures } = features;
   return {
     ...rest,
+    features: lengthType
+      ? {
+          ...publicFeatures,
+          max_prompt_length: resolvePromptMaxLength(lengthType, publicFeatures.max_prompt_length),
+        }
+      : publicFeatures,
     supported_sizes: view.supported_sizes.map((size) => ({
       id: size.id,
       label: size.label,

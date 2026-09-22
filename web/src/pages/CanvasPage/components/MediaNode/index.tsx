@@ -1,19 +1,30 @@
 /* ============================================
  * MediaNode 媒体节点：图片/视频/音频展示与操作手柄
  * 统一外部常驻标题 + 独立圆角内容主体
- * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 280×280 方形
+ * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 480×240 横矩形
  * ============================================ */
-import { useState, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus } from 'lucide-react';
-import { isMediaExtractNodeId } from '../../mediaExtract';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown } from 'lucide-react';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
+import { isAudioTrimNodeId } from '../../audioTrim';
+import type { ImageEnhanceIdentity } from '../../imageEnhance';
+import type { ImageCutoutIdentity } from '../../imageCutout';
+import type { VideoEnhanceIdentity } from '../../videoEnhance';
+import type { MaskOp, MaskPoint } from '../../eraseMask';
+import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
+import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+import EraseMaskLayer from './EraseMaskLayer';
+import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
+import AudioTrimOverlay from './AudioTrimOverlay';
+import AudioPlayer, { useAudioTrimSeekBridge } from './AudioPlayer';
+import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
-import { mediaNodeGenerationOverlay } from './generationOverlay';
-import { mediaNodeToolbarVisibility } from './toolbarVisibility';
+import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
-import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
+import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
@@ -46,7 +57,8 @@ const durationLabel = (duration?: number) =>
 /** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
 
-interface MediaNodeData {
+/** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
+export interface MediaNodeData {
   src?: string;
   fileName?: string;
   mediaType?: 'image' | 'video' | 'audio';
@@ -62,6 +74,14 @@ interface MediaNodeData {
   draftModelId?: string;
   draftSize?: string;
   draftRatio?: string;
+  /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
+  imageEnhance?: ImageEnhanceIdentity;
+  /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
+   *  据此分流 HD 面板（不进视频生成面板），lastParams 随面板切换即时写卡 */
+  videoEnhance?: VideoEnhanceIdentity;
+  /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
+   *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
+  imageCutout?: ImageCutoutIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -70,6 +90,16 @@ interface MediaNodeData {
   prompt?: string;
   /** 资产 ID（上传完成后存储） */
   assetId?: string | number;
+  /** 已绑定的素材库 id（asset- 前缀），用于入库去重 */
+  materialId?: string;
+  /** 空壳占位：待用户上传，不连线不成组无右键 */
+  emptyShell?: boolean;
+  /** 合规校验进行中（会话内 UI，不随画布持久化） */
+  complianceBusy?: boolean;
+  /** 合规校验已通过：历史画布只认 snapshot assets.material_status === Active */
+  compliancePassed?: boolean;
+  /** 合规校验未通过（当前会话内失败角标；二次进入不从节点 JSON 恢复） */
+  complianceFailed?: boolean;
   /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
   assetMissing?: boolean;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
@@ -84,6 +114,69 @@ interface MediaNodeData {
   size?: number;
   /** 生成参数透传的目标比例（如 "16:9"），仅决定占位形状，不作原始分辨率展示 */
   targetRatio?: string;
+  /** IKFM3S §4：「输入已更新」派生标记（渲染期注入，不持久化）：来源文本输入变化未被成功使用 */
+  inputStale?: boolean;
+  /** IKFM3S §4：第一条文本入边的来源文本卡 id（徽标定位入口） */
+  inputSourceNodeId?: string | null;
+  /** IKFM3S §6：定位来源文本卡（平移居中 + 选中高亮） */
+  onLocateInputSource?: (sourceNodeId: string) => void;
+  /** 「输入已更新」菜单：在当前节点用最新文本输入原位重新生成 */
+  onUpdateGenerate?: (id: string) => void;
+  /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
+  pickMarked?: boolean;
+  /** 会话期隐藏标记（IKGZ5O，渲染期派生注入，不持久化）：本卡为编辑会话（擦除/裁切/抠图/
+   *  扩图等）源卡时由 CanvasPage 注入。工具条迁出（IKGYYD）后本字段不再控制渲染，退为
+   *  可观测标记（集成测试断言会话进入/退出时序）；模态显隐由钉屏幕层 show 门
+   *  （!editSessionActive）承担。高清/HD 参数面板打开不再注入此标记（IKHFUF）。 */
+  soloToolbarHidden?: boolean;
+  /** 视频选取会话中能力失效（如合规未通过）置灰 */
+  pickBlocked?: boolean;
+  /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
+   *  CanvasPage 注入——棋盘格渲染数据与指针回调；仅正常图片内容区渲染 */
+  eraseEditing?: {
+    ops: readonly MaskOp[];
+    liveOp: MaskOp | null;
+    onStrokeStart: (point: MaskPoint) => void;
+    onStrokeMove: (point: MaskPoint) => void;
+    onStrokeEnd: () => void;
+  };
+  /** 去字幕框选模式框层（IKGZ83，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡且
+   *  会话处于框选模式时由 CanvasPage 注入——检测框渲染数据（半透明矩形描边）与拉框指针
+   *  回调，仅正常视频内容区渲染；智能模式不注入（零框选工具）。停帧由 subtitleErasePaused
+   *  单独承担（IKH3OU），与本标记解耦 */
+  subtitleEraseEditing?: {
+    boxes: readonly SubtitleBoxOp[];
+    liveBox: SubtitleBoxOp | null;
+    onBoxStart: (point: SubtitleBoxPoint) => void;
+    onBoxMove: (point: SubtitleBoxPoint) => void;
+    onBoxEnd: () => void;
+  };
+  /** 去字幕会话停帧标记（IKH3OU，渲染期派生注入，不持久化）：本卡为去字幕会话源视频卡时
+   *  由 CanvasPage 注入，视频暂停锁定在当前帧（会话期无播放控制）。与 subtitleEraseEditing
+   *  分开：框选模式两者都有，智能模式只有本标记——智能模式零框选工具，不渲染框层 */
+  subtitleErasePaused?: true;
+  /** 音视频分离编辑态标记（IKH28U，渲染期派生注入，不持久化）：本卡为音视频分离目标
+   *  源视频卡时由 CanvasPage 注入——视频暂停在当前帧并锁定播放控制（透明锁定层接管
+   *  指针，退出标记移除即恢复）；上方 X 工具条/下方发送条由 CanvasPage 浮出
+   *  （VideoAudioSplitDialog） */
+  splitEditing?: true;
+  /** 音频截取编辑态标记（IKHB7A，渲染期派生注入，不持久化）：本卡为截取会话源音频卡
+   *  时由 CanvasPage 注入——波形区叠加截取遮罩四件套（AudioTrimOverlay：选区框/抓手/
+   *  暗区/秒数胶囊，接管指针不冒泡开音频面板），AudioPlayer 按选区钳制试听；发送条
+   *  （AudioTrimBar）由 CanvasPage 浮出。选区（秒）与全长为遮罩几何与发送参数唯一
+   *  数据源，抓手拖拽实时上抛 CanvasPage（发送条时间范围联动）。 */
+  trimEditing?: {
+    selection: { start: number; end: number };
+    duration: number;
+    onSelectionChange: (selection: { start: number; end: number }) => void;
+  };
+  /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
+   *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
+   *  失败卡无身份不渲染，口径同家族身份分流先例） */
+  mediaExtract?: MediaExtractIdentity;
+  /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
+   *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
+  cropEditing?: true;
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -94,28 +187,100 @@ interface MediaNodeData {
   onCancelJob?: (id: string) => void;
   /** 重试（失败节点） */
   onRetryJob?: (id: string) => void;
-  /** 重新编辑：打开图片对话框并带入提示词与图片 */
-  onReEdit?: (id: string) => void;
-  /** 生成图片：打开图片对话框并带入图片 */
-  onGenImage?: (id: string) => void;
-  /** 生成视频：打开视频对话框并带入图片 */
-  onGenVideo?: (id: string) => void;
-  /** 生成音频：打开音频对话框并带入图片 */
-  onGenAudio?: (id: string) => void;
-  /** 视频整段提取音频；音频节点由后端注入画布。 */
-  onExtractAudio?: (id: string) => Promise<void> | void;
+  /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
+  onTitleChange?: (id: string, name: string) => void;
+  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（画质工具横排「高清」按钮派发，IKH3XZ） */
+  onEnhanceImage?: (id: string) => void;
+  /** 擦除（IKGOT7）：把本卡置为擦除编辑态（画质工具横排「擦除」按钮派发，IKH3XZ；门槛见 imageErase.ts） */
+  onEraseImage?: (id: string) => void;
+  /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
+  onOutpaintImage?: (id: string) => void;
+  /** 裁切（IKGW1H）：把本卡置为裁切编辑态（画质工具横排「裁切」按钮派发，IKH3XZ；无门槛恒可用） */
+  onCropImage?: (id: string) => void;
+  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（画质工具横排「抠图」按钮派发，IKH3XZ；门槛见 imageCutout.ts） */
+  onCutoutImage?: (id: string) => void;
+  /** 智能去字幕（IKGZ82 入口 / IKH3OU 交互重做）：进入去字幕会话；mode 由「智能去字幕 ▾」
+   *  下拉菜单项决定（smart=智能模式、box=框选模式），会话内不互切；
+   *  门槛预检见 videoSubtitleErase.ts */
+  onVideoSubtitleErase?: (id: string, mode: VideoSubtitleEraseMode) => void;
+  /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
+   *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
+  onVideoEnhance?: (id: string) => void;
+  /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：进入音视频分离编辑态（「音视频分离 ▾」
+   *  下拉首项与触发钮直启派发，原单按钮链路不变；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
+  onAudioVideoSplit?: (id: string) => void;
+  /** 音频截取（IKHB6Y，父单 IKHB08）：音频卡工具条首位「截取」入口点亮派发（进入遮罩选段
+   *  编辑态归 IKHB7A，本票只透出回调；置灰门槛见 audioTrim.ts——音频 URL 缺失或时长
+   *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
+  onTrimAudio?: (id: string) => void;
+  /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
+   *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
+   *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
+  onVocalBackgroundSplit?: (id: string) => void;
+  /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
+   *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
+  onSceneSplit?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
   onShowDetails?: (id: string) => void;
+  onPaste?: (id: string) => void;
+  onCopyImage?: (id: string) => void;
+  onComplianceCheck?: (id: string) => void;
+  onFillEmptyShell?: (id: string, file: File) => void;
 }
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
+  const shellFileRef = useRef<HTMLInputElement>(null);
+  /** 源视频元素引用：去字幕编辑态注入时暂停在当前帧（IKGZ83，本期无播放控制） */
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [staleMenuOpen, setStaleMenuOpen] = useState(false);
+  const staleMenuRef = useRef<HTMLDivElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+  /** 去字幕会话锁定（IKH3NP 审查修订）：框选（subtitleEraseEditing 注入）与智能（仅
+   *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
+   *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
+  const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
+
+  /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
+  const commitName = useCallback(() => {
+    const result = commitCardName(nameDraft, data.fileName ?? '');
+    if (result.kind === 'invalid') {
+      setNameError(result.message);
+      return;
+    }
+    setNameError('');
+    setNameEditing(false);
+    if (result.kind === 'save') data.onTitleChange?.(id, result.value);
+  }, [data, id, nameDraft]);
+
+  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
+  const cancelName = useCallback(() => {
+    setNameDraft(data.fileName ?? '');
+    setNameError('');
+    setNameEditing(false);
+  }, [data.fileName]);
+
+  useDismissOnOutside([
+    { open: staleMenuOpen, ref: staleMenuRef, dismiss: () => setStaleMenuOpen(false) },
+  ]);
+
+  useEffect(() => {
+    if (!staleMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setStaleMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [staleMenuOpen]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -129,13 +294,47 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     };
   }, [contextMenu]);
 
-  /** 右键菜单 */
+  /** 去字幕会话（IKGZ83）：视频暂停锁定在当前帧——拉框对全片生效、画面定格便于精确框选；
+   *  两模式共用会话锁定布尔（IKH3NP 审查修订：框层只在框选模式注入，智能模式借
+   *  subtitleErasePaused 停在当前帧）。依赖稳定布尔而非每次渲染新生的对象引用，
+   *  语义不变且不再靠引用变化反复重放。 */
+  useEffect(() => {
+    if (!subtitleEraseLocked) return;
+    videoRef.current?.pause();
+  }, [subtitleEraseLocked]);
+
+  /** 音视频分离编辑态（IKH28U）：进入即定格在当前帧，锁定层接管指针，标记移除即恢复 */
+  useEffect(() => {
+    if (!data.splitEditing) return;
+    videoRef.current?.pause();
+  }, [data.splitEditing]);
+
+  /** 截取遮罩定位条 → AudioPlayer 命令式桥（IKHB7A）：按下暂停记 wasPlaying、松手按
+   *  wasPlaying 与「未拖到选区尾」续播（拖到尾停终点）；hook 细节见 AudioPlayer.tsx。 */
+  const trimSeekBridge = useAudioTrimSeekBridge();
+
+  const isEmptyShell = data.emptyShell === true;
+  const isGenHost =
+    data.draft === true
+    || data.genStatus === 'draft'
+    || data.genStatus === 'generating'
+    || data.genStatus === 'failed'
+    || data.genStatus === 'cancelled'
+    || data.jobId != null;
+  /** 上传素材只作出源，左侧不加号；生成节点（含图片草稿）一律接收入边。
+   *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
+  const showTargetHandle = !isEmptyShell && isGenHost;
+  const blockNodeMenu =
+    isEmptyShell || data.genStatus === 'generating';
+
+  /** 右键菜单：空壳 / 生成中不弹；草稿可弹（仅创建副本 / 删除） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
+    if (blockNodeMenu) return;
     setContextMenu({ x: e.clientX, y: e.clientY });
-  }, [data.toolMode]);
+  }, [data.toolMode, blockNodeMenu]);
 
   const handleDelete = useCallback(() => {
     setContextMenu(null);
@@ -154,30 +353,17 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onAddToChat?.(id);
   }, [data, id]);
 
+  const acceptShellFile = useCallback((file: File | undefined) => {
+    if (!file) return;
+    data.onFillEmptyShell?.(id, file);
+  }, [data, id]);
+
   /** 保存到共享资产（共享资产下线，入口已隐藏） */
   // const handleSaveToAssets = useCallback(() => {
   //   setContextMenu(null);
   //   console.log('[MediaNode] 保存到共享资产', { nodeId: id, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
   //   data.onSaveToAssets?.(id);
   // }, [data, id]);
-
-  /** 工具条操作（stopPropagation 避免触发节点拖拽/选中变化） */
-  const stop = (e: React.MouseEvent) => e.stopPropagation();
-  const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
-  const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
-  const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleExtractAudio = useCallback(async () => {
-    if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
-    setIsExtractSubmitting(true);
-    try {
-      await data.onExtractAudio(id);
-    } finally {
-      setIsExtractSubmitting(false);
-    }
-  }, [data, id, isExtractSubmitting]);
-  const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
-  const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
-  const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   /** 浏览器实测尺寸回填：仅在缺失或与既有数据不一致时上报，避免回填抖动 */
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -200,8 +386,22 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
-  const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   const isDraft = data.genStatus === 'draft';
+  /** 右侧出源手柄可见性：空壳与待生成草稿不出（草稿转生成中/成品时才补挂进 DOM） */
+  const showSourceHandle = !isEmptyShell && !isDraft;
+  /** React Flow 只在节点首测与尺寸变化时测量 handleBounds：手柄显隐翻转而节点同尺寸
+   *  （草稿占位与成品同形，IKHHCN）时库不重测，新挂载手柄永远不注册、拖线静默无响应，
+   *  须在显隐翻转时手动触发重测（库对动态手柄的指定姿势）。挂载首测库自己量，只在
+   *  翻转时补测——冗余首调在 jsdom 会撞 DOMMatrixReadOnly 缺桩（IKHHCN 门禁实证）。 */
+  const updateNodeInternals = useUpdateNodeInternals();
+  const handleVisibilityRef = useRef<[boolean, boolean] | null>(null);
+  useEffect(() => {
+    const prev = handleVisibilityRef.current;
+    handleVisibilityRef.current = [showTargetHandle, showSourceHandle];
+    if (prev === null) return;
+    if (prev[0] === showTargetHandle && prev[1] === showSourceHandle) return;
+    updateNodeInternals(id);
+  }, [updateNodeInternals, id, showTargetHandle, showSourceHandle]);
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   /** IKDMQU Q5：有旧素材（有效 http 素材 src）的生成中卡片继续显示素材，仅叠加状态角标；
@@ -209,7 +409,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const hasMediaSrc =
     typeof data.src === 'string' && data.src !== '' && !data.src.startsWith('blob:');
   const isMediaExtraction = isMediaExtractNodeId(id);
-  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
+  /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
+  const isAudioTrimCard = isAudioTrimNodeId(id);
+  const hideCancel = isMediaExtraction
+    || isAudioTrimCard
+    || isCanvasToolGeneration(data as Record<string, unknown>);
+  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction, hideCancel);
   const failHeadline = mediaNodeFailHeadline({
     genStatus: data.genStatus,
     errorText: data.errorText,
@@ -237,16 +442,24 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
   const renderPlaceholder = () => {
     if (isDraft) {
-      /* 待生成草稿（IKDMQQ）：不是素材缺失，点击卡片打开面板继续编辑 */
+      const isImageDraft = data.mediaType === 'image';
+      const isVideoDraft = data.mediaType === 'video';
+      // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
+      // 视频 HD 高清草稿（IKH3VG）同款专属占位；面板由本票接入
+      const draftHint = isImageDraft && data.imageEnhance
+        ? '配置参数生成高清图像'
+        : isVideoDraft && data.videoEnhance
+          ? '配置参数生成高清视频'
+          : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
-          <Image size={22} strokeWidth={1.8} color="#666" />
-          <span className={styles.missingText}>待生成</span>
+          {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
+          <span className={styles.missingText}>{draftHint}</span>
         </div>
       );
     }
     if (isGenerating) {
-      /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
+      /* 生成中：转圈；音频提取展示真实进度；生图/生视频可取消，画布工具卡不开放取消 */
       return (
         <div className={styles.genBox}>
           <div className={styles.genSpinner} />
@@ -276,11 +489,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       );
     }
     if (isGenDone) {
-      /* 失败/已取消：错误提示 + 重试 */
+      /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
+          才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
+          重试——IKHB7A lastInput 原参数重发；存量无身份失败卡不渲染） */
+      const canRetry = data.genStatus === 'failed'
+        && (!isMediaExtraction || data.mediaExtract != null)
+        && (!isAudioTrimCard || data.audioTrim != null);
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
-          {data.genStatus === 'failed' && !isMediaExtraction && (
+          {canRetry && (
             <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
               重试
             </button>
@@ -298,91 +516,244 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   };
 
   return (
-    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu} style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}>
-      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {selected && !data.genStatus && !data.assetMissing && (
-        <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
-          <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
-            <RefreshCcw size={14} strokeWidth={2} />
-            <span>重新编辑</span>
-          </button>
-          {toolbar.genImage && (
-            <button className={styles.toolBtn} onClick={handleGenImage} title="带入图片，打开图片对话框">
-              <Sparkles size={14} strokeWidth={2} />
-              <span>生成图片</span>
-            </button>
-          )}
-          {toolbar.genVideo && (
-            <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
-              <Video size={14} strokeWidth={2} />
-              <span>生成视频</span>
-            </button>
-          )}
-          {data.mediaType === 'video' && (
-            <button
-              className={styles.toolBtn}
-              onClick={() => void handleExtractAudio()}
-              disabled={data.assetId == null || isExtractSubmitting}
-              title={data.assetId == null ? '当前视频尚未关联资产，无法提取音频' : '提取视频中的完整音轨'}
-            >
-              <AudioLines size={14} strokeWidth={2} />
-              <span>{isExtractSubmitting ? '提交中…' : '提取音频'}</span>
-            </button>
-          )}
-          <span className={styles.toolDivider} />
-          <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
-            <Info size={14} strokeWidth={2} />
-          </button>
-          <button className={styles.toolBtn} onClick={handleDownload} title="下载">
-            <Download size={14} strokeWidth={2} />
-          </button>
-          {toolbar.mention && (
-            <button className={styles.toolBtn} onClick={handleMention} title="添加到 Agent 聊天">
-              <AtSign size={14} strokeWidth={2} />
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形） */}
+    <div
+      className={`${styles.wrapper} ${selected ? styles.selected : ''} ${data.pickBlocked ? styles.pickBlocked : ''}`}
+      data-media-type={data.mediaType ?? 'image'}
+      onContextMenu={handleContextMenu}
+      style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
+    >
+      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒横矩形）。
+          选中态悬浮工具条已迁出（IKGYYD）：钉屏幕层由 CanvasPage 经 NodeFollowToolbar 渲染
+          MediaNodeToolbar（拖动/缩放实时跟随、屏幕尺寸恒定），不再位于节点卡 DOM 内。 */}
       <div className={styles.titleRow} data-testid="media-title">
         <div className={styles.titleLeft}>
           <Icon className={styles.titleIcon} strokeWidth={2} color="#888" />
-          <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
+          {nameEditing ? (
+            <input
+              className="nodrag nopan"
+              aria-label="卡片名称"
+              value={nameDraft}
+              autoFocus
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
+                event.stopPropagation();
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  commitName();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelName();
+                }
+              }}
+            />
+          ) : (
+            <span
+              className={styles.titleName}
+              title={data.fileName || undefined}
+              onDoubleClick={(event) => {
+                // 原位编辑，不触发节点双击居中放大
+                event.stopPropagation();
+                if (!data.onTitleChange) return;
+                setNameDraft(data.fileName ?? '');
+                setNameError('');
+                setNameEditing(true);
+              }}
+            >
+              {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
+            </span>
+          )}
+          {data.complianceBusy ? (
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验中">
+              <span className={styles.complianceSpinner} />
+            </span>
+          ) : data.compliancePassed ? (
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance视频生成">
+              <img src="/success.png" alt="" />
+            </span>
+          ) : data.complianceFailed ? (
+            <span className={`nodrag nopan ${styles.complianceFailedText}`} title="seedance合规校验失败，不可用于视频生成">
+              审核失败
+            </span>
+          ) : null}
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
-      <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
-        {!data.isFirst && (
+      {/* 「输入已更新」徽标：点击在下方弹出操作，默认「更新生成」原位重跑最新输入。
+          放标题行外层避免 titleRow overflow 裁剪。 */}
+      {data.inputStale === true && (
+        <div ref={staleMenuRef} className={`nodrag nopan ${styles.inputStaleWrap}`}>
+          <button
+            type="button"
+            className={styles.inputStaleLabel}
+            data-testid="input-stale-badge"
+            title="输入已更新：来源文本已修改"
+            aria-haspopup="menu"
+            aria-expanded={staleMenuOpen || undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              setStaleMenuOpen((open) => !open);
+            }}
+          >
+            输入已更新
+            <ChevronDown size={12} strokeWidth={2} />
+          </button>
+          {staleMenuOpen && (
+            <div className={styles.inputStaleMenu} role="menu" data-testid="input-stale-menu">
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.inputStaleMenuItem}
+                data-testid="input-stale-update-generate"
+                disabled={isGenerating}
+                title={isGenerating ? '正在生成中' : '在当前节点用最新输入重新生成'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (isGenerating) return;
+                  setStaleMenuOpen(false);
+                  data.onUpdateGenerate?.(id);
+                }}
+              >
+                <RefreshCw size={14} strokeWidth={2} />
+                <span>更新生成</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {/* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾（纯展示不挡点击） */}
+      {data.pickMarked === true && (
+        <span
+          className={`nodrag nopan ${styles.pickMarkedBadge}`}
+          data-testid="pick-mark-badge"
+          title="已加入当前参考"
+        >
+          <Check size={12} strokeWidth={3} />
+        </span>
+      )}
+      {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
+      <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+        {showTargetHandle && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>
         )}
-        {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
-            IKDMQV：重新生成失败/取消同样保留旧素材（Q5「失败或取消后仍保留旧素材与最新编辑内容」），
-            失败原因与重试入口收进底部角标；无旧素材的失败（草稿首生成、提取任务）仍走占位 genBox */}
-        {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
+        {isEmptyShell ? (
+          <button
+            type="button"
+            className={`${styles.emptyShell} nodrag nopan`}
+            onClick={() => shellFileRef.current?.click()}
+          >
+            <Icon size={22} strokeWidth={1.8} color="#888" />
+            <span className={styles.emptyShellHint}>点击上传素材</span>
+            <input
+              ref={shellFileRef}
+              type="file"
+              hidden
+              accept={
+                data.mediaType === 'video'
+                  ? 'video/*'
+                  : data.mediaType === 'audio'
+                    ? 'audio/*'
+                    : 'image/*'
+              }
+              onChange={(e) => {
+                acceptShellFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+          </button>
+        ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <AudioPlayer src={data.src || ''} fileName={data.fileName} />
+          <AudioPlayer
+            ref={trimSeekBridge.playerRef}
+            src={data.src || ''}
+            fileName={data.fileName}
+            duration={typeof data.duration === 'number' ? data.duration : undefined}
+            onDownload={() => data.onDownload?.(id)}
+            trimSelection={data.trimEditing ? data.trimEditing.selection : null}
+            trimOverlay={
+              data.trimEditing ? (
+                <AudioTrimOverlay
+                  selection={data.trimEditing.selection}
+                  duration={data.trimEditing.duration}
+                  onSelectionChange={data.trimEditing.onSelectionChange}
+                  onSeekStart={trimSeekBridge.onSeekStart}
+                  onSeek={trimSeekBridge.onSeek}
+                  onSeekEnd={(time) => trimSeekBridge.onSeekEnd(time, data.trimEditing?.selection.end)}
+                />
+              ) : undefined
+            }
+          />
         ) : data.mediaType === 'video' ? (
-          <video
-            className={styles.mediaVideo}
-            src={data.src}
-            controls={isSelect}
-            preload="metadata"
-            onLoadedMetadata={handleVideoMetadata}
-            style={isSelect ? undefined : { pointerEvents: 'none' }}
-          />
+          <>
+            <video
+              ref={videoRef}
+              className={styles.mediaVideo}
+              src={data.src}
+              controls={isSelect && !subtitleEraseLocked}
+              preload="metadata"
+              disablePictureInPicture
+              disableRemotePlayback
+              controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
+              onLoadedMetadata={handleVideoMetadata}
+              style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
+            />
+            {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
+                仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}
+            {data.subtitleEraseEditing && (
+              <SubtitleEraseBoxesLayer
+                boxes={data.subtitleEraseEditing.boxes}
+                liveBox={data.subtitleEraseEditing.liveBox}
+                displayWidth={contentBox.width}
+                displayHeight={contentBox.height}
+                onBoxStart={data.subtitleEraseEditing.onBoxStart}
+                onBoxMove={data.subtitleEraseEditing.onBoxMove}
+                onBoxEnd={data.subtitleEraseEditing.onBoxEnd}
+              />
+            )}
+            {/* 音视频分离编辑态锁定层（IKH28U）：透明全覆盖接管指针（无框层，先例=去字幕
+                框层全覆盖接管）——编辑态期间播放控制不可达、点视频不响应播放操作；
+                退出（标记移除）即恢复播放控制。nodrag/nopan 同框层口径（层上拖不动卡/画布） */}
+            {data.splitEditing && (
+              <div
+                className="nodrag nopan"
+                data-testid="split-lock-layer"
+                style={{ position: 'absolute', inset: 0, zIndex: 5, cursor: 'default', touchAction: 'none' }}
+              />
+            )}
+          </>
         ) : (
-          <img
-            className={styles.mediaImage}
-            src={data.src}
-            alt={data.fileName || 'image'}
-            draggable={false}
-            onLoad={handleImageLoad}
-            style={isSelect ? undefined : { pointerEvents: 'none' }}
-          />
+          <>
+            {/* 抠图结果卡棋盘格垫底层（IKGXMT）：垫在 img 之下的静态棋盘格，透出透明 png 的
+                透明区域（规格故事 21）；仅 imageCutout 标记卡渲染，aria-hidden 纯视觉 */}
+            {data.imageCutout && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="cutout-checkerboard" />
+            )}
+            <img
+              className={styles.mediaImage}
+              src={data.src}
+              alt={data.fileName || 'image'}
+              draggable={false}
+              onLoad={handleImageLoad}
+              style={isSelect ? undefined : { pointerEvents: 'none' }}
+            />
+            {/* 擦除编辑态遮罩层（IKGOTB）：棋盘格渲染+指针接管，仅正常图片内容区叠加 */}
+            {data.eraseEditing && (
+              <EraseMaskLayer
+                ops={data.eraseEditing.ops}
+                liveOp={data.eraseEditing.liveOp}
+                displayWidth={contentBox.width}
+                displayHeight={contentBox.height}
+                onStrokeStart={data.eraseEditing.onStrokeStart}
+                onStrokeMove={data.eraseEditing.onStrokeMove}
+                onStrokeEnd={data.eraseEditing.onStrokeEnd}
+              />
+            )}
+          </>
         )}
         {isGenerating && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="regen-overlay">
@@ -390,9 +761,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.regenText}>
               重新生成中{typeof data.progress === 'number' ? ` ${data.progress}%` : ''}
             </span>
-            <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
-              取消
-            </button>
+            {!hideCancel && (
+              <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
+                取消
+              </button>
+            )}
           </div>
         )}
         {/* IKDMQV：重新生成失败/取消的成品卡——旧素材继续显示，底部角标呈现原因与重试。
@@ -400,42 +773,54 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isGenDone && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
-            {data.genStatus === 'failed' && !isMediaExtraction && (
+            {data.genStatus === 'failed'
+              && (!isMediaExtraction || data.mediaExtract != null)
+              && (!isAudioTrimCard || data.audioTrim != null) && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>
             )}
           </div>
         )}
+        {showSourceHandle && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
         <HandlePlus />
       </Handle>
+        )}
       </div>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-          <button className={styles.contextItem} onClick={handleAddToChat}>
-            <span>添加到聊天</span>
-          </button>
-          {/* 共享资产概念下线，隐藏入口 */}
-          {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
-            <span>保存到共享资产</span>
-          </button> */}
-          <button className={styles.contextItem} onClick={handleDuplicate}>
-            <span>复制</span>
-          </button>
-          <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-            <span>删除</span>
-          </button>
-          </div>,
-          document.body,
-        )}
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={isDraft
+            ? [
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]
+            : [
+                { key: 'chat', label: '添加到聊天' },
+                ...(isAudio
+                  ? []
+                  : [{
+                      key: 'compliance',
+                      label: 'Seedance合规校验',
+                      loading: data.complianceBusy,
+                      disabled: data.assetMissing === true,
+                    }]),
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]}
+          onClose={() => setContextMenu(null)}
+          onSelect={(key) => {
+            setContextMenu(null);
+            if (key === 'chat') handleAddToChat();
+            else if (key === 'compliance') data.onComplianceCheck?.(id);
+            else if (key === 'duplicate') handleDuplicate();
+            else if (key === 'delete') handleDelete();
+          }}
+        />
+      )}
     </div>
   );
 }

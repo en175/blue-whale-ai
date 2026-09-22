@@ -3,11 +3,11 @@ import {
   classifyPlanApplicationAvailability,
   type ConversationMentionType,
   type MentionFailureReason,
-} from "@blue-whale/core";
+} from "@lib/core";
 import {
   type CapabilitySnapshotVersion,
   type DerivedReference,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
@@ -52,8 +52,21 @@ export interface SnapshotAssetRow {
   id: string;
   type: string;
   url: string;
+  /** 素材内容 md5。渐入期老资产未落 md5，可空；写入侧不保证小写，比对需大小写不敏感。 */
+  md5: string | null;
   /** assets.project_id 在部署 schema 非空（默认 0）；理论可空时按全局 asset 处理。 */
   project_id: string | null;
+  /** IKEXX8：素材库关联两列成对携带（未关联为 null）。 */
+  material_id: string | null;
+  material_group_id: string | null;
+  /** IKFYHJ：素材校验状态（ADR-0087）。
+   *  取自本地镜像表，**不在这里查上游**——snapshot 是打开画布必走的读路径，
+   *  按素材数扇出 GetAsset 会把一次开页变成 N 次上游往返。
+   *  null = 没关联素材库、或关联了但本地无镜像行（早于本功能入库的存量素材）。
+   *  判定「此刻能不能用」以生成接口为准，本字段只作首屏展示。 */
+  material_status: string | null;
+  /** 该状态最后一次向上游确认的时刻（ISO 或 null）——前端据此判断镜像是否已经陈旧。 */
+  material_status_checked_at: string | null;
 }
 
 export interface SnapshotJobAggregate {
@@ -249,8 +262,47 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           id: idStr,
           type: a.type,
           url: a.url,
+          md5: a.md5 ?? null,
           project_id: rowProjectId,
+          material_id: a.material_id ?? null,
+          material_group_id: a.material_group_id ?? null,
+          material_status: null,
+          material_status_checked_at: null,
         });
+      }
+
+      // IKFYHJ：一次性批量取这批 asset 关联素材的校验状态（ADR-0087），回填到 asset 行。
+      // 单条 IN 查询，不做 N+1、不打上游——见 SnapshotAssetRow 的字段注释。
+      // 带 user_id 谓词（决策 1 的纵深防御）。
+      const materialIds = [
+        ...new Set(
+          assets
+            .map((a) => a.material_id)
+            .filter((id): id is string => id !== null && id.length > 0),
+        ),
+      ];
+      if (materialIds.length > 0) {
+        const statusRows = await prisma.material_assets.findMany({
+          where: { user_id: uid, material_id: { in: materialIds } },
+          select: {
+            material_id: true,
+            status: true,
+            status_checked_at: true,
+          },
+        });
+        const statusByMaterial = new Map(
+          statusRows.map((r) => [r.material_id, r]),
+        );
+        for (const asset of assets) {
+          if (asset.material_id === null) continue;
+          const row = statusByMaterial.get(asset.material_id);
+          if (!row) continue;
+          asset.material_status = row.status;
+          asset.material_status_checked_at =
+            row.status_checked_at === null
+              ? null
+              : row.status_checked_at.toISOString();
+        }
       }
 
       // IK67HE/T14：加载该 project 全部输出槽（按 slot_index 升序稳定），按 job 分组附加到 job view。

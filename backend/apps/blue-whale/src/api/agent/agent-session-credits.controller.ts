@@ -12,8 +12,8 @@
 // 求和只能发生在本层：agent 与后端之间用的是服务令牌，它手里没有用户凭证，调不了
 // /api/log/self；而浏览器请求带着用户 token 到达这里。agent 因此完全不碰钱。
 import { Controller, Get, Headers, Param, Query } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AccountService } from "@lib/shared/account/account.service.js";

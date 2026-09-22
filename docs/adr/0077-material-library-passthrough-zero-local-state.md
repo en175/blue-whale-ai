@@ -47,6 +47,18 @@ AI 产品（Canvas 创作）需要素材库能力：管理（素材组/素材/�
 - **创建生成任务时同步调 `GetAsset` 预检**：增加 N 次上游往返，且预检通过≠执行时仍有效
   （上游状态会漂移）。否决，保持纯过境。
 
+## 修订记录（2026-09-11，IKDE6X/IKEXX8 局部推翻，本 ADR 其余仍有效）
+
+「零本地表」边界被两次素材库需求收窄，产品侧现有**三处**本地持久化：
+
+1. `generation_jobs.input` 素材引用快照（本 ADR 原有例外）；
+2. `assets.material_id/material_group_id` 关联镜像（IKDJNZ）；
+3. `material_groups` **虚拟组**镜像，读权威（IKDE6X 落表 / IKEXX8 分流：`ListAssetGroups(AIGC)`
+   与 `GetAssetGroup` 本地命中读本地，真人组及其他 Action 仍纯过境透传，写权威恒为上游）。
+
+透传镜像、Action 白名单、真人会话、生成引用格式校验等其余决策不变。细则见
+[契约 v2](../specs/2026-09-08-ikde6x-material-group-design.md) §4/§5。
+
 ## 影响
 
 - 上游素材库素材是**账号维度外部目录**，与项目维度 Asset 是两个不同概念；`asset://` 双义

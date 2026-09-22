@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@blue-whale/contracts";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { NewApiError } from "@lib/core";
+import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@lib/contracts";
 import { assetDurationSeconds } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -13,6 +13,7 @@ import {
   type DedupAssetInput,
   type PresignAssetInput,
 } from "@lib/shared/assets/upload.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import {
   RateLimit,
@@ -33,6 +34,7 @@ export class AgentAssetsController {
     private readonly assets: AssetService,
     private readonly projects: ProjectService,
     private readonly storage: AssetStorageService,
+    private readonly material: MaterialService,
   ) {}
 
   @Post("presign")
@@ -53,18 +55,21 @@ export class AgentAssetsController {
     return handlePresignAsset(user.userId, body, this.storage.uploads);
   }
 
-  /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。 */
+  /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。
+   *  IKGQWR：带 `materialId` 时先过素材闸，命中后写 `material_id` / `material_group_id`。 */
   @Post("uploads/dedup")
   @RateLimit({
     buckets: [{ scope: "asset-dedup", key: "user", limit: 30, windowMs: 60_000 }],
   })
   async uploadsDedup(
     @CurrentUser() user: AuthenticatedUser,
+    @Headers("authorization") authorization: string | undefined,
     @Body() body: DedupAssetInput,
   ) {
     return handleDedupAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
+      materialGate: this.material.uploadMaterialGate(authorization),
     });
   }
 
@@ -74,12 +79,14 @@ export class AgentAssetsController {
   })
   async uploadsComplete(
     @CurrentUser() user: AuthenticatedUser,
+    @Headers("authorization") authorization: string | undefined,
     @Body() body: CompleteAssetInput,
   ) {
     return handleCompleteAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
       storage: this.storage.uploads,
+      materialGate: this.material.uploadMaterialGate(authorization),
     });
   }
 
