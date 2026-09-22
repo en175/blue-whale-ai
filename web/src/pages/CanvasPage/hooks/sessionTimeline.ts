@@ -950,6 +950,18 @@ export function buildTurns(
   return turns;
 }
 
+/**
+ * 这一轮底下要不要挂轮尾那一行（失败那句话、「重新回答」、已取消……）。
+ *
+ * 看的是「这一轮结束了没有」，不是「还有没有 live」：失败的轮为了让思考与已收口的工具行留在屏幕上
+ * 回看，`live` 保留着（`ended: true`）直到下一轮开始。此前条件写的是 `!turn.live`，于是失败的轮在
+ * 实时画面里永远没有这一行，刷新之后才出现——用户看到的是对话停在自己那句话下面、什么都点不了
+ * （IKHV7G 本地真机：上游过载重试用尽之后）。
+ */
+export function showsTurnFooter(turn: Pick<Turn, 'account' | 'live'>): boolean {
+  return turn.account !== null && (turn.live === null || turn.live.ended);
+}
+
 /* ============ 会话状态机（纯函数） ============ */
 
 /**
