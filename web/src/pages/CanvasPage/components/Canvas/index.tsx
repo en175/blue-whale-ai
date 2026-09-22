@@ -423,6 +423,18 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const parentNodeIdsRef = useRef<Set<string>>(new Set());
+  parentNodeIdsRef.current = new Set([
+    ...extraNodes.map((n) => n.id),
+    ...textNodes.map((n) => n.id),
+    ...mediaNodes.map((n) => n.id),
+    ...productNodes.map((n) => n.id),
+    ...assetNodes.map((n) => n.id),
+  ]);
+  const canvasEdgesRef = useRef(edges);
+  canvasEdgesRef.current = edges;
+  const onEdgesChangeRef = useRef(onEdgesChange);
+  onEdgesChangeRef.current = onEdgesChange;
   const onDeleteNodeRef = useRef(onDeleteNode);
   onDeleteNodeRef.current = onDeleteNode;
   const onDuplicateSelectedRef = useRef(onDuplicateSelected);
@@ -514,6 +526,23 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     },
     [onNodesChange],
   );
+  /** 父层刚插入节点+连线时，内部 nodes 还要等 useEffect 才同步。React Flow 会把
+   *  「目标尚未进内部图」的新边当成孤儿发出 remove。裁切等即时成品卡没有 generating
+   *  守卫，这条误删会把来源连线吃掉。父层两端都在、内部还缺一端时吞掉这次 remove；
+   *  剪刀删除时两端已在内部图，照常上抛。 */
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    const parentIds = parentNodeIdsRef.current;
+    const internalIds = new Set(nodesRef.current.map((n) => n.id));
+    const forwarded = changes.filter((change) => {
+      if (change.type !== 'remove') return true;
+      const edge = canvasEdgesRef.current.find((item) => item.id === change.id);
+      if (!edge) return true;
+      const parentHasBoth = parentIds.has(edge.source) && parentIds.has(edge.target);
+      const internalHasBoth = internalIds.has(edge.source) && internalIds.has(edge.target);
+      return !(parentHasBoth && !internalHasBoth);
+    });
+    if (forwarded.length > 0) onEdgesChangeRef.current(forwarded);
+  }, []);
   /** 节点拖拽中标记：拖动节点（含拖组内成员出组）时隐藏框选悬浮条（成组/下载标签），
    *  这些标签只在静止框选状态出现，不应跟随被拖节点移动。 */
   const [isDraggingNode, setIsDraggingNode] = useState(false);
@@ -767,7 +796,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         nodes={nodesForFlow}
         edges={showEdges ? edges : []}
         onNodesChange={handleNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onConnectStart={(_e, params) => onConnectStart?.(params.nodeId ?? null)}
         onConnectEnd={onConnectEnd}

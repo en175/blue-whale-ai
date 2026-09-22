@@ -11,6 +11,7 @@ import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtr
 import { isAudioTrimNodeId } from '../../audioTrim';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
+import type { ImageCropIdentity } from '../../imageCrop';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
 import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
@@ -88,6 +89,9 @@ export interface MediaNodeData {
   /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
    *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
   imageCutout?: ImageCutoutIdentity;
+  /** 裁切身份标记：本卡由「裁切」结果链创建（客户端裁切无服务端任务）。成品态仍需渲染
+   *  左侧 target Handle 接收来源边，故以本标记识别为生成宿主（非草稿占位，图片正常展示）。 */
+  imageCrop?: ImageCropIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -333,7 +337,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     || data.genStatus === 'generating'
     || data.genStatus === 'failed'
     || data.genStatus === 'cancelled'
-    || data.jobId != null;
+    || data.jobId != null
+    || data.imageCrop != null;
   /** 上传素材只作出源，左侧不加号；生成节点（含图片草稿）一律接收入边。
    *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
   const showTargetHandle = !isEmptyShell && isGenHost;
