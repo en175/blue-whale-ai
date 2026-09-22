@@ -98,6 +98,41 @@ export type VideoFrameInterpolationInput = z.infer<
   typeof videoFrameInterpolationInputSchema
 >;
 
+/** 恢复查询契约（IKHSFE，PR !820 合入前整改）：浏览器未收到创建响应就关页时，前端只持有
+ *  草稿卡的 target_node_id（本地生成、不落库），服务端按「项目 + 目标节点」查回当前任务，
+ *  供重新进入画布恢复关联。路由：GET /api/projects/:projectId/video-frame-interpolations/current
+ *  ?target_node_id=xxx（控制器路径段常量 = 本值；查询键复用 VIDEO_FRAME_INTERPOLATION_INPUT_KEYS
+ *  .targetNodeId，不另造键名）。 */
+export const VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT = "current";
+
+/** 恢复查询的「当前关联」判定规则（契约冻结，双端不得各自发明）：同 user + 同 project + 同
+ *  target_node_id 的全部未软删插帧任务中，**创建时间最新者为当前关联**（gmt_create desc、
+ *  id desc 双键稳定排序）；旧任务不得覆盖更新关联，不同卡（不同 target_node_id）、不同项目的
+ *  任务互不串联。**不过滤 status**——queued / running / succeeded / failed（含入队失败兜底置
+ *  failed 的任务）均可查回；软删（is_delete）任务不参与。响应**不含 input**（凭证不外泄：
+ *  provider_credential 冻结在 job input，恢复查询只回任务身份与进度，详情走 GET /api/jobs/:id）。 */
+export const VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS = {
+  /** 当前关联任务 id（无任何关联任务时整个 data 为 null，不另设空对象形态）。 */
+  jobId: "job_id",
+  /** 任务状态（generation_jobs.status 原值，前端据此决定恢复轮询或呈现终态）。 */
+  status: "status",
+  /** 进度百分比原值（终态恒 0 或 100，按库值透传）。 */
+  progress: "progress",
+  /** 创建时间 ISO 串（gmt_create，前端展示与调试用）。 */
+  createdAt: "created_at",
+} as const;
+
+/** 恢复查询入参 schema（strict 单键：target_node_id 必填非空字符串；多余键拒——服务端只挑
+ *  本键透传，与创建 payload 的 strict 口径同源）。 */
+export const videoFrameInterpolationRecoveryQuerySchema = z
+  .object({
+    [VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId]: z.string().min(1),
+  })
+  .strict();
+export type VideoFrameInterpolationRecoveryQuery = z.infer<
+  typeof videoFrameInterpolationRecoveryQuerySchema
+>;
+
 /** 执行面错误码归并口径（数值码注册在 error-codes.ts
  *  ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = 1049，TS 侧常量单源在 error-codes.ts，本文件不重复
  *  定义——video_enhance / video_scene_split 同款）：

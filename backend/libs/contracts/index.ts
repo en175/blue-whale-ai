@@ -257,9 +257,13 @@ export {
   VIDEO_FRAME_INTERPOLATION_SUBMIT_PATH,
   VIDEO_FRAME_INTERPOLATION_POLL_PATH_PREFIX,
   VIDEO_FRAME_INTERPOLATION_RESULT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS,
   videoFrameInterpolationInputSchema,
+  videoFrameInterpolationRecoveryQuerySchema,
   type VideoFrameInterpolationFps,
   type VideoFrameInterpolationInput,
+  type VideoFrameInterpolationRecoveryQuery,
 } from "./video-frame-interpolation.js";
 export {
   AUDIO_TRIM_JOB_TYPE,

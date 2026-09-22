@@ -20,6 +20,7 @@ import {
   fail,
   ok,
   videoFrameInterpolationInputSchema,
+  videoFrameInterpolationRecoveryQuerySchema,
   type VideoFrameInterpolationInput,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
@@ -135,5 +136,46 @@ export class VideoFrameInterpolationsService {
       message,
       details,
     );
+  }
+
+  /** 恢复查询（IKHSFE）：浏览器未收到创建响应就关页时，按「项目 + 目标节点」查回当前任务
+   *  的权威关联，供重新进入画布恢复。契约 = video-frame-interpolation.ts 的恢复查询节
+   *  （RECOVERY_* 常量与 schema）。
+   *  - 归属：先 project.findOwnedById 复核（非本人项目一律 404，不泄露存在性）；
+   *  - 判定：同 user + project + target_node_id 的未软删任务中 gmt_create/id 最新者为当前关联
+   *    （旧任务不得覆盖更新关联，不同卡互不串联），**不过滤 status**——入队失败兜底置 failed
+   *    的任务同样可查回；
+   *  - 外泄面：响应只回 job_id / status / progress / created_at，**不回 input**——
+   *    provider_credential 冻结在 job input，恢复查询不投影（详情走 GET /api/jobs/:id）。
+   *  JSON path 过滤（input.target_node_id）经实测在 Prisma 7 + mariadb adapter 生效
+   *  （path 须带 "$." 前缀，MySQL JSON 等值比较类型敏感）。 */
+  async findCurrent(userId: string, projectId: string, query: Record<string, unknown>) {
+    const parsed = videoFrameInterpolationRecoveryQuerySchema.safeParse(query ?? {});
+    if (!parsed.success) {
+      return fail(PARAM_MISSING_CODE, "缺少目标节点 ID（target_node_id）");
+    }
+    const project = await this.project.findOwnedById(projectId, userId);
+    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+
+    const job = await this.prisma.client.generation_jobs.findFirst({
+      where: {
+        user_id: BigInt(userId),
+        project_id: BigInt(projectId),
+        type: VIDEO_FRAME_INTERPOLATION_JOB_TYPE,
+        is_delete: false,
+        input: {
+          path: "$." + VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId,
+          equals: parsed.data[VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId],
+        },
+      },
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+    });
+    if (!job) return ok(null);
+    return ok({
+      job_id: job.id.toString(),
+      status: job.status,
+      progress: job.progress,
+      created_at: job.gmt_create.toISOString(),
+    });
   }
 }

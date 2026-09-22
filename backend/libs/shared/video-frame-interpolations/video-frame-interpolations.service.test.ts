@@ -231,3 +231,74 @@ describe("VideoFrameInterpolationsService.create：请求方凭证冻结（断�
     expect(create.mock.calls[0][0].data.input).toEqual(VALID_BODY);
   });
 });
+
+describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）", () => {
+  function makeJobRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 400n,
+      status: "queued",
+      progress: 0,
+      gmt_create: new Date("2026-09-22T05:00:00.000Z"),
+      input: { ...VALID_BODY },
+      ...overrides,
+    };
+  }
+
+  function makeFindService(overrides: {
+    project?: unknown;
+    findFirst?: unknown;
+  } = {}) {
+    const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
+    const findFirst = overrides.findFirst ?? vi.fn().mockResolvedValue(makeJobRow());
+    const prisma = { client: { generation_jobs: { findFirst } } };
+    return {
+      service: new VideoFrameInterpolationsService(prisma as never, project as never, {} as never),
+      findFirst,
+    };
+  }
+
+  it("rejects a missing or empty target_node_id with a readable reason", async () => {
+    const { service } = makeFindService();
+    expect((await service.findCurrent("9", "55", {})).code).not.toBe(200);
+    expect((await service.findCurrent("9", "55", { target_node_id: "" })).code).not.toBe(200);
+    expect((await service.findCurrent("9", "55", { foo: 1 })).msg).toContain("target_node_id");
+  });
+
+  it("rejects a project not owned by the requester (404, no existence leak)", async () => {
+    const { service, findFirst } = makeFindService({
+      project: { findOwnedById: vi.fn().mockResolvedValue(null) },
+    });
+    const result = await service.findCurrent("9", "55", { target_node_id: "node-1" });
+    expect(result.code).not.toBe(200);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns data=null when the target node has no job at all", async () => {
+    const { service } = makeFindService({ findFirst: vi.fn().mockResolvedValue(null) });
+    const result = await service.findCurrent("9", "55", { target_node_id: "node-1" });
+    expect(result.code).toBe(200);
+    expect(result.data).toBeNull();
+  });
+
+  it("projects only job_id / status / progress / created_at — no input, no credential", async () => {
+    const { service } = makeFindService({
+      findFirst: vi.fn().mockResolvedValue(
+        makeJobRow({
+          input: { ...VALID_BODY, provider_credential: "sk-live-token" },
+          status: "failed",
+          progress: 0,
+        }),
+      ),
+    });
+    const result = await service.findCurrent("9", "55", { target_node_id: "node-1" });
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual({
+      job_id: "400",
+      status: "failed",
+      progress: 0,
+      created_at: "2026-09-22T05:00:00.000Z",
+    });
+    expect(JSON.stringify(result)).not.toContain("provider_credential");
+    expect(JSON.stringify(result)).not.toContain("sk-live-token");
+  });
+});

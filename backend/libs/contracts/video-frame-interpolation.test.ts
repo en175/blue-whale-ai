@@ -22,10 +22,13 @@ import {
   VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
   VIDEO_FRAME_INTERPOLATION_JOB_TYPE,
   VIDEO_FRAME_INTERPOLATION_POLL_PATH_PREFIX,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
   VIDEO_FRAME_INTERPOLATION_RESULT_KEYS,
   VIDEO_FRAME_INTERPOLATION_SOURCE,
   VIDEO_FRAME_INTERPOLATION_SUBMIT_PATH,
   videoFrameInterpolationInputSchema,
+  videoFrameInterpolationRecoveryQuerySchema,
 } from "./video-frame-interpolation.js";
 
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
@@ -132,6 +135,31 @@ describe("video_frame_interpolation 契约不变量（官方参数级 API 参考
         `fps=${JSON.stringify(fps)} 必须被拒`,
       ).toBe(false);
     }
+  });
+});
+
+describe("video_frame_interpolation 恢复查询契约（IKHSFE：按项目 + 目标节点查回当前任务）", () => {
+  it("路由段 current；响应键冻结 job_id / status / progress / created_at——不含 input（凭证不外泄）", () => {
+    expect(VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT).toBe("current");
+    expect(Object.values(VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS)).toEqual([
+      "job_id",
+      "status",
+      "progress",
+      "created_at",
+    ]);
+  });
+
+  it("schema：target_node_id 单键必填非空；strict 多余键拒、空串拒", () => {
+    expect(videoFrameInterpolationRecoveryQuerySchema.parse({ target_node_id: "node-1" })).toEqual({
+      target_node_id: "node-1",
+    });
+    expect(videoFrameInterpolationRecoveryQuerySchema.safeParse({}).success).toBe(false);
+    expect(videoFrameInterpolationRecoveryQuerySchema.safeParse({ target_node_id: "" }).success).toBe(
+      false,
+    );
+    expect(videoFrameInterpolationRecoveryQuerySchema.safeParse({ foo: 1 }).success).toBe(false);
+    // 查询键与创建 input 的目标节点键同名（不另造键名）。
+    expect(VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId).toBe("target_node_id");
   });
 });
 

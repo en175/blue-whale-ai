@@ -1,12 +1,26 @@
 // IKHLK3：POST /projects/:projectId/video-frame-interpolations — 视频插帧（火山 MediaKit
 // video-frame-interpolation）建任务端点。
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+// IKHSFE：GET /projects/:projectId/video-frame-interpolations/current — 恢复查询端点
+// （浏览器未收到创建响应就关页时，按项目 + 目标节点查回当前任务关联）。
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
-import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
+import {
+  ERROR_ENQUEUE_FAILED,
+  VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+} from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 @Controller("projects/:projectId/video-frame-interpolations")
@@ -52,5 +66,19 @@ export class VideoFrameInterpolationsController {
         .catch(() => {});
     }
     return result;
+  }
+
+  /** 恢复查询（IKHSFE）：GET .../current?target_node_id=xxx。只挑契约单键透传，判定与投影
+   *  归 service.findCurrent（契约口径见 video-frame-interpolation.ts 恢复查询节）。 */
+  @Get(VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT)
+  async findCurrent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Query() query: Record<string, string> = {},
+  ) {
+    return this.videoFrameInterpolations.findCurrent(user.userId, projectId, {
+      [VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId]:
+        query[VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId],
+    });
   }
 }
