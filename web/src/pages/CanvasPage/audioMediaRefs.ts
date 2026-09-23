@@ -4,6 +4,7 @@
  * 音频参考无角色槽（服务端契约 role 恒 reference），随连线顺序持久化（服务端零改动）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
+import { AUDIO_SPEED_EDGE_ORIGIN } from './audioSpeed';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
@@ -82,8 +83,12 @@ export function audioMediaRefsOf(
     // 否则该视频会被判成非法音频参考，卡住音频面板的发送。
     // IKHB08：截取产物卡的来源边（origin=audio-trim）同口径跳过——源音频是合法音频
     // 素材，不跳过会被静默列为参考占位（防参考污染，见 audioTrim.ts 常量注释）。
+    // IKI4M2：调速产物卡的来源边（origin=audio-speed）同口径跳过——调速成品卡保留
+    // 生成记录可再开音频面板，不跳过会让源音频占参考位、进 references，源卡删除后
+    // 还会进 invalid 阻塞发送（见 audioSpeed.ts 常量注释）。
     const origin = (edge.data as { origin?: string } | undefined)?.origin;
-    if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN || origin === AUDIO_MIX_EDGE_ORIGIN) continue;
+    if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN
+      || origin === AUDIO_MIX_EDGE_ORIGIN || origin === AUDIO_SPEED_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const reason = audioRefSourceError(source);
