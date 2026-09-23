@@ -9175,7 +9175,13 @@ export default function CanvasPage() {
     setAudioTrimSubmitting(false);
   };
 
+  /** 退出音频混合会话（四路共用：发送条 X/Esc 公共链/点选其他卡/源卡删除绑定清理）：
+   *  未发送的所选输入与格式全部丢弃（无卡、无边、无任务），提交 state 复位——
+   *  任务在途锁（ref）不在此复位，由发送链 finally 释放（防并发创建的粒度是请求而非会话）。
+   *  IKI8L8：退出即推进纪元（对齐其余十一工具——此前唯一不推进者，发送在途 Esc 退出后
+   *  重开的会话会被旧响应误关）。 */
   const exitAudioMixEditing = () => {
+    toolSessionEpochRef.current.exit('audioMix');
     setAudioMixSourceNodeId(null);
     setAudioMixSelectedInputs([]);
     setAudioMixFormat('mp3');
@@ -9985,6 +9991,17 @@ export default function CanvasPage() {
     });
   };
 
+  /** 混合发送（发送条发送钮）：源素材身份 + 所选输入清单 + 输出格式 → 建任务。
+   *  请求发出即返回；编辑态退出与建卡在创建成功后由本异步链承担，失败停留会话
+   *  （输入/格式可调后重发）。
+   *  会话纪元（IKI8L8，机制单源 toolSessionCoordinator，不设工具专属纪元）：发送捕获
+   *  纪元，settle 比对——纪元失效（在途 Esc 退出/重开/切项目）即迟到响应：仍做任务收尾
+   *  （建卡/连线/首保存/轮询/释放任务在途锁），但不退用户当前会话、不复位其提交
+   *  state、不弹旧错误（素材关联/创建/首保存失败提示同归发送时的会话）。
+   *  双锁口径：audioMixInFlightRef（ref）是任务在途锁，防并发创建的粒度是请求——
+   *  在途时后来的发送被守卫挡回、拿不到锁，故 finally 无条件释放的必是本请求的锁，
+   *  且不能因会话失效跳过（否则永久锁死后续发送）；audioMixSubmitting（state）是
+   *  会话 UI 提交状态——仅发送时会话仍有效才复位，迟到响应不动新会话的提交状态。 */
   const handleAudioMixSend = (): void => {
     if (audioMixInFlightRef.current || !currentId || !audioMixSourceNodeId) return;
     const source = mediaNodesRef.current.find((node) => node.id === audioMixSourceNodeId);
@@ -10016,6 +10033,7 @@ export default function CanvasPage() {
       output_format: audioMixFormat,
     };
     const projectId = currentId;
+    const sessionEpoch = toolSessionEpochRef.current.capture('audioMix');
     audioMixInFlightRef.current = true;
     setAudioMixSubmitting(true);
     void (async () => {
@@ -10026,13 +10044,17 @@ export default function CanvasPage() {
             assetIds: selected.filter((input) => !input.nodeId).map((input) => input.assetId),
           });
         } catch (error) {
-          showToast('error', isApiError(error) ? `素材关联项目失败：${error.message}` : '素材关联项目失败，请重试');
+          // 迟到失败不向用户当前会话弹旧错误（任务未创建，无收尾要做）
+          if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+            showToast('error', isApiError(error) ? `素材关联项目失败：${error.message}` : '素材关联项目失败，请重试');
+          }
           return;
         }
         if (activeProjectRef.current !== projectId) return;
         const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
         if (activeProjectRef.current !== projectId) return;
-        exitAudioMixEditing();
+        // 只退出本次发送的会话；迟到成功仍建自己的任务卡收尾，不触碰后来开启的会话
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) exitAudioMixEditing();
         const nodeId = audioMixNodeId(created.job_id);
         const occupied = [
           ...mediaNodesRef.current,
@@ -10057,19 +10079,32 @@ export default function CanvasPage() {
         const firstSave = flushCanvasSave(projectId);
         audioMixFirstSaveRef.current.set(nodeId, firstSave);
         try {
-          if (!(await firstSave)) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
-          else audioMixUnpersistedCardsRef.current.delete(nodeId);
+          if (!(await firstSave)) {
+            // 首保存失败提示归发送时的会话；簿记清理是任务收尾，无条件执行
+            if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+              showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+            }
+          } else {
+            audioMixUnpersistedCardsRef.current.delete(nodeId);
+          }
         } catch {
-          showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+            showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          }
         } finally {
           if (audioMixFirstSaveRef.current.get(nodeId) === firstSave) audioMixFirstSaveRef.current.delete(nodeId);
         }
         pollJob(nodeId, created.job_id);
       } catch (error) {
-        showToast('error', isApiError(error) ? error.message : '音频混合任务创建失败，请重试');
+        // 迟到失败不打扰用户当前会话（无旧错误提示、不动其提交状态）
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+          showToast('error', isApiError(error) ? error.message : '音频混合任务创建失败，请重试');
+        }
       } finally {
+        // 任务在途锁永远释放（守卫下持有者必是本请求，不能用会话守卫跳过——否则永久锁死
+        // 后续发送）；会话 UI 提交状态仅发送时会话仍有效才复位，迟到不动新会话
         audioMixInFlightRef.current = false;
-        setAudioMixSubmitting(false);
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) setAudioMixSubmitting(false);
       }
     })();
   };

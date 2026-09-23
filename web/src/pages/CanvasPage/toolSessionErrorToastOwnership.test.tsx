@@ -279,6 +279,10 @@ const trimSendBar = () => document.body.querySelector('[data-testid="audio-trim-
 const trimSendBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-trim-send-btn"]');
 const sceneSendBar = () => document.body.querySelector('[data-testid="scene-split-send-bar"]');
 const sceneSendBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="scene-split-send-btn"]');
+const mixSendBar = () => document.body.querySelector('[data-testid="audio-mix-send-bar"]');
+const mixSendBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-mix-send"]');
+const mixCloseBtn = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-mix-close"]');
+const mixFormatTrigger = () => document.body.querySelector<HTMLButtonElement>('[data-testid="audio-mix-format-trigger"]');
 
 /** 进入截取编辑态（音频卡工具条「截取」回调） */
 async function enterTrim(id: string) {
@@ -290,6 +294,19 @@ async function enterTrim(id: string) {
 async function enterSceneSplit(id: string) {
   await act(async () => {
     (dataOf(id).onSceneSplit as (nodeId: string) => void)(id);
+  });
+}
+/** 进入音频混合会话并配好可发送的第二源（IKI8L8） */
+async function armMix(sourceId: string, candidateId: string) {
+  await act(async () => {
+    (dataOf(sourceId).onMixAudio as (nodeId: string) => void)(sourceId);
+  });
+  await clickBtn(document.body.querySelector<HTMLButtonElement>('[data-testid="audio-mix-add"]'));
+  await clickBtn(document.body.querySelector<HTMLButtonElement>(`[data-testid="audio-mix-candidate-${candidateId}"]`));
+}
+async function clickBtn(btn: HTMLButtonElement | null) {
+  await act(async () => {
+    btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 }
 /** 点发送钮（挂起场景下只完成发送动作本身，不等待创建往返） */
@@ -398,6 +415,51 @@ describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时�
     await flush();
     expect(toast.error).not.toHaveBeenCalled();
     expect(useAuthPromptStore.getState().open).toBe(true);
+  });
+});
+
+describe('IKI8L8 音频混合（真实 API/HTTP 链）：错误提示归属发送时会话', () => {
+  it('迟到业务失败：Esc 在途退出重开新会话后，旧失败全链路静默、新会话 WAV 参数不动', async () => {
+    let settleA!: (value: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { settleA = resolve; }));
+    await renderPage();
+    await armMix('a1', 'b1');
+    await clickSend(mixSendBtn());
+    // 发送在途：X 按钮提交禁用（不可用其伪造退出），Esc 公共链是唯一在途退出入口
+    expect(mixCloseBtn()!.disabled).toBe(true);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(mixSendBar()).toBeNull();
+    // 重开新会话、改 WAV
+    await armMix('a1', 'b1');
+    await clickBtn(mixFormatTrigger());
+    await clickBtn(document.body.querySelector<HTMLButtonElement>('[data-testid="audio-mix-format-wav"]'));
+    expect(mixFormatTrigger()!.textContent).toContain('wav');
+    // 旧请求以业务失败（HTTP 500 + msg）迟到返回——真实链：silent 传输下 HTTP 层不弹，
+    // 唯一提示源是页面 catch，修订前它无纪元比对、把旧错误弹给新会话（即缺口本体）
+    await act(async () => { settleA(jsonFail('混音服务开小差了')); });
+    await flush();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('混音服务开小差了');
+    // 新会话仍开、WAV 保留、可重试
+    expect(mixSendBar()).not.toBeNull();
+    expect(mixFormatTrigger()!.textContent).toContain('wav');
+    expect(mixSendBtn()!.disabled).toBe(false);
+  });
+
+  it('当前有效会话业务失败：页面提示恰一次、HTTP 层不叠加，停留会话可重试', async () => {
+    fetchMock.mockImplementationOnce(async () => jsonFail('混音服务开小差了'));
+    await renderPage();
+    await armMix('a1', 'b1');
+    await clickSend(mixSendBtn());
+    await flush();
+    // 单源提示：页面 catch 弹 msg（silent 传输，HTTP 层不 toast）
+    expect(document.body.textContent).toContain('混音服务开小差了');
+    expect(toast.error).not.toHaveBeenCalled();
+    // 会话保护不吞有效失败：停留会话、提交复位可重试
+    expect(mixSendBar()).not.toBeNull();
+    expect(mixSendBtn()!.disabled).toBe(false);
   });
 });
 

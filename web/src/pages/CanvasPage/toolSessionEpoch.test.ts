@@ -1,6 +1,8 @@
 /* IKI61O 会话纪元机制单测（toolSessionCoordinator.createToolSessionEpoch）：
    覆盖全部会话种类的进入/退出/项目切换推进与 capture/isCurrent 比对语义——
-   迟到响应「只做任务收尾、不碰当前会话」的判定只活在这一个机制里，各家族不各自发明。 */
+   迟到响应「只做任务收尾、不碰当前会话」的判定只活在这一个机制里，各家族不各自发明。
+   IKI8L8：ALL_KINDS 对齐 ToolSessionKind 当前全集十二种（audioMix 由 IKI68W 加入，
+   此前清单沿用 IKHW5C 收口时的十一种口径而漏列，勿再照抄历史清单）。 */
 import { describe, expect, it } from 'vitest';
 import {
   createToolSessionEpoch,
@@ -15,6 +17,7 @@ const ALL_KINDS: readonly ToolSessionKind[] = [
   'subtitleErase',
   'audioVideoSplit',
   'audioTrim',
+  'audioMix',
   'audioSpeed',
   'sceneSplit',
   'vocalSplit',
@@ -57,6 +60,19 @@ describe('IKI61O createToolSessionEpoch', () => {
     const sentAt = epoch.capture('audioSpeed');
     epoch.exit('audioSpeed');
     expect(epoch.isCurrent('audioSpeed', sentAt)).toBe(false);
+  });
+
+  it('音频混合（IKI8L8）：进入/退出/重开均推进纪元，旧捕获在重开后失效、新捕获有效', () => {
+    const epoch = createToolSessionEpoch();
+    epoch.enter('audioMix');
+    const sentAt = epoch.capture('audioMix');
+    expect(epoch.isCurrent('audioMix', sentAt)).toBe(true);
+    epoch.exit('audioMix'); // 发送在途 Esc 退出——此前唯一不推进纪元的退出函数
+    expect(epoch.isCurrent('audioMix', sentAt)).toBe(false);
+    epoch.enter('audioMix'); // 重开新会话（进入亦推进）
+    expect(epoch.isCurrent('audioMix', sentAt)).toBe(false);
+    const resentAt = epoch.capture('audioMix');
+    expect(epoch.isCurrent('audioMix', resentAt)).toBe(true);
   });
 
   it('项目切换 advanceAll：全部会话种类的旧捕获一并失效', () => {
