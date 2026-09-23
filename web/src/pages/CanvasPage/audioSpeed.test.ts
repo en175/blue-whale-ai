@@ -15,9 +15,14 @@ import {
 } from './audioSpeed';
 
 describe('audioSpeedGateReason（音频卡「调速」入口门槛预检，IKHW5C/IKHW5S）', () => {
-  it('有音频 URL 放行（本地可播；assetId 不参与门槛）', () => {
-    expect(audioSpeedGateReason({ src: 'blob:test' })).toBeNull();
-    expect(audioSpeedGateReason({ src: 'http://a/x.mp3' })).toBeNull();
+  it('音频 URL 与资产 ID 均存在时放行', () => {
+    expect(audioSpeedGateReason({ src: 'blob:test', assetId: '8' })).toBeNull();
+    expect(audioSpeedGateReason({ src: 'http://a/x.mp3', asset_id: 8 })).toBeNull();
+  });
+
+  it('有 URL 但没有资产 ID 时置灰', () => {
+    expect(audioSpeedGateReason({ src: 'http://a/x.mp3' })).toBe(AUDIO_SPEED_UNAVAILABLE_REASON);
+    expect(audioSpeedGateReason({ src: 'http://a/x.mp3', assetId: '' })).toBe(AUDIO_SPEED_UNAVAILABLE_REASON);
   });
 
   it('音频 URL 缺失置灰并悬停唯一原因（undefined/null/空串）', () => {
@@ -26,14 +31,13 @@ describe('audioSpeedGateReason（音频卡「调速」入口门槛预检，IKHW5
     expect(audioSpeedGateReason({ src: '' })).toBe(AUDIO_SPEED_UNAVAILABLE_REASON);
   });
 
-  it('assetId 有而 URL 缺失同样置灰（无 src 无从试听，资产关联性留给发送时拦截——对齐截取口径，IKHW5S 门槛核对）', () => {
-    expect(audioSpeedGateReason({ src: null })).toBe(AUDIO_SPEED_UNAVAILABLE_REASON);
+  it('assetId 有而 URL 缺失同样置灰', () => {
+    expect(audioSpeedGateReason({ src: null, assetId: '8' })).toBe(AUDIO_SPEED_UNAVAILABLE_REASON);
     expect(AUDIO_SPEED_UNAVAILABLE_REASON).toContain('无法调速');
   });
 
   it('时长缺失不拦调速（用户故事 4：无截取的时长门槛，门槛入参不含时长）', () => {
-    // 门槛形状只收 src——时长不参与判定（截取为 URL+时长双条件，调速无时长条件）
-    expect(audioSpeedGateReason({ src: 'blob:test' })).toBeNull();
+    expect(audioSpeedGateReason({ src: 'blob:test', assetId: '8' })).toBeNull();
   });
 });
 

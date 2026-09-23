@@ -300,7 +300,7 @@ export interface MediaNodeData {
   onMixAudio?: (id: string) => void;
   /** 音频调速（IKHW5C，父单 IKHVYO）：音频卡工具条第二钮「调速」入口点亮派发（进入
    *  调速编辑态骨架归本票，编辑态本体——滑杆/发送条/提交——归 IKHW5S；置灰门槛见
-   *  audioSpeed.ts——音频 URL 与 assetId 皆缺失唯一置灰，时长缺失不拦） */
+   *  audioSpeed.ts——音频 URL 或资产 ID 缺失即置灰，时长缺失不拦） */
   onAudioSpeed?: (id: string) => void;
   /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
    *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；

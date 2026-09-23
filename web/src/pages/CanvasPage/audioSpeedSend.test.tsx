@@ -125,6 +125,17 @@ async function switchToProjectB() {
   });
 }
 
+async function switchToProjectA() {
+  await act(async () => {
+    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
+    navigateRef!('/canvas?project=p1');
+  });
+  await act(async () => {
+    seedProjectA();
+    navigateRef!('/canvas?project=p1');
+  });
+}
+
 beforeEach(() => {
   enableReactActEnvironment();
   localStorage.clear();
@@ -141,6 +152,47 @@ afterEach(async () => {
 });
 
 describe('IKI4LX 慢响应期间 A→B 切换：迟到响应不污染新项目', () => {
+  it('首次提交迟到成功：回到 A 恢复结果卡、来源边、轮询与保存', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({
+      job_id: 'j1', status: 'succeeded', progress: 100,
+      asset: { id: 'a89', url: 'http://tos/result.m4a', type: 'audio', duration: 11.1 },
+    });
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    expect(mediaNodes().map((n) => n.id)).toEqual(['b1']);
+    expect(edges()).toEqual([]);
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+
+    await switchToProjectA();
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
+    expect(dataOf('audio-speed-j1').audioSpeed).toEqual({
+      sourceAssetId: '8', lastInput: { source_asset_id: '8', speed: 1.35 },
+    });
+    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
+      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+    });
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
+    expect(dataOf('audio-speed-j1').src).toBe('http://tos/result.m4a');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({
+        nodes: expect.arrayContaining([expect.objectContaining({ id: 'audio-speed-j1' })]),
+        edges: expect.arrayContaining([expect.objectContaining({
+          source: 'a1', target: 'audio-speed-j1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+        })]),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('成功响应迟到：B 无占位卡/无来源边/不启动轮询，B 新进的调速会话与提交中状态不受影响', async () => {
     // A 的创建请求挂起：构造「往返在途」窗口
     let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
@@ -174,12 +226,12 @@ describe('IKI4LX 慢响应期间 A→B 切换：迟到响应不污染新项目',
     );
     expect(sendBtn()!.disabled).toBe(true); // B 提交在途
 
-    // A 的迟到成功响应到达：本地写入全部丢弃
+    // A 的迟到成功响应到达：B 的本地画布不受影响
     await act(async () => {
       resolveA({ job_id: 'j1', status: 'queued' });
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    // 不建卡、不连线、不启动轮询（任务在服务端归属 A，无需补偿）
+    // B 不建卡、不连线、不启动轮询
     expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(false);
     expect(edges().some((e) => e.target === 'audio-speed-j1')).toBe(false);
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();

@@ -2597,6 +2597,14 @@ export default function CanvasPage() {
   const hydratedDocRef = useRef<typeof doc>(null);
   /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
   const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
+  /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
+  const audioSpeedPendingSubmissionsRef = useRef(new Map<string, {
+    projectId: string;
+    sourceNodeId: string;
+    jobId: string | number;
+    payload: AudioSpeedInput;
+    source: Node;
+  }>());
 
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
   useEffect(() => {
@@ -2665,6 +2673,22 @@ export default function CanvasPage() {
       node.data = { ...node.data, ...retry.patch };
       restoredAudioSpeedRetry = true;
     });
+    let restoredAudioSpeedSubmission = false;
+    audioSpeedPendingSubmissionsRef.current.forEach((pending, key) => {
+      if (pending.projectId !== currentId) return;
+      if (m.some((node) => node.id === audioSpeedNodeId(pending.jobId))) {
+        audioSpeedPendingSubmissionsRef.current.delete(key);
+        return;
+      }
+      const source = m.find((node) => node.id === pending.sourceNodeId) ?? pending.source;
+      m.push(attachCallbacks(buildAudioSpeedPlaceholderNode({
+        jobId: pending.jobId,
+        speed: pending.payload.speed ?? 1,
+        sourceAssetId: pending.payload.source_asset_id,
+        source,
+      }) as Node));
+      restoredAudioSpeedSubmission = true;
+    });
     // 商品序号从已加载节点数接续，避免新建重名
     productSeq.current = p.length;
     if (import.meta.env.DEV) {
@@ -2692,6 +2716,21 @@ export default function CanvasPage() {
         style: { stroke: '#444' },
         ...(e.data ? { data: e.data } : {}),
       }));
+    audioSpeedPendingSubmissionsRef.current.forEach((pending) => {
+      if (pending.projectId !== currentId || !hydratedIds.has(pending.sourceNodeId)) return;
+      const target = audioSpeedNodeId(pending.jobId);
+      if (hydratedEdges.some((edge) => edge.source === pending.sourceNodeId && edge.target === target)) return;
+      hydratedEdges.push({
+        id: `e-${pending.sourceNodeId}-${target}`,
+        source: pending.sourceNodeId,
+        target,
+        sourceHandle: null,
+        targetHandle: null,
+        type: 'custom',
+        style: { stroke: '#444' },
+        data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+      });
+    });
     setEdges(hydratedEdges);
     // 同步乐观锁版本/视口，并记录内容签名避免加载后立即重复保存
     // （签名口径与自动保存一致：含组伪节点，否则组数据会导致加载后立即误判变更）
@@ -2702,7 +2741,7 @@ export default function CanvasPage() {
     const upgradedTextNodes = contentNodes.some(
       (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
     );
-    lastSavedRef.current = upgradedTextNodes || restoredAudioSpeedRetry
+    lastSavedRef.current = upgradedTextNodes || restoredAudioSpeedRetry || restoredAudioSpeedSubmission
       ? ''
       : JSON.stringify(doc.viewport) +
         serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
@@ -9201,7 +9240,7 @@ export default function CanvasPage() {
   };
 
   /** 音频调速（IKHW5C 入口 / IKHW5S 编辑态闭环）：把目标音频卡置为调速编辑态。
-   *  置灰门槛（音频 URL 缺失唯一条件，时长缺失不拦）已在工具条按钮置灰层完成
+   *  置灰门槛（音频 URL 或资产 ID 缺失，时长缺失不拦）已在工具条按钮置灰层完成
    *  （audioSpeedGateReason），此处只管进入；互斥退出与生成面板关闭经
    *  toolSessionCoordinator（与截取/去字幕等既有会话互斥互踢）、不动视角；进入即暂停+
    *  播放头归零由 speedEditing 注入承担（AudioPlayer），工具条随会话模态隐藏；倍速
@@ -9562,8 +9601,8 @@ export default function CanvasPage() {
    *  不退编辑态（用户可调倍速后重发，截取同口径）。免费口径同截取：无幂等头、
    *  无积分预估、不走余额拦截门。
    *  项目隔离（IKI4LX）：发送时捕获 projectId，创建响应 settle 时核对 activeProjectRef——
-   *  等待期间用户已切走项目的，任务在服务端归属原项目（无需补偿），本地写入全部丢弃：
-   *  不退新项目的调速会话、不建卡、不连线、不启动轮询、不落盘、失败也不弹原项目的
+   *  等待期间用户已切走项目的，成功受理结果暂存到原项目，回去后建卡与落盘；
+   *  不退新项目的调速会话、不在新项目建卡/连线/轮询/落盘，失败也不弹原项目的
    *  错误提示（口径同 startFrameInterpolationJob 的 flush 收尾双检，IKHSFF）。
    *  请求错误只提示一次：创建走 silent 传输（http 层不 toast），catch 统一提示。 */
   const startAudioSpeedJob = async (
@@ -9583,8 +9622,13 @@ export default function CanvasPage() {
     }
     try {
       const created = await createAudioSpeedMutation.mutateAsync({ projectId, payload });
-      // 迟到响应项目双检（IKI4LX）：等待期间已切换到别的项目，本地写入全部丢弃
-      if (activeProjectRef.current !== projectId) return true;
+      // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
+      if (activeProjectRef.current !== projectId) {
+        audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
+          projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
+        });
+        return true;
+      }
       // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
       if (audioSpeedSessionRef.current.epoch === sessionEpoch) exitAudioSpeedEditing();
       const nodeId = audioSpeedNodeId(created.job_id);
@@ -10317,6 +10361,23 @@ export default function CanvasPage() {
     trackCanvasSave(queued.then(() => undefined, () => undefined));
     return queued;
   };
+
+  /** 返回发起项目时立即保存补建的调速卡；保存成功后才移除待恢复记录。 */
+  useEffect(() => {
+    if (!currentId || !doc) return;
+    const pending = [...audioSpeedPendingSubmissionsRef.current.entries()].filter(([, item]) =>
+      item.projectId === currentId &&
+      mediaNodes.some((node) => node.id === audioSpeedNodeId(item.jobId)) &&
+      (!mediaNodes.some((node) => node.id === item.sourceNodeId) ||
+        edges.some((edge) => edge.source === item.sourceNodeId && edge.target === audioSpeedNodeId(item.jobId))),
+    );
+    if (pending.length === 0) return;
+    const projectId = currentId;
+    void flushCanvasSave(projectId).then((saved) => {
+      if (saved) pending.forEach(([key]) => audioSpeedPendingSubmissionsRef.current.delete(key));
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, doc, mediaNodes, edges]);
 
   const handleRetryCanvasSave = async () => {
     if (!currentId || applyingRef.current) return;

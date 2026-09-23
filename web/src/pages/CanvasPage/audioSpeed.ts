@@ -1,7 +1,7 @@
 /* ============================================
  * 音频调速（IKHW5C 入口门槛 / IKHW5S 编辑态与发送闭环，父单 IKHVYO）：纯逻辑，
- * 无 React 依赖。门槛形状对齐 audioTrim.ts 先例（URL 缺失即置灰，assetId 不参与
- * 判定）；与截取门槛的差异只在时长条件——调速编辑态无选区、时间折算不硬依赖
+ * 无 React 依赖。音频 URL 或资产 ID 缺失即置灰；与截取门槛的差异只在时长条件，
+ * 调速编辑态无选区、时间折算不硬依赖
  * 时长，时长缺失不拦（用户故事 4）。占位卡/终态补丁/身份重试/错误文案形状
  * 对齐 audioTrim.ts（一对一「单占位卡→原地补丁成品卡」同族）。
  * 滑杆位置↔倍速映射（posToSpeed/speedToPos）与提交参数构造（贴原速省略/两位
@@ -15,6 +15,7 @@ import {
   type AudioSpeedInput,
 } from '@lib/contracts/audio-speed';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { readAssetId } from './mediaRefs';
 
 /** 唯一置灰原因（工单拍板文案：URL 缺失各情形共用一句） */
 export const AUDIO_SPEED_UNAVAILABLE_REASON = '音频不可用，无法调速';
@@ -22,15 +23,21 @@ export const AUDIO_SPEED_UNAVAILABLE_REASON = '音频不可用，无法调速';
 /** 门槛判定输入：与 MediaNode data 字段同名（src 音频 URL）。 */
 export interface AudioSpeedGateSource {
   src?: string | null;
+  assetId?: unknown;
+  asset_id?: unknown;
+  assetID?: unknown;
 }
 
 /** 音频卡「调速」入口门槛预检（按钮置灰用）：返回不可用原因（悬停展示），null 为可用。
- *  置灰条件 = 音频 URL 缺失（对齐截取 audioTrimGateReason 的 URL 条件——试听硬依赖
- *  src，无 URL 无从试听；assetId 不参与门槛，与截取同口径「资产关联性留给发送时
- *  拦截」）。时长不参与判定（用户故事 4：无截取那样的时长门槛，调速编辑态无选区、
+ *  置灰条件 = 音频 URL 或资产 ID 缺失；资产 ID 与发送守卫共用 readAssetId。
+ *  时长不参与判定（用户故事 4：无截取那样的时长门槛，调速编辑态无选区、
  *  时间折算不硬依赖时长）。 */
 export function audioSpeedGateReason(source: AudioSpeedGateSource): string | null {
-  if (!source.src) return AUDIO_SPEED_UNAVAILABLE_REASON;
+  if (!source.src || !readAssetId({
+    assetId: source.assetId,
+    asset_id: source.asset_id,
+    assetID: source.assetID,
+  })) return AUDIO_SPEED_UNAVAILABLE_REASON;
   return null;
 }
 

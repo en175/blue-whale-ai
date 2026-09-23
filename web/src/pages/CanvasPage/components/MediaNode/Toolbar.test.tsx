@@ -12,7 +12,7 @@
    悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
    派发 onTrimAudio（编辑态行为归 IKHB7A）。
    IKHW5C（父单 IKHVYO）第二钮「调速」点亮：自占位数组移出单独渲染（形态同「截取」
-   先例），门槛见 audioSpeed.ts（音频 URL 与 assetId 皆缺失唯一置灰，悬停「音频不可用，
+   先例），门槛见 audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，
    无法调速」；时长缺失不拦，无截取的时长门槛），达标可点派发 onAudioSpeed（编辑态
    本体归 IKHW5S）；混合/音视频合成/转码三钮维持占位「即将上线」。
    IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
@@ -154,7 +154,7 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
    点击后的编辑态行为归 IKHB7A，本套只验收回调被正确调用。
    IKHW5C（父单 IKHVYO）：第二钮「调速」自占位点亮——形态与置灰口径同「截取」先例
    （aria-disabled 置灰沿用画质横排先例，见 .toolBtn[aria-disabled='true']），门槛见
-   audioSpeed.ts（音频 URL 与 assetId 皆缺失唯一置灰，悬停「音频不可用，无法调速」；
+   audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，无法调速」；
    时长缺失不拦），达标可点派发 onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被
    正确调用）。其余三钮（混合/音视频合成/转码）维持置灰占位：悬停提示「即将上线」，
    不绑定任何点击行为；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
@@ -306,9 +306,8 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」点亮与三占位�
 });
 
 /* IKHW5C（父单 IKHVYO）：音频卡第二钮「调速」点亮断言（对齐「截取」钮 IKHB6Y 先例）。
-   置灰唯一条件 = 音频 URL 缺失（悬停「音频不可用，无法调速」；assetId 不参与门槛、
-   资产关联性留给发送时拦截，对齐截取口径——IKHW5S 门槛核对后由「URL 与 assetId
-   皆缺失」收窄）；时长缺失不拦（用户故事 4，无截取的时长门槛）。达标可点派发
+   音频 URL 或资产 ID 缺失即置灰并悬停「音频不可用，无法调速」；
+   时长缺失不拦（用户故事 4，无截取的时长门槛）。达标可点派发
    onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被正确调用）。 */
 describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
   const speedBtn = () =>
@@ -316,7 +315,7 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
 
   it('达标态「调速」可点：无 aria-disabled 且点击派发 onAudioSpeed（携带节点 id）', async () => {
     const onAudioSpeed = vi.fn();
-    await renderToolbar('audio', { data: { onAudioSpeed } });
+    await renderToolbar('audio', { data: { onAudioSpeed, assetId: '8' } });
     const btn = speedBtn();
     expect(btn.getAttribute('aria-disabled')).toBeNull();
     await act(async () => {
@@ -326,7 +325,7 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
   });
 
   it('达标态「调速」可用时无默认悬停文案（口径同「截取」钮先例）', async () => {
-    await renderToolbar('audio');
+    await renderToolbar('audio', { data: { assetId: '8' } });
     expect(speedBtn().getAttribute('title')).toBeNull();
   });
 
@@ -339,7 +338,7 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
       { src: '' },
     ];
     for (const data of cases) {
-      await renderToolbar('audio', { id: 'gate-node', data: { onAudioSpeed, ...data } });
+      await renderToolbar('audio', { id: 'gate-node', data: { onAudioSpeed, assetId: '8', ...data } });
       const btn = speedBtn();
       expect(btn.getAttribute('aria-disabled')).toBe('true');
       expect(btn.getAttribute('title')).toBe('音频不可用，无法调速');
@@ -350,30 +349,31 @@ describe('MediaNodeToolbar 音频卡「调速」点亮（IKHW5C）', () => {
     expect(onAudioSpeed).not.toHaveBeenCalled();
   });
 
-  it('有 URL 无 assetId（本地可播）放行；有 assetId 无 URL（试听无从谈起）置灰（对齐截取口径，IKHW5S 门槛核对）', async () => {
+  it('有 URL 无 assetId 或有 assetId 无 URL 均置灰', async () => {
     const onAudioSpeed = vi.fn();
     // 仅有 URL（blob 直传未关联资产）
     await renderToolbar('audio', { data: { onAudioSpeed, assetId: undefined } });
-    expect(speedBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(speedBtn().getAttribute('aria-disabled')).toBe('true');
+    expect(speedBtn().getAttribute('title')).toBe('音频不可用，无法调速');
     await act(async () => {
       speedBtn().click();
     });
-    expect(onAudioSpeed).toHaveBeenCalledWith('audio-node');
+    expect(onAudioSpeed).not.toHaveBeenCalled();
 
-    // 仅有 assetId（URL 缺失）：无 src 无从试听，置灰（资产关联性留给发送时拦截）
+    // 仅有 assetId（URL 缺失）：无 src 无从试听
     await renderToolbar('audio', { id: 'asset-node', data: { onAudioSpeed, src: '', assetId: 'a1' } });
     expect(speedBtn().getAttribute('aria-disabled')).toBe('true');
     expect(speedBtn().getAttribute('title')).toBe('音频不可用，无法调速');
     await act(async () => {
       speedBtn().click();
     });
-    expect(onAudioSpeed).toHaveBeenCalledTimes(1);
+    expect(onAudioSpeed).not.toHaveBeenCalled();
   });
 
   it('时长缺失不拦调速（用户故事 4）：duration 缺失/为 0 均可点，与「截取」门槛对照', async () => {
     const onAudioSpeed = vi.fn();
     for (const duration of [undefined, null, 0]) {
-      await renderToolbar('audio', { data: { onAudioSpeed, duration } });
+      await renderToolbar('audio', { data: { onAudioSpeed, assetId: '8', duration } });
       expect(speedBtn().getAttribute('aria-disabled')).toBeNull();
       await act(async () => {
         speedBtn().click();

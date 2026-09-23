@@ -33,9 +33,8 @@
  * 10 分钟且有时长数据，缺失放行），触发钮点击直启首项「人像抠像」。
  * IKHW5C（父单 IKHVYO）音频卡第二钮「调速」点亮（ADR-0109 第二钮）：自占位数组移出
  * 单独渲染接门槛与回调（形态同「截取」钮 IKHB6Y 先例：图标+文字、aria-disabled 置灰、
- * 点击守卫后派发 onAudioSpeed，编辑态本体归 IKHW5S）；置灰唯一条件 = 音频 URL 缺失
- * （audioSpeed.ts，悬停「音频不可用，无法调速」；assetId 不参与门槛、资产关联性留给
- * 发送时拦截，对齐截取口径；时长缺失不拦，无截取的时长门槛），混合/音视频合成/转码
+ * 点击守卫后派发 onAudioSpeed，编辑态本体归 IKHW5S）；音频 URL 或资产 ID 缺失
+ * 时置灰（audioSpeed.ts，悬停「音频不可用，无法调速」；时长缺失不拦），混合/音视频合成/转码
  * 三钮维持置灰占位「即将上线」不变。
  * IKHLKR 视频卡首位「HD」单按钮升为「高清 ▾」下拉（FrameInterpolationMenu，ADR-0113）：
  * 首项「HD 高清」直启原链路零变化，次项「插帧」派发 onFrameInterpolation 建插帧草稿卡
@@ -138,9 +137,8 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
   const audioTrimDisabledReason = audioTrimGateReason(data);
   const audioMixDisabledReason = audioMixSourceError({ id, type: 'mediaNode', position: { x: 0, y: 0 }, data: data as unknown as Record<string, unknown> });
   /** 音频调速（IKHW5C，父单 IKHVYO）：第二钮「调速」点亮，点击派发 onAudioSpeed 进入
-   *  调速编辑态骨架（编辑态本体归 IKHW5S）；置灰预检见 audioSpeed.ts（音频 URL 缺失
-   *  唯一置灰——悬停「音频不可用，无法调速」；assetId 不参与门槛、资产关联性留给
-   *  发送时拦截，对齐截取口径；时长缺失不拦，无截取的时长门槛） */
+   *  调速编辑态骨架（编辑态本体归 IKHW5S）；置灰预检见 audioSpeed.ts（音频 URL
+   *  或资产 ID 缺失时悬停「音频不可用，无法调速」；时长缺失不拦） */
   const handleAudioSpeed = useCallback(() => data.onAudioSpeed?.(id), [data, id]);
   const audioSpeedDisabledReason = audioSpeedGateReason(data);
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
