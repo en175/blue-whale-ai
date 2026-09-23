@@ -8,6 +8,8 @@ import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 export interface AssetView {
   id: string;
   type: string;
+  /** 资产入库状态；仅 normal 可作为音频混合输入。 */
+  status: string | null;
   url: string;
   width: number | null;
   height: number | null;
@@ -402,6 +404,7 @@ function toAssetView(
   a: {
     id: bigint;
     type: string;
+    status?: string | null;
     url: string;
     width: number | null;
     height: number | null;
@@ -421,6 +424,7 @@ function toAssetView(
   return {
     id: a.id.toString(),
     type: a.type,
+    status: a.status ?? null,
     url: a.url,
     width: a.width,
     height: a.height,

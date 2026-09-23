@@ -13,6 +13,8 @@ export interface AssetRecord {
   id: number | string;
   /** 资产类型，决定预览渲染方式 */
   type: AssetType;
+  /** 服务端入库状态；只有 normal 可作为音频混合输入。 */
+  status?: string | null;
   /** 资产访问 URL：image→<img>，video→<video>，audio→<audio> */
   url: string;
   /** 图片/视频宽度（像素），null 表示未知 */
@@ -164,10 +166,10 @@ export function fetchAssetReferences(id: AssetRecord['id']) {
  * 把资产库素材挂到指定项目，使其进入该项目 snapshot 资产字典，
  * 画布引用跨项目素材后刷新不会被判定为"素材已被删除"。
  */
-export function linkAssetToProject(projectId: string, assetId: AssetRecord['id']) {
+export function linkAssetToProject(projectId: string, assetId: AssetRecord['id'], init?: ApiRequestInit) {
   return apiRequest<{ projectId: string; assetId: string }>(
     `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(String(assetId))}/link`,
-    { method: 'POST' },
+    { ...init, method: 'POST' },
   );
 }
 

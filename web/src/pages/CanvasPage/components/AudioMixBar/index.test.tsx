@@ -25,9 +25,9 @@ const canvas: Node[] = [
 ];
 const libraryPage = {
   records: [
-    { id: 8, type: 'audio', url: '/fixed.mp3', duration: 10, source: 'uploaded', model: null, width: null, height: null, created_at: null },
-    { id: 7, type: 'audio', url: '/library.mp3', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
-    { id: 10, type: 'audio', url: '', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
+    { id: 8, type: 'audio', status: 'normal', url: '/fixed.mp3', duration: 10, source: 'uploaded', model: null, width: null, height: null, created_at: null },
+    { id: 7, type: 'audio', status: 'normal', url: '/library.mp3', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
+    { id: 10, type: 'audio', status: 'uploading', url: '/pending.wav', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
   ], total: 3, size: 30, current: 1,
 };
 

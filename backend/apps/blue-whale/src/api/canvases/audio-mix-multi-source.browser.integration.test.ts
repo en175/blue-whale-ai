@@ -15,6 +15,7 @@ import { ProjectsController } from "../projects/projects.controller.js";
 import { JobsController } from "../jobs/jobs.controller.js";
 import { AudioMixesController } from "../audio-mixes/audio-mixes.controller.js";
 import { AssetsController } from "../assets/assets.controller.js";
+import { AgentAssetsController } from "../agent-assets/agent-assets.controller.js";
 import { ProjectAssetsController } from "../project-assets/project-assets.controller.js";
 import { GenerationModelsController } from "../generation/models.controller.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
@@ -26,6 +27,7 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueAudioMixJob: vi.fn(async () => {}),
@@ -52,6 +54,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
     let temp = "";
     let storedOutput: Buffer | undefined;
     let expectedOutput: Buffer;
+    const uploadedObjects = new Map<string, Buffer>();
     const servedOutputHashes: string[] = [];
     const repo = resolve(import.meta.dirname, "../../../../../..");
     const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
@@ -120,21 +123,33 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       prisma = new PrismaService();
       projects = new ProjectService(prisma);
       const canvas = new CanvasService(prisma, projects);
-      const storage = { uploads: { inspectObject: async (key: string) => rejectObject ? null : ({
-        size: wav.length, mime: "audio/wav", publicUrl: `https://mix-object.test/${key}`,
-      }) } } as unknown as AssetStorageService;
+      const storage = { uploads: {
+        prepareUpload: async () => {
+          const storageKey = `uploads/9/audio/browser-${randomBytes(6).toString("hex")}.wav`;
+          return { storageKey, publicUrl: `https://mix-object.test/${storageKey}`,
+            uploadUrl: `${mediaBase}/${storageKey}`, headers: {}, expiresIn: 600 };
+        },
+        inspectObject: async (key: string) => rejectObject || (key.includes("/browser-") && !uploadedObjects.has(key)) ? null : ({
+          size: uploadedObjects.get(key)?.length ?? wav.length, mime: "audio/wav", publicUrl: `https://mix-object.test/${key}`,
+        }),
+        readHead: async (key: string, length: number) => uploadedObjects.get(key)?.subarray(0, length) ?? null,
+        makePublic: async () => {},
+        deleteMultiObjects: async (keys: string[]) => { keys.forEach((key) => uploadedObjects.delete(key)); },
+      } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
+      const material = new MaterialService(prisma);
       const mixes = new AudioMixesService(prisma, projects, assets, storage);
       Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
       Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
       Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);
+      Reflect.defineMetadata("design:paramtypes", [AssetService, ProjectService, AssetStorageService, MaterialService], AgentAssetsController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
       Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
       class HarnessModule {}
       Module({ controllers: [CanvasesController, ProjectsController, JobsController, AudioMixesController,
-        AssetsController, ProjectAssetsController, GenerationModelsController], providers: [
+        AssetsController, AgentAssetsController, ProjectAssetsController, GenerationModelsController], providers: [
         { provide: CanvasService, useValue: canvas },
         { provide: ProjectService, useValue: projects },
         { provide: PrismaService, useValue: prisma },
@@ -142,6 +157,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
         { provide: JobsService, useValue: new JobsService(prisma, projects) },
         { provide: AudioMixesService, useValue: mixes },
         { provide: AssetService, useValue: assets },
+        { provide: MaterialService, useValue: material },
         { provide: AssetStorageService, useValue: storage },
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       ] })(HarnessModule);
@@ -172,9 +188,10 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       const { chromium } = await import("playwright");
       const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
       const projectId = (await projects.create("9", "IKI68X browser")).id;
-      const createAsset = async (name: string) => {
+      const foreignProjectId = (await projects.create("9", "IKI68X other project")).id;
+      const createAsset = async (name: string, assetProjectId = projectId, status = "normal") => {
         const row = await prisma.client.assets.create({ data: {
-          user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
+          user_id: 9n, project_id: BigInt(assetProjectId), type: "audio", source: "uploaded", status,
           storage_key: `uploads/9/${name}.wav`, url: `${mediaBase}/${name}.wav`,
           duration_ms: 10_000, size: BigInt(wav.length),
         } });
@@ -182,7 +199,8 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       };
       const sourceAsset = await createAsset("source");
       const canvasAsset = await createAsset("canvas");
-      const libraryAsset = await createAsset("library");
+      const libraryAsset = await createAsset("library", foreignProjectId);
+      const pendingAsset = await createAsset("pending", projectId, "uploading");
       const nodes = [
         { id: "source", type: "mediaNode", position: { x: 280, y: 380 }, data: {
           src: `${mediaBase}/source.wav`, mediaType: "audio", fileName: "画布源.wav", assetId: sourceAsset, duration: 10,
@@ -199,6 +217,14 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       const vite = await createVite({ root: `${process.cwd()}/web`, plugins: [{
         name: "isolated-audio-object-read",
         configureServer(server) {
+          server.middlewares.use("/__tos-upload", (request, response) => {
+            const url = new URL(request.url ?? "", "http://localhost").searchParams.get("url");
+            const key = url?.startsWith(`${mediaBase}/`) ? url.slice(mediaBase.length + 1) : null;
+            if (request.method !== "PUT" || !key?.startsWith("uploads/9/audio/")) { response.writeHead(404).end(); return; }
+            const chunks: Buffer[] = [];
+            request.on("data", (chunk: Buffer) => chunks.push(chunk));
+            request.on("end", () => { uploadedObjects.set(key, Buffer.concat(chunks)); response.writeHead(200).end(); });
+          });
           server.middlewares.use("/__tos-fetch", (request, response) => {
             const url = new URL(request.url ?? "", "http://localhost").searchParams.get("url");
             if (url === `${mediaBase}/stored/out.mp3` && storedOutput) {
@@ -214,25 +240,19 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        const apiFailures: string[] = [];
+        const uploadResponses: string[] = [];
+        page.on("response", (response) => {
+          const path = new URL(response.url()).pathname;
+          if (path.startsWith("/api/agent/assets/uploads/")) uploadResponses.push(`${path}:${response.status()}`);
+          if (response.url().includes("/api/") && response.status() >= 400) {
+            void response.text().then((body) => apiFailures.push(`${response.status()} ${response.url()} ${body}`));
+          }
+        });
         page.setDefaultTimeout(15_000);
         await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
           userId: 9, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
         } }, version: 0 })));
-        let uploadedAsset = "";
-        await page.route("**/api/agent/assets/uploads/dedup", (route) =>
-          route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: 200, data: { dedup: false }, msg: "ok" }) }));
-        await page.route("**/api/agent/assets/uploads/presign", (route) =>
-          route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-            code: 200, data: { storage_key: "uploads/9/browser-local.wav", upload_url: "https://mix-upload.test/audio.wav", headers: {}, expires_in: 600 }, msg: "ok",
-          }) }));
-        await page.route("**/__tos-upload?**", (route) => route.fulfill({ status: 200, body: "" }));
-        await page.route("**/api/agent/assets/uploads/complete", async (route) => {
-          uploadedAsset = await createAsset("browser-local");
-          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-            code: 200, data: { asset_id: uploadedAsset, status: "ready", type: "audio",
-              url: `${mediaBase}/browser-local.wav`, duration: 1, width: 0, height: 0, mime: "audio/wav", size: wav.length }, msg: "ok",
-          }) });
-        });
         await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
         const source = page.locator('.react-flow__node-mediaNode[data-id="source"]');
         await source.waitFor();
@@ -243,21 +263,39 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
         await page.locator('[data-testid="audio-mix-add"]').click();
         await page.locator('[data-testid="audio-mix-candidate-canvas"]').click();
         await page.locator('[data-testid="audio-mix-tab-library"]').click();
+        expect(await page.locator(`[data-testid="audio-mix-library-${pendingAsset}"]`).isDisabled()).toBe(true);
         await page.locator(`[data-testid="audio-mix-library-${libraryAsset}"]`).click();
+        expect(await prisma.client.project_asset.count({ where: {
+          user_id: 9n, asset_id: BigInt(libraryAsset), project_id: BigInt(projectId), is_delete: 0,
+        } })).toBe(0);
         await page.locator('[data-testid="audio-mix-tab-upload"]').click();
         await page.locator('[data-testid="audio-mix-upload-input"]').setInputFiles({
           name: "本地音频.wav", mimeType: "audio/wav", buffer: wav,
         });
         await page.locator('[data-testid="audio-mix-add"]').getByText("音频 4/100").waitFor();
-        expect(uploadedAsset).not.toBe("");
+        const uploaded = await prisma.client.assets.findFirst({ where: {
+          user_id: 9n, project_id: BigInt(projectId), type: "audio", status: "normal",
+          storage_key: { startsWith: "uploads/9/audio/browser-" },
+        } });
+        expect(uploaded).not.toBeNull();
+        const uploadedAsset = uploaded!.id.toString();
+        expect(uploadedObjects.get(uploaded!.storage_key!)).toEqual(wav);
+        expect(uploadResponses).toEqual(expect.arrayContaining([
+          "/api/agent/assets/uploads/dedup:201",
+          "/api/agent/assets/uploads/presign:201",
+          "/api/agent/assets/uploads/complete:201",
+        ]));
         expect(await send.isEnabled()).toBe(true);
         await page.locator('[data-testid="audio-mix-format-trigger"]').click();
         await page.locator('[data-testid="audio-mix-format-mp3"]').click();
         await send.click();
+        await vi.waitFor(async () => expect(await prisma.client.project_asset.count({ where: {
+          user_id: 9n, asset_id: BigInt(libraryAsset), project_id: BigInt(projectId), is_delete: 0,
+        } })).toBe(1));
         let jobId = "";
         await vi.waitFor(async () => {
           const job = await prisma.client.generation_jobs.findFirst({ where: { project_id: BigInt(projectId), type: "audio_mix" } });
-          expect(job).not.toBeNull();
+          expect(job, `API failures: ${apiFailures.join(" | ")}; page: ${await page.locator("body").innerText()}`).not.toBeNull();
           jobId = job!.id.toString();
           expect(job!.input).toMatchObject({ source_node_id: "source", output_format: "mp3", inputs: [
             { asset_id: sourceAsset, node_id: "source" },

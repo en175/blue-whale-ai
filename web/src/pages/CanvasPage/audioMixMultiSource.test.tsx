@@ -62,6 +62,7 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createAudioMix: vi.fn(),
+  linkAssetToProject: vi.fn(),
   fetchAssetPage: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
@@ -89,7 +90,7 @@ vi.mock('@/api/assets', () => ({
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
   assetPageQueryOptions: () => ({ queryKey: ["assets", "audio", 30], initialPageParam: 1, queryFn: () => apiMocks.fetchAssetPage(), getNextPageParam: () => undefined }),
-  linkAssetToProject: vi.fn(),
+  linkAssetToProject: apiMocks.linkAssetToProject,
 }));
 
 vi.mock('@/api/canvas', () => ({
@@ -235,7 +236,9 @@ beforeEach(() => {
   seedDoc();
   apiMocks.createAudioMix.mockReset();
   apiMocks.fetchAssetPage.mockReset();
-  apiMocks.fetchAssetPage.mockResolvedValue({ records: [{ id: 7, type: "audio", url: "http://aud/7.mp3", duration: null, width: null, height: null, source: "uploaded", model: null, created_at: null }], total: 1, current: 1, size: 30 });
+  apiMocks.fetchAssetPage.mockResolvedValue({ records: [{ id: 7, type: "audio", status: "normal", url: "http://aud/7.mp3", duration: null, width: null, height: null, source: "uploaded", model: null, created_at: null }], total: 1, current: 1, size: 30 });
+  apiMocks.linkAssetToProject.mockReset();
+  apiMocks.linkAssetToProject.mockResolvedValue({ projectId: 'p1', assetId: '7' });
   apiMocks.uploadAssetFile.mockReset();
   apiMocks.saveCanvasDoc.mockReset();
   apiMocks.saveCanvasDoc.mockResolvedValue({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
@@ -272,7 +275,10 @@ describe('IKI68X 三来源与多段提交', () => {
     });
     await click('audio-mix-format-trigger');
     await click('audio-mix-format-wav');
+    expect(apiMocks.linkAssetToProject).not.toHaveBeenCalled();
     await sendMix();
+    expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '7', { silent: true });
+    expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', '9', { silent: true });
     expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', {
       source_node_id: 'a1',
       inputs: [
@@ -305,6 +311,26 @@ describe('IKI68X 三来源与多段提交', () => {
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
     expect(bodyBtn('audio-mix-add').textContent).toContain('2/100');
     expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('flac');
+    expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('跨项目素材关联失败时保留清单与格式，提示错误且不创建任务', async () => {
+    apiMocks.linkAssetToProject.mockRejectedValueOnce(new Error('关联接口不可用'));
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-tab-library');
+    await act(async () => { await vi.waitFor(() => expect(document.body.querySelector('[data-testid="audio-mix-library-7"]')).not.toBeNull()); });
+    await click('audio-mix-library-7');
+    await click('audio-mix-format-trigger');
+    await click('audio-mix-format-flac');
+    expect(apiMocks.linkAssetToProject).not.toHaveBeenCalled();
+    await sendMix();
+    expect(sendBar()).not.toBeNull();
+    expect(bodyBtn('audio-mix-add').textContent).toContain('2/100');
+    expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('flac');
+    expect(document.body.textContent).toContain('素材关联项目失败');
+    expect(apiMocks.createAudioMix).not.toHaveBeenCalled();
     expect(flowProps.current.edges).toEqual([]);
   });
 });

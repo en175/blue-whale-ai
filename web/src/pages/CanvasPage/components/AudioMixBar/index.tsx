@@ -42,7 +42,7 @@ function AudioMixLibrary({ selectedIds, full, submitting, onAdd }: {
     {library.data?.pages.flatMap((page) => page.records).filter((asset) => asset.type === 'audio').map((asset) => (
       <button key={String(asset.id)} type="button" role="menuitem" className={bar.formatMenuItem}
         data-testid={`audio-mix-library-${asset.id}`}
-        disabled={!asset.url || selectedIds.has(String(asset.id)) || full || submitting}
+        disabled={asset.status !== 'normal' || !asset.url || selectedIds.has(String(asset.id)) || full || submitting}
         onClick={() => onAdd({ assetId: String(asset.id), name: `音频 #${asset.id}`, duration: asset.duration })}>
         音频 #{asset.id}
       </button>

@@ -1949,6 +1949,10 @@ export default function CanvasPage() {
     mutationFn: (vars: { projectId: string; payload: AudioMixCreate }) =>
       createAudioMix(vars.projectId, vars.payload, { silent: true }),
   });
+  const linkAudioMixAssetsMutation = useMutation({
+    mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
+      Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
+  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -9433,6 +9437,16 @@ export default function CanvasPage() {
     setAudioMixSubmitting(true);
     void (async () => {
       try {
+        try {
+          await linkAudioMixAssetsMutation.mutateAsync({
+            projectId,
+            assetIds: selected.filter((input) => !input.nodeId).map((input) => input.assetId),
+          });
+        } catch (error) {
+          showToast('error', isApiError(error) ? `素材关联项目失败：${error.message}` : '素材关联项目失败，请重试');
+          return;
+        }
+        if (activeProjectRef.current !== projectId) return;
         const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
         if (activeProjectRef.current !== projectId) return;
         exitAudioMixEditing();
