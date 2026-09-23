@@ -93,6 +93,10 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
         "backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql"));
       execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
         { input: additiveSql, stdio: ["pipe", "pipe", "pipe"] });
+      const assetNameSql = readFileSync(join(repo,
+        "backend/prisma/migrations/20260923153000_iki8az_asset_name/migration.sql"));
+      execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
+        { input: assetNameSql, stdio: ["pipe", "pipe", "pipe"] });
       execFileSync("docker", ["exec", mysqlId, "mysql", "-utest", "-ptest", databaseName,
         "-e", `CREATE TABLE iki68n_test_guard (guard_token CHAR(32) PRIMARY KEY); INSERT INTO iki68n_test_guard VALUES ('${guardToken}')`],
       { stdio: "pipe" });
