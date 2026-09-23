@@ -353,6 +353,7 @@ import {
   readJobFailText,
   type CreateVideoMattingPayload,
   type CreateFrameInterpolationPayload,
+  type CreateAudioSpeedPayload,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
@@ -2006,6 +2007,15 @@ export default function CanvasPage() {
   const retryAudioMixMutation = useMutation({
     mutationFn: (vars: { projectId: string; jobId: string; key: string }) =>
       retryAudioMix(vars.projectId, vars.jobId, vars.key, { silent: true }),
+  });
+
+  /** 调速创建写请求（IKI4LX）：useMutation 承载 POST audio-speeds（首次提交与失败重试共用）——
+   *  silent 传输（http 层不 toast）+ 调用方 catch 统一提示一次（先例
+   *  createFrameInterpolationMutation，IKHSFH）。项目归属不由 Mutation 承载：提交与重试的
+   *  跨项目隔离由调用侧 activeProjectRef 双检显式保证（迟到响应丢弃本地写入）。 */
+  const createAudioSpeedMutation = useMutation({
+    mutationFn: (vars: { projectId: string; payload: CreateAudioSpeedPayload }) =>
+      createAudioSpeed(vars.projectId, vars.payload, { silent: true }),
   });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
@@ -8030,27 +8040,36 @@ export default function CanvasPage() {
     if (audioSpeedIdentity?.lastInput) {
       // 调速卡分流（IKHW5S，镜像截取）：契约无 retry 端点，重试 = 冻结 input（源素材+
       // 倍速，贴原速省略形态原样保留）重发创建接口，不从零再选。
+      // IKI4LX：重发走 createAudioSpeedMutation（silent 传输，http 层不 toast）——失败
+      // 由 catch 统一提示一次；跨项目隔离由 nodeId 归属保证（卡只存在于原项目节点表，
+      // 切走后 patch/poll 空转），lastInput 冻结形态不变。
       if (!currentId) {
         showToast('warn', '未选中项目，无法调速');
         return;
       }
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      const projectIdAtRetry = currentId;
       patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioSpeed(currentId, audioSpeedIdentity.lastInput)
+      createAudioSpeedMutation.mutateAsync({ projectId: currentId, payload: audioSpeedIdentity.lastInput })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          // 等待期间项目已切换：新任务归属原项目，不写入新项目节点表（IKI4LX）
+          if (activeProjectRef.current !== projectIdAtRetry) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
           pollJob(nodeId, created.job_id);
         })
         .catch((e: unknown) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          // 等待期间项目已切换：失败卡与错误提示都属于原项目，不写入新项目（IKI4LX）
+          if (activeProjectRef.current !== projectIdAtRetry) return;
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : audioSpeedErrorText(null),
           });
+          showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
         });
       return;
     }
@@ -9509,7 +9528,12 @@ export default function CanvasPage() {
    *  参考推导跳过，源音频不占参考位防参考污染）、启动轮询（applyJobTerminal 的调速
    *  分支回填成品/失败，时长以火山返回为权威值）、立刻落盘。创建失败（网络）不建卡
    *  不退编辑态（用户可调倍速后重发，截取同口径）。免费口径同截取：无幂等头、
-   *  无积分预估、不走余额拦截门。 */
+   *  无积分预估、不走余额拦截门。
+   *  项目隔离（IKI4LX）：发送时捕获 projectId，创建响应 settle 时核对 activeProjectRef——
+   *  等待期间用户已切走项目的，任务在服务端归属原项目（无需补偿），本地写入全部丢弃：
+   *  不退新项目的调速会话、不建卡、不连线、不启动轮询、不落盘、失败也不弹原项目的
+   *  错误提示（口径同 startFrameInterpolationJob 的 flush 收尾双检，IKHSFF）。
+   *  请求错误只提示一次：创建走 silent 传输（http 层不 toast），catch 统一提示。 */
   const startAudioSpeedJob = async (
     sourceNodeId: string,
     payload: AudioSpeedInput,
@@ -9518,13 +9542,16 @@ export default function CanvasPage() {
       showToast('warn', '未选中项目，无法调速');
       return false;
     }
+    const projectId = currentId;
     const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
     if (!node) {
       showToast('warn', '源音频卡不存在，无法调速');
       return false;
     }
     try {
-      const created = await createAudioSpeed(currentId, payload);
+      const created = await createAudioSpeedMutation.mutateAsync({ projectId, payload });
+      // 迟到响应项目双检（IKI4LX）：等待期间已切换到别的项目，本地写入全部丢弃
+      if (activeProjectRef.current !== projectId) return true;
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
       exitAudioSpeedEditing();
       const nodeId = audioSpeedNodeId(created.job_id);
@@ -9544,9 +9571,11 @@ export default function CanvasPage() {
       // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
       addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
       pollJob(nodeId, created.job_id);
-      await flushCanvasSave(currentId).catch(() => {});
+      await flushCanvasSave(projectId).catch(() => {});
       return true;
     } catch (e: unknown) {
+      // 等待期间项目已切换：原项目的失败提示不得弹给新项目（IKI4LX）
+      if (activeProjectRef.current !== projectId) return false;
       showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
       return false;
     }
@@ -9816,7 +9845,10 @@ export default function CanvasPage() {
   /** 调速发送（发送条发送钮）：源素材身份 + 当前倍速（贴原速省略/两位小数收口）→
    *  建任务。发送守卫（1.00x 置灰）由发送条承担，此处兜底拦截原速无意义任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioSpeedJob 承担，
-   *  失败停留编辑态（倍速可调后重发）。 */
+   *  失败停留编辑态（倍速可调后重发）。
+   *  提交会话隔离（IKI4LX）：finally 复位 submitting 以发送时捕获的项目为准——等待
+   *  期间项目已切换的，原会话由绑定清理 effect 退出（submitting 随之复位），本回调
+   *  不得再触碰（此时 submitting 可能属于新项目新会话的提交）。 */
   const handleAudioSpeedSend = (): boolean => {
     const nodeId = audioSpeedTargetNodeId;
     if (!nodeId || audioSpeedSubmitting) return false;
@@ -9828,10 +9860,14 @@ export default function CanvasPage() {
     }
     const speed = audioSpeedSpeed;
     if (speed === 1) return false;
+    const projectIdAtSend = currentId;
     setAudioSpeedSubmitting(true);
     // 贴原速省略与两位小数在契约构造内收口（buildAudioSpeedInput 口径只此一份）
     void startAudioSpeedJob(nodeId, buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed }))
-      .finally(() => setAudioSpeedSubmitting(false));
+      .finally(() => {
+        if (activeProjectRef.current !== projectIdAtSend) return;
+        setAudioSpeedSubmitting(false);
+      });
     return true;
   };
 

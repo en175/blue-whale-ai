@@ -405,16 +405,20 @@ export interface AudioSpeedCreatedData {
   status: 'queued';
 }
 
-/** 创建音频调速任务（IKHW5S，编辑态发送闭环）。 */
+/** 创建音频调速任务（IKHW5S，编辑态发送闭环）。
+ *  init.silent 透传 apiRequest（IKI4LX「请求错误只提示一次」，同 createFrameInterpolation
+ *  先例）：静默传输失败仍抛 ApiError 但 http 层不 toast，由调用方 catch 统一提示一次。 */
 export function createAudioSpeed(
   projectId: string,
   payload: CreateAudioSpeedPayload,
+  init?: { silent?: boolean },
 ): Promise<AudioSpeedCreatedData> {
   return apiRequest<AudioSpeedCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-speeds`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...(init?.silent === true ? { silent: true } : {}),
     },
   );
 }
