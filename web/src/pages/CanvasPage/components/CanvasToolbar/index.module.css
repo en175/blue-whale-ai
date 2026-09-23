@@ -3,10 +3,9 @@
  * ============================================ */
 
 .toolbar {
-  position: absolute;
-  top: 50%;
-  left: var(--spacing-lg);
+  position: fixed;
   transform: translateY(-50%);
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -17,7 +16,7 @@
   border-radius: var(--radius-lg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  z-index: 20;
+  z-index: 50;
 }
 
 .toolBtn {

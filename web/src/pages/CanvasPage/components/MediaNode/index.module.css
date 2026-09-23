@@ -81,6 +81,7 @@
 
 .contentCard .mediaImage,
 .contentCard .mediaVideo,
+.contentCard .mediaVideoLayer,
 .contentCard .audioBox,
 .contentCard .genBox,
 .contentCard .missingBox {
@@ -232,16 +233,21 @@
   pointer-events: none;
 }
 
-.mediaVideo {
+.mediaVideoLayer {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mediaVideo,
+.mediaVideoPoster {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background-color: #000;
-  /* React Flow 节点带 CSS transform，部分 Chromium 下圆角 video 不合成画面只剩黑底；
-     独立合成层让解码帧能画出来（首页 Hero 视频同款）。 */
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 /* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单 */

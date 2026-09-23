@@ -11186,7 +11186,7 @@ export default function CanvasPage() {
       />
 
       {/* 画布区域 */}
-      <div ref={canvasWrapperRef} className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
+      <div ref={canvasWrapperRef} data-canvas-stage className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
       {/* 资产卡参考图上限（ADR-0086）：节点组件经 context 读能力行，避免为卡内上限在
           节点树层层透传 props；未注入/未加载时回落能力缺省值 */}
@@ -11526,7 +11526,7 @@ export default function CanvasPage() {
         />
 
         {/* 左下角：返回首页 + 小地图切换 */}
-        <div className={styles.bottomLeftActions}>
+        <div className={styles.bottomLeftActions} data-canvas-chrome="block">
           <button
             className={styles.backHomeBtn}
             onClick={async () => { if (await ensureSavedBeforeProjectSwitch()) navigate('/'); }}

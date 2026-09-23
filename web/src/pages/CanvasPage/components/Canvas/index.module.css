@@ -4,6 +4,10 @@
 .canvasContainer {
   width: 100%;
   height: 100%;
+  /* 自成层叠上下文，避免节点 z-index:1000 和左侧工具栏比层级、把点击抢走 */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .canvasContainer :global(.react-flow__node) {
