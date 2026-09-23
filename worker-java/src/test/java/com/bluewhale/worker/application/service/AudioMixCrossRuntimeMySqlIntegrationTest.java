@@ -99,11 +99,20 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
     @DisplayName("audio_mix 跨 Node/Java 贯通：消费真实业务 API 写入的同库任务")
     void audioMixCrossRuntimeBusinessApiToAsset() throws Exception {
         String jobId = target.jobId();
+        boolean failPhase = "fail".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"));
         String storageUploadUrl = target.storageUploadUrl();
         String storagePublicUrl = target.storagePublicUrl();
         byte[] audio = "ID3-cross-runtime-output".getBytes(StandardCharsets.UTF_8);
         var submitted = new AtomicReference<String>();
         var base = new AtomicReference<String>();
+        String oldFence = System.getenv("IKI68N_OLD_FENCE");
+        if (oldFence != null) {
+            assertThat(service.publishAudioMixResult(new com.bluewhale.worker.domain.dto.PublishMediaExtractDto(
+                    jobId, "0", "9", "amix-stale", Long.parseLong(oldFence),
+                    "https://stale.invalid/out.mp3", "generated/9/audio/stale.mp3", "audio/mpeg",
+                    1L, "0123456789abcdef0123456789abcdef", 1.0))).isFalse();
+            assertThat(countAssets(Long.parseLong(jobId))).isZero();
+        }
         HttpServer gateway = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         gateway.createContext("/v1/mediakit/mix-audio", exchange -> {
             submitted.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
@@ -113,8 +122,10 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             try (var output = exchange.getResponseBody()) { output.write(response); }
         });
         gateway.createContext("/v1/mediakit/tasks/cross-task-1", exchange -> {
-            byte[] response = ("{\"status\":\"completed\",\"result\":{\"audio_url\":\""
-                    + base.get() + "/temporary/out.mp3\",\"duration\":12.5}}")
+            byte[] response = (failPhase
+                    ? "{\"status\":\"failed\",\"error\":{\"code\":\"provider_error\",\"message\":\"上游混音失败\"},\"request_id\":\"request-cross-fail\"}"
+                    : "{\"status\":\"completed\",\"result\":{\"audio_url\":\""
+                    + base.get() + "/temporary/out.mp3\",\"duration\":37.25}}")
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
             try (var output = exchange.getResponseBody()) { output.write(response); }
@@ -157,12 +168,17 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
                     WorkerClock.now().minusSeconds(10), Long.parseLong(jobId));
             processor.handle(jobId);
-            assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo("succeeded");
+            assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo(failPhase ? "failed" : "succeeded");
+            if (failPhase) {
+                assertThat(readJob(Long.parseLong(jobId)).getError()).contains("request-cross-fail");
+                assertThat(countAssets(Long.parseLong(jobId))).isZero();
+                return;
+            }
             assertThat(countAssets(Long.parseLong(jobId))).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class,
                     Long.parseLong(jobId))).isEqualTo(storagePublicUrl);
             assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class,
-                    Long.parseLong(jobId))).isEqualTo(12_500);
+                    Long.parseLong(jobId))).isEqualTo(37_250);
         } finally {
             gateway.stop(0);
         }

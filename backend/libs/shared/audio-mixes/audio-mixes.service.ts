@@ -13,6 +13,7 @@ import {
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
+  ERROR_ENQUEUE_FAILED,
   DomainError,
   audioMixCreateSchema,
   ok,
@@ -174,7 +175,19 @@ export class AudioMixesService {
       if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
         throw new DomainError(409, "幂等键已用于另一项音频混合重试");
       }
-      return ok({ job_id: jobId, status: "queued", replayed: true });
+      const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid } });
+      const error = current.error;
+      if (current.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
+          && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
+        const resumed = await this.prisma.client.generation_jobs.updateMany({
+          where: { id: jid, status: "failed", version: current.version },
+          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000),
+            version: { increment: 1 } },
+        });
+        if (resumed.count === 1) return ok({ job_id: jobId, status: "queued", replayed: true, enqueue_required: true });
+      }
+      const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid }, select: { status: true } });
+      return ok({ job_id: jobId, status: latest.status, replayed: true, enqueue_required: false });
     };
     try {
       const result = await this.prisma.client.$transaction(async (tx) => {
@@ -212,7 +225,8 @@ export class AudioMixesService {
         });
         return { replayed: false };
       });
-      return ok({ job_id: jobId, status: "queued", replayed: result.replayed });
+      if (result.replayed) return (await replay())!;
+      return ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true });
     } catch (error) {
       if (error instanceof DomainError && error.status !== 409) throw error;
       const existing = await replay();
@@ -221,8 +235,12 @@ export class AudioMixesService {
     }
   }
 
-  async markFailed(jobId: string, code: string, message: string): Promise<void> {
+  async markFailed(jobId: string, code: string, message: string): Promise<string> {
     await createGenerationCommandRepo(this.prisma.client).markFailedQueued(jobId, code, message);
+    const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({
+      where: { id: BigInt(jobId) }, select: { status: true },
+    });
+    return current.status;
   }
 }
 

@@ -1122,6 +1122,22 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
+    @DisplayName("audio_mix 退避期间恢复扫描不提前重投，DB 与 MQ 使用同一延迟")
+    void audioMixRecoveryRespectsPersistedPollBackoff() {
+        long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
+        LocalDateTime before = WorkerClock.now();
+        assertThat(service.rescheduleProviderPoll(String.valueOf(jobId), "mix-worker", 5L, 0, 40_000L)).isTrue();
+        LocalDateTime after = WorkerClock.now();
+
+        GenerationJobEntity row = readJob(jobId);
+        assertThat(row.getNextActionAt()).isBetween(before.plusSeconds(38), after.plusSeconds(42));
+        assertThat(row.getNextPollAt()).isEqualTo(row.getNextActionAt());
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).doesNotContain(jobId);
+        jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+    }
+
+    @Test
     @DisplayName("audio_mix 续租只允许当前 fencing 持有者且不复活已过期租约")
     void audioMixTransferLeaseIsFenced() {
         long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);

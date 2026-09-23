@@ -134,4 +134,56 @@ describe.skipIf(!databaseUrl)("audio mix retry in an isolated MySQL database", (
     expect(await second.json()).toMatchObject({ data: { job_id: String(original.id), replayed: true } });
     expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[String(original.id)]]);
   });
+
+  it("reports an enqueue failure and recovers once with the same key", async () => {
+    const original = await failedJob();
+    vi.mocked(enqueueAudioMixJob).mockReset();
+    vi.mocked(enqueueAudioMixJob).mockRejectedValueOnce(new Error("MQ down"));
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const url = `${baseUrl}/api/projects/${projectId}/audio-mixes/${original.id}/retry`;
+    const send = () => fetch(url, { method: "POST", headers: { "Idempotency-Key": "recover-mq" } });
+
+    const failed = await send();
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    const failedRow = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } });
+    expect(failedRow.status).toBe("failed");
+    expect(failedRow.error).toMatchObject({ code: "enqueue_failed" });
+    const recovered = await send();
+    const replay = await send();
+    expect(recovered.status).toBe(201);
+    expect(await recovered.json()).toMatchObject({ data: { job_id: String(original.id), status: "queued", replayed: true } });
+    expect(await replay.json()).toMatchObject({ data: { job_id: String(original.id), status: "queued", replayed: true } });
+    expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[String(original.id)], [String(original.id)]]);
+    const row = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } });
+    expect(row.retry_count).toBe(1);
+    expect(row.fencing_token).toBe(8n);
+    expect(row.input).toEqual(snapshot);
+    expect(row.error).toBeNull();
+  });
+
+  it("lets only one concurrent same-key replay resume a failed enqueue", async () => {
+    const original = await failedJob();
+    vi.mocked(enqueueAudioMixJob).mockReset();
+    vi.mocked(enqueueAudioMixJob).mockRejectedValueOnce(new Error("MQ down"));
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const url = `${baseUrl}/api/projects/${projectId}/audio-mixes/${original.id}/retry`;
+    const send = () => fetch(url, { method: "POST", headers: { "Idempotency-Key": "concurrent-recovery" } });
+    expect((await send()).status).toBeGreaterThanOrEqual(500);
+
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[String(original.id)], [String(original.id)]]);
+    expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } })).retry_count).toBe(1);
+  });
+
+  it("replays the actual failed worker status without re-enqueueing", async () => {
+    const original = await failedJob();
+    await service.retry("9", projectId, String(original.id), "worker-failure-key");
+    await prisma.client.generation_jobs.update({ where: { id: original.id }, data: {
+      status: "failed", error: { code: "audio_mix_failed", message: "provider rejected" },
+    } });
+    const replay = await service.retry("9", projectId, String(original.id), "worker-failure-key");
+    expect(replay.data).toMatchObject({ job_id: String(original.id), status: "failed", replayed: true });
+    expect(replay.data?.enqueue_required).toBe(false);
+  });
 });

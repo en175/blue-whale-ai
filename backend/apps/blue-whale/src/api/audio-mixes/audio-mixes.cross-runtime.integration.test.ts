@@ -18,13 +18,14 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJob: vi.fn(async () => {}) }));
 
 // IKI68N: true Nest HTTP + MySQL + Java Worker, with only MediaKit/MQ/object storage replaced locally.
 describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runtime acceptance", () => {
-  it("creates a frozen job through HTTP, processes it in Java, and reads the durable asset back through HTTP", async () => {
+  it("freezes inputs through HTTP, survives worker failure/restart and double-click retry, then publishes durable audio", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
     const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
     const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
@@ -150,9 +151,11 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         expect((await fetch(input.url)).status).toBe(206);
       }
 
-      const runWorker = async (token: string) => {
+      const runWorker = async (token: string, phase: "fail" | "succeed", oldFence?: bigint) => {
         const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
           "-e", `IKI68N_DB_GUARD_TOKEN=${token}`,
+          "-e", `IKI68N_CROSS_RUNTIME_PHASE=${phase}`,
+          ...(oldFence === undefined ? [] : ["-e", `IKI68N_OLD_FENCE=${oldFence}`]),
           "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${port}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
           "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${created.data.job_id}`,
           "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${outputPort}/stored/out.mp3`,
@@ -168,13 +171,45 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         const exitCode = await new Promise<number | null>((done) => worker.on("close", done));
         return { exitCode, output };
       };
-      const rejected = await runWorker("0".repeat(32));
+      const rejected = await runWorker("0".repeat(32), "fail");
       expect(rejected.exitCode).not.toBe(0);
       expect(rejected.output).toContain("隔离库标记不匹配");
       expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("queued");
       expect(await prisma.client.assets.count({ where: { generation_job_id: job.id } })).toBe(0);
 
-      const accepted = await runWorker(guardToken);
+      const failedRun = await runWorker(guardToken, "fail");
+      expect(failedRun.exitCode, failedRun.output).toBe(0);
+      const failedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } });
+      expect(failedJob.status).toBe("failed");
+      expect(failedJob.error).toMatchObject({ code: "audio_mix_failed", message: expect.stringContaining("request-cross-fail") });
+      expect(await prisma.client.assets.count({ where: { generation_job_id: job.id } })).toBe(0);
+      const failedResponse = await originalFetch(`${base}/api/jobs/${created.data.job_id}`);
+      const failedView = await failedResponse.json() as { code: number; msg: string; data: { status: string } };
+      expect(failedView.data.status).toBe("failed");
+      expect(failedView.code).toBe(1051);
+      expect(failedView.msg).toBe("音频混合失败，请重试");
+
+      vi.mocked(enqueueAudioMixJob).mockClear();
+      const retryUrl = `${base}/api/projects/${project.id}/audio-mixes/${job.id}/retry`;
+      const retry = () => originalFetch(retryUrl, { method: "POST", headers: { "Idempotency-Key": "cross-runtime-double-click" } });
+      const retryResponses = await Promise.all([retry(), retry()]);
+      expect(retryResponses.map((response) => response.status)).toEqual([201, 201]);
+      const retryBodies = await Promise.all(retryResponses.map((response) => response.json())) as Array<{
+        data: { job_id: string; status: string; replayed: boolean }
+      }>;
+      expect(retryBodies.map((body) => body.data.job_id)).toEqual([created.data.job_id, created.data.job_id]);
+      expect(retryBodies.map((body) => body.data.status)).toEqual(["queued", "queued"]);
+      expect(retryBodies.filter((body) => !body.data.replayed)).toHaveLength(1);
+      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[created.data.job_id]]);
+      const retriedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } });
+      expect(retriedJob.input).toEqual(job.input);
+      expect(retriedJob.provider_task_id).toBeNull();
+      expect(retriedJob.retry_count).toBe(1);
+      expect(retriedJob.fencing_token).toBe(failedJob.fencing_token + 1n);
+      expect(await prisma.client.generation_jobs.count({ where: { id: job.id } })).toBe(1);
+      expect(await prisma.client.cost_reservations.count({ where: { generation_job_id: job.id } })).toBe(0);
+
+      const accepted = await runWorker(guardToken, "succeed", failedJob.fencing_token);
       expect(accepted.exitCode, accepted.output).toBe(0);
 
       const jobResponse = await originalFetch(`${base}/api/jobs/${created.data.job_id}`);
@@ -185,11 +220,15 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       const assetView = await assetResponse.json() as { code: number; data: { url: string; duration: number } };
       expect(assetView.code).toBe(200);
       expect(assetView.data.url).toBe(`http://127.0.0.1:${outputPort}/stored/out.mp3`);
-      expect(assetView.data.duration).toBe(12.5);
+      expect(assetView.data.duration).toBe(37.25);
       const playable = await originalFetch(assetView.data.url);
       expect(playable.status).toBe(200);
       expect(playable.headers.get("content-type")).toBe("audio/mpeg");
       expect(Buffer.from(await playable.arrayBuffer()).toString()).toBe("ID3-cross-runtime-output");
+      const finalReplay = await retry();
+      expect((await finalReplay.json() as { data: { status: string; replayed: boolean } }).data)
+        .toMatchObject({ status: "succeeded", replayed: true });
+      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[created.data.job_id]]);
     } finally {
       vi.unstubAllGlobals();
       await app?.close();

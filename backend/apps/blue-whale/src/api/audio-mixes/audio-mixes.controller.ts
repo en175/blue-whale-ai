@@ -1,7 +1,7 @@
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
+import { DomainError, ERROR_ENQUEUE_FAILED, FAILURE_CODE } from "@lib/contracts";
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import { AudioMixesService } from "@lib/shared/audio-mixes/audio-mixes.service.js";
@@ -43,12 +43,14 @@ export class AudioMixesController {
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.audioMixes.retry(user.userId, projectId, jobId, idempotencyKey ?? "");
-    if (!result.data?.replayed) {
+    if (result.data?.enqueue_required) {
       try {
         await enqueueAudioMixJob(jobId);
       } catch (error) {
         logger.error(`[audio_mix] retry enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
-        await this.audioMixes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
+        const status = await this.audioMixes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
+        if (status === "failed") throw new DomainError(FAILURE_CODE, "重试任务入队失败");
+        return { ...result, data: { ...result.data, status } };
       }
     }
     return result;

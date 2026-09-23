@@ -219,8 +219,9 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private void scheduleNext(ClaimedMediaExtractJobDto job) {
-        if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress())) {
-            producer.enqueue(job.id(), pollDelayMs(job.pollCount()));
+        long delayMs = pollDelayMs(job.pollCount());
+        if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress(), delayMs)) {
+            producer.enqueue(job.id(), delayMs);
         }
     }
 

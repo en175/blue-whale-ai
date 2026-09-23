@@ -62,11 +62,12 @@ class AudioMixJobProcessorTest {
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0))).thenReturn(true);
+        when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L))).thenReturn(true);
 
         new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 60_000L);
+        verify(stateMachine).rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L));
         verify(stateMachine, never()).failMediaExtractJob(any());
     }
 
@@ -99,7 +100,7 @@ class AudioMixJobProcessorTest {
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-2"))
                 .thenReturn(new MixAudioTaskObservation("processing", null, null, null, null));
-        when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(9L), eq(0))).thenReturn(true);
+        when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(9L), eq(0), eq(5_000L))).thenReturn(true);
 
         new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
 

@@ -470,10 +470,16 @@ public class JobStateMachineService {
      */
     public boolean rescheduleProviderPoll(String jobId, String workerId,
                                        long fencingToken, int progress) {
+        return rescheduleProviderPoll(jobId, workerId, fencingToken, progress, 5_000L);
+    }
+
+    /** audio_mix 轮询退避的持久时刻须与 MQ 延迟相同；普通任务仍调用固定 5s 入口。 */
+    public boolean rescheduleProviderPoll(String jobId, String workerId,
+                                       long fencingToken, int progress, long delayMs) {
         Long jobIdLong = Long.parseLong(jobId);
         int clamped = Math.max(0, Math.min(99, progress));
         LocalDateTime now = WorkerClock.now();
-        LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
+        LocalDateTime nextPollAt = now.plusNanos(delayMs * 1_000_000);
         int affected = jobMapper.rescheduleProviderPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         if (affected != 1) {
             log.warn("[video] rescheduleProviderPoll 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
