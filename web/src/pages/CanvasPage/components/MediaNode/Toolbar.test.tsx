@@ -6,15 +6,15 @@
    三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
    IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
    「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。
-   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能占位钮（截取/调速/混合/
-   音视频合成/转码，悬停「即将上线」、不绑定点击）+ 分隔线 + 下载，详情对音频退役。
+   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能钮（截取/调速/混合/
+   音视频合成/转码）+ 分隔线 + 下载，详情对音频退役。
    IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
    悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
    派发 onTrimAudio（编辑态行为归 IKHB7A）。
    IKHW5C（父单 IKHVYO）第二钮「调速」点亮：自占位数组移出单独渲染（形态同「截取」
    先例），门槛见 audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，
    无法调速」；时长缺失不拦，无截取的时长门槛），达标可点派发 onAudioSpeed（编辑态
-   本体归 IKHW5S）；混合/音视频合成/转码三钮维持占位「即将上线」。
+   本体归 IKHW5S）；混合也已点亮，音视频合成/转码维持占位「即将上线」。
    IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
    独立实例），第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）。
    IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
@@ -156,10 +156,10 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
    （aria-disabled 置灰沿用画质横排先例，见 .toolBtn[aria-disabled='true']），门槛见
    audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，无法调速」；
    时长缺失不拦），达标可点派发 onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被
-   正确调用）。其余三钮（混合/音视频合成/转码）维持置灰占位：悬停提示「即将上线」，
+   正确调用）。「混合」也已点亮；音视频合成、转码维持置灰占位：悬停提示「即将上线」，
    不绑定任何点击行为；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
    不出现「替换」入口。 */
-describe('MediaNodeToolbar 音频卡「截取」「调速」点亮与三占位（IKHB6Y/IKHW5C/IKH8Q3）', () => {
+describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮与两占位（IKHB6Y/IKHW5C/IKH8Q3）', () => {
   const audioTool = (id: string) =>
     mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
   const trimBtn = () => audioTool('trim');
