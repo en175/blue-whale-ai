@@ -73,6 +73,16 @@ class NewApiMediaKitMixAudioClientTest {
     }
 
     @Test
+    void submitWithoutTaskIdStillRetainsRequestId() {
+        response.set("{\"success\":false,\"task_id\":null,\"request_id\":\"req-mix-no-task\"}");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new NewApiMediaKitMixAudioClient(baseUrl).submit("sk-token",
+                        List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .hasMessageContaining("缺少 task_id")
+                .hasMessageContaining("req-mix-no-task");
+    }
+
+    @Test
     void completedResponseKeepsRequestIdEvenWithoutAudioResult() {
         response.set("{\"status\":\"completed\",\"request_id\":\"req-mix-88\",\"result\":{}}");
         var observation = new NewApiMediaKitMixAudioClient(baseUrl).poll("sk-token", "task-9");

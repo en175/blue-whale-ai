@@ -153,7 +153,7 @@ abstract class NewApiMediaKitAsyncTaskClient {
             String taskId = NewApiMediaKitJsonSupport.textOrNull(data, "task_id");
             if (taskId == null || taskId.isEmpty()) {
                 throw error(fallbackCode(),
-                        "MediaKit " + label + "提交响应缺少 task_id");
+                        "MediaKit " + label + "提交响应缺少 task_id" + requestIdSuffix(rawText));
             }
             return taskId;
         } catch (RuntimeException e) {

@@ -223,47 +223,38 @@ public class JobClaimService {
      */
     public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findMediaExtractCandidate(jobIdLong);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
-        int affected = jobMapper.claimMediaExtractCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[media_extract] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new ClaimedMediaExtractJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+        return claimPollingAudioJob(jobIdLong, workerId, "media_extract",
+                jobMapper.findMediaExtractCandidate(jobIdLong), jobMapper::claimMediaExtractCas);
     }
 
-    /** audio_mix 使用独立 type 与 MQ tag，CAS 与媒体提取的单资产轮询步骤相同。 */
+    /** audio_mix 仅选择 type/source 候选，领取生命周期与 media_extract 共用。 */
     public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
                 jobIdLong, com.bluewhale.worker.domain.contract.AudioMixContract.TAG,
                 List.of(com.bluewhale.worker.domain.contract.AudioMixContract.SOURCE));
+        return claimPollingAudioJob(jobIdLong, workerId, "audio_mix", candidate, jobMapper::claimImageCas);
+    }
+
+    @FunctionalInterface
+    private interface PollingAudioCas {
+        int claim(Long jobId, String workerId, LocalDateTime leaseExpiresAt,
+                  Long fencingToken, String candidateStatus);
+    }
+
+    /** 单段轮询型音频任务的唯一 claim/CAS/投影生命周期。 */
+    private Optional<ClaimedMediaExtractJobDto> claimPollingAudioJob(
+            Long jobIdLong, String workerId, String type,
+            GenerationJobEntity candidate, PollingAudioCas claimCas) {
         if (candidate == null) return Optional.empty();
         LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(jobIdLong, workerId, leaseExpiresAt,
+        int affected = claimCas.claim(jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) return Optional.empty();
+        if (affected == 0) {
+            log.info("[{}] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    type, jobIdLong, candidate.getFencingToken());
+            return Optional.empty();
+        }
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new ClaimedMediaExtractJobDto(
                 candidate.getId().toString(),

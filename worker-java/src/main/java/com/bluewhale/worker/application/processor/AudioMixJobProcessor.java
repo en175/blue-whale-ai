@@ -74,10 +74,8 @@ public class AudioMixJobProcessor implements JobProcessor {
             String code = error instanceof MediaExtractError domain && PRESERVED_CODES.contains(domain.getCode())
                     ? domain.getCode() : AudioMixContract.ERROR_AUDIO_MIX_FAILED;
             if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音频混合失败")) {
-                // markProviderSubmitted / rescheduleProviderPoll 已释放租约时，失败守卫无法命中。
-                // 交还 broker 重投，避免自投 MQ 失败后任务永久悬挂。
-                if (error instanceof RuntimeException runtime) throw runtime;
-                throw new IllegalStateException(error);
+                // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
+                log.info("[audio_mix] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
             }
         }
     }

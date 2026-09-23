@@ -16,7 +16,7 @@ public class NewApiMediaKitMixAudioClient extends NewApiMediaKitAsyncTaskClient 
     static final String MODEL = "mediakit-mix-audio";
 
     public NewApiMediaKitMixAudioClient() { this(System.getenv("NEW_API_BASE_URL")); }
-    NewApiMediaKitMixAudioClient(String baseUrl) { super(baseUrl); }
+    public NewApiMediaKitMixAudioClient(String baseUrl) { super(baseUrl); }
 
     @Override protected String submitPath() { return AudioMixContract.SUBMIT_PATH; }
     @Override protected String pollPathPrefix() { return AudioMixContract.POLL_PATH_PREFIX; }

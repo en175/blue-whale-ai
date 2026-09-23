@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -135,7 +135,7 @@ class AudioMixJobProcessorTest {
     }
 
     @Test
-    void lostFollowUpEnqueueRethrowsForBrokerRedelivery() {
+    void lostFollowUpEnqueueReturnsWhenFenceIsNoLongerOwned() {
         when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
@@ -144,8 +144,8 @@ class AudioMixJobProcessorTest {
                 .thenReturn(true);
         doThrow(new IllegalStateException("MQ 不可用")).when(producer).enqueue("70", 5_000L);
 
-        assertThatThrownBy(() -> new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("MQ 不可用");
+        assertThatCode(() -> new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70"))
+                .doesNotThrowAnyException();
         verify(stateMachine).failMediaExtractJob(any());
     }
 }
