@@ -17,6 +17,7 @@ import { AudioMixesController } from "../audio-mixes/audio-mixes.controller.js";
 import { AssetsController } from "../assets/assets.controller.js";
 import { ProjectAssetsController } from "../project-assets/project-assets.controller.js";
 import { GenerationModelsController } from "../generation/models.controller.js";
+import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -26,6 +27,9 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
+import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueAudioMixJob: vi.fn(async () => {}),
@@ -135,9 +139,11 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
       Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
       Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
+      Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService,
+        GenerationCostEstimatorService, CanvasService, MaterialService, AssetService], GenerationJobsController);
       class HarnessModule {}
       Module({ controllers: [CanvasesController, ProjectsController, JobsController, AudioMixesController,
-        AssetsController, ProjectAssetsController, GenerationModelsController], providers: [
+        AssetsController, ProjectAssetsController, GenerationModelsController, GenerationJobsController], providers: [
         { provide: CanvasService, useValue: canvas },
         { provide: ProjectService, useValue: projects },
         { provide: PrismaService, useValue: prisma },
@@ -147,6 +153,9 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         { provide: AssetService, useValue: assets },
         { provide: AssetStorageService, useValue: storage },
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
+        { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
+        { provide: GenerationCostEstimatorService, useValue: {} },
+        { provide: MaterialService, useValue: {} },
       ] })(HarnessModule);
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
       app.use(json({ limit: "16mb" }));
