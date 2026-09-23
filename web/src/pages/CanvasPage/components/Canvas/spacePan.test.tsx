@@ -257,8 +257,9 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     };
     await act(async () => { root.render(createElement(FlowCanvas, props)); });
     if (mediaType === 'video') {
-      // !834 起选中 + 选择工具的视频卡延迟 80ms 布防树内 <video>（离屏解码先行）：等布防再取元素
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
+      // !834 起选中 + 选择工具的视频卡延迟 80ms 布防树内 <video>（离屏解码先行）：
+      // 等 200ms（布防 + 余量）再取元素，避免慢机竞态
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
     }
     const media = node().querySelector(mediaType === 'image' ? 'img' : 'video')!;
     for (const [key, value] of Object.entries(mediaType === 'image'

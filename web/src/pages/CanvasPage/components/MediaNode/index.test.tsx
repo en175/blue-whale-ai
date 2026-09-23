@@ -93,9 +93,10 @@ function offscreenVideo(): HTMLVideoElement {
   return document.body.querySelector<HTMLVideoElement>('div[aria-hidden="true"] video')!;
 }
 
-/** 选中 + 选择工具下原生控件延迟 80ms 布防（防穿透点击锁）：等布防完成再取树内 video */
+/** 选中 + 选择工具下原生控件延迟 80ms 布防（防穿透点击锁）：等布防完成再取树内 video。
+ *  裕量 200ms（80ms 布防 + 120ms 余量），避免慢机 CI 上竞态。 */
 async function waitForVideoArm() {
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
 }
 
 /** 图片/视频新布局：外部标题行与内容主体（与 e2e 共用 data-testid 锚点） */
@@ -936,6 +937,15 @@ describe('MediaNode 去字幕编辑态框层（IKGZ83）', () => {
     await renderNode('video', { data: { toolMode: 'select', subtitleErasePaused: true } });
     expect(mountNode.querySelector('video')).toBeNull();
     expect(mountNode.querySelector('canvas')).toBeTruthy();
+    // 智能模式转场停帧（初始锁定渲染时离屏 video 天生暂停、无 pause 调用）：
+    // 先布防成可播卡再注入停帧标记，转场必须暂停树内 video——与框层/splitEditing 同口径
+    const pauseSpy = vi.fn();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseSpy);
+    await rerenderNode('video', { data: { toolMode: 'select' } });
+    await waitForVideoArm();
+    await rerenderNode('video', { data: { toolMode: 'select', subtitleErasePaused: true } });
+    expect(pauseSpy).toHaveBeenCalled();
+    pause.mockRestore();
     // 框选模式：注入框层（本改动对它同样生效，不再只靠框层遮挡）
     const editing = {
       boxes: [],
