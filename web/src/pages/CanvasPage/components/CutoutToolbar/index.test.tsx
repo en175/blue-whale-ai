@@ -198,3 +198,38 @@ describe('CutoutToolbar（抠图横条工具栏）', () => {
     expect(handlers.onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('IKI61N 描边宽度滑杆键盘操作（Esc 退出会话，组件内自闭环）', () => {
+  /** 人像场景 + 启用描边 + 打开描边上拉，返回可用的宽度滑杆 */
+  async function openContourSlider() {
+    state.scene = 'human';
+    state.needContour = true;
+    await renderToolbar();
+    await click('cutout-contour-trigger');
+    const range = mountNode.querySelector<HTMLInputElement>('[data-testid="cutout-contour-size"]')!;
+    expect(range.disabled).toBe(false);
+    return range;
+  }
+
+  it('滑杆聚焦按 Esc：派发 onClose 退出会话并阻断冒泡（专属/公共 Esc 链不二次处理）', async () => {
+    const range = await openContourSlider();
+    const windowSpy = vi.fn();
+    window.addEventListener('keydown', windowSpy);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(async () => {
+      range.dispatchEvent(event);
+    });
+    window.removeEventListener('keydown', windowSpy);
+    expect(handlers.onClose).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(windowSpy).not.toHaveBeenCalled();
+    expect(handlers.onSend).not.toHaveBeenCalled();
+  });
+
+  it('滑杆原生属性保持 step=1 / 1~50（方向键步进语义由原生承担，组件不拦截）', async () => {
+    const range = await openContourSlider();
+    expect(range.step).toBe('1');
+    expect(range.min).toBe('1');
+    expect(range.max).toBe('50');
+  });
+});

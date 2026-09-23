@@ -12,6 +12,7 @@
  * data-gen-panel-territory）。逻辑层（门槛/精校/组装）全在 imageCutout 纯函数。
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, ArrowUp, ChevronDown, Scan, User, Package, CircleDot, Crop } from 'lucide-react';
 import type { FollowDialogAnchor } from '../../followDialog';
 import {
@@ -102,6 +103,18 @@ export default function CutoutToolbar({
   const guarded = (disabled: boolean, dispatch: () => void) => () => {
     if (disabled) return;
     dispatch();
+  };
+
+  /** 描边宽度滑杆键盘操作（IKI61N，组件内自闭环，不改公共 helper 与公共 Esc 链）：
+   *  Esc 退出抠图会话——抠图专属 Esc handler 与画布公共链对任何 INPUT 豁免
+   *  （isEditableKeyboardTarget，type=range 同被吞），故在此直调 onClose（X 同口径）；
+   *  preventDefault + stopPropagation 阻断冒泡，两条链不会二次处理。
+   *  方向键不拦截：step=1 与受控值同网格、无受控量化冲突，原生步进语义直接生效。 */
+  const onContourSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    onClose();
   };
 
   return (
@@ -202,6 +215,7 @@ export default function CutoutToolbar({
                       aria-label="描边宽度"
                       data-testid="cutout-contour-size"
                       onChange={(event) => onContourSizeChange(Number(event.target.value))}
+                      onKeyDown={onContourSliderKeyDown}
                     />
                     <span className={styles.contourValue}>{contourSize}px</span>
                   </div>

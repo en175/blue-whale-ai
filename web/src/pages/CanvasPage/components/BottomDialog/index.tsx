@@ -12,6 +12,7 @@ import PromptSyncActions from '../PromptSyncActions';
  * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
  * ============================================ */
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   ChevronDown,
   X,
@@ -819,6 +820,19 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   );
   const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, base + i));
 
+  /** 时长滑杆键盘操作（IKI61N，组件内自闭环，不改公共 helper 与公共 Esc 链）：
+   *  Esc 关闭对话框——画布公共 Esc 链对任何 INPUT 豁免（isEditableKeyboardTarget，
+   *  type=range 同被吞），故在此直调 onClose（X 同口径）；preventDefault + stopPropagation
+   *  阻断冒泡，公共链不会二次处理。
+   *  方向键不拦截：min/max/step 取模型能力且与发送校验同网格（(v-min)%step===0），
+   *  无受控量化冲突，原生步进语义直接生效；readOnly 时滑杆 disabled 本就不可聚焦。 */
+  const onDurationSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    onClose();
+  };
+
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
@@ -974,6 +988,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                   setDuration(v);
                   syncDraftParams({ duration: v });
                 }}
+                onKeyDown={onDurationSliderKeyDown}
               />
               <div className={styles.durationTicks}>
                 {ticks.map((v) => (
