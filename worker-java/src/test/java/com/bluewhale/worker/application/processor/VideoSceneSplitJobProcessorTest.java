@@ -95,8 +95,14 @@ class VideoSceneSplitJobProcessorTest {
 
     private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
                                                    int pollCount) {
+        return makeClaim(input, providerTaskId, pollCount, null);
+    }
+
+    private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+                                                   int pollCount, String parentProviderTaskId) {
         return new ClaimedVideoSceneSplitJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0);
+                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
+                parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
@@ -293,6 +299,198 @@ class VideoSceneSplitJobProcessorTest {
 
         assertFailCode(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
         verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    // ========== parent-reuse 重试收割（IKI89T / ADR-0114；平移家族定型票先例）==========
+
+    @Test
+    @DisplayName("parent-reuse 命中：父任务已成功且切片数组非空 → 不提交，直接逐段转存发布（payload 与正常完成同型）")
+    void parentReuseSuccess_publishesWithoutSubmit() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-1")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-1"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.5, List.of(
+                        new SegmentObservation(0.0, 45.0, "https://volc/old-seg1.mp4"),
+                        new SegmentObservation(45.0, 95.5, "https://volc/old-seg2.mp4")),
+                        null, null));
+        stubSourceAsset();
+        when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
+        when(mediaRelay.persist("https://volc/old-seg2.mp4", "9")).thenReturn(stored(2));
+        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(mediaRelay).persist("https://volc/old-seg1.mp4", "9");
+        verify(mediaRelay).persist("https://volc/old-seg2.mp4", "9");
+        ArgumentCaptor<PublishVideoSceneSplitDto> captor =
+                ArgumentCaptor.forClass(PublishVideoSceneSplitDto.class);
+        verify(stateMachine).publishVideoSceneSplitResult(captor.capture());
+        PublishVideoSceneSplitDto published = captor.getValue();
+        assertThat(published.durationSec()).isEqualTo(95.5);
+        assertThat(published.segments()).hasSize(2);
+        PublishVideoSceneSplitDto.Segment first = published.segments().get(0);
+        assertThat(first.segmentIndex()).isEqualTo(1);
+        assertThat(first.startTimeSec()).isEqualTo(0.0);
+        assertThat(first.endTimeSec()).isEqualTo(45.0);
+        assertThat(first.url()).isEqualTo("https://tos/seg-1.mp4");
+        assertThat(first.storageKey()).isEqualTo("generated/9/video/seg-1.mp4");
+        assertThat(first.md5()).isEqualTo("md5-seg-1");
+        assertThat(first.width()).isEqualTo(1920);
+        assertThat(first.height()).isEqualTo(1080);
+        PublishVideoSceneSplitDto.Segment second = published.segments().get(1);
+        assertThat(second.segmentIndex()).isEqualTo(2);
+        assertThat(second.endTimeSec()).isEqualTo(95.5);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
+    void parentReuseFailed_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-fail")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-fail"))
+                .thenReturn(new SceneSplitTaskObservation("failed", null, null,
+                        "VideoParseFailed", "输入视频解析失败"));
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
+    void parentReusePollError_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-gone")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-gone"))
+                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "MediaKit 场景切分任务查询失败: HTTP 404"));
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("非重试 job（parentProviderTaskId=null）→ 不查父任务，执行路径与现状完全一致")
+    void nonRetryJob_skipsParentQuery() {
+        stubSubmitClaim(input("standard"));
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-1");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-1")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient, never()).poll(anyString(), anyString());
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务成功但切片数组为空 → 回退正常重新提交")
+    void parentReuseEmptySegments_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-empty")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-empty"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(),
+                        null, null));
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布失败（段切片下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
+    void parentReusePublishFails_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-stale")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-stale"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
+                        new SegmentObservation(0.0, 95.0, "https://volc/old-seg1.mp4")),
+                        null, null));
+        when(mediaRelay.persist("https://volc/old-seg1.mp4", "9"))
+                .thenThrow(new RuntimeException("段切片下载失败: HTTP 404"));
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
+    void parentReusePublishGuardMissed_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-guard")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-guard"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
+                        new SegmentObservation(0.0, 95.0, "https://volc/old-seg1.mp4")),
+                        null, null));
+        when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
+        when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(false);
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 回退正常重新提交，不落失败终态")
+    void parentReuseSegmentLeaseRenewMissed_fallThrough() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-renew")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-renew"))
+                .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
+                        new SegmentObservation(0.0, 45.0, "https://volc/old-seg1.mp4"),
+                        new SegmentObservation(45.0, 95.0, "https://volc/old-seg2.mp4")),
+                        null, null));
+        when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
+        // 第 1 段续租放行、第 2 段续租守卫未命中（转存中途被接管）→ 收割发布中止
+        when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
+                .thenReturn(true, false);
+        stubSourceAsset();
+        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        verify(mediaRelay, times(1)).persist(anyString(), anyString());
+        verify(stateMachine, never()).publishVideoSceneSplitResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========
