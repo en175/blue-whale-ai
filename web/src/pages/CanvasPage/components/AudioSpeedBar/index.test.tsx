@@ -6,6 +6,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { speedToPos } from '@lib/contracts/audio-speed';
 import AudioSpeedBar from './index';
 
 let root: Root | null = null;
@@ -49,6 +50,16 @@ async function dragSliderTo(pos: number) {
     setter.call(slider, String(pos));
     slider.dispatchEvent(new Event('input', { bubbles: true }));
   });
+}
+
+/** 滑杆上按键（React onKeyDown 通道）；返回事件以便断言 preventDefault / 冒泡阻断 */
+async function pressKeyOnSlider(key: string) {
+  const slider = container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  await act(async () => {
+    slider.dispatchEvent(event);
+  });
+  return event;
 }
 
 beforeEach(() => {
@@ -176,6 +187,94 @@ describe('submitting 只读态', () => {
     expect(sendBtn.className).not.toContain('sendBtnActive');
     await click('audio-speed-send-btn');
     expect(sendMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('滑杆键盘操作（IKI4M6：方向键 0.05 步进 + Esc 退出）', () => {
+  it('ArrowRight/ArrowUp 按 0.05 步进加速：1.00x→1.05x，并阻止原生 step=1 行为', async () => {
+    renderBar({ speed: 1 });
+    const e1 = await pressKeyOnSlider('ArrowRight');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1.05);
+    expect(e1.defaultPrevented).toBe(true);
+    await pressKeyOnSlider('ArrowUp');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1.05);
+    expect(speedChangeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('ArrowLeft/ArrowDown 按 0.05 步进减速：1.00x→0.95x', async () => {
+    renderBar({ speed: 1 });
+    await pressKeyOnSlider('ArrowLeft');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(0.95);
+    await pressKeyOnSlider('ArrowDown');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(0.95);
+    expect(speedChangeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('非网格中间值按键同样按 0.05 步进：1.35x→1.40x / 1.30x（往返回中点 1.0x 一致）', async () => {
+    renderBar({ speed: 1.35 });
+    await pressKeyOnSlider('ArrowRight');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1.4);
+    renderBar({ speed: 1.35 });
+    await pressKeyOnSlider('ArrowLeft');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1.3);
+    renderBar({ speed: 1.05 });
+    await pressKeyOnSlider('ArrowLeft');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1);
+  });
+
+  it('两端钳制：0.10x 再按左不派发、4.00x 再按右不派发', async () => {
+    renderBar({ speed: 0.1 });
+    await pressKeyOnSlider('ArrowLeft');
+    await pressKeyOnSlider('ArrowDown');
+    expect(speedChangeMock).not.toHaveBeenCalled();
+
+    renderBar({ speed: 4 });
+    await pressKeyOnSlider('ArrowRight');
+    await pressKeyOnSlider('ArrowUp');
+    expect(speedChangeMock).not.toHaveBeenCalled();
+  });
+
+  it('近端钳制：0.15x 按左到 0.10x 为止、3.95x 按右到 4.00x 为止', async () => {
+    renderBar({ speed: 0.15 });
+    await pressKeyOnSlider('ArrowLeft');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(0.1);
+    renderBar({ speed: 3.95 });
+    await pressKeyOnSlider('ArrowRight');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(4);
+  });
+
+  it('Esc 调 onClose 退出编辑态，并阻断冒泡（公共 Esc 链不二次处理）', async () => {
+    renderBar({ speed: 1.5 });
+    const windowSpy = vi.fn();
+    window.addEventListener('keydown', windowSpy);
+    const e = await pressKeyOnSlider('Escape');
+    window.removeEventListener('keydown', windowSpy);
+    expect(closeMock).toHaveBeenCalledTimes(1);
+    expect(e.defaultPrevented).toBe(true);
+    expect(windowSpy).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('submitting 时键盘操作无效：方向键不派发、Esc 不退出', async () => {
+    renderBar({ speed: 1.5, submitting: true });
+    await pressKeyOnSlider('ArrowRight');
+    await pressKeyOnSlider('ArrowLeft');
+    await pressKeyOnSlider('Escape');
+    expect(speedChangeMock).not.toHaveBeenCalled();
+    expect(closeMock).not.toHaveBeenCalled();
+  });
+
+  it('键盘步进后受控回传：位置与显示值刷新（1.00x→1.05x 位置 508），拖动 onChange 路径不变', async () => {
+    renderBar({ speed: 1 });
+    await pressKeyOnSlider('ArrowRight');
+    expect(speedChangeMock).toHaveBeenLastCalledWith(1.05);
+    renderBar({ speed: 1.05 });
+    const slider = container!.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!;
+    expect(slider.value).toBe(String(speedToPos(1.05)));
+    expect(container!.querySelector('[data-testid="audio-speed-value"]')!.textContent).toBe('1.05x');
+    // 鼠标拖动通道不受影响：仍走 onChange + 契约 posToSpeed
+    await dragSliderTo(123);
+    expect(speedChangeMock).toHaveBeenLastCalledWith(0.3);
   });
 });
 

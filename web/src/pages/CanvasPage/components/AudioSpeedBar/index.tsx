@@ -7,14 +7,20 @@
  * API 无格式参数，父单决策）。发送按当前倍速建任务（发送闭环由父级承担）；
  * X/Esc/点其他卡/点画布空白四路退出未发送不建任务不建卡。
  * 位置↔倍速换算只引契约 posToSpeed/speedToPos（@lib/contracts/audio-speed 单源，
- * 父单实现决策 3——前端禁止各自实现换算）。
+ * 父单实现决策 3——前端禁止各自实现换算）。滑杆键盘操作（IKI4M6）：方向键按契约
+ * 0.05 步进改倍速（原生 step=1 位置步进经 0.05 量化后近失效，拦截改走倍速域步进），
+ * Esc 组件内直接退出（公共 Esc 链对 INPUT 豁免会吞键，见 onSliderKeyDown 注释）。
  * ============================================ */
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ArrowUp, X, Zap } from 'lucide-react';
 import {
+  AUDIO_SPEED_MAX_SPEED,
+  AUDIO_SPEED_MIN_SPEED,
   AUDIO_SPEED_SLIDER_MAX_POS,
   AUDIO_SPEED_SLIDER_MIN_POS,
+  AUDIO_SPEED_STEP,
   posToSpeed,
+  roundAudioSpeed,
   speedToPos,
 } from '@lib/contracts/audio-speed';
 import type { FollowDialogAnchor } from '../../followDialog';
@@ -63,6 +69,35 @@ export default function AudioSpeedBar({
 
   const pos = speedToPos(speed);
 
+  /** 滑杆键盘操作（IKI4M6，在组件内自闭环，不改公共 helper）：
+   *  - 方向键按契约 0.05 步进改倍速（原生 range 按 step=1 走位置，经 posToSpeed 0.05
+   *    量化后右半段约 8 次按键才动一格，看起来失效——故 preventDefault 拦截原生行为，
+   *    直接以倍速域步进派发）；两端钳制 [0.1, 4.0]，量化与范围常量全引契约单源。
+   *  - Esc 退出编辑态：画布公共 Esc 链对任何 INPUT 豁免（isEditableKeyboardTarget，
+   *    type=range 同被吞），故在此直接调 onClose；stopPropagation 阻断冒泡（React 18
+   *    合成事件委托 root，先于 window 监听执行），公共链不会二次处理；未发送不建任务
+   *    不建卡、倍速复位 1.0x 由父级 onClose 既有语义承担。
+   *  - submitting（readOnly）时键盘操作无效（与 disabled 滑杆语义一致；disabled 本不
+   *    聚焦，此守卫为防御）。 */
+  const onSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (readOnly) return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const delta = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? AUDIO_SPEED_STEP : -AUDIO_SPEED_STEP;
+      const next = Math.min(
+        AUDIO_SPEED_MAX_SPEED,
+        Math.max(AUDIO_SPEED_MIN_SPEED, roundAudioSpeed(speed + delta)),
+      );
+      if (next !== speed) onSpeedChange(next);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    }
+  };
+
   return (
     <div
       className={`${styles.sendBar} ${anchor ? styles.sendBarFollow : ''}`}
@@ -94,6 +129,7 @@ export default function AudioSpeedBar({
           data-testid="audio-speed-slider"
           aria-label="播放倍速"
           onChange={(e) => onSpeedChange(posToSpeed(parseInt(e.target.value, 10)))}
+          onKeyDown={onSliderKeyDown}
         />
         {/* 1.0x 原速视觉中点凹槽 */}
         <span className={styles.notch} aria-hidden />
