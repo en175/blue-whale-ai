@@ -6656,7 +6656,7 @@ export default function CanvasPage() {
     if (isAudioMixNodeId(nodeId)) {
       const mixPatch = audioMixTerminalPatch(detail);
       if (mixPatch) {
-        if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+        if (pendingDeleteJobNodesRef.current.has(nodeId) || node.data.audioMixCancelPending === true) {
           if (detail.status === 'failed' || detail.status === 'cancelled') {
             removeWithPendingDelete();
             return 'terminal';
@@ -6669,7 +6669,7 @@ export default function CanvasPage() {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
-        patchMediaNode(nodeId, mixPatch);
+        patchMediaNode(nodeId, { ...mixPatch, audioMixCancelPending: undefined });
         return 'terminal';
       }
     }
@@ -7687,6 +7687,14 @@ export default function CanvasPage() {
     // 仍 queued/processing（软取消已登记）或状态不可得：不抢先移除（worker 竞态完成的作品
     // 不得失去入口）——登记删除意图，轮询终态驱动移除/挂载
     pendingDeleteJobNodesRef.current.add(nodeId);
+    if (isAudioMixNodeId(nodeId)) {
+      const nextNodes = mediaNodesRef.current.map((item) => item.id === nodeId
+        ? { ...item, data: { ...item.data, audioMixCancelPending: true } }
+        : item);
+      mediaNodesRef.current = nextNodes;
+      setMediaNodes(nextNodes);
+      void flushCanvasSave(currentId).catch(() => {});
+    }
     finish();
   };
 

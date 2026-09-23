@@ -26,7 +26,7 @@ const canvas: Node[] = [
 const libraryPage = {
   records: [
     { id: 8, type: 'audio', status: 'normal', url: '/fixed.mp3', duration: 10, source: 'uploaded', model: null, width: null, height: null, created_at: null },
-    { id: 7, type: 'audio', status: 'normal', url: '/library.mp3', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
+    { id: 7, name: '双人合唱.wav', type: 'audio', status: 'normal', url: '/library.mp3', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
     { id: 10, type: 'audio', status: 'uploading', url: '/pending.wav', duration: null, source: 'uploaded', model: null, width: null, height: null, created_at: null },
   ], total: 3, size: 30, current: 1,
 };
@@ -36,7 +36,7 @@ let container: HTMLDivElement;
 let sent = 0;
 let selectedSnapshot: AudioMixInputSelection[] = [];
 
-function Harness({ initial = [] }: { initial?: AudioMixInputSelection[] }) {
+function Harness({ initial = [], candidates = canvas }: { initial?: AudioMixInputSelection[]; candidates?: Node[] }) {
   const [selected, setSelected] = useState(initial);
   const [closed, setClosed] = useState(false);
   const [format, setFormat] = useState<'mp3' | 'wav' | 'm4a' | 'ogg' | 'flac'>('mp3');
@@ -46,20 +46,20 @@ function Harness({ initial = [] }: { initial?: AudioMixInputSelection[] }) {
       ? [...current, item] : current);
   if (closed) return null;
   return createElement(AudioMixBar, {
-    source, candidates: canvas, selected, onAdd: add,
+    source, candidates, selected, onAdd: add,
     onRemove: (assetId: string) => setSelected((items) => items.filter((item) => item.assetId !== assetId)),
     projectId: 'p1', format, onFormatChange: setFormat,
     onSend: () => { sent += 1; }, onClose: () => setClosed(true), submitting: false, anchor: null,
   });
 }
 
-async function render(initial: AudioMixInputSelection[] = []) {
+async function render(initial: AudioMixInputSelection[] = [], candidates: Node[] = canvas) {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   await act(async () => root.render(createElement(QueryClientProvider,
     { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-    createElement(Harness, { initial }))));
+    createElement(Harness, { initial, candidates }))));
 }
 
 async function click(id: string) {
@@ -156,5 +156,30 @@ describe('IKI68X 音频混合选材浮层', () => {
     expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(5);
     await click('audio-mix-format-wav');
     expect(container.querySelector('[data-testid="audio-mix-format-trigger"]')?.textContent).toContain('wav');
+  });
+});
+
+describe('IKI8B0 音频混合选材反馈', () => {
+  it('素材库候选与已选项显示资产名称，名称缺失时回退资产编号', async () => {
+    await render();
+    await click('audio-mix-add');
+    await click('audio-mix-tab-library');
+    await act(async () => { await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-mix-library-7"]')).not.toBeNull()); });
+    expect(container.querySelector('[data-testid="audio-mix-library-7"]')?.textContent).toBe('双人合唱.wav');
+    expect(container.querySelector('[data-testid="audio-mix-library-10"]')?.textContent).toBe('音频 #10');
+    await click('audio-mix-library-7');
+    expect(container.querySelector('[data-testid="audio-mix-selected-list"]')?.textContent).toContain('双人合唱.wav');
+    expect(selectedSnapshot[0]?.name).toBe('双人合唱.wav');
+  });
+
+  it.each([{ candidates: [] }, { candidates: [canvas[1], canvas[2]] }])('没有可加入的画布音频时提示其它来源', async ({ candidates }) => {
+    await render([], candidates);
+    await click('audio-mix-add');
+    expect(container.textContent).toContain('画布暂无其它音频，可从素材库或上传添加');
+    await click('audio-mix-tab-library');
+    expect(container.textContent).not.toContain('画布暂无其它音频，可从素材库或上传添加');
+    await click('audio-mix-tab-upload');
+    expect(container.textContent).toContain('选择本地音频');
+    expect(container.textContent).not.toContain('画布暂无其它音频，可从素材库或上传添加');
   });
 });
