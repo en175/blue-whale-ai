@@ -6,6 +6,7 @@ import {
   createAudioMix,
   retryAudioMix,
   createAudioTrim,
+  createAudioSpeed,
   createFrameInterpolation,
   createMediaExtraction,
   createVocalSplit,
@@ -369,6 +370,47 @@ describe('createAudioTrim', () => {
       source_asset_id: '5',
       output_format: 'wav',
     });
+  });
+});
+
+describe('createAudioSpeed', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目音频调速端点提交源素材 + 倍速（IKHW5S，契约键名恒等、无幂等头）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1132', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createAudioSpeed('project/1', { source_asset_id: '3985', speed: 1.35 }),
+    ).resolves.toEqual({ job_id: '1132', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-speeds');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({ source_asset_id: '3985', speed: 1.35 });
+  });
+
+  it('贴原速省略：speed 1.0 不出现键（走官方默认 1，契约 buildAudioSpeedInput 口径）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1133', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createAudioSpeed('p1', { source_asset_id: '5' }),
+    ).resolves.toEqual({ job_id: '1133', status: 'queued' });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ source_asset_id: '5' });
   });
 });
 

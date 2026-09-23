@@ -138,6 +138,43 @@ public class JobFinalizer {
                 input.workerId(), input.fencingToken());
     }
 
+    // ========== audio_speed 直通（IKHW5A，父单 IKHVYO；publish/fail 守卫复用
+    //            publishSingleAssetResult / failPollingToolJob——两 SQL 均无 type 过滤，
+    //            语义 = 单槽免费工具轮询型任务终态收口，audio_trim 同款） ==========
+
+    /**
+     * 发布 audio_speed 结果（IKHW5A）。
+     * <p>
+     * 同 publishAudioTrimResult 形态（单槽单 asset、双事件），差异仅文案；Asset
+     * type='audio'、duration_ms 取官方 result.duration 秒换算（调速产物时长 = 源时长/speed
+     * ≠ 源时长，**不做源时长回落**——官方值缺失即 null，父单实现决策 1「产物时长以火山
+     * 返回 duration 写回服务端权威时长」，ADR-0113 同口径）。
+     */
+    @Transactional
+    public boolean publishAudioSpeedResult(
+            com.bluewhale.worker.domain.dto.PublishAudioSpeedDto input) {
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[audio_speed] publishAudioSpeedResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "audio",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                null, null,
+                input.durationSec() != null ? (int) Math.round(input.durationSec() * 1000) : null,
+                "音频已调速", null));
+    }
+
+    /**
+     * 失败 audio_speed 作业（IKHW5A；failAudioTrimJob 同款守卫——轮询型任务失败多清
+     * next_poll_at，details.raw 透传原始原因）。
+     */
+    @Transactional
+    public boolean failAudioSpeedJob(
+            com.bluewhale.worker.domain.dto.FailAudioSpeedDto input) {
+        return failPollingToolJob("[audio_speed] failAudioSpeedJob",
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
+    }
+
     /**
      * 发布 image_enhance 结果（契约 §14.5 / IKGM9D，附录 C 触点⑤）。
      * <p>

@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.AudioSpeedJobProcessor;
 import com.bluewhale.worker.application.processor.AudioTrimJobProcessor;
 import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
@@ -51,6 +52,7 @@ class ConsumerRouteWiringTest {
     private static final List<GenerationMqRouteEnum> ROUTES = List.of(
             GenerationMqRouteEnum.MEDIA_EXTRACT,
             GenerationMqRouteEnum.AUDIO_TRIM,
+            GenerationMqRouteEnum.AUDIO_SPEED,
             GenerationMqRouteEnum.AUDIO,
             GenerationMqRouteEnum.IMAGE,
             GenerationMqRouteEnum.IMAGE_ENHANCE,
@@ -91,6 +93,8 @@ class ConsumerRouteWiringTest {
                         mock(MediaExtractJobProcessor.class), workerProps, clientConfig),
                 config.audioTrimConsumer(
                         mock(AudioTrimJobProcessor.class), workerProps, clientConfig),
+                config.audioSpeedConsumer(
+                        mock(AudioSpeedJobProcessor.class), workerProps, clientConfig),
                 config.audioConsumer(mock(AudioJobProcessor.class), workerProps, clientConfig),
                 config.imageConsumer(mock(ImageJobProcessor.class), workerProps, clientConfig),
                 config.imageEnhanceConsumer(

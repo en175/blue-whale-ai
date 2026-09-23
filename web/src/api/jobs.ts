@@ -17,6 +17,7 @@ import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-in
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
+import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 import type {
@@ -388,6 +389,37 @@ export function retryAudioMix(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
     { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
       ...(init?.silent === true ? { silent: true } : {}) },
+  );
+}
+
+/** POST /api/projects/:id/audio-speeds 请求体（键名与 backend/libs/contracts/audio-speed.ts
+ *  契约恒等；source_asset_id 必传、speed 可选——贴原速省略口径，1.0 不传走官方默认；
+ *  构造走契约 buildAudioSpeedInput 单源，web 不各自拼键）。 */
+export type CreateAudioSpeedPayload = AudioSpeedInput;
+
+/** 创建音频调速任务返回（IKHW5S）；免费口径同 media_extract——不带幂等头、无积分预估、
+ *  不走余额拦截门。调速占位卡由前端在创建成功后本地插入（源音频卡右侧 +60px），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（duration 以火山返回为权威时长）。 */
+export interface AudioSpeedCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建音频调速任务（IKHW5S，编辑态发送闭环）。
+ *  init.silent 透传 apiRequest（IKI4LX「请求错误只提示一次」，同 createFrameInterpolation
+ *  先例）：静默传输失败仍抛 ApiError 但 http 层不 toast，由调用方 catch 统一提示一次。 */
+export function createAudioSpeed(
+  projectId: string,
+  payload: CreateAudioSpeedPayload,
+  init?: { silent?: boolean },
+): Promise<AudioSpeedCreatedData> {
+  return apiRequest<AudioSpeedCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-speeds`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...(init?.silent === true ? { silent: true } : {}),
+    },
   );
 }
 

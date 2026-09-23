@@ -121,6 +121,11 @@ public class JobStateMachineService {
         return claimService.claimAudioTrim(jobId, workerId);
     }
 
+    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto> claimAudioSpeed(
+            String jobId, String workerId) {
+        return claimService.claimAudioSpeed(jobId, workerId);
+    }
+
     public Optional<ClaimedJobDto> claimAudioJobById(String jobId, String workerId) {
         return claimService.claimAudioJobById(jobId, workerId);
     }
@@ -251,6 +256,16 @@ public class JobStateMachineService {
 
     public boolean failAudioTrimJob(com.bluewhale.worker.domain.dto.FailAudioTrimDto input) {
         return finalizer.failAudioTrimJob(input);
+    }
+
+    // ========== audio_speed 直通（DTO 形态，AudioSpeedJobProcessor 专用，IKHW5A） ==========
+
+    public boolean publishAudioSpeedResult(com.bluewhale.worker.domain.dto.PublishAudioSpeedDto input) {
+        return finalizer.publishAudioSpeedResult(input);
+    }
+
+    public boolean failAudioSpeedJob(com.bluewhale.worker.domain.dto.FailAudioSpeedDto input) {
+        return finalizer.failAudioSpeedJob(input);
     }
 
     // ========== image_enhance 直通（DTO 形态，ImageEnhanceJobProcessor 专用；失败复用通用 failJob） ==========

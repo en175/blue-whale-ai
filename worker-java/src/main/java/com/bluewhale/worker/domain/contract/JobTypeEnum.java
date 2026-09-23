@@ -27,6 +27,10 @@ public enum JobTypeEnum {
      * backend/libs/contracts/audio-trim.ts，ADR-0111；消费者与处理器由 IKHB6S 按附录 C 触点注册）。 */
     AUDIO_TRIM("audio_trim"),
 
+    /** 音频调速（tag=audio_speed，画布音频卡「调速」，Semaphore 2；契约 =
+     * backend/libs/contracts/audio-speed.ts，ADR-0113；消费者与处理器由 IKHW5A 按附录 C 触点注册）。 */
+    AUDIO_SPEED("audio_speed"),
+
     /** 高清放大（tag=image_enhance，契约 §14 / IKGM8U；消费者与处理器由 IKGM9D 按附录 C 触点注册）。 */
     IMAGE_ENHANCE("image_enhance"),
 

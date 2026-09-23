@@ -27,6 +27,7 @@ import { AdminModule } from "./api/admin/admin.module.js";
 import { AgentAssetsModule } from "./api/agent-assets/agent-assets.module.js";
 import { AgentSkillsModule } from "./api/agent-skills/agent-skills.module.js";
 import { AssetsApiModule } from "./api/assets/assets.module.js";
+import { AudioSpeedsApiModule } from "./api/audio-speeds/audio-speeds.module.js";
 import { AudioTrimsApiModule } from "./api/audio-trims/audio-trims.module.js";
 import { AuthModule } from "./api/auth/auth.module.js";
 import { CanvasApiModule } from "./api/canvases/canvases.module.js";
@@ -94,6 +95,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     MediaExtractionsApiModule,
     AudioMixesApiModule,
     AudioTrimsApiModule,
+    AudioSpeedsApiModule,
     ImageEnhancementsApiModule,
     ImageErasuresApiModule,
     ImageCutoutsApiModule,

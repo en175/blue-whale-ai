@@ -3,6 +3,7 @@ import { Producer } from "rocketmq-client-nodejs";
 import {
   AUDIO_GENERATION_TAG,
   AUDIO_MIX_TAG,
+  AUDIO_SPEED_TAG,
   AUDIO_TRIM_TAG,
   GENERATION_TASK_QUEUE,
   IMAGE_CUTOUT_TAG,
@@ -33,6 +34,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  / enqueueVideoEnhanceJob（tag=video_enhance，IKH3VE）
  *  / enqueueVocalSplitJob（tag=vocal_split，IKHA2I）
  *  / enqueueAudioTrimJob（tag=audio_trim，IKHB6N）
+ *  / enqueueAudioSpeedJob（tag=audio_speed，IKHW59）
  *  / enqueueVideoSceneSplitJob（tag=video_scene_split，IKH8BO）
  *  / enqueueVideoMattingJob（tag=video_matting，IKHK98）
  *  / enqueueVideoFrameInterpolationJob（tag=video_frame_interpolation，IKHLK3）
@@ -173,6 +175,20 @@ export async function enqueueAudioTrimJob(
   await createRocketMqGenerationProducer(
     producer,
     AUDIO_TRIM_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 音频调速 job 入队（IKHW59，契约 = @lib/contracts/audio-speed）：复用生成任务 topic/queue，
+ *  用独立 tag「audio_speed」区分任务类型。 */
+export async function enqueueAudioSpeedJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqGenerationProducer(
+    producer,
+    AUDIO_SPEED_TAG,
   ).enqueue(jobId, options);
 }
 

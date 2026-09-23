@@ -67,6 +67,9 @@ export const apiMocks = {
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
   fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),
+  /** 调速创建（IKI4LX 项目隔离回归：默认无实现，需要的测试显式 mockResolvedValue /
+   *  挂起手工放行；断言第三参 { silent: true } 同插帧先例） */
+  createAudioSpeed: vi.fn(),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -116,6 +119,7 @@ vi.mock('@/api/jobs', () => ({
   fetchJobs: apiMocks.fetchJobs,
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
+  createAudioSpeed: apiMocks.createAudioSpeed,
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));

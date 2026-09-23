@@ -1,6 +1,7 @@
 package com.bluewhale.worker.config;
 
 import com.bluewhale.worker.application.consumer.AudioConsumer;
+import com.bluewhale.worker.application.consumer.AudioSpeedConsumer;
 import com.bluewhale.worker.application.consumer.AudioTrimConsumer;
 import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.ImageEnhanceConsumer;
@@ -9,6 +10,7 @@ import com.bluewhale.worker.application.consumer.ImageEraseConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.AudioSpeedJobProcessor;
 import com.bluewhale.worker.application.processor.AudioTrimJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
 import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
@@ -159,6 +161,32 @@ public class RocketMqConfig {
         return new AudioTrimConsumer(
                 processor,
                 GenerationMqRouteEnum.AUDIO_TRIM.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
+     * audio_speed（音频调速，画布音频卡「调速」）consumer（IKHW5A，父单 IKHVYO；
+     * audioTrimConsumer 接线为模板）。
+     * <p>
+     * consumer group = "generation-audio-speed-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#AUDIO_SPEED}（= TS `AUDIO_SPEED_TAG`）。
+     * digitGuard = false（AudioTrimConsumer 同款，不做纯数字守卫）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public AudioSpeedConsumer audioSpeedConsumer(
+            AudioSpeedJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-audio-speed-worker";
+        int concurrency = workerProps.concurrency().audioSpeed();
+
+        return new AudioSpeedConsumer(
+                processor,
+                GenerationMqRouteEnum.AUDIO_SPEED.topic(),
                 clientConfig,
                 consumerGroup,
                 concurrency
@@ -539,6 +567,21 @@ public class RocketMqConfig {
     }
 
     /**
+     * audio_speed 轮询自投生产者（IKHW5A；audioTrimMessageProducer 同款）。
+     * <p>
+     * AudioSpeedJobProcessor 火山异步链 submit / poll 步完成后自投延迟消息驱动下一步；
+     * 独立 bean（tag = audio_speed）——复用 video 的 producer 会把消息投到 video tag，
+     * 被视频消费者当成不认识的 jobId 静默丢进轮询死胡同（去字幕注释同款教训）。
+     */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioSpeedMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig,
+                GenerationMqRouteEnum.AUDIO_SPEED.topic(),
+                GenerationMqRouteEnum.AUDIO_SPEED.tag());
+    }
+
+    /**
      * video_enhance 轮询自投生产者（IKH3VF；去字幕 videoSubtitleEraseMessageProducer 同款）。
      * <p>
      * VideoEnhanceJobProcessor submit / poll 步完成后自投延迟消息驱动下一步；
@@ -643,6 +686,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer audioMixRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_MIX);
+    }
+
+    /** recovery 重投 audio_speed（IKHW5A，父单 IKHVYO；轮询自投消息丢失时由扫描兜底重投）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioSpeedRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_SPEED);
     }
 
     /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */

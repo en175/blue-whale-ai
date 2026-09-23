@@ -15,6 +15,9 @@
    IKHB7A 音频截取（audioTrim）按音视频分离同档接入——互斥、选中规范化退出、Esc
    公共链同为家族口径；node-click 拦截不挂（仅 outpaint/cutout 有源卡切换语义，
    截取与场景切分等工具一样走选中规范化退出）。
+   IKHW5C 音频调速（audioSpeed，父单 IKHVYO，编辑态本体归 IKHW5S）按音频截取
+   同档接入——互斥、选中规范化退出、Esc 公共链同家族口径；node-click 拦截不挂
+   （无源卡切换语义，点其他卡走选中规范化退出）。
    约束：会话状态与完整退出动作的实现留在页面现有持有处（index.tsx），本 module 不持
    state、不建第二份「活动工具」事实源——活跃与否由调用方每次交互时从现有会话
    target 装配快照传入。纯 in-process 依赖，无网络接口。 */
@@ -29,6 +32,7 @@ export type ToolSessionKind =
   | 'audioVideoSplit'
   | 'audioTrim'
   | 'audioMix'
+  | 'audioSpeed'
   | 'sceneSplit'
   | 'vocalSplit'
   | 'smartMatting';
@@ -44,23 +48,24 @@ const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'audioVideoSplit',
   'audioTrim',
   'audioMix',
+  'audioSpeed',
   'sceneSplit',
   'vocalSplit',
   'smartMatting',
 ];
 
-/** 八会话活跃快照：各会话 target node id（null=未进入）。由页面每次交互时从现有
- *  会话 state 装配最新值传入，module 不保存。 */
+/** 全会话活跃快照（IKH3ZH 收口时为八会话，IKHW5C 增至十一）：各会话 target node id
+ *  （null=未进入）。由页面每次交互时从现有会话 state 装配最新值传入，module 不保存。 */
 export type ToolSessionActivity = Record<ToolSessionKind, string | null>;
 
-/** 八会话完整退出动作（页面现有持有处的原函数，module 只调度不实现） */
+/** 全会话完整退出动作（页面现有持有处的原函数，module 只调度不实现） */
 export type ToolSessionExits = Record<ToolSessionKind, () => void>;
 
 /** 进入协调依赖 */
 export interface EnterToolSessionDeps {
-  /** 本次交互对应的最新八会话活跃快照 */
+  /** 本次交互对应的最新全会话活跃快照 */
   activity: ToolSessionActivity;
-  /** 八个完整退出动作 */
+  /** 全部会话的完整退出动作 */
   exits: ToolSessionExits;
   /** 关闭全部生成面板（进入任一会话统一执行） */
   dismissGenPanels: () => void;
@@ -143,10 +148,8 @@ export function handleToolSessionNodeClick(
   return 'pass';
 }
 
-/** 选中规范化退出的工具：擦除/裁切/去字幕/音视频分离/音频截取/场景切分/人声背景分离
- *  （IKHB7A/IKH8BR/IKHA2W 先后同档接入；抠图/扩图的选中变化走冻结，其点其他卡退出
- *  已由 node-click 拦截承担）。 */
-const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'sceneSplit', 'vocalSplit', 'smartMatting'];
+/** 选中规范化退出的工具包含音频混合与调速；抠图/扩图的选中变化走冻结。 */
+const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'sceneSplit', 'vocalSplit', 'smartMatting'];
 
 /** 选中变化的会话处置：抠图/扩图活跃时冻结面板联动（返回 true，调用方应终止面板
  *  联动——会话内点其他卡的选中变化已由 node-click 拦截处置，程序化选中触发的变化
@@ -177,10 +180,8 @@ export function escDefersToToolSessionHandler(deps: ToolSessionDeps): boolean {
   return deps.activity.cutout != null || deps.activity.outpaint != null;
 }
 
-/** Esc 公共链退出的工具与顺序：擦除→去字幕→音视频分离→音频截取→场景切分→人声背景
- *  分离→裁切（让位与退出顺序是 module 持有的知识；抠图/扩图不在其列，由专属
- *  handler 承担）。 */
-const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
+/** Esc 公共链按顺序退出首个活跃会话；抠图/扩图由专属 handler 处理。 */
+const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
 
 /** Esc 公共链后段的会话退出：按 ESC_EXIT_KINDS 顺序退出首个活跃会话并消费；无此
  *  六会话返回 false 交还调用方继续面板关闭链。 */
@@ -194,8 +195,9 @@ export function exitToolSessionOnEsc(deps: ToolSessionDeps): boolean {
   return false;
 }
 
-/** 公共 Esc 链挂载条件中的会话判断：擦除/裁切/去字幕/分离/截取/场景切分任一活跃即需挂载公共链
- *  （抠图/扩图有专属 handler，不因它们挂载公共链——与页面原挂载条件口径一致）。 */
+/** 公共 Esc 链挂载条件中的会话判断：擦除/裁切/去字幕/分离/截取/调速/场景切分/人声背景
+ *  分离任一活跃即需挂载公共链（抠图/扩图有专属 handler，不因它们挂载公共链——与页面
+ *  原挂载条件口径一致）。 */
 export function hasEscExitSession(deps: ToolSessionDeps): boolean {
   return ESC_EXIT_KINDS.some((kind) => deps.activity[kind] != null);
 }
