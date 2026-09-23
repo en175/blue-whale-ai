@@ -63,6 +63,7 @@ export default function FollowToolbarLayer({
     <div
       ref={layerRef}
       className={layerStyles.toolbarLayer}
+      data-canvas-chrome
       data-gen-panel-territory
       style={{
         position: 'fixed',

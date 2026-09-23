@@ -315,6 +315,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const shellFileRef = useRef<HTMLInputElement>(null);
   /** 源视频元素引用：去字幕编辑态注入时暂停在当前帧（IKGZ83，本期无播放控制） */
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** 未选中时用首帧画布占位，避免铺满的 <video> 合成层把工具栏点击偷走 */
+  const videoPosterRef = useRef<HTMLCanvasElement | null>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -328,6 +330,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
    *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
   const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
+  /** 原生控件只给「当前选中」的视频卡。选择工具下所有卡都开 controls 时，
+   *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
+  const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
+  const [videoControlsArmed, setVideoControlsArmed] = useState(false);
+  useEffect(() => {
+    if (!videoInteractive) {
+      setVideoControlsArmed(false);
+      videoRef.current?.pause();
+      return;
+    }
+    const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
+    return () => window.clearTimeout(timer);
+  }, [videoInteractive]);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -478,6 +493,21 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高。
    *  静默解码失败形态（Windows/Edge 无 HEVC 解码实测）：数据齐（readyState≥2）
    *  但视频轨量不出尺寸且不派发 error 事件——videoWidth=0 视为编码不支持，走兜底。 */
+  const drawVideoPoster = useCallback((video: HTMLVideoElement) => {
+    const canvas = videoPosterRef.current;
+    if (!canvas) return;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) return;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, width, height);
+  }, []);
+
   const hydratePausedVideo = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return;
     if (video.readyState >= 2 && video.videoWidth === 0 && video.videoHeight === 0) {
@@ -485,17 +515,51 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return;
     }
     syncVideoDims(video);
-    paintVideoFirstFrame(video, syncVideoDims);
-  }, [syncVideoDims]);
+    paintVideoFirstFrame(video, (ready) => {
+      syncVideoDims(ready);
+      drawVideoPoster(ready);
+    });
+  }, [drawVideoPoster, syncVideoDims]);
 
   const handleVideoReady = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     hydratePausedVideo(e.currentTarget);
   }, [hydratePausedVideo]);
 
-  /** 缓存命中时 loadedmetadata 可能早于监听绑定，挂载后再补画一帧 */
+  /** 未选中时不把 <video> 放进卡片：Chromium 合成层会穿透工具栏。解码挂到 body，只往画布画首帧。 */
   useEffect(() => {
-    hydratePausedVideo(videoRef.current);
-  }, [data.src, hydratePausedVideo]);
+    if (videoControlsArmed) {
+      hydratePausedVideo(videoRef.current);
+      return;
+    }
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;left:-240px;top:-240px;width:8px;height:8px;overflow:hidden;pointer-events:none;opacity:0';
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.controls = false;
+    video.disablePictureInPicture = true;
+    videoRef.current = video;
+    for (const source of videoSourceList(data.src, data.srcH264)) {
+      const el = document.createElement('source');
+      el.src = source.src;
+      el.type = source.type;
+      video.appendChild(el);
+    }
+    const onReady = () => hydratePausedVideo(video);
+    video.addEventListener('loadedmetadata', onReady);
+    video.addEventListener('loadeddata', onReady);
+    host.appendChild(video);
+    document.body.appendChild(host);
+    video.load();
+    return () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      video.removeEventListener('loadeddata', onReady);
+      host.remove();
+      if (videoRef.current === video) videoRef.current = null;
+    };
+  }, [data.src, data.srcH264, hydratePausedVideo, videoControlsArmed]);
 
   const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const code = e.currentTarget.error?.code;
@@ -851,25 +915,31 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               </div>
             ) : (
               /* 双源播放：主源编码未知不标 codecs，H.264 兜底标 avc1——主源解码失败
-                 （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source */
-              <video
-                ref={videoRef}
-                className={`${styles.mediaVideo}${isSelect && !subtitleEraseLocked ? ' nodrag nopan' : ''}`}
-                controls={isSelect && !subtitleEraseLocked}
-                playsInline
-                preload="metadata"
-                disablePictureInPicture
-                disableRemotePlayback
-                controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-                onLoadedMetadata={handleVideoReady}
-                onLoadedData={handleVideoReady}
-                onError={handleVideoError}
-                style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
-              >
-                {videoSourceList(data.src, data.srcH264).map((source) => (
-                  <source key={source.src} src={source.src} type={source.type} />
-                ))}
-              </video>
+                 （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source。
+                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。 */
+              <div className={styles.mediaVideoLayer}>
+                {videoControlsArmed ? (
+                  <video
+                    ref={videoRef}
+                    className={`${styles.mediaVideo} nodrag nopan`}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    disablePictureInPicture
+                    disableRemotePlayback
+                    controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
+                    onLoadedMetadata={handleVideoReady}
+                    onLoadedData={handleVideoReady}
+                    onError={handleVideoError}
+                  >
+                    {videoSourceList(data.src, data.srcH264).map((source) => (
+                      <source key={source.src} src={source.src} type={source.type} />
+                    ))}
+                  </video>
+                ) : (
+                  <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />
+                )}
+              </div>
             )}
             {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
                 左下角半透明胶囊标注「透明背景 · WEBM」，与棋盘格一起标识透明产物；

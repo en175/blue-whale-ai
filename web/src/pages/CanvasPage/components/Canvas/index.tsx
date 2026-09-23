@@ -38,6 +38,15 @@ import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTar
 import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboardClipboard';
 import { isMentionMenuOpen } from './canvasKeyboard';
 import { useCanvasPan } from './useCanvasPan';
+import {
+  canvasChromeAtPoint,
+  chromeSelectionLockIds,
+  lockChromeSelection,
+  rememberIdleSelection,
+  shouldSuppressCanvasSelection,
+  swallowStolenCanvasChromeHit,
+  trackChromePointer,
+} from './chromeHitGuard';
 import ConnectionPreview from './ConnectionPreview';
 import SnapGuides from './SnapGuides';
 import OutpaintFrame from '../OutpaintFrame';
@@ -164,7 +173,69 @@ interface FlowCanvasProps {
 
 function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onUpdateGenerate }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
+  const nodesRef = useRef<Node[]>([]);
+  /** 点在工具栏/小地图上：本轮手势里丢掉 React Flow 的 select，避免视频 GPU 穿透后把卡选中 */
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  nodesRef.current = nodes;
+
+  const isChromeGestureActive = () => shouldSuppressCanvasSelection();
+
+  useEffect(() => {
+    const revertLockedSelection = () => {
+      const locked = chromeSelectionLockIds();
+      if (!locked) return;
+      setNodes((prev) => {
+        let changed = false;
+        const next = prev.map((node) => {
+          const shouldSelect = locked.has(node.id);
+          if (Boolean(node.selected) === shouldSelect) return node;
+          changed = true;
+          return { ...node, selected: shouldSelect };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    const onPointerDown = (event: Event) => {
+      if (!('clientX' in event) || !('clientY' in event)) return;
+      const { clientX, clientY } = event as PointerEvent;
+      const target = event.target;
+      const onChrome = trackChromePointer(clientX, clientY)
+        || (target instanceof Element && Boolean(target.closest('[data-canvas-chrome], .react-flow__minimap')));
+      if (onChrome) {
+        lockChromeSelection();
+        document.documentElement.classList.add('canvas-chrome-lock');
+        [0, 16, 32, 80, 160, 320, 500].forEach((ms) => window.setTimeout(revertLockedSelection, ms));
+      }
+      swallowStolenCanvasChromeHit(event);
+    };
+    const onClick = (event: Event) => {
+      swallowStolenCanvasChromeHit(event);
+      revertLockedSelection();
+    };
+    const onPointerUp = () => {
+      window.setTimeout(() => document.documentElement.classList.remove('canvas-chrome-lock'), 400);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const overChrome = trackChromePointer(event.clientX, event.clientY);
+      if (overChrome || chromeSelectionLockIds()) return;
+      rememberIdleSelection(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
+    };
+
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('mousedown', onPointerDown, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('pointerup', onPointerUp, true);
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('mousedown', onPointerDown, true);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.documentElement.classList.remove('canvas-chrome-lock');
+    };
+  }, [setNodes]);
   const extraIdsRef = useRef<Set<string>>(new Set());
   const textIdsRef = useRef<Set<string>>(new Set());
   /** 上次已从父层接受的文本坐标：仅当父层坐标变化时才回写（撤销/拖结束），避免 html 刷新把拖动位置打回 */
@@ -178,6 +249,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const selectReqTsRef = useRef(0);
   useEffect(() => {
     if (!selectRequest || selectRequest.ts === selectReqTsRef.current) return;
+    if (chromeSelectionLockIds()) return;
     selectReqTsRef.current = selectRequest.ts;
     setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
   }, [selectRequest, setNodes]);
@@ -421,8 +493,6 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     });
   }, [nodes, toolMode, setNodes]);
 
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
   const parentNodeIdsRef = useRef<Set<string>>(new Set());
   parentNodeIdsRef.current = new Set([
     ...extraNodes.map((n) => n.id),
@@ -494,6 +564,12 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   snapEnabledRef.current = snapAlignmentEnabled !== false;
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      if (isChromeGestureActive()) {
+        const next = changes.filter((c) => c.type !== 'select');
+        if (next.length === 0) return;
+        onNodesChange(next);
+        return;
+      }
       if (frameDraggingRef.current) {
         const next = changes.filter((c) => c.type !== 'select');
         if (next.length === 0) return;
@@ -808,12 +884,20 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             ? (_e, node) => {
                 // 阻止节点点击冒泡到 pane，避免「到节点选择」命中节点时误触画布空白关闭（视频/图片/音频生成面板）
                 _e.stopPropagation();
+                if (canvasChromeAtPoint(_e.clientX, _e.clientY) || chromeSelectionLockIds()) return;
                 onNodeClick(node);
               }
             : undefined
         }
         onPaneClick={onPaneClick}
-        onSelectionChange={frameDragMemberIds.size > 0 ? undefined : onSelectionChange}
+        onSelectionChange={
+          frameDragMemberIds.size > 0
+            ? undefined
+            : (params) => {
+                if (isChromeGestureActive()) return;
+                onSelectionChange?.(params);
+              }
+        }
         onMove={(_e, v) => onViewportLiveRef.current?.(v)}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}
