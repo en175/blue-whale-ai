@@ -517,7 +517,7 @@ test("classifies verification governance changes as scoped governance verificati
       "tests/verification-policy.test.mjs",
       "tests/agent-rules.test.mjs",
       ".claude/skills/implement/SKILL.md",
-      ".superpowers/skills/finishing-a-development-branch/SKILL.md",
+      ".superpowers/skills/requesting-code-review/SKILL.md",
       ".zcode/skills/implement/SKILL.md",
       ".qoder/skills/implement/SKILL.md",
       ".gitee/PULL_REQUEST_TEMPLATE.md",

@@ -36,9 +36,6 @@ test("documents every required branch of the testing strategy", () => {
 test("project skills delegate final verification to the repository strategy", () => {
   const skillPaths = [
     ".claude/skills/implement/SKILL.md",
-    ".superpowers/skills/dispatching-parallel-agents/SKILL.md",
-    ".superpowers/skills/finishing-a-development-branch/SKILL.md",
-    ".superpowers/skills/subagent-driven-development/implementer-prompt.md",
   ];
 
   for (const path of skillPaths) {
@@ -116,9 +113,8 @@ test("tracked skill mirrors match their authoritative sources", () => {
   assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
 
   for (const skill of [
-    "dispatching-parallel-agents/SKILL.md",
-    "finishing-a-development-branch/SKILL.md",
-    "subagent-driven-development/implementer-prompt.md",
+    "receiving-code-review/SKILL.md",
+    "requesting-code-review/SKILL.md",
   ]) {
     const authority = read(`.superpowers/skills/${skill}`);
     assert.equal(read(`.claude/skills/${skill}`), authority, skill);
