@@ -1,0 +1,28 @@
+.sendBar {
+  max-width: calc(100% - 32px);
+}
+
+.sourceMenu {
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sourceRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 8px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.sourceRow span,
+.menuLabel {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.menuLabel {
+  padding: 8px 8px 2px;
+}

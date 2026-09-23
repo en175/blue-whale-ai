@@ -156,8 +156,8 @@ describe('MediaNodeToolbar 音频卡「截取」点亮与四功能占位（IKHB6
   const audioTool = (id: string) =>
     mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
   const trimBtn = () => audioTool('trim');
-  const placeholderIds = ['speed', 'mix', 'compose', 'transcode'] as const;
-  const audioToolIds = ['trim', ...placeholderIds];
+  const placeholderIds = ['speed', 'compose', 'transcode'] as const;
+  const audioToolIds = ['trim', 'speed', 'mix', 'compose', 'transcode'];
   const audioToolLabels = ['截取', '调速', '混合', '音视频合成', '转码'];
 
   it('五钮顺序截取/调速/混合/音视频合成/转码（截取仍首位），图标加文字横排（复用透明底 toolBtn）', async () => {
@@ -229,7 +229,7 @@ describe('MediaNodeToolbar 音频卡「截取」点亮与四功能占位（IKHB6
     expect(onTrimAudio).not.toHaveBeenCalled();
   });
 
-  it('四占位钮（调速/混合/音视频合成/转码）维持置灰占位：aria-disabled 且悬停「即将上线」', async () => {
+  it('三占位钮（调速/音视频合成/转码）维持置灰占位：aria-disabled 且悬停「即将上线」', async () => {
     await renderToolbar('audio', { data: { duration: 12 } });
     placeholderIds.map(audioTool).forEach((b) => {
       expect(b.getAttribute('aria-disabled')).toBe('true');
@@ -237,7 +237,7 @@ describe('MediaNodeToolbar 音频卡「截取」点亮与四功能占位（IKHB6
     });
   });
 
-  it('四占位钮不绑定任何点击行为：点击不派发任何回调（含 onTrimAudio）', async () => {
+  it('三占位钮不绑定任何点击行为：点击不派发任何回调（含 onTrimAudio）', async () => {
     const onTrimAudio = vi.fn();
     const onShowDetails = vi.fn();
     const onDownload = vi.fn();
@@ -248,6 +248,18 @@ describe('MediaNodeToolbar 音频卡「截取」点亮与四功能占位（IKHB6
     expect(onTrimAudio).not.toHaveBeenCalled();
     expect(onShowDetails).not.toHaveBeenCalled();
     expect(onDownload).not.toHaveBeenCalled();
+  });
+
+  it('混合仅在完成且有资产的音频卡上可点，缺时长不拦', async () => {
+    const onMixAudio = vi.fn();
+    await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', assetId: '8', duration: undefined, onMixAudio } });
+    expect(audioTool('mix').getAttribute('aria-disabled')).toBeNull();
+    await act(async () => audioTool('mix').click());
+    expect(onMixAudio).toHaveBeenCalledTimes(1);
+    await renderToolbar('audio', { data: { src: 'blob:upload', assetId: '8', onMixAudio } });
+    expect(audioTool('mix').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => audioTool('mix').click());
+    expect(onMixAudio).toHaveBeenCalledTimes(1);
   });
 
   it('竖直分隔线在「转码」之后、「下载」之前（分隔线后下载在最右）', async () => {

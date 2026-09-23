@@ -16,6 +16,7 @@ import {
 import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-interpolation';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
+import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
 import type {
@@ -29,7 +30,7 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
 
 /** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'video_frame_interpolation';
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'video_frame_interpolation';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -360,6 +361,14 @@ export function createAudioTrim(
       method: 'POST',
       body: JSON.stringify(payload),
     },
+  );
+}
+
+/** 业务 API 接受后返回任务 id；画布结果卡在受理后创建。 */
+export function createAudioMix(projectId: string, payload: AudioMixCreate): Promise<AudioTrimCreatedData> {
+  return apiRequest<AudioTrimCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
+    { method: 'POST', body: JSON.stringify(payload) },
   );
 }
 

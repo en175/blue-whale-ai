@@ -28,6 +28,7 @@ export type ToolSessionKind =
   | 'subtitleErase'
   | 'audioVideoSplit'
   | 'audioTrim'
+  | 'audioMix'
   | 'sceneSplit'
   | 'vocalSplit'
   | 'smartMatting';
@@ -42,6 +43,7 @@ const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'subtitleErase',
   'audioVideoSplit',
   'audioTrim',
+  'audioMix',
   'sceneSplit',
   'vocalSplit',
   'smartMatting',
@@ -144,7 +146,7 @@ export function handleToolSessionNodeClick(
 /** 选中规范化退出的工具：擦除/裁切/去字幕/音视频分离/音频截取/场景切分/人声背景分离
  *  （IKHB7A/IKH8BR/IKHA2W 先后同档接入；抠图/扩图的选中变化走冻结，其点其他卡退出
  *  已由 node-click 拦截承担）。 */
-const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'sceneSplit', 'vocalSplit', 'smartMatting'];
+const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'sceneSplit', 'vocalSplit', 'smartMatting'];
 
 /** 选中变化的会话处置：抠图/扩图活跃时冻结面板联动（返回 true，调用方应终止面板
  *  联动——会话内点其他卡的选中变化已由 node-click 拦截处置，程序化选中触发的变化
@@ -178,7 +180,7 @@ export function escDefersToToolSessionHandler(deps: ToolSessionDeps): boolean {
 /** Esc 公共链退出的工具与顺序：擦除→去字幕→音视频分离→音频截取→场景切分→人声背景
  *  分离→裁切（让位与退出顺序是 module 持有的知识；抠图/扩图不在其列，由专属
  *  handler 承担）。 */
-const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
+const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
 
 /** Esc 公共链后段的会话退出：按 ESC_EXIT_KINDS 顺序退出首个活跃会话并消费；无此
  *  六会话返回 false 交还调用方继续面板关闭链。 */

@@ -39,7 +39,7 @@ export interface JobStatusView {
   status: string;
   progress: number;
   /** 成功时的首个产出资源；无则 null。 */
-  asset: { id: string; url: string; type: string } | null;
+  asset: { id: string; url: string; type: string; duration?: number } | null;
   /** 成功时的全部产出资源（按 output_asset_ids 顺序）；一对一工具与 asset 首元素等价，
    *  一对多工具（场景切分扇出）按序消费（IKH8C1）。 */
   output_assets: JobOutputAsset[];
@@ -168,9 +168,13 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       if (!row) return null;
 
       let outputAssets: JobOutputAsset[] = [];
+      let audioMixDurationMs: number | null = null;
       if (row.status === "succeeded") {
         const ids = parseAssetIds(row.output_asset_ids);
         const assetMap = await loadAssets(ids);
+        if (row.type === "audio_mix" && ids[0] !== undefined) {
+          audioMixDurationMs = assetMap.get(ids[0].toString())?.duration_ms ?? null;
+        }
         outputAssets = ids
           .map((id) => assetMap.get(id.toString()))
           .filter((a): a is AssetRow => a !== undefined)
@@ -184,7 +188,12 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       }
       const firstAsset = outputAssets[0];
       const asset = firstAsset
-        ? { id: firstAsset.id, url: firstAsset.url, type: firstAsset.type }
+        ? {
+            id: firstAsset.id,
+            url: firstAsset.url,
+            type: firstAsset.type,
+            ...(audioMixDurationMs != null ? { duration: audioMixDurationMs / 1000 } : {}),
+          }
         : null;
 
       // 一对多 result（IKH8C1 场景切分扇出）：终态日志 payload 承载 duration + segments，

@@ -1,0 +1,323 @@
+// @vitest-environment jsdom
+/* IKI68W 画布音频混合：固定首源、挑第二张资产音频、拒绝保留编辑态，
+   POST 受理后才建结果卡和双来源边；终态在原卡回填。 */
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Node } from '@xyflow/react';
+import CanvasPage from './index';
+import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
+import type { GenerationModel } from '@/api/generation';
+
+vi.mock('./components/AgentPanel', () => ({
+  default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
+}));
+
+/** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
+type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }> };
+const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
+vi.mock('./components/Canvas', () => ({
+  default: (props: FlowProps) => {
+    flowProps.current = props;
+    return createElement('div', { 'data-testid': 'flow-canvas' });
+  },
+}));
+
+vi.mock('./components/CanvasToolbar', () => ({
+  default: () => createElement('div', { 'data-testid': 'canvas-toolbar' }),
+}));
+
+vi.mock('./components/CanvasHeader', () => ({
+  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
+}));
+
+vi.mock('./components/ProjectSelector', () => ({
+  default: () => createElement('div', { 'data-testid': 'project-selector' }),
+}));
+
+vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
+vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
+
+const apiMocks = vi.hoisted(() => ({
+  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
+  createProject: vi.fn(),
+  renameProject: vi.fn(),
+  deleteProject: vi.fn(),
+  fetchMe: vi.fn(async () => null),
+  fetchQuota: vi.fn(async () => ({})),
+  toSessionUser: vi.fn(() => null),
+  applyPromptPreview: vi.fn(),
+  saveCanvasDoc: vi.fn(
+    async (): Promise<{ id: number; project_id: number; version: number; viewport: string; nodes: string }> => ({
+      id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]',
+    }),
+  ),
+  createGenerationJob: vi.fn(),
+  fetchJobStatus: vi.fn(),
+  cancelGenerationJob: vi.fn(),
+  retryGenerationJob: vi.fn(),
+  createVideoEnhancement: vi.fn(),
+  createMediaExtraction: vi.fn(),
+  createAudioTrim: vi.fn(),
+  createAudioMix: vi.fn(),
+  readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
+  fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
+  uploadAssetFile: vi.fn(),
+}));
+
+vi.mock('@/api/projects', () => ({
+  touchProjectLastOpened: vi.fn(async () => undefined),
+  pinProject: vi.fn(async () => undefined),
+  fetchProjects: apiMocks.fetchProjects,
+  createProject: apiMocks.createProject,
+  renameProject: apiMocks.renameProject,
+  deleteProject: apiMocks.deleteProject,
+}));
+vi.mock('@/api/auth', () => ({
+  fetchMe: apiMocks.fetchMe,
+  fetchQuota: apiMocks.fetchQuota,
+  toSessionUser: apiMocks.toSessionUser,
+}));
+vi.mock('@/api/assets', () => ({
+  UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
+  fetchUploadPresign: vi.fn(),
+  putToPresignedUrl: vi.fn(),
+  completeUpload: vi.fn(),
+  fetchAllAssets: vi.fn(async () => []),
+  fetchAssetDetail: vi.fn(),
+  linkAssetToProject: vi.fn(),
+}));
+
+vi.mock('@/api/canvas', () => ({
+  applyPromptPreview: apiMocks.applyPromptPreview,
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
+  createConversationQuote: vi.fn(),
+  legacyCardHistoryOptions: (projectId: string) => ({
+    queryKey: ['canvas', projectId, 'legacy-history'],
+    queryFn: () => Promise.resolve({ items: [] }),
+    retry: false,
+  }),
+  saveCanvasDoc: apiMocks.saveCanvasDoc,
+  serializeNodes: vi.fn((nodes: Node[]) =>
+    JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
+  ),
+  serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string }>) =>
+    JSON.stringify(edges.map((e) => JSON.parse(JSON.stringify(e)))),
+  ),
+}));
+vi.mock('@/api/jobs', () => ({
+  createGenerationJob: apiMocks.createGenerationJob,
+  cancelGenerationJob: apiMocks.cancelGenerationJob,
+  retryGenerationJob: apiMocks.retryGenerationJob,
+  fetchJobStatus: apiMocks.fetchJobStatus,
+  createVideoEnhancement: apiMocks.createVideoEnhancement,
+  createMediaExtraction: apiMocks.createMediaExtraction,
+  createAudioTrim: apiMocks.createAudioTrim,
+  createAudioMix: apiMocks.createAudioMix,
+  readJobFailText: apiMocks.readJobFailText,
+}));
+vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
+vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
+vi.mock('@/utils/upload', () => ({ uploadAssetFile: apiMocks.uploadAssetFile }));
+
+const canvasDocMock = vi.hoisted(() => ({
+  current: {
+    doc: null as unknown,
+    assets: {} as Record<string, unknown>,
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  },
+}));
+vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
+
+/** 画布：一个就绪音频节点 a1（15 秒 mp3，assetId 满足置灰门槛；无连线）+ 一个视频卡
+ *  v1（互斥用例的分离会话源卡） */
+function seedDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        {
+          id: 'a1',
+          type: 'mediaNode',
+          position: { x: 400, y: 0 },
+          data: {
+            src: 'http://aud/a1.mp3',
+            mediaType: 'audio',
+            fileName: '播客片头.mp3',
+            assetId: '8',
+            duration: 15,
+            mime: 'audio/mpeg',
+          },
+        },
+        {
+          id: 'a2',
+          type: 'mediaNode',
+          position: { x: 1000, y: 0 },
+          data: {
+            src: 'http://aud/a2.mp3',
+            mediaType: 'audio',
+            fileName: '背景乐.mp3',
+            assetId: '6',
+            duration: 30,
+            mime: 'audio/mpeg',
+          },
+        },
+      ],
+      edges: [],
+    },
+    assets: {
+      8: { asset_id: 8, type: 'audio', access_url: 'http://aud/a1.mp3', duration: 15 },
+      6: { asset_id: 6, type: 'audio', access_url: 'http://aud/a2.mp3', duration: 30 },
+    },
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
+}
+
+let root: Root;
+let container: HTMLDivElement;
+
+async function renderPage() {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(MemoryRouter, null, createElement(CanvasPage)),
+      ),
+    );
+  });
+}
+
+/** 从音频卡工具栏进入混合编辑态。 */
+async function enterMix() {
+  const audio = flowProps.current.mediaNodes.find((n: Node) => n.id === 'a1')!;
+  await act(async () => {
+    (audio.data.onMixAudio as (id: string) => void)('a1');
+  });
+}
+
+function bodyBtn(testId: string): HTMLButtonElement {
+  return document.body.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+}
+
+async function click(testId: string) {
+  await act(async () => {
+    bodyBtn(testId).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+function sendBar(): HTMLElement | null {
+  return document.body.querySelector('[data-testid="audio-mix-send-bar"]');
+}
+
+/** 等创建请求与首轮轮询完成。 */
+async function sendMix() {
+  await click('audio-mix-send');
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
+function nodeById(id: string): Node | undefined {
+  return (flowProps.current.mediaNodes as Node[]).find((n) => n.id === id);
+}
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
+  sessionStorage.clear();
+  seedDoc();
+  apiMocks.createAudioMix.mockReset();
+});
+
+afterEach(async () => {
+  if (root) await act(async () => root.unmount());
+  container?.remove();
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+});
+
+describe('IKI68W 画布双音频混合', () => {
+  it('关闭与 Esc 丢弃未发送选择，重进恢复默认 MP3', async () => {
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await click('audio-mix-format-trigger');
+    await click('audio-mix-format-wav');
+    await click('audio-mix-close');
+    expect(sendBar()).toBeNull();
+    await enterMix();
+    expect(bodyBtn('audio-mix-send').disabled).toBe(true);
+    expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('mp3');
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(sendBar()).toBeNull();
+    expect(apiMocks.createAudioMix).not.toHaveBeenCalled();
+    expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('单源禁发送；选择第二张不同资产后，POST 被接受才创建占位卡与两条持久来源边', async () => {
+    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    expect(bodyBtn('audio-mix-send').disabled).toBe(true);
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    expect(bodyBtn('audio-mix-send').disabled).toBe(false);
+    await sendMix();
+    expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', {
+      source_node_id: 'a1',
+      inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
+      output_format: 'mp3',
+    });
+    const placeholder = nodeById('audio-mix-j1')!;
+    expect(placeholder.data).toMatchObject({ fileName: '混合结果.mp3', genStatus: 'generating', src: '' });
+    expect(placeholder.position.y).toBeGreaterThan(0);
+    const lines = (flowProps.current.edges as Array<{ source: string; target: string; data?: Record<string, unknown> }>).filter(e => e.target === placeholder.id);
+    expect(lines.map(e => [e.source, e.data?.origin])).toEqual([['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN]]);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+  });
+
+  it('创建拒绝保持编辑和选择，不留下卡与来源线', async () => {
+    apiMocks.createAudioMix.mockRejectedValue(new Error('create rejected'));
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await sendMix();
+    expect(sendBar()).not.toBeNull();
+    expect(bodyBtn('audio-mix-send').disabled).toBe(false);
+    expect(nodeById('audio-mix-j1')).toBeUndefined();
+    expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('成功沿用同卡并回填服务端权威时长', async () => {
+    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({
+      job_id: 'j1', status: 'succeeded', progress: 100,
+      asset: { id: 'a88', url: 'http://tos/mixed.mp3', type: 'audio', duration: 42.75 },
+    });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await sendMix();
+    expect(nodeById('audio-mix-j1')?.data).toMatchObject({
+      fileName: '混合结果.mp3', src: 'http://tos/mixed.mp3', assetId: 'a88', duration: 42.75,
+    });
+    expect(nodeById('a1')?.data.assetId).toBe('8');
+    expect(nodeById('a2')?.data.assetId).toBe('6');
+  });
+});

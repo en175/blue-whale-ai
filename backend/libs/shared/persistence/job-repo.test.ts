@@ -145,6 +145,29 @@ describe("createJobRepo.findByIdForUser", () => {
     ]);
   });
 
+  it("音频混合成功任务：首个产物的持久时长毫秒投影为秒", async () => {
+    const prisma = buildPrisma({
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "audio_mix",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [11],
+          error: null,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([
+        { id: 11n, url: "https://tos/mixed.mp3", type: "audio", width: null, height: null, duration_ms: 42750 },
+      ]) },
+    });
+
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+    expect(view?.asset).toEqual({ id: "11", url: "https://tos/mixed.mp3", type: "audio", duration: 42.75 });
+  });
+
   it("进行中任务：output_assets 为空、asset 为 null、不查日志", async () => {
     const prisma = buildPrisma({
       generation_jobs: {

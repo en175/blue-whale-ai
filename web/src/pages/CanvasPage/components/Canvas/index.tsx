@@ -203,7 +203,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       const onChrome = trackChromePointer(clientX, clientY)
         || (target instanceof Element && Boolean(target.closest('[data-canvas-chrome], .react-flow__minimap')));
       if (onChrome) {
-        lockChromeSelection();
+        lockChromeSelection(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
         document.documentElement.classList.add('canvas-chrome-lock');
         [0, 16, 32, 80, 160, 320, 500].forEach((ms) => window.setTimeout(revertLockedSelection, ms));
       }

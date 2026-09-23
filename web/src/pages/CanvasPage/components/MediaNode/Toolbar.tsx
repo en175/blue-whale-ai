@@ -45,6 +45,7 @@ import { imageCutoutGateReason } from '../../imageCutout';
 import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
 import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
 import { audioTrimGateReason } from '../../audioTrim';
+import { audioMixSourceError } from '../../audioMix';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import {
   SMART_MATTING_ENTRY_HINT,
@@ -89,8 +90,6 @@ interface MediaNodeToolbarProps {
  *  形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
 const AUDIO_TOOL_PLACEHOLDER_HINT = '即将上线';
 const audioToolItems: Array<{ id: string; label: string; icon: LucideIcon }> = [
-  { id: 'speed', label: '调速', icon: Gauge },
-  { id: 'mix', label: '混合', icon: Layers },
   { id: 'compose', label: '音视频合成', icon: Clapperboard },
   { id: 'transcode', label: '转码', icon: Repeat },
 ];
@@ -130,6 +129,7 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  不照搬家族「数据缺失不拦」口径） */
   const handleTrimAudio = useCallback(() => data.onTrimAudio?.(id), [data, id]);
   const audioTrimDisabledReason = audioTrimGateReason(data);
+  const audioMixDisabledReason = audioMixSourceError({ id, type: 'mediaNode', position: { x: 0, y: 0 }, data: data as unknown as Record<string, unknown> });
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
    *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
   const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
@@ -356,6 +356,13 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <span>截取</span>
         </button>
       )}
+      {toolbar.audioTools && (
+        <button type="button" className={styles.toolBtn} title={AUDIO_TOOL_PLACEHOLDER_HINT}
+          aria-disabled="true" data-testid="audio-tool-speed">
+          <Gauge size={14} strokeWidth={2} />
+          <span>调速</span>
+        </button>
+      )}
       {/* 场景切分（IKH8BJ）：仅视频卡显示，落「音视频分离」之后、分隔线之前；同音视频分离
           形态（图标+文字单按钮、native disabled 置灰 + title 悬停原因/可用态 hint） */}
       {data.mediaType === 'video' && (
@@ -378,7 +385,17 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           triggerHint={SMART_MATTING_ENTRY_HINT}
         />
       )}
-      {/* 音频卡四功能占位（IKH8Q3 剩余项）：aria-disabled 置灰保持渲染（口径同画质横排
+      {toolbar.audioTools && (
+        <button type="button" className={styles.toolBtn}
+          title={audioMixDisabledReason ?? undefined}
+          aria-disabled={audioMixDisabledReason !== null || undefined}
+          data-testid="audio-tool-mix"
+          onClick={() => { if (audioMixDisabledReason === null) data.onMixAudio?.(id); }}>
+          <Layers size={14} strokeWidth={2} />
+          <span>混合</span>
+        </button>
+      )}
+      {/* 音频卡剩余两功能占位（IKH8Q3）：aria-disabled 置灰保持渲染（口径同画质横排
           .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}
       {toolbar.audioTools && audioToolItems.map((item) => {
         const Icon = item.icon;
