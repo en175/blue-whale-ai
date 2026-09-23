@@ -11,6 +11,7 @@ import {
   type AssetType,
   type UploadCompleteData,
 } from '@/api/assets';
+import { silentInit } from '@/api/http';
 import { FileRejectedError, checkFileBeforeUpload } from './fileSignature';
 
 /** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
@@ -123,8 +124,9 @@ export async function uploadAssetFile(
     }
   }
 
-  const presignInit = opts?.silent === true ? { silent: true } as const : undefined;
-  const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size }, presignInit);
+  // IKI8KZ 审查修订：silent 透传两步 HTTP（presign/complete）共用 silentInit 单源
+  // （此前局部名 presignInit 同时喂给 complete，名不副实）。
+  const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size }, silentInit(opts));
   console.log('[upload] presign 返回:', {
     storage_key: presign.storage_key,
     upload_url: presign.upload_url?.substring(0, 100) + '...',
@@ -143,7 +145,7 @@ export async function uploadAssetFile(
     // IKGOTB：遮罩中间素材带来源标记（资产列表不可见）；普通上传不传（后端缺省 uploaded）
     ...(opts?.assetSource ? { source: opts.assetSource } : {}),
     ...meta,
-  }, presignInit);
+  }, silentInit(opts));
   console.log('[upload] complete 返回:', { url: result.url, asset_id: result.asset_id });
   return result;
 }

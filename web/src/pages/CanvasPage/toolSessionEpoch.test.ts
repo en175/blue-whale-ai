@@ -1,28 +1,16 @@
 /* IKI61O 会话纪元机制单测（toolSessionCoordinator.createToolSessionEpoch）：
    覆盖全部会话种类的进入/退出/项目切换推进与 capture/isCurrent 比对语义——
    迟到响应「只做任务收尾、不碰当前会话」的判定只活在这一个机制里，各家族不各自发明。
-   IKI8L8：ALL_KINDS 对齐 ToolSessionKind 当前全集十二种（audioMix 由 IKI68W 加入，
-   此前清单沿用 IKHW5C 收口时的十一种口径而漏列，勿再照抄历史清单）。 */
+   IKI8KZ 审查修订：ALL_KINDS 自 coordinator 导出的 TOOL_SESSION_KINDS 派生，
+   不再手抄全集副本（此前 audioMix 由 IKI68W 加入时手抄清单漏列过）——新增/遗漏
+   种类时测试遍历自动跟随权威集合暴露缺口。 */
 import { describe, expect, it } from 'vitest';
 import {
   createToolSessionEpoch,
-  type ToolSessionKind,
+  TOOL_SESSION_KINDS,
 } from './toolSessionCoordinator';
 
-const ALL_KINDS: readonly ToolSessionKind[] = [
-  'erase',
-  'cutout',
-  'crop',
-  'outpaint',
-  'subtitleErase',
-  'audioVideoSplit',
-  'audioTrim',
-  'audioMix',
-  'audioSpeed',
-  'sceneSplit',
-  'vocalSplit',
-  'smartMatting',
-];
+const ALL_KINDS = TOOL_SESSION_KINDS;
 
 describe('IKI61O createToolSessionEpoch', () => {
   it('初始纪元为 0，capture 不推进纪元', () => {

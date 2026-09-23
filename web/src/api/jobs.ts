@@ -2,7 +2,7 @@
  * jobs 接口：生成任务创建/取消/重试/轮询/列表
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
-import { apiRequest, isApiError, type ApiError } from './http';
+import { apiRequest, isApiError, silentInit, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
@@ -200,7 +200,7 @@ export function createVocalSplit(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -338,7 +338,7 @@ export function createMediaExtraction(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -369,7 +369,7 @@ export function createAudioTrim(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -382,7 +382,7 @@ export function createAudioMix(
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
-    { method: 'POST', body: JSON.stringify(payload), ...(init?.silent === true ? { silent: true } : {}) },
+    { method: 'POST', body: JSON.stringify(payload), ...silentInit(init) },
   );
 }
 
@@ -396,7 +396,7 @@ export function retryAudioMix(
   return apiRequest(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
     { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...(init?.silent === true ? { silent: true } : {}) },
+      ...silentInit(init) },
   );
 }
 
@@ -426,7 +426,7 @@ export function createAudioSpeed(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -470,7 +470,7 @@ export function createImageErase(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -498,7 +498,7 @@ export function createImageCutout(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -545,7 +545,7 @@ export function createVideoSubtitleErase(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -605,7 +605,7 @@ export function createFrameInterpolation(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -675,7 +675,7 @@ export function createVideoSceneSplit(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }

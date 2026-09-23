@@ -2,7 +2,7 @@
  * assets 接口：资产库列表（分页 + 筛选）
  * ============================================ */
 import { infiniteQueryOptions, queryOptions, skipToken, type QueryClient } from '@tanstack/react-query';
-import { apiRequest, type ApiRequestInit } from './http';
+import { apiRequest, silentInit, type ApiRequestInit } from './http';
 
 /** 资产类型 */
 export type AssetType = 'image' | 'video' | 'audio' | 'character';
@@ -203,7 +203,7 @@ export function fetchUploadPresign(
   return apiRequest<PresignData>('/api/agent/assets/uploads/presign', {
     method: 'POST',
     body: JSON.stringify(params),
-    ...(init?.silent === true ? { silent: true } : {}),
+    ...silentInit(init),
   });
 }
 
@@ -268,7 +268,7 @@ export function completeUpload(params: UploadCompleteParams, init?: { silent?: b
   return apiRequest<UploadCompleteData>('/api/agent/assets/uploads/complete', {
     method: 'POST',
     body: JSON.stringify(params),
-    ...(init?.silent === true ? { silent: true } : {}),
+    ...silentInit(init),
   });
 }
 

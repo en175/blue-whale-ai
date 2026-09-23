@@ -44,8 +44,9 @@ export type ToolSessionKind =
   | 'smartMatting';
 
 /** 会话统一遍历顺序（互斥退出的固定顺序）。各 exit 只清各自 state、相互独立，
- *  顺序不影响结果，固定只为确定性。 */
-const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
+ *  顺序不影响结果，固定只为确定性。IKI8KZ 审查修订后导出：纪元机制单测的 ALL_KINDS
+ *  自本数组派生——新增种类（或集合漏列）直接反映进测试遍历，不再手抄副本漏检。 */
+export const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'erase',
   'cutout',
   'crop',
