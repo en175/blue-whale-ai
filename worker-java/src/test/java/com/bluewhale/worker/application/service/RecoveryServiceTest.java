@@ -125,7 +125,7 @@ class RecoveryServiceTest {
 
     @Test
     void recoversDueAudioMixJobWhenFollowUpMessageWasLost() {
-        when(jobMapper.listDueAudioMixJobIds(100, MAX_AGE_MINUTES)).thenReturn(List.of(70L));
+        when(jobMapper.listDueAudioMixJobIds(100, 0)).thenReturn(List.of(70L));
 
         service.recover();
 
@@ -142,7 +142,7 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueAudioJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueMediaExtractJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueAudioTrimJobIds(100, MAX_AGE_MINUTES);
-        verify(jobMapper).listDueAudioMixJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueAudioMixJobIds(100, 0);
         verify(jobMapper).listDueImageEnhanceJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEraseJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageCutoutJobIds(100, MAX_AGE_MINUTES);

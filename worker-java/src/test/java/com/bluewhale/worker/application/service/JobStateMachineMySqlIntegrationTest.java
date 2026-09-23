@@ -1108,6 +1108,34 @@ class JobStateMachineMySqlIntegrationTest {
     // ========== 11. publishMediaExtractResult / failMediaExtractJob ==========
 
     @Test
+    @DisplayName("audio_mix 恢复扫描包含创建超过两小时的待处理任务")
+    void audioMixRecoveryDoesNotLoseLongProcessingJob() {
+        long jobId = seedJob(9L, "audio_mix", "dock", "processing", 7L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[]}");
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 3 HOUR), "
+                + "lease_owner=NULL, lease_expires_at=NULL, next_action_at=DATE_SUB(NOW(), INTERVAL 10 SECOND) "
+                + "WHERE id=?", jobId);
+
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).doesNotContain(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+    }
+
+    @Test
+    @DisplayName("audio_mix 续租只允许当前 fencing 持有者且不复活已过期租约")
+    void audioMixTransferLeaseIsFenced() {
+        long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 10 SECOND) WHERE id=?", jobId);
+
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 5L)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
+                + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 4L)).isFalse();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 5L)).isFalse();
+    }
+
+    @Test
     @DisplayName("audio_mix 真库闭环：领取→保存 task_id→转存后发布自家音频资产和精确时长")
     void audioMixTaskPersistsProviderIdentityAndLongLivedAsset() {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,

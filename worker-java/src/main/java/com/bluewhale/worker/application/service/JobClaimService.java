@@ -264,7 +264,8 @@ public class JobClaimService {
                 input != null ? input : Map.of(),
                 candidate.getProviderTaskId(), workerId, candidate.getFencingToken() + 1,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                candidate.getGmtCreate(), candidate.getExecutionDeadlineAt()));
     }
 
     /**

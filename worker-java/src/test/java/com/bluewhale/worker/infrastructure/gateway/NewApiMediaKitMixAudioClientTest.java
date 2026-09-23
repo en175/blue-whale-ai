@@ -89,4 +89,13 @@ class NewApiMediaKitMixAudioClientTest {
         assertThat(observation.requestId()).isEqualTo("req-mix-88");
         assertThat(observation.audioUrl()).isNull();
     }
+
+    @Test
+    void malformedQueryResponseRetainsRequestId() {
+        response.set("{\"request_id\":\"req-mix-no-status\",\"result\":{}}");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new NewApiMediaKitMixAudioClient(baseUrl).poll("sk-token", "task-9"))
+                .hasMessageContaining("缺少 status")
+                .hasMessageContaining("req-mix-no-status");
+    }
 }

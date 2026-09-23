@@ -41,9 +41,15 @@ public class NewApiMediaKitMixAudioClient extends NewApiMediaKitAsyncTaskClient 
 
     public MixAudioTaskObservation poll(String token, String taskId) {
         PollBody body = executePoll(token, taskId);
-        String status = normalizedStatus(body);
         String requestId = NewApiMediaKitJsonSupport.textOrNull(body.data(), "request_id");
         if (requestId == null) requestId = NewApiMediaKitJsonSupport.textOrNull(body.parsed(), "request_id");
+        String status;
+        try {
+            status = normalizedStatus(body);
+        } catch (MediaExtractError error) {
+            if (requestId == null) throw error;
+            throw new MediaExtractError(error.getCode(), error.getMessage() + " request_id=" + requestId, error);
+        }
         if ("failed".equals(status)) {
             return new MixAudioTaskObservation("failed", null, null,
                     extractUpstreamCode(body), extractPollUpstreamMessage(body), requestId);

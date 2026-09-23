@@ -34,4 +34,24 @@ export class AudioMixesController {
     }
     return result;
   }
+
+  @Post(":jobId/retry")
+  async retry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    const result = await this.audioMixes.retry(user.userId, projectId, jobId, idempotencyKey ?? "");
+    if (!result.data?.replayed) {
+      try {
+        await enqueueAudioMixJob(jobId);
+      } catch (error) {
+        logger.error(`[audio_mix] retry enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
+        await this.audioMixes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
+      }
+    }
+    return result;
+  }
+
 }

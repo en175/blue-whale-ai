@@ -141,7 +141,7 @@ public class RecoveryService {
             reenqueue(GenerationMqRouteEnum.AUDIO_TRIM, audioTrimProducer.getIfAvailable(),
                     jobMapper.listDueAudioTrimJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.AUDIO_MIX, audioMixProducer.getIfAvailable(),
-                    jobMapper.listDueAudioMixJobIds(SCAN_LIMIT, maxAgeMinutes));
+                    jobMapper.listDueAudioMixJobIds(SCAN_LIMIT, 0));
             reenqueue(GenerationMqRouteEnum.AUDIO, audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),

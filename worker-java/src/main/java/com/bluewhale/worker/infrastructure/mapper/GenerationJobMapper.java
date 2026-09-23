@@ -102,6 +102,19 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
+    /** 混音大产物转存期续租：仅当前未过期的 owner/fence 可延期。 */
+    @Update("""
+            UPDATE generation_jobs
+            SET lease_expires_at = #{leaseExpiresAt}, version = version + 1
+            WHERE id = #{jobId} AND type = 'audio_mix' AND source = 'dock'
+              AND status = 'processing' AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken} AND lease_expires_at > NOW()
+            """)
+    int renewAudioMixLease(@Param("jobId") Long jobId,
+                           @Param("workerId") String workerId,
+                           @Param("fencingToken") Long fencingToken,
+                           @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
+
     /**
      * 更新 video_scene_split 进度：CAS 更新 + 续租（IKH8BP 审查修复；SQL 语义与
      * updateMediaExtractProgress 同款，仅租约时长由调用侧按场景切分的单段转存窗口传入）。
@@ -751,7 +764,8 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     // CAS UPDATE 与媒体类型无关——不保留逐字复制的专属方法（审查修复 S2）。
 
     // ========== recovery 到点/孤儿扫描（IKF3AT；claim-ops.ts:134-230 逐字移植） ==========
-    // 共同条件：is_delete=false + gmt_create 在 RECOVERY_MAX_AGE 窗口内（避免卡死任务被 60s 循环无限重放）
+    // 共同条件：is_delete=false + 默认 gmt_create 在 RECOVERY_MAX_AGE 窗口内；audio_mix
+    // 传 maxAgeMinutes=0 跳过年龄过滤，长任务由 execution_deadline_at 收敛。
     // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
     // 注：TS 的 resetStalledImageJobs 无活调用方（死代码），不移植（edits 死代码教训）。
     // 六路径仅 type / source 白名单差异（audio / media_extract 不套白名单），其余条件逐字同 TS——
@@ -774,7 +788,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
             </if>
             AND is_delete = false
-            AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+            <if test="maxAgeMinutes > 0">
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+            </if>
             AND next_action_at &lt;= NOW()
             AND (
               status = 'queued'
@@ -819,7 +835,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit, maxAgeMinutes);
     }
 
-    /** 音频混合到点/孤儿：与唯一创建入口和 claim 一致，只认 dock。 */
+    /** 音频混合到点/孤儿：处理可超过通用 2h 扫描窗；由处理器的轮询预算收敛终态。 */
     default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
     }

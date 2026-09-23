@@ -386,6 +386,11 @@ public class JobStateMachineService {
         return affected == 1;
     }
 
+    public boolean renewAudioMixLease(String jobId, String workerId, long fencingToken) {
+        return jobMapper.renewAudioMixLease(Long.parseLong(jobId), workerId,
+                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+    }
+
     /**
      * 更新 video_scene_split 进度（IKH8BP 审查修复；属本类保留的 progress 续租族）：
      * 0-99 钳制 + 续租。

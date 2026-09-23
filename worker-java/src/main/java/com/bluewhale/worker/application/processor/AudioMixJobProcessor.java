@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.ConnectException;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,14 +30,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** audio_mix 独立 MQ 步进：提交、持久化 task_id、查询、转存、发布长期音频 Asset。 */
 @Component
 public class AudioMixJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(AudioMixJobProcessor.class);
     private static final long POLL_INTERVAL_MS = 5_000;
-    // 长任务策略由 IKI696 收口；首票给出 24h 兜底，避免照搬音频截取 60min 截止。
-    private static final int MAX_POLLS = 17_280;
+    private static final ScheduledExecutorService LEASE_HEARTBEAT_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "amix-lease-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
     private static final Set<String> PRESERVED_CODES = Set.of(
             GenerationError.ERROR_QUOTA_EXHAUSTED,
             GenerationError.ERROR_CONTENT_REJECTED,
@@ -47,6 +58,7 @@ public class AudioMixJobProcessor implements JobProcessor {
     private final TosAudioMediaRelay relay;
     private final GenerationMessageProducer producer;
     private final String workerId;
+    long leaseRenewIntervalMs = 60_000;
 
     public AudioMixJobProcessor(JobStateMachineService stateMachine,
                                 GenerationCredentialService credentials,
@@ -140,14 +152,14 @@ public class AudioMixJobProcessor implements JobProcessor {
         try {
             observed = gateway.poll(token, job.providerTaskId());
         } catch (MediaExtractError error) {
-            if (transientPollError(error) && job.pollCount() < MAX_POLLS) {
+            if (transientPollError(error) && !timedOut(job)) {
                 scheduleNext(job);
                 return;
             }
             throw error;
         }
         if ("processing".equals(observed.status())) {
-            if (job.pollCount() >= MAX_POLLS) {
+            if (timedOut(job)) {
                 fail(job, AudioMixContract.ERROR_AUDIO_MIX_FAILED, "音频混合查询超时");
             } else scheduleNext(job);
             return;
@@ -173,7 +185,28 @@ public class AudioMixJobProcessor implements JobProcessor {
             return;
         }
         String format = (String) job.input().get(AudioMixContract.INPUT_KEY_OUTPUT_FORMAT);
-        TosAudioMediaRelay.StoredAudio stored = relay.persist(observed.audioUrl(), job.userId(), format);
+        if (!renewLease(job)) return;
+        AtomicBoolean lostLease = new AtomicBoolean();
+        ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
+            try {
+                if (!renewLease(job)) lostLease.set(true);
+            } catch (Exception error) {
+                lostLease.set(true);
+                log.warn("[audio_mix] 结果转存续租异常 jobId={}", job.id(), error);
+            }
+        }, leaseRenewIntervalMs, leaseRenewIntervalMs, TimeUnit.MILLISECONDS);
+        TosAudioMediaRelay.StoredAudio stored;
+        try {
+            stored = relay.persist(observed.audioUrl(), job.userId(), format);
+        } catch (MediaExtractError error) {
+            if (lostLease.get()) return;
+            String requestId = observed.requestId();
+            if (requestId == null || requestId.isBlank()) throw error;
+            throw new MediaExtractError(error.getCode(), error.getMessage() + " request_id=" + requestId, error);
+        } finally {
+            heartbeat.cancel(false);
+        }
+        if (lostLease.get() || !renewLease(job)) return;
         boolean published = stateMachine.publishAudioMixResult(new PublishMediaExtractDto(
                 job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
@@ -181,10 +214,32 @@ public class AudioMixJobProcessor implements JobProcessor {
         if (!published) log.warn("[audio_mix] 结果发布守卫未命中 jobId={}", job.id());
     }
 
+    private boolean renewLease(ClaimedMediaExtractJobDto job) {
+        return stateMachine.renewAudioMixLease(job.id(), job.workerId(), job.fencingToken());
+    }
+
     private void scheduleNext(ClaimedMediaExtractJobDto job) {
         if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress())) {
-            producer.enqueue(job.id(), POLL_INTERVAL_MS);
+            producer.enqueue(job.id(), pollDelayMs(job.pollCount()));
         }
+    }
+
+    private static long pollDelayMs(int pollCount) {
+        return Math.min(60_000L, POLL_INTERVAL_MS << Math.min(4, Math.max(0, pollCount / 3)));
+    }
+
+    /** 平均 RTF≈1 只作预算依据：已知最长源给四倍处理余量加六小时，至少一天；未知给七天。 */
+    private static boolean timedOut(ClaimedMediaExtractJobDto job) {
+        if (job.executionDeadlineAt() != null) {
+            return !WorkerClock.now().isBefore(job.executionDeadlineAt());
+        }
+        if (job.createdAt() == null) return false;
+        Object estimated = job.input().get("estimated_duration_ms");
+        Duration budget = estimated instanceof Number number && number.longValue() > 0
+                ? Duration.ofHours(6).plus(Duration.ofMillis(number.longValue()).multipliedBy(4))
+                : Duration.ofDays(7);
+        if (budget.compareTo(Duration.ofDays(1)) < 0) budget = Duration.ofDays(1);
+        return Duration.between(job.createdAt(), WorkerClock.now()).compareTo(budget) >= 0;
     }
 
     private static boolean transientPollError(MediaExtractError error) {

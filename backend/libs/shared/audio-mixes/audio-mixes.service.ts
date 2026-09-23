@@ -1,4 +1,6 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
@@ -141,12 +143,93 @@ export class AudioMixesService {
           ...(internal.providerCredential ? { provider_credential: internal.providerCredential } : {}),
         },
         next_action_at: new Date(Date.now() - 60_000),
+        execution_deadline_at: audioMixDeadline(estimatedDurationMs),
       },
     });
     return ok({ job_id: job.id.toString(), status: "queued" });
   }
 
+  async retry(userId: string, projectId: string, jobId: string, idempotencyKey: string) {
+    if (!/^[!-~]{1,128}$/.test(idempotencyKey)) {
+      throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
+    }
+    if (!/^[1-9][0-9]*$/.test(jobId) || !/^[1-9][0-9]*$/.test(projectId)) {
+      throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    }
+    const pid = BigInt(projectId);
+    const jid = BigInt(jobId);
+    const owned = await this.prisma.client.generation_jobs.findFirst({
+      where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE,
+        source: AUDIO_MIX_SOURCE, is_delete: false },
+      select: { id: true },
+    });
+    if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    const hash = createHash("sha256").update(`POST:audio_mix.retry:${projectId}:${jobId}`).digest("hex");
+    const key = { project_id: pid, operation: "audio_mix.retry", idempotency_key: idempotencyKey };
+    const replay = async () => {
+      const existing = await this.prisma.client.command_idempotency.findUnique({
+        where: { project_id_operation_idempotency_key: key },
+      });
+      if (!existing) return null;
+      if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+        throw new DomainError(409, "幂等键已用于另一项音频混合重试");
+      }
+      return ok({ job_id: jobId, status: "queued", replayed: true });
+    };
+    try {
+      const result = await this.prisma.client.$transaction(async (tx) => {
+        const existing = await tx.command_idempotency.findUnique({
+          where: { project_id_operation_idempotency_key: key },
+        });
+        if (existing) {
+          if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+            throw new DomainError(409, "幂等键已用于另一项音频混合重试");
+          }
+          return { replayed: true };
+        }
+        const job = await tx.generation_jobs.findFirst({
+          where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE,
+            source: AUDIO_MIX_SOURCE, is_delete: false },
+        });
+        if (!job) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+        if (job.status !== "failed") throw new DomainError(409, "只有失败的音频混合任务可重试");
+        const frozen = job.input as { estimated_duration_ms?: unknown } | null;
+        const duration = typeof frozen?.estimated_duration_ms === "number" ? frozen.estimated_duration_ms : null;
+        const updated = await tx.generation_jobs.updateMany({
+          where: { id: jid, status: "failed", fencing_token: job.fencing_token },
+          data: {
+            status: "queued", progress: 0, error: Prisma.DbNull, output_asset_ids: Prisma.DbNull,
+            provider_task_id: null, poll_count: 0, next_poll_at: null,
+            next_action_at: new Date(Date.now() - 60_000),
+            execution_deadline_at: audioMixDeadline(duration),
+            lease_owner: null, lease_expires_at: null,
+            fencing_token: { increment: 1 }, retry_count: { increment: 1 }, version: { increment: 1 },
+          },
+        });
+        if (updated.count !== 1) throw new DomainError(409, "音频混合任务正在重试");
+        await tx.command_idempotency.create({
+          data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
+        });
+        return { replayed: false };
+      });
+      return ok({ job_id: jobId, status: "queued", replayed: result.replayed });
+    } catch (error) {
+      if (error instanceof DomainError && error.status !== 409) throw error;
+      const existing = await replay();
+      if (existing) return existing;
+      throw error;
+    }
+  }
+
   async markFailed(jobId: string, code: string, message: string): Promise<void> {
     await createGenerationCommandRepo(this.prisma.client).markFailedQueued(jobId, code, message);
   }
+}
+
+function audioMixDeadline(estimatedDurationMs: number | null): Date {
+  const day = 24 * 60 * 60 * 1000;
+  const budget = estimatedDurationMs !== null && Number.isFinite(estimatedDurationMs) && estimatedDurationMs > 0
+    ? Math.max(day, estimatedDurationMs * 4 + 6 * 60 * 60 * 1000)
+    : 7 * day;
+  return new Date(Date.now() + Math.min(budget, 365 * day));
 }
