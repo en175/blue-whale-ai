@@ -89,7 +89,7 @@ Kimi CLI 只从用户级 `~/.kimi-code/config.toml` 加载 hooks（实测项目�
   - Kimi 的关联 id 字段是 `tool_call_id`（无 `tool_use_id`）——`lib/pretool.py` 与 `lib/hook_audit.py` 做回退映射，授权 claim 与审计关联不变。
   - Kimi 的 Write/Edit 目标路径参数是 `tool_input.path`（无 `file_path`）——同样由上述回退吸收，`block-master-edit.sh` 的分支判定与审计不变。
   - Kimi 的 PostToolUse 成功输出字段是 `tool_output`（无 `tool_response`），且仅在工具成功时触发（失败走 `PostToolUseFailure`）——`confirm-release-action.sh` 的成功判定兼容两种形状，PR 标记撕票语义不变。
-  - Kimi 的 SessionStart 是观察型事件（fire-and-forget，stdout 不注入上下文；compaction 走独立 PreCompact/PostCompact 观察事件）。注入型的 `cbm-session-reminder.sh` / `superpowers-session-start.sh` 挂载到 kimi 即为死配置，因此 `.kimi-code/hooks.toml` 不挂 SessionStart。kimi 会话启动 context 由原生 AGENTS.md 加载机制覆盖（项目 AGENTS.md 指向 CLAUDE.md，规则路由完整）；superpowers 引导在 kimi 无 hook 等价物。
+  - Kimi 的 SessionStart 是观察型事件（fire-and-forget，stdout 不注入上下文；compaction 走独立 PreCompact/PostCompact 观察事件）。注入型的 `cbm-session-reminder.sh` 挂载到 kimi 即为死配置，因此 `.kimi-code/hooks.toml` 不挂 SessionStart。kimi 会话启动 context 由原生 AGENTS.md 加载机制覆盖（项目 AGENTS.md 指向 CLAUDE.md，规则路由完整）。
 - 阻断契约一致：`exit 0` 放行、`stderr + exit 2` 阻断、其它非零 fail-open。注意 Kimi 的 fail-open 是官方设计，hooks 同样只是兜底而非完整安全边界。
 - 使用 kimi 的本机首次（或换新机）运行一次 `scripts/install-kimi-hooks.sh`；变更 `.kimi-code/hooks.toml` 或 shim 后重跑一次即可幂等同步。新会话生效，已有会话用 `/reload` 重载。
 - 目前 Kimi CLI 为个人使用（非团队平台）：配置入库不是为团队分发，而是机制必需——task worktree 从 git 提交状态创建，`.kimi-code/hooks.toml`（opt-in 标记）与 shim 权威源若不入库，worktree 会话中 hook 会静默失效；入库同时让契约/闭环检查器可持续守护四端一致。
