@@ -358,7 +358,10 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
      * + 契约 result 回传（段序 / 起止秒 / 段资产引用 / 总时长）→ 终态 succeeded。
      * <p>
-     * 返回发布守卫结果（IKI89T：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存）、终态发布守卫未命中。poll 相
+     * 调用方忽略返回值（静默退出）；重试收割调用方据此回退正常重新提交——续租/发布/提交
+     * 三守卫 WHERE 同构，回退后 markProviderSubmitted 必同样未命中，无 DB 双写，代价为一份
+     * 无人轮询的孤儿上游任务。
      */
     private boolean publishResult(ClaimedVideoSceneSplitJobDto claim,
                                   SceneSplitTaskObservation observation) {
