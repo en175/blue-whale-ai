@@ -95,9 +95,38 @@ function paintVideoFirstFrame(
 /** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
 
+/** <video> 双源列表项：type 带 codecs 时浏览器才能精确判定解码能力 */
+export interface VideoSourceOption {
+  src: string;
+  type: string;
+}
+
+/** 双源列表：主源编码未知不标 codecs（canPlayType 至少 "maybe" 被选中，解码失败浏览器
+ *  自动落到次选）；H.264 兜底标 avc1。次选与主源相同则去重。 */
+export function videoSourceList(src?: string, srcH264?: string): VideoSourceOption[] {
+  const list: VideoSourceOption[] = [];
+  if (src) list.push({ src, type: 'video/mp4' });
+  if (srcH264 && srcH264 !== src) list.push({ src: srcH264, type: 'video/mp4; codecs="avc1"' });
+  return list;
+}
+
+/** 视频加载失败文案（MediaError.code 分类；HTMLMediaElement.error 见各平台实现） */
+export function videoLoadErrorMessage(code?: number): string {
+  switch (code) {
+    case 4: return '浏览器不支持该视频编码，请更换浏览器';
+    case 3: return '视频解码失败';
+    case 2: return '视频加载失败';
+    default: return '视频无法播放';
+  }
+}
+
 /** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
 export interface MediaNodeData {
   src?: string;
+  /** H.264 兜底地址（双源播放）：生成 MP4 编码未知（较长产物可能为 H.265/HEVC，
+   *  Windows/Edge 无 HEVC 解码扩展时黑屏），提供时渲染为 <source> 次选——主源解码
+   *  失败浏览器自动回退次选。后端转码落地前可选缺失，缺省行为与单源一致。 */
+  srcH264?: string;
   fileName?: string;
   mediaType?: 'image' | 'video' | 'audio';
   toolMode?: 'drag' | 'select';
@@ -439,9 +468,22 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onMediaDims?.(id, dims);
   }, [data, id]);
 
-  /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高 */
+  /** 视频播放失败兜底（双源全部失败/解码失败）：错误态替换黑屏为明确提示 +
+   *  新窗口打开入口；src 任一变化即复位重试 */
+  const [videoError, setVideoError] = useState<{ code?: number } | null>(null);
+  useEffect(() => {
+    setVideoError(null);
+  }, [data.src, data.srcH264]);
+
+  /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高。
+   *  静默解码失败形态（Windows/Edge 无 HEVC 解码实测）：数据齐（readyState≥2）
+   *  但视频轨量不出尺寸且不派发 error 事件——videoWidth=0 视为编码不支持，走兜底。 */
   const hydratePausedVideo = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return;
+    if (video.readyState >= 2 && video.videoWidth === 0 && video.videoHeight === 0) {
+      setVideoError({ code: 4 });
+      return;
+    }
     syncVideoDims(video);
     paintVideoFirstFrame(video, syncVideoDims);
   }, [syncVideoDims]);
@@ -454,6 +496,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   useEffect(() => {
     hydratePausedVideo(videoRef.current);
   }, [data.src, hydratePausedVideo]);
+
+  const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const code = e.currentTarget.error?.code;
+    // code 1（MEDIA_ERR_ABORTED）多为换源主动中止，不算失败
+    if (code === 1) return;
+    setVideoError({ code });
+  }, []);
 
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
@@ -780,20 +829,48 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             {data.transparentOutput === true && (
               <div className={styles.cutoutCheckerboard} aria-hidden data-testid="video-transparent-checkerboard" />
             )}
-            <video
-              ref={videoRef}
-              className={`${styles.mediaVideo}${isSelect && !subtitleEraseLocked ? ' nodrag nopan' : ''}`}
-              src={data.src}
-              controls={isSelect && !subtitleEraseLocked}
-              playsInline
-              preload="metadata"
-              disablePictureInPicture
-              disableRemotePlayback
-              controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-              onLoadedMetadata={handleVideoReady}
-              onLoadedData={handleVideoReady}
-              style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
-            />
+            {videoError ? (
+              /* 播放失败兜底：双源全部失败（如 Windows/Edge 无 HEVC 扩展）或解码错误时，
+                 以明确提示 + 新窗口打开替代无声黑屏；src 变化即复位（见 setVideoError 重置 effect） */
+              <div className={styles.genBox} data-testid="video-error-box">
+                <span className={styles.genFailText} title={videoLoadErrorMessage(videoError.code)}>
+                  {videoLoadErrorMessage(videoError.code)}
+                </span>
+                {data.src && (
+                  <a
+                    className={styles.genBtn}
+                    href={data.src}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: 'none', display: 'inline-block' }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    新窗口打开
+                  </a>
+                )}
+              </div>
+            ) : (
+              /* 双源播放：主源编码未知不标 codecs，H.264 兜底标 avc1——主源解码失败
+                 （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source */
+              <video
+                ref={videoRef}
+                className={`${styles.mediaVideo}${isSelect && !subtitleEraseLocked ? ' nodrag nopan' : ''}`}
+                controls={isSelect && !subtitleEraseLocked}
+                playsInline
+                preload="metadata"
+                disablePictureInPicture
+                disableRemotePlayback
+                controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
+                onLoadedMetadata={handleVideoReady}
+                onLoadedData={handleVideoReady}
+                onError={handleVideoError}
+                style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
+              >
+                {videoSourceList(data.src, data.srcH264).map((source) => (
+                  <source key={source.src} src={source.src} type={source.type} />
+                ))}
+              </video>
+            )}
             {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
                 左下角半透明胶囊标注「透明背景 · WEBM」，与棋盘格一起标识透明产物；
                 仅 transparentOutput 标记卡渲染，MP4 纯色结果不渲染 */}

@@ -6,7 +6,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReactFlowProvider } from '@xyflow/react';
-import MediaNode, { type MediaGenStatus } from './index';
+import MediaNode, { videoSourceList, type MediaGenStatus } from './index';
 
 /** IKHIT1：只替换手柄重测钩子以断言调用时机，其余导出（Provider/Handle/useStore）
     保持官方实现；jsdom 不起真实 ReactFlow 测量。 */
@@ -634,6 +634,75 @@ describe('MediaNode browser-measured dims fill-in', () => {
       video.dispatchEvent(new Event('loadedmetadata'));
     });
     expect(onMediaDims).toHaveBeenCalledWith('video-node', { width: 1920, height: 1080, duration: 12.4 });
+  });
+});
+
+describe('MediaNode 视频双源与播放失败兜底', () => {
+  it('videoSourceList：主源不标 codecs，H.264 兜底标 avc1，相同地址去重', () => {
+    expect(videoSourceList('a.mp4', 'b.mp4')).toEqual([
+      { src: 'a.mp4', type: 'video/mp4' },
+      { src: 'b.mp4', type: 'video/mp4; codecs="avc1"' },
+    ]);
+    expect(videoSourceList('a.mp4')).toEqual([{ src: 'a.mp4', type: 'video/mp4' }]);
+    expect(videoSourceList('a.mp4', 'a.mp4')).toEqual([{ src: 'a.mp4', type: 'video/mp4' }]);
+    expect(videoSourceList(undefined, 'b.mp4')).toEqual([
+      { src: 'b.mp4', type: 'video/mp4; codecs="avc1"' },
+    ]);
+  });
+
+  it('渲染双 source：主源无 codecs、兜底带 avc1；无兜底时单 source', async () => {
+    await renderNode('video', { data: { src: 'https://x/main.mp4', srcH264: 'https://x/fallback.mp4' } });
+    const sources = [...mountNode.querySelectorAll('video source')];
+    expect(sources).toHaveLength(2);
+    expect(sources[0].getAttribute('src')).toBe('https://x/main.mp4');
+    expect(sources[0].getAttribute('type')).toBe('video/mp4');
+    expect(sources[1].getAttribute('src')).toBe('https://x/fallback.mp4');
+    expect(sources[1].getAttribute('type')).toBe('video/mp4; codecs="avc1"');
+    await rerenderNode('video', { data: { src: 'https://x/main.mp4' } });
+    expect([...mountNode.querySelectorAll('video source')]).toHaveLength(1);
+  });
+
+  it('video error（code 4）渲染兜底占位与新窗口链接，src 变化复位', async () => {
+    await renderNode('video', { data: { src: 'https://x/main.mp4' } });
+    const video = mountNode.querySelector('video')!;
+    Object.defineProperty(video, 'error', { value: { code: 4 }, configurable: true });
+    await act(async () => {
+      video.dispatchEvent(new Event('error'));
+    });
+    const box = mountNode.querySelector('[data-testid="video-error-box"]');
+    expect(box).toBeTruthy();
+    expect(box!.textContent).toContain('浏览器不支持该视频编码');
+    const link = box!.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://x/main.mp4');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    // src 变化复位：错误占位消失、video 恢复渲染
+    await rerenderNode('video', { data: { src: 'https://x/other.mp4' } });
+    expect(mountNode.querySelector('[data-testid="video-error-box"]')).toBeNull();
+    expect(mountNode.querySelector('video')).toBeTruthy();
+  });
+
+  it('code 1（换源主动中止）不触发错误占位', async () => {
+    await renderNode('video', { data: { src: 'https://x/main.mp4' } });
+    const video = mountNode.querySelector('video')!;
+    Object.defineProperty(video, 'error', { value: { code: 1 }, configurable: true });
+    await act(async () => {
+      video.dispatchEvent(new Event('error'));
+    });
+    expect(mountNode.querySelector('[data-testid="video-error-box"]')).toBeNull();
+    expect(mountNode.querySelector('video')).toBeTruthy();
+  });
+
+  it('静默解码失败（readyState≥2 但 videoWidth=0，无 error 事件）渲染兜底占位', async () => {
+    await renderNode('video', { data: { src: 'https://x/main.mp4' } });
+    const video = mountNode.querySelector('video')!;
+    // jsdom videoWidth/videoHeight 默认即 0，只需就绪状态
+    Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+    await act(async () => {
+      video.dispatchEvent(new Event('loadeddata'));
+    });
+    const box = mountNode.querySelector('[data-testid="video-error-box"]');
+    expect(box).toBeTruthy();
+    expect(box!.textContent).toContain('浏览器不支持该视频编码');
   });
 });
 
