@@ -36,7 +36,8 @@ import java.util.Set;
  *   <li>claimVideoSubtitleErase（富投影：providerTaskId / pollCount / progress）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（返 task_id）→
  *       markProviderSubmitted（存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1043）；processing →
  *       续排；failed → 终态 1043 + 上游原因透传；completed → **立即下载转存（火山 URL 仅
  *       24h 有效）** → 建 Asset（type=video / source=generated）→ 终态 succeeded</li>
  * </ol>
@@ -248,6 +249,18 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             observation = subtitleEraseClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoSubtitleEraseError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码、同一文案。
+                if (claim.pollCount() >= MAX_SUBTITLE_ERASE_POLLS) {
+                    log.warn("[video_subtitle_erase] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failClaimed(claim, VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
+                            "去字幕轮询超时（超过 " + MAX_SUBTITLE_ERASE_POLLS + " 次）");
+                    return;
+                }
                 log.warn("[video_subtitle_erase] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(
