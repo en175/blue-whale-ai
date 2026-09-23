@@ -91,8 +91,15 @@ class MediaExtractJobProcessorErrorMappingTest {
 
     private ClaimedMediaExtractJobDto makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount, int progress) {
+        return makeClaim(input, providerTaskId, pollCount, progress, null);
+    }
+
+    private ClaimedMediaExtractJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+                                                int pollCount, int progress,
+                                                String parentProviderTaskId) {
         return new ClaimedMediaExtractJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress);
+                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress,
+                parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
@@ -270,6 +277,160 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
         verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    // ========== parent-reuse 重试收割（IKI89P / ADR-0114；平移 VideoJobProcessorTest 先例）==========
+
+    @Test
+    @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
+    void parentReuseSuccess_publishesWithoutSubmit() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-1")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-1"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded",
+                        "https://volc/old-out.mp3?auth_key=...", 65.5, null, null));
+        when(mediaRelay.persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3"))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio(
+                        "https://tos/out.mp3", "generated/9/audio/abc.mp3",
+                        "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
+        verify(mediaRelay).persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3");
+        ArgumentCaptor<PublishMediaExtractDto> captor =
+                ArgumentCaptor.forClass(PublishMediaExtractDto.class);
+        verify(stateMachine).publishMediaExtractResult(captor.capture());
+        PublishMediaExtractDto published = captor.getValue();
+        assertThat(published.url()).isEqualTo("https://tos/out.mp3");
+        assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
+        assertThat(published.mime()).isEqualTo("audio/mpeg");
+        assertThat(published.size()).isEqualTo(123_456L);
+        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+        assertThat(published.duration()).isEqualTo(65.5);
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
+    void parentReuseFailed_fallThrough() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-fail")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-fail"))
+                .thenReturn(new ExtractAudioTaskObservation("failed", null, null,
+                        "VideoParseFailed", "输入视频解析失败"));
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
+    void parentReusePollError_fallThrough() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-gone")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-gone"))
+                .thenThrow(new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "MediaKit 音频提取任务查询失败: HTTP 404"));
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    @DisplayName("非重试 job（parentProviderTaskId=null）→ 不查父任务，执行路径与现状完全一致")
+    void nonRetryJob_skipsParentQuery() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-1");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-1")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient, never()).poll(anyString(), anyString());
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
+    void parentReuseIncompleteResult_fallThrough() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-empty")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-empty"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded", null, null, null, null));
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
+        verify(mediaRelay, never()).persist(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
+    void parentReusePublishFails_fallThrough() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-stale")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-stale"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded",
+                        "https://volc/expired-out.mp3", 65.5, null, null));
+        when(mediaRelay.persist(anyString(), eq("9"), eq("mp3")))
+                .thenThrow(new RuntimeException("生成音频下载失败: HTTP 404"));
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
+    void parentReusePublishGuardMissed_fallThrough() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-guard")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-guard"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded",
+                        "https://volc/old-out.mp3", 65.5, null, null));
+        when(mediaRelay.persist(anyString(), eq("9"), eq("mp3")))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio(
+                        "https://tos/out.mp3", "generated/9/audio/abc.mp3",
+                        "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishMediaExtractResult(any())).thenReturn(false);
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(extractAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("mp3"));
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐去字幕） ==========
