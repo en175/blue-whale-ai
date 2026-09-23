@@ -51,8 +51,6 @@ next-env.d.ts
 # 本地说明文档（agent 生成的流程说明，不进仓）
 docs/skills/Description file/
 
-# superpowers 本地产物（plans 等，不进仓）
-docs/superpowers/
 # Playwright 产物（IJZYVT）
 test-results/
 playwright-report/
@@ -60,8 +58,6 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
-# superpowers 本地产物（plans 等，不进仓）
-docs/superpowers/
 
 # Java / Maven
 target/
@@ -91,8 +87,6 @@ __pycache__/
 !.kimi-code/hooks/blue-whale-hook.sh
 .kimi-code/local.toml
 
-# SDD 运行时 scratch（progress ledger/task reports），不进仓；.superpowers/skills/ 是 tracked 技能文件
-.superpowers/sdd/
 
 # Python 构建产物与虚拟环境（本地运行/测试生成，不入库）
 *.egg-info/
