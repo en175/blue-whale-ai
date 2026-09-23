@@ -2,7 +2,10 @@ import { z } from "zod";
 
 /* 音频调速（audio_speed，画布音频卡「调速」）跨进程任务契约（IKHW48）：
    父单 IKHVYO（滑杆编辑态+分段中点映射+火山 adjust-audio-speed 异步任务）；交互与参数
-   口径 = ADR-0113（全曲变速、无格式下拉、0.05 步进、1.0 原速视觉中点、贴原速省略提交）；
+   口径 = 父单 IKHVYO「解决方案」「用户故事」11–15、28 与「实现决策」2、3：
+   https://e.gitee.com/hangzhou-xuanfu_1/issues/IKHVYO
+   （全曲变速、无格式下拉、0.05 步进、1.0 原速视觉中点、原速发送置灰）。
+   原速省略 speed 是本契约 buildAudioSpeedInput 的防御性收口，非父单交互决策；
    术语见根 CONTEXT.md「画布音频调速」节。一对一复刻 audio-trim 契约家族（audio-trim.ts）。
    接口契约唯一权威 = 火山引擎 AI MediaKit adjust-audio-speed 官方 CLI 参考文档
    （volcengine/mediakit-cli 仓库 skills/byted-mediakit-editing/reference/adjust-audio-speed.md，
@@ -50,7 +53,7 @@ export const AUDIO_SPEED_INPUT_KEYS = {
 } as const;
 
 /** 倍速域常量（文档出处：官方 CLI 参考文档 speed 节「播放速度……取值范围 [0.1, 4]」；
- *  产品步进口径 = 父单 IKHVYO / ADR-0113 滑杆步进 0.05——两位小数天然满足）。 */
+ *  产品步进口径 = 父单 IKHVYO「用户故事」11 /「实现决策」3 滑杆步进 0.05——两位小数天然满足）。 */
 export const AUDIO_SPEED_MIN_SPEED = 0.1;
 export const AUDIO_SPEED_MAX_SPEED = 4.0;
 export const AUDIO_SPEED_STEP = 0.05;
@@ -59,7 +62,7 @@ export const AUDIO_SPEED_STEP = 0.05;
  *  火山上游侧对应官方文档「提交音频调速任务」节 POST /api/v1/tools/adjust-audio-speed，
  *  由网关内部转发，本仓不直连上游。本常量按家族规律（/v1/mediakit/{与上游同名的工具段}，
  *  trim-audio / extract-audio / segment-scenes 等先例一致）取值，网关配置票定稿后回填
- *  （IKH28Y / IKH8BK 先例，ADR-0113）。
+ *  （父单 IKHVYO「实现决策」2、9；IKH28Y / IKH8BK 先例）。
  *  ⚠️ 网关路径 ≠ 火山上游路径（IKH67T 实测：混用即 404 Invalid URL，任务卡在提交相）。 */
 export const AUDIO_SPEED_SUBMIT_PATH = "/v1/mediakit/adjust-audio-speed";
 
@@ -67,7 +70,7 @@ export const AUDIO_SPEED_SUBMIT_PATH = "/v1/mediakit/adjust-audio-speed";
  *  同一条查询路由，路径**不含 async 段**。 */
 export const AUDIO_SPEED_POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 
-/** 滑杆位置域常量（ADR-0113 / 父单 IKHVYO 实现决策 3）：滑杆 0~1000 整数位置分段线性，
+/** 滑杆位置域常量（父单 IKHVYO「实现决策」3）：滑杆 0~1000 整数位置分段线性，
  *  1.0 原速在视觉中点 500——慢放 0.1~1.0 占左半、快放 1.0~4.0 占右半（线性铺开时慢放区
  *  仅 23% 宽度且原速凹槽偏离中点，故分段）。web 滑杆 min/max/midpoint 与刻度定位共用本组。 */
 export const AUDIO_SPEED_SLIDER_MIN_POS = 0;

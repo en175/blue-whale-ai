@@ -2,7 +2,8 @@ package com.bluewhale.worker.domain.contract;
 
 /**
  * 音频调速（audio_speed，画布音频卡「调速」，火山 MediaKit adjust-audio-speed）跨进程任务
- * 契约常量（IKHW5A，父单 IKHVYO；交互与参数口径 = ADR-0113）。
+ * 契约常量（IKHW5A；交互与参数口径见父单 IKHVYO「用户故事」11–15、28 与「实现决策」2、3）。
+ * 设计依据：<a href="https://e.gitee.com/hangzhou-xuanfu_1/issues/IKHVYO">IKHVYO 音频调速规格</a>。
  * <p>
  * 变化轴：跨进程字段（TS 侧权威 = backend/libs/contracts/audio-speed.ts；防漂移断言 =
  * backend/libs/contracts/audio-speed.test.ts 直接读本文件源码文本对账，两处任一侧改动即红）。
@@ -46,7 +47,7 @@ public final class AudioSpeedContract {
     public static final String TRANSFER_OUTPUT_FORMAT = "m4a";
 
     // ========== 网关对客端点路径（IKH67T：网关路由 ≠ 火山上游路径，混用即 404 Invalid URL；
-    //            网关配置由独立拆票上线前置——IKH28Y / IKH8BK 先例，ADR-0113） ==========
+    //            网关配置由独立拆票上线前置——父单 IKHVYO「实现决策」2、9，IKH28Y / IKH8BK 先例） ==========
     // 常量值与 TS 契约 audio-speed.ts 的 AUDIO_SPEED_SUBMIT_PATH / AUDIO_SPEED_POLL_PATH_PREFIX
     // 同值（家族规律 /v1/mediakit/{与上游同名的工具段}；网关配置票定稿后回填）。
 

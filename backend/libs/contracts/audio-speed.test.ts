@@ -9,8 +9,8 @@
 // （volcengine/mediakit-cli 仓库，Cloud 模式契约）：speed 范围 [0.1, 4] 默认 1；
 // 终态 result.audio_url（24h 临时链接）/ result.duration（秒）——字段名已对官方文档逐字复核
 // 证实（非视频侧示例推测）；官方另有可选 format 参数（默认 m4a），本产品不传、产物格式
-// 跟随官方输出。产品口径 = ADR-0113 + 父单 IKHVYO 实现决策 1-3（分段中点映射、0.05 步进、
-// 贴原速省略）。后续票（IKHW59 backend / IKHW5C+IKHW5S web）照抄本契约
+// 跟随官方输出。产品口径 = 父单 IKHVYO「实现决策」2、3（分段中点映射、0.05 步进）：
+// https://e.gitee.com/hangzhou-xuanfu_1/issues/IKHVYO 。贴原速省略是 buildAudioSpeedInput 的防御性收口。后续票（IKHW59 backend / IKHW5C+IKHW5S web）照抄本契约
 // 与 audio-speed.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -108,7 +108,7 @@ describe("滑杆分段映射（父单 IKHVYO 实现决策 3 原型定稿函数�
     expect(speedToPos(0.1)).toBe(0);
     expect(speedToPos(4.0)).toBe(1000);
     expect(speedToPos(1.0)).toBe(500);
-    // ADR-0113 刻度档位定位值：0.5x / 2.0x 刻度落位（四舍五入取整位置）。
+    // 父单 IKHVYO「用户故事」13 /「实现决策」3 刻度档位定位值：0.5x / 2.0x 刻度落位（四舍五入取整位置）。
     expect(speedToPos(0.5)).toBe(222);
     expect(speedToPos(2.0)).toBe(667);
   });
