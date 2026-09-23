@@ -703,7 +703,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       const canRetry = data.genStatus === 'failed'
         && (!isMediaExtraction || data.mediaExtract != null)
         && (!isAudioTrimCard || data.audioTrim != null)
-        && !isAudioMixCard
+        && (!isAudioMixCard || data.jobId != null)
         && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>

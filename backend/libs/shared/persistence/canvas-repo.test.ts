@@ -3,6 +3,51 @@ import { describe, expect, it, vi } from "vitest";
 import { createCanvasRepo } from "./canvas-repo.js";
 
 describe("canvas optimistic save", () => {
+  it("首次保存规范混合结果卡记为 present，移除记 removed，撤销重加回 present", async () => {
+    let version = 3;
+    let cardState = "pending";
+    const tx = {
+      canvas: {
+        updateMany: vi.fn(async ({ where }: { where: { version: number } }) => {
+          if (where.version !== version) return { count: 0 };
+          version += 1;
+          return { count: 1 };
+        }),
+        findFirst: vi.fn(async () => ({ id: 1n, project_id: 55n, version,
+          viewport_json: null, nodes_json: [], edges_json: null })),
+      },
+      generation_output_slots: { updateMany: vi.fn() },
+      generation_jobs: {
+        updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { canvas_card_state: string } }) => {
+          if (where.project_id !== 55n || where.user_id !== 9n || where.type !== "audio_mix") return { count: 0 };
+          if (data.canvas_card_state === "present" && Array.isArray((where.id as { in?: bigint[] } | undefined)?.in)
+              && (where.id as { in: bigint[] }).in.includes(73n)) cardState = "present";
+          const excluded = (where.id as { notIn?: bigint[] } | undefined)?.notIn ?? [];
+          if (data.canvas_card_state === "removed" && cardState === "present" && !excluded.includes(73n)) cardState = "removed";
+          return { count: 1 };
+        }),
+      },
+    };
+    const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
+    const card = JSON.stringify([{ id: "audio-mix-73", type: "mediaNode", data: { jobId: "73" } }]);
+    await repo.saveIfVersion("55", 3, null, card, null, { ownerId: "9", items: [] });
+    expect(cardState).toBe("present");
+    await repo.saveIfVersion("55", 4, null, "[]", null, { ownerId: "9", items: [] });
+    expect(cardState).toBe("removed");
+    await repo.saveIfVersion("55", 5, null, card, null, { ownerId: "9", items: [] });
+    expect(cardState).toBe("present");
+  });
+
+  it("Canvas 版本冲突及非规范结果卡不改变混合卡状态", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const jobUpdate = vi.fn();
+    const tx = { canvas: { updateMany }, generation_jobs: { updateMany: jobUpdate } };
+    const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
+    const forged = JSON.stringify([{ id: "other-73", type: "mediaNode", data: { jobId: "73" } }]);
+    await expect(repo.saveIfVersion("55", 3, null, forged, null, { ownerId: "9", items: [] })).resolves.toBeNull();
+    expect(jobUpdate).not.toHaveBeenCalled();
+  });
+
   it("returns a conflict without overwriting newer canvas data", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn();

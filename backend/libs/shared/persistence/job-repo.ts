@@ -20,6 +20,7 @@ export interface JobListItem {
   input: unknown;
   created_at: string;
   output_assets: JobOutputAsset[];
+  canvas_card_state?: string;
   /** Node handler projects this internal field into a public error envelope. */
   stored_error?: Record<string, unknown> | null;
 }
@@ -141,6 +142,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         status: r.status,
         progress: r.progress,
         input: publicGenerationInput(r.input ?? null),
+        ...(r.type === "audio_mix" ? { canvas_card_state: r.canvas_card_state } : {}),
         created_at: r.gmt_create.toISOString(),
         output_assets: parseAssetIds(r.output_asset_ids)
           .map((id) => assetMap.get(id.toString()))

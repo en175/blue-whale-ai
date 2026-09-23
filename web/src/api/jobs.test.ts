@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
   createAudioMix,
+  retryAudioMix,
   createAudioTrim,
   createFrameInterpolation,
   createMediaExtraction,
@@ -14,6 +15,7 @@ import {
   isGenerationDomainError,
   readJobFailText,
 } from './jobs';
+import { audioMixJobsOptions } from './audioMixRecovery';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -67,6 +69,51 @@ describe('createAudioMix', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/audio-mixes');
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(payload);
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('retryAudioMix', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('同一结果卡重试时提交原 jobId 与稳定幂等键，不重发输入', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '73', status: 'queued', replayed: false } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(retryAudioMix('project/1', '73', 'retry-key-73', { silent: true }))
+      .resolves.toMatchObject({ job_id: '73', status: 'queued' });
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-mixes/73/retry');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
+    expect(init.body).toBeUndefined();
+  });
+});
+
+describe('audioMixJobsOptions', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('逐页读取同项目混合任务，能找回超过首 100 条后的未落盘任务', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, msg: 'ok', data: {
+        records: Array.from({ length: 100 }, (_, index) => ({ job_id: String(index + 1), type: 'audio_mix' })),
+        total: 101, size: 100, current: 1,
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, msg: 'ok', data: {
+        records: [{ job_id: '101', type: 'audio_mix', canvas_card_state: 'pending' }],
+        total: 101, size: 100, current: 2,
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const records = await audioMixJobsOptions('project/1').queryFn!({} as never);
+    expect(records).toHaveLength(101);
+    expect(records[100]).toMatchObject({ job_id: '101', canvas_card_state: 'pending' });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/jobs?projectId=project%2F1&type=audio_mix&size=100&page=1',
+      '/api/jobs?projectId=project%2F1&type=audio_mix&size=100&page=2',
+    ]);
   });
 });
 

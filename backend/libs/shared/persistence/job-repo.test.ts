@@ -3,6 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { createJobRepo } from "./job-repo.js";
 
 describe("createJobRepo.listByUser", () => {
+  it("只向音频混合列表投影卡片持久状态以区分未落盘与主动删除", async () => {
+    const prisma = {
+      generation_jobs: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([
+        { id: 73n, type: "audio_mix", status: "failed", canvas_card_state: "removed",
+          progress: 0, input: { source_node_id: "source", provider_credential: "secret" },
+          output_asset_ids: [], gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
+        { id: 72n, type: "audio_mix", status: "queued", canvas_card_state: "pending",
+          progress: 0, input: { source_node_id: "source" }, output_asset_ids: [],
+          gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
+      ]) },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+    const page = await createJobRepo(prisma).listByUser("9", { projectId: "55", type: "audio_mix", page: 1, size: 100 });
+    expect(page.records.map((job) => [job.job_id, job.canvas_card_state])).toEqual([
+      ["73", "removed"], ["72", "pending"],
+    ]);
+    expect(page.records[0]?.input).toEqual({ source_node_id: "source" });
+  });
+
   it("ids 精确过滤，按当前用户 + 去重后的 ID 查询", async () => {
     const count = vi.fn().mockResolvedValue(2);
     const findMany = vi.fn().mockResolvedValue([

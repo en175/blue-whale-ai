@@ -10,6 +10,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { frameInterpolationRecoveryOptions } from '@/api/frameInterpolationRecovery';
+import { audioMixJobsOptions } from '@/api/audioMixRecovery';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
@@ -94,6 +95,7 @@ import {
   buildAudioMixPlaceholderNode,
   findAudioMixPosition,
   isAudioMixNodeId,
+  planAudioMixRecovery,
   type AudioMixFormat,
   type AudioMixInputSelection,
 } from './audioMix';
@@ -331,6 +333,7 @@ import {
   createMediaExtraction,
   createAudioTrim,
   createAudioMix,
+  retryAudioMix,
   createVocalSplit,
   createVideoSceneSplit,
   createVideoMatting,
@@ -714,6 +717,12 @@ export default function CanvasPage() {
   const [audioMixFormat, setAudioMixFormat] = useState<AudioMixFormat>('mp3');
   const [audioMixSubmitting, setAudioMixSubmitting] = useState(false);
   const audioMixInFlightRef = useRef(false);
+  const audioMixRetryInFlightRef = useRef(new Set<string>());
+  const audioMixRetryKeysRef = useRef(new Map<string, string>());
+  /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
+  const audioMixUnpersistedCardsRef = useRef(new Set<string>());
+  const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
+  const audioMixDeleteWaitingRef = useRef(new Set<string>());
 
   /** 人声背景分离编辑态（IKHA2W，会话口径同音视频分离）：处于人声背景分离编辑的源视频卡
    *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
@@ -1953,6 +1962,10 @@ export default function CanvasPage() {
     mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
       Promise.all(vars.assetIds.map((assetId) => linkAssetToProject(vars.projectId, assetId, { silent: true }))),
   });
+  const retryAudioMixMutation = useMutation({
+    mutationFn: (vars: { projectId: string; jobId: string; key: string }) =>
+      retryAudioMix(vars.projectId, vars.jobId, vars.key, { silent: true }),
+  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -2117,6 +2130,7 @@ export default function CanvasPage() {
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
+  const audioMixJobsQuery = useQuery({ ...audioMixJobsOptions(currentId), enabled: Boolean(doc && currentId) });
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
 
@@ -2634,6 +2648,55 @@ export default function CanvasPage() {
       .forEach((n) => recoverFrameInterpolationRef.current(n.id, n.data.jobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
+
+  /** 已受理但关页前未保存的任务，按服务端 pending 标记补卡；已主动移除的不复活。 */
+  useEffect(() => {
+    if (!doc || !audioMixJobsQuery.data || !currentId) return;
+    const projectId = currentId;
+    const timer = window.setTimeout(() => {
+      if (activeProjectRef.current !== projectId || hydratedDocRef.current !== doc) return;
+      const currentNodes = mediaNodesRef.current;
+      const currentEdges = edgesRef.current;
+      const recovered = planAudioMixRecovery(
+        currentNodes, currentEdges, audioMixJobsQuery.data!,
+        [...currentNodes, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current],
+      );
+      if (recovered.nodes !== currentNodes) {
+        const existingIds = new Set(currentNodes.map((node) => node.id));
+        const freshMixIds: string[] = [];
+        recovered.nodes.forEach((node) => {
+          if (!existingIds.has(node.id) && isAudioMixNodeId(node.id)) {
+            audioMixUnpersistedCardsRef.current.add(node.id);
+            freshMixIds.push(node.id);
+          }
+        });
+        const next = recovered.nodes.map((node) => existingIds.has(node.id) ? node : attachCallbacks(node));
+        mediaNodesRef.current = next;
+        setMediaNodes(next);
+        if (freshMixIds.length > 0) {
+          // 来源线先写入 ref，再开始首个含卡保存；删除操作只等待这一笔的结果。
+          if (recovered.edges !== currentEdges) edgesRef.current = recovered.edges;
+          const firstSave = flushCanvasSave(projectId);
+          freshMixIds.forEach((id) => audioMixFirstSaveRef.current.set(id, firstSave));
+          void firstSave.then((saved) => {
+            if (saved) freshMixIds.forEach((id) => audioMixUnpersistedCardsRef.current.delete(id));
+          }).catch(() => {}).finally(() => {
+            freshMixIds.forEach((id) => {
+              if (audioMixFirstSaveRef.current.get(id) === firstSave) audioMixFirstSaveRef.current.delete(id);
+            });
+          });
+        }
+      }
+      if (recovered.edges !== currentEdges) {
+        edgesRef.current = recovered.edges;
+        setEdges(recovered.edges);
+      }
+      recovered.pollJobIds.forEach((jobId) => pollJobRef.current(audioMixNodeId(jobId), jobId));
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // 任务列表或画布快照变更时重算一次；节点/边变更由规划函数保证幂等，不触发查询循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, currentId, audioMixJobsQuery.data]);
 
   /** 连线端点级联删除（IKDLQF）：仅当节点真实离开画布时清理其连线，覆盖键盘删除/工具条删除/回滚等全部删除路径。
    *  不按「当前存在的节点」反查：挂载首批 effect 的节点列表尚在水合前，会把刚恢复的连线误清。 */
@@ -6490,6 +6553,10 @@ export default function CanvasPage() {
     if (pendingDeleteJobNodesRef.current.has(nodeId)) {
       pendingDeleteJobNodesRef.current.delete(nodeId);
       locallyRemovedGenerationNodesRef.current.add(nodeId);
+      if (isAudioMixNodeId(nodeId)) {
+        removeAudioMixCardNow(nodeId);
+        return;
+      }
       removeCancelledGenerationNode(
         nodeId,
         jobTimersRef.current,
@@ -7243,6 +7310,20 @@ export default function CanvasPage() {
     });
   };
 
+  /** 混合占位卡确认移除时同步收走来源线，并马上保存 removed 状态。 */
+  const removeAudioMixCardNow = (nodeId: string) => {
+    const nextNodes = mediaNodesRef.current.filter((node) => node.id !== nodeId);
+    const nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+    mediaNodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    setMediaNodes(nextNodes);
+    setEdges(nextEdges);
+    audioMixRetryKeysRef.current.delete(nodeId);
+    stopJobPolling(nodeId, jobTimersRef.current);
+    activeJobByNodeRef.current.delete(nodeId);
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+  };
+
   /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——
    *  cancelled/failed 终态确认后立即移除；仍 processing（软取消已登记、worker 未停）时不
    *  抢先移除，登记删除意图由轮询终态驱动（succeeded 竞态保留作品并提示「任务已完成」）。
@@ -7291,6 +7372,11 @@ export default function CanvasPage() {
     if (detail?.status === 'cancelled' || detail?.status === 'failed') {
       // 任务已终态：确认移除，登记防迟到响应复活
       locallyRemovedGenerationNodesRef.current.add(nodeId);
+      if (isAudioMixNodeId(nodeId)) {
+        removeAudioMixCardNow(nodeId);
+        finish();
+        return;
+      }
       removeCancelledGenerationNode(
         nodeId,
         jobTimersRef.current,
@@ -7308,6 +7394,22 @@ export default function CanvasPage() {
   /** 画布删除统一入口（IKD0JT 撤销接入）：右键/键盘/节点回调删除收口——
    *  撤销栈登记 + 悬空边清理 + blob 释放；生成中媒体卡片转取消任务流程（不可回退，PRD §7.2 R2）。 */
   const removeCanvasNodes = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const waiting = ids.filter((id) => isAudioMixNodeId(id) && audioMixUnpersistedCardsRef.current.has(id));
+    waiting.forEach((id) => {
+      if (!currentId || audioMixDeleteWaitingRef.current.has(id)) return;
+      const projectId = currentId;
+      audioMixDeleteWaitingRef.current.add(id);
+      const firstSave = audioMixFirstSaveRef.current.get(id) ?? flushCanvasSave(projectId);
+      void firstSave.then((saved) => {
+        if (!saved || activeProjectRef.current !== projectId) return;
+        audioMixUnpersistedCardsRef.current.delete(id);
+        removeCanvasNodes([id]);
+      }).catch(() => {
+        showToast('error', '画布保存失败，结果卡已保留，请重试删除');
+      }).finally(() => audioMixDeleteWaitingRef.current.delete(id));
+    });
+    ids = ids.filter((id) => !waiting.includes(id));
     if (ids.length === 0) return;
     // 生成中媒体卡片：先取消任务，终态驱动移除（不进撤销栈）
     const generating = ids.filter((id) => mediaNodesRef.current.some((n) => n.id === id) && isGeneratingNode(id));
@@ -7364,6 +7466,11 @@ export default function CanvasPage() {
     // 立即清理悬空边（不等定时器）
     if (removedEdges.length > 0) {
       setEdges(remainingEdges);
+    }
+    if (Array.from(idSet).some(isAudioMixNodeId)) {
+      mediaNodesRef.current = filter(mediaNodesRef.current);
+      edgesRef.current = remainingEdges;
+      if (currentId) void flushCanvasSave(currentId).catch(() => {});
     }
   };
 
@@ -7485,12 +7592,6 @@ export default function CanvasPage() {
   /** 媒体节点删除统一入口（IKDMQW）：右键菜单/键盘删除/节点回调全部收口——
    *  生成中且带任务的卡片先取消再移除；其余直接移除。 */
   const handleRemoveMediaNode = (nodeId: string) => {
-    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const data = node?.data as Record<string, unknown> | undefined;
-    if (data?.genStatus === 'generating' && data.jobId != null) {
-      void deleteGeneratingNode(nodeId);
-      return;
-    }
     removeCanvasNodes([nodeId]);
   };
 
@@ -7502,6 +7603,31 @@ export default function CanvasPage() {
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
+    if (isAudioMixNodeId(nodeId)) {
+      if (!currentId || !jobId || node?.data.genStatus !== 'failed'
+        || audioMixRetryInFlightRef.current.has(nodeId)) return;
+      const projectId = currentId;
+      const key = audioMixRetryKeysRef.current.get(nodeId) ?? newIdempotencyKey();
+      audioMixRetryKeysRef.current.set(nodeId, key);
+      audioMixRetryInFlightRef.current.add(nodeId);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: undefined });
+      void retryAudioMixMutation.mutateAsync({ projectId, jobId: String(jobId), key })
+        .then((retried) => {
+          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
+          if (String(retried.job_id) !== String(jobId)) throw new Error('重试任务身份不一致');
+          audioMixRetryKeysRef.current.delete(nodeId);
+          pollJob(nodeId, jobId);
+        })
+        .catch((error: unknown) => {
+          if (activeProjectRef.current !== projectId || !mediaNodesRef.current.some((item) => item.id === nodeId)) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed', errorText: isApiError(error) ? error.message : '音频混合重试失败，请重试',
+          });
+        })
+        .finally(() => audioMixRetryInFlightRef.current.delete(nodeId));
+      return;
+    }
     const enhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageEnhance as
       | ImageEnhanceIdentity
       | undefined;
@@ -9462,6 +9588,7 @@ export default function CanvasPage() {
         ));
         const current = mediaNodesRef.current;
         const next = current.some((node) => node.id === nodeId) ? current : [...current, placeholder];
+        audioMixUnpersistedCardsRef.current.add(nodeId);
         mediaNodesRef.current = next;
         setMediaNodes(next);
         const liveNodeIds = new Set(current.map((node) => node.id));
@@ -9470,10 +9597,15 @@ export default function CanvasPage() {
             addCanvasEdge(input.node_id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
           }
         }
+        const firstSave = flushCanvasSave(projectId);
+        audioMixFirstSaveRef.current.set(nodeId, firstSave);
         try {
-          if (!(await flushCanvasSave(projectId))) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          if (!(await firstSave)) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          else audioMixUnpersistedCardsRef.current.delete(nodeId);
         } catch {
           showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+        } finally {
+          if (audioMixFirstSaveRef.current.get(nodeId) === firstSave) audioMixFirstSaveRef.current.delete(nodeId);
         }
         pollJob(nodeId, created.job_id);
       } catch (error) {

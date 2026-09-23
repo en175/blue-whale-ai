@@ -281,6 +281,7 @@ export interface JobRecord {
   created_at: string;
   output_assets: JobAsset[];
   error?: JobError | null;
+  canvas_card_state?: 'pending' | 'present' | 'removed';
 }
 
 /** GET /api/jobs 返回 */
@@ -373,6 +374,20 @@ export function createAudioMix(
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
     { method: 'POST', body: JSON.stringify(payload), ...(init?.silent === true ? { silent: true } : {}) },
+  );
+}
+
+/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。 */
+export function retryAudioMix(
+  projectId: string,
+  jobId: string | number,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
+  return apiRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
+    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...(init?.silent === true ? { silent: true } : {}) },
   );
 }
 
@@ -702,6 +717,7 @@ export async function fetchJobStatus(jobId: number | string): Promise<JobDetail>
 /** GET /api/jobs 查询参数 */
 export interface FetchJobsParams {
   projectId?: string;
+  type?: JobType;
   status?: JobStatus;
   size?: number;
   /** 批量查询指定任务ID */
@@ -713,6 +729,7 @@ export interface FetchJobsParams {
 export function fetchJobs(params: FetchJobsParams = {}, init?: { silent?: boolean }) {
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('projectId', params.projectId);
+  if (params.type) qs.set('type', params.type);
   if (params.status) qs.set('status', params.status);
   if (params.size !== undefined) qs.set('size', String(params.size));
   if (params.ids?.length) qs.set('ids', params.ids.join(','));
