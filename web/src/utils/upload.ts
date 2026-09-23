@@ -139,6 +139,7 @@ export async function uploadAssetFile(
     type,
     mime: file.type,
     size: file.size,
+    name: file.name,
     storage_key: presign.storage_key,
     project_id: opts?.projectId,
     md5,

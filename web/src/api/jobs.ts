@@ -378,11 +378,12 @@ export function createAudioTrim(
 export function createAudioMix(
   projectId: string,
   payload: AudioMixCreate,
-  init?: { silent?: boolean },
+  init: { idempotencyKey: string; silent?: boolean },
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
-    { method: 'POST', body: JSON.stringify(payload), ...silentInit(init) },
+    { method: 'POST', headers: { 'Idempotency-Key': init.idempotencyKey }, body: JSON.stringify(payload),
+      ...silentInit(init) },
   );
 }
 

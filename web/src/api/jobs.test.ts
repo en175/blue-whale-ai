@@ -70,9 +70,11 @@ describe('createAudioMix', () => {
       output_format: 'mp3' as const,
     };
 
-    await expect(createAudioMix('project/1', payload, { silent: true })).rejects.toThrow('混合任务创建失败');
+    await expect(createAudioMix('project/1', payload, { silent: true, idempotencyKey: 'mix-create-1' }))
+      .rejects.toThrow('混合任务创建失败');
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/audio-mixes');
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(payload);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Idempotency-Key')).toBe('mix-create-1');
     expect(toast.error).not.toHaveBeenCalled();
   });
 });

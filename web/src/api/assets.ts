@@ -232,6 +232,7 @@ export interface UploadCompleteParams {
   type: AssetType;
   mime: string;
   size: number;
+  name?: string;
   /** presign 返回的 storage_key */
   storage_key: string;
   /** 关联项目 ID，资产页上传不传 */
