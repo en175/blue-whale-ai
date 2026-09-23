@@ -248,7 +248,7 @@ describe('IKH28X 音视频分离发送落盘', () => {
     expect(audio.position).toEqual({ x: 958, y: 0 });
     expect((audio.data as Record<string, unknown>).fileName).toBe('素材视频(audio).m4a');
     // 建任务带所选格式（默认 m4a）
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' });
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' }, { silent: true });
   });
 
   it('flush 在途时 800ms 防抖自动保存跳过，不并发第二个 PUT', async () => {

@@ -376,7 +376,7 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     // 建任务带三键（缺省档显式携带：通用/aac）
     expect(apiMocks.createVocalSplit).toHaveBeenCalledWith('p1', {
       source_asset_id: '5', scene: 'audio', output_format: 'aac',
-    });
+    }, { silent: true });
     // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
@@ -424,7 +424,7 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     expect(apiMocks.createVocalSplit).toHaveBeenCalledTimes(1);
     expect(apiMocks.createVocalSplit).toHaveBeenCalledWith('p1', {
       source_asset_id: '5', scene: 'drama', output_format: 'flac',
-    });
+    }, { silent: true });
     expect(nodeById('vocal-split-j702')!.data.vocalSplit).toEqual({
       sourceAssetId: '5',
       lastInput: { source_asset_id: '5', scene: 'drama', output_format: 'flac' },
@@ -459,10 +459,10 @@ describe('IKHA2W 发送闭环（建任务→占位卡→来源边→落盘）', 
     await sendVocal();
     expect(apiMocks.createVocalSplit).toHaveBeenNthCalledWith(1, 'p1', {
       source_asset_id: '5', scene: 'audio', output_format: 'mp3',
-    });
+    }, { silent: true });
     expect(apiMocks.createVocalSplit).toHaveBeenNthCalledWith(2, 'p1', {
       source_asset_id: '5', scene: 'music', output_format: 'wav',
-    });
+    }, { silent: true });
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
     expect(nodeById('vocal-split-j710')).toBeTruthy();
     expect(nodeById('vocal-split-j711')!.data.vocalSplit).toEqual({
@@ -503,7 +503,7 @@ describe('IKHA2W 轮询终态与失败重试', () => {
     });
     expect(apiMocks.createVocalSplit).toHaveBeenLastCalledWith('p1', {
       source_asset_id: '5', scene: 'narrate', output_format: 'aac',
-    });
+    }, { silent: true });
     const retried = nodeById('vocal-split-j720')!;
     expect(retried.data.jobId).toBe('j721');
     expect(retried.data.genStatus).toBe('generating');

@@ -193,11 +193,17 @@ export interface PresignData {
   expires_in: number;
 }
 
-/** 上传第一步：获取对象存储预签名 URL（mime 必须以 {type}/ 开头） */
-export function fetchUploadPresign(params: { type: AssetType; mime: string; size: number }) {
+/** 上传第一步：获取对象存储预签名 URL（mime 必须以 {type}/ 开头）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：工具会话内的上传由持有发送
+ *  身份的调用方决定是否提示，迟到失败不在 http 层抢弹；缺省口径（toast）不变。 */
+export function fetchUploadPresign(
+  params: { type: AssetType; mime: string; size: number },
+  init?: { silent?: boolean },
+) {
   return apiRequest<PresignData>('/api/agent/assets/uploads/presign', {
     method: 'POST',
     body: JSON.stringify(params),
+    ...(init?.silent === true ? { silent: true } : {}),
   });
 }
 
@@ -256,11 +262,13 @@ export interface UploadCompleteData {
   size: number;
 }
 
-/** 上传第三步：确认上传完成，后端校验并创建资产记录 */
-export function completeUpload(params: UploadCompleteParams) {
+/** 上传第三步：确认上传完成，后端校验并创建资产记录。
+ *  init.silent 透传同 fetchUploadPresign（IKI8L4 错误提示归属）。 */
+export function completeUpload(params: UploadCompleteParams, init?: { silent?: boolean }) {
   return apiRequest<UploadCompleteData>('/api/agent/assets/uploads/complete', {
     method: 'POST',
     body: JSON.stringify(params),
+    ...(init?.silent === true ? { silent: true } : {}),
   });
 }
 

@@ -84,10 +84,13 @@ export function fileToAssetType(file: File): AssetType | null {
  * TOS 三步上传；未命中走三步，并在 complete 时带上 md5 落库，供后续同内容文件查重。
  *
  * 体积超限在发请求之前就挡掉（IKAL46）：presign 那一侧也会拒，但那要等一次网络往返，而且回来
- * 的是通用错误码，用户看不出是文件太大。本地先判一次，报得准也报得快。 */
+ * 的是通用错误码，用户看不出是文件太大。本地先判一次，报得准也报得快。
+ * opts.silent（IKI8L4 错误提示归属）：工具会话内的上传（擦除遮罩/裁切成品）由持有发送
+ * 身份的页面 catch 决定是否提示——silent 透传 presign/complete 两条 HTTP 传输
+ * （dedup 已 silent、PUT 直传不经 http 层），迟到失败不在 http 层抢弹；缺省口径不变。 */
 export async function uploadAssetFile(
   file: File,
-  opts?: { projectId?: string; assetSource?: 'mask_erase' },
+  opts?: { projectId?: string; assetSource?: 'mask_erase'; silent?: boolean },
 ): Promise<UploadCompleteData> {
   const type = fileToAssetType(file);
   if (!type) throw new FileRejectedError(`${file.name} 的格式不支持，请用 JPG、PNG、WebP、MP4 或常见音频格式。`);
@@ -120,7 +123,8 @@ export async function uploadAssetFile(
     }
   }
 
-  const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
+  const presignInit = opts?.silent === true ? { silent: true } as const : undefined;
+  const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size }, presignInit);
   console.log('[upload] presign 返回:', {
     storage_key: presign.storage_key,
     upload_url: presign.upload_url?.substring(0, 100) + '...',
@@ -139,7 +143,7 @@ export async function uploadAssetFile(
     // IKGOTB：遮罩中间素材带来源标记（资产列表不可见）；普通上传不传（后端缺省 uploaded）
     ...(opts?.assetSource ? { source: opts.assetSource } : {}),
     ...meta,
-  });
+  }, presignInit);
   console.log('[upload] complete 返回:', { url: result.url, asset_id: result.asset_id });
   return result;
 }

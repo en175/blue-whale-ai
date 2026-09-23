@@ -7237,7 +7237,7 @@ export default function CanvasPage() {
     }
     const targetNodeId = input.target_node_id;
     try {
-      const created = await createImageErase(currentId, input);
+      const created = await createImageErase(currentId, input, { silent: true });
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
       // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
       const sessionCurrent = toolSessionEpochRef.current.isCurrent('erase', sessionEpoch);
@@ -7295,7 +7295,7 @@ export default function CanvasPage() {
     const targetNodeId = input.target_node_id;
     const sourceData = (node.data ?? {}) as Record<string, unknown>;
     try {
-      const created = await createVideoSubtitleErase(currentId, input);
+      const created = await createVideoSubtitleErase(currentId, input, { silent: true });
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
       // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
       const sessionCurrent = toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch);
@@ -7388,7 +7388,7 @@ export default function CanvasPage() {
     }
     const targetNodeId = input.target_node_id;
     try {
-      const created = await createImageCutout(currentId, input);
+      const created = await createImageCutout(currentId, input, { silent: true });
       // 发送即退会话（先退再建卡：建卡的程序化选中不触发会话的「点其他卡退出」误判，口径同擦除）；
       // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
       const sessionCurrent = toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch);
@@ -7479,6 +7479,7 @@ export default function CanvasPage() {
       const uploaded = await uploadAssetFile(file, {
         projectId: currentId ?? undefined,
         assetSource: 'mask_erase',
+        silent: true,
       });
       const input: ImageEraseInput = {
         source_asset_id: sourceAssetId,
@@ -7949,7 +7950,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createImageErase(currentId, eraseIdentity.lastInput)
+      createImageErase(currentId, eraseIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -7980,7 +7981,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput)
+      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8011,7 +8012,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createImageCutout(currentId, cutoutIdentity.lastInput)
+      createImageCutout(currentId, cutoutIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8051,7 +8052,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVocalSplit(currentId, vocalSplitIdentity.lastInput)
+      createVocalSplit(currentId, vocalSplitIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8083,7 +8084,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() })
+      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() }, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8150,7 +8151,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createMediaExtraction(currentId, mediaExtractIdentity.lastInput)
+      createMediaExtraction(currentId, mediaExtractIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8171,6 +8172,8 @@ export default function CanvasPage() {
     if (audioTrimIdentity?.lastInput) {
       // 截取卡分流（IKHB7A，镜像分离）：契约无 retry 端点，重试 = 冻结 input（源素材+
       // 起止+格式，贴边省略形态原样保留）重发创建接口，不从零再选。
+      // 重试创建同走 silent 传输（IKI8L4）：失败收敛到本卡失败态（errorText 可读可再重试），
+      // http 层不叠弹——迟到失败同样不打扰用户后来开启的编辑会话（口径同调速重试）。
       if (!currentId) {
         showToast('warn', '未选中项目，无法截取');
         return;
@@ -8180,7 +8183,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioTrim(currentId, audioTrimIdentity.lastInput)
+      createAudioTrim(currentId, audioTrimIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -9456,7 +9459,7 @@ export default function CanvasPage() {
           }
           return;
         }
-        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined });
+        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined, silent: true });
         // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）；
         // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
         if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) exitCropMode();
@@ -9605,7 +9608,7 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createMediaExtraction(currentId, payload);
+      const created = await createMediaExtraction(currentId, payload, { silent: true });
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
       // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
       if (toolSessionEpochRef.current.isCurrent('audioVideoSplit', sessionEpoch)) exitAudioVideoSplitEditing();
@@ -9671,9 +9674,11 @@ export default function CanvasPage() {
    *  「源名(截取).{格式}」；带 audioTrim 身份——lastInput 供失败重试原样重发）、拉来源边
    *  （origin=audio-trim，参考推导跳过，源音频不占参考位防参考污染）、启动轮询
    *  （applyJobTerminal 的截取分支回填成品/失败，时长以火山返回为权威值）、立刻落盘。
-   *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。
-   *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
-   *  但不退用户当前会话、不向它弹旧失败提示。 */
+ *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。
+ *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
+ *  但不退用户当前会话、不向它弹旧失败提示。
+ *  错误提示单源（IKI8L4）：创建走 silent 传输（http 层不 toast），失败由本 catch 按
+ *  纪元归属提示恰一次——迟到失败全链路静默，当前会话失败恰一条且可重试。 */
   const startAudioTrimJob = async (
     sourceNodeId: string,
     payload: AudioTrimInput,
@@ -9689,7 +9694,7 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createAudioTrim(currentId, payload);
+      const created = await createAudioTrim(currentId, payload, { silent: true });
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
       // 纪元失效（迟到响应）则不退用户当前会话，只收尾建卡
       if (toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) exitAudioTrimEditing();
@@ -9813,7 +9818,7 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createVocalSplit(currentId, payload);
+      const created = await createVocalSplit(currentId, payload, { silent: true });
       // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
       // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
       if (toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) exitVocalSplitEditing();
@@ -9858,10 +9863,12 @@ export default function CanvasPage() {
    *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
    *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
    *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
-   *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
-   *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
-   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
-   *  无积分预估、不走余额拦截门。 */
+ *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
+ *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
+ *  错误提示单源（IKI8L4）：创建走 silent 传输（http 层不 toast），失败由本 catch 按
+ *  「退出后捕获纪元」提示——无后来会话不吞本次有效失败，有后来会话旧失败不打扰。
+ *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
+ *  无积分预估、不走余额拦截门。 */
   const startSceneSplitJob = async (
     sourceNodeId: string,
     payload: { source_asset_id: string; target_node_id: string; granularity: SceneSplitGranularity },
@@ -9900,7 +9907,7 @@ export default function CanvasPage() {
       const created = await createVideoSceneSplit(currentId, {
         ...payload,
         client_token: newIdempotencyKey(),
-      });
+      }, { silent: true });
       // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(placeholderId, activeAtCreate);

@@ -363,7 +363,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await enterSplit();
     await sendSplit();
     // 建任务带所选格式（默认 m4a）
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' });
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, { silent: true });
     // 先退编辑态再建卡：浮条卸载、splitEditing 移除、占位卡已上画布
     expect(toolbar()).toBeNull();
     expect(v1Data().splitEditing).toBeUndefined();
@@ -397,7 +397,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await selectFormat('wav');
     await sendSplit();
     expect(apiMocks.createMediaExtraction).toHaveBeenCalledTimes(1);
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'wav' });
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: '5', output_format: 'wav' }, { silent: true });
     expect(nodeById('media-extract-j1')!.data.fileName).toBe('素材视频(audio).wav');
   });
 
@@ -460,7 +460,7 @@ describe('IKH28X 发送闭环（建任务→占位卡→终态→重试）', () 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(apiMocks.createMediaExtraction).toHaveBeenLastCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' });
+    expect(apiMocks.createMediaExtraction).toHaveBeenLastCalledWith('p1', { source_asset_id: '5', output_format: 'm4a' }, { silent: true });
     const retried = nodeById('media-extract-j1')!;
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBeUndefined();
