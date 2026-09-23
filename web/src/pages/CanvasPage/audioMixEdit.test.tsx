@@ -16,7 +16,7 @@ vi.mock('./components/AgentPanel', () => ({
 }));
 
 /** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
-type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void };
+type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void; onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void };
 const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
 vi.mock('./components/Canvas', () => ({
   default: (props: FlowProps) => {
@@ -197,7 +197,7 @@ async function renderPage() {
     root.render(
       createElement(
         QueryClientProvider,
-        { client: new QueryClient() },
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
         createElement(MemoryRouter, null, createElement(NavigationProbe), createElement(CanvasPage)),
       ),
     );
@@ -244,6 +244,8 @@ beforeEach(() => {
   sessionStorage.clear();
   seedDoc();
   apiMocks.createAudioMix.mockReset();
+  apiMocks.saveCanvasDoc.mockReset();
+  apiMocks.saveCanvasDoc.mockResolvedValue({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
   apiMocks.fetchProjects.mockResolvedValue([{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
 });
 
@@ -343,6 +345,32 @@ describe('IKI68W 画布双音频混合', () => {
     await click('switch-p2');
     expect(bodyBtn('switch-p2').textContent).toBe('p1');
     await act(async () => { resolveSave({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }); });
+  });
+
+  it('切换保存先开始、混合发送后开始时仍保留原项目并落盘结果卡', async () => {
+    let resolveSwitchSave!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
+    let resolveCreate!: (value: { job_id: string; status: string }) => void;
+    apiMocks.createAudioMix.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await act(async () => { flowProps.current.onViewportChange?.({ x: 1, y: 0, zoom: 1 }); });
+    apiMocks.saveCanvasDoc.mockClear();
+    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((resolve) => { resolveSwitchSave = resolve; }));
+    await click('switch-p2');
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1));
+    await click('audio-mix-send');
+    expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveSwitchSave({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }); });
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenNthCalledWith(1, 'p1', expect.anything(), expect.anything());
+    expect(apiMocks.saveCanvasDoc).toHaveBeenNthCalledWith(2, 'p1', expect.anything(), expect.anything());
   });
 
   it('请求期间地址栏跳到另一项目也不把结果卡写进另一画布', async () => {

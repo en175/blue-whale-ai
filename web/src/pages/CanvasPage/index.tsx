@@ -5176,7 +5176,12 @@ export default function CanvasPage() {
     const projectId = currentId;
     applyingRef.current = true;
     try {
-      return await flushCanvasSave(projectId);
+      const saved = await flushCanvasSave(projectId);
+      if (audioMixInFlightRef.current) {
+        showToast('warn', '正在保存并提交，请稍候');
+        return false;
+      }
+      return saved;
     } catch (e) {
       showToast('error', '保存失败，请重试');
       console.warn('项目切换前画布落盘失败:', e);
