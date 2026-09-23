@@ -333,7 +333,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 原生控件只给「当前选中」的视频卡。选择工具下所有卡都开 controls 时，
    *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
   const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
-  const videoControlsArmed = videoInteractive;
+  const [videoControlsArmed, setVideoControlsArmed] = useState(false);
+  useEffect(() => {
+    if (!videoInteractive) {
+      setVideoControlsArmed(false);
+      videoRef.current?.pause();
+      return;
+    }
+    const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
+    return () => window.clearTimeout(timer);
+  }, [videoInteractive]);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {

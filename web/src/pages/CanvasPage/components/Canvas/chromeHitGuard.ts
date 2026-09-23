@@ -1,5 +1,8 @@
-/** 会挡住画布选中的上层控件：左侧栏 / 左下角 / 缩放条 / 小地图。不含节点跟随操作栏。 */
-export const CANVAS_BLOCK_CHROME_SELECTOR = '[data-canvas-chrome="block"], .react-flow__minimap';
+/** 画布上层控件（工具栏 / 小地图 / 缩放条 / 节点跟随条）命中标记 */
+export const CANVAS_CHROME_SELECTOR = '[data-canvas-chrome], .react-flow__minimap';
+
+const CHROME_INTERACTIVE = 'button, a, [role="button"], input';
+const registeredChrome = new Set<Element>();
 
 function pointInRect(rect: DOMRect, x: number, y: number): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
@@ -10,9 +13,25 @@ function isFullViewportCover(el: Element): boolean {
   return rect.width >= window.innerWidth - 2 && rect.height >= window.innerHeight - 2;
 }
 
-/** 坐标是否落在会挡住选中的上层控件上 */
+export function registerCanvasChrome(el: Element | null): () => void {
+  if (!el) return () => {};
+  registeredChrome.add(el);
+  return () => {
+    registeredChrome.delete(el);
+  };
+}
+
+function collectChromeRoots(): Element[] {
+  const roots = new Set<Element>(registeredChrome);
+  for (const node of document.querySelectorAll(CANVAS_CHROME_SELECTOR)) {
+    roots.add(node);
+  }
+  return [...roots];
+}
+
+/** 只按控件矩形判断 */
 export function canvasChromeAtPoint(clientX: number, clientY: number): Element | null {
-  for (const root of document.querySelectorAll(CANVAS_BLOCK_CHROME_SELECTOR)) {
+  for (const root of collectChromeRoots()) {
     if (isFullViewportCover(root)) continue;
     const style = getComputedStyle(root);
     if (style.display === 'none' || style.visibility === 'hidden') continue;
@@ -29,47 +48,90 @@ export function isStolenCanvasChromeHit(event: Event): boolean {
   if (!('clientX' in event) || !('clientY' in event)) return false;
   const target = event.target;
   if (!(target instanceof Element)) return false;
-  if (target.closest(CANVAS_BLOCK_CHROME_SELECTOR)) return false;
+  if (target.closest(CANVAS_CHROME_SELECTOR)) return false;
   const { clientX, clientY } = event as PointerEvent;
   return canvasChromeAtPoint(clientX, clientY) != null;
 }
 
-let lockedIds: Set<string> | null = null;
+let selectionLockUntil = 0;
+let selectionLockIds: Set<string> | null = null;
 let idleSelectedIds = new Set<string>();
-let pointerOverBlockChrome = false;
 
+/** 指针不在工具栏上时记住选中，避免穿透先选中再上锁把脏快照锁进去 */
 export function rememberIdleSelection(ids: Iterable<string>): void {
-  if (lockedIds) return;
+  if (selectionLockIds && performance.now() < selectionLockUntil) return;
   idleSelectedIds = new Set(ids);
 }
 
 export function lockChromeSelection(ids?: Iterable<string>): void {
-  lockedIds = new Set(ids ?? idleSelectedIds);
-}
-
-export function unlockChromeSelection(): void {
-  lockedIds = null;
+  selectionLockIds = new Set(ids ?? idleSelectedIds);
+  selectionLockUntil = performance.now() + 600;
 }
 
 export function chromeSelectionLockIds(): Set<string> | null {
-  return lockedIds;
+  if (!selectionLockIds || performance.now() >= selectionLockUntil) return null;
+  return selectionLockIds;
 }
+
+export function releaseChromeSelectionLock(): void {
+  if (performance.now() < selectionLockUntil) return;
+  selectionLockIds = null;
+}
+
+let pointerOverChrome = false;
 
 export function trackChromePointer(clientX: number, clientY: number): boolean {
-  pointerOverBlockChrome = canvasChromeAtPoint(clientX, clientY) != null;
-  return pointerOverBlockChrome;
+  pointerOverChrome = canvasChromeAtPoint(clientX, clientY) != null;
+  return pointerOverChrome;
 }
 
-/** 指针在左侧栏/小地图等挡选控件上，或本轮按下尚未抬起 */
+/** 指针在工具栏上，或本轮工具栏手势尚未结束：不要应用选中、不要挂操作栏 */
 export function shouldSuppressCanvasSelection(): boolean {
-  return pointerOverBlockChrome || lockedIds != null;
+  return pointerOverChrome || chromeSelectionLockIds() != null;
 }
 
-/** 拦截打到节点上、坐标却在挡选控件里的事件。不补发 click，以免工具栏连点/丢手势。 */
+let lastChromeClickAt = 0;
+let lastChromeClickEl: Element | null = null;
+
+function chromeInteractiveAt(clientX: number, clientY: number): HTMLElement | null {
+  const chrome = canvasChromeAtPoint(clientX, clientY);
+  if (!chrome) return null;
+  for (const node of chrome.querySelectorAll(CHROME_INTERACTIVE)) {
+    if (!(node instanceof HTMLElement) || isFullViewportCover(node)) continue;
+    if (pointInRect(node.getBoundingClientRect(), clientX, clientY)) return node;
+  }
+  return null;
+}
+
+function rememberChromeClick(el: Element): void {
+  lastChromeClickEl = el;
+  lastChromeClickAt = performance.now();
+}
+
+function alreadyClicked(el: Element): boolean {
+  return lastChromeClickEl === el && performance.now() - lastChromeClickAt < 400;
+}
+
 export function swallowStolenCanvasChromeHit(event: Event): boolean {
+  const target = event.target;
+  if (target instanceof Element && target.closest(CANVAS_CHROME_SELECTOR)) {
+    if (event.type === 'click') {
+      const interactive = target.closest(CHROME_INTERACTIVE);
+      if (interactive instanceof HTMLElement) rememberChromeClick(interactive);
+    }
+    return false;
+  }
   if (!isStolenCanvasChromeHit(event)) return false;
   event.preventDefault();
   event.stopPropagation();
   if ('stopImmediatePropagation' in event) event.stopImmediatePropagation();
+  if (target instanceof HTMLVideoElement) target.pause();
+  else if (target instanceof Element) target.closest('video')?.pause();
+  if (event.type !== 'click' || !('clientX' in event)) return true;
+  const { clientX, clientY } = event as PointerEvent;
+  const interactive = chromeInteractiveAt(clientX, clientY);
+  if (!interactive || alreadyClicked(interactive)) return true;
+  rememberChromeClick(interactive);
+  interactive.click();
   return true;
 }

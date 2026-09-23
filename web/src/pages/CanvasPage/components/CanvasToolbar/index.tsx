@@ -27,7 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import styles from './index.module.css';
-import { lockChromeSelection } from '../Canvas/chromeHitGuard';
+import { lockChromeSelection, registerCanvasChrome } from '../Canvas/chromeHitGuard';
 
 type ToolMode = 'drag' | 'select';
 
@@ -112,6 +112,8 @@ export default function CanvasToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [openMenu, setOpenMenu] = useState<ToolMenuKey | 'upload' | null>(null);
   const [stageAnchor, setStageAnchor] = useState({ left: 16, top: typeof window === 'undefined' ? 0 : window.innerHeight / 2 });
+
+  useEffect(() => registerCanvasChrome(toolbarRef.current), []);
 
   useLayoutEffect(() => {
     const update = () => {
@@ -213,8 +215,8 @@ export default function CanvasToolbar({
     <div
       ref={toolbarRef}
       className={styles.toolbar}
-      data-canvas-chrome="block"
-      style={{ left: stageAnchor.left, top: stageAnchor.top }}
+      data-canvas-chrome
+      style={{ left: stageAnchor.left, top: stageAnchor.top, zIndex: 2147483000 }}
       onPointerDownCapture={() => {
         lockChromeSelection();
       }}

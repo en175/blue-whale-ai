@@ -11526,7 +11526,7 @@ export default function CanvasPage() {
         />
 
         {/* 左下角：返回首页 + 小地图切换 */}
-        <div className={styles.bottomLeftActions} data-canvas-chrome="block">
+        <div className={styles.bottomLeftActions} data-canvas-chrome>
           <button
             className={styles.backHomeBtn}
             onClick={async () => { if (await ensureSavedBeforeProjectSwitch()) navigate('/'); }}

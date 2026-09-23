@@ -39,7 +39,6 @@ import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboar
 import { isMentionMenuOpen } from './canvasKeyboard';
 import { useCanvasPan } from './useCanvasPan';
 import {
-  CANVAS_BLOCK_CHROME_SELECTOR,
   canvasChromeAtPoint,
   chromeSelectionLockIds,
   lockChromeSelection,
@@ -47,7 +46,6 @@ import {
   shouldSuppressCanvasSelection,
   swallowStolenCanvasChromeHit,
   trackChromePointer,
-  unlockChromeSelection,
 } from './chromeHitGuard';
 import ConnectionPreview from './ConnectionPreview';
 import SnapGuides from './SnapGuides';
@@ -180,6 +178,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   nodesRef.current = nodes;
 
+  const isChromeGestureActive = () => shouldSuppressCanvasSelection();
+
   useEffect(() => {
     const revertLockedSelection = () => {
       const locked = chromeSelectionLockIds();
@@ -201,15 +201,20 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       const { clientX, clientY } = event as PointerEvent;
       const target = event.target;
       const onChrome = trackChromePointer(clientX, clientY)
-        || (target instanceof Element && Boolean(target.closest(CANVAS_BLOCK_CHROME_SELECTOR)));
+        || (target instanceof Element && Boolean(target.closest('[data-canvas-chrome], .react-flow__minimap')));
       if (onChrome) {
         lockChromeSelection();
+        document.documentElement.classList.add('canvas-chrome-lock');
+        [0, 16, 32, 80, 160, 320, 500].forEach((ms) => window.setTimeout(revertLockedSelection, ms));
       }
       swallowStolenCanvasChromeHit(event);
     };
-    const onPointerUp = () => {
+    const onClick = (event: Event) => {
+      swallowStolenCanvasChromeHit(event);
       revertLockedSelection();
-      unlockChromeSelection();
+    };
+    const onPointerUp = () => {
+      window.setTimeout(() => document.documentElement.classList.remove('canvas-chrome-lock'), 400);
     };
     const onPointerMove = (event: PointerEvent) => {
       const overChrome = trackChromePointer(event.clientX, event.clientY);
@@ -218,13 +223,17 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     };
 
     document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('mousedown', onPointerDown, true);
+    document.addEventListener('click', onClick, true);
     document.addEventListener('pointerup', onPointerUp, true);
     document.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('mousedown', onPointerDown, true);
+      document.removeEventListener('click', onClick, true);
       document.removeEventListener('pointerup', onPointerUp, true);
       document.removeEventListener('pointermove', onPointerMove);
-      unlockChromeSelection();
+      document.documentElement.classList.remove('canvas-chrome-lock');
     };
   }, [setNodes]);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -555,7 +564,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   snapEnabledRef.current = snapAlignmentEnabled !== false;
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      if (shouldSuppressCanvasSelection()) {
+      if (isChromeGestureActive()) {
         const next = changes.filter((c) => c.type !== 'select');
         if (next.length === 0) return;
         onNodesChange(next);
@@ -885,7 +894,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           frameDragMemberIds.size > 0
             ? undefined
             : (params) => {
-                if (shouldSuppressCanvasSelection()) return;
+                if (isChromeGestureActive()) return;
                 onSelectionChange?.(params);
               }
         }
