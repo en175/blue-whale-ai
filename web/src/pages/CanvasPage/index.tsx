@@ -747,6 +747,16 @@ export default function CanvasPage() {
   const [audioSpeedSpeed, setAudioSpeedSpeed] = useState(1);
   /** 调速发送中（创建请求飞行期防重复提交，口径同 audioTrimSubmitting） */
   const [audioSpeedSubmitting, setAudioSpeedSubmitting] = useState(false);
+  // 请求的数据归属仍看项目；编辑会话用代际隔离，关闭/重进及 A→B→A 均不可复用。
+  const audioSpeedSessionRef = useRef({ projectId: currentId, epoch: 0 });
+  if (audioSpeedSessionRef.current.projectId !== currentId) {
+    audioSpeedSessionRef.current = { projectId: currentId, epoch: audioSpeedSessionRef.current.epoch + 1 };
+  }
+  useEffect(() => {
+    setAudioSpeedTargetNodeId(null);
+    setAudioSpeedSpeed(1);
+    setAudioSpeedSubmitting(false);
+  }, [currentId]);
 
   /** 人声背景分离编辑态（IKHA2W，会话口径同音视频分离）：处于人声背景分离编辑的源视频卡
    *  node id，null=未进入。视频暂停在当前帧并锁定播放控制（MediaNode splitEditing 注入）、
@@ -9017,6 +9027,7 @@ export default function CanvasPage() {
    *  与发送中复位；speedEditing 注入移除后 playbackRate 经 AudioPlayer 倍速 effect 恢复
    *  1.0、时间行恢复源时长显示。 */
   const exitAudioSpeedEditing = () => {
+    audioSpeedSessionRef.current.epoch += 1;
     setAudioSpeedTargetNodeId(null);
     setAudioSpeedSpeed(1);
     setAudioSpeedSubmitting(false);
@@ -9179,6 +9190,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
     runToolSessionEntry('audioSpeed', () => {
+      audioSpeedSessionRef.current.epoch += 1;
       setAudioSpeedSpeed(1);
       setAudioSpeedTargetNodeId(id);
     });
@@ -9537,6 +9549,7 @@ export default function CanvasPage() {
   const startAudioSpeedJob = async (
     sourceNodeId: string,
     payload: AudioSpeedInput,
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法调速');
@@ -9552,8 +9565,8 @@ export default function CanvasPage() {
       const created = await createAudioSpeedMutation.mutateAsync({ projectId, payload });
       // 迟到响应项目双检（IKI4LX）：等待期间已切换到别的项目，本地写入全部丢弃
       if (activeProjectRef.current !== projectId) return true;
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitAudioSpeedEditing();
+      // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
+      if (audioSpeedSessionRef.current.epoch === sessionEpoch) exitAudioSpeedEditing();
       const nodeId = audioSpeedNodeId(created.job_id);
       const placeholder = attachCallbacks(
         buildAudioSpeedPlaceholderNode({
@@ -9574,8 +9587,8 @@ export default function CanvasPage() {
       await flushCanvasSave(projectId).catch(() => {});
       return true;
     } catch (e: unknown) {
-      // 等待期间项目已切换：原项目的失败提示不得弹给新项目（IKI4LX）
-      if (activeProjectRef.current !== projectId) return false;
+      // 失败提示也归发送时的会话，不能打扰同项目或往返项目后新开的编辑态。
+      if (activeProjectRef.current !== projectId || audioSpeedSessionRef.current.epoch !== sessionEpoch) return false;
       showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
       return false;
     }
@@ -9846,9 +9859,8 @@ export default function CanvasPage() {
    *  建任务。发送守卫（1.00x 置灰）由发送条承担，此处兜底拦截原速无意义任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioSpeedJob 承担，
    *  失败停留编辑态（倍速可调后重发）。
-   *  提交会话隔离（IKI4LX）：finally 复位 submitting 以发送时捕获的项目为准——等待
-   *  期间项目已切换的，原会话由绑定清理 effect 退出（submitting 随之复位），本回调
-   *  不得再触碰（此时 submitting 可能属于新项目新会话的提交）。 */
+   *  提交会话隔离（IKI6EB）：退出/重进/切换项目都会推进会话代际；迟到响应仍可
+   *  收敛原项目任务卡，但退出编辑态、提示与 finally 释放锁仅作用于发送时的会话。 */
   const handleAudioSpeedSend = (): boolean => {
     const nodeId = audioSpeedTargetNodeId;
     if (!nodeId || audioSpeedSubmitting) return false;
@@ -9860,12 +9872,12 @@ export default function CanvasPage() {
     }
     const speed = audioSpeedSpeed;
     if (speed === 1) return false;
-    const projectIdAtSend = currentId;
+    const sessionEpoch = audioSpeedSessionRef.current.epoch;
     setAudioSpeedSubmitting(true);
     // 贴原速省略与两位小数在契约构造内收口（buildAudioSpeedInput 口径只此一份）
-    void startAudioSpeedJob(nodeId, buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed }))
+    void startAudioSpeedJob(nodeId, buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed }), sessionEpoch)
       .finally(() => {
-        if (activeProjectRef.current !== projectIdAtSend) return;
+        if (audioSpeedSessionRef.current.epoch !== sessionEpoch) return;
         setAudioSpeedSubmitting(false);
       });
     return true;
