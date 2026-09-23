@@ -4,6 +4,7 @@
  * 下方浮出窄发送条（本期免费 + 发送）。
  * 编辑状态（工具/笔刷/遮罩 ops）提升在 CanvasPage（源图卡内的 EraseMaskLayer 共用），本组件受控。
  * 涂抹发送在组件内栅格化遮罩 PNG（rasterizeMaskToPngFile）后交父级上传建任务；
+ * 会话身份与输入在栅格化之前经 onCaptureSendSession 同步捕获、随结果回传（IKI8L7）；
  * 「清除文字」不经遮罩直接上抛（规格：两条发送路径共用同一条任务链路）。
  * data-gen-panel-territory 豁免点外关闭误杀；Esc/X/点其他卡/点空白退出由 CanvasPage 承载。
  * ============================================ */
@@ -11,7 +12,7 @@ import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
 import type { FollowDialogAnchor } from '../../followDialog';
 import type { MaskCoordinateSpace, MaskOp } from '../../eraseMask';
-import { rasterizeMaskToPngFile } from '../../imageErase';
+import { rasterizeMaskToPngFile, type EraseMaskSendSession } from '../../imageErase';
 import styles from './index.module.css';
 
 /** 擦除编辑工具（三选一互斥）：画笔涂抹 / 矩形框选 / 橡皮擦（从并集减去） */
@@ -49,9 +50,14 @@ interface ImageEraseDialogProps {
   onClose: () => void;
   /** 「清除文字」一键直发：返回 true 表示创建请求已发出；创建成功后父级自行退出编辑态（失败停留编辑态） */
   onSendTextErase: () => boolean;
-  /** 涂抹发送：组件栅格化 ops 成黑白遮罩 PNG 后上抛（File 为 null 表示栅格化失败）；
-   *  resolve true 表示创建请求已发出，创建成功后父级自行退出编辑态（失败停留编辑态） */
-  onSendMask: (file: File | null) => Promise<boolean>;
+  /** 涂抹发送第一步（IKI8L7）：点发送瞬间同步执行、先于遮罩栅格化——捕获发送会话身份与
+   *  输入快照（目标卡 nodeId、源资产 assetId、会话纪元）；返回 null 表示校验未过（父级已
+   *  提示），不进入栅格化与发送。 */
+  onCaptureSendSession: () => EraseMaskSendSession | null;
+  /** 涂抹发送：组件栅格化 ops 成黑白遮罩 PNG 后，连同捕获时刻的会话快照一起上抛
+   *  （File 为 null 表示栅格化失败）；resolve true 表示创建请求已发出，创建成功后父级
+   *  自行退出编辑态（失败停留编辑态）。父级只用快照判定会话归属，不重读当前会话。 */
+  onSendMask: (session: EraseMaskSendSession, file: File | null) => Promise<boolean>;
   tool: EraseTool;
   onToolChange: (tool: EraseTool) => void;
   brushRadius: number;
@@ -81,6 +87,7 @@ const TOOL_ITEMS: Array<{ id: EraseTool; label: string; icon: typeof Brush; test
 export default function ImageEraseDialog({
   onClose,
   onSendTextErase,
+  onCaptureSendSession,
   onSendMask,
   tool,
   onToolChange,
@@ -127,8 +134,12 @@ export default function ImageEraseDialog({
 
   const handleSendMask = async () => {
     if (!canSendMask || !maskSpace) return;
+    // 会话身份与发送输入在首个异步步骤（遮罩栅格化 canvas.toBlob）之前同步捕获（IKI8L7）：
+    // 编码在途回调返回后不再读取当前会话——旧编码结果不冒领重开会话的身份
+    const session = onCaptureSendSession();
+    if (!session) return;
     const file = await rasterizeMaskToPngFile(ops, maskSpace);
-    await onSendMask(file);
+    await onSendMask(session, file);
   };
 
   const anchorStyle = (anchor: FollowDialogAnchor | null) =>

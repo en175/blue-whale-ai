@@ -185,6 +185,7 @@ import {
 import {
   IMAGE_ERASE_EDGE_ORIGIN,
   maskHasPaintArea,
+  type EraseMaskSendSession,
   type ImageEraseIdentity,
   type ImageEraseInput,
 } from './imageErase';
@@ -7223,7 +7224,8 @@ export default function CanvasPage() {
     input: ImageEraseInput,
     sessionEpoch: number,
   ): Promise<boolean> => {
-    // 前置校验也要纪元值守：涂抹发送路在遮罩上传 await 后才走到这里，期间会话可能已退出/重进
+    // 前置校验也要纪元值守：涂抹发送路的会话快照在遮罩编码前捕获（IKI8L7），但走到这里
+    // 已过编码与上传两次 await，期间会话可能已退出/重进（纪元失效时输入用快照、不读当前会话）
     if (!currentId) {
       if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('warn', '未选中项目，无法发起图片擦除');
@@ -7456,25 +7458,41 @@ export default function CanvasPage() {
     return true;
   };
 
-  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处上传（source=mask_erase，
-   *  中间素材不进用户资产列表可见内容）→ 组装 selected_area_erase 四键 → 发任务。
-   *  会话纪元（IKI61O）：发送捕获纪元；上传期退出/重进即迟到——任务仍按原样创建收尾，
-   *  但提示与 finally 释放锁仅作用于发送时的会话。 */
-  const handleEraseDialogSendMask = async (file: File | null): Promise<boolean> => {
+  /** 涂抹发送第一步（组件点发送瞬间同步回调，先于遮罩栅格化——IKI8L7）：捕获会话身份
+   *  与发送输入快照——目标卡 nodeId、源资产 assetId、会话纪元。栅格化（canvas.toBlob）、
+   *  上传、创建任务全程只用这份快照：旧编码回调返回后不重新捕获当前会话、不读取新会话
+   *  输入——旧任务按原输入收尾（!838 统一纪元：不关新会话、不动其提交状态、不弹旧错误）。 */
+  const handleEraseDialogCaptureMaskSession = (): EraseMaskSendSession | null => {
     const nodeId = eraseTargetNodeId;
-    if (!nodeId) return false;
-    if (!file) {
-      showToast('error', '遮罩生成失败，请重试');
-      return false;
-    }
+    if (!nodeId) return null;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
     if (!node || !sourceAssetId) {
       showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return null;
+    }
+    return { nodeId, sourceAssetId, sessionEpoch: toolSessionEpochRef.current.capture('erase') };
+  };
+
+  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处用发送时刻捕获的会话快照
+   *  （非当前会话状态）上传（source=mask_erase，中间素材不进用户资产列表可见内容）→
+   *  组装 selected_area_erase 四键 → 发任务。
+   *  会话纪元（IKI61O/IKI8L7）：纪元与输入在栅格化之前捕获；编码在途退出/重开即迟到——
+   *  任务仍按原输入创建收尾，但提交锁、提示与退出仅作用于发送时的会话。 */
+  const handleEraseDialogSendMask = async (
+    session: EraseMaskSendSession,
+    file: File | null,
+  ): Promise<boolean> => {
+    const { nodeId, sourceAssetId, sessionEpoch } = session;
+    if (!nodeId) return false;
+    if (!file) {
+      // 栅格化失败/无产物也经异步回调返回，会话可能已退出/重开（IKI8L7）：旧失败不向新会话提示
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
+      showToast('error', '遮罩生成失败，请重试');
       return false;
     }
-    const sessionEpoch = toolSessionEpochRef.current.capture('erase');
-    setEraseSubmitting(true);
+    // 迟到回调（会话已换）继续按原输入上传收尾，但不把新会话设为提交中
+    if (toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) setEraseSubmitting(true);
     try {
       const uploaded = await uploadAssetFile(file, {
         projectId: currentId ?? undefined,
@@ -7489,7 +7507,7 @@ export default function CanvasPage() {
       };
       return await startImageEraseJob(nodeId, input, sessionEpoch);
     } catch (e: unknown) {
-      // 迟到失败不打扰用户当前会话（IKI61O）
+      // 迟到失败不打扰用户当前会话（IKI61O/IKI8L7）
       if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '遮罩上传失败，请重试');
       return false;
@@ -12726,6 +12744,7 @@ export default function CanvasPage() {
           <ImageEraseDialog
             onClose={exitEraseEditing}
             onSendTextErase={handleEraseDialogSendText}
+            onCaptureSendSession={handleEraseDialogCaptureMaskSession}
             onSendMask={handleEraseDialogSendMask}
             tool={eraseTool}
             onToolChange={setEraseTool}
