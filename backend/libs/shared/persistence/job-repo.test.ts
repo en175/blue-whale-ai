@@ -3,6 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { createJobRepo } from "./job-repo.js";
 
 describe("createJobRepo.listByUser", () => {
+  it("只向音频混合列表投影卡片持久状态以区分未落盘与主动删除", async () => {
+    const prisma = {
+      generation_jobs: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([
+        { id: 73n, type: "audio_mix", status: "failed", canvas_card_state: "removed",
+          progress: 0, input: { source_node_id: "source", provider_credential: "secret" },
+          output_asset_ids: [], gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
+        { id: 72n, type: "audio_mix", status: "queued", canvas_card_state: "pending",
+          progress: 0, input: { source_node_id: "source" }, output_asset_ids: [],
+          gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
+      ]) },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+    const page = await createJobRepo(prisma).listByUser("9", { projectId: "55", type: "audio_mix", page: 1, size: 100 });
+    expect(page.records.map((job) => [job.job_id, job.canvas_card_state])).toEqual([
+      ["73", "removed"], ["72", "pending"],
+    ]);
+    expect(page.records[0]?.input).toEqual({ source_node_id: "source" });
+  });
+
   it("ids 精确过滤，按当前用户 + 去重后的 ID 查询", async () => {
     const count = vi.fn().mockResolvedValue(2);
     const findMany = vi.fn().mockResolvedValue([
@@ -51,7 +70,7 @@ describe("createJobRepo.listByUser", () => {
         is_delete: false,
         id: { in: [1n, 2n] },
       },
-      orderBy: { gmt_create: "desc" },
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
       skip: 0,
       take: 3,
     });
@@ -143,6 +162,29 @@ describe("createJobRepo.findByIdForUser", () => {
     expect(view?.output_assets).toEqual([
       { id: "11", url: "https://tos/seg-1.mp4", type: "video", width: 1920, height: 1080 },
     ]);
+  });
+
+  it("音频混合成功任务：首个产物的持久时长毫秒投影为秒", async () => {
+    const prisma = buildPrisma({
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "audio_mix",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [11],
+          error: null,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([
+        { id: 11n, url: "https://tos/mixed.mp3", type: "audio", width: null, height: null, duration_ms: 42750 },
+      ]) },
+    });
+
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+    expect(view?.asset).toEqual({ id: "11", url: "https://tos/mixed.mp3", type: "audio", duration: 42.75 });
   });
 
   it("进行中任务：output_assets 为空、asset 为 null、不查日志", async () => {

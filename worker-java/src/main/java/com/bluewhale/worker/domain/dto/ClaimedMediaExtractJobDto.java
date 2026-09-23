@@ -1,6 +1,7 @@
 package com.bluewhale.worker.domain.dto;
 
 import java.util.Map;
+import java.time.LocalDateTime;
 
 /**
  * 媒体提取作业领取投影（契约 附录 B：ClaimedMediaExtractJobDto，types.ts:65-72；
@@ -23,5 +24,21 @@ public record ClaimedMediaExtractJobDto(
         /** 已轮询次数（rescheduleProviderPoll 累计，轮询上限判定用） */
         int pollCount,
         /** 轮询进度（瞬时错误重排时保持不倒退） */
-        int progress
-) {}
+        int progress,
+        LocalDateTime createdAt,
+        LocalDateTime executionDeadlineAt
+) {
+    public ClaimedMediaExtractJobDto(String id, String projectId, String userId, Map<String, Object> input,
+                                     String providerTaskId, String workerId, long fencingToken,
+                                     int pollCount, int progress) {
+        this(id, projectId, userId, input, providerTaskId, workerId, fencingToken,
+                pollCount, progress, null, null);
+    }
+
+    public ClaimedMediaExtractJobDto(String id, String projectId, String userId, Map<String, Object> input,
+                                     String providerTaskId, String workerId, long fencingToken,
+                                     int pollCount, int progress, LocalDateTime createdAt) {
+        this(id, projectId, userId, input, providerTaskId, workerId, fencingToken,
+                pollCount, progress, createdAt, null);
+    }
+}

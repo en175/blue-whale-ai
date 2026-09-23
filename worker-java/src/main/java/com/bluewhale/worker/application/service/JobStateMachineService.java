@@ -111,6 +111,11 @@ public class JobStateMachineService {
         return claimService.claimMediaExtract(jobId, workerId);
     }
 
+    /** 以 audio_mix 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取，未命中返回空。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
+        return claimService.claimAudioMix(jobId, workerId);
+    }
+
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
             String jobId, String workerId) {
         return claimService.claimAudioTrim(jobId, workerId);
@@ -225,6 +230,11 @@ public class JobStateMachineService {
         return finalizer.publishMediaExtractResult(
                 input.jobId(), input.projectId(), input.userId(), input.workerId(), input.fencingToken(),
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(), input.duration());
+    }
+
+    /** 委托音频混合终态事务；仅当前租约与 fencing token 有效时创建长期 Asset 并成功，失效返回 false。 */
+    public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
+        return finalizer.publishAudioMixResult(input);
     }
 
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
@@ -376,6 +386,11 @@ public class JobStateMachineService {
         return affected == 1;
     }
 
+    public boolean renewAudioMixLease(String jobId, String workerId, long fencingToken) {
+        return jobMapper.renewAudioMixLease(Long.parseLong(jobId), workerId,
+                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+    }
+
     /**
      * 更新 video_scene_split 进度（IKH8BP 审查修复；属本类保留的 progress 续租族）：
      * 0-99 钳制 + 续租。
@@ -455,10 +470,16 @@ public class JobStateMachineService {
      */
     public boolean rescheduleProviderPoll(String jobId, String workerId,
                                        long fencingToken, int progress) {
+        return rescheduleProviderPoll(jobId, workerId, fencingToken, progress, 5_000L);
+    }
+
+    /** audio_mix 轮询退避的持久时刻须与 MQ 延迟相同；普通任务仍调用固定 5s 入口。 */
+    public boolean rescheduleProviderPoll(String jobId, String workerId,
+                                       long fencingToken, int progress, long delayMs) {
         Long jobIdLong = Long.parseLong(jobId);
         int clamped = Math.max(0, Math.min(99, progress));
         LocalDateTime now = WorkerClock.now();
-        LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
+        LocalDateTime nextPollAt = now.plusNanos(delayMs * 1_000_000);
         int affected = jobMapper.rescheduleProviderPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         if (affected != 1) {
             log.warn("[video] rescheduleProviderPoll 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",

@@ -9,6 +9,7 @@ import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import { isAudioTrimNodeId } from '../../audioTrim';
+import { isAudioMixNodeId } from '../../audioMix';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { ImageCropIdentity } from '../../imageCrop';
@@ -289,6 +290,7 @@ export interface MediaNodeData {
    *  编辑态归 IKHB7A，本票只透出回调；置灰门槛见 audioTrim.ts——音频 URL 缺失或时长
    *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
   onTrimAudio?: (id: string) => void;
+  onMixAudio?: (id: string) => void;
   /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
    *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
    *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
@@ -604,6 +606,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isMediaExtraction = isMediaExtractNodeId(id);
   /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
   const isAudioTrimCard = isAudioTrimNodeId(id);
+  const isAudioMixCard = isAudioMixNodeId(id);
   /** 插帧草稿卡（IKHLKX）：插帧卡与 HD 卡共用 media-draft- 前缀，无法按 id 分流，故按身份判定
    *  ——失败重试须带冻结源素材（frameInterpolation.sourceAssetId），重试据此原样重发创建接口；
    *  身份残缺的失败卡不渲染重试钮（同 media_extract / audio_trim 身份守卫口径）。 */
@@ -613,6 +616,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     || (typeof frameInterpolationIdentity.sourceAssetId === 'string' && frameInterpolationIdentity.sourceAssetId !== '');
   const hideCancel = isMediaExtraction
     || isAudioTrimCard
+    || isAudioMixCard
     || isCanvasToolGeneration(data as Record<string, unknown>);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction, hideCancel);
   const failHeadline = mediaNodeFailHeadline({
@@ -699,6 +703,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       const canRetry = data.genStatus === 'failed'
         && (!isMediaExtraction || data.mediaExtract != null)
         && (!isAudioTrimCard || data.audioTrim != null)
+        && (!isAudioMixCard || data.jobId != null)
         && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>

@@ -10,14 +10,20 @@ import com.volcengine.tos.model.object.PutObjectInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 音频媒体转存（迁移契约 §18 / IKH28W；以 {@link TosVideoMediaRelay} 为模板的 audio/ 变体）。
@@ -35,28 +41,47 @@ import java.util.UUID;
  * （IKHCW9）。旧本地链路 TosMediaStorage.upload 恒 .mp3 硬编码即此问题的 ffmpeg
  * 单格式特例，本件随任务格式扩展。
  * <p>
- * 大小上限 1GiB（全内存 byte[] 转存故仍需硬上限）：火山输入建议 ≤10GB（官方 PDF），其无损
- * wav 音轨理论上限 ≈600MB，1GiB 覆盖最坏情况（视频先例 200MB 对应其 200MB 输入口径）。
+ * 大产物先流式落临时文件，再用文件流上传；不会把供应商产物整份载入堆，也不将输入建议大小
+ * 擅自变成用户可见的硬上限（异常流的磁盘防护上限见 {@link #MAX_RELAY_BYTES}）。磁盘、下载
+ * 或 TOS 上传失败均由调用方记录失败终态。
  */
 public class TosAudioMediaRelay {
 
     private static final Logger log = LoggerFactory.getLogger(TosAudioMediaRelay.class);
 
-    /** 音频转存大小上限 1GiB（见类注释口径）。 */
-    static final long MAX_AUDIO_BYTES = 1L << 30;
+    private static final ScheduledExecutorService DOWNLOAD_WATCHDOG = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "audio-relay-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /** 转存 key 的产物目录段（视频先例 "video" 的音频同构位）。 */
     static final String KEY_TYPE_SEGMENT = "audio";
+
+    /**
+     * 转存字节上限（10 GiB，对齐供应商「单文件不建议超过 10 GB」）。这是防异常/劫持上游在
+     * 6h watchdog 窗口内无限流写满 worker 磁盘的内部护栏，不是用户可见的产品容量限制——
+     * 后者按 IKI5ZC Further Notes 须先修订规格与 UI 才能引入。IKI696 移除旧 1 GiB 上限
+     * 是为放行超大合法产物（>1 GiB 用例见 TosAudioMediaRelayMixTest），本护栏不收紧该语义。
+     */
+    static final long MAX_RELAY_BYTES = 10L << 30;
 
     private final TOSV2 client;
     private final String bucket;
     private final String endpoint;
     private final HttpClient httpClient;
+    private final long maxRelayBytes;
 
     public TosAudioMediaRelay(TOSV2 client, String bucket, String endpoint) {
+        this(client, bucket, endpoint, MAX_RELAY_BYTES);
+    }
+
+    /** 测试注入小上限用；生产路径走 {@link #TosAudioMediaRelay(TOSV2, String, String)}。 */
+    TosAudioMediaRelay(TOSV2 client, String bucket, String endpoint, long maxRelayBytes) {
         this.client = client;
         this.bucket = bucket;
         this.endpoint = endpoint;
+        this.maxRelayBytes = maxRelayBytes;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -86,7 +111,7 @@ public class TosAudioMediaRelay {
     }
 
     /**
-     * 转存音频（视频先例 persist 同构）：fetch → 按 output_format 落 mime →
+     * 转存音频：流式下载 → 按 output_format 落 mime →
      * 弱校验响应头像音频（m4a 允许被标成 video/mp4）→ PUT → makePublic。
      * <p>
      * 错误统一抛 {@link MediaExtractError}（1044 兜底码由 processor 归并，§18.4 第三类：
@@ -98,78 +123,72 @@ public class TosAudioMediaRelay {
      * @return 转存结果
      */
     public StoredAudio persist(String sourceUrl, String userId, String outputFormat) {
-        // 1. fetch 源 URL（视频先例同款：60s 超时、followRedirects NORMAL）
-        byte[] bytes;
-        String reportedType = "";
+        Path tempFile = null;
         try {
+            tempFile = Files.createTempFile("audio-relay-", ".part");
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(sourceUrl))
                     .timeout(Duration.ofSeconds(60))
                     .GET()
                     .build();
-            HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
-            if (resp.statusCode() >= 400) {
-                String errBody = new String(resp.body(), java.nio.charset.StandardCharsets.UTF_8);
-                String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
-                throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
-                        "生成音频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
+            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            String reportedType = resp.headers().firstValue("content-type")
+                    .map(value -> value.split(";", 2)[0].trim()).orElse("");
+            long size;
+            try (InputStream body = resp.body()) {
+                var timeout = DOWNLOAD_WATCHDOG.schedule(() -> {
+                    try { body.close(); } catch (IOException ignored) { }
+                }, 6, TimeUnit.HOURS);
+                try {
+                    if (resp.statusCode() >= 400) {
+                        String errBody = new String(body.readNBytes(301), java.nio.charset.StandardCharsets.UTF_8);
+                        String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
+                        throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
+                                "生成音频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
+                    }
+                    String reported = reportedType.toLowerCase();
+                    if (!reported.isEmpty() && !reported.startsWith("audio/")
+                            && !("m4a".equals(outputFormat) && "video/mp4".equals(reported))) {
+                        throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
+                                "生成结果不是音频");
+                    }
+                    size = copyWithLimit(body, tempFile);
+                } finally {
+                    timeout.cancel(false);
+                }
             }
-            bytes = resp.body();
-            reportedType = resp.headers().firstValue("content-type")
-                    .map(value -> value.split(";", 2)[0].trim())
-                    .orElse("");
+            if (size == 0) {
+                throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED, "生成音频为空");
+            }
+            String mime = mimeForOutputFormat(outputFormat);
+            String storageKey = "generated/" + userId + "/" + KEY_TYPE_SEGMENT + "/"
+                    + UUID.randomUUID().toString().replace("-", "") + "." + outputFormat;
+            String md5 = ContentDigest.md5Hex(tempFile);
+            try (InputStream upload = Files.newInputStream(tempFile)) {
+                ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                        .setHeaders(Map.of("Content-Type", mime));
+                client.putObject(new PutObjectInput()
+                        .setBucket(bucket).setKey(storageKey).setContent(upload)
+                        .setContentLength(size).setOptions(options));
+                client.putObjectAcl(new PutObjectACLInput()
+                        .setBucket(bucket).setKey(storageKey).setAcl(ACLType.ACL_PUBLIC_READ));
+            } catch (Exception e) {
+                throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
+                        "生成音频转存失败: " + e.getMessage(), e);
+            }
+            String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
+            return new StoredAudio(publicUrl, storageKey, mime, size, md5);
         } catch (MediaExtractError e) {
             throw e;
         } catch (Exception e) {
             throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
                     "生成音频下载失败: " + e.getMessage(), e);
+        } finally {
+            if (tempFile != null) {
+                try { Files.deleteIfExists(tempFile); }
+                catch (IOException e) { log.warn("音频转存临时文件清理失败: {}", e.getMessage()); }
+            }
         }
-
-        // 2. mime 按任务格式落定；CDN 头仅作「像不像音频」的弱校验（m4a 允许被标成 video/mp4）
-        String mime = mimeForOutputFormat(outputFormat);
-        String reported = reportedType.toLowerCase();
-        boolean looksLikeAudio = reported.startsWith("audio/");
-        boolean m4aLabeledAsVideo = "m4a".equals(outputFormat) && "video/mp4".equals(reported);
-        if (!reported.isEmpty() && !looksLikeAudio && !m4aLabeledAsVideo) {
-            throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED, "生成结果不是音频");
-        }
-        if (bytes.length == 0) {
-            throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED, "生成音频为空");
-        }
-        if (bytes.length > MAX_AUDIO_BYTES) {
-            throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED, "生成音频超过转存上限");
-        }
-
-        // 3. 上传：key 后缀 = 任务所选 output_format（扩展名单源，见类注释）
-        String uuid = UUID.randomUUID().toString().replace("-", "");
-        String storageKey = "generated/" + userId + "/" + KEY_TYPE_SEGMENT + "/"
-                + uuid + "." + outputFormat;
-
-        try {
-            ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
-                    .setHeaders(Map.of("Content-Type", mime));
-            PutObjectInput putInput = new PutObjectInput()
-                    .setBucket(bucket)
-                    .setKey(storageKey)
-                    .setContent(new ByteArrayInputStream(bytes))
-                    .setContentLength((long) bytes.length)
-                    .setOptions(options);
-            client.putObject(putInput);
-
-            // makePublic（视频先例同款）
-            PutObjectACLInput aclInput = new PutObjectACLInput()
-                    .setBucket(bucket)
-                    .setKey(storageKey)
-                    .setAcl(ACLType.ACL_PUBLIC_READ);
-            client.putObjectAcl(aclInput);
-        } catch (Exception e) {
-            throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
-                    "生成音频转存失败: " + e.getMessage(), e);
-        }
-
-        String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
-        return new StoredAudio(publicUrl, storageKey, mime, (long) bytes.length,
-                ContentDigest.md5Hex(bytes));
     }
 
     /** 按任务所选格式推导 mime（扩展名与 TOS Content-Type / assets.mime 的单源；
@@ -184,6 +203,28 @@ public class TosAudioMediaRelay {
             case "wav" -> "audio/wav";
             default -> "audio/mpeg";
         };
+    }
+
+    /** 流式落盘并累计字节数，超过 {@code maxRelayBytes} 立即中止（超限写满磁盘的护栏）。 */
+    private long copyWithLimit(InputStream body, Path target) throws IOException {
+        try (var out = Files.newOutputStream(target,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                java.nio.file.StandardOpenOption.WRITE)) {
+            byte[] buffer = new byte[64 * 1024];
+            long total = 0;
+            int read;
+            while ((read = body.read(buffer)) != -1) {
+                total += read;
+                if (total > maxRelayBytes) {
+                    throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
+                            "生成音频超过转存上限 " + (maxRelayBytes >> 30) + " GiB，已中止下载（收到 "
+                                    + total + " 字节）");
+                }
+                out.write(buffer, 0, read);
+            }
+            return total;
+        }
     }
 
     /** 转存结果（视频先例 StoredVideo 形态的音频同构，md5 供 assets.md5 落库 IKGS73）。 */

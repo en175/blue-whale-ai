@@ -3,10 +3,12 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
+import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
@@ -19,6 +21,11 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
+import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
+import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
+import com.sun.net.httpserver.HttpServer;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -48,13 +55,28 @@ import org.testcontainers.utility.MountableFile;
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * JobStateMachineService 真库集成测试（blade-1：Testcontainers 安全网）。
@@ -181,6 +203,9 @@ class JobStateMachineMySqlIntegrationTest {
 
     @BeforeAll
     static void boot() {
+        if (System.getenv("IKI68N_EXTERNAL_DB_URL") != null) {
+            throw new IllegalStateException("普通 MySQL 金标禁止 IKI68N_EXTERNAL_DB_URL；跨端验收须运行专用测试类");
+        }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         service = ctx.getBean(JobStateMachineService.class);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
@@ -1081,6 +1106,226 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     // ========== 11. publishMediaExtractResult / failMediaExtractJob ==========
+
+    @Test
+    @DisplayName("audio_mix 恢复扫描包含创建超过两小时的待处理任务")
+    void audioMixRecoveryDoesNotLoseLongProcessingJob() {
+        long jobId = seedJob(9L, "audio_mix", "dock", "processing", 7L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[]}");
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 3 HOUR), "
+                + "lease_owner=NULL, lease_expires_at=NULL, next_action_at=DATE_SUB(NOW(), INTERVAL 10 SECOND) "
+                + "WHERE id=?", jobId);
+
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).doesNotContain(jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+    }
+
+    @Test
+    @DisplayName("audio_mix 退避期间恢复扫描不提前重投，DB 与 MQ 使用同一延迟")
+    void audioMixRecoveryRespectsPersistedPollBackoff() {
+        long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
+        LocalDateTime before = WorkerClock.now();
+        assertThat(service.rescheduleProviderPoll(String.valueOf(jobId), "mix-worker", 5L, 0, 40_000L)).isTrue();
+        LocalDateTime after = WorkerClock.now();
+
+        GenerationJobEntity row = readJob(jobId);
+        assertThat(row.getNextActionAt()).isBetween(before.plusSeconds(38), after.plusSeconds(42));
+        assertThat(row.getNextPollAt()).isEqualTo(row.getNextActionAt());
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).doesNotContain(jobId);
+        jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+    }
+
+    @Test
+    @DisplayName("audio_mix 续租只允许当前 fencing 持有者且不复活已过期租约")
+    void audioMixTransferLeaseIsFenced() {
+        long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 10 SECOND) WHERE id=?", jobId);
+
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 5L)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
+                + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 4L)).isFalse();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 5L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("audio_mix 真库闭环：领取→保存 task_id→转存后发布自家音频资产和精确时长")
+    void audioMixTaskPersistsProviderIdentityAndLongLivedAsset() {
+        long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
+        var first = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        assertThat(first).isPresent();
+        assertThat(first.get().input().get("source_node_id")).isEqualTo("source");
+        assertThat(service.markProviderSubmitted(String.valueOf(jobId), "mix-worker",
+                first.get().fencingToken(), "provider-mix-1")).isTrue();
+        assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("provider-mix-1");
+
+        jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
+                WorkerClock.now().minusSeconds(10), jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).contains(jobId);
+        var second = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        assertThat(second).isPresent();
+        assertThat(second.get().providerTaskId()).isEqualTo("provider-mix-1");
+        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+                String.valueOf(jobId), "99", "9", "mix-worker", second.get().fencingToken(),
+                "https://our-tos.example/audio.mp3", "generated/9/audio/out.mp3", "audio/mpeg",
+                500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
+
+        assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId))
+                .isEqualTo("https://our-tos.example/audio.mp3");
+        assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+                .isEqualTo(12_500);
+        assertThat(countAssets(jobId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("audio_mix 行为闭环：冻结任务经真实 Worker 和网关协议替身生成可读取长期资产")
+    void audioMixWorkerGatewayAndReadableAsset() throws Exception {
+        byte[] audio = "ID3-verified-mix-output".getBytes(StandardCharsets.UTF_8);
+        var submitted = new AtomicReference<String>();
+        var stored = new AtomicReference<byte[]>();
+        var base = new AtomicReference<String>();
+        HttpServer gateway = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        gateway.createContext("/v1/mediakit/mix-audio", exchange -> {
+            submitted.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{\"success\":true,\"task_id\":\"mix-task-1\",\"request_id\":\"request-1\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (var output = exchange.getResponseBody()) { output.write(response); }
+        });
+        gateway.createContext("/v1/mediakit/tasks/mix-task-1", exchange -> {
+            byte[] response = ("{\"status\":\"completed\",\"result\":{\"audio_url\":\""
+                    + base.get() + "/temporary/out.mp3\",\"duration\":12.5}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (var output = exchange.getResponseBody()) { output.write(response); }
+        });
+        gateway.createContext("/temporary/out.mp3", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "audio/mpeg");
+            exchange.sendResponseHeaders(200, audio.length);
+            try (var output = exchange.getResponseBody()) { output.write(audio); }
+        });
+        gateway.createContext("/stored/out.mp3", exchange -> {
+            byte[] bytes = stored.get();
+            if (bytes == null) {
+                exchange.sendResponseHeaders(404, -1);
+            } else {
+                exchange.getResponseHeaders().set("Content-Type", "audio/mpeg");
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var output = exchange.getResponseBody()) { output.write(bytes); }
+            }
+        });
+        gateway.start();
+        base.set("http://127.0.0.1:" + gateway.getAddress().getPort());
+        try {
+            long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10), 99L,
+                    "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"estimated_duration_ms\":12500,"
+                    + "\"provider_credential\":\"sk-frozen\",\"inputs\":["
+                    + "{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},"
+                    + "{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
+            TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
+            when(relay.persist(anyString(), eq("9"), eq("mp3"))).thenAnswer(invocation -> {
+                String temporaryUrl = invocation.getArgument(0);
+                stored.set(java.net.URI.create(temporaryUrl).toURL().openStream().readAllBytes());
+                return new TosAudioMediaRelay.StoredAudio(base.get() + "/stored/out.mp3",
+                        "generated/9/audio/out.mp3", "audio/mpeg", (long) stored.get().length,
+                        "0123456789abcdef0123456789abcdef");
+            });
+            GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+            var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(),
+                    new NewApiMediaKitMixAudioClient(base.get()), relay, producer);
+
+            processor.handle(String.valueOf(jobId));
+            assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("mix-task-1");
+            assertThat(submitted.get()).contains("\"audio_urls\":[\"https://tos/a.mp3\",\"https://tos/b.mp3\"]")
+                    .contains("\"format\":\"mp3\"");
+            verify(producer).enqueue(String.valueOf(jobId), 5_000L);
+            jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
+                    WorkerClock.now().minusSeconds(10), jobId);
+
+            processor.handle(String.valueOf(jobId));
+            assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+            assertThat(countAssets(jobId)).isEqualTo(1);
+            String assetUrl = jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId);
+            assertThat(assetUrl).isEqualTo(base.get() + "/stored/out.mp3")
+                    .isNotEqualTo(base.get() + "/temporary/out.mp3");
+            assertThat(java.net.URI.create(assetUrl).toURL().openStream().readAllBytes()).isEqualTo(audio);
+            assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+                    .isEqualTo(12_500);
+        } finally {
+            gateway.stop(0);
+        }
+    }
+
+    @Test
+    @DisplayName("audio_mix 真库并发领取：同一 job 仅一个 worker 获得租约")
+    void audioMixConcurrentClaimAllowsOneWinner() throws Exception {
+        long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        var originalNextActionAt = readJob(jobId).getNextActionAt();
+        var candidatesRead = new CountDownLatch(2);
+        var seenTokens = new CopyOnWriteArrayList<Long>();
+        GenerationJobMapper competingMapper = spy(jobMapper);
+        doAnswer(invocation -> {
+            var candidate = jobMapper.findCandidateByTypeAndSources(jobId,
+                    AudioMixContract.TAG, List.of(AudioMixContract.SOURCE));
+            seenTokens.add(candidate.getFencingToken());
+            candidatesRead.countDown();
+            assertThat(candidatesRead.await(10, TimeUnit.SECONDS)).isTrue();
+            return candidate;
+        }).when(competingMapper).findCandidateByTypeAndSources(
+                eq(jobId), eq(AudioMixContract.TAG), anyList());
+        var competingClaims = new JobClaimService(competingMapper);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> competingClaims.claimAudioMix(String.valueOf(jobId), "mix-worker-a"));
+            var second = pool.submit(() -> competingClaims.claimAudioMix(String.valueOf(jobId), "mix-worker-b"));
+            var claims = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+            assertThat(seenTokens).containsExactlyInAnyOrder(0L, 0L);
+            assertThat(claims.stream().filter(Optional::isPresent).count()).isEqualTo(1);
+            assertThat(readJob(jobId).getFencingToken()).isEqualTo(1L);
+            assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
+            assertThat(readJob(jobId).getNextActionAt()).isEqualTo(originalNextActionAt);
+            assertThat(countAssets(jobId)).isZero();
+            assertThat(countEvents(99L)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_job_logs WHERE generation_job_id=?",
+                    Integer.class, jobId)).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("audio_mix 真库迟到 token：旧 worker 不能失败或发布新 worker 的任务")
+    void audioMixLateFenceCannotOverwriteNewOwner() {
+        long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        var first = service.claimAudioMix(String.valueOf(jobId), "mix-worker-a").orElseThrow();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=?, next_action_at=? WHERE id=?",
+                WorkerClock.now().minusSeconds(10), WorkerClock.now().minusSeconds(10), jobId);
+        var second = service.claimAudioMix(String.valueOf(jobId), "mix-worker-b").orElseThrow();
+        assertThat(second.fencingToken()).isEqualTo(first.fencingToken() + 1);
+
+        assertThat(service.failMediaExtractJob(new FailMediaExtractDto(
+                String.valueOf(jobId), "mix-worker-a", first.fencingToken(),
+                "audio_mix_failed", "迟到失败", Map.of()))).isFalse();
+        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+                String.valueOf(jobId), "99", "9", "mix-worker-a", first.fencingToken(),
+                "https://our-tos.example/stale.mp3", "generated/9/audio/stale.mp3", "audio/mpeg",
+                500L, "0123456789abcdef0123456789abcdef", 12.5))).isFalse();
+        assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
+        assertThat(countAssets(jobId)).isZero();
+
+        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+                String.valueOf(jobId), "99", "9", "mix-worker-b", second.fencingToken(),
+                "https://our-tos.example/final.mp3", "generated/9/audio/final.mp3", "audio/mpeg",
+                500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
+        assertThat(countAssets(jobId)).isEqualTo(1);
+        assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+    }
 
     @Nested
     @DisplayName("media_extract 终态")

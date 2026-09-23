@@ -5,6 +5,7 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
+import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
 import { panelCanvasRefError } from './refSourceTypes';
@@ -82,7 +83,7 @@ export function audioMediaRefsOf(
     // IKHB08：截取产物卡的来源边（origin=audio-trim）同口径跳过——源音频是合法音频
     // 素材，不跳过会被静默列为参考占位（防参考污染，见 audioTrim.ts 常量注释）。
     const origin = (edge.data as { origin?: string } | undefined)?.origin;
-    if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN) continue;
+    if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN || origin === AUDIO_MIX_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const reason = audioRefSourceError(source);

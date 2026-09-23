@@ -142,6 +142,7 @@ CREATE TABLE `generation_jobs` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` BOOLEAN NOT NULL DEFAULT false,
+    `canvas_card_state` VARCHAR(16) NOT NULL DEFAULT 'pending',
     `input` JSON NULL,
 
     INDEX `idx_project_id`(`project_id`),

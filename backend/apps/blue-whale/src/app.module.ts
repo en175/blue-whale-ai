@@ -39,6 +39,7 @@ import { ImageOutpaintsApiModule } from "./api/image-outpaints/image-outpaints.m
 import { JobsApiModule } from "./api/jobs/jobs.module.js";
 import { MaterialApiModule } from "./api/material/material.module.js";
 import { MediaExtractionsApiModule } from "./api/media-extractions/media-extractions.module.js";
+import { AudioMixesApiModule } from "./api/audio-mixes/audio-mixes.module.js";
 import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
@@ -91,6 +92,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     CanvasApiModule,
     MaterialApiModule,
     MediaExtractionsApiModule,
+    AudioMixesApiModule,
     AudioTrimsApiModule,
     ImageEnhancementsApiModule,
     ImageErasuresApiModule,

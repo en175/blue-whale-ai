@@ -312,6 +312,22 @@ describe('MediaNode failed overlay', () => {
   });
 });
 
+describe('MediaNode 音频混合失败卡（IKI697）', () => {
+  it('显示服务端原因与同卡重试入口，失败态不可播放', async () => {
+    const onRetryJob = vi.fn();
+    await renderNode('audio', {
+      id: 'audio-mix-73', selected: false, genStatus: 'failed',
+      errorText: '供应商任务失败', data: { jobId: '73', audioMix: { format: 'mp3' }, src: '', onRetryJob },
+    });
+    expect(mountNode.textContent).toContain('供应商任务失败');
+    expect(mountNode.querySelector('audio')).toBeNull();
+    const retry = [...mountNode.querySelectorAll('button')].find((button) => button.textContent?.trim() === '重试');
+    expect(retry).toBeTruthy();
+    await act(async () => retry!.click());
+    expect(onRetryJob).toHaveBeenCalledWith('audio-mix-73');
+  });
+});
+
 describe('MediaNode 插帧草稿卡（IKHLKX）', () => {
   it('生成中：仅转圈与「取消生成」，不展示百分比/进度条（插帧不属钱已扣画布工具卡，可取消）', async () => {
     const onCancelJob = vi.fn();

@@ -9,6 +9,7 @@ import {
 } from './audioMediaRefs';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
+import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 
 /* IKFDFZ 音频参考连线：来源有效性校验、「连线 → 媒体参考」推导与统一添加校验。
    面板展示与提交输入共用同一推导，保证所见即实际输入。 */
@@ -137,6 +138,14 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     expect(result.refs).toEqual([
       { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },
     ]);
+  });
+
+  it('两条混合来源边均不占参考位或 @ 编号', () => {
+    const sourceEdges = [
+      { id: 'mix1', source: 'u1', target: 'mixed', data: { origin: AUDIO_MIX_EDGE_ORIGIN } },
+      { id: 'mix2', source: 'u2', target: 'mixed', data: { origin: AUDIO_MIX_EDGE_ORIGIN } },
+    ] as Edge[];
+    expect(audioMediaRefsOf('mixed', sourceEdges, nodes)).toEqual({ refs: [], invalid: [] });
   });
 });
 

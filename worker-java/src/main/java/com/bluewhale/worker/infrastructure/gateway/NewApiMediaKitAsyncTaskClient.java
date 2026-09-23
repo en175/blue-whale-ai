@@ -134,6 +134,7 @@ abstract class NewApiMediaKitAsyncTaskClient {
                 } else {
                     message += " body=" + truncate(rawText);
                 }
+                message += requestIdSuffix(rawText);
                 throw error(code, message);
             }
 
@@ -143,7 +144,8 @@ abstract class NewApiMediaKitAsyncTaskClient {
             if (errorNode != null && errorNode.has("message")) {
                 String errText = errorNode.get("message").asText();
                 String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
-                throw error(code, "MediaKit " + label + "提交业务失败: " + truncate(errText));
+                throw error(code, "MediaKit " + label + "提交业务失败: " + truncate(errText)
+                        + requestIdSuffix(rawText));
             }
 
             // data 解包宽容（网关可能包 data 层，家族同款）
@@ -151,7 +153,7 @@ abstract class NewApiMediaKitAsyncTaskClient {
             String taskId = NewApiMediaKitJsonSupport.textOrNull(data, "task_id");
             if (taskId == null || taskId.isEmpty()) {
                 throw error(fallbackCode(),
-                        "MediaKit " + label + "提交响应缺少 task_id");
+                        "MediaKit " + label + "提交响应缺少 task_id" + requestIdSuffix(rawText));
             }
             return taskId;
         } catch (RuntimeException e) {
@@ -211,7 +213,8 @@ abstract class NewApiMediaKitAsyncTaskClient {
                 // HTTP 429/5xx 瞬时（cause 携带状态供 processor 重排）；4xx 业务错 → 硬失败
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
                 RuntimeException error = error(code,
-                        "MediaKit " + label + "任务查询失败: HTTP " + response.code() + " body=" + truncate(rawText));
+                        "MediaKit " + label + "任务查询失败: HTTP " + response.code() + " body=" + truncate(rawText)
+                                + requestIdSuffix(rawText));
                 error.initCause(new NewApiVideoClient.HttpStatusException(response.code()));
                 throw error;
             }
@@ -252,10 +255,21 @@ abstract class NewApiMediaKitAsyncTaskClient {
                 message = node.path("message");
             }
             if (message.isTextual() && !message.asText().isEmpty()) {
-                return truncate(message.asText());
+                String requestId = NewApiMediaKitJsonSupport.textOrNull(body.data(), "request_id");
+                if (requestId == null) requestId = NewApiMediaKitJsonSupport.textOrNull(body.parsed(), "request_id");
+                return truncate(message.asText()) + (requestId != null ? " request_id=" + requestId : "");
             }
         }
         return "";
+    }
+
+    private static String requestIdSuffix(String rawText) {
+        try {
+            String requestId = NewApiMediaKitJsonSupport.textOrNull(JSON.readTree(rawText), "request_id");
+            return requestId != null ? " request_id=" + requestId : "";
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     // ===== 共享工具 =====

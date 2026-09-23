@@ -425,7 +425,7 @@ export class CanvasService {
       viewport,
       nodes,
       edgesProvided ? JSON.stringify(releaseRemovedPromptSources(JSON.parse(current.edges ?? "[]") as CanvasEdge[], incomingEdges as CanvasEdge[])) : current.edges,
-      editedMaterials.length ? { ownerId, items: editedMaterials } : undefined,
+      { ownerId, items: editedMaterials },
     );
     if (!saved) {
       // 条件写失败说明读与写之间被并发改动：重读一次拿服务端当前 version 回给前端。
