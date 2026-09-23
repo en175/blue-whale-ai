@@ -89,8 +89,15 @@ class AudioTrimJobProcessorErrorMappingTest {
 
     private ClaimedAudioTrimJobDto makeClaim(Map<String, Object> input, String providerTaskId,
                                              int pollCount, int progress) {
+        return makeClaim(input, providerTaskId, pollCount, progress, null);
+    }
+
+    private ClaimedAudioTrimJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+                                             int pollCount, int progress,
+                                             String parentProviderTaskId) {
         return new ClaimedAudioTrimJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress);
+                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress,
+                parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
@@ -304,6 +311,166 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    // ========== parent-reuse 重试收割（IKI89Q / ADR-0114；平移 IKI89P 定型用例）==========
+
+    @Test
+    @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
+    void parentReuseSuccess_publishesWithoutSubmit() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-1")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-1"))
+                .thenReturn(new TrimAudioTaskObservation("succeeded",
+                        "https://volc/old-out.mp3?auth_key=...", 120.25, null, null));
+        when(mediaRelay.persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3"))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio(
+                        "https://tos/out.mp3", "generated/9/audio/abc.mp3",
+                        "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishAudioTrimResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
+        verify(mediaRelay).persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3");
+        ArgumentCaptor<PublishAudioTrimDto> captor =
+                ArgumentCaptor.forClass(PublishAudioTrimDto.class);
+        verify(stateMachine).publishAudioTrimResult(captor.capture());
+        PublishAudioTrimDto published = captor.getValue();
+        assertThat(published.url()).isEqualTo("https://tos/out.mp3");
+        assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
+        assertThat(published.mime()).isEqualTo("audio/mpeg");
+        assertThat(published.size()).isEqualTo(123_456L);
+        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+        assertThat(published.durationSec()).isEqualTo(120.25);
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
+    void parentReuseFailed_fallThrough() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-fail")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-fail"))
+                .thenReturn(new TrimAudioTaskObservation("failed", null, null,
+                        "InvalidParameter", "The parameter `end_time` must be less than audio duration."));
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
+    void parentReusePollError_fallThrough() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-gone")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-gone"))
+                .thenThrow(new AudioTrimError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "MediaKit 音频截取任务查询失败: HTTP 404"));
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("非重试 job（parentProviderTaskId=null）→ 不查父任务，执行路径与现状完全一致")
+    void nonRetryJob_skipsParentQuery() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-1");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-1")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient, never()).poll(anyString(), anyString());
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
+    void parentReuseIncompleteResult_fallThrough() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-empty")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-empty"))
+                .thenReturn(new TrimAudioTaskObservation("succeeded", null, null, null, null));
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+        verify(mediaRelay, never()).persist(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
+    void parentReusePublishFails_fallThrough() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-stale")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-stale"))
+                .thenReturn(new TrimAudioTaskObservation("succeeded",
+                        "https://volc/expired-out.mp3", 120.25, null, null));
+        when(mediaRelay.persist(anyString(), eq("9"), eq("mp3")))
+                .thenThrow(new RuntimeException("生成音频下载失败: HTTP 404"));
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
+    void parentReusePublishGuardMissed_fallThrough() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-guard")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-guard"))
+                .thenReturn(new TrimAudioTaskObservation("succeeded",
+                        "https://volc/old-out.mp3", 120.25, null, null));
+        when(mediaRelay.persist(anyString(), eq("9"), eq("mp3")))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio(
+                        "https://tos/out.mp3", "generated/9/audio/abc.mp3",
+                        "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishAudioTrimResult(any())).thenReturn(false);
+        stubSourceAsset();
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(trimAudioClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
     }
 
     // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
