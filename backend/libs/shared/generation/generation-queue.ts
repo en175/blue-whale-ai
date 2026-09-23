@@ -2,6 +2,7 @@ import { Producer } from "rocketmq-client-nodejs";
 
 import {
   AUDIO_GENERATION_TAG,
+  AUDIO_MIX_TAG,
   AUDIO_TRIM_TAG,
   GENERATION_TASK_QUEUE,
   IMAGE_CUTOUT_TAG,
@@ -152,6 +153,13 @@ export async function enqueueMediaExtractJob(
     producer,
     MEDIA_EXTRACT_TAG,
   ).enqueue(jobId, options);
+}
+
+/** 音频混合任务入队。 */
+export async function enqueueAudioMixJob(jobId: string): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqGenerationProducer(producer, AUDIO_MIX_TAG).enqueue(jobId);
 }
 
 /** 音频截取 job 入队（IKHB6N，契约 = @lib/contracts/audio-trim）：复用生成任务 topic/queue，

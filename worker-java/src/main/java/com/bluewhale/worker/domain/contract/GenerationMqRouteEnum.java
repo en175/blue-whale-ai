@@ -30,6 +30,9 @@ public enum GenerationMqRouteEnum {
     /** 视频/音频提取。 */
     MEDIA_EXTRACT("generation-task", "media_extract"),
 
+    /** 音频混合。 */
+    AUDIO_MIX("generation-task", "audio_mix"),
+
     /** 音频截取（IKHB6S，父单 IKHB08；契约 = backend/libs/contracts/audio-trim.ts，ADR-0111）。 */
     AUDIO_TRIM("generation-task", "audio_trim"),
 

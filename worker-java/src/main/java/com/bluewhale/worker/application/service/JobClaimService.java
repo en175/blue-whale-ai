@@ -253,6 +253,28 @@ public class JobClaimService {
                 candidate.getProgress() != null ? candidate.getProgress() : 0));
     }
 
+    /** audio_mix 使用独立 type 与 MQ tag，CAS 与媒体提取的单资产轮询步骤相同。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, com.bluewhale.worker.domain.contract.AudioMixContract.TAG,
+                List.of(com.bluewhale.worker.domain.contract.AudioMixContract.SOURCE));
+        if (candidate == null) return Optional.empty();
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) return Optional.empty();
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedMediaExtractJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(), workerId, candidate.getFencingToken() + 1,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0));
+    }
+
     /**
      * 领取 audio_trim 作业（IKHB6S，父单 IKHB08，附录 C 触点④）。
      * <p>

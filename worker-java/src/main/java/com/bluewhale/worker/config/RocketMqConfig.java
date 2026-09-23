@@ -130,6 +130,16 @@ public class RocketMqConfig {
         );
     }
 
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.AudioMixConsumer audioMixConsumer(
+            com.bluewhale.worker.application.processor.AudioMixJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig) {
+        return new com.bluewhale.worker.application.consumer.AudioMixConsumer(
+                processor, GenerationMqRouteEnum.AUDIO_MIX.topic(), clientConfig,
+                "generation-audio-mix-worker", workerProps.concurrency().mediaExtract());
+    }
+
     /**
      * audio_trim（音频截取，画布音频卡「截取」）consumer（IKHB6S，父单 IKHB08）。
      * <p>
@@ -522,6 +532,12 @@ public class RocketMqConfig {
                 GenerationMqRouteEnum.AUDIO_TRIM.tag());
     }
 
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioMixMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig, GenerationMqRouteEnum.AUDIO_MIX.topic(), GenerationMqRouteEnum.AUDIO_MIX.tag());
+    }
+
     /**
      * video_enhance 轮询自投生产者（IKH3VF；去字幕 videoSubtitleEraseMessageProducer 同款）。
      * <p>
@@ -621,6 +637,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer audioTrimRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_TRIM);
+    }
+
+    /** recovery 重投 audio_mix 的到点或孤儿任务。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioMixRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_MIX);
     }
 
     /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */

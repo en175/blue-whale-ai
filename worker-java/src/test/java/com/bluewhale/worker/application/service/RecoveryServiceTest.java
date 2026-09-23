@@ -37,6 +37,7 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> audioProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> extractProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> audioTrimProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> audioMixProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEnhanceProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEraseProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageCutoutProvider;
@@ -52,6 +53,7 @@ class RecoveryServiceTest {
     @Mock private GenerationMessageProducer audioProducer;
     @Mock private GenerationMessageProducer extractProducer;
     @Mock private GenerationMessageProducer audioTrimProducer;
+    @Mock private GenerationMessageProducer audioMixProducer;
     @Mock private GenerationMessageProducer imageEnhanceProducer;
     @Mock private GenerationMessageProducer imageEraseProducer;
     @Mock private GenerationMessageProducer imageCutoutProducer;
@@ -72,6 +74,7 @@ class RecoveryServiceTest {
         when(audioProvider.getIfAvailable()).thenReturn(audioProducer);
         when(extractProvider.getIfAvailable()).thenReturn(extractProducer);
         when(audioTrimProvider.getIfAvailable()).thenReturn(audioTrimProducer);
+        when(audioMixProvider.getIfAvailable()).thenReturn(audioMixProducer);
         when(imageEnhanceProvider.getIfAvailable()).thenReturn(imageEnhanceProducer);
         when(imageEraseProvider.getIfAvailable()).thenReturn(imageEraseProducer);
         when(imageCutoutProvider.getIfAvailable()).thenReturn(imageCutoutProducer);
@@ -87,6 +90,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueMediaExtractJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueAudioTrimJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueAudioMixJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEraseJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageCutoutJobIds(anyInt(), anyInt())).thenReturn(List.of());
@@ -98,7 +102,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueVideoMattingJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueVideoFrameInterpolationJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, audioTrimProvider, imageEnhanceProvider,
+                audioProvider, extractProvider, audioTrimProvider, audioMixProvider, imageEnhanceProvider,
                 imageEraseProvider, imageCutoutProvider, imageOutpaintProvider,
                 videoSubtitleEraseProvider, videoEnhanceProvider, vocalSplitProvider,
                 videoSceneSplitProvider, videoMattingProvider, videoFrameInterpolationProvider,
@@ -120,6 +124,15 @@ class RecoveryServiceTest {
     }
 
     @Test
+    void recoversDueAudioMixJobWhenFollowUpMessageWasLost() {
+        when(jobMapper.listDueAudioMixJobIds(100, MAX_AGE_MINUTES)).thenReturn(List.of(70L));
+
+        service.recover();
+
+        verify(audioMixProducer).enqueue("70", 1000L);
+    }
+
+    @Test
     @DisplayName("扫描参数：limit=100 + 窗口分钟数透传（2h 政策）")
     void passesScanParameters() {
         service.recover();
@@ -129,6 +142,7 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueAudioJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueMediaExtractJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueAudioTrimJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueAudioMixJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEnhanceJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEraseJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageCutoutJobIds(100, MAX_AGE_MINUTES);

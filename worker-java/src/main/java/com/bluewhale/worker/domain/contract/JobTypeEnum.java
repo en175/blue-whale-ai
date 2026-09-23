@@ -20,6 +20,9 @@ public enum JobTypeEnum {
     /** 视频/音频提取（tag=media_extract，Semaphore 2）。 */
     MEDIA_EXTRACT("media_extract"),
 
+    /** 音频混合。 */
+    AUDIO_MIX("audio_mix"),
+
     /** 音频截取（tag=audio_trim，画布音频卡「截取」，Semaphore 2；契约 =
      * backend/libs/contracts/audio-trim.ts，ADR-0111；消费者与处理器由 IKHB6S 按附录 C 触点注册）。 */
     AUDIO_TRIM("audio_trim"),

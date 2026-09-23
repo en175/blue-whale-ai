@@ -88,6 +88,18 @@ public class JobFinalizer {
                 "音频已提取", null));
     }
 
+    /** 音频混合成功：单槽免费音频资产；官方 result.duration 秒转毫秒。 */
+    @Transactional
+    public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[audio_mix] publishAudioMixResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "audio", input.url(), input.storageKey(), input.mime(),
+                input.size(), input.md5(), null, null,
+                input.duration() != null ? (int) Math.round(input.duration() * 1000) : null,
+                "音频混合完成", null));
+    }
+
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
     //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========

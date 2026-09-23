@@ -111,6 +111,10 @@ public class JobStateMachineService {
         return claimService.claimMediaExtract(jobId, workerId);
     }
 
+    public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
+        return claimService.claimAudioMix(jobId, workerId);
+    }
+
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
             String jobId, String workerId) {
         return claimService.claimAudioTrim(jobId, workerId);
@@ -225,6 +229,10 @@ public class JobStateMachineService {
         return finalizer.publishMediaExtractResult(
                 input.jobId(), input.projectId(), input.userId(), input.workerId(), input.fencingToken(),
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(), input.duration());
+    }
+
+    public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
+        return finalizer.publishAudioMixResult(input);
     }
 
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {

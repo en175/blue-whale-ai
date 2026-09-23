@@ -75,6 +75,7 @@ export interface AssetInternal {
  */
 export interface AssetSourceFields {
   type: string;
+  project_id: bigint;
   storage_key: string | null;
   url: string;
   mime: string | null;
@@ -657,6 +658,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       if (!row) return null;
       return {
         type: row.type,
+        project_id: row.project_id,
         storage_key: row.storage_key,
         url: row.url,
         mime: row.mime,

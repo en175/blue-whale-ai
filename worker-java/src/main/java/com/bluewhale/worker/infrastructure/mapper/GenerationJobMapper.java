@@ -819,6 +819,11 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
         return listDueJobIdsByTypeAndSources("audio_trim", List.of(), limit, maxAgeMinutes);
     }
 
+    /** 音频混合到点/孤儿：与唯一创建入口和 claim 一致，只认 dock。 */
+    default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
+    }
+
     /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
     default List<Long> listDueImageEnhanceJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("image_enhance",

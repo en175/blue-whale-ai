@@ -1082,6 +1082,38 @@ class JobStateMachineMySqlIntegrationTest {
 
     // ========== 11. publishMediaExtractResult / failMediaExtractJob ==========
 
+    @Test
+    @DisplayName("audio_mix 真库闭环：领取→保存 task_id→转存后发布自家音频资产和精确时长")
+    void audioMixTaskPersistsProviderIdentityAndLongLivedAsset() {
+        long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
+        var first = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        assertThat(first).isPresent();
+        assertThat(first.get().input().get("source_node_id")).isEqualTo("source");
+        assertThat(service.markProviderSubmitted(String.valueOf(jobId), "mix-worker",
+                first.get().fencingToken(), "provider-mix-1")).isTrue();
+        assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("provider-mix-1");
+
+        jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
+                WorkerClock.now().minusSeconds(10), jobId);
+        assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).contains(jobId);
+        var second = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        assertThat(second).isPresent();
+        assertThat(second.get().providerTaskId()).isEqualTo("provider-mix-1");
+        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+                String.valueOf(jobId), "99", "9", "mix-worker", second.get().fencingToken(),
+                "https://our-tos.example/audio.mp3", "generated/9/audio/out.mp3", "audio/mpeg",
+                500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
+
+        assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId))
+                .isEqualTo("https://our-tos.example/audio.mp3");
+        assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+                .isEqualTo(12_500);
+        assertThat(countAssets(jobId)).isEqualTo(1);
+    }
+
     @Nested
     @DisplayName("media_extract 终态")
     class MediaExtractTerminalTests {

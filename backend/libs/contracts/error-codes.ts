@@ -88,6 +88,8 @@ export const ERROR_VOCAL_SPLIT_FAILED = "vocal_split_failed";
 /** IKHB6F：音频截取（audio_trim，火山 MediaKit trim-audio）执行兜底失败码（父单 IKHB08
  *  ——网关分类链外的火山任务失败与转存失败统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_AUDIO_TRIM_FAILED = "audio_trim_failed";
+/** IKI68N：音频混合上游失败或临时结果转存失败。 */
+export const ERROR_AUDIO_MIX_FAILED = "audio_mix_failed";
 /** IKH8BH：视频场景切分（video_scene_split，火山 MediaKit segment-scenes）执行兜底失败码
  *  （父规格 IKH86V——网关分类链外的火山任务 failed 与逐段转存失败〔任一段失败即整体失败〕
  *  统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
@@ -192,6 +194,7 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_VIDEO_FRAME_INTERPOLATION_FAILED]: 1049,
   // IKHK7F 注：1049 已由 !820 插帧先行合入占用，智能抠像兜底码让号取下一空号 1050。
   [ERROR_VIDEO_MATTING_FAILED]: 1050,
+  [ERROR_AUDIO_MIX_FAILED]: 1051,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -480,6 +483,7 @@ export const ERROR_CODES: Record<number, string> = {
   1048: "音频截取失败，请重试", // audio_trim_failed（火山 MediaKit trim-audio；1046 场景切分/1047 人声分离已占，让位取 1048）
   1049: "视频插帧失败，请重试", // video_frame_interpolation_failed（火山 MediaKit video-frame-interpolation）
   1050: "智能抠像失败，请重试", // video_matting_failed（火山 MediaKit matte-portrait/greenscreen-video 双端点；1049 已由 !820 插帧占用，让位取 1050）
+  1051: "音频混合失败，请重试", // audio_mix_failed
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
