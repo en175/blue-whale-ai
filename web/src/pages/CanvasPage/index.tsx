@@ -2595,6 +2595,8 @@ export default function CanvasPage() {
   /** 最近一次完整水合所用的 doc 引用。snapshotAssets 单独更新时不得整页重水合，
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
+  /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
+  const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
 
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
   useEffect(() => {
@@ -2648,6 +2650,21 @@ export default function CanvasPage() {
         }
       }
     });
+    let restoredAudioSpeedRetry = false;
+    m.forEach((node) => {
+      const retryKey = `${currentId}:${node.id}`;
+      const retry = audioSpeedRetriesRef.current.get(retryKey);
+      if (!retry) return;
+      // 快照已接住本次终态：交还持久化数据，保留后续改名等用户编辑。
+      if (retry.patch.genStatus !== 'generating'
+        && node.data.jobId === retry.patch.jobId
+        && node.data.genStatus === retry.patch.genStatus) {
+        audioSpeedRetriesRef.current.delete(retryKey);
+        return;
+      }
+      node.data = { ...node.data, ...retry.patch };
+      restoredAudioSpeedRetry = true;
+    });
     // 商品序号从已加载节点数接续，避免新建重名
     productSeq.current = p.length;
     if (import.meta.env.DEV) {
@@ -2685,7 +2702,7 @@ export default function CanvasPage() {
     const upgradedTextNodes = contentNodes.some(
       (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
     );
-    lastSavedRef.current = upgradedTextNodes
+    lastSavedRef.current = upgradedTextNodes || restoredAudioSpeedRetry
       ? ''
       : JSON.stringify(doc.viewport) +
         serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
@@ -6561,6 +6578,8 @@ export default function CanvasPage() {
       if (speedPatch) {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
+        const retry = audioSpeedRetriesRef.current.get(`${currentId}:${nodeId}`);
+        if (retry) retry.patch = { ...retry.patch, ...speedPatch };
         patchMediaNode(nodeId, speedPatch);
         return 'terminal';
       }
@@ -8048,37 +8067,38 @@ export default function CanvasPage() {
       | AudioSpeedIdentity
       | undefined;
     if (audioSpeedIdentity?.lastInput) {
-      // 调速卡分流（IKHW5S，镜像截取）：契约无 retry 端点，重试 = 冻结 input（源素材+
-      // 倍速，贴原速省略形态原样保留）重发创建接口，不从零再选。
-      // IKI4LX：重发走 createAudioSpeedMutation（silent 传输，http 层不 toast）——失败
-      // 由 catch 统一提示一次；跨项目隔离由 nodeId 归属保证（卡只存在于原项目节点表，
-      // 切走后 patch/poll 空转），lastInput 冻结形态不变。
+      // 重试使用冻结输入；在途与终态按项目保留，水合时只恢复原卡。
       if (!currentId) {
         showToast('warn', '未选中项目，无法调速');
         return;
       }
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       const projectIdAtRetry = currentId;
-      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const retryKey = `${projectIdAtRetry}:${nodeId}`;
+      const retry: { patch: Record<string, unknown> } = {
+        patch: { genStatus: 'generating', progress: 0, errorText: '', jobId: undefined },
+      };
+      audioSpeedRetriesRef.current.set(retryKey, retry);
+      settledExtractNodesRef.current.delete(nodeId);
+      patchMediaNode(nodeId, retry.patch);
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
       createAudioSpeedMutation.mutateAsync({ projectId: currentId, payload: audioSpeedIdentity.lastInput })
         .then((created) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          // 等待期间项目已切换：新任务归属原项目，不写入新项目节点表（IKI4LX）
+          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
+          retry.patch = { ...retry.patch, jobId: created.job_id };
           if (activeProjectRef.current !== projectIdAtRetry) return;
-          patchMediaNode(nodeId, { jobId: created.job_id });
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, retry.patch);
           pollJob(nodeId, created.job_id);
         })
         .catch((e: unknown) => {
-          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
-          // 等待期间项目已切换：失败卡与错误提示都属于原项目，不写入新项目（IKI4LX）
+          if (audioSpeedRetriesRef.current.get(retryKey) !== retry) return;
+          retry.patch = { ...retry.patch, genStatus: 'failed', errorText: isApiError(e) ? e.message : audioSpeedErrorText(null) };
           if (activeProjectRef.current !== projectIdAtRetry) return;
-          patchMediaNode(nodeId, {
-            genStatus: 'failed',
-            errorText: isApiError(e) ? e.message : audioSpeedErrorText(null),
-          });
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, retry.patch);
           showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
         });
       return;
