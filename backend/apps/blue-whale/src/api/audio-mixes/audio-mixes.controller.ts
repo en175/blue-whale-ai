@@ -31,6 +31,7 @@ export class AudioMixesController {
     } catch (error) {
       logger.error(`[audio_mix] enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
       await this.audioMixes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败");
+      throw new DomainError(FAILURE_CODE, "任务入队失败");
     }
     return result;
   }
