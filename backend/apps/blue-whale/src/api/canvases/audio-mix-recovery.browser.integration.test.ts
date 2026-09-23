@@ -283,7 +283,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         expect(await result.locator("audio").count()).toBe(0);
         await page.reload();
         await result.waitFor();
-        expect(await result.innerText()).toContain("音频混合失败，请重试");
+        await vi.waitFor(async () => expect(await result.innerText()).toContain("音频混合失败，请重试"), { timeout: 15_000 });
         const retryRequests: string[] = [];
         page.on("request", (request) => {
           if (request.method() === "POST" && request.url().endsWith(`/audio-mixes/${jobId}/retry`)) retryRequests.push(request.url());
@@ -337,6 +337,95 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         await vite.close();
       }
     }, 360_000);
+
+    it("删除生成中卡后软取消由 Worker 落终态，刷新不复活", async () => {
+      const { chromium } = await import("playwright");
+      const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+      const projectId = (await projects.create("9", "IKI8AZ cancel browser")).id;
+      const source = await prisma.client.assets.create({ data: {
+        user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
+        storage_key: "uploads/9/cancel-source.wav", url: `${mediaBase}/cancel-source.wav`, duration_ms: 10_000,
+      } });
+      const other = await prisma.client.assets.create({ data: {
+        user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
+        storage_key: "uploads/9/cancel-other.wav", url: `${mediaBase}/cancel-other.wav`, duration_ms: 10_000,
+      } });
+      const sourceId = source.id.toString();
+      const otherId = other.id.toString();
+      const nodes = [
+        { id: "source", type: "mediaNode", position: { x: 280, y: 380 }, data: {
+          src: `${mediaBase}/cancel-source.wav`, mediaType: "audio", fileName: "人声.wav", assetId: sourceId, duration: 10,
+        } },
+        { id: "second", type: "mediaNode", position: { x: 820, y: 380 }, data: {
+          src: `${mediaBase}/cancel-other.wav`, mediaType: "audio", fileName: "背景声.wav", assetId: otherId, duration: 10,
+        } },
+      ];
+      const saved = await originalFetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 0.7 }) }),
+      });
+      expect(saved.status).toBe(200);
+      const created = await originalFetch(`${base}/api/projects/${projectId}/audio-mixes`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source_node_id: "source", inputs: [
+          { asset_id: sourceId, node_id: "source" }, { asset_id: otherId, node_id: "second" },
+        ], output_format: "mp3" }),
+      });
+      expect(created.status).toBe(201);
+      const jobId = (await created.json() as { data: { job_id: string } }).data.job_id;
+      const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+        open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+      } });
+      await vite.listen();
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        page.setDefaultTimeout(15_000);
+        await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+          userId: 9, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+        } }, version: 0 })));
+        const url = `${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`;
+        await page.goto(url);
+        const result = page.locator(`.react-flow__node-mediaNode[data-id="audio-mix-${jobId}"]`);
+        await result.waitFor();
+        await result.click();
+        await page.keyboard.press("Delete");
+        await vi.waitFor(async () => {
+          expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).cancel_requested_at)
+            .toBeInstanceOf(Date);
+          expect(await result.innerText()).toContain("正在取消");
+        }, { timeout: 15_000 });
+        await page.reload();
+        await vi.waitFor(async () => expect(await result.innerText()).toContain("正在取消"), { timeout: 15_000 });
+        const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
+          "-e", `IKI68N_DB_GUARD_TOKEN=${guardToken}`,
+          "-e", "IKI68N_CROSS_RUNTIME_PHASE=cancel",
+          "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${mysqlPort}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
+          "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${jobId}`,
+          "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${(mediaServer.address() as { port: number }).port}/stored/out.mp3`,
+          "-e", `IKI68N_STORAGE_PUBLIC_URL=${mediaBase}/stored/out.mp3`,
+          "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
+          "-v", `${process.env.HOME}/.m2:/root/.m2",
+          "maven:3.9-eclipse-temurin-21", "mvn", "-q",
+          "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
+        let output = "";
+        worker.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+        worker.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+        const exit = await new Promise<number | null>((done) => worker.on("close", done));
+        expect(exit, output).toBe(0);
+        const job = await originalFetch(`${base}/api/jobs/${jobId}`);
+        expect((await job.json() as { data: { status: string } }).data.status).toBe("cancelled");
+        await result.waitFor({ state: "detached", timeout: 15_000 });
+        await page.reload();
+        expect(await result.count()).toBe(0);
+        expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).canvas_card_state)
+          .toBe("removed");
+        expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(0);
+      } finally {
+        await browser.close();
+        await vite.close();
+      }
+    }, 120_000);
 
     it("同秒 101 个任务分页时，第二页 pending 结果仍由浏览器补卡", async () => {
       const { chromium } = await import("playwright");
