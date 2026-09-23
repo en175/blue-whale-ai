@@ -670,7 +670,7 @@ describe('MediaNode 视频双源与播放失败兜底', () => {
   it('渲染双 source：主源无 codecs、兜底带 avc1；无兜底时单 source', async () => {
     // 未布防（默认非选择工具）：离屏解码器同样按双源列表挂 <source>
     await renderNode('video', { data: { src: 'https://x/main.mp4', srcH264: 'https://x/fallback.mp4' } });
-    let sources = [...offscreenVideo().querySelectorAll('source')];
+    let sources: Element[] = [...offscreenVideo().querySelectorAll('source')];
     expect(sources).toHaveLength(2);
     expect(sources[0].getAttribute('src')).toBe('https://x/main.mp4');
     expect(sources[0].getAttribute('type')).toBe('video/mp4');
