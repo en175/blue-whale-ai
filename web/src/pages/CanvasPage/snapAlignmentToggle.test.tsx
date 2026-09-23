@@ -145,6 +145,13 @@ async function renderPage() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  // !834 起 CanvasToolbar 布局期用 ResizeObserver 跟随画布舞台定位；jsdom 无此 API，
+  // 按仓库先例（textNodeCard / edgesControl）补桩，本开关测试不需要真实回调
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
   localStorage.clear();
   sessionStorage.clear();
 });
@@ -152,6 +159,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 describe('画布左下角对齐吸附开关（IKGGCT T3）', () => {
