@@ -550,12 +550,21 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     const onReady = () => hydratePausedVideo(video);
     video.addEventListener('loadedmetadata', onReady);
     video.addEventListener('loadeddata', onReady);
+    // 离屏解码也要接住 error：404/编码不支持在未选中卡上同样需要兜底占位（!832 合同），
+    // 口径与选中态 onError 一致——code 1（换源主动中止）不算失败
+    const onError = () => {
+      const code = video.error?.code;
+      if (code === 1) return;
+      setVideoError({ code });
+    };
+    video.addEventListener('error', onError);
     host.appendChild(video);
     document.body.appendChild(host);
     video.load();
     return () => {
       video.removeEventListener('loadedmetadata', onReady);
       video.removeEventListener('loadeddata', onReady);
+      video.removeEventListener('error', onError);
       host.remove();
       if (videoRef.current === video) videoRef.current = null;
     };
