@@ -116,6 +116,10 @@ public class JobStateMachineService {
         return claimService.claimAudioMix(jobId, workerId);
     }
 
+    public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
+        return jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+    }
+
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
             String jobId, String workerId) {
         return claimService.claimAudioTrim(jobId, workerId);

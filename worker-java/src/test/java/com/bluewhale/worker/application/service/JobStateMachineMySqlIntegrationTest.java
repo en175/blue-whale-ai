@@ -76,6 +76,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -1106,6 +1107,34 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     // ========== 11. publishMediaExtractResult / failMediaExtractJob ==========
+
+    @Test
+    @DisplayName("audio_mix 软取消真库行为：提交前及已提交任务均落 cancelled，停止轮询且迟到结果不可发布")
+    void audioMixCancellationStopsPollingAndRejectsLateResult() {
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        NewApiMediaKitMixAudioClient gateway = mock(NewApiMediaKitMixAudioClient.class);
+        TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
+        var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(), gateway, relay, producer);
+        for (String providerTaskId : new String[] { null, "provider-already-submitted" }) {
+            long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
+                    WorkerClock.now().minusSeconds(10), 99L, "{\"provider_credential\":\"sk-frozen\"}");
+            jdbc.update("UPDATE generation_jobs SET cancel_requested_at=NOW(), provider_task_id=? WHERE id=?",
+                    providerTaskId, jobId);
+
+            processor.handle(String.valueOf(jobId));
+
+            GenerationJobEntity row = readJob(jobId);
+            assertThat(row.getStatus()).isEqualTo("cancelled");
+            assertThat(row.getNextActionAt()).isNull();
+            assertThat(row.getLeaseOwner()).isNull();
+            assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+                    String.valueOf(jobId), "99", "9", "mix-stale", row.getFencingToken(),
+                    "https://late.invalid/out.mp3", "generated/9/audio/late.mp3", "audio/mpeg",
+                    10L, "0123456789abcdef0123456789abcdef", 1.0))).isFalse();
+            assertThat(countAssets(jobId)).isZero();
+        }
+        verifyNoInteractions(gateway, relay, producer);
+    }
 
     @Test
     @DisplayName("audio_mix 恢复扫描包含创建超过两小时的待处理任务")

@@ -13,6 +13,7 @@ model assets {
   project_id        BigInt   @default(0)
   generation_job_id BigInt?
   type              String   @db.VarChar(16)
+  name              String?  @db.VarChar(255)
   storage_key       String?  @db.VarChar(512)
   content_sha256    String?  @db.VarChar(64)
   md5               String?  @db.VarChar(32)

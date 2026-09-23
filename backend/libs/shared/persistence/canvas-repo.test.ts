@@ -18,6 +18,10 @@ describe("canvas optimistic save", () => {
       },
       generation_output_slots: { updateMany: vi.fn() },
       generation_jobs: {
+        findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+          const excluded = (where.id as { notIn?: bigint[] } | undefined)?.notIn ?? [];
+          return cardState === "present" && !excluded.includes(73n) ? { id: 73n } : null;
+        }),
         updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { canvas_card_state: string } }) => {
           if (where.project_id !== 55n || where.user_id !== 9n || where.type !== "audio_mix") return { count: 0 };
           if (data.canvas_card_state === "present" && Array.isArray((where.id as { in?: bigint[] } | undefined)?.in)
@@ -36,6 +40,23 @@ describe("canvas optimistic save", () => {
     expect(cardState).toBe("removed");
     await repo.saveIfVersion("55", 5, null, card, null, { ownerId: "9", items: [] });
     expect(cardState).toBe("present");
+  });
+
+  it("无混音结果卡且无待移除状态时不执行混音任务更新", async () => {
+    const jobUpdate = vi.fn();
+    const jobFind = vi.fn().mockResolvedValue(null);
+    const tx = {
+      canvas: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
+      },
+      generation_jobs: { findFirst: jobFind, updateMany: jobUpdate },
+      generation_output_slots: { updateMany: vi.fn() },
+    };
+    const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
+    await repo.saveIfVersion("55", 3, null, "[]", null, { ownerId: "9", items: [] });
+    expect(jobFind).toHaveBeenCalledOnce();
+    expect(jobUpdate).not.toHaveBeenCalled();
   });
 
   it("Canvas 版本冲突及非规范结果卡不改变混合卡状态", async () => {

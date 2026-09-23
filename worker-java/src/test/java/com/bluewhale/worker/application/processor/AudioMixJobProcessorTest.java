@@ -53,6 +53,32 @@ class AudioMixJobProcessorTest {
     }
 
     @Test
+    void cancellationBeforeSubmitStopsUpstreamWork() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verifyNoInteractions(gateway, relay, producer);
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void cancellationAfterSubmitStopsPolling() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L)))
+                .thenReturn(false, true);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .thenReturn("provider-1");
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     void keepsPollingA20HourMixAfter25HoursButBacksOffQueries() {
         Map<String, Object> frozen = new java.util.HashMap<>(input());
         frozen.put("estimated_duration_ms", 20L * 60 * 60 * 1000);
@@ -178,6 +204,35 @@ class AudioMixJobProcessorTest {
 
         verify(stateMachine, never()).publishAudioMixResult(any());
         verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void cancellationDuringLongTransferReachesCancelledBeforeTransferReturns() throws Exception {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
+        when(stateMachine.renewAudioMixLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        CountDownLatch cancelled = new CountDownLatch(1);
+        AtomicInteger checks = new AtomicInteger();
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L))).thenAnswer(invocation -> {
+            if (checks.incrementAndGet() == 4) {
+                cancelled.countDown();
+                return true;
+            }
+            return false;
+        });
+        when(relay.persist("https://temporary/out.mp3", "9", "mp3")).thenAnswer(invocation -> {
+            assertThat(cancelled.await(2, TimeUnit.SECONDS)).isTrue();
+            return new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5");
+        });
+        var processor = new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        processor.leaseRenewIntervalMs = 20;
+
+        processor.handle("70");
+
+        verify(stateMachine, never()).publishAudioMixResult(any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
