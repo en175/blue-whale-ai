@@ -852,6 +852,9 @@ public class JobClaimService {
      * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）
      * 与 cancelRequested（软取消入口对本类型生效，处理器据它落 cancelled 终态）。
+     * <p>
+     * IKI8A0（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<ClaimedVideoFrameInterpolationJobDto> claimVideoFrameInterpolation(
             String jobId, String workerId) {
@@ -878,6 +881,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI8A0（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new ClaimedVideoFrameInterpolationJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -888,7 +899,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     // ========== 内部工具 ==========
