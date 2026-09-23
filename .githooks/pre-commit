@@ -4,6 +4,7 @@
 #   1. 禁提交生成物（dist/ target/ .next/ __pycache__/ node_modules/ 等；graphify-out/ 团队图谱除外）
 #   2. 后端改动时跑 py_compile（软提醒，不拦提交）
 #   3. 远程落后软提醒（工单分支落后 origin/master）
+#   4. 错误码改码注释对账（staged 含 error-codes.ts 时；无 node 环境跳过）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
@@ -67,5 +68,15 @@ case "$_branch" in
     fi
     ;;
 esac
+
+# ============================================================
+# 3. 错误码改码注释对账（staged 含 error-codes.ts 时）
+#    改码（让号/迁移）提交必须同步清理旧数值在该错误域的注释与测试名残留
+#    （实证：!831 调速 1051→1052 注释漏改约 30 处）。主链路仍纯 shell，
+#    仅此节调用 node；无 node 环境时跳过，不破坏零依赖承诺。
+# ============================================================
+if printf '%s\n' "$staged_files" | grep -qx 'backend/libs/contracts/error-codes.ts' && command -v node >/dev/null 2>&1; then
+  node scripts/check-error-code-drift.mjs || exit 1
+fi
 
 exit 0
