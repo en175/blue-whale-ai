@@ -25,7 +25,7 @@ const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environm
 const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|worker-java\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
-const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
+const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
 
 // 精确登记已同步的技能资产；未知的同目录脚本仍须单独分类。
 const SKILL_ASSET_FILES = new Set([
@@ -35,6 +35,13 @@ const SKILL_ASSET_FILES = new Set([
   ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".claude/skills/wizard/template.sh",
   "tests/skill-assets.test.mjs",
+  // 已精简删除的 superpowers 技能根目录脚本（删除态仍需可分类）
+  ".claude/skills/systematic-debugging/find-polluter.sh",
+  ".claude/skills/writing-skills/render-graphs.js",
+  ".superpowers/skills/systematic-debugging/find-polluter.sh",
+  ".superpowers/skills/writing-skills/render-graphs.js",
+  ".zcode/skills/systematic-debugging/find-polluter.sh",
+  ".zcode/skills/writing-skills/render-graphs.js",
 ]);
 
 function isTestFile(file) {

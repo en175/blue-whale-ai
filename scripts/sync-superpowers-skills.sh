@@ -2,7 +2,7 @@
 # Sync superpowers skills from the authoritative source (.superpowers/skills/)
 # to the two harness runtime discovery dirs: .claude/skills/ and .zcode/skills/.
 #
-# Only the 14 superpowers skill names (whitelist) are touched — existing
+# Only the 2 superpowers skill names (whitelist) are touched — existing
 # mattpocock skills in .claude/skills/ are never deleted or overwritten.
 #
 # Codex is intentionally NOT synced: it uses each user's local official plugin
@@ -20,23 +20,13 @@ ROOT="$(cd "$ROOT" && pwd)"
 SRC="$ROOT/.superpowers/skills"
 TARGETS=("$ROOT/.claude/skills" "$ROOT/.zcode/skills")
 
-# Whitelist: the 14 superpowers skill dir names. Anything else in TARGETS is
-# left untouched (protects mattpocock skills like tdd, grilling, etc.).
+# Whitelist: the 2 review skills kept from the upstream v6.4.1 snapshot
+# (the other 12 were removed on purpose; see docs/agents/superpowers.md).
+# Anything else in TARGETS is left untouched (protects mattpocock skills
+# like tdd, grilling, etc.).
 SKILLS=(
-  brainstorming
-  dispatching-parallel-agents
-  executing-plans
-  finishing-a-development-branch
   receiving-code-review
   requesting-code-review
-  subagent-driven-development
-  systematic-debugging
-  test-driven-development
-  using-git-worktrees
-  using-superpowers
-  verification-before-completion
-  writing-plans
-  writing-skills
 )
 
 DRY_RUN=0
