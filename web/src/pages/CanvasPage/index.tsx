@@ -11650,6 +11650,7 @@ export default function CanvasPage() {
         type: assetType,
         mime: file.type,
         size: file.size,
+        name: file.name,
         storage_key: presign.storage_key,
         project_id: currentId || undefined,
         ...meta,

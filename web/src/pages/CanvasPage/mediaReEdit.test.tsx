@@ -657,6 +657,7 @@ it('首页上传参考保留永久素材地址与连线，不保存已释放的 
     await renderPage({ kind: 'image', text: '上传参考生成', modelId: 'm-test', size: '2k', ratio: '1:1',
       files: [{ id: 'upload', name: 'ref.png', type: 'image', file: pngFile('ref.png'), url: 'blob:home-reference' }] });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.completeUpload).toHaveBeenCalledWith(expect.objectContaining({ name: 'ref.png' }));
     const source = flowProps.current.mediaNodes.find((n: Node) => n.data.assetId === 'new-ref') as Node;
     expect(source.data.src).toBe('https://assets/ref.png');
     expect(flowProps.current.edges.some((e: { source: string }) => e.source === source.id)).toBe(true);
