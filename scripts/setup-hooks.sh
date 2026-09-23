@@ -20,7 +20,7 @@ echo ""
 git config core.hooksPath .githooks
 echo "✅ git hooks 已配置：core.hooksPath = .githooks（仅本项目）"
 echo "   生效的 hook："
-echo "   - pre-commit：禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒（允许用户本地 master commit）"
+echo "   - pre-commit：禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒 + 错误码改码注释对账（staged 含 error-codes.ts 时，允许用户本地 master commit）"
 echo "   - commit-msg：Conventional Commits 规范校验"
 echo "   - pre-push：禁直推 master/main + 首次 push 的非结构化中文分支名拦截（普通任务分支落后仍可 push）"
 echo "     运行依赖：Python 3（macOS/Linux 使用 python3；Windows Git Bash 使用 py -3）"

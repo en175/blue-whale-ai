@@ -100,6 +100,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
 | 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 写入任务必须先创建 task worktree；仅散文文档（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)）及经 Git 确认已忽略的根 `CLAUDE.local.md` / `.codex/config.toml`（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）可直改 master，后两者不得提交。 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
+| 错误码改码注释对账 | 🔴 硬挡 | pre-commit：staged 含 `backend/libs/contracts/error-codes.ts` 时，`scripts/check-error-code-drift.mjs` 对改码项（如让号 1051→1052）全仓 grep 旧数值在该错误域代码注释与测试名的残留，命中拦截；行内含新数值的迁移说明放行；无 node 环境跳过 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `pnpm --filter @blue-whale/web lint`，失败只警告不拦 |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | PR 前目标基线校验 | 🔴 发布门禁 | 普通任务分支即使落后也允许日常 push；创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
