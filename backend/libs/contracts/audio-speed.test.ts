@@ -217,10 +217,10 @@ describe("input schema（冻结后形态复核）", () => {
 });
 
 describe("执行面兜底码（error-codes.ts 注册）", () => {
-  it("audio_speed_failed → 1051（1045-1050 已由家族占用取下一空号，落码前全仓 grep 1051 零命中），文案表同步", () => {
+  it("audio_speed_failed → 1052（1051 已由音频混合占用），文案表同步", () => {
     expect(ERROR_AUDIO_SPEED_FAILED).toBe("audio_speed_failed");
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_SPEED_FAILED]).toBe(1051);
-    expect(ERROR_CODES[1051]).toBeTruthy();
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_SPEED_FAILED]).toBe(1052);
+    expect(ERROR_CODES[1052]).toBe("音频调速失败，请重试");
     // 家族相邻码不冲突（号位唯一）。
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_TRIM_FAILED]).toBe(1048);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1050);
