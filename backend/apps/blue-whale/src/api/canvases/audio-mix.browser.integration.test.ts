@@ -1,5 +1,11 @@
 import "reflect-metadata";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import ffmpegPath from "ffmpeg-static";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
@@ -28,8 +34,8 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   closeGenerationQueue: vi.fn(async () => {}),
 }));
 
-/** 浏览器→真实业务 API→隔离库；对象存储的可读性检查和供应商执行为本地替身。 */
-describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !== "1")(
+/** 浏览器→Nest→隔离 MySQL→Java Worker→本地 MediaKit/存储替身→浏览器播放。 */
+describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
   "IKI68W browser audio mix",
   () => {
     const previousDatabase = process.env.DATABASE_URL;
@@ -41,6 +47,16 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
     let mediaServer: Server;
     let mediaBase = "";
     let rejectObject = false;
+    let mysqlId = "";
+    let mysqlPort = 0;
+    let temp = "";
+    let storedOutput: Buffer | undefined;
+    let expectedOutput: Buffer;
+    const servedOutputHashes: string[] = [];
+    const repo = resolve(import.meta.dirname, "../../../../../..");
+    const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
+    const guardToken = randomBytes(16).toString("hex");
+    const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
     // 有效 1 秒 PCM WAV，Chromium 可真实解码，供输入播放和成功结果播放/下载。
     const wav = (() => {
@@ -55,8 +71,43 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
     })();
 
     beforeAll(async () => {
-      process.env.DATABASE_URL = process.env.IKI68W_DATABASE_URL;
-      mediaServer = createServer((_request, response) => {
+      temp = mkdtempSync(join(tmpdir(), "iki68w-browser-"));
+      if (!ffmpegPath) throw new Error("ffmpeg-static 缺少可执行文件");
+      execFileSync(ffmpegPath, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-codec:a", "libmp3lame", "-q:a", "9", join(temp, "result.mp3")]);
+      expectedOutput = readFileSync(join(temp, "result.mp3"));
+      const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+      mysqlId = execFileSync("docker", ["run", "-d", "--rm", "-e", "MYSQL_ROOT_PASSWORD=root",
+        "-e", `MYSQL_DATABASE=${databaseName}`, "-e", "MYSQL_USER=test", "-e", "MYSQL_PASSWORD=test",
+        "-p", "127.0.0.1::3306", "-v", `${schema}:/docker-entrypoint-initdb.d/init.sql:ro`, "mysql:8.0"],
+      { encoding: "utf8" }).trim();
+      mysqlPort = Number(execFileSync("docker", ["port", mysqlId, "3306/tcp"], { encoding: "utf8" }).trim().split(":").at(-1));
+      let ready = false;
+      for (let attempt = 0; attempt < 60 && !ready; attempt++) {
+        try { execFileSync("docker", ["exec", mysqlId, "mysqladmin", "ping", "-h127.0.0.1", "-utest", "-ptest", "--silent"], { stdio: "ignore" }); ready = true; }
+        catch { await new Promise((done) => setTimeout(done, 500)); }
+      }
+      expect(ready).toBe(true);
+      process.env.DATABASE_URL = `mysql://test:test@127.0.0.1:${mysqlPort}/${databaseName}`;
+      const additiveSql = readFileSync(join(repo,
+        "backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql"));
+      execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
+        { input: additiveSql, stdio: ["pipe", "pipe", "pipe"] });
+      execFileSync("docker", ["exec", mysqlId, "mysql", "-utest", "-ptest", databaseName,
+        "-e", `CREATE TABLE iki68n_test_guard (guard_token CHAR(32) PRIMARY KEY); INSERT INTO iki68n_test_guard VALUES ('${guardToken}')`],
+      { stdio: "pipe" });
+      mediaServer = createServer((request, response) => {
+        if (request.url === "/stored/out.mp3") {
+          if (request.method === "PUT") {
+            const chunks: Buffer[] = [];
+            request.on("data", (chunk: Buffer) => chunks.push(chunk));
+            request.on("end", () => { storedOutput = Buffer.concat(chunks); response.writeHead(200).end(); });
+          } else if (storedOutput) {
+            response.writeHead(200, { "content-type": "audio/mpeg", "content-length": storedOutput.length,
+              "access-control-allow-origin": "*" }).end(storedOutput);
+          } else response.writeHead(404).end();
+          return;
+        }
         response.writeHead(200, { "content-type": "audio/wav", "content-length": wav.length, "access-control-allow-origin": "*" });
         response.end(wav);
       });
@@ -97,8 +148,10 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
       app.use(json({ limit: "16mb" }));
       app.setGlobalPrefix("api");
-      app.use((request: { user: unknown }, _response: unknown, next: () => void) => {
-        request.user = { userId: "987654" }; next();
+      app.use((request: { user: unknown; headers: Record<string, string> }, _response: unknown, next: () => void) => {
+        request.user = { userId: "9" };
+        request.headers.authorization = "Bearer sk-test";
+        next();
       });
       await app.listen(0, "127.0.0.1");
       base = await app.getUrl();
@@ -109,18 +162,20 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
       await new Promise<void>((resolve) => mediaServer?.close(() => resolve()));
       await prisma?.client.$disconnect();
       vi.unstubAllGlobals();
+      if (mysqlId) execFileSync("docker", ["stop", mysqlId], { stdio: "ignore" });
+      if (temp) rmSync(temp, { recursive: true, force: true });
       if (previousDatabase === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previousDatabase;
-    });
+    }, 90_000);
 
     it("拒绝保留编辑；受理后持久化双来源；刷新恢复；成功同卡可播放下载", async () => {
       const { chromium } = await import("playwright");
       const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
-      const projectId = (await projects.create("987654", "IKI68W browser")).id;
+      const projectId = (await projects.create("9", "IKI68W browser")).id;
       const createAsset = async (name: string, durationMs: number) => {
         const row = await prisma.client.assets.create({ data: {
-          user_id: 987654n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
-          storage_key: `uploads/987654/${name}.wav`, url: `${mediaBase}/${name}.wav`,
+          user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
+          storage_key: `uploads/9/${name}.wav`, url: `${mediaBase}/${name}.wav`,
           duration_ms: durationMs, size: BigInt(wav.length),
         } });
         return row.id.toString();
@@ -147,16 +202,23 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
       const vite = await createVite({ root: `${process.cwd()}/web`, plugins: [{
         name: "isolated-audio-object-read",
         configureServer(server) {
-          server.middlewares.use("/__tos-fetch", (_request, response) => {
-            response.writeHead(200, { "content-type": "audio/wav", "content-length": wav.length });
-            response.end(wav);
+          server.middlewares.use("/__tos-fetch", (request, response) => {
+            const url = new URL(request.url ?? "", "http://localhost").searchParams.get("url");
+            if (url === `${mediaBase}/stored/out.mp3` && storedOutput) {
+              servedOutputHashes.push(hash(storedOutput));
+              response.writeHead(200, { "content-type": "audio/mpeg", "content-length": storedOutput.length });
+              response.end(storedOutput);
+            } else if (url?.startsWith(`${mediaBase}/`) && url.endsWith(".wav")) {
+              response.writeHead(200, { "content-type": "audio/wav", "content-length": wav.length });
+              response.end(wav);
+            } else response.writeHead(404).end();
           });
         },
       }], server: {
         open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
       } });
       await vite.listen();
-      const proxyCheck = await originalFetch(`${vite.resolvedUrls!.local[0]}__tos-fetch?url=${encodeURIComponent(`${mediaBase}/output.wav`)}`);
+      const proxyCheck = await originalFetch(`${vite.resolvedUrls!.local[0]}__tos-fetch?url=${encodeURIComponent(`${mediaBase}/first.wav`)}`);
       expect(proxyCheck.status, await proxyCheck.text()).toBe(200);
       expect(proxyCheck.headers.get("content-type")).toContain("audio/wav");
       const browser = await chromium.launch({ headless: true });
@@ -166,7 +228,7 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
         page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/audio-mixes')) mixRequests.push(request.url()); });
         page.setDefaultTimeout(12_000);
         await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
-          userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+          userId: 9, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
         } }, version: 0 })));
         await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
         const source = page.locator('.react-flow__node-mediaNode[data-id="source"]');
@@ -189,12 +251,16 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
         expect(await second.locator("audio").count()).toBe(1);
 
         rejectObject = true;
+        const rejectedResponse = page.waitForResponse((response) => response.request().method() === "POST"
+          && response.url().includes("/audio-mixes"));
         await send.click();
+        expect((await (await rejectedResponse).json() as { code: number }).code).not.toBe(200);
         await vi.waitFor(async () => expect(mixRequests, (await page.locator('body').innerText()).slice(0, 700)).toHaveLength(1), { timeout: 10_000 });
         expect(await page.locator('[data-testid="audio-mix-send-bar"]').count()).toBe(1);
         expect(await page.locator('.react-flow__node-mediaNode[data-id^="audio-mix-"]').count()).toBe(0);
         expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId), type: "audio_mix" } })).toBe(0);
         rejectObject = false;
+        await vi.waitFor(async () => expect(await send.isEnabled()).toBe(true), { timeout: 10_000 });
         await send.click();
         let jobId = "";
         await vi.waitFor(async () => {
@@ -220,25 +286,45 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
         await page.reload();
         await result.waitFor();
         expect(await result.locator("audio").count()).toBe(0);
-
-        const output = await prisma.client.assets.create({ data: {
-          user_id: 987654n, project_id: BigInt(projectId), type: "audio", source: "generated", status: "normal",
-          url: `${mediaBase}/output.wav`, duration_ms: 42_750, size: BigInt(wav.length),
-        } });
-        await prisma.client.generation_jobs.update({ where: { id: BigInt(jobId) }, data: {
-          status: "succeeded", progress: 100, output_asset_ids: [output.id.toString()],
-        } });
+        const browserAudio: string[] = [];
+        page.on("response", (response) => {
+          if (response.status() === 200 && response.url().includes("/__tos-fetch")
+              && response.url().includes(encodeURIComponent(`${mediaBase}/stored/out.mp3`))) {
+            browserAudio.push(response.url());
+          }
+        });
+        const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
+          "-e", `IKI68N_DB_GUARD_TOKEN=${guardToken}`,
+          "-e", "IKI68N_CROSS_RUNTIME_PHASE=succeed",
+          "-e", "IKI68N_CROSS_RUNTIME_AUDIO_FILE=/fixture/result.mp3",
+          "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${mysqlPort}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
+          "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${jobId}`,
+          "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${(mediaServer.address() as { port: number }).port}/stored/out.mp3`,
+          "-e", `IKI68N_STORAGE_PUBLIC_URL=${mediaBase}/stored/out.mp3`,
+          "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
+          "-v", `${temp}:/fixture:ro`, "-v", `${process.env.HOME}/.m2:/root/.m2`,
+          "maven:3.9-eclipse-temurin-21", "mvn", "-q",
+          "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
+        let workerOutput = "";
+        worker.stdout.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });
+        worker.stderr.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });
+        const workerExit = await new Promise<number | null>((done) => worker.on("close", done));
+        expect(workerExit, workerOutput).toBe(0);
+        expect(storedOutput).toEqual(expectedOutput);
+        const publicAudio = await originalFetch(`${mediaBase}/stored/out.mp3`);
+        expect(publicAudio.status).toBe(200);
+        expect(hash(Buffer.from(await publicAudio.arrayBuffer()))).toBe(hash(storedOutput!));
         const status = await (await fetch(`${base}/api/jobs/${jobId}`)).json() as { data: { asset: { duration?: number } } };
-        expect(status.data.asset.duration).toBe(42.75);
+        expect(status.data.asset.duration).toBe(37.25);
         const player = result.locator("audio");
         await player.waitFor({ state: "attached", timeout: 15_000 });
-        expect(await player.getAttribute("src")).toContain("output.wav");
+        expect(await player.getAttribute("src")).toContain("stored%2Fout.mp3");
         expect(await result.innerText()).toContain("混合结果.mp3");
         expect(await source.locator("audio").count()).toBe(1);
         expect(await second.locator("audio").count()).toBe(1);
         await vi.waitFor(async () => {
           const saved = await readCanvas();
-          expect((JSON.parse(saved.nodes) as Array<{ id: string; data: { duration?: number } }>).find((node) => node.id === `audio-mix-${jobId}`)?.data.duration).toBe(42.75);
+          expect((JSON.parse(saved.nodes) as Array<{ id: string; data: { duration?: number } }>).find((node) => node.id === `audio-mix-${jobId}`)?.data.duration).toBe(37.25);
         }, { timeout: 10_000 });
         await page.reload();
         await result.locator("audio").waitFor({ state: "attached" });
@@ -247,20 +333,24 @@ describe.skipIf(!process.env.IKI68W_DATABASE_URL || process.env.IKI68W_BROWSER !
           if (audio.paused || audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) throw new Error("混合结果无法播放");
           audio.pause();
         });
+        await vi.waitFor(() => expect(browserAudio.length).toBeGreaterThan(0), { timeout: 10_000 });
+        expect(servedOutputHashes).toContain(hash(storedOutput!));
         await result.click();
         const download = page.waitForEvent("download");
         await page.locator('button[title="下载"]').click();
-        expect((await download).suggestedFilename()).toMatch(/^混合结果\./);
+        const savedDownload = await download;
+        expect(savedDownload.suggestedFilename()).toMatch(/^混合结果\./);
+        expect(hash(readFileSync(await savedDownload.path()))).toBe(hash(storedOutput!));
         await second.click();
         expect(await second.getAttribute("class")).toContain("selected");
         expect(await source.getAttribute("class")).not.toContain("selected");
         expect(await result.getAttribute("class")).not.toContain("selected");
         const saved = await readCanvas();
-        expect((JSON.parse(saved.nodes) as Array<{ id: string; data: { duration?: number } }>).find((node) => node.id === `audio-mix-${jobId}`)?.data.duration).toBe(42.75);
+        expect((JSON.parse(saved.nodes) as Array<{ id: string; data: { duration?: number } }>).find((node) => node.id === `audio-mix-${jobId}`)?.data.duration).toBe(37.25);
       } finally {
         await browser.close();
         await vite.close();
       }
-    }, 120_000);
+    }, 240_000);
   },
 );

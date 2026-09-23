@@ -28,6 +28,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -102,7 +104,13 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         boolean failPhase = "fail".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"));
         String storageUploadUrl = target.storageUploadUrl();
         String storagePublicUrl = target.storagePublicUrl();
-        byte[] audio = "ID3-cross-runtime-output".getBytes(StandardCharsets.UTF_8);
+        String audioFile = System.getenv("IKI68N_CROSS_RUNTIME_AUDIO_FILE");
+        if (audioFile != null && !"/fixture/result.mp3".equals(audioFile)) {
+            throw new IllegalStateException("跨端测试音频只允许只读挂载的 /fixture/result.mp3");
+        }
+        byte[] audio = audioFile == null
+                ? "ID3-cross-runtime-output".getBytes(StandardCharsets.UTF_8)
+                : Files.readAllBytes(Path.of(audioFile));
         var submitted = new AtomicReference<String>();
         var base = new AtomicReference<String>();
         String oldFence = System.getenv("IKI68N_OLD_FENCE");
