@@ -7,6 +7,14 @@ export const AUDIO_MIX_EDGE_ORIGIN = 'audio-mix';
 export const AUDIO_MIX_FORMATS = AUDIO_MIX_OUTPUT_FORMATS;
 export type AudioMixFormat = AudioMixCreate['output_format'];
 
+/** 编辑期选材。assetId 是跨入口身份；nodeId 仅表示用户确实选了画布卡。 */
+export interface AudioMixInputSelection {
+  assetId: string;
+  nodeId?: string;
+  name: string;
+  duration?: number | null;
+}
+
 export function audioMixSourceError(node: Node | undefined): string | null {
   if (!node || node.type !== 'mediaNode' || node.data?.mediaType !== 'audio') return '仅支持已完成的音频卡';
   return baseSourceError(node);

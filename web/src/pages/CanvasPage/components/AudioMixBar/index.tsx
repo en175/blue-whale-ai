@@ -1,18 +1,24 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
 import { ArrowUp, ChevronDown, Plus, X, Zap } from 'lucide-react';
 import type { Node } from '@xyflow/react';
+import { assetPageQueryOptions } from '@/api/assets';
+import { isApiError } from '@/api/http';
+import { uploadAssetFile } from '@/utils/upload';
 import type { FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { AUDIO_MIX_FORMATS, type AudioMixFormat } from '../../audioMix';
-import { cardNameOfNode } from '../../mediaRefs';
+import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
+import { cardNameOfNode, readAssetId } from '../../mediaRefs';
 import bar from '../AudioTrimBar/index.module.css';
 import styles from './index.module.css';
 
 interface AudioMixBarProps {
   source: Node;
   candidates: Node[];
-  selectedNodeId: string | null;
-  onSelect: (nodeId: string | null) => void;
+  selected: AudioMixInputSelection[];
+  onAdd: (input: AudioMixInputSelection) => void;
+  onRemove: (assetId: string) => void;
+  projectId: string;
   format: AudioMixFormat;
   onFormatChange: (format: AudioMixFormat) => void;
   onSend: () => void;
@@ -21,25 +27,84 @@ interface AudioMixBarProps {
   anchor: FollowDialogAnchor | null;
 }
 
+type SourceTab = 'canvas' | 'library' | 'upload';
+
+function AudioMixLibrary({ selectedIds, full, submitting, onAdd }: {
+  selectedIds: Set<string>;
+  full: boolean;
+  submitting: boolean;
+  onAdd: (input: AudioMixInputSelection) => void;
+}) {
+  const library = useInfiniteQuery({ ...assetPageQueryOptions('audio', 30), staleTime: 0 });
+  return <>
+    {library.isPending && <div className={styles.hint}>载入音频素材…</div>}
+    {library.isError && <div className={styles.hint}>素材库加载失败，请重试</div>}
+    {library.data?.pages.flatMap((page) => page.records).filter((asset) => asset.type === 'audio').map((asset) => (
+      <button key={String(asset.id)} type="button" role="menuitem" className={bar.formatMenuItem}
+        data-testid={`audio-mix-library-${asset.id}`}
+        disabled={!asset.url || selectedIds.has(String(asset.id)) || full || submitting}
+        onClick={() => onAdd({ assetId: String(asset.id), name: `音频 #${asset.id}`, duration: asset.duration })}>
+        音频 #{asset.id}
+      </button>
+    ))}
+    {library.hasNextPage && <button type="button" className={bar.formatMenuItem}
+      disabled={library.isFetchingNextPage} onClick={() => { void library.fetchNextPage(); }}>
+      {library.isFetchingNextPage ? '载入中…' : '加载更多'}
+    </button>}
+  </>;
+}
+
 export default function AudioMixBar({
-  source, candidates, selectedNodeId, onSelect, format, onFormatChange,
+  source, candidates, selected, onAdd, onRemove, projectId, format, onFormatChange,
   onSend, onClose, submitting, anchor,
 }: AudioMixBarProps) {
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
+  const [tab, setTab] = useState<SourceTab>('canvas');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const formatWrapRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   useDismissOnOutside([
     { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: formatMenuOpen, ref: formatWrapRef, dismiss: () => setFormatMenuOpen(false) },
   ]);
-  const selected = candidates.find((node) => node.id === selectedNodeId);
-  const durations = [source, ...(selected ? [selected] : [])]
-    .map((node) => node.data?.duration);
-  const duration = durations.every((value) => typeof value === 'number' && value > 0)
-    ? `${Math.round(Math.max(...durations as number[]))}s`
+
+  const sourceAssetId = readAssetId(source.data);
+  const selectedIds = new Set<string>([...(sourceAssetId ? [sourceAssetId] : []), ...selected.map((item) => item.assetId)]);
+  const full = selected.length >= 99;
+  const durations = [source.data?.duration, ...selected.map((item) => item.duration)];
+  const duration = durations.every((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+    ? String(Math.round(Math.max(...durations as number[]))) + 's'
     : '待确定';
-  const disabled = submitting || !selected;
+  const upload = useMutation({
+    mutationFn: (file: File) => uploadAssetFile(file, { projectId }),
+  });
+  const disabled = submitting || upload.isPending || selected.length === 0;
+
+  const uploadFile = (file: File) => {
+    if (submitting || upload.isPending || full) return;
+    setUploadError(null);
+    void upload.mutateAsync(file).then((asset) => {
+      if (!mountedRef.current) return;
+      if (asset.type !== 'audio' || asset.status !== 'ready' || !asset.asset_id || !asset.url) {
+        setUploadError('上传音频尚未入库，请重试');
+        return;
+      }
+      if (selectedIds.has(String(asset.asset_id))) {
+        setUploadError('此音频已在清单中');
+        return;
+      }
+      onAdd({ assetId: String(asset.asset_id), name: file.name, duration: asset.duration });
+    }).catch((error: unknown) => {
+      if (!mountedRef.current) return;
+      if (!isApiError(error)) setUploadError(error instanceof Error ? error.message : '上传失败，请重试');
+    });
+  };
 
   return (
     <div
@@ -57,26 +122,60 @@ export default function AudioMixBar({
         <button type="button" className={bar.formatTrigger} data-testid="audio-mix-add"
           aria-haspopup="menu" aria-expanded={sourceMenuOpen || undefined}
           disabled={submitting} onClick={() => setSourceMenuOpen((open) => !open)}>
-          <Plus size={13} strokeWidth={2} /> 音频 {selected ? 2 : 1}/100
+          <Plus size={13} strokeWidth={2} /> 音频 {selected.length + 1}/100
         </button>
         {sourceMenuOpen && (
           <div className={`${bar.formatMenu} ${styles.sourceMenu}`} role="menu" data-testid="audio-mix-source-menu">
-            <div className={styles.sourceRow}>{cardNameOfNode(source)} <span>固定</span></div>
-            {selected && (
-              <button type="button" role="menuitem" className={bar.formatMenuItem}
-                data-testid="audio-mix-remove" onClick={() => onSelect(null)}>
-                {cardNameOfNode(selected)} <X size={12} />
-              </button>
-            )}
-            <div className={styles.menuLabel}>画布</div>
-            {candidates.map((node) => (
-              <button key={node.id} type="button" role="menuitem" className={bar.formatMenuItem}
-                data-testid={`audio-mix-candidate-${node.id}`}
-                disabled={node.id === selectedNodeId || submitting}
-                onClick={() => { onSelect(node.id); setSourceMenuOpen(false); }}>
-                {cardNameOfNode(node)}
-              </button>
-            ))}
+            <div className={styles.selectedList} data-testid="audio-mix-selected-list">
+              <div className={styles.sourceRow}>{cardNameOfNode(source)} <span>固定</span></div>
+              {selected.map((item) => (
+                <div key={item.assetId} className={styles.sourceRow}>
+                  <span title={item.name}>{item.name}</span>
+                  <button type="button" className={styles.removeBtn} data-testid={`audio-mix-remove-${item.assetId}`}
+                    aria-label={`移除 ${item.name}`} disabled={submitting} onClick={() => onRemove(item.assetId)}><X size={12} /></button>
+                </div>
+              ))}
+            </div>
+            <div className={styles.tabs} role="tablist" aria-label="音频来源">
+              {([['canvas', '画布'], ['library', '素材库'], ['upload', '上传']] as const).map(([key, label]) => (
+                <button key={key} type="button" role="tab" data-testid={`audio-mix-tab-${key}`}
+                  aria-selected={tab === key} className={tab === key ? styles.activeTab : styles.tab}
+                  onClick={() => setTab(key)}>{label}</button>
+              ))}
+            </div>
+            <div className={styles.candidateList} role="tabpanel">
+              {tab === 'canvas' && candidates.map((node) => {
+                const assetId = readAssetId(node.data);
+                return (
+                  <button key={node.id} type="button" role="menuitem" className={bar.formatMenuItem}
+                    data-testid={`audio-mix-candidate-${node.id}`}
+                    disabled={!!audioMixSourceError(node) || !assetId || selectedIds.has(assetId) || full || submitting}
+                    onClick={() => {
+                      if (!assetId) return;
+                      onAdd({ assetId: assetId!, nodeId: node.id, name: cardNameOfNode(node) || '未命名音频',
+                        duration: typeof node.data?.duration === 'number' ? node.data.duration : null });
+                    }}>
+                    {cardNameOfNode(node)}
+                  </button>
+                );
+              })}
+              {tab === 'library' && <AudioMixLibrary
+                selectedIds={selectedIds} full={full} submitting={submitting} onAdd={onAdd}
+              />}
+              {tab === 'upload' && <>
+                <label className={styles.uploadLabel}>
+                  {upload.isPending ? '正在上传…' : '选择本地音频'}
+                  <input type="file" accept="audio/*" data-testid="audio-mix-upload-input"
+                    disabled={submitting || upload.isPending || full}
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = '';
+                      if (file) uploadFile(file);
+                    }} />
+                </label>
+                {uploadError && <div className={styles.hint} role="alert">{uploadError}</div>}
+              </>}
+            </div>
           </div>
         )}
       </div>
@@ -104,7 +203,7 @@ export default function AudioMixBar({
         <Zap size={11} fill="currentColor" strokeWidth={0} />0 本期免费
       </span>
       <button type="button" className={`${bar.sendBtn} ${!disabled ? bar.sendBtnActive : ''}`}
-        data-testid="audio-mix-send" disabled={disabled} title={selected ? '生成混合音频' : '请添加另一段音频'}
+        data-testid="audio-mix-send" disabled={disabled} title={disabled ? '请添加另一段音频' : '生成混合音频'}
         onClick={onSend}>
         <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
       </button>

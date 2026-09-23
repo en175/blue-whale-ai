@@ -95,6 +95,7 @@ import {
   findAudioMixPosition,
   isAudioMixNodeId,
   type AudioMixFormat,
+  type AudioMixInputSelection,
 } from './audioMix';
 import AudioMixBar from './components/AudioMixBar';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
@@ -709,7 +710,7 @@ export default function CanvasPage() {
   /** 截取发送中（创建请求飞行期防重复提交，口径同 audioVideoSplitSubmitting） */
   const [audioTrimSubmitting, setAudioTrimSubmitting] = useState(false);
   const [audioMixSourceNodeId, setAudioMixSourceNodeId] = useState<string | null>(null);
-  const [audioMixSelectedNodeId, setAudioMixSelectedNodeId] = useState<string | null>(null);
+  const [audioMixSelectedInputs, setAudioMixSelectedInputs] = useState<AudioMixInputSelection[]>([]);
   const [audioMixFormat, setAudioMixFormat] = useState<AudioMixFormat>('mp3');
   const [audioMixSubmitting, setAudioMixSubmitting] = useState(false);
   const audioMixInFlightRef = useRef(false);
@@ -1664,7 +1665,8 @@ export default function CanvasPage() {
     ? mediaNodes.find((n) => n.id === audioMixSourceNodeId) ?? null
     : null;
   const audioMixCandidates = audioMixSourceNode
-    ? mediaNodes.filter((node) => audioMixCandidate(audioMixSourceNode, node))
+    ? mediaNodes.filter((node) => node.id !== audioMixSourceNode.id
+      && node.type === 'mediaNode' && node.data?.mediaType === 'audio')
     : [];
   const audioMixSendBarAnchor = (() => {
     if (!audioMixSourceNode || wrapperSize.width <= 0) return null;
@@ -8736,7 +8738,7 @@ export default function CanvasPage() {
 
   const exitAudioMixEditing = () => {
     setAudioMixSourceNodeId(null);
-    setAudioMixSelectedNodeId(null);
+    setAudioMixSelectedInputs([]);
     setAudioMixFormat('mp3');
     setAudioMixSubmitting(false);
   };
@@ -8882,7 +8884,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((item) => item.id === id);
     if (audioMixSourceError(node)) return;
     runToolSessionEntry('audioMix', () => {
-      setAudioMixSelectedNodeId(null);
+      setAudioMixSelectedInputs([]);
       setAudioMixFormat('mp3');
       setAudioMixSourceNodeId(id);
     });
@@ -9381,21 +9383,48 @@ export default function CanvasPage() {
     return true;
   };
 
-  const handleAudioMixSend = (): void => {
-    if (audioMixInFlightRef.current || !currentId || !audioMixSourceNodeId || !audioMixSelectedNodeId) return;
+  const handleAudioMixAdd = (input: AudioMixInputSelection): void => {
     const source = mediaNodesRef.current.find((node) => node.id === audioMixSourceNodeId);
-    const second = mediaNodesRef.current.find((node) => node.id === audioMixSelectedNodeId);
-    if (!source || !second || audioMixSourceError(source) || !audioMixCandidate(source, second)) {
+    if (!source || audioMixSourceError(source) || !input.assetId) return;
+    if (input.nodeId) {
+      const node = mediaNodesRef.current.find((item) => item.id === input.nodeId);
+      if (!node || !audioMixCandidate(source, node) || readAssetId(node.data) !== input.assetId) return;
+    }
+    setAudioMixSelectedInputs((current) => {
+      const sourceAssetId = readAssetId(source.data);
+      if (current.length >= 99 || input.assetId === sourceAssetId
+        || current.some((item) => item.assetId === input.assetId)) return current;
+      return [...current, input];
+    });
+  };
+
+  const handleAudioMixSend = (): void => {
+    if (audioMixInFlightRef.current || !currentId || !audioMixSourceNodeId) return;
+    const source = mediaNodesRef.current.find((node) => node.id === audioMixSourceNodeId);
+    const selected = audioMixSelectedInputs;
+    if (!source || audioMixSourceError(source) || selected.length < 1 || selected.length > 99) {
       showToast('warn', '所选音频不可用，请重新选择');
       return;
     }
     const sourceAssetId = readAssetId(source.data)!;
-    const secondAssetId = readAssetId(second.data)!;
+    const assetIds = [sourceAssetId, ...selected.map((item) => item.assetId)];
+    const canvasInputsValid = selected.every((input) => {
+      if (!input.nodeId) return true;
+      const node = mediaNodesRef.current.find((item) => item.id === input.nodeId);
+      return node && audioMixCandidate(source, node) && readAssetId(node.data) === input.assetId;
+    });
+    if (new Set(assetIds).size !== assetIds.length || !canvasInputsValid) {
+      showToast('warn', '所选音频不可用，请重新选择');
+      return;
+    }
     const payload: AudioMixCreate = {
       source_node_id: source.id,
       inputs: [
         { asset_id: sourceAssetId, node_id: source.id },
-        { asset_id: secondAssetId, node_id: second.id },
+        ...selected.map((input) => ({
+          asset_id: input.assetId,
+          ...(input.nodeId ? { node_id: input.nodeId } : {}),
+        })),
       ],
       output_format: audioMixFormat,
     };
@@ -9422,8 +9451,11 @@ export default function CanvasPage() {
         mediaNodesRef.current = next;
         setMediaNodes(next);
         const liveNodeIds = new Set(current.map((node) => node.id));
-        if (liveNodeIds.has(source.id)) addCanvasEdge(source.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
-        if (liveNodeIds.has(second.id)) addCanvasEdge(second.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
+        for (const input of payload.inputs) {
+          if (input.node_id && liveNodeIds.has(input.node_id)) {
+            addCanvasEdge(input.node_id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
+          }
+        }
         try {
           if (!(await flushCanvasSave(projectId))) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
         } catch {
@@ -12061,8 +12093,10 @@ export default function CanvasPage() {
           <AudioMixBar
             source={audioMixSourceNode}
             candidates={audioMixCandidates}
-            selectedNodeId={audioMixSelectedNodeId}
-            onSelect={setAudioMixSelectedNodeId}
+            selected={audioMixSelectedInputs}
+            onAdd={handleAudioMixAdd}
+            onRemove={(assetId) => setAudioMixSelectedInputs((items) => items.filter((item) => item.assetId !== assetId))}
+            projectId={currentId ?? ''}
             format={audioMixFormat}
             onFormatChange={setAudioMixFormat}
             onSend={handleAudioMixSend}

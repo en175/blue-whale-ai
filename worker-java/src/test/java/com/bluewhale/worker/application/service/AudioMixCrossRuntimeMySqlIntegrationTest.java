@@ -32,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -169,8 +170,15 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             var json = new com.fasterxml.jackson.databind.ObjectMapper();
             var frozen = json.readTree(readJob(Long.parseLong(jobId)).getInput()).path("inputs");
             var outbound = json.readTree(submitted.get());
-            assertThat(outbound.path("audio_urls")).isEqualTo(json.valueToTree(List.of(
-                    frozen.get(0).path("url").asText(), frozen.get(1).path("url").asText())));
+            String expectedCountValue = System.getenv("IKI68N_CROSS_RUNTIME_EXPECTED_INPUT_COUNT");
+            int expectedCount = expectedCountValue == null ? 2 : Integer.parseInt(expectedCountValue);
+            assertThat(expectedCount).isIn(2, 4);
+            assertThat(frozen.size()).isEqualTo(expectedCount);
+            List<String> expectedUrls = IntStream.range(0, expectedCount)
+                    .mapToObj(index -> frozen.get(index).path("url").asText())
+                    .toList();
+            assertThat(expectedUrls).allSatisfy(url -> assertThat(url).isNotBlank());
+            assertThat(outbound.path("audio_urls")).isEqualTo(json.valueToTree(expectedUrls));
             assertThat(outbound.path("format").asText()).isEqualTo("mp3");
             verify(producer).enqueue(jobId, 5_000L);
             jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
