@@ -405,7 +405,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
           "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${(mediaServer.address() as { port: number }).port}/stored/out.mp3`,
           "-e", `IKI68N_STORAGE_PUBLIC_URL=${mediaBase}/stored/out.mp3`,
           "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
-          "-v", `${process.env.HOME}/.m2:/root/.m2",
+          "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
         let output = "";
