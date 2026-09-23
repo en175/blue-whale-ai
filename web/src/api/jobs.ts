@@ -365,10 +365,14 @@ export function createAudioTrim(
 }
 
 /** 业务 API 接受后返回任务 id；画布结果卡在受理后创建。 */
-export function createAudioMix(projectId: string, payload: AudioMixCreate): Promise<AudioTrimCreatedData> {
+export function createAudioMix(
+  projectId: string,
+  payload: AudioMixCreate,
+  init?: { silent?: boolean },
+): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
-    { method: 'POST', body: JSON.stringify(payload) },
+    { method: 'POST', body: JSON.stringify(payload), ...(init?.silent === true ? { silent: true } : {}) },
   );
 }
 

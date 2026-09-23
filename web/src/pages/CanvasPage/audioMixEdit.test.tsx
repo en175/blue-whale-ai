@@ -4,7 +4,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
@@ -16,7 +16,7 @@ vi.mock('./components/AgentPanel', () => ({
 }));
 
 /** FlowCanvas 打桩：透出 props 供测试读取节点与触发画布回调 */
-type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }> };
+type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void };
 const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
 vi.mock('./components/Canvas', () => ({
   default: (props: FlowProps) => {
@@ -30,7 +30,8 @@ vi.mock('./components/CanvasToolbar', () => ({
 }));
 
 vi.mock('./components/CanvasHeader', () => ({
-  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
+  default: ({ currentProjectId, onSelectProject }: { currentProjectId: string; onSelectProject: (id: string) => void }) =>
+    createElement('button', { 'data-testid': 'switch-p2', onClick: () => onSelectProject('p2') }, currentProjectId),
 }));
 
 vi.mock('./components/ProjectSelector', () => ({
@@ -181,6 +182,12 @@ function seedDoc() {
 
 let root: Root;
 let container: HTMLDivElement;
+let navigateTo: ReturnType<typeof useNavigate>;
+
+function NavigationProbe() {
+  navigateTo = useNavigate();
+  return null;
+}
 
 async function renderPage() {
   container = document.createElement('div');
@@ -191,7 +198,7 @@ async function renderPage() {
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(NavigationProbe), createElement(CanvasPage)),
       ),
     );
   });
@@ -237,6 +244,7 @@ beforeEach(() => {
   sessionStorage.clear();
   seedDoc();
   apiMocks.createAudioMix.mockReset();
+  apiMocks.fetchProjects.mockResolvedValue([{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
 });
 
 afterEach(async () => {
@@ -281,7 +289,7 @@ describe('IKI68W 画布双音频混合', () => {
       source_node_id: 'a1',
       inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
       output_format: 'mp3',
-    });
+    }, { silent: true });
     const placeholder = nodeById('audio-mix-j1')!;
     expect(placeholder.data).toMatchObject({ fileName: '混合结果.mp3', genStatus: 'generating', src: '' });
     expect(placeholder.position.y).toBeGreaterThan(0);
@@ -301,6 +309,75 @@ describe('IKI68W 画布双音频混合', () => {
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
     expect(nodeById('audio-mix-j1')).toBeUndefined();
     expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('创建请求及结果卡落盘期间禁止切换项目', async () => {
+    let resolveCreate!: (value: { job_id: string; status: string }) => void;
+    apiMocks.createAudioMix.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await click('audio-mix-send');
+    await click('switch-p2');
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+    expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+  });
+
+  it('服务端已受理但结果卡尚未保存时仍禁止切换项目', async () => {
+    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    let resolveSave!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
+    apiMocks.saveCanvasDoc.mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
+    await click('audio-mix-send');
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled());
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    await click('switch-p2');
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+    await act(async () => { resolveSave({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }); });
+  });
+
+  it('请求期间地址栏跳到另一项目也不把结果卡写进另一画布', async () => {
+    let resolveCreate!: (value: { job_id: string; status: string }) => void;
+    apiMocks.createAudioMix.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await click('audio-mix-send');
+    await act(async () => { navigateTo('/canvas?project=p2'); });
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(bodyBtn('switch-p2').textContent).toBe('p1');
+  });
+
+  it('请求期间删除来源节点后只给仍存活的节点建边，提交快照保持原样', async () => {
+    let resolveCreate!: (value: { job_id: string; status: string }) => void;
+    apiMocks.createAudioMix.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await click('audio-mix-send');
+    await act(async () => { flowProps.current.onDeleteNode?.(['a2']); });
+    expect(nodeById('a2')).toBeUndefined();
+    await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
+    expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', expect.objectContaining({
+      inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
+    }), { silent: true });
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(flowProps.current.edges.filter((edge) => edge.target === 'audio-mix-j1').map((edge) => edge.source)).toEqual(['a1']);
   });
 
   it('成功沿用同卡并回填服务端权威时长', async () => {

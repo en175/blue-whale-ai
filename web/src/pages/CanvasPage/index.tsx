@@ -1943,6 +1943,10 @@ export default function CanvasPage() {
     mutationFn: (vars: { projectId: string; payload: CreateFrameInterpolationPayload }) =>
       createFrameInterpolation(vars.projectId, vars.payload, { silent: true }),
   });
+  const createAudioMixMutation = useMutation({
+    mutationFn: (vars: { projectId: string; payload: AudioMixCreate }) =>
+      createAudioMix(vars.projectId, vars.payload, { silent: true }),
+  });
   const applyingRef = useRef(false);
   const updateGenerateRef = useRef<(nodeId: string) => void>(() => {});
   const onUpdateGenerate = useCallback((nodeId: string) => {
@@ -2050,8 +2054,13 @@ export default function CanvasPage() {
   /** 地址栏改 query（含后退）时切回对应画布 */
   useEffect(() => {
     const fromQuery = readCanvasIdFromSearch(new URLSearchParams(location.search));
+    if (fromQuery && audioMixInFlightRef.current && activeProjectRef.current && fromQuery !== activeProjectRef.current) {
+      navigate({ pathname: location.pathname, search: canvasLocationSearch(new URLSearchParams(location.search), activeProjectRef.current) },
+        { replace: true, state: location.state });
+      return;
+    }
     if (fromQuery) setCurrentId(fromQuery);
-  }, [location.search]);
+  }, [location.search, location.pathname, location.state, navigate]);
 
   /** 当前画布写入 ?project=，刷新后回到同一张画布；保留其它 query 与 location.state */
   useEffect(() => {
@@ -5155,7 +5164,7 @@ export default function CanvasPage() {
   /** 项目切换/新建前的落盘闸门（IKDMQQ Q19）：先把未防抖编辑落盘；保存失败停留当前项目并提示重试。
    *  顺带修复「带未保存编辑切换项目丢失修改」的旧缺口。 */
   const ensureSavedBeforeProjectSwitch = async (): Promise<boolean> => {
-    if (submittingNodeId) {
+    if (submittingNodeId || audioMixInFlightRef.current) {
       showToast('warn', '正在保存并提交，请稍候');
       return false;
     }
@@ -9390,7 +9399,8 @@ export default function CanvasPage() {
     setAudioMixSubmitting(true);
     void (async () => {
       try {
-        const created = await createAudioMix(projectId, payload);
+        const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
+        if (activeProjectRef.current !== projectId) return;
         exitAudioMixEditing();
         const nodeId = audioMixNodeId(created.job_id);
         const occupied = [
@@ -9406,8 +9416,9 @@ export default function CanvasPage() {
         const next = current.some((node) => node.id === nodeId) ? current : [...current, placeholder];
         mediaNodesRef.current = next;
         setMediaNodes(next);
-        addCanvasEdge(source.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
-        addCanvasEdge(second.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
+        const liveNodeIds = new Set(current.map((node) => node.id));
+        if (liveNodeIds.has(source.id)) addCanvasEdge(source.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
+        if (liveNodeIds.has(second.id)) addCanvasEdge(second.id, nodeId, undefined, { origin: AUDIO_MIX_EDGE_ORIGIN });
         try {
           if (!(await flushCanvasSave(projectId))) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
         } catch {

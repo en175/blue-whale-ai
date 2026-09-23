@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
+  createAudioMix,
   createAudioTrim,
   createFrameInterpolation,
   createMediaExtraction,
@@ -41,6 +42,31 @@ describe('createMediaExtraction', () => {
       source_asset_id: '3985',
       output_format: 'mp3',
     });
+  });
+});
+
+describe('createAudioMix', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('提交冻结双源，静默传输错误交由画布提示一次', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 1028, msg: '混合任务创建失败', data: null }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const payload = {
+      source_node_id: 'source',
+      inputs: [{ asset_id: '8', node_id: 'source' }, { asset_id: '6', node_id: 'second' }],
+      output_format: 'mp3' as const,
+    };
+
+    await expect(createAudioMix('project/1', payload, { silent: true })).rejects.toThrow('混合任务创建失败');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/audio-mixes');
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(payload);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 
