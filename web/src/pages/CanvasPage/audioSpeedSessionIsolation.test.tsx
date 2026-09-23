@@ -206,4 +206,51 @@ describe('IKI6EB 调速会话响应归属', () => {
     expect(sendBtn()!.disabled).toBe(false);
     expect(mediaNode('audio-speed-old-a').data.jobId).toBe('old-a');
   });
+
+  // IKI61O：工单背景的字面场景——同项目同卡「发送在途 → X 关旧会话 → 同卡重开新会话」
+  it('同卡重开：迟到成功不关新会话、不改新倍速，旧任务照常建卡收尾', async () => {
+    let resolveOld!: (value: { job_id: string; status: string }) => void;
+    let resolveNew!: (value: { job_id: string; status: string }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    apiMocks.createAudioSpeed.mockImplementationOnce(() => new Promise((resolve) => { resolveNew = resolve; }));
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-speed-close"]')!.click(); });
+    // 同一张卡重开新会话并调到另一倍速
+    await enterSpeed('a1');
+    await dragSliderTo(600);
+    await act(async () => { resolveOld({ job_id: 'old-a', status: 'queued' }); });
+    await flush();
+    // 新会话不被旧响应关闭、新倍速不被复位；旧任务卡与来源边照常收尾
+    expect(sendBar()).not.toBeNull();
+    expect(sendBtn()!.disabled).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('[data-testid="audio-speed-slider"]')!.value).toBe('600');
+    expect(mediaNode('audio-speed-old-a').data.jobId).toBe('old-a');
+    expect(edges().some((edge) => edge.source === 'a1' && edge.target === 'audio-speed-old-a')).toBe(true);
+    // 新会话自身发送闭环不受影响
+    await clickSend();
+    await act(async () => { resolveNew({ job_id: 'new-a', status: 'queued' }); });
+    await flush();
+    expect(sendBar()).toBeNull();
+    expect(mediaNode('audio-speed-new-a').data.jobId).toBe('new-a');
+  });
+
+  it('同卡重开：迟到失败不向新会话弹旧错误、不动新会话提交锁', async () => {
+    let rejectOld!: (error: Error) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="audio-speed-close"]')!.click(); });
+    await enterSpeed('a1');
+    await dragSliderTo(600);
+    await act(async () => { rejectOld(new Error('old request failed')); });
+    await flush();
+    expect(sendBar()).not.toBeNull();
+    expect(sendBtn()!.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('音频调速任务创建失败');
+  });
 });
