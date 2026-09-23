@@ -6356,6 +6356,10 @@ export default function CanvasPage() {
       pendingDeleteJobNodesRef.current.delete(nodeId);
       locallyRemovedGenerationNodesRef.current.add(nodeId);
       stopJobPolling(nodeId, jobTimersRef.current);
+      if (isAudioMixNodeId(nodeId)) {
+        removeAudioMixCardNow(nodeId);
+        return;
+      }
       setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
     };
     if (((node.data ?? {}) as Record<string, unknown>).sceneSplit != null) {
@@ -6448,6 +6452,16 @@ export default function CanvasPage() {
     if (isAudioMixNodeId(nodeId)) {
       const mixPatch = audioMixTerminalPatch(detail);
       if (mixPatch) {
+        if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+          if (detail.status === 'failed' || detail.status === 'cancelled') {
+            removeWithPendingDelete();
+            return 'terminal';
+          }
+          if (detail.status === 'succeeded') {
+            pendingDeleteJobNodesRef.current.delete(nodeId);
+            showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
+          }
+        }
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');

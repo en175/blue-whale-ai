@@ -70,7 +70,7 @@ describe("createJobRepo.listByUser", () => {
         is_delete: false,
         id: { in: [1n, 2n] },
       },
-      orderBy: { gmt_create: "desc" },
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
       skip: 0,
       take: 3,
     });

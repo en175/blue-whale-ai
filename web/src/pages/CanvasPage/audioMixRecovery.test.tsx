@@ -26,6 +26,43 @@ beforeEach(() => {
 afterEach(async () => { await unmountPage(); vi.clearAllMocks(); });
 
 describe('IKI697 同卡失败重试', () => {
+  it.each(['failed', 'cancelled'] as const)('删除意图等待中的任务到达 %s 终态后移除卡与来源线', async (terminal) => {
+    seed([{ id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { src: 'https://audio.test/source.mp3', mediaType: 'audio', assetId: '1' } },
+    { ...failedCard, data: { ...failedCard.data, genStatus: 'generating', errorText: undefined } }]);
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: '73', status: 'queued', progress: 0, asset: null })
+      .mockResolvedValueOnce({ job_id: '73', status: 'processing', progress: 20, asset: null })
+      .mockResolvedValueOnce({ job_id: '73', status: terminal, progress: 20, asset: null });
+    await renderPage();
+    await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledTimes(1));
+    await act(async () => { flowProps.current.onDeleteNode(['audio-mix-73']); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
+    expect(mediaNodes().map((node) => node.id)).toContain('audio-mix-73');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2700)); });
+    expect(mediaNodes().map((node) => node.id)).not.toContain('audio-mix-73');
+    expect(flowProps.current.edges.some((edge: { target: string }) => edge.target === 'audio-mix-73')).toBe(false);
+    const saves = apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[string, { nodes: Array<{ id: string }> }]>;
+    expect(saves.at(-1)?.[1].nodes.map((node) => node.id)).not.toContain('audio-mix-73');
+  }, 8000);
+
+  it('删除等待期间任务抢先成功时保留原卡与产物', async () => {
+    seed([{ id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { src: 'https://audio.test/source.mp3', mediaType: 'audio', assetId: '1' } },
+    { ...failedCard, data: { ...failedCard.data, genStatus: 'generating', errorText: undefined } }]);
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({ job_id: '73', status: 'queued', progress: 0, asset: null })
+      .mockResolvedValueOnce({ job_id: '73', status: 'processing', progress: 20, asset: null })
+      .mockResolvedValueOnce({ job_id: '73', status: 'succeeded', progress: 100,
+        asset: { id: '88', url: 'https://audio.test/result.mp3', type: 'audio' } });
+    await renderPage();
+    await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledTimes(1));
+    await act(async () => { flowProps.current.onDeleteNode(['audio-mix-73']); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2700)); });
+    expect(mediaNodes().find((node) => node.id === 'audio-mix-73')?.data).toMatchObject({
+      genStatus: undefined, src: 'https://audio.test/result.mp3', assetId: '88',
+    });
+    expect(flowProps.current.edges.some((edge: { target: string }) => edge.target === 'audio-mix-73')).toBe(true);
+  }, 8000);
+
   it('POST 已受理但卡尚未落盘时，重新打开画布从任务列表补卡和冻结来源线', async () => {
     seed([
       { id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },

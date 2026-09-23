@@ -333,5 +333,60 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         await vite.close();
       }
     }, 360_000);
+
+    it("同秒 101 个任务分页时，第二页 pending 结果仍由浏览器补卡", async () => {
+      const { chromium } = await import("playwright");
+      const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+      const projectId = (await projects.create("9", "IKI697 same-second jobs")).id;
+      const sameSecond = new Date("2026-09-23T12:00:00Z");
+      await prisma.client.generation_jobs.createMany({ data: Array.from({ length: 101 }, () => ({
+        user_id: 9n, project_id: BigInt(projectId), type: "audio_mix", source: "media_kit",
+        status: "queued", progress: 0, canvas_card_state: "removed", gmt_create: sameSecond,
+        input: { source_node_id: "source", inputs: [], output_format: "mp3" },
+      })) });
+      const rows = await prisma.client.generation_jobs.findMany({
+        where: { project_id: BigInt(projectId), type: "audio_mix" }, orderBy: { id: "desc" }, select: { id: true },
+      });
+      const lastId = rows.at(-1)!.id;
+      await prisma.client.generation_jobs.update({ where: { id: lastId }, data: { canvas_card_state: "pending" } });
+      const save = await originalFetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: "[]", edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      });
+      expect(save.status).toBe(200);
+      const readPage = async (page: number) => {
+        const response = await originalFetch(`${base}/api/jobs?projectId=${projectId}&type=audio_mix&size=100&page=${page}`);
+        return (await response.json() as { data: { records: Array<{ job_id: string }> } }).data.records;
+      };
+      const first = await readPage(1);
+      const second = await readPage(2);
+      expect(first).toHaveLength(100);
+      expect(second).toHaveLength(1);
+      expect([...first, ...second].map((job) => job.job_id)).toEqual(rows.map((row) => row.id.toString()));
+      expect(second[0]?.job_id).toBe(lastId.toString());
+      const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+        open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+      } });
+      await vite.listen();
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        page.setDefaultTimeout(15_000);
+        await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+          userId: 9, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+        } }, version: 0 })));
+        await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+        await page.locator(`.react-flow__node-mediaNode[data-id="audio-mix-${lastId}"]`).waitFor();
+        await vi.waitFor(async () => {
+          const response = await originalFetch(`${base}/api/canvases?projectId=${projectId}`);
+          const doc = (await response.json() as { data: { nodes: string } }).data;
+          expect((JSON.parse(doc.nodes) as Array<{ id: string }>).map((node) => node.id)).toEqual([`audio-mix-${lastId}`]);
+          expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: lastId } })).canvas_card_state).toBe("present");
+        }, { timeout: 15_000 });
+      } finally {
+        await browser.close();
+        await vite.close();
+      }
+    }, 60_000);
   },
 );

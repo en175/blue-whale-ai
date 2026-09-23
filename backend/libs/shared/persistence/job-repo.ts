@@ -126,7 +126,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         prisma.generation_jobs.count({ where }),
         prisma.generation_jobs.findMany({
           where,
-          orderBy: { gmt_create: "desc" },
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
           take: filter.size,
         }),
