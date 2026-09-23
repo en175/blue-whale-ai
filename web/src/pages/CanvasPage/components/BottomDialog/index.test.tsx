@@ -187,3 +187,45 @@ describe('BottomDialog 宽高比图标（IKGBTV）', () => {
     expect(icon.style.height).toBe('16px');
   });
 });
+
+/* IKI61N：时长滑杆键盘操作——原生 range 命中画布公共 Esc 链的 INPUT 豁免会被吞键，
+   Esc 在组件内自闭环（直调 onClose + 阻断冒泡），不改公共 helper 与公共 Esc 链；
+   方向键步进语义与 min/max/step 原生属性一致，由原生行为承担不拦截。 */
+describe('IKI61N 时长滑杆键盘操作（Esc 关闭对话框，组件内自闭环）', () => {
+  async function openDurationSlider() {
+    const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('16:9'),
+    );
+    expect(configBtn).toBeTruthy();
+    await act(async () => {
+      configBtn?.click();
+    });
+    const slider = mountNode.querySelector<HTMLInputElement>('input[type="range"]')!;
+    expect(slider).toBeTruthy();
+    return slider;
+  }
+
+  it('时长滑杆聚焦按 Esc：派发 onClose 关闭对话框并阻断冒泡（公共 Esc 链不二次处理）', async () => {
+    const onClose = await renderDialog();
+    const slider = await openDurationSlider();
+    const windowSpy = vi.fn();
+    window.addEventListener('keydown', windowSpy);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(async () => {
+      slider.dispatchEvent(event);
+    });
+    window.removeEventListener('keydown', windowSpy);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(windowSpy).not.toHaveBeenCalled();
+  });
+
+  it('时长滑杆原生属性与模型能力一致（min/max/step 4~15 step 1，方向键由原生承担）', async () => {
+    await renderDialog();
+    const slider = await openDurationSlider();
+    expect(slider.min).toBe('4');
+    expect(slider.max).toBe('15');
+    expect(slider.step).toBe('1');
+    expect(slider.value).toBe('10');
+  });
+});
