@@ -96,6 +96,35 @@ class TosAudioMediaRelayMixTest {
     }
 
     @Test
+    void oversizedAudioIsRejectedMidStreamBeforeTouchingStorage() throws Exception {
+        byte[] chunk = new byte[64 * 1024];
+        java.util.Arrays.fill(chunk, (byte) 9);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/flood.wav", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "audio/wav");
+            // 声明远大于注入上限的体积；写到一半客户端即中止，服务端异常可忽略
+            exchange.sendResponseHeaders(200, 64L * 1024 * 1024);
+            try (var output = exchange.getResponseBody()) {
+                while (true) output.write(chunk);
+            } catch (java.io.IOException ignored) {
+                // 客户端断开后写出失败，属预期
+            }
+        });
+        server.start();
+        try {
+            TOSV2 client = mock(TOSV2.class);
+            var relay = new TosAudioMediaRelay(client, "our-bucket", "tos.example", 1024);
+            assertThatThrownBy(() -> relay.persist("http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/flood.wav", "9", "wav"))
+                    .isInstanceOf(com.bluewhale.worker.domain.error.MediaExtractError.class)
+                    .hasMessageContaining("转存上限");
+            verifyNoInteractions(client);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void expiredTemporaryAudioCannotCreateAnAsset() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/expired", exchange -> {

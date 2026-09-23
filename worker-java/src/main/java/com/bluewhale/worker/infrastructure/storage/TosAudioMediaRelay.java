@@ -42,7 +42,8 @@ import java.util.concurrent.TimeUnit;
  * 单格式特例，本件随任务格式扩展。
  * <p>
  * 大产物先流式落临时文件，再用文件流上传；不会把供应商产物整份载入堆，也不将输入建议大小
- * 擅自变成用户可见的硬上限。磁盘、下载或 TOS 上传失败均由调用方记录失败终态。
+ * 擅自变成用户可见的硬上限（异常流的磁盘防护上限见 {@link #MAX_RELAY_BYTES}）。磁盘、下载
+ * 或 TOS 上传失败均由调用方记录失败终态。
  */
 public class TosAudioMediaRelay {
 
@@ -57,15 +58,30 @@ public class TosAudioMediaRelay {
     /** 转存 key 的产物目录段（视频先例 "video" 的音频同构位）。 */
     static final String KEY_TYPE_SEGMENT = "audio";
 
+    /**
+     * 转存字节上限（10 GiB，对齐供应商「单文件不建议超过 10 GB」）。这是防异常/劫持上游在
+     * 6h watchdog 窗口内无限流写满 worker 磁盘的内部护栏，不是用户可见的产品容量限制——
+     * 后者按 IKI5ZC Further Notes 须先修订规格与 UI 才能引入。IKI696 移除旧 1 GiB 上限
+     * 是为放行超大合法产物（>1 GiB 用例见 TosAudioMediaRelayMixTest），本护栏不收紧该语义。
+     */
+    static final long MAX_RELAY_BYTES = 10L << 30;
+
     private final TOSV2 client;
     private final String bucket;
     private final String endpoint;
     private final HttpClient httpClient;
+    private final long maxRelayBytes;
 
     public TosAudioMediaRelay(TOSV2 client, String bucket, String endpoint) {
+        this(client, bucket, endpoint, MAX_RELAY_BYTES);
+    }
+
+    /** 测试注入小上限用；生产路径走 {@link #TosAudioMediaRelay(TOSV2, String, String)}。 */
+    TosAudioMediaRelay(TOSV2 client, String bucket, String endpoint, long maxRelayBytes) {
         this.client = client;
         this.bucket = bucket;
         this.endpoint = endpoint;
+        this.maxRelayBytes = maxRelayBytes;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -136,7 +152,7 @@ public class TosAudioMediaRelay {
                         throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
                                 "生成结果不是音频");
                     }
-                    size = Files.copy(body, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    size = copyWithLimit(body, tempFile);
                 } finally {
                     timeout.cancel(false);
                 }
@@ -187,6 +203,28 @@ public class TosAudioMediaRelay {
             case "wav" -> "audio/wav";
             default -> "audio/mpeg";
         };
+    }
+
+    /** 流式落盘并累计字节数，超过 {@code maxRelayBytes} 立即中止（超限写满磁盘的护栏）。 */
+    private long copyWithLimit(InputStream body, Path target) throws IOException {
+        try (var out = Files.newOutputStream(target,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                java.nio.file.StandardOpenOption.WRITE)) {
+            byte[] buffer = new byte[64 * 1024];
+            long total = 0;
+            int read;
+            while ((read = body.read(buffer)) != -1) {
+                total += read;
+                if (total > maxRelayBytes) {
+                    throw new MediaExtractError(MediaExtractError.MEDIA_EXTRACT_PROVIDER_FAILED,
+                            "生成音频超过转存上限 " + (maxRelayBytes >> 30) + " GiB，已中止下载（收到 "
+                                    + total + " 字节）");
+                }
+                out.write(buffer, 0, read);
+            }
+            return total;
+        }
     }
 
     /** 转存结果（视频先例 StoredVideo 形态的音频同构，md5 供 assets.md5 落库 IKGS73）。 */
