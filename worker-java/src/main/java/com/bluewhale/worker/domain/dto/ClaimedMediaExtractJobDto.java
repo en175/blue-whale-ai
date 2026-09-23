@@ -38,7 +38,7 @@ public record ClaimedMediaExtractJobDto(
          * 防重复上游费用（非重试 job 恒 null，不查父任务）。
          */
         String parentProviderTaskId
-) {
+) implements ParentReuseClaim {
     public ClaimedMediaExtractJobDto(String id, String projectId, String userId, Map<String, Object> input,
                                      String providerTaskId, String workerId, long fencingToken,
                                      int pollCount, int progress) {
@@ -51,5 +51,22 @@ public record ClaimedMediaExtractJobDto(
                                      int pollCount, int progress, LocalDateTime createdAt) {
         this(id, projectId, userId, input, providerTaskId, workerId, fencingToken,
                 pollCount, progress, createdAt, null, null);
+    }
+
+    /** 批一线形态（IKI89P）：progress 后直接 parentProviderTaskId（无 createdAt/deadline 投影）。 */
+    public ClaimedMediaExtractJobDto(String id, String projectId, String userId, Map<String, Object> input,
+                                     String providerTaskId, String workerId, long fencingToken,
+                                     int pollCount, int progress, String parentProviderTaskId) {
+        this(id, projectId, userId, input, providerTaskId, workerId, fencingToken,
+                pollCount, progress, null, null, parentProviderTaskId);
+    }
+
+    /** IKI696 线形态：progress 后 createdAt + executionDeadlineAt（无收割投影）。 */
+    public ClaimedMediaExtractJobDto(String id, String projectId, String userId, Map<String, Object> input,
+                                     String providerTaskId, String workerId, long fencingToken,
+                                     int pollCount, int progress,
+                                     LocalDateTime createdAt, LocalDateTime executionDeadlineAt) {
+        this(id, projectId, userId, input, providerTaskId, workerId, fencingToken,
+                pollCount, progress, createdAt, executionDeadlineAt, null);
     }
 }

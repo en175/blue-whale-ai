@@ -37,4 +37,4 @@ public record ClaimedVocalSplitJobDto(
          * 则复用旧结果发布，防重复上游费用（非重试 job 恒 null，不查父任务）。
          */
         String parentProviderTaskId
-) {}
+) implements ParentReuseClaim {}

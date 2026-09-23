@@ -269,12 +269,7 @@ public class JobClaimService {
         }
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89P（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new ClaimedMediaExtractJobDto(
                 candidate.getId().toString(),
@@ -328,12 +323,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89Q（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto(
                 candidate.getId().toString(),
@@ -689,12 +679,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89U（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new ClaimedVideoSubtitleEraseJobDto(
                 candidate.getId().toString(),
@@ -744,12 +729,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89S（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
                 candidate.getId().toString(),
@@ -798,12 +778,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89R（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new ClaimedVocalSplitJobDto(
                 candidate.getId().toString(),
@@ -853,12 +828,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89T（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto(
                 candidate.getId().toString(),
@@ -909,12 +879,7 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
 
-        // IKI89Z（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto(
                 candidate.getId().toString(),
@@ -968,10 +933,7 @@ public class JobClaimService {
 
         // IKI8A0（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
         // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = null;
-        if (candidate.getRetryOfJobId() != null) {
-            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
-        }
+        String parentProviderTaskId = projectParentProviderTaskId(candidate);
 
         return Optional.of(new ClaimedVideoFrameInterpolationJobDto(
                 candidate.getId().toString(),
@@ -985,6 +947,18 @@ public class JobClaimService {
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
                 parentProviderTaskId));
+    }
+
+    /**
+     * IKI8GN 收敛：8 个 MediaKit 家族 claim 的父任务投影共用段——retry job（retry_of_job_id
+     * 非空）二次查询父任务的 provider_task_id（视频 IKEA26 先例同款 mapper 方法，SQL 零
+     * 新增）；非重试 job 返回 null，不查父任务。
+     */
+    private String projectParentProviderTaskId(GenerationJobEntity candidate) {
+        if (candidate.getRetryOfJobId() == null) {
+            return null;
+        }
+        return jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
     }
 
     // ========== 内部工具 ==========

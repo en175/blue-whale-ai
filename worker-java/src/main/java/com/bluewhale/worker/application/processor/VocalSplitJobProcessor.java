@@ -184,8 +184,12 @@ public class VocalSplitJobProcessor implements JobProcessor {
      */
     private void submitPhase(ClaimedVocalSplitJobDto claim, String providerToken) {
         // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
-            if (tryReuseParentResult(claim, providerToken)) {
+            if (ParentResultReuse.tryReuseParentResult(VocalSplitContract.TAG, claim, providerToken,
+                    separateVoiceClient::poll,
+                    this::vocalSplitResultIncomplete,
+                    this::publishResult)) {
                 return;
             }
         }
@@ -243,58 +247,20 @@ public class VocalSplitJobProcessor implements JobProcessor {
     }
 
     /**
-     * IKI89R（ADR-0114）：重试收割（parent-reuse，视频 IKEA26 先例推广）。
-     * <p>
-     * 超窗判失败后上游任务仍在跑；用户手动重试时先查父任务的上游任务：已成功且轨数组
-     * 齐全（对齐本家族轮询相成功口径，2/3 轨 URL 齐全）→ 不重新提交，直接以父任务
-     * observation 走既有 {@link #publishResult} 发布（资产入库、槽位回填、项目事件与
-     * 正常完成同型，不新建 cost 记录）。父任务失败 / 不存在 / 查询异常 / 收割发布失败
-     * 四种形态一律返回 false，回退 submit 相正常重新提交，无第三种行为分支。
+     * 收割齐全判定（IKI8GN 家族差异参数）：轨数组齐全口径对齐轮询相成功判据——scene 轨序内
+     * 每轨 URL 都在（客户端只装非空 URL，containsKey 即齐全；缺任一轨 = 不齐全，不部分复用）。
+     * 返回 null=齐全；非空=未齐原因短句（嵌进共享骨架「未命中(父任务{})」日志）。
      */
-    private boolean tryReuseParentResult(ClaimedVocalSplitJobDto claim, String providerToken) {
-        SeparateVoiceTaskObservation observation;
-        try {
-            observation = separateVoiceClient.poll(providerToken, claim.parentProviderTaskId());
-        } catch (Exception error) {
-            // 不存在与查询异常同路处理（视频先例 D6 同款：当不存在，重新 submit）
-            log.warn("[vocal_split] 重试收割查父任务失败 jobId={} parentTask={} err={}，按不存在处理重新提交",
-                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
-            return false;
-        }
-
-        if (!"succeeded".equals(observation.status())) {
-            log.info("[vocal_split] 重试收割未命中(父任务未成功) jobId={} parentTask={} status={}，回退重新提交",
-                    claim.id(), claim.parentProviderTaskId(), observation.status());
-            return false;
-        }
-        // 轨数组齐全判定对齐轮询相成功口径：scene 轨序内每轨 URL 都在（客户端只装非空
-        // URL，containsKey 即齐全；缺任一轨 = 不齐全，不部分复用）
-        List<String> trackOrder = resolveTrackOrder(claim);
+    private String vocalSplitResultIncomplete(ClaimedVocalSplitJobDto claim,
+                                              SeparateVoiceTaskObservation observation) {
         Map<String, String> trackUrls = observation.trackUrls() != null
                 ? observation.trackUrls() : Map.of();
-        for (String trackType : trackOrder) {
+        for (String trackType : resolveTrackOrder(claim)) {
             if (!trackUrls.containsKey(trackType)) {
-                log.info("[vocal_split] 重试收割未命中(父任务轨数组不齐) jobId={} parentTask={} 缺{}轨，回退重新提交",
-                        claim.id(), claim.parentProviderTaskId(), trackType);
-                return false;
+                return "轨数组不齐，缺" + trackType + "轨";
             }
         }
-
-        log.info("[vocal_split] 重试收割命中 jobId={} parentTask={}，复用旧结果发布（不重新提交）",
-                claim.id(), claim.parentProviderTaskId());
-        try {
-            boolean published = publishResult(claim, observation);
-            if (!published) {
-                log.warn("[vocal_split] 重试收割发布未命中守卫 jobId={}（stale worker 或已终态），回退重新提交",
-                        claim.id());
-            }
-            return published;
-        } catch (Exception error) {
-            // 结果取回/发布失败（如结果 URL 已超 24h 失效下载 404）→ 回退重新提交兜底
-            log.warn("[vocal_split] 重试收割发布失败 jobId={} parentTask={} err={}，回退重新提交",
-                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
-            return false;
-        }
+        return null;
     }
 
     // ========== poll 相 ==========

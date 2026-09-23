@@ -3,6 +3,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
+import com.bluewhale.worker.domain.dto.ParentTaskObservation;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -214,7 +215,7 @@ public class NewApiMediaKitSegmentScenesClient extends NewApiMediaKitAsyncTaskCl
             String upstreamCode,
             /** failed 时的上游可读原因（error.message / 顶层 message，可 null）。 */
             String upstreamMessage
-    ) {}
+    ) implements ParentTaskObservation {}
 
     /** 官方段观测（start_time / end_time 同名同值透传；segment_video_url 为火山 24h 临时链接）。 */
     public record SegmentObservation(
