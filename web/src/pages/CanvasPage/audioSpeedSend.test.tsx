@@ -116,12 +116,15 @@ async function clickSend() {
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
-/** 切到项目二：先换 doc 引用（水合 effect 按 doc 变化重载节点）再迁移 URL query */
+/** 切到项目二：先经历文档加载中，再交付项目二快照。 */
 async function switchToProjectB() {
+  await act(async () => {
+    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
+    navigateRef!('/canvas?project=p2');
+  });
   await act(async () => {
     seedProjectB();
     navigateRef!('/canvas?project=p2');
-    await new Promise((resolve) => setTimeout(resolve, 20));
   });
 }
 
@@ -136,12 +139,22 @@ async function switchToProjectA() {
   });
 }
 
+async function startLoadingProjectA() {
+  await act(async () => {
+    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
+    navigateRef!('/canvas?project=p1');
+  });
+}
+
 beforeEach(() => {
   enableReactActEnvironment();
   localStorage.clear();
   sessionStorage.clear();
   seedProjectA();
   apiMocks.createAudioSpeed.mockReset();
+  apiMocks.saveCanvasDoc.mockReset().mockResolvedValue({
+    id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]',
+  });
   apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j1', status: 'processing', progress: 1, asset: null });
 });
 
@@ -152,6 +165,102 @@ afterEach(async () => {
 });
 
 describe('IKI4LX 慢响应期间 A→B 切换：迟到响应不污染新项目', () => {
+  it('A→B→A 文档仍在加载时受理：不以空画布覆盖 A，水合后恢复任务', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await startLoadingProjectA();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+    await act(async () => { seedProjectA(); navigateRef!('/canvas?project=p1'); });
+    expect(mediaNodes().map((n) => n.id)).toContain('audio-speed-j1');
+    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
+      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+    });
+  });
+
+  it('返回 A 时快照读取失败：不保存降级空画布，再次进入 A 后恢复', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    await startLoadingProjectA();
+    await act(async () => {
+      canvasDocMock.current = {
+        ...canvasDocMock.current,
+        doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
+      };
+      Object.assign(canvasDocMock.current, { loadFailed: true });
+      navigateRef!('/canvas?project=p1');
+    });
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(false);
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+    await switchToProjectB();
+    await switchToProjectA();
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+  });
+
+  it('A→B→A 已重新水合后受理：当场建卡并保存', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await switchToProjectA();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    expect(mediaNodes().map((n) => n.id)).toContain('audio-speed-j1');
+    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
+      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+  });
+
+  it('发送在途删除源卡后受理：保留结果卡且不创建悬空来源边', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await act(async () => {
+      (dataOf('a1').onDelete as (id: string) => void)('a1');
+    });
+    expect(mediaNodes().some((n) => n.id === 'a1')).toBe(false);
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
+    expect(edges().some((e) => e.target === 'audio-speed-j1')).toBe(false);
+  });
+
+  it('真实空画布的首张音频卡提交：版本尚未产生时仍显示结果卡', async () => {
+    const doc = canvasDocMock.current.doc as { version: number | null };
+    doc.version = null;
+    apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j1', status: 'queued' });
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
+  });
+
   it('首次提交迟到成功：回到 A 恢复结果卡、来源边、轮询与保存', async () => {
     let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
     apiMocks.createAudioSpeed.mockImplementationOnce(
@@ -190,6 +299,87 @@ describe('IKI4LX 慢响应期间 A→B 切换：迟到响应不污染新项目',
         })]),
       }),
       expect.anything(),
+    );
+    const savedCall = (apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[
+      string,
+      { viewport: unknown; nodes: Node[]; edges: ReturnType<typeof edges> },
+      number | null,
+    ]>).find(([projectId, body]) => projectId === 'p1' &&
+      body.nodes.some((savedNode) => savedNode.id === 'audio-speed-j1'))!;
+    const savedDoc = JSON.parse(JSON.stringify({
+      id: 11, version: 4, viewport: savedCall[1].viewport,
+      nodes: savedCall[1].nodes, edges: savedCall[1].edges,
+    }));
+    await unmountPage();
+    canvasDocMock.current = { ...canvasDocMock.current, doc: savedDoc };
+    await renderPage();
+    expect(mediaNodes().some((n) => n.id === 'audio-speed-j1')).toBe(true);
+    expect(edges().find((e) => e.target === 'audio-speed-j1')).toMatchObject({
+      source: 'a1', data: { origin: AUDIO_SPEED_EDGE_ORIGIN },
+    });
+  });
+
+  it('A 补卡保存尚未返回时切 B：A 的保存版本不覆盖 B', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    let resolveSaveA!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSaveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    await switchToProjectA();
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+    await switchToProjectB();
+    await act(async () => {
+      resolveSaveA({ id: 11, project_id: 1, version: 99, viewport: '{}', nodes: '[]' });
+    });
+    apiMocks.createAudioSpeed.mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
+    await enterSpeed('b1');
+    await dragSliderTo(558);
+    await clickSend();
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p2', expect.anything(), 7);
+  });
+
+  it('A 补卡保存占用在途锁时 B 改名：A 返回后 B 自动保存继续', async () => {
+    let resolveA!: (value: { job_id: string; status: 'queued' }) => void;
+    apiMocks.createAudioSpeed.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve; }),
+    );
+    let resolveSaveA!: (value: { id: number; project_id: number; version: number; viewport: string; nodes: string }) => void;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSaveA = resolve; }),
+    );
+    await renderPage();
+    await enterSpeed('a1');
+    await dragSliderTo(558);
+    await clickSend();
+    await switchToProjectB();
+    await act(async () => { resolveA({ job_id: 'j1', status: 'queued' }); });
+    await switchToProjectA();
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith('p1', expect.anything(), expect.anything());
+    await switchToProjectB();
+    await act(async () => {
+      (dataOf('b1').onTitleChange as (id: string, name: string) => void)('b1', 'B 新名称');
+      await new Promise((resolve) => setTimeout(resolve, 850));
+    });
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalledWith('p2', expect.anything(), expect.anything());
+    await act(async () => {
+      resolveSaveA({ id: 11, project_id: 1, version: 99, viewport: '{}', nodes: '[]' });
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledWith(
+      'p2', expect.objectContaining({
+        nodes: expect.arrayContaining([expect.objectContaining({
+          id: 'b1', data: expect.objectContaining({ fileName: 'B 新名称' }),
+        })]),
+      }), 7,
     );
   });
 

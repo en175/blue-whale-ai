@@ -2190,7 +2190,7 @@ export default function CanvasPage() {
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, loadFailed: canvasLoadFailed, refetch, acceptDoc, legacyMigration, patchAsset, upsertAssets } = useCanvasDoc(currentId);
   const audioMixJobsQuery = useQuery({ ...audioMixJobsOptions(currentId), enabled: Boolean(doc && currentId) });
   const snapshotAssetsRef = useRef(snapshotAssets);
   snapshotAssetsRef.current = snapshotAssets;
@@ -2595,6 +2595,7 @@ export default function CanvasPage() {
   /** 最近一次完整水合所用的 doc 引用。snapshotAssets 单独更新时不得整页重水合，
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
+  const hydratedProjectRef = useRef<string | null>(null);
   /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
   const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
   /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
@@ -2618,6 +2619,7 @@ export default function CanvasPage() {
       versionRef.current = null;
       lastSavedRef.current = '';
       hydratedDocRef.current = null;
+      hydratedProjectRef.current = null;
       setSaveStatus('idle');
       return;
     }
@@ -2634,6 +2636,7 @@ export default function CanvasPage() {
       setAssetNodes(refresh);
       return;
     }
+    hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
     const t: Node[] = [];
     const m: Node[] = [];
     const p: Node[] = [];
@@ -2674,7 +2677,7 @@ export default function CanvasPage() {
       restoredAudioSpeedRetry = true;
     });
     let restoredAudioSpeedSubmission = false;
-    audioSpeedPendingSubmissionsRef.current.forEach((pending, key) => {
+    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending, key) => {
       if (pending.projectId !== currentId) return;
       if (m.some((node) => node.id === audioSpeedNodeId(pending.jobId))) {
         audioSpeedPendingSubmissionsRef.current.delete(key);
@@ -2716,7 +2719,7 @@ export default function CanvasPage() {
         style: { stroke: '#444' },
         ...(e.data ? { data: e.data } : {}),
       }));
-    audioSpeedPendingSubmissionsRef.current.forEach((pending) => {
+    if (!canvasLoadFailed) audioSpeedPendingSubmissionsRef.current.forEach((pending) => {
       if (pending.projectId !== currentId || !hydratedIds.has(pending.sourceNodeId)) return;
       const target = audioSpeedNodeId(pending.jobId);
       if (hydratedEdges.some((edge) => edge.source === pending.sourceNodeId && edge.target === target)) return;
@@ -9623,7 +9626,7 @@ export default function CanvasPage() {
     try {
       const created = await createAudioSpeedMutation.mutateAsync({ projectId, payload });
       // 迟到响应留给发起项目；当前项目的画布与编辑会话均不触碰。
-      if (activeProjectRef.current !== projectId) {
+      if (activeProjectRef.current !== projectId || hydratedProjectRef.current !== projectId) {
         audioSpeedPendingSubmissionsRef.current.set(`${projectId}:${audioSpeedNodeId(created.job_id)}`, {
           projectId, sourceNodeId, jobId: created.job_id, payload, source: node,
         });
@@ -9646,7 +9649,9 @@ export default function CanvasPage() {
       setMediaNodes(next);
       // 连一条源音频 → 调速卡的**来源边**（带 origin 标记）：参考推导跳过，
       // 避免调速产物再次编辑时把源音频误当参考输入（防参考污染）
-      addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
+      if (mediaNodesRef.current.some((item) => item.id === sourceNodeId)) {
+        addCanvasEdge(sourceNodeId, nodeId, undefined, { origin: AUDIO_SPEED_EDGE_ORIGIN });
+      }
       pollJob(nodeId, created.job_id);
       await flushCanvasSave(projectId).catch(() => {});
       return true;
@@ -10339,10 +10344,19 @@ export default function CanvasPage() {
       if (signature !== lastSavedRef.current) {
         try {
           const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+          if (activeProjectRef.current !== projectId) {
+            // 旧项目的保存结束后重启当前项目的自动保存防抖。
+            setSaveEpoch((value) => value + 1);
+            return false;
+          }
           versionRef.current = saved.version;
           lastSavedRef.current = signature;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
+          if (activeProjectRef.current !== projectId) {
+            setSaveEpoch((value) => value + 1);
+            throw error;
+          }
           adoptCanvasConflictVersion(error);
           setSaveBlocked(true);
           setSaveStatus('error');
@@ -10364,7 +10378,7 @@ export default function CanvasPage() {
 
   /** 返回发起项目时立即保存补建的调速卡；保存成功后才移除待恢复记录。 */
   useEffect(() => {
-    if (!currentId || !doc) return;
+    if (!currentId || !doc || canvasLoadFailed) return;
     const pending = [...audioSpeedPendingSubmissionsRef.current.entries()].filter(([, item]) =>
       item.projectId === currentId &&
       mediaNodes.some((node) => node.id === audioSpeedNodeId(item.jobId)) &&
@@ -10377,7 +10391,7 @@ export default function CanvasPage() {
       if (saved) pending.forEach(([key]) => audioSpeedPendingSubmissionsRef.current.delete(key));
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, doc, mediaNodes, edges]);
+  }, [currentId, doc, canvasLoadFailed, mediaNodes, edges]);
 
   const handleRetryCanvasSave = async () => {
     if (!currentId || applyingRef.current) return;

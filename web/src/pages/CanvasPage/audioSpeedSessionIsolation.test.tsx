@@ -108,12 +108,15 @@ async function clickSend() {
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
-/** 切到项目二：先换 doc 引用（水合 effect 按 doc 变化重载节点）再迁移 URL query */
+/** 切到项目二：先进入加载态，再交付新项目快照。 */
 async function switchToProjectB() {
+  await act(async () => {
+    canvasDocMock.current = { ...canvasDocMock.current, doc: null };
+    navigateRef!('/canvas?project=p2');
+  });
   await act(async () => {
     seedProjectB();
     navigateRef!('/canvas?project=p2');
-    await new Promise((resolve) => setTimeout(resolve, 20));
   });
 }
 
@@ -189,6 +192,10 @@ describe('IKI6EB 调速会话响应归属', () => {
     await dragSliderTo(558);
     await clickSend();
     await switchToProjectB();
+    await act(async () => {
+      canvasDocMock.current = { ...canvasDocMock.current, doc: null };
+      navigateRef!('/canvas?project=p1');
+    });
     await act(async () => { seedProjectA(); navigateRef!('/canvas?project=p1'); });
     await flush();
     await enterSpeed('a1');
