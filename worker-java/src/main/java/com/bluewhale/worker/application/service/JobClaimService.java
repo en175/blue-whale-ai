@@ -573,6 +573,9 @@ public class JobClaimService {
      * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
      * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     * <p>
+     * IKI89S（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto> claimVideoEnhance(
             String jobId, String workerId) {
@@ -598,6 +601,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89S（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -607,7 +618,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
