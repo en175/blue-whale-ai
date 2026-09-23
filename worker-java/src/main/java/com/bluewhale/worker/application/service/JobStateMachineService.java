@@ -111,6 +111,7 @@ public class JobStateMachineService {
         return claimService.claimMediaExtract(jobId, workerId);
     }
 
+    /** 以 audio_mix 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取，未命中返回空。 */
     public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
         return claimService.claimAudioMix(jobId, workerId);
     }
@@ -231,6 +232,7 @@ public class JobStateMachineService {
                 input.url(), input.storageKey(), input.mime(), input.size(), input.md5(), input.duration());
     }
 
+    /** 委托音频混合终态事务；仅当前租约与 fencing token 有效时创建长期 Asset 并成功，失效返回 false。 */
     public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
         return finalizer.publishAudioMixResult(input);
     }

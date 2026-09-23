@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer, request as httpsRequest } from "node:https";
@@ -26,6 +27,8 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
   it("creates a frozen job through HTTP, processes it in Java, and reads the durable asset back through HTTP", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
     const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+    const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
+    const guardToken = randomBytes(16).toString("hex");
     const temp = mkdtempSync(join(tmpdir(), "iki68n-cross-runtime-"));
     const originalDatabase = process.env.DATABASE_URL;
     const originalFetch = globalThis.fetch;
@@ -78,7 +81,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       const outputPort = (outputServer.address() as { port: number }).port;
 
       mysqlId = execFileSync("docker", ["run", "-d", "--rm", "-e", "MYSQL_ROOT_PASSWORD=root",
-        "-e", "MYSQL_DATABASE=bluewhale_test", "-e", "MYSQL_USER=test", "-e", "MYSQL_PASSWORD=test",
+        "-e", `MYSQL_DATABASE=${databaseName}`, "-e", "MYSQL_USER=test", "-e", "MYSQL_PASSWORD=test",
         "-p", "127.0.0.1::3306", "-v", `${schema}:/docker-entrypoint-initdb.d/init.sql:ro`, "mysql:8.0"],
       { encoding: "utf8" }).trim();
       const port = Number(execFileSync("docker", ["port", mysqlId, "3306/tcp"], { encoding: "utf8" }).trim().split(":").at(-1));
@@ -88,12 +91,15 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         catch { await new Promise((done) => setTimeout(done, 500)); }
       }
       expect(ready).toBe(true);
-      process.env.DATABASE_URL = `mysql://test:test@127.0.0.1:${port}/bluewhale_test`;
+      process.env.DATABASE_URL = `mysql://test:test@127.0.0.1:${port}/${databaseName}`;
       // Testcontainers DDL 固定在 09-12；只在此临时库补执行仓内 09-19 的纯新增列迁移。
       const additiveSql = readFileSync(join(repo,
         "backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql"));
-      execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", "bluewhale_test"],
+      execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
         { input: additiveSql, stdio: ["pipe", "pipe", "pipe"] });
+      execFileSync("docker", ["exec", mysqlId, "mysql", "-utest", "-ptest", databaseName,
+        "-e", `CREATE TABLE iki68n_test_guard (guard_token CHAR(32) PRIMARY KEY); INSERT INTO iki68n_test_guard VALUES ('${guardToken}')`],
+      { stdio: "pipe" });
       prisma = new PrismaService();
       const projects = new ProjectService(prisma);
       const storage = { uploads: { inspectObject: async (key: string) => {
@@ -144,23 +150,32 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         expect((await fetch(input.url)).status).toBe(206);
       }
 
-      const worker = spawn("docker", ["run", "--rm", "-e", "TESTCONTAINERS_RYUK_DISABLED=true",
-        "-e", "TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal",
-        "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${port}/bluewhale_test?allowPublicKeyRetrieval=true&useSSL=false`,
-        "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${created.data.job_id}`,
-        "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${outputPort}/stored/out.mp3`,
-        "-e", `IKI68N_STORAGE_PUBLIC_URL=http://127.0.0.1:${outputPort}/stored/out.mp3`,
-        "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
-        "-v", `${process.env.HOME}/.m2:/root/.m2`,
-        "-v", `${process.env.HOME}/.docker/run/docker.sock:/var/run/docker.sock`,
-        "maven:3.9-eclipse-temurin-21", "mvn", "-q",
-        "-Dtest=JobStateMachineMySqlIntegrationTest#audioMixCrossRuntimeBusinessApiToAsset", "test"],
-      { cwd: repo });
-      let workerOutput = "";
-      worker.stdout.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });
-      worker.stderr.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });
-      const exitCode = await new Promise<number | null>((done) => worker.on("close", done));
-      expect(exitCode, workerOutput).toBe(0);
+      const runWorker = async (token: string) => {
+        const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
+          "-e", `IKI68N_DB_GUARD_TOKEN=${token}`,
+          "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${port}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
+          "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${created.data.job_id}`,
+          "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${outputPort}/stored/out.mp3`,
+          "-e", `IKI68N_STORAGE_PUBLIC_URL=http://127.0.0.1:${outputPort}/stored/out.mp3`,
+          "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
+          "-v", `${process.env.HOME}/.m2:/root/.m2`,
+          "maven:3.9-eclipse-temurin-21", "mvn", "-q",
+          "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"],
+        { cwd: repo });
+        let output = "";
+        worker.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+        worker.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+        const exitCode = await new Promise<number | null>((done) => worker.on("close", done));
+        return { exitCode, output };
+      };
+      const rejected = await runWorker("0".repeat(32));
+      expect(rejected.exitCode).not.toBe(0);
+      expect(rejected.output).toContain("隔离库标记不匹配");
+      expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("queued");
+      expect(await prisma.client.assets.count({ where: { generation_job_id: job.id } })).toBe(0);
+
+      const accepted = await runWorker(guardToken);
+      expect(accepted.exitCode, accepted.output).toBe(0);
 
       const jobResponse = await originalFetch(`${base}/api/jobs/${created.data.job_id}`);
       const jobView = await jobResponse.json() as { code: number; data: { status: string; asset: { id: string; url: string } } };

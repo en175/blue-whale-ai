@@ -1,6 +1,8 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
+import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
@@ -223,7 +225,7 @@ public class JobClaimService {
      */
     public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
-        return claimPollingAudioJob(jobIdLong, workerId, "media_extract",
+        return claimPollingAudioJob(jobIdLong, workerId, MediaExtractContract.TAG,
                 jobMapper.findMediaExtractCandidate(jobIdLong), jobMapper::claimMediaExtractCas);
     }
 
@@ -231,9 +233,8 @@ public class JobClaimService {
     public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, com.bluewhale.worker.domain.contract.AudioMixContract.TAG,
-                List.of(com.bluewhale.worker.domain.contract.AudioMixContract.SOURCE));
-        return claimPollingAudioJob(jobIdLong, workerId, "audio_mix", candidate, jobMapper::claimImageCas);
+                jobIdLong, AudioMixContract.TAG, List.of(AudioMixContract.SOURCE));
+        return claimPollingAudioJob(jobIdLong, workerId, AudioMixContract.TAG, candidate, jobMapper::claimImageCas);
     }
 
     @FunctionalInterface
