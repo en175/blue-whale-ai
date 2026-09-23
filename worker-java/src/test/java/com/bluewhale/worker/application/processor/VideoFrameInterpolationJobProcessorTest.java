@@ -91,14 +91,20 @@ class VideoFrameInterpolationJobProcessorTest {
 
     private ClaimedVideoFrameInterpolationJobDto makeClaim(Map<String, Object> input, String providerTaskId,
                                                            int pollCount) {
+        return makeClaim(input, providerTaskId, pollCount, null);
+    }
+
+    private ClaimedVideoFrameInterpolationJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+                                                           int pollCount, String parentProviderTaskId) {
         return new ClaimedVideoFrameInterpolationJobDto(
-                "100", "42", "9", input, providerTaskId, false, "worker-1", 5L, pollCount, 0);
+                "100", "42", "9", input, providerTaskId, false, "worker-1", 5L, pollCount, 0,
+                parentProviderTaskId);
     }
 
     private ClaimedVideoFrameInterpolationJobDto makeCancelRequestedClaim(Map<String, Object> input,
                                                                          String providerTaskId) {
         return new ClaimedVideoFrameInterpolationJobDto(
-                "100", "42", "9", input, providerTaskId, true, "worker-1", 5L, 0, 0);
+                "100", "42", "9", input, providerTaskId, true, "worker-1", 5L, 0, 0, null);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
@@ -302,7 +308,7 @@ class VideoFrameInterpolationJobProcessorTest {
         when(credentialService.open("sk-other-token")).thenReturn("sk-other-token");
         when(stateMachine.claimVideoFrameInterpolation(eq("200"), anyString()))
                 .thenReturn(Optional.of(new ClaimedVideoFrameInterpolationJobDto(
-                        "200", "42", "9", input2, "amk-task-2", false, "worker-1", 6L, 2, 0)));
+                        "200", "42", "9", input2, "amk-task-2", false, "worker-1", 6L, 2, 0, null)));
         when(interpolateVideoClient.poll("sk-other-token", "amk-task-2"))
                 .thenReturn(new InterpolateVideoTaskObservation("processing", null, null, null, null,
                         null, null));
@@ -372,6 +378,173 @@ class VideoFrameInterpolationJobProcessorTest {
 
         assertFailCode(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED);
         verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    // ========== parent-reuse 重试收割（IKI8A0 / ADR-0114；平移定型票 IKI89P 用例）==========
+
+    @Test
+    @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
+    void parentReuseSuccess_publishesWithoutSubmit() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-1")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-1"))
+                .thenReturn(new InterpolateVideoTaskObservation("succeeded",
+                        "https://volc/old-out.mp4?auth_key=...", 65.5, "1080p", 60.0, null, null));
+        stubSourceAsset(1920, 1080);
+        when(mediaRelay.persist("https://volc/old-out.mp4?auth_key=...", "9"))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.mp4", "generated/9/video/abc.mp4",
+                        "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+        verify(mediaRelay).persist("https://volc/old-out.mp4?auth_key=...", "9");
+        ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
+                ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
+        verify(stateMachine).publishVideoFrameInterpolationResult(captor.capture());
+        PublishVideoFrameInterpolationDto published = captor.getValue();
+        assertThat(published.url()).isEqualTo("https://tos/out.mp4");
+        assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
+        assertThat(published.mime()).isEqualTo("video/mp4");
+        assertThat(published.size()).isEqualTo(123_456L);
+        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+        // 插帧不改变分辨率 → 宽高 = 源近似（1920x1080），不做档位推导，与正常完成路径同型
+        assertThat(published.width()).isEqualTo(1920);
+        assertThat(published.height()).isEqualTo(1080);
+        assertThat(published.durationSec()).isEqualTo(65.5);
+        assertThat(published.resolution()).isEqualTo("1080p");
+        assertThat(published.fps()).isEqualTo(60.0);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        // 收割即终态：不自投下一步
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
+    void parentReuseFailed_fallThrough() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-fail")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-fail"))
+                .thenReturn(new InterpolateVideoTaskObservation("failed", null, null, null, null,
+                        "InvalidParameter", "The 'fps' parameter is out of range [15, 120]"));
+        stubSourceAsset(1920, 1080);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
+    void parentReusePollError_fallThrough() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-gone")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-gone"))
+                .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "MediaKit 视频插帧任务查询失败: HTTP 404"));
+        stubSourceAsset(1920, 1080);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("非重试 job（parentProviderTaskId=null）→ 不查父任务，执行路径与现状完全一致")
+    void nonRetryJob_skipsParentQuery() {
+        stubSubmitClaim(input(60));
+        stubSourceAsset(1920, 1080);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-1");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-1")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient, never()).poll(anyString(), anyString());
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
+    void parentReuseIncompleteResult_fallThrough() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-empty")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-empty"))
+                .thenReturn(new InterpolateVideoTaskObservation("succeeded", null, null, null, null,
+                        null, null));
+        stubSourceAsset(1920, 1080);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
+        verify(mediaRelay, never()).persist(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
+    void parentReusePublishFails_fallThrough() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-stale")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-stale"))
+                .thenReturn(new InterpolateVideoTaskObservation("succeeded",
+                        "https://volc/expired-out.mp4", 65.5, "1080p", 60.0, null, null));
+        when(mediaRelay.persist(anyString(), eq("9")))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+        stubSourceAsset(1920, 1080);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
+    void parentReusePublishGuardMissed_fallThrough() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-guard")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
+                .thenReturn(new InterpolateVideoTaskObservation("succeeded",
+                        "https://volc/old-out.mp4", 65.5, "1080p", 60.0, null, null));
+        stubSourceAsset(1920, 1080);
+        when(mediaRelay.persist(anyString(), eq("9")))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.mp4", "generated/9/video/abc.mp4",
+                        "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(false);
+        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq(60));
     }
 
     // ========== poll 相：状态机 ==========
