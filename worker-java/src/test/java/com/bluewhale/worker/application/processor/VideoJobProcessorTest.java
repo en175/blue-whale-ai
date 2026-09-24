@@ -330,6 +330,31 @@ class VideoJobProcessorTest {
     }
 
     @Test
+    @DisplayName("PR !854 审查修订: parent-reuse 转存/发布异常 → 按旧结果不可用回退重新提交（不写终态失败）")
+    void parentReusePublishError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("118", false, null, 0, 0, "parent-task-expired");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("118"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-expired.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-expired"));
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载失败: HTTP 404"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new SubmitResult("new-task-expired", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("118"), anyString(), eq(1L), eq("new-task-expired"));
+
+        processor.handle("118");
+
+        verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
+        verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("IKICD3: parent-reuse 发布守卫未命中 → 失去执行权停止：零 submit、零 providerTaskId、零轮询、零迟到 Finalize")
     void parentReusePublishGuardMissed_stopWithoutResubmit() {
         ClaimedVideoJobDto claim = videoClaim("114", false, null, 0, 0, "parent-task-stale");
