@@ -329,11 +329,18 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       duration: 12,
       width: 1280,
       height: 720,
+      src: 'http://vid/v1.mp4',
     });
     // 视频槽转入已绑定信息条：文件名 + 时长 + 来源标注「· 画布」
     expect(boundBar()).toBeTruthy();
     expect(boundBar()!.textContent).toContain('城市夜景.mp4');
     expect(boundBar()!.textContent).toContain('· 画布');
+    // IKIHMX 审查修复 2：绑定信息条显真实视频首帧缩略图（preload=metadata 小 video，
+    //     绑定时刻冻结视频卡 src），不再是无信息图标占位
+    const thumbVideo = boundBar()!.querySelector('video');
+    expect(thumbVideo).not.toBeNull();
+    expect(thumbVideo!.getAttribute('src')).toBe('http://vid/v1.mp4');
+    expect(thumbVideo!.getAttribute('preload')).toBe('metadata');
     expect(sendBtn()!.disabled).toBe(false);
   });
 
@@ -356,6 +363,7 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       duration: 45,
       width: 1920,
       height: 1080,
+      src: 'http://vid/v2.mp4',
     });
     // 固定音频输入线不受影响
     expect(edges().some((e) => e.source === 'a1' && e.target === 'm1')).toBe(true);
@@ -492,8 +500,13 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
       duration: 8,
       width: 1920,
       height: 1080,
+      src: 'http://vid/lib1.mp4',
     });
     expect(boundBar()!.textContent).toContain('· 素材库');
+    // IKIHMX 审查修复 2：素材库绑定冻结资产 URL，信息条同样显真实首帧缩略图
+    const libThumbVideo = boundBar()!.querySelector('video');
+    expect(libThumbVideo).not.toBeNull();
+    expect(libThumbVideo!.getAttribute('src')).toBe('http://vid/lib1.mp4');
   });
 
   it('素材库浮层 Esc 关闭：只关浮层不退会话（面板仍在）', async () => {
@@ -538,6 +551,7 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
       duration: 45,
       width: 1920,
       height: 1080,
+      src: 'http://vid/v2.mp4',
     });
   });
 });
@@ -652,6 +666,9 @@ describe('IKIHPK 会话注册、四退出与模态', () => {
     });
     expect(panel()).toBeTruthy();
     expect(boundBar()!.textContent).toContain('城市夜景.mp4');
+    // IKIHMX 审查修复 2：存量绑定身份无冻结 src（本种子未写）时回落图标占位，
+    //     不渲染无信息 video 元素
+    expect(boundBar()!.querySelector('video')).toBeNull();
   });
 
   it('草稿卡被删除时会话清理（面板关闭，无悬空会话）', async () => {

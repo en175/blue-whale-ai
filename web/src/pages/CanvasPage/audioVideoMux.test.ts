@@ -247,6 +247,8 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
       sourceNodeId: 'a1', sourceAssetId: '8', reserveAudio: true, sync: 'none',
       video: {
         assetId: '5', nodeId: 'v1', name: '视v1', duration: null, width: null, height: null,
+        // IKIHMX 审查修复 2：恢复身份从画布视频卡现值取缩略图 src（素材库无卡场景省略回落图标）
+        src: 'http://vid/v1.mp4',
       },
     });
     expect(first.edges.map((edge) => [edge.source, edge.target, edge.data?.origin])).toEqual([
@@ -265,6 +267,9 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
       input: { ...frozenInput, video: { assetId: '5' } },
     })]);
     expect(result.edges.map((edge) => edge.source)).toEqual(['a1']);
+    // IKIHMX 审查修复 2：无画布卡可查，恢复身份不带缩略图 src（面板回落图标占位）
+    const libCard = result.nodes.find((node) => node.id === 'audio-video-mux-73')!;
+    expect(audioVideoMuxIdentityOf(libCard)!.video).not.toHaveProperty('src');
   });
 
   it('输入卡已删除时不复活、不创建悬空线；已产出成品卡不在恢复中重建', () => {

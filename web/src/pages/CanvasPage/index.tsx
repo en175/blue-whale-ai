@@ -9719,6 +9719,10 @@ export default function CanvasPage() {
       // 宽高随身份冻结（终态「供应商值缺失回落源资产」不依赖视频卡是否还在画布上）
       width: typeof sourceData.width === 'number' ? sourceData.width : null,
       height: typeof sourceData.height === 'number' ? sourceData.height : null,
+      // 缩略图源（IKIHMX 审查修复 2）：绑定时刻冻结视频卡 src（门槛已保证非空非 blob）
+      ...(typeof sourceData.src === 'string' && sourceData.src !== '' && !sourceData.src.startsWith('blob:')
+        ? { src: sourceData.src }
+        : {}),
     };
     // 同一视频重复拖到同一草稿卡：幂等（不重复建边、不重复写卡）
     const current = identity.video;

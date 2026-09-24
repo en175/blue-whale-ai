@@ -53,6 +53,10 @@ export interface AudioVideoMuxBoundVideo {
   duration?: number | null;
   width?: number | null;
   height?: number | null;
+  /** 缩略图源（IKIHMX 审查修复 2）：绑定时刻冻结的源地址（画布绑定取视频卡 src、素材库
+   *  取资产 URL），面板信息条经 <video preload="metadata"> 显首帧；恢复时回落画布视频卡
+   *  现值，无值（素材库绑定且卡不在画布的恢复场景）回落图标占位。不进提交载荷。 */
+  src?: string;
 }
 
 /** 合成草稿卡身份（随卡持久化，记住直到终态回填）：固定音频源 + 参数 + 可选绑定视频 */
@@ -235,6 +239,11 @@ export function audioVideoMuxIdentityFromFrozen(
       duration: typeof videoData.duration === 'number' ? videoData.duration : null,
       width: typeof videoData.width === 'number' ? videoData.width : null,
       height: typeof videoData.height === 'number' ? videoData.height : null,
+      // 缩略图源（IKIHMX 审查修复 2）：优先画布视频卡现值（成品卡 src 非 blob），
+      //  素材库绑定恢复无卡可查则省略，面板回落图标占位
+      ...(typeof videoData.src === 'string' && videoData.src !== '' && !videoData.src.startsWith('blob:')
+        ? { src: videoData.src }
+        : {}),
     },
   };
 }

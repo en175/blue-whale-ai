@@ -7,12 +7,13 @@
  * 素材库浮层：单列表视频资产（无页签、无上传），选中即绑定不拉线，点浮层外部或 Esc 关闭
  * （AudioMixBar outside-dismiss 口径；Esc 在捕获阶段拦下，只关浮层不退会话）。
  * 参数切换经 onReserveChange/onSyncChange 即时写卡（随草稿卡持久化，重开/刷新恢复）。
- * 发送真实提交与占位回填归 IKIHP M：本票 onSend 由页面传入空实现，点击不建任务、不改卡态。
+ * 发送经 onSend 走页面 handleAudioVideoMuxSend 真实提交并回填占位卡（IKIHP M 已接线）。
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
 import { assetPageQueryOptions } from '@/api/assets';
+import { resolveMediaSrc } from '@/utils/remoteImageCors';
 import type { FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
@@ -40,7 +41,7 @@ interface AudioVideoMuxPanelProps {
   onUnbind: () => void;
   /** 拖线手势进行中（视频槽「绑定中跟手」态） */
   wireBinding: boolean;
-  /** 发送：真实提交归 IKIHP M（本票页面传空实现） */
+  /** 发送：真实提交（IKIHP M 已接线，页面传 handleAudioVideoMuxSend） */
   onSend: () => void;
   /** 绑定草稿卡时跟随其下方；缺省锚定底部 */
   followAnchor: FollowDialogAnchor | null;
@@ -81,6 +82,8 @@ function MuxVideoLibrary({ onPick }: { onPick: (video: AudioVideoMuxBoundVideo) 
                 duration: asset.duration,
                 width: asset.width,
                 height: asset.height,
+                // 缩略图源（IKIHMX 审查修复 2）：选中即绑定冻结资产 URL（disabled 已保证非空）
+                src: asset.url,
               })}
             >
               <span className={styles.libraryThumb} aria-hidden><Film size={12} strokeWidth={1.8} /></span>
@@ -168,7 +171,14 @@ export default function AudioVideoMuxPanel({
           <div className={styles.slotWrap} ref={slotWrapRef}>
             {bound ? (
               <div className={styles.boundBar} data-testid="audio-video-mux-bound">
-                <span className={styles.boundThumb} aria-hidden><Video size={14} strokeWidth={1.8} /></span>
+                {/* 真实视频首帧缩略图（IKIHMX 审查修复 2）：绑定时刻冻结的 src 经
+                    preload="metadata" 小 video 显首帧（仓内 AtMentionMenu/MentionMenu 同款
+                    最便宜做法）；恢复场景无 src（素材库绑定且卡不在画布）回落图标占位 */}
+                <span className={styles.boundThumb} aria-hidden>
+                  {bound.src
+                    ? <video className={styles.boundThumbVideo} src={resolveMediaSrc(bound.src)} muted playsInline preload="metadata" />
+                    : <Video size={14} strokeWidth={1.8} />}
+                </span>
                 <span className={styles.boundMeta}>
                   <span className={styles.boundName} title={bound.name}>{bound.name}</span>
                   <span className={styles.boundDur}>
