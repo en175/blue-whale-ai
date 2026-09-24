@@ -241,6 +241,36 @@ class LedgerIntegrationTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 时区口径（DbTime.ZONE 必须与 datasource 的会话时区一致）
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void 会话时区已钉成北京时间() {
+        // 断言的是**偏移量**而不是 @@session.time_zone 的字面值：
+        // forceConnectionTimeZoneToSession 把会话设成命名时区 "Asia/Shanghai"（而非 "+08:00"），
+        // 两者都对。真正要钉住的性质是「会话墙钟比 UTC 快 8 小时」——DbTime.ZONE 就按它换算。
+        assertThat(jdbc.queryForObject(
+                "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW())", Integer.class))
+                .as("NOW() 必须比 UTC_TIMESTAMP() 快 8 小时，与 DbTime.ZONE 一致；"
+                        + "否则 DATETIME 的写入口径与 NOW() 的判定口径相差整小时")
+                .isEqualTo(8);
+    }
+
+    @Test
+    void 到期边界_一小时内到期的批次判定正确() {
+        // 用 ±1 小时而不是 ±1 天：8 小时的时区偏差在 ±1 天的用例里被掩盖，
+        // 在这里会立刻翻车（该过期的那批被当成有效）。
+        long expiring = grant(CreditSource.GIFT, 100, Instant.now().plus(1, ChronoUnit.HOURS), "tz-a");
+        long expired = grant(CreditSource.GIFT, 100, Instant.now().minus(1, ChronoUnit.HOURS), "tz-b");
+
+        credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION);
+
+        assertThat(frozenOf(expiring)).isEqualTo(60);
+        assertThat(frozenOf(expired)).isZero();
+        assertInvariant();
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 断言工具
     // ─────────────────────────────────────────────────────────────
 

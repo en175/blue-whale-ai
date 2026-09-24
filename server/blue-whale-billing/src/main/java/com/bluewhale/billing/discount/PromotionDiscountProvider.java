@@ -1,14 +1,17 @@
 package com.bluewhale.billing.discount;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.bluewhale.billing.domain.DbTime;
+import com.bluewhale.billing.domain.entity.PromotionEntity;
+import com.bluewhale.billing.infrastructure.mapper.PromotionMapper;
 import com.bluewhale.billing.pricing.PricingContext;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.sql.Time;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -30,11 +33,11 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
 
     private static final Logger log = LoggerFactory.getLogger(PromotionDiscountProvider.class);
 
-    private final JdbcTemplate jdbc;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final PromotionMapper mapper;
+    private final ObjectMapper json = new ObjectMapper();
 
-    public PromotionDiscountProvider(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public PromotionDiscountProvider(PromotionMapper mapper) {
+        this.mapper = mapper;
     }
 
     @Override
@@ -68,26 +71,28 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
 
     @Override
     protected List<Row> loadCandidates(PricingContext ctx) {
-        // ⚠️ 时间窗在 SQL 里粗筛（走 idx_promo__active），但**时区无法在 SQL 里处理**——
-        //    MySQL 的 NOW() 用会话时区，而活动自带 tz。精确的「现在是否在时段内」
-        //    留给 matchesScope 按活动自己的时区判定。
-        return jdbc.query(
-                "SELECT id, code, discount_bp, model_ids, task_types, tier_scope, "
-                        + "       days_of_week, daily_time_start, daily_time_end, tz "
-                        + "FROM billing_promotions "
-                        + "WHERE status = 'enabled' AND start_at <= ? AND end_at > ?",
-                (rs, rowNum) -> new Row(
-                        rs.getLong("id"),
-                        rs.getString("code"),
-                        rs.getInt("discount_bp"),
-                        parseStringList(rs.getString("model_ids")),
-                        parseStringList(rs.getString("task_types")),
-                        parseIntSet(rs.getString("days_of_week")),
-                        toLocalTime(rs.getTime("daily_time_start")),
-                        toLocalTime(rs.getTime("daily_time_end")),
-                        rs.getString("tz"),
-                        parseStringSet(rs.getString("tier_scope"))),
-                java.sql.Timestamp.from(ctx.submitAt()), java.sql.Timestamp.from(ctx.submitAt()));
+        // ⚠️ 时间窗只是**粗筛**（走 idx_promo__active），但**时区无法在 SQL 里处理**——
+        //    MySQL 的 NOW() 用会话时区，而活动自带 tz。「现在是否落在时段内」
+        //    必须留给 matchesScope 按活动自己的时区判定。
+        LocalDateTime submitAt = DbTime.toDb(ctx.submitAt());
+        List<PromotionEntity> rows = mapper.selectList(new LambdaQueryWrapper<PromotionEntity>()
+                .eq(PromotionEntity::getStatus, "enabled")
+                .le(PromotionEntity::getStartAt, submitAt)
+                .gt(PromotionEntity::getEndAt, submitAt));
+
+        return rows.stream()
+                .map(entity -> new Row(
+                        entity.getId(),
+                        entity.getCode(),
+                        entity.getDiscountBp(),
+                        parseStringList(entity.getModelIds()),
+                        parseStringList(entity.getTaskTypes()),
+                        parseIntSet(entity.getDaysOfWeek()),
+                        entity.getDailyTimeStart(),
+                        entity.getDailyTimeEnd(),
+                        entity.getTz(),
+                        parseStringSet(entity.getTierScope())))
+                .toList();
     }
 
     @Override
@@ -121,31 +126,27 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
 
     // ── JSON 列解析。配置坏了不该让整次计价崩，但也不能静默放行：记 WARN + 当作「没配」 ──
 
-    private List<String> parseStringList(String json) {
-        if (json == null || json.isBlank()) return List.of();
+    private List<String> parseStringList(String jsonText) {
+        if (jsonText == null || jsonText.isBlank()) return List.of();
         try {
-            return mapper.readValue(json, new TypeReference<List<String>>() {});
+            return json.readValue(jsonText, new TypeReference<List<String>>() {});
         } catch (Exception e) {
-            log.warn("营销活动的目标集合不是合法 JSON，按「不限」处理：{}", json, e);
+            log.warn("营销活动的目标集合不是合法 JSON，按「不限」处理：{}", jsonText, e);
             return List.of();
         }
     }
 
-    private Set<String> parseStringSet(String json) {
-        return Set.copyOf(parseStringList(json));
+    private Set<String> parseStringSet(String jsonText) {
+        return Set.copyOf(parseStringList(jsonText));
     }
 
-    private Set<Integer> parseIntSet(String json) {
-        if (json == null || json.isBlank()) return Set.of();
+    private Set<Integer> parseIntSet(String jsonText) {
+        if (jsonText == null || jsonText.isBlank()) return Set.of();
         try {
-            return Set.copyOf(mapper.readValue(json, new TypeReference<List<Integer>>() {}));
+            return Set.copyOf(json.readValue(jsonText, new TypeReference<List<Integer>>() {}));
         } catch (Exception e) {
-            log.warn("营销活动的星期集合不是合法 JSON，按「不限」处理：{}", json, e);
+            log.warn("营销活动的星期集合不是合法 JSON，按「不限」处理：{}", jsonText, e);
             return Set.of();
         }
-    }
-
-    private static LocalTime toLocalTime(Time time) {
-        return time == null ? null : time.toLocalTime();
     }
 }

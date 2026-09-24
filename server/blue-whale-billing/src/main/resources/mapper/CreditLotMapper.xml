@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  积分批次的复杂语句。
+
+  落位约定（全模块统一）：带 ORDER BY / LIMIT / FOR UPDATE / 聚合 / 自引用表达式的语句写在
+  XML；纯等值或比较谓词的单表读写用 LambdaQueryWrapper，不在这里重复一遍样板。
+-->
+<mapper namespace="com.bluewhale.billing.infrastructure.mapper.CreditLotMapper">
+
+  <!--
+    ★ 锁该用户的全部有效批次，按扣减顺序排好序返回（《计费逻辑详细设计》§4.1）。
+
+    三级 tie-break：
+      ① (expires_at IS NULL)   永久排最后
+      ① expires_at ASC         先过期先扣
+      ② source_priority ASC    同到期时间按来源（先消耗平台赠送的）
+      ③ id ASC                 先获得的先扣
+
+    ⚠️ source_priority 是**冗余列**而非 FIELD(source, 'compensation','bonus',...)：
+       后者把优先级硬编码进 SQL，枚举一改就静默错位；前者由插入时决定且能走索引。
+
+    ⚠️ ORDER BY 第一项是布尔表达式——MySQL 里 (expires_at IS NULL) 取 0/1，
+       所以 NULL（永久）排在非 NULL 之后，正好是「永久最后扣」。
+
+    只用 FOR UPDATE 锁**单个用户**的行，不是全表：争用范围天然是单用户
+    （同一用户的并发提交是个位数，业务语义上本就该串行）。
+    对比 GeekAI 的全局 sync.Mutex——那是把「同用户串行」做成了「全库串行」。
+
+    过期批次靠 WHERE 天然排除，不需要定时任务清理。
+  -->
+  <select id="lockActiveLots" resultType="com.bluewhale.billing.domain.entity.CreditLotEntity">
+    SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+      AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY (expires_at IS NULL), expires_at ASC, source_priority ASC, id ASC
+    FOR UPDATE
+  </select>
+
+  <!--
+    可用余额 = Σ(remaining − frozen)，仅计未过期的批次。
+
+    这是**聚合表达式**，Wrapper 的 select 只能列字段名，表达不了 remaining - frozen。
+  -->
+  <select id="sumAvailable" resultType="long">
+    SELECT COALESCE(SUM(remaining - frozen), 0)
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+      AND (expires_at IS NULL OR expires_at > NOW())
+  </select>
+
+  <!--
+    冻结：预扣用。**只动 frozen**，remaining 不动 —— 钱还没花掉，只是不能用了。
+
+    SET frozen = frozen + #{amount} 是**自引用表达式**：Wrapper 的 set 只能赋常量，
+    所以这类语句一律落在 XML，顺带也就不必在 Java 里拼 SQL 片段。
+    下面的 releaseFrozen / settle 同理。
+  -->
+  <update id="addFrozen">
+    UPDATE billing_credit_lots
+    SET frozen = frozen + #{amount},
+        version = version + 1
+    WHERE id = #{lotId}
+  </update>
+
+  <!--
+    解冻：返还用。**只动 frozen**，也不新建批次。
+
+    ⚠️ 刻意不动 remaining：若改成「先扣掉、返还时新建批次」，返还的积分会带**新的有效期**，
+    用户凭空获得一次有效期重置，与应得权益不符。
+  -->
+  <update id="releaseFrozen">
+    UPDATE billing_credit_lots
+    SET frozen = frozen - #{amount},
+        version = version + 1
+    WHERE id = #{lotId}
+  </update>
+
+  <!--
+    结算：解冻并实扣。
+
+    frozenTake 是预扣时锁定的量，actualTake 是实际消耗的量。两者可以不等
+    （部分成功 / 缓存命中）——差额自动回到可用余额。
+
+    两列同时按不同数量更新，且都是自引用表达式，Wrapper 表达不了。
+  -->
+  <update id="settle">
+    UPDATE billing_credit_lots
+    SET frozen = frozen - #{frozenTake},
+        remaining = remaining - #{actualTake},
+        version = version + 1
+    WHERE id = #{lotId}
+  </update>
+
+</mapper>

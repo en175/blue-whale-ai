@@ -57,6 +57,15 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
     </dependency>
+
+    <!-- ORM：与 worker 同款同版本（ADR-0114「技术栈逐项对齐」）。
+         SQL 的落位约定（哪类写 XML、哪类用 Wrapper）见 application.yml 的 mybatis-plus 段。 -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+      <version>${mybatis-plus.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>

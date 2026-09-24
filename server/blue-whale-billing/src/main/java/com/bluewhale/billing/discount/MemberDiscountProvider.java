@@ -1,7 +1,9 @@
 package com.bluewhale.billing.discount;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.bluewhale.billing.domain.entity.MemberDiscountEntity;
+import com.bluewhale.billing.infrastructure.mapper.MemberDiscountMapper;
 import com.bluewhale.billing.pricing.PricingContext;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,10 +20,10 @@ import java.util.List;
 @Component
 public class MemberDiscountProvider extends DiscountProvider.Abstract<MemberDiscountProvider.Row> {
 
-    private final JdbcTemplate jdbc;
+    private final MemberDiscountMapper mapper;
 
-    public MemberDiscountProvider(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public MemberDiscountProvider(MemberDiscountMapper mapper) {
+        this.mapper = mapper;
     }
 
     @Override
@@ -40,21 +42,23 @@ public class MemberDiscountProvider extends DiscountProvider.Abstract<MemberDisc
             List<String> taskPatterns
     ) implements Candidate {
         @Override public String code() { return null; }   // 会员折扣没有业务码
-        @Override public boolean enabled() { return true; } // enabled 由 SQL 过滤
+        @Override public boolean enabled() { return true; } // enabled 由查询条件过滤
     }
 
     @Override
     protected List<Row> loadCandidates(PricingContext ctx) {
-        // tier 在 SQL 里过滤：表按 tier 建了索引，全表拉再内存过滤是浪费。
+        // tier 在查询条件里过滤：表按 tier 建了索引，全表拉再内存过滤是浪费。
         // 注意用 tier 而非 user_id —— 同一等级共享同一批规则，结果可整体缓存。
-        return jdbc.query(
-                "SELECT id, discount_bp, model_pattern, task_pattern "
-                        + "FROM billing_member_discounts WHERE tier = ? AND status = 'enabled'",
-                (rs, rowNum) -> new Row(
-                        rs.getLong("id"),
-                        rs.getInt("discount_bp"),
-                        List.of(rs.getString("model_pattern")),
-                        List.of(rs.getString("task_pattern"))),
-                ctx.request().tier());
+        List<MemberDiscountEntity> rows = mapper.selectList(new LambdaQueryWrapper<MemberDiscountEntity>()
+                .eq(MemberDiscountEntity::getTier, ctx.request().tier())
+                .eq(MemberDiscountEntity::getStatus, "enabled"));
+
+        return rows.stream()
+                .map(entity -> new Row(
+                        entity.getId(),
+                        entity.getDiscountBp(),
+                        List.of(entity.getModelPattern()),
+                        List.of(entity.getTaskPattern())))
+                .toList();
     }
 }

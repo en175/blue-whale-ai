@@ -17,8 +17,17 @@ spring:
   #    本地开发从 docker 容器取：
   #      docker inspect bw-mysql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD
   #    然后 export BILLING_DB_PASSWORD=...
+  #
+  # ⚠️ **两个时区参数必须与 com.bluewhale.billing.domain.DbTime.ZONE 保持一致。**
+  #    表里存的是无时区的 DATETIME，而批次是否过期又靠服务端的 NOW() 判定——
+  #    NOW() 返回的是**会话时区**的墙钟。容器里 MySQL 默认 UTC，若会话时区不钉住，
+  #    北京时间写进去、UTC 比出来，偏差整 8 小时，表现是「积分到期后还能多用 8 小时」。
+  #    这种钱漏不会报错、也不会有人当场发现，所以宁可在连接串上显式钉死。
+  #      · connectionTimeZone          驱动理解 DATETIME 时用的时区
+  #      · forceConnectionTimeZoneToSession  连接建立时把会话 time_zone 也设成它
+  #    只写 connectionTimeZone 不够：那只是驱动侧的换算，服务端 NOW() 仍用全局时区。
   datasource:
-    url: ${BILLING_DB_URL:jdbc:mysql://localhost:13306/bw_billing?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    url: ${BILLING_DB_URL:jdbc:mysql://localhost:13306/bw_billing?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true}
     username: ${BILLING_DB_USERNAME:root}
     password: ${BILLING_DB_PASSWORD:}
 
@@ -31,10 +40,37 @@ spring:
     clean-disabled: true
     baseline-on-migrate: false
 
+  # ── ORM：MyBatis-Plus（与 worker 同款同版本，ADR-0114 技术栈逐项对齐） ──
+  #
+  # SQL 的落位约定（全模块统一，避免同一服务里出现两种写 SQL 的姿势）：
+  #
+  #   写 XML（resources/mapper/）—— 带下列任一特征的语句：
+  #     · ORDER BY / LIMIT      排序与截断的语义要在 SQL 里看得见
+  #     · FOR UPDATE            锁语义必须显式
+  #     · 聚合                  SUM(remaining - frozen) 这类表达式，Wrapper 的 select
+  #                             只能列字段名
+  #     · 自引用表达式          SET frozen = frozen + ?，Wrapper 的 set 只能赋常量
+  #
+  #   用 LambdaQueryWrapper —— 纯等值 / 比较谓词的单表读写与单行增删改：
+  #     这类 SQL 是纯样板，写进 XML 只会多一处「改列名时要同步」的地方。
+  #     字段名由方法引用推导（CreditLotEntity::getUserId），编译期即可校验，
+  #     不会因为改名而静默查错列。
+  #
+  # 实体在 com.bluewhale.billing.domain.entity，对应 Flyway 迁移建的表——
+  # schema 权威仍在 Flyway，实体只是映射，改字段先改迁移。
+  mybatis-plus:
+    mapper-locations: classpath*:mapper/**/*.xml
+    configuration:
+      # 下划线列 → 驼峰字段。开了这个，实体上就不必给每个字段挂 @TableField——
+      # 那些注解与列名逐字重复，却不携带任何信息。
+      map-underscore-to-camel-case: true
+
 logging:
   level:
     com.bluewhale: INFO
     # 首次接入时想看 Flyway 实际跑了哪些迁移，临时调到 INFO 即可
     org.flywaydb: INFO
+    # 排查「为什么这条查不到」时把下面这行放开，日志里会回显实际 SQL 与参数
+    # com.bluewhale.billing.infrastructure.mapper: DEBUG
 
 # ⚠️ MQ / 账本 / 账户尚未接入：按 ADR-0113 的 P2–P4 落地时按真实形状加。
