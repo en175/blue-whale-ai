@@ -18,7 +18,6 @@ import {
 } from '@/api/admin';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { isApiError } from '@/api/http';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import ConfirmModal from '../../components/ConfirmModal';
 import {
   Badge,
@@ -337,8 +336,8 @@ export default function SkillManage() {
                   </td>
                   <td>
                     {s.cover_url ? (
-                      {/* 保留 release 分支的 resolveMediaSrc + crossOrigin（媒体跨域），
-                          尺寸走内联而非私有样式类 —— 本页已无自己的 CSS 文件 */}
+                      // 保留 release 分支的 resolveMediaSrc + crossOrigin（媒体跨域）；
+                      // 尺寸走内联而非私有样式类 —— 本页已无自己的 CSS 文件
                       <img
                         src={resolveMediaSrc(s.cover_url)}
                         crossOrigin={remoteImageCrossOrigin(s.cover_url)}
