@@ -20,7 +20,9 @@ import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mq.BillingEventPublisher;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.mq.RocketMqBillingEventPublisher;
 import com.bluewhale.worker.infrastructure.mq.RocketMqGenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
@@ -759,6 +761,21 @@ public class RocketMqConfig {
             ClientConfiguration clientConfig, GenerationMqRouteEnum route) {
         return RocketMqGenerationMessageProducer.create(
                 clientConfig, route.topic(), route.tag());
+    }
+
+    /**
+     * billing 事件生产者（结算 / 返还）。
+     *
+     * <p>与上面那批 {@link GenerationMessageProducer} **不是一类东西**：
+     * 那些发的是**生成队列**（一个实例钉死一个 topic/tag，驱动下一步骤，发给自己人）；
+     * 这个发的是**领域事件**（topic 逐次传入，发给 billing 解冻预扣）。
+     * 语义、消费方、重投策略都不同，共用一套生产者只会让两边互相牵制。
+     *
+     * <p>一个 Producer 实例支持多 topic，所以这里建一次、发时给 topic。
+     */
+    @Bean(destroyMethod = "close")
+    public BillingEventPublisher billingEventPublisher(ClientConfiguration clientConfig) {
+        return RocketMqBillingEventPublisher.create(clientConfig);
     }
 
     /**

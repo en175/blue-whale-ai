@@ -50,6 +50,7 @@ public class JobFinalizer {
     private final SceneCardGenerationRecordSync recordSync;
     private final StoryboardPreviewSync previewSync;
     private final ProjectEventPublisher eventPublisher;
+    private final JobSettlementPublisher settlementPublisher;
 
     public JobFinalizer(
             GenerationJobMapper jobMapper,
@@ -58,7 +59,8 @@ public class JobFinalizer {
             GenerationOutputSlotMapper slotMapper,
             SceneCardGenerationRecordSync recordSync,
             StoryboardPreviewSync previewSync,
-            ProjectEventPublisher eventPublisher
+            ProjectEventPublisher eventPublisher,
+            JobSettlementPublisher settlementPublisher
     ) {
         this.jobMapper = jobMapper;
         this.assetMapper = assetMapper;
@@ -67,6 +69,7 @@ public class JobFinalizer {
         this.recordSync = recordSync;
         this.previewSync = previewSync;
         this.eventPublisher = eventPublisher;
+        this.settlementPublisher = settlementPublisher;
     }
 
     /**
@@ -289,9 +292,7 @@ public class JobFinalizer {
             return true;
         }
 
-        eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                Map.of("job_id", job.getId().toString(),
+        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                         "type", job.getType(),
                         "source", job.getSource(),
                         "status", job.getStatus(),
@@ -382,9 +383,7 @@ public class JobFinalizer {
                         "details", details != null ? details : Map.of()));
 
         if (job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -474,9 +473,7 @@ public class JobFinalizer {
                             "generation_job_id", job.getId().toString(),
                             "type", asset.getType(),
                             "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -545,9 +542,7 @@ public class JobFinalizer {
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
         if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -667,9 +662,7 @@ public class JobFinalizer {
                                 "type", asset.getType(),
                                 "access_url", asset.getUrl()));
             }
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -857,9 +850,7 @@ public class JobFinalizer {
             resultPayload.put(
                     com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_SEGMENTS,
                     resultSegments);
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -970,9 +961,7 @@ public class JobFinalizer {
                             "generation_job_id", job.getId().toString(),
                             "type", asset.getType(),
                             "access_url", asset.getUrl()));
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -1030,9 +1019,7 @@ public class JobFinalizer {
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
+            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -1043,6 +1030,32 @@ public class JobFinalizer {
     }
 
     // ========== 内部工具 ==========
+
+    /**
+     * 终态事件收口（IKHKMJ 单点收敛的延伸）。
+     *
+     * <p>本类有 8 个终态路径（4 成功 / 4 失败），过去各自裸调
+     * {@code eventPublisher.publish(..., "generation_job.status_changed", ...)}。
+     * 现在它们全部走这里，因为这个动作要做的**不再只有一件事**：
+     *
+     * <ol>
+     *   <li>落一条 {@code status_changed} 到 project_events（前端游标，用户看到进度）</li>
+     *   <li>发一条 billing 事件（解冻预扣，**钱**）</li>
+     * </ol>
+     *
+     * <p>两件事的触发条件**完全同构**——都是「job 到达终态」。分散回 8 处各写一遍，
+     * 漏掉任何一处的后果不是显示问题，是那个 job 的预扣永远冻着。
+     *
+     * <p>沿用同一个 {@code payload}：它同时是 project_events 的行内容和 billing 事件的
+     * 数据源（成功槽数、失败原因都从里面取）。另起一份就会出现「事件说的成功、
+     * 结算看到的失败」这种对不上的账。
+     */
+    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
+        eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                payload);
+        settlementPublisher.publishTerminal(job, payload);
+    }
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
                                    String url, String storageKey, String mime, Long size, String md5,

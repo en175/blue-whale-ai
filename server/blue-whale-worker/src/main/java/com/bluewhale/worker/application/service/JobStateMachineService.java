@@ -83,7 +83,9 @@ public class JobStateMachineService {
                                 new ProjectEventPublisher(projectEventMapper)),
                         new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
                                 new ProjectEventPublisher(projectEventMapper)),
-                        new ProjectEventPublisher(projectEventMapper)));
+                        new ProjectEventPublisher(projectEventMapper),
+                        // 测试直连构造没有 Spring 容器，也就没有 MQ 生产者
+                        JobSettlementPublisher.noop()));
     }
 
     /**
