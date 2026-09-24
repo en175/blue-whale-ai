@@ -32,6 +32,10 @@ public class AssetEntity {
     /** 类型：image/video/audio（assets）；image/video/audio/media_extract（jobs，契约 §2） */
     private String type;
 
+    @TableField("name")
+    /** 展示名（可空）；音视频合成结果 = 视频名(音视频合成).mp4（IKIHPJ，迁移契约 §20.4） */
+    private String name;
+
     @TableField("storage_key")
     /** TOS 对象键；null=上游直存 passthrough 残留行（源资产解析视为不可用） */
     private String storageKey;
@@ -114,6 +118,8 @@ public class AssetEntity {
     public void setGenerationJobId(Long generationJobId) { this.generationJobId = generationJobId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
     public String getStorageKey() { return storageKey; }
     public void setStorageKey(String storageKey) { this.storageKey = storageKey; }
     public String getContentSha256() { return contentSha256; }

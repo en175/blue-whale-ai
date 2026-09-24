@@ -100,6 +100,53 @@ public class JobFinalizer {
                 "音频混合完成", null));
     }
 
+    /**
+     * 音视频合成成功：单槽免费视频资产（IKIHPJ，迁移契约 §20.4）。
+     * <p>
+     * 秒→毫秒换算在此收口：{@code duration_ms = round(result.duration × 1000)}；宽高由
+     * {@code result.resolution}（"WxH"）解析。时长/分辨率缺失回落源视频资产（去字幕先例）；
+     * 结果资产命名 = 源视频资产名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，卡片回填取资产名）。
+     */
+    @Transactional
+    public boolean publishAudioVideoMuxResult(com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto input) {
+        AssetEntity source = assetMapper.selectById(Long.parseLong(input.sourceVideoAssetId()));
+        Integer width = null;
+        Integer height = null;
+        if (input.resolution() != null) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile("^(\\d+)[xX](\\d+)$").matcher(input.resolution().trim());
+            if (matcher.matches()) {
+                width = Integer.valueOf(matcher.group(1));
+                height = Integer.valueOf(matcher.group(2));
+            }
+        }
+        if (width == null || height == null) {
+            width = source != null ? source.getWidth() : null;
+            height = source != null ? source.getHeight() : null;
+        }
+        Integer durationMs = input.durationSec() != null && Double.isFinite(input.durationSec())
+                ? (int) Math.round(input.durationSec() * 1000)
+                : (source != null ? source.getDurationMs() : null);
+        Map<String, Object> extra = new java.util.HashMap<>();
+        if (input.resolution() != null) extra.put("resolution", input.resolution());
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[audio_video_mux] publishAudioVideoMuxResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video", input.url(), input.storageKey(), input.mime(),
+                input.size(), input.md5(), width, height, durationMs,
+                "音视频合成完成", extra.isEmpty() ? null : extra,
+                composeAudioVideoMuxResultName(source != null ? source.getName() : null)));
+    }
+
+    /** 结果资产命名（IKIHPJ 拍板⑤）：源视频资产名去扩展名 + "(音视频合成).mp4"；源名空白回落基名「视频」。 */
+    private static String composeAudioVideoMuxResultName(String sourceName) {
+        String base = sourceName == null ? "" : sourceName.trim();
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) base = base.substring(0, dot);
+        if (base.isEmpty()) base = "视频";
+        return base + "(音视频合成).mp4";
+    }
+
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
     //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========
@@ -950,7 +997,7 @@ public class JobFinalizer {
 
         AssetEntity asset = buildAsset(jobIdLong, p.projectId(), p.userId(), p.assetType(),
                 p.url(), p.storageKey(), p.mime(), p.size(), p.md5(),
-                p.width(), p.height(), p.durationMs());
+                p.width(), p.height(), p.durationMs(), p.name());
         assetMapper.insert(asset);
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
@@ -995,8 +1042,19 @@ public class JobFinalizer {
             Integer width, Integer height, Integer durationMs,
             String successMessage,
             /** 终态日志附加键值（可 null）；结果字段入库的承载位先例。 */
-            Map<String, Object> extraLogPayload
-    ) {}
+            Map<String, Object> extraLogPayload,
+            /** 结果资产名（可 null = 不命名）；音视频合成按迁移契约 §20.4 落「视频名(音视频合成).mp4」。 */
+            String name
+    ) {
+        /** 无命名家族的旧形构造（name=null）：既有注册点零改动。 */
+        SingleAssetPublish(String logTag, String jobId, String projectId, String userId, String workerId,
+                           long fencingToken, String assetType, String url, String storageKey, String mime,
+                           Long size, String md5, Integer width, Integer height, Integer durationMs,
+                           String successMessage, Map<String, Object> extraLogPayload) {
+            this(logTag, jobId, projectId, userId, workerId, fencingToken, assetType, url, storageKey, mime,
+                    size, md5, width, height, durationMs, successMessage, extraLogPayload, null);
+        }
+    }
 
     /**
      * 轮询型免费工具失败模板：failMediaExtractGuard（SET 清 next_action_at + next_poll_at）
@@ -1044,14 +1102,23 @@ public class JobFinalizer {
 
     // ========== 内部工具 ==========
 
+    /** 旧形签名（不命名家族）：name=null 委托，既有调用点零改动。 */
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
                                    String url, String storageKey, String mime, Long size, String md5,
                                    Integer width, Integer height, Integer durationMs) {
+        return buildAsset(jobIdLong, projectId, userId, type, url, storageKey, mime, size, md5,
+                width, height, durationMs, null);
+    }
+
+    private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
+                                   String url, String storageKey, String mime, Long size, String md5,
+                                   Integer width, Integer height, Integer durationMs, String name) {
         AssetEntity asset = new AssetEntity();
         asset.setUserId(Long.parseLong(userId));
         asset.setProjectId(Long.parseLong(projectId));
         asset.setGenerationJobId(jobIdLong);
         asset.setType(type);
+        asset.setName(name);
         asset.setUrl(url);
         asset.setStorageKey(storageKey);
         asset.setMime(mime);

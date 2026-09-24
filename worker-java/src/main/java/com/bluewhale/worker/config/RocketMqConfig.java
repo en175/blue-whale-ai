@@ -143,6 +143,23 @@ public class RocketMqConfig {
     }
 
     /**
+     * audio_video_mux（音视频合成，画布音频卡「音视频合成」）consumer（IKIHPJ，父规格 IKIHMX）。
+     * <p>
+     * consumer group = "generation-audio-video-mux-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRouteEnum#AUDIO_VIDEO_MUX}（= TS `AUDIO_VIDEO_MUX_TAG`）。
+     * digitGuard = false（AudioMixConsumer 同款）；并发复用 mediaExtract 档（不新增 WorkerProperties 字段）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.AudioVideoMuxConsumer audioVideoMuxConsumer(
+            com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig) {
+        return new com.bluewhale.worker.application.consumer.AudioVideoMuxConsumer(
+                processor, GenerationMqRouteEnum.AUDIO_VIDEO_MUX.topic(), clientConfig,
+                "generation-audio-video-mux-worker", workerProps.concurrency().mediaExtract());
+    }
+
+    /**
      * audio_trim（音频截取，画布音频卡「截取」）consumer（IKHB6S，父单 IKHB08）。
      * <p>
      * consumer group = "generation-audio-trim-worker"（冻结值）。
@@ -566,6 +583,13 @@ public class RocketMqConfig {
                 clientConfig, GenerationMqRouteEnum.AUDIO_MIX.topic(), GenerationMqRouteEnum.AUDIO_MIX.tag());
     }
 
+    /** audio_video_mux 轮询自投生产者（IKIHPJ；audioMixMessageProducer 同款，独立 tag 防投错）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioVideoMuxMessageProducer(ClientConfiguration clientConfig) {
+        return RocketMqGenerationMessageProducer.create(
+                clientConfig, GenerationMqRouteEnum.AUDIO_VIDEO_MUX.topic(), GenerationMqRouteEnum.AUDIO_VIDEO_MUX.tag());
+    }
+
     /**
      * audio_speed 轮询自投生产者（IKHW5A；audioTrimMessageProducer 同款）。
      * <p>
@@ -686,6 +710,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer audioMixRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_MIX);
+    }
+
+    /** recovery 重投 audio_video_mux 的到点或孤儿任务（IKIHPJ）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer audioVideoMuxRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRouteEnum.AUDIO_VIDEO_MUX);
     }
 
     /** recovery 重投 audio_speed（IKHW5A，父单 IKHVYO；轮询自投消息丢失时由扫描兜底重投）。 */
