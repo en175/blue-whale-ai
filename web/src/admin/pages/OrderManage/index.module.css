@@ -131,7 +131,7 @@
   font-size: var(--font-size-md, 14px);
   outline: none;
   cursor: pointer;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .dateInput {
@@ -145,7 +145,7 @@
   color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .dateInput:focus {
@@ -192,8 +192,8 @@
 }
 
 .table td {
-  padding: 20px 16px;
-  border-top: 1px solid #242424;
+  padding: 10px 12px;
+  border-top: 1px solid var(--admin-divider);
   font-size: var(--font-size-md, 14px);
   color: var(--admin-text);
   white-space: nowrap;
@@ -338,9 +338,9 @@
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 72px);
   overflow-y: auto;
-  border: 1px solid #2e2e2e;
+  border: 1px solid var(--admin-divider);
   border-radius: 14px;
-  background: #1c1c1c;
+  background: #f3f4f6;
   box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
@@ -349,9 +349,9 @@
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 72px);
   overflow-y: auto;
-  border: 1px solid #2e2e2e;
+  border: 1px solid var(--admin-divider);
   border-radius: 14px;
-  background: #1c1c1c;
+  background: #f3f4f6;
   box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
@@ -464,7 +464,7 @@
 }
 
 .stepLine {
-  background: #3a3a3a;
+  background: var(--admin-border-strong);
 }
 
 .stepLineDone {
@@ -557,7 +557,7 @@
   color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .input:focus {
@@ -583,7 +583,7 @@
   padding: 11px 26px;
   border: none;
   border-radius: 8px;
-  background: #16a34a;
+  background: var(--admin-success);
   color: #fff;
   font-size: var(--font-size-md, 14px);
   font-weight: 500;
@@ -595,7 +595,7 @@
 }
 
 .confirmGreen:disabled {
-  background: #1e3a2a;
+  background: var(--admin-success-soft);
   color: var(--admin-text-muted);
   cursor: not-allowed;
 }
@@ -640,7 +640,7 @@
   padding: 12px 16px;
   border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #202020;
+  background: var(--admin-divider);
 }
 
 .logHead {

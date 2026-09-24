@@ -68,7 +68,7 @@
   font-size: var(--font-size-md, 14px);
   outline: none;
   cursor: pointer;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .dateInput {
@@ -82,7 +82,7 @@
   color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .dateInput:focus {
@@ -157,8 +157,8 @@
 }
 
 .table td {
-  padding: 20px 16px;
-  border-top: 1px solid #242424;
+  padding: 10px 12px;
+  border-top: 1px solid var(--admin-divider);
   font-size: var(--font-size-md, 14px);
   color: var(--admin-text);
   white-space: nowrap;

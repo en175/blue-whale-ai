@@ -16,9 +16,9 @@
 .modal {
   width: 420px;
   max-width: calc(100vw - 48px);
-  border: 1px solid #2e2e2e;
+  border: 1px solid var(--admin-divider);
   border-radius: 14px;
-  background: #1c1c1c;
+  background: #f3f4f6;
   box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 

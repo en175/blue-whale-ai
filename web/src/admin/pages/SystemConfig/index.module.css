@@ -117,7 +117,7 @@
   padding: 22px 24px;
   border: 1px solid var(--admin-border);
   border-radius: 12px;
-  background: #1c1c1c;
+  background: #f3f4f6;
 }
 
 .cardHead {
@@ -280,7 +280,7 @@
   color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .input:focus {
