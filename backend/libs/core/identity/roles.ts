@@ -43,3 +43,54 @@ export const ADMIN_ROLE_CODES: readonly string[] = [ROLE_ADMIN, ROLE_SUPER_ADMIN
 export function isAdmin(roleCodes: readonly string[]): boolean {
   return roleCodes.some((code) => ADMIN_ROLE_CODES.includes(code));
 }
+
+/** 该角色集合里有没有超级管理员。 */
+export function isSuperAdmin(roleCodes: readonly string[]): boolean {
+  return roleCodes.includes(ROLE_SUPER_ADMIN);
+}
+
+/**
+ * 这次撤销会不会让系统失去**最后一个**超级管理员？
+ *
+ * <p>对应 geekai 里那条 `manager.Username != SuperUsername && !manager.Status`——
+ * 它硬编码了一个用户名（`const SuperUsername = "admin"`）来保证「超管踢不掉」。
+ * 我们把它做成**数据判定**：看的是「持有 `super_admin` 的人还剩几个」，
+ * 而不是某个固定用户名。这样换人不需要改代码，也支持多个超管互相兜底。
+ *
+ * <p>⚠️ 拦的是「撤掉 `super_admin` 这最后一个持有者」，不是「超管不能被碰」：
+ * 从超管身上撤销**别的**角色（比如 `admin`）不受影响。所以判定的第一个参数是
+ * **被撤销的角色**，而不是被操作者。只有一个超管时，撤它的超管角色才锁死；
+ * 有两个的时候随你撤——留一个能进门的就够了。
+ *
+ * <p>放在纯函数里而不是写在 controller 里，是因为它是一条**不该被绕过**的规则：
+ * 将来做批量授撤、脚本、或别的入口，都得走同一个判定。
+ *
+ * @param roleBeingRevoked      这次要撤销的角色 code
+ * @param targetRoleCodes       被操作者当前持有的角色
+ * @param superAdminHolderCount 全系统持有 super_admin 的人数（**含被操作者**）
+ */
+export function revokeWouldOrphanSuperAdmin(
+  roleBeingRevoked: string,
+  targetRoleCodes: readonly string[],
+  superAdminHolderCount: number,
+): boolean {
+  return (
+    roleBeingRevoked === ROLE_SUPER_ADMIN &&
+    isSuperAdmin(targetRoleCodes) &&
+    superAdminHolderCount <= 1
+  );
+}
+
+/**
+ * 这次操作会撤掉系统里最后一个超级管理员。
+ *
+ * <p>单独成一个错误类型而不是抛通用的「参数非法」：它不是「你传错了」，
+ * 是「这么做完之后没人能进管理端了」。调用方要能把它翻成一个**说人话**的提示，
+ * 否则运维看到「参数错误」只会换个参数再试一次。
+ */
+export class LastSuperAdminError extends Error {
+  constructor() {
+    super("系统必须保留至少一个超级管理员：这是最后一个，撤销后将无人能进入管理端");
+    this.name = "LastSuperAdminError";
+  }
+}

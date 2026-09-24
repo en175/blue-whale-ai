@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 
 import type { Tier } from "@lib/core/identity/tier.js";
+import {
+  LastSuperAdminError,
+  revokeWouldOrphanSuperAdmin,
+  ROLE_SUPER_ADMIN,
+} from "@lib/core/identity/roles.js";
 import { createLogger } from "@lib/core/logging";
 import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-login-log-repo.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
@@ -42,6 +47,26 @@ export class IdentityService {
   /** 是否具备管理员权限（持有 admin / super_admin 中任意一个）。 */
   async isAdmin(userId: string | number): Promise<boolean> {
     return this.roles.isAdmin(String(userId));
+  }
+
+  /** 授予角色。角色 code 不存在时由 repo 抛 {@link UnknownRoleError}。 */
+  async grantRole(userId: string | number, code: string, grantedBy: string): Promise<void> {
+    await this.roles.grant(String(userId), code, grantedBy);
+  }
+
+  /**
+   * 撤销角色。
+   *
+   * @throws LastSuperAdminError 会撤掉系统里最后一个超级管理员——**删掉之后就没人能进管理端了**
+   */
+  async revokeRole(userId: string | number, code: string): Promise<void> {
+    const targetRoles = await this.roles.listRoleCodes(String(userId));
+    // 判定用纯函数（见 roles.ts）：规则只有一处定义，将来做批量授撤、脚本、
+    // 或别的入口时都走同一个判定，不会各写一份。
+    if (revokeWouldOrphanSuperAdmin(code, targetRoles, await this.roles.countHolders(ROLE_SUPER_ADMIN))) {
+      throw new LastSuperAdminError();
+    }
+    await this.roles.revoke(String(userId), code);
   }
 
   /**
