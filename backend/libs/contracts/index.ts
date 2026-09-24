@@ -240,6 +240,7 @@ export {
   AUDIO_MIX_DEFAULT_OUTPUT_FORMAT,
   AUDIO_MIX_SUBMIT_PATH,
   AUDIO_MIX_POLL_PATH_PREFIX,
+  AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS,
   audioMixCreateSchema,
   type AudioMixCreate,
 } from "./audio-mix.js";

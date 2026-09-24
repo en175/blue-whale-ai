@@ -85,11 +85,18 @@ public class AudioMixJobProcessor implements JobProcessor {
         } catch (Exception error) {
             String code = error instanceof MediaExtractError domain && PRESERVED_CODES.contains(domain.getCode())
                     ? domain.getCode() : AudioMixContract.ERROR_AUDIO_MIX_FAILED;
-            if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音频混合失败")) {
+            if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音频混合失败",
+                    upstreamHttpStatus(error))) {
                 // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
                 log.info("[audio_mix] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
             }
         }
+    }
+
+    /** 上游 HTTP 状态（网关 !2xx 时经 cause 携带）；非 HTTP 失败返回 null。 */
+    private static Integer upstreamHttpStatus(Throwable error) {
+        return error.getCause() instanceof NewApiVideoClient.HttpStatusException http
+                ? http.getStatus() : null;
     }
 
     private void runStep(ClaimedMediaExtractJobDto job) {
@@ -270,8 +277,16 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private boolean fail(ClaimedMediaExtractJobDto job, String code, String message) {
+        return fail(job, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIHGQ）：backend 401 换凭证判定读它，不依赖文案。 */
+    private boolean fail(ClaimedMediaExtractJobDto job, String code, String message, Integer httpStatus) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(AudioMixContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         log.warn("[audio_mix] job 失败 jobId={} code={} message={}", job.id(), code, message);
         return stateMachine.failMediaExtractJob(new FailMediaExtractDto(
                 job.id(), job.workerId(), job.fencingToken(), code, message, details));

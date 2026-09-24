@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import org.junit.jupiter.api.Test;
@@ -319,8 +320,47 @@ class AudioMixJobProcessorTest {
         new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine).failMediaExtractJob(argThat(failure ->
-                failure.code().equals("audio_mix_failed") && failure.message().contains("TOS 转存失败")));
+                failure.code().equals("audio_mix_failed") && failure.message().contains("TOS 转存失败")
+                        && !failure.details().containsKey("http_status")));
         verify(stateMachine, never()).publishAudioMixResult(any());
+    }
+
+    @Test
+    void upstreamUnauthorizedSubmitPersistsHttpStatusDetail() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed", "上游凭证被拒绝");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .thenThrow(unauthorized);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(failure.capture());
+        assertThat(failure.getValue().code()).isEqualTo("audio_mix_failed");
+        assertThat(failure.getValue().details())
+                .containsEntry("raw", "上游凭证被拒绝")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    void upstreamUnauthorizedPollPersistsHttpStatusDetailWithoutRelyingOnMessageWording() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed", "上游拒绝了这次查询");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(gateway.poll("sk-frozen", "provider-1")).thenThrow(unauthorized);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(failure.capture());
+        // 文案不含「401」字样：换凭证判定只依赖结构化 details.http_status，措辞变化不影响重试
+        assertThat(failure.getValue().message()).doesNotContain("401");
+        assertThat(failure.getValue().details()).containsEntry("http_status", 401);
     }
 
     @Test
