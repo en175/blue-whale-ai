@@ -225,6 +225,160 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertFalse(run("git", "ls-remote", "--heads", "origin",
                              "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
 
+    def test_bootstrap_existing_preserves_legacy_tasks_branches_and_prs(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        task = self.root / "legacy-task"
+        task_branch = "chore/IKITEST-旧发布线任务"
+        run("git", "worktree", "add", "-b", task_branch, task, old, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        orphan = "chore/IKITEST-遗留未合任务"
+        run("git", "branch", orphan, old, cwd=self.repo)
+        run("git", "worktree", "add", self.root / "orphan", orphan, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending legacy work",
+            cwd=self.root / "orphan")
+        run("git", "worktree", "remove", self.root / "orphan", cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+        snapshot = self.snapshot([{"number": 58, "target_branch": old, "state": "opened"}])
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", snapshot, "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        data = json.loads(activated.stdout)
+        self.assertEqual(new, data["branch"])
+        self.assertEqual([old], data["legacy"])
+        self.assertEqual(task_branch, data["legacy_inventory"]["task_worktrees"][0]["branch"])
+        self.assertIn(orphan, data["legacy_inventory"]["unmerged_task_branches"])
+        self.assertEqual(58, data["legacy_inventory"]["open_prs"][0]["number"])
+        self.assertTrue(task.exists())
+        self.assertTrue(run("git", "show-ref", "--verify", f"refs/heads/{orphan}",
+                            cwd=self.repo).stdout)
+        self.assertEqual(new, json.loads(self.command("current", "--json").stdout)["branch"])
+
+    def test_bootstrap_existing_records_unshared_legacy_release_work(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: local legacy commit",
+            cwd=old_worktree)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        item = json.loads(activated.stdout)["legacy_inventory"]["release_branches"][0]
+        self.assertEqual(old, item["branch"])
+        self.assertTrue(item["remote_exists"])
+        self.assertEqual(1, item["local_commit_count"])
+        self.assertTrue(run("git", "show-ref", "--verify", f"refs/heads/{old}",
+                            cwd=self.repo).stdout)
+
+    def test_bootstrap_existing_preserves_local_only_archived_release_with_unsaved_file(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        (old_worktree / "draft.txt").write_text("keep me\n", encoding="utf-8")
+        run("git", "push", "origin", "--delete", old, cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        data = json.loads(activated.stdout)
+        self.assertIn(old, data["legacy"])
+        item = data["legacy_inventory"]["release_branches"][0]
+        self.assertFalse(item["remote_exists"])
+        self.assertIn("draft.txt", item["worktree_changes"][0]["status"])
+        self.assertEqual("keep me\n", (old_worktree / "draft.txt").read_text(encoding="utf-8"))
+        self.assertEqual(new, json.loads(self.command("current", "--json").stdout)["branch"])
+
+    def test_bootstrap_existing_does_not_count_commit_shared_by_another_release(self):
+        old = "release/2026.09.15_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: shared history",
+            cwd=old_worktree)
+        run("git", "push", "origin", f"{old}:{new}", cwd=self.repo)
+        run("git", "push", "origin", "--delete", old, cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        item = json.loads(activated.stdout)["legacy_inventory"]["release_branches"][0]
+        self.assertFalse(item["remote_exists"])
+        self.assertEqual(0, item["local_commit_count"])
+        self.assertEqual(1, int(run("git", "rev-list", "--count", "origin/master.." + old,
+                                    cwd=self.repo).stdout.strip()))
+
+    def test_bootstrap_existing_requires_latest_dated_release(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            old, cwd=self.repo)
+
+        rejected = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                       "--branch", old, "--adopt-legacy", "--bootstrap-existing",
+                       "--user-authorized", "--pr-snapshot", self.snapshot(),
+                       cwd=bootstrap, check=False)
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("日期最新", rejected.stderr)
+
+    def test_bootstrap_existing_requires_isolated_task_worktree(self):
+        target = "release/2026.09.29_新版发布验证"
+        self.release(target)
+        args = ("activate", "--branch", target, "--bootstrap-existing",
+                "--user-authorized", "--pr-snapshot", self.snapshot())
+
+        main = self.command(*args)
+        self.assertNotEqual(0, main.returncode)
+        self.assertIn("隔离任务工作树", main.stderr)
+        release_worktree = self.root / "release"
+        run("git", "worktree", "add", release_worktree, target, cwd=self.repo)
+        direct = run(BASH, release_worktree / "scripts/manage-release-branch.sh", *args,
+                     cwd=release_worktree, check=False)
+        self.assertNotEqual(0, direct.returncode)
+        self.assertIn("隔离任务工作树", direct.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
     def test_create_rejects_unchecked_task_branch_without_worktree(self):
         first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
         self.assertEqual(0, first.returncode, first.stderr)
