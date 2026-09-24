@@ -48,8 +48,9 @@ import static org.mockito.Mockito.*;
  * <p>
  * parent-reuse 重试收割（IKI89Z / ADR-0114，IKI89P 定型形态平移）：重试 job submit 相
  * 查父任务上游，命中（succeeded 且 videoUrl+resolution 齐全）不提交直接发布；父失败/
- * 不存在/查询异常/发布失败回退重新提交；租约丢失形态（续租未命中/转存中止）静默退出
- * 不回退——已被接管或已终态，回退只会白付一次上游提交费。
+ * 不存在/查询异常/仍持有执行权的发布失败（下载转存异常）回退重新提交；失租形态（续租
+ * 未命中/转存中止/发布守卫未命中）停止执行不提交（IKICD0）——已被接管或已终态，回退
+ * 只会白付一次上游提交费。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -529,8 +530,8 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交（IKI89P 定型口径）")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0，与心跳失租同一停止语义）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoMatting(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-guard")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -542,15 +543,16 @@ class VideoMattingJobProcessorTest {
                         "video/webm", 1L, null));
         when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
         stubSourceAsset(1920, 1080);
-        when(matteVideoClient.submit(anyString(), anyString(), anyString(), anyString(), any()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
-                "portrait", "WEBM", null);
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：与心跳失租路径（续租未命中/转存中止
+        // 静默退出）同一停止语义，不提交、不自投、不落失败，任务由新 worker 重新领取收割
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test

@@ -197,7 +197,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoFrameInterpolationJobDto claim, String providerToken) {
-        // 0. IKI8A0（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI8A0（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoFrameInterpolationContract.TAG, claim, providerToken,
@@ -328,7 +329,8 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
      * 结果发布：立即下载转存（火山 video_url 仅 24h 有效，官方明确「须及时下载保存」）→
      * 建 Asset（type=video / source='generated' / generation_job_id）→ 终态 succeeded。
      * <p>
-     * 返回发布守卫结果（IKI8A0：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI8A0：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedVideoFrameInterpolationJobDto claim,
                                   InterpolateVideoTaskObservation observation) {

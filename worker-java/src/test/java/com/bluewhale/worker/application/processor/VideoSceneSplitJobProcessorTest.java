@@ -445,8 +445,8 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-guard")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -456,18 +456,20 @@ class VideoSceneSplitJobProcessorTest {
         when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
         when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(false);
         stubSourceAsset();
-        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 回退正常重新提交，不落失败终态")
-    void parentReuseSegmentLeaseRenewMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReuseSegmentLeaseRenewMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-renew")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-renew"))
@@ -480,13 +482,13 @@ class VideoSceneSplitJobProcessorTest {
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true, false);
         stubSourceAsset();
-        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        // 逐段转存中续租未命中 = 失租（IKICD0）：与守卫未命中同一停止语义，不因共享
+        // 回退逻辑提交新上游任务；新 worker 领取后从头重新检查父任务并完成收割
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
         verify(mediaRelay, times(1)).persist(anyString(), anyString());
         verify(stateMachine, never()).publishVideoSceneSplitResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
