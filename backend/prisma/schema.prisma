@@ -561,7 +561,10 @@ model identity_users {
   id           BigInt   @id @default(autoincrement())
   phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
   /// 邮箱。设计 §6.2 要求；与 username 一样是登录方式之一（email + password）。
-  email        String?  @db.VarChar(50)
+  /// ⚠️ 唯一：登录按 `username = ? OR email = ?` 一次查出主体，邮箱不唯一时会命中
+  /// **任意一行**——等于能用别人的邮箱登进来。NULL 可多行，空串不可
+  /// （MySQL 唯一索引对 NULL 互不相等，对空串不是）。见 migration 20260925120000。
+  email        String?  @unique(map: "uk_identity_users__email") @db.VarChar(50)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
@@ -569,6 +572,9 @@ model identity_users {
   version      Int      @default(1)
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
+  /// bcrypt 哈希（cost 10，与 new-api 一致）。**可空**：手机号注册、以及刚从
+  /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
+  /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
 
   @@unique([username], map: "uk_identity_users__username")

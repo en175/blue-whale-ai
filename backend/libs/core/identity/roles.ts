@@ -94,3 +94,25 @@ export class LastSuperAdminError extends Error {
     this.name = "LastSuperAdminError";
   }
 }
+
+/**
+ * 角色 code → 展示/存储用的**数值档位**（1 普通 / 10 管理员 / 100 超级管理员）。
+ *
+ * <h2>为什么会有这个函数（以及为什么它是过渡产物）</h2>
+ *
+ * 数值档位是 new-api 的口径，我们的角色模型是**集合**（见本文件开头）。
+ * 但会话 payload、管理端表格、前端权限判断目前都还是数字，一次性改完不现实。
+ * 于是这里做一个**单向、有损**的桥：集合 → 数字。
+ *
+ * <p>⚠️ 有损：只能表达「最高那一档」，表达不了「同时持有 admin 与 user」。
+ * 所以**判定权限请用 {@link isAdmin}，不要用 `roleRank(...) >= 10`**——
+ * 后者是我们正在退掉的老写法，但凡多一处用它，将来删它就更难一分。
+ *
+ * <p>它必须只有一份：登录与用户列表各写一遍，
+ * 就会出现「同一个人在两个页面里角色不一样」这种谁都不信的 bug。
+ */
+export function roleRank(roleCodes: readonly string[]): number {
+  if (roleCodes.includes(ROLE_SUPER_ADMIN)) return 100;
+  if (roleCodes.includes(ROLE_ADMIN)) return 10;
+  return 1;
+}

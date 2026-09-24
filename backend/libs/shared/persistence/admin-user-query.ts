@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { ROLE_ADMIN, ROLE_SUPER_ADMIN } from "@lib/core/identity/roles.js";
+import { roleRank } from "@lib/core/identity/roles.js";
 
 /**
  * 管理端用户列表 —— **读我们自己的库**，不再转发给 new-api。
@@ -41,13 +41,6 @@ export interface AdminUserListOptions {
 
 export interface AdminUserQuery {
   listAdminUsers(options: AdminUserListOptions): Promise<{ items: AdminUserRow[]; total: number }>;
-}
-
-/** 角色 code → 管理端展示用的数值档位（沿用前端既有的 1/10/100 口径）。 */
-function roleRank(codes: readonly string[]): number {
-  if (codes.includes(ROLE_SUPER_ADMIN)) return 100;
-  if (codes.includes(ROLE_ADMIN)) return 10;
-  return 1;
 }
 
 export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {

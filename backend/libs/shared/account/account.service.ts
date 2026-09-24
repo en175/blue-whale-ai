@@ -35,10 +35,25 @@ export class AccountService {
 
   // —— 账户/鉴权 ——
 
+  /**
+   * @deprecated **零调用者**：登录已切到我们自己的库（`IdentityService.login`，
+   * bcrypt 校验 `identity_users.password`）。
+   *
+   * <p>new-api 从「我们的用户体系」变成「上游供应商」之后，它那边不再有我们的用户，
+   * 这个方法连不上了。留着是为了让「还有没有别处在用」有个明确答案——
+   * 而不是让它在某次 grep 里重新冒出来。
+   *
+   * <p>连同 `NewApiLoginResult` 一起删除的时机：确认新登录路径在测试站跑通之后。
+   */
   login(input: NewApiLoginInput): Promise<NewApiLoginResult> {
     return this.client.login(input);
   }
 
+  /**
+   * @deprecated **零调用者**：注册已切到 `IdentityService.register`。
+   * 只切登录不切注册会让新用户注册进 new-api、登录查 identity_users——
+   * **注册完立刻登不上**，报的还是「用户名或密码错误」。
+   */
   register(input: NewApiRegisterInput): Promise<NewApiLoginResult> {
     return this.client.register(input);
   }

@@ -4,14 +4,54 @@ import type { Tier } from "@lib/core/identity/tier.js";
 import {
   LastSuperAdminError,
   revokeWouldOrphanSuperAdmin,
+  roleRank,
   ROLE_SUPER_ADMIN,
+  ROLE_USER,
 } from "@lib/core/identity/roles.js";
 import { createLogger } from "@lib/core/logging";
 import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-login-log-repo.js";
 import { createAdminUserQuery, type AdminUserListOptions } from "@lib/shared/persistence/admin-user-query.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
 import { createIdentityRoleRepo } from "@lib/shared/persistence/identity-role-repo.js";
+import { createIdentityUserRepo } from "@lib/shared/persistence/identity-user-repo.js";
+import {
+  burnVerificationTime,
+  hashPassword,
+  verifyPassword,
+} from "@lib/shared/identity/password.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/**
+ * 本地登录的结果，形状对齐会话 payload（role/status 是数值）。
+ *
+ * <p>⚠️ 这里**没有令牌字段**。老的 `NewApiLoginResult.token` 是那个用户的 new-api
+ * sk-，而 new-api 独立成上游之后，我们手上只有一把项目级的统一 key——
+ * 它属于部署配置，不属于某个人的登录结果。会话凭证由
+ * {@code SessionService} 自己签发（`sess_` 不透明令牌）。
+ */
+export interface LocalLoginResult {
+  userId: number;
+  username: string;
+  email: string | null;
+  /** 由角色集合折算的数值档位（见 `roleRank`），只为兼容既有会话与前端口径 */
+  role: number;
+  /** 1 = 启用 / 0 = 停用，与 `auth.guard.ts` 的 ENABLED_STATUS 一致 */
+  status: number;
+}
+
+/**
+ * 账号或口令不正确。
+ *
+ * <p>⚠️ **用户名不存在与口令错误共用这一个错误**，调用方必须原样透传。
+ * 分开报「该用户不存在」等于免费送出一份有效用户名清单——
+ * 而拿到这份清单正是撞库的第一步。
+ */
+export class InvalidCredentialsError extends Error {
+  constructor() {
+    super("用户名或密码错误");
+    this.name = "InvalidCredentialsError";
+  }
+}
 
 /**
  * 用户身份域的对内入口 —— 三件事：**等级（花多少钱）、角色（能做什么）、登录留痕**。
@@ -34,12 +74,113 @@ export class IdentityService {
   private readonly roles;
   private readonly loginLogs;
   private readonly adminUsers;
+  private readonly users;
 
   constructor(prisma: PrismaService) {
     this.memberships = createIdentityMembershipRepo(prisma.client);
     this.roles = createIdentityRoleRepo(prisma.client);
     this.loginLogs = createIdentityLoginLogRepo(prisma.client);
     this.adminUsers = createAdminUserQuery(prisma.client);
+    this.users = createIdentityUserRepo(prisma.client);
+  }
+
+  /**
+   * 口令登录 —— **查我们自己的库**，不再转发给 new-api。
+   *
+   * <h2>为什么必须切</h2>
+   *
+   * new-api 从「我们的用户体系提供方」变成「带一把统一 key 的上游供应商」，
+   * 它那边不再有我们的用户。继续转发的话，它独立的那天所有人一起登不上。
+   *
+   * <h2>三条刻意的行为</h2>
+   *
+   * <ul>
+   *   <li><b>用户不存在也要烧掉一次 bcrypt</b>：否则「查无此人」比「密码错」快 60ms，
+   *       响应时间就成了一个用户名枚举接口。</li>
+   *   <li><b>没有口令的账号一律登不上</b>：`identity_users.password` 允许为 null
+   *       （手机号注册、以及刚从 new-api 迁来还没设口令的行）。把 null 当作
+   *       「都能登」是把一个数据状态变成一次越权。</li>
+   *   <li><b>停用账号照常返回身份</b>，由 Guard 拦。登录处判状态会多一份判定，
+   *       而两份判定迟早有一份忘了改——一处拦，就一处生效。</li>
+   * </ul>
+   *
+   * @throws InvalidCredentialsError 账号不存在 / 无口令 / 口令不匹配
+   */
+  async login(input: { username: string; password: string }): Promise<LocalLoginResult> {
+    const user = await this.users.findByLoginName(input.username);
+
+    if (!user) {
+      // 时间抹平：正常路径在这里已经跑过一次 bcrypt 了，两条路径必须一样慢
+      await burnVerificationTime(input.password);
+      throw new InvalidCredentialsError();
+    }
+
+    if (!(await verifyPassword(input.password, user.password))) {
+      throw new InvalidCredentialsError();
+    }
+
+    return {
+      userId: Number(user.id),
+      username: user.username,
+      email: user.email,
+      role: roleRank(await this.roles.listRoleCodes(user.id)),
+      status: user.status === "NORMAL" ? 1 : 0,
+    };
+  }
+
+  /**
+   * 注册 —— 同样落**我们自己的库**。
+   *
+   * <h2>为什么登录切了、注册也必须跟着切</h2>
+   *
+   * 只切一半是最糟的状态：新用户注册进的是 new-api 的库，而我们登录查的是
+   * `identity_users`——**注册完立刻登不上**，且报的还是「用户名或密码错误」，
+   * 用户只会以为自己记错了密码。
+   *
+   * <h2>口令策略的最小集</h2>
+   *
+   * 只做两件事：**非空**、**不超过 bcrypt 的 72 字节**（见 `password.ts`，
+   * 超了会被算法悄悄截断，用户以为设了 80 位而实际只有 72 位有效）。
+   * 复杂度规则（大小写/符号）不做：它们把用户推向 `Passw0rd!` 这类可预测的口令，
+   * 收益远不如长度。真要提升强度应该上强度表，而不是加字符集要求。
+   *
+   * @throws UsernameTakenError 用户名已被占用
+   * @throws PasswordPolicyError 口令超长
+   */
+  async register(input: {
+    username: string;
+    password: string;
+    email?: string | undefined;
+  }): Promise<LocalLoginResult> {
+    const passwordHash = await hashPassword(input.password);
+    const created = await this.users.create({
+      username: input.username,
+      passwordHash,
+      email: input.email ?? null,
+    });
+
+    // 显式授予内置的 user 角色。
+    //
+    // ⚠️ 不授也能用（`roleRank([])` 也是 1），但那样「这个用户有哪些角色」在两个
+    //    用户之间就有了两种表示（[] 与 ['user']），而角色列表是要拿来做权限判定的。
+    //    统一成一条基线，将来加「批量授权」「按角色查人」时才不会漏掉这一批。
+    //    失败不阻断注册：角色行缺失只影响将来的扩展权限，不影响登录与生成。
+    try {
+      await this.roles.grant(created.id, ROLE_USER, "self-register");
+    } catch (error) {
+      this.logger.error(
+        `注册后授予 ${ROLE_USER} 角色失败（用户 ${created.id}）：` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return {
+      userId: Number(created.id),
+      username: created.username,
+      email: created.email,
+      role: roleRank(await this.roles.listRoleCodes(created.id)),
+      status: 1,
+    };
   }
 
   /**
