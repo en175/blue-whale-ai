@@ -51,7 +51,7 @@ scripts/publish-review-package.sh --user-authorized --create-pr --target-branch 
 # 经授权需要草稿 PR 时加 --draft-pr
 ```
 
-入口成功后，Agent 用 Gitee 创建 source/target 与发布标记一致的 PR，并显式传 `draft=true` 或 `draft=false`。Hook 比较标记中的 `draft`、source 和 target；创建成功的 PostToolUse 才消费标记。失败或旧标记缺字段时不放行。用户授权的已有 PR 修订走 `--update-pr <编号> --pr-snapshot <临时JSON>`，快照记录 opened、source、target、head、conflict、changed_files 与 fetched_at。推送后回读 PR，并运行 `scripts/verify-pr-update.sh`，成功后才能 finalize 同步恢复点。
+入口成功后，Agent 用 Gitee 创建 source/target 与发布标记一致的 PR，并显式传 `draft=true` 或 `draft=false`。Hook 比较标记中的 `draft`、source 和 target，也核对远端源 HEAD 与目标 SHA。提交变化时重新验证和发布。创建成功的 PostToolUse 才消费标记；失败或旧标记缺字段时不放行。用户授权修订已有 PR 时，运行 `--update-pr <编号> --pr-snapshot <临时JSON>`。快照记录 opened、source、target、head、conflict、changed_files 与 fetched_at。推送后回读 PR，运行 `scripts/verify-pr-update.sh`，成功后再 finalize 同步恢复点。
 
 PR 创建后保留本地任务分支、远端源分支和 task worktree 处理审查反馈。合并 PR 需要单独授权；不能把 `can_merge=true` 当作合并许可。
 

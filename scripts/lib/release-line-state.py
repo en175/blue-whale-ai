@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from release_line_sync import SyncError, release_line_lock
 from task_metadata import TASK_PREFIXES, TaskMetadataError, read_task_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -204,28 +205,48 @@ def pr_snapshot(path, targets):
             and p["state"].lower() in ("open", "opened", "progressing")]
 
 
-def assert_closed(old, snapshot):
-    if git("rev-parse", "--verify", "origin/master", check=False).returncode:
+def assert_closed(old, snapshot, require_merged=True):
+    old_branches = [old] if isinstance(old, str) else old
+    if require_merged and git("rev-parse", "--verify", "origin/master", check=False).returncode:
         raise ReleaseError("origin/master 不可用，无法核实旧批次。")
     inventory_rows = worktrees()
-    old_tasks = [item for item in inventory_rows if item.get("target_branch") == old]
+    old_tasks = [item for item in inventory_rows if item.get("target_branch") in old_branches]
     unassigned = [item for item in inventory_rows if "metadata_error" in item]
     tasks = ", ".join(item["branch"] for item in old_tasks) or "无"
     unknown = ", ".join(item["branch"] for item in unassigned) or "无"
+    local_commits = []
+    dirty = []
+    for branch in old_branches:
+        local_ref = f"refs/heads/{branch}"
+        if not git("show-ref", "--verify", "--quiet", local_ref, check=False).returncode:
+            ahead = git("log", "--format=%h %s", f"origin/{branch}..{local_ref}").stdout.strip()
+            if ahead:
+                local_commits.append(f"{branch}: {ahead}")
+        for item in inventory_rows:
+            if item["branch"] == branch:
+                changes = git("-C", item["path"], "status", "--porcelain",
+                              "--untracked-files=all").stdout.strip()
+                if changes:
+                    dirty.append(f"{branch}: {changes}")
     if snapshot:
-        open_pulls = pr_snapshot(snapshot, old)
-        pulls = ", ".join(f"!{p.get('number', p.get('id', '?'))}" for p in open_pulls) or "无"
+        open_pulls = pr_snapshot(snapshot, old_branches)
+        pulls = ", ".join(f"!{p.get('number', p.get('id', '?'))} ({p['target_branch']})"
+                           for p in open_pulls) or "无"
     else:
         open_pulls = []
         pulls = "未核对（需 --pr-snapshot）"
-    inventory = f"待处理任务：{tasks}；归属未核实任务：{unknown}；开放 PR：{pulls}"
-    if git("merge-base", "--is-ancestor", f"origin/{old}", "origin/master",
-           check=False).returncode:
-        raise ReleaseError(f"旧活动发布线 {old} 尚未进入 origin/master，拒绝换期；{inventory}。")
+    inventory = (f"待处理任务：{tasks}；归属未核实任务：{unknown}；"
+                 f"本地领先提交：{'; '.join(local_commits) or '无'}；"
+                 f"未保存文件：{'; '.join(dirty) or '无'}；开放 PR：{pulls}")
+    if require_merged:
+        for branch in old_branches:
+            if git("merge-base", "--is-ancestor", f"origin/{branch}", "origin/master",
+                   check=False).returncode:
+                raise ReleaseError(f"旧活动发布线 {branch} 尚未进入 origin/master，拒绝换期；{inventory}。")
     if not snapshot:
         raise ReleaseError(f"换期需 --pr-snapshot <JSON>；{inventory}。")
-    if old_tasks or unassigned or open_pulls:
-        raise ReleaseError(f"旧活动发布线仍有待处理或归属未核实的任务、开放 PR，拒绝换期；{inventory}；请负责人决定去向。")
+    if old_tasks or unassigned or local_commits or dirty or open_pulls:
+        raise ReleaseError(f"旧发布线仍有待处理事项，拒绝换期；{inventory}；请负责人决定去向。")
 
 
 def write_state(previous, active, legacy):
@@ -247,6 +268,11 @@ def activate(args):
     if not args.user_authorized:
         raise ReleaseError("启用发布线需负责人授权并传 --user-authorized。")
     assert_main()
+    with release_line_lock(ROOT):
+        activate_locked(args)
+
+
+def activate_locked(args):
     validate(args.branch)
     refresh()
     branches = releases()
@@ -258,13 +284,7 @@ def activate(args):
         if others and not args.adopt_legacy:
             raise ReleaseError("首次启用发现多条分支，请清点后显式传 --adopt-legacy：" + ", ".join(others))
         if others:
-            open_pulls = pr_snapshot(args.pr_snapshot, others)
-            if open_pulls:
-                details = ", ".join(
-                    f"!{p.get('number', p.get('id', '?'))} 的目标为 {p['target_branch']}"
-                    for p in open_pulls
-                )
-                raise ReleaseError("待归档分支仍有开放 PR，请负责人决定去向：" + details)
+            assert_closed(others, args.pr_snapshot, require_merged=False)
         legacy = others
     else:
         pending = candidates(state, branches)
@@ -288,6 +308,11 @@ def create(args):
     if not args.user_authorized:
         raise ReleaseError("创建 release 分支需负责人授权并传 --user-authorized。")
     assert_main()
+    with release_line_lock(ROOT):
+        create_locked(args)
+
+
+def create_locked(args):
     if args.summary and (any(x in args.summary for x in "_-/\\")
                          or any(x.isspace() for x in args.summary)):
         raise ReleaseError("描述禁止包含空格、下划线、连字符、斜杠或反斜杠。")
@@ -322,7 +347,7 @@ def create(args):
         raise ReleaseError("推送失败，已回滚本地新分支：" + pushed.stderr.strip())
     try:
         sha = write_state(previous, branch, legacy)
-    except ReleaseError as exc:
+    except (ReleaseError, SyncError) as exc:
         raise ReleaseError(f"已推送 {branch}，但共享状态未启用；保留分支供核查。{exc}") from exc
     emit({"status": "created", "branch": branch, "base": master,
           "state_sha": sha, "legacy": legacy},

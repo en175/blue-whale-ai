@@ -284,6 +284,8 @@ if [ "$MODE" = create ]; then
   cat >"$marker_path" <<EOF
 branch=$branch
 target=$TARGET_BRANCH
+head=$head_sha
+target_sha=$upstream_sha
 draft=$draft_marker
 created_at=$(date +%s)
 EOF

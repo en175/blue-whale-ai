@@ -61,7 +61,7 @@ scripts/publish-review-package.sh --user-authorized --create-pr --target-branch 
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON>
 ```
 
-创建 Gitee PR 时显式传与发布标记相同的 `draft` 值。Hook 核对 source、target、draft，旧标记缺 draft 字段时阻断。任务分支落后时走 `scripts/sync-task-from-origin.sh sync --target-branch <任务目标 release> --json`，Hook 不执行同步。更新已有 PR 先取 Gitee 快照，入口核对 IID、opened、source、target、head 和冻结范围，按显式 lease 推送；推送后回读 PR 并通过 `scripts/verify-pr-update.sh`，再 finalize 恢复点。
+创建 Gitee PR 时显式传与发布标记相同的 `draft` 值。Hook 核对 source、target、draft、远端源 HEAD 和目标 SHA。提交变化或旧标记缺字段时，重新验证并执行发布入口。任务分支落后时运行 `scripts/sync-task-from-origin.sh sync --target-branch <任务目标 release> --json`，Hook 不执行同步。更新已有 PR 前先取 Gitee 快照。入口核对 IID、opened、source、target、head 和冻结范围，再按显式 lease 推送。推送后回读 PR，运行 `scripts/verify-pr-update.sh`，通过后再 finalize 恢复点。
 
 ZCode / Claude Code / Codex / Kimi CLI 共用 `.claude/hooks/` 权威实现及 `PreToolUse` / `PostToolUse` 阻断协议；Codex wrapper 对普通 Gate 透明转发，仅把官方 `tool_name=apply_patch`、`tool_input.command` 适配到共享写入 Gate；Kimi CLI 经用户级 shim（`scripts/install-kimi-hooks.sh` 安装）路由到同一实现，载荷差异（`tool_call_id` / `tool_output`）由 Gate 层回退兼容。四端都是“无输出即放行、stderr 原因 + `exit 2` 即阻断、成功 Post 消费、失败保留”。提醒型 `Grep|Glob` 因只注入 context 且 Codex 无对应 CBM MCP 而排除；`SessionStart` 因属于会话启动/恢复 context 注入而非工具 Gate、各平台生命周期挂载不同而排除。正常流程以 `CLAUDE.md` 和本规则为先，Hook 不承担同步或状态编排。
 

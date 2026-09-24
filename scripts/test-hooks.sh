@@ -279,11 +279,16 @@ write_publish_marker() {
   local created_at="${1:-$(date +%s)}"; shift || true
   local draft="${1:-false}"; shift || true
   local marker
+  local head target_sha
   marker="$(publish_marker_path "$branch")"
+  head="$("$REAL_GIT" -C "$PUBLISH_TEST_ROOT" ls-remote --heads origin "refs/heads/$branch" | awk '{ print $1 }')"
+  target_sha="$("$REAL_GIT" -C "$PUBLISH_TEST_ROOT" ls-remote --heads origin "refs/heads/$target" | awk '{ print $1 }')"
   mkdir -p "$(dirname "$marker")"
   cat >"$marker" <<EOF
 branch=$branch
 target=$target
+head=$head
+target_sha=$target_sha
 draft=$draft
 created_at=$created_at
 EOF
@@ -368,6 +373,14 @@ setup_publish_test_repo() {
   SAVED_PUBLISH_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
   PUBLISH_TEST_ROOT="$(mktemp -d)"
   "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" init -q
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" config user.name "Hook Test"
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" config user.email "hook@example.com"
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" commit -q --allow-empty -m "chore: hook test base"
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" init -q --bare "$PUBLISH_TEST_ROOT/origin.git"
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" remote add origin "$PUBLISH_TEST_ROOT/origin.git"
+  for branch in release/prod release/stale feature/x feature/aaa feature/bbb feature/stale feature/kimi-post; do
+    "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" push -q origin "HEAD:refs/heads/$branch"
+  done
   CLAUDE_PROJECT_DIR="$PUBLISH_TEST_ROOT"
   export PUBLISH_TEST_ROOT CLAUDE_PROJECT_DIR
 }
@@ -1440,6 +1453,23 @@ PUBLISH_AUDIT_LOG="$(audit_log_path "$PUBLISH_TEST_ROOT" "$RELEASE_HOOK")"
 assert_audit_record_field "$PUBLISH_AUDIT_LOG" tu_create_pr_allow operation create-pr "audit-all: create PR 记录操作类别"
 assert_audit_record_field "$PUBLISH_AUDIT_LOG" tu_create_pr_allow exit_code 0 "audit-all: create PR 放行记录"
 assert_file_not_has_text "$PUBLISH_AUDIT_LOG" SECRET_PR_TITLE "audit-all: create PR 不记录 MCP 参数"
+
+# 标记生成后远端源分支或目标分支前进，旧标记不得用于创建 PR。
+write_publish_marker "feature/stale"
+"$REAL_GIT" -C "$PUBLISH_TEST_ROOT" commit -q --allow-empty -m "chore: advance source"
+"$REAL_GIT" -C "$PUBLISH_TEST_ROOT" push -q origin HEAD:refs/heads/feature/stale
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/stale","target_branch":"release/prod","draft":false,"title":"test"}}'
+assert_exit 2 "release: 源分支前进后旧发布标记拦截"
+assert_stderr_has "源分支提交" "release: 源分支前进提示重新验证"
+remove_publish_marker feature/stale
+
+write_publish_marker "feature/x" "release/stale"
+"$REAL_GIT" -C "$PUBLISH_TEST_ROOT" commit -q --allow-empty -m "chore: advance target"
+"$REAL_GIT" -C "$PUBLISH_TEST_ROOT" push -q origin HEAD:refs/heads/release/stale
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/stale","draft":false,"title":"test"}}'
+assert_exit 2 "release: 目标分支前进后旧发布标记拦截"
+assert_stderr_has "目标分支提交" "release: 目标分支前进提示重新验证"
+remove_publish_marker feature/x
 
 # 创建显式非 draft PR → Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 write_publish_marker "feature/x"

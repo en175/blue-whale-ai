@@ -6,7 +6,7 @@
 
 本地 `master` 与 `origin/master` 代表生产版本。日常 feature、fix、docs、chore 均基于团队唯一活动 `release/*`，PR 指向任务元数据记录的同一发布线。发布负责人在 staging 验证该批次后，将 release 经 Gitee PR 合入 master，再打 tag 并部署。
 
-发布线状态由 `scripts/manage-release-branch.sh current --json` 读取。新候选批次不能只按日期自动启用；发布负责人先核对旧批次和未完成任务、PR，明确授权 `activate --branch <release/*> --user-authorized --pr-snapshot <JSON>`。创建新批次用 `create --summary <中文简述> --user-authorized`，旧批次仍活动时入口拒绝再建一条活动线。`list` 用于查看候选，不是每张任务 PR 的目标选择器。旧任务与 PR 不自动迁移。
+发布线状态由 `scripts/manage-release-branch.sh current --json` 读取。新候选批次不能只按日期自动启用；发布负责人先核对旧批次任务、PR、本地领先提交和未保存文件，明确授权 `activate --branch <release/*> --user-authorized --pr-snapshot <JSON>`。创建新批次用 `create --summary <中文简述> --user-authorized`，旧批次仍有待处理事项时入口拒绝换期。换期与任务开工使用同一把本地锁，避免换期后新任务落到旧线。`list` 用于查看候选，不是每张任务 PR 的目标选择器。旧任务与 PR 不自动迁移。
 
 每次开始依赖仓库代码的任务，包括只读调查、调试和审查，先在当前本地发布线工作树运行 `scripts/sync-release-line.sh --json`。入口抓取同名远端，保留本地领先提交，远端领先时快进，分叉无冲突时合并。冲突、远端不可达或同步可能覆盖未提交文件时停止；报告实际 HEAD、dirty 路径和失败原因。同步成功后核对当前工作目录的 CBM 索引与查询范围。未提交文件不进入任务共同基线。
 

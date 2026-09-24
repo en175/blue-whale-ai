@@ -13,7 +13,7 @@
 # 规则：
 #   - 发布审查包只允许通过标准入口触发；--user-authorized 即 Agent 对人类授权的声明。
 #   - 普通任务分支 push 不需要发布授权；保护分支与发布审查包不得绕过入口。
-#   - 创建 PR 校验标准入口写入的短期标记（target、source_branch、draft）；
+#   - 创建 PR 校验标准入口写入的短期标记（target、source_branch、HEAD、目标 SHA、draft）；
 #     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
 #   - 合并 PR / 创建 release 使用 AI 自动生成、绑定对象、TTL 900s 的一次性凭证。
 #   - Pre 仅校验，Post 成功后消费；失败保留凭证供有限重试。
@@ -163,10 +163,13 @@ validate_publish_marker() {
 
   marker_branch="$(read_publish_marker branch "$marker_path" || true)"
   marker_target="$(read_publish_marker target "$marker_path" || true)"
+  marker_head="$(read_publish_marker head "$marker_path" || true)"
+  marker_target_sha="$(read_publish_marker target_sha "$marker_path" || true)"
   marker_draft="$(read_publish_marker draft "$marker_path" || true)"
   marker_created_at="$(read_publish_marker created_at "$marker_path" || true)"
 
-  if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ] || [ -z "$marker_draft" ]; then
+  if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_head" ] ||
+     [ -z "$marker_target_sha" ] || [ -z "$marker_created_at" ] || [ -z "$marker_draft" ]; then
     block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized --create-pr 推送当前工单分支。"
   fi
 
@@ -190,6 +193,24 @@ validate_publish_marker() {
   esac
   if [ "$marker_draft" != "$requested_draft" ]; then
     block "PR draft 参数与发布审查包标记不匹配。请按发布入口记录的草稿状态创建 PR。"
+  fi
+
+  case "$marker_head:$marker_target_sha" in
+    *[!0-9a-f:]* ) block "发布审查包提交标记无效，请重新执行发布入口。" ;;
+  esac
+  if [ "${#marker_head}" -ne 40 ] || [ "${#marker_target_sha}" -ne 40 ]; then
+    block "发布审查包提交标记无效，请重新执行发布入口。"
+  fi
+  remote_refs="$(git -C "$PROJECT_DIR" ls-remote --heads origin \
+    "refs/heads/$source_branch" "refs/heads/$target_branch" 2>/dev/null)" ||
+    block "无法读取远端 PR 分支，请重新核对发布审查包。"
+  remote_head="$(printf '%s\n' "$remote_refs" | awk -v ref="refs/heads/$source_branch" '$2 == ref { print $1; exit }')"
+  remote_target_sha="$(printf '%s\n' "$remote_refs" | awk -v ref="refs/heads/$target_branch" '$2 == ref { print $1; exit }')"
+  if [ "$remote_head" != "$marker_head" ]; then
+    block "源分支提交在发布审查包生成后变化，请重新验证并执行发布入口。"
+  fi
+  if [ "$remote_target_sha" != "$marker_target_sha" ]; then
+    block "目标分支提交在发布审查包生成后变化，请重新验证并执行发布入口。"
   fi
 
   # 成功路径不在此消费：消费延后到 PostToolUse（PR 创建成功后），见 ADR-0011。

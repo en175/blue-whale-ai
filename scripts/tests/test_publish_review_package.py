@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLISH_SCRIPT = REPO_ROOT / "scripts" / "publish-review-package.sh"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-task-from-origin.sh"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-pr-update.sh"
+CREATE_PR_HOOK = REPO_ROOT / ".claude" / "hooks" / "confirm-release-action.sh"
 BRANCH = "feature/测试已有PR更新流程"
 
 
@@ -122,6 +123,16 @@ class PublishReviewPackageTest(unittest.TestCase):
             errors="replace",
             capture_output=True,
             env=env or self.base_env,
+        )
+
+    def invoke_create_pr_hook(self) -> subprocess.CompletedProcess[str]:
+        payload = {"tool_name": "mcp__gitee-ent__create_enterprise_repo_pull", "tool_input": {
+            "source_branch": BRANCH, "target_branch": "release/prod", "draft": False,
+        }}
+        return subprocess.run(
+            [BASH, str(CREATE_PR_HOOK)], cwd=self.worktree,
+            input=json.dumps(payload), text=True, encoding="utf-8", capture_output=True,
+            env={**self.base_env, "CLAUDE_PROJECT_DIR": str(self.worktree)},
         )
 
     def pr_snapshot(
@@ -227,13 +238,41 @@ class PublishReviewPackageTest(unittest.TestCase):
             expected_head,
         )
         self.assertTrue(self.publish_marker().exists())
-        self.assertIn("draft=false", self.publish_marker().read_text(encoding="utf-8"))
+        marker = self.publish_marker().read_text(encoding="utf-8")
+        self.assertIn("draft=false", marker)
+        self.assertIn(f"head={expected_head}", marker)
+        target_sha = self.git("ls-remote", "--heads", "origin", "refs/heads/release/prod").split()[0]
+        self.assertIn(f"target_sha={target_sha}", marker)
 
     def test_create_mode_can_bind_an_explicit_draft_marker(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--draft-pr", "--json")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("draft=true", self.publish_marker().read_text(encoding="utf-8"))
+
+    def test_create_pr_hook_rejects_source_commit_after_marker(self) -> None:
+        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
+        self.assertEqual(0, self.invoke_create_pr_hook().returncode)
+        self.commit_followup("after marker")
+        self.git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
+
+        blocked = self.invoke_create_pr_hook()
+
+        self.assertEqual(2, blocked.returncode)
+        self.assertIn("源分支", blocked.stderr)
+
+    def test_create_pr_hook_rejects_target_advance_after_marker(self) -> None:
+        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
+        self.assertEqual(0, self.invoke_create_pr_hook().returncode)
+        self.git("commit", "--allow-empty", "-m", "chore: advance target", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+
+        blocked = self.invoke_create_pr_hook()
+
+        self.assertEqual(2, blocked.returncode)
+        self.assertIn("目标分支", blocked.stderr)
 
     def test_update_mode_rejects_draft_creation_flag(self) -> None:
         result = self.invoke_update(self.pr_snapshot(), "--draft-pr")

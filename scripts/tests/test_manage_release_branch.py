@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.lib.release_line_sync import release_line_lock
+
 try:
     from .bash_helper import BASH
 except ImportError:
@@ -184,6 +186,63 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertNotEqual(0, refused.returncode)
         self.assertIn("候选不唯一", refused.stderr)
 
+    def test_initial_adoption_rejects_legacy_task_worktree(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        task = self.root / "legacy-task"
+        branch = "chore/IKITEST-旧发布线任务"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+
+        rejected = self.command("activate", "--branch", new, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(branch, rejected.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
+    def test_switch_rejects_unshared_local_release_commit_and_dirty_file(self):
+        created = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
+        old = json.loads(created.stdout)["branch"]
+        new = "release/2026.09.29_新版发布验证"
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: local release work", cwd=old_worktree)
+        (old_worktree / "draft.txt").write_text("unsaved\n", encoding="utf-8")
+
+        rejected = self.command("activate", "--branch", new, "--user-authorized",
+                                "--pr-snapshot", self.snapshot())
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("local release work", rejected.stderr)
+        self.assertIn("draft.txt", rejected.stderr)
+        self.assertEqual(old, json.loads(self.command("list", "--json").stdout)["branch"])
+        self.assertEqual("unsaved\n", (old_worktree / "draft.txt").read_text(encoding="utf-8"))
+
+    def test_switch_rejects_dirty_release_worktree_without_local_commits(self):
+        created = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
+        old = json.loads(created.stdout)["branch"]
+        new = "release/2026.09.29_新版发布验证"
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        (old_worktree / "draft.txt").write_text("unsaved\n", encoding="utf-8")
+
+        rejected = self.command("activate", "--branch", new, "--user-authorized",
+                                "--pr-snapshot", self.snapshot())
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("draft.txt", rejected.stderr)
+        self.assertEqual(old, json.loads(self.command("list", "--json").stdout)["branch"])
+
     def test_create_rejects_second_active_line_and_offline_state(self):
         first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
         self.assertEqual(0, first.returncode, first.stderr)
@@ -239,6 +298,36 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         created = self.command("create", "--summary", "下期发布验证", "--user-authorized",
                                "--pr-snapshot", snapshot, "--json")
         self.assertEqual(0, created.returncode, created.stderr)
+
+    def test_create_waits_for_task_creation_before_switching_line(self):
+        first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
+        self.assertEqual(0, first.returncode, first.stderr)
+        old = json.loads(first.stdout)["branch"]
+        snapshot = self.snapshot()
+        with release_line_lock(self.repo):
+            process = subprocess.Popen(
+                [BASH, str(self.repo / "scripts/manage-release-branch.sh"), "create",
+                 "--summary", "新版发布验证", "--user-authorized", "--pr-snapshot", str(snapshot)],
+                cwd=self.repo, text=True, encoding="utf-8", errors="replace",
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            try:
+                process.communicate(timeout=1)
+                waited = False
+            except subprocess.TimeoutExpired:
+                waited = True
+                task = self.root / "task-in-progress"
+                branch = "chore/IKITEST-并发开工任务"
+                run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+                start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+                run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+                    "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        _, stderr = process.communicate(timeout=15)
+
+        self.assertTrue(waited, "换期入口未等待正在创建任务的发布线锁")
+        self.assertNotEqual(0, process.returncode)
+        self.assertIn(branch, stderr)
+        self.assertEqual(old, json.loads(self.command("list", "--json").stdout)["branch"])
 
     def test_create_after_closeout_retains_old_branch_and_uses_suffix(self):
         first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
