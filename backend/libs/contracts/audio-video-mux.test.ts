@@ -7,6 +7,7 @@ import {
   AUDIO_VIDEO_MUX_JOB_TYPE,
   AUDIO_VIDEO_MUX_MODEL,
   AUDIO_VIDEO_MUX_POLL_PATH_PREFIX,
+  AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX,
   AUDIO_VIDEO_MUX_SOURCE,
   AUDIO_VIDEO_MUX_SUBMIT_PATH,
   AUDIO_VIDEO_MUX_SYNC_MODES,
@@ -17,6 +18,7 @@ import {
 const javaContract = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioVideoMuxContract.java", import.meta.url), "utf8");
 const javaRoute = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java", import.meta.url), "utf8");
 const javaClient = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/infrastructure/gateway/NewApiMediaKitMuxAudioVideoClient.java", import.meta.url), "utf8");
+const javaFinalizer = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/application/service/JobFinalizer.java", import.meta.url), "utf8");
 
 describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §20）", () => {
   it("keeps task type, queue tag, routes and gateway endpoints aligned with Java", () => {
@@ -55,6 +57,15 @@ describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §20）", () =
 
   it("keeps the transfer capacity constant aligned with the 10 GiB audio-side precedent", () => {
     expect(javaContract).toContain("MAX_RESULT_BYTES = 10L << 30");
+  });
+
+  it("pins the result-name suffix so the TS constant and the Java literal cannot drift apart", () => {
+    // §20.4 结果资产命名 = 源视频名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，空白回落「视频」）。
+    // Java 无法 import TS 常量，JobFinalizer.composeAudioVideoMuxResultName 持同一字面——
+    // 两侧任一改写未同步即红（TS 侧 web/audioVideoMux.ts 的回填命名同源引用本常量）。
+    expect(AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX).toBe("(音视频合成).mp4");
+    expect(javaFinalizer).toContain(`+ "${AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX}";`);
+    expect(javaFinalizer).toContain('if (base.isEmpty()) base = "视频";');
   });
 
   it("derives a printable ASCII client token deterministically from job id and submit attempt", () => {

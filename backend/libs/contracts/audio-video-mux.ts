@@ -10,6 +10,11 @@ export const AUDIO_VIDEO_MUX_POLL_PATH_PREFIX = "/v1/mediakit/tasks/";
 export const AUDIO_VIDEO_MUX_MODEL = "mediakit-mux-audio-video";
 export const AUDIO_VIDEO_MUX_SYNC_MODES = ["none", "video", "audio"] as const;
 
+/** 结果资产命名后缀（迁移契约 §20.4）：源视频资产名去扩展名 + 本后缀；worker-java
+ *  JobFinalizer.composeAudioVideoMuxResultName 持同一字面（Java 无法 import TS，靠
+ *  audio-video-mux.test.ts 读 Java 源逐值对账钉死两侧一致，前端回填取资产名同源）。 */
+export const AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX = "(音视频合成).mp4";
+
 /** 供应商 client_token 前缀（幂等键 = 前缀 + jobId + "-" + 提交尝试序号；≤64 可打印 ASCII）。 */
 export const AUDIO_VIDEO_MUX_CLIENT_TOKEN_PREFIX = "bwmux-";
 
