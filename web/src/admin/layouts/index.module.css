@@ -1,59 +1,70 @@
 /* ============================================
  * AdminLayout 后台布局样式
+ *
+ * 全部走 token（--admin-* 是 admin.css 里映射到全局设计 token 的别名）。
+ * 这里不再出现 # 字面量——之前这个文件自己定了一套底、边、灰、蓝，
+ * 与产品主题无关，改主题它不跟。
  * ============================================ */
 .guardLoading {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  color: #888;
+  color: var(--admin-text-faint, var(--color-text-tertiary));
   font-size: var(--font-size-md);
 }
+
 .layout {
   display: flex;
   width: 100%;
   height: 100vh;
-  background-color: #0a0a0a;
+  background-color: var(--color-bg-primary);
 }
 
-/* ---- 侧边栏 ---- */
+/* ---- 侧边栏 ----
+ * 比页面底亮一档（secondary），靠描边与内容区脱开，不用投影——
+ * 侧栏是固定结构，给它投影只会让「窗口里还浮着一块」的错觉。 */
 .sidebar {
-  width: 260px;
+  width: 248px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background-color: #151515;
-  border-right: 1px solid #232323;
+  background-color: var(--admin-surface-raised);
+  border-right: 1px solid var(--admin-border);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px;
-  border-bottom: 1px solid #232323;
+  gap: var(--spacing-md);
+  padding: var(--spacing-xl);
+  border-bottom: 1px solid var(--admin-border);
 }
 
+/* 品牌图标：**柔和底 + 强调色描边**，不是实心色块。
+   实心大色块是最容易显廉价的元素——它把强调色的用量堆到了最大。 */
 .brandIcon {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #3e8efc;
-  border-radius: 10px;
-  color: #fff;
+  background: color-mix(in srgb, var(--admin-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--admin-accent) 32%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--admin-accent);
 }
 
 .brandName {
-  color: #fff;
+  color: var(--admin-text);
   font-size: var(--font-size-md);
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .brandSub {
-  color: #888;
+  color: var(--admin-text-faint);
   font-size: var(--font-size-xs);
   margin-top: 2px;
 }
@@ -63,74 +74,100 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 12px;
+  gap: 2px;
+  padding: var(--spacing-md) var(--spacing-sm);
   overflow-y: auto;
 }
 
 .navItem {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  color: #bbb;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
   text-decoration: none;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .navItem:hover {
-  background-color: #1f1f1f;
-  color: #eee;
+  background-color: var(--admin-row-hover);
+  color: var(--admin-text);
 }
 
-.navActive {
-  color: #3e8efc;
+.navItem:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+/* 选中态：**柔和底 + 左侧 2px 指示条**。
+   不用整块实心强调色——那样一屏里最抢眼的是导航，而不是内容。 */
+.navActive,
+.navActive:hover {
+  background-color: var(--color-accent-agent-soft, rgba(76, 110, 245, 0.12));
+  color: var(--admin-accent);
   font-weight: 500;
 }
 
-.navActive:hover {
-  background-color: rgba(62, 139, 252, 0.08);
-  color: #3e8efc;
+.navActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background-color: var(--admin-accent);
 }
 
 /* ---- 底部管理员 ---- */
 .footer {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid #232323;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-top: 1px solid var(--admin-border);
 }
 
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #2a2a2a;
-  border-radius: 50%;
-  color: #ccc;
+  background: color-mix(in srgb, var(--admin-accent) 18%, transparent);
+  border-radius: var(--radius-full);
+  color: var(--admin-accent);
   font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.footerText {
+  min-width: 0;
 }
 
 .footerName {
-  color: #eee;
+  color: var(--admin-text);
   font-size: var(--font-size-sm);
 }
 
 .footerMail {
-  color: #777;
+  color: var(--admin-text-faint);
   font-size: var(--font-size-xs);
   margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- 内容区 ---- */
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 40px;
 }

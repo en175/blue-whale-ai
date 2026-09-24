@@ -19,6 +19,7 @@ import {
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
+import '../styles/admin.css';
 import styles from './index.module.css';
 
 /** 后台侧边菜单 */
@@ -64,13 +65,16 @@ export default function AdminLayout() {
   if (checking) return <div className={styles.guardLoading}>身份校验中…</div>;
 
   return (
-    <div className={styles.layout}>
+    // adminRoot 是 admin.css 里的全局类：它把 --admin-* 一组变量挂在这一层，
+    // 子树里所有样式都从它取值。挂在这里而不是 :root，是为了让这组变量
+    // 只在后台生效——前台不该被管理端的样式影响。
+    <div className={`adminRoot ${styles.layout}`}>
       {/* 侧边栏 */}
       <aside className={styles.sidebar}>
         {/* 品牌区 */}
         <div className={styles.brand}>
           <div className={styles.brandIcon}>
-            <Shield size={20} strokeWidth={2} />
+            <Shield size={18} strokeWidth={2} />
           </div>
           <div className={styles.brandText}>
             <div className={styles.brandName}>管理后台</div>
