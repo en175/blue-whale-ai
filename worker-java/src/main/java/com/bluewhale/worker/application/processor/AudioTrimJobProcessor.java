@@ -231,6 +231,10 @@ public class AudioTrimJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（start_time / end_time null 即不出键，走官方默认片头片尾）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = trimAudioClient.submit(providerToken, source.getUrl(), startTime, endTime,
                 outputFormat);
         log.info("[audio_trim] 上游已提交 jobId={} providerTaskId={} format={} start={} end={}",

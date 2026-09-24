@@ -85,6 +85,7 @@ class VideoSubtitleEraseJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（宽高/时长供结果 Asset 近似回填）。 */
@@ -429,6 +430,22 @@ class VideoSubtitleEraseJobProcessorTest {
                 eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-race")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient, never()).submit(anyString(), anyString(), anyString(), anyList());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test

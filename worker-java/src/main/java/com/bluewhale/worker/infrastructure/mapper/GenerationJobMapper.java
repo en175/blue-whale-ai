@@ -412,6 +412,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND fencing_token = #{fencingToken}
               AND status = #{candidateStatus}
+              AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at < NOW())
             """)
     int claimImageCas(
             @Param("jobId") Long jobId,
@@ -615,6 +616,24 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken,
             @Param("providerTaskId") String providerTaskId,
             @Param("nextPollAt") java.time.LocalDateTime nextPollAt
+    );
+
+    @Update("""
+            UPDATE generation_jobs
+            SET lease_expires_at = #{leaseExpiresAt},
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND lease_expires_at > NOW()
+              AND provider_task_id IS NULL
+            """)
+    int reserveParentReuseSubmit(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
     );
 
     /**

@@ -75,6 +75,7 @@ class VocalSplitJobProcessorTest {
                 credentialService, separateVoiceClient, mediaRelay, producer);
         when(stateMachine.failVocalSplitJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（时长供结果 duration 回落）。 */
@@ -365,6 +366,22 @@ class VocalSplitJobProcessorTest {
         verify(separateVoiceClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
         verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-race")));
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset("video");
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
