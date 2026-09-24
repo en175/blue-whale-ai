@@ -185,6 +185,7 @@ import {
 import {
   IMAGE_ERASE_EDGE_ORIGIN,
   maskHasPaintArea,
+  type EraseMaskSendSession,
   type ImageEraseIdentity,
   type ImageEraseInput,
 } from './imageErase';
@@ -272,6 +273,7 @@ import {
 import OutpaintDialog from './components/OutpaintDialog';
 import CutoutToolbar from './components/CutoutToolbar';
 import {
+  createToolSessionEpoch,
   enterToolSession,
   escDefersToToolSessionHandler,
   exitAllToolSessions,
@@ -753,10 +755,17 @@ export default function CanvasPage() {
   const [audioSpeedSpeed, setAudioSpeedSpeed] = useState(1);
   /** 调速发送中（创建请求飞行期防重复提交，口径同 audioTrimSubmitting） */
   const [audioSpeedSubmitting, setAudioSpeedSubmitting] = useState(false);
-  // 请求的数据归属仍看项目；编辑会话用代际隔离，关闭/重进及 A→B→A 均不可复用。
-  const audioSpeedSessionRef = useRef({ projectId: currentId, epoch: 0 });
-  if (audioSpeedSessionRef.current.projectId !== currentId) {
-    audioSpeedSessionRef.current = { projectId: currentId, epoch: audioSpeedSessionRef.current.epoch + 1 };
+  /* IKI61O 会话纪元（机制单源在 toolSessionCoordinator，本页以 ref 持有一份实例）：
+   *  进/出会话推进、发送捕获、迟到响应 settle 比对——纪元不同即「当前会话已不是
+   *  发起时的会话（或已关闭）」，只做任务收尾（建卡/连线/轮询等），不关闭用户当前
+   *  会话、不复位其提交锁、不向它弹旧错误提示。IKI6EB 调速专属代际 ref 由本机制取代。 */
+  const toolSessionEpochRef = useRef(createToolSessionEpoch());
+  // 项目切换即全部会话身份失效：渲染期推进覆盖新项目首帧（口径同 IKI6EB 调速 ref 先例），
+  // 等 effect 才推进会把首帧窗口内的迟到 settle 误判为仍属当前会话。
+  const toolSessionEpochProjectRef = useRef(currentId);
+  if (toolSessionEpochProjectRef.current !== currentId) {
+    toolSessionEpochProjectRef.current = currentId;
+    toolSessionEpochRef.current.advanceAll();
   }
   useEffect(() => {
     setAudioSpeedTargetNodeId(null);
@@ -838,8 +847,9 @@ export default function CanvasPage() {
     needCropBackground: false,
   };
   /** 退出抠图会话（IKGXMT 四退出共用）：未发送的参数全部丢弃（无卡、无边、无任务），
-   *  会话身份与提交中标记一并复位。 */
+   *  会话身份与提交中标记一并复位。IKI61O：退出即推进纪元。 */
   const exitCutoutSession = useCallback(() => {
+    toolSessionEpochRef.current.exit('cutout');
     setCutoutNodeId(null);
     setCutoutScene(cutoutDefaultParams.scene);
     setCutoutNeedContour(cutoutDefaultParams.needContour);
@@ -870,8 +880,9 @@ export default function CanvasPage() {
   const [outpaintExpands, setOutpaintExpands] = useState<ExpandSides>(ZERO_EXPANDS);
   /** 扩图模式进行中（派生布尔，会话身份单点收敛） */
   const outpaintSessionActive = outpaintNodeId != null;
-  /** 结束扩图模式：清会话与扩展量（不留痕迹；再次进入从零开始） */
+  /** 结束扩图模式：清会话与扩展量（不留痕迹；再次进入从零开始）。IKI61O：退出即推进纪元。 */
   const endOutpaintSession = useCallback(() => {
+    toolSessionEpochRef.current.exit('outpaint');
     setOutpaintNodeId(null);
     setOutpaintExpands(ZERO_EXPANDS);
   }, []);
@@ -4005,8 +4016,13 @@ export default function CanvasPage() {
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
   });
 
-  const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) =>
+  /** 进入工具会话的统一包装（IKH3ZH 互斥收口 + IKI61O 纪元推进）：每次进入都是新会话
+   *  身份——同工具换卡重进不触发出，靠 enter 推进区分；互斥退出其余会话与关面板由
+   *  enterToolSession 承担，其余会话的纪元在各自完整退出函数里推进。 */
+  const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) => {
+    toolSessionEpochRef.current.enter(kind);
     enterToolSession(kind, buildToolSessionDeps(), init);
+  };
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离/
    *  音频截取/音频调速/场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求
@@ -7200,28 +7216,38 @@ export default function CanvasPage() {
    *  在源卡右侧建擦除结果卡（node id = input.target_node_id，发送前已生成冻结进任务）、
    *  拉纯视觉来源线（origin=image-erase，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
    *  创建失败（门槛拒/网络）不建卡不退出编辑态；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
-   *  免费口径同 image_enhance：无幂等头、无积分预估、不走余额拦截门。 */
+   *  免费口径同 image_enhance：无幂等头、无积分预估、不走余额拦截门。
+   *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
+   *  但不退用户当前会话、建卡不抢选中、不向它弹旧失败提示。 */
   const startImageEraseJob = async (
     sourceNodeId: string,
     input: ImageEraseInput,
+    sessionEpoch: number,
   ): Promise<boolean> => {
+    // 前置校验也要纪元值守：涂抹发送路的会话快照在遮罩编码前捕获（IKI8L7），但走到这里
+    // 已过编码与上传两次 await，期间会话可能已退出/重进（纪元失效时输入用快照、不读当前会话）
     if (!currentId) {
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('warn', '未选中项目，无法发起图片擦除');
       return false;
     }
     const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
     if (!node) {
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('warn', '源图卡不存在，无法发起图片擦除');
       return false;
     }
     const targetNodeId = input.target_node_id;
     try {
-      const created = await createImageErase(currentId, input);
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitEraseEditing();
+      const created = await createImageErase(currentId, input, { silent: true });
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
+      // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
+      const sessionCurrent = toolSessionEpochRef.current.isCurrent('erase', sessionEpoch);
+      if (sessionCurrent) exitEraseEditing();
       const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
         fileName: '擦除',
         nodeId: targetNodeId,
+        skipSelect: !sessionCurrent,
         data: {
           imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
           genStatus: 'generating',
@@ -7236,6 +7262,8 @@ export default function CanvasPage() {
       pollJob(draftId, created.job_id);
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O）
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '创建擦除任务失败，请重试');
       return false;
     }
@@ -7255,6 +7283,7 @@ export default function CanvasPage() {
   const startVideoSubtitleEraseJob = async (
     sourceNodeId: string,
     input: VideoSubtitleEraseInput,
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法发起视频去字幕');
@@ -7268,12 +7297,15 @@ export default function CanvasPage() {
     const targetNodeId = input.target_node_id;
     const sourceData = (node.data ?? {}) as Record<string, unknown>;
     try {
-      const created = await createVideoSubtitleErase(currentId, input);
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitSubtitleEraseEditing();
+      const created = await createVideoSubtitleErase(currentId, input, { silent: true });
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
+      // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
+      const sessionCurrent = toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch);
+      if (sessionCurrent) exitSubtitleEraseEditing();
       const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
         fileName: '去字幕',
         nodeId: targetNodeId,
+        skipSelect: !sessionCurrent,
         data: {
           mediaType: 'video',
           ...(typeof sourceData.width === 'number' ? { width: sourceData.width } : {}),
@@ -7291,6 +7323,8 @@ export default function CanvasPage() {
       pollJob(draftId, created.job_id);
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O）
+      if (!toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '创建去字幕任务失败，请重试');
       return false;
     }
@@ -7300,7 +7334,8 @@ export default function CanvasPage() {
    *  （buildVideoSubtitleEraseInput：detect_mode 两模式恒 subtitle_smart、erase_boxes 由
    *  框集合推导——智能模式入口零框选工具故恒空数组）→ 发任务。请求发出即返回；会话退出与
    *  建卡在创建成功后由 startVideoSubtitleEraseJob 承担，失败停留会话（可重发）。
-   *  框选模式必框守卫（IKH3OV）：无框时不提交、不建卡、不回落智能语义（组件侧同条件置灰）。 */
+   *  框选模式必框守卫（IKH3OV）：无框时不提交、不建卡、不回落智能语义（组件侧同条件置灰）。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleSubtitleEraseSend = (): boolean => {
     const nodeId = subtitleEraseTargetNodeId;
     if (!nodeId) return false;
@@ -7319,8 +7354,12 @@ export default function CanvasPage() {
       displayWidth: displayBox?.width ?? MEDIA_CONTENT_SHORT_SIDE,
       displayHeight: displayBox?.height ?? MEDIA_CONTENT_SHORT_SIDE,
     });
+    const sessionEpoch = toolSessionEpochRef.current.capture('subtitleErase');
     setSubtitleEraseSubmitting(true);
-    void startVideoSubtitleEraseJob(nodeId, input).finally(() => setSubtitleEraseSubmitting(false));
+    void startVideoSubtitleEraseJob(nodeId, input, sessionEpoch).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('subtitleErase', sessionEpoch)) return;
+      setSubtitleEraseSubmitting(false);
+    });
     return true;
   };
 
@@ -7332,10 +7371,13 @@ export default function CanvasPage() {
    *  拉纯视觉来源线（origin=image-cutout，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
    *  创建失败（门槛拒/网络）不建卡不退会话（擦除同口径：用户参数留在工具栏可调后重发，
    *  规格故事 18「立即退出」指成功路径）。免费口径同 image_enhance / image_erase：
-   *  无幂等头、无积分预估、不走余额拦截门。 */
+   *  无幂等头、无积分预估、不走余额拦截门。
+   *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
+   *  但不退用户当前会话、建卡不抢选中、不向它弹旧失败提示。 */
   const startImageCutoutJob = async (
     sourceNodeId: string,
     input: ImageCutoutRequest,
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法发起图片抠图');
@@ -7348,12 +7390,15 @@ export default function CanvasPage() {
     }
     const targetNodeId = input.target_node_id;
     try {
-      const created = await createImageCutout(currentId, input);
-      // 发送即退会话（先退再建卡：建卡的程序化选中不触发会话的「点其他卡退出」误判，口径同擦除）
-      exitCutoutSession();
+      const created = await createImageCutout(currentId, input, { silent: true });
+      // 发送即退会话（先退再建卡：建卡的程序化选中不触发会话的「点其他卡退出」误判，口径同擦除）；
+      // 纪元失效（迟到响应）则不退用户当前会话，建卡也不抢选中（skipSelect）
+      const sessionCurrent = toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch);
+      if (sessionCurrent) exitCutoutSession();
       const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
         fileName: '抠图',
         nodeId: targetNodeId,
+        skipSelect: !sessionCurrent,
         data: {
           imageCutout: { sourceAssetId: input.source_asset_id, lastInput: input },
           genStatus: 'generating',
@@ -7368,6 +7413,8 @@ export default function CanvasPage() {
       pollJob(draftId, created.job_id);
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O）
+      if (!toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '创建抠图任务失败，请重试');
       return false;
     }
@@ -7375,7 +7422,8 @@ export default function CanvasPage() {
 
   /** 抠图工具栏发送（横条圆形发送钮）：源素材身份 → 场景档精校兜底（发送钮置灰已拦，
    *  实测尺寸回填竞态下再守一次）→ 组装契约 input（target_node_id 此刻生成冻结）→ 发任务。
-   *  请求发出即返回 true；会话退出与建卡在创建成功后由 startImageCutoutJob 承担。 */
+   *  请求发出即返回 true；会话退出与建卡在创建成功后由 startImageCutoutJob 承担。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleCutoutToolbarSend = (): boolean => {
     const nodeId = cutoutNodeId;
     if (!nodeId) return false;
@@ -7401,31 +7449,55 @@ export default function CanvasPage() {
       contourSize: cutoutContourSize,
       needCropBackground: cutoutNeedCropBackground,
     });
+    const sessionEpoch = toolSessionEpochRef.current.capture('cutout');
     setCutoutSubmitting(true);
-    void startImageCutoutJob(nodeId, input).finally(() => setCutoutSubmitting(false));
+    void startImageCutoutJob(nodeId, input, sessionEpoch).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('cutout', sessionEpoch)) return;
+      setCutoutSubmitting(false);
+    });
     return true;
   };
 
-  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处上传（source=mask_erase，
-   *  中间素材不进用户资产列表可见内容）→ 组装 selected_area_erase 四键 → 发任务。 */
-  const handleEraseDialogSendMask = async (file: File | null): Promise<boolean> => {
+  /** 涂抹发送第一步（组件点发送瞬间同步回调，先于遮罩栅格化——IKI8L7）：捕获会话身份
+   *  与发送输入快照——目标卡 nodeId、源资产 assetId、会话纪元。栅格化（canvas.toBlob）、
+   *  上传、创建任务全程只用这份快照：旧编码回调返回后不重新捕获当前会话、不读取新会话
+   *  输入——旧任务按原输入收尾（!838 统一纪元：不关新会话、不动其提交状态、不弹旧错误）。 */
+  const handleEraseDialogCaptureMaskSession = (): EraseMaskSendSession | null => {
     const nodeId = eraseTargetNodeId;
-    if (!nodeId) return false;
-    if (!file) {
-      showToast('error', '遮罩生成失败，请重试');
-      return false;
-    }
+    if (!nodeId) return null;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
     if (!node || !sourceAssetId) {
       showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return null;
+    }
+    return { nodeId, sourceAssetId, sessionEpoch: toolSessionEpochRef.current.capture('erase') };
+  };
+
+  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处用发送时刻捕获的会话快照
+   *  （非当前会话状态）上传（source=mask_erase，中间素材不进用户资产列表可见内容）→
+   *  组装 selected_area_erase 四键 → 发任务。
+   *  会话纪元（IKI61O/IKI8L7）：纪元与输入在栅格化之前捕获；编码在途退出/重开即迟到——
+   *  任务仍按原输入创建收尾，但提交锁、提示与退出仅作用于发送时的会话。 */
+  const handleEraseDialogSendMask = async (
+    session: EraseMaskSendSession,
+    file: File | null,
+  ): Promise<boolean> => {
+    const { nodeId, sourceAssetId, sessionEpoch } = session;
+    if (!nodeId) return false;
+    if (!file) {
+      // 栅格化失败/无产物也经异步回调返回，会话可能已退出/重开（IKI8L7）：旧失败不向新会话提示
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
+      showToast('error', '遮罩生成失败，请重试');
       return false;
     }
-    setEraseSubmitting(true);
+    // 迟到回调（会话已换）继续按原输入上传收尾，但不把新会话设为提交中
+    if (toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) setEraseSubmitting(true);
     try {
       const uploaded = await uploadAssetFile(file, {
         projectId: currentId ?? undefined,
         assetSource: 'mask_erase',
+        silent: true,
       });
       const input: ImageEraseInput = {
         source_asset_id: sourceAssetId,
@@ -7433,17 +7505,20 @@ export default function CanvasPage() {
         erase_scene: 'selected_area_erase',
         mask_asset_id: uploaded.asset_id,
       };
-      return await startImageEraseJob(nodeId, input);
+      return await startImageEraseJob(nodeId, input, sessionEpoch);
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O/IKI8L7）
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '遮罩上传失败，请重试');
       return false;
     } finally {
-      setEraseSubmitting(false);
+      if (toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) setEraseSubmitting(false);
     }
   };
 
   /** 清除文字一键直发（不经遮罩）：full_screen_text_erase 三键直接发任务，
-   *  与涂抹发送共用同一条结果链路（规格故事 20）；请求发出即返回 true（编辑态随之退出）。 */
+   *  与涂抹发送共用同一条结果链路（规格故事 20）；请求发出即返回 true（编辑态随之退出）。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleEraseDialogSendText = (): boolean => {
     const nodeId = eraseTargetNodeId;
     if (!nodeId) return false;
@@ -7458,8 +7533,12 @@ export default function CanvasPage() {
       target_node_id: newNodeId('media-draft'),
       erase_scene: 'full_screen_text_erase',
     };
+    const sessionEpoch = toolSessionEpochRef.current.capture('erase');
     setEraseSubmitting(true);
-    void startImageEraseJob(nodeId, input).finally(() => setEraseSubmitting(false));
+    void startImageEraseJob(nodeId, input, sessionEpoch).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('erase', sessionEpoch)) return;
+      setEraseSubmitting(false);
+    });
     return true;
   };
 
@@ -7889,7 +7968,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createImageErase(currentId, eraseIdentity.lastInput)
+      createImageErase(currentId, eraseIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -7920,7 +7999,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput)
+      createVideoSubtitleErase(currentId, subtitleEraseIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -7951,7 +8030,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createImageCutout(currentId, cutoutIdentity.lastInput)
+      createImageCutout(currentId, cutoutIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -7991,7 +8070,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVocalSplit(currentId, vocalSplitIdentity.lastInput)
+      createVocalSplit(currentId, vocalSplitIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8023,7 +8102,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() })
+      createVideoSceneSplit(currentId, { ...sceneSplitIdentity.lastInput, client_token: newIdempotencyKey() }, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8090,7 +8169,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createMediaExtraction(currentId, mediaExtractIdentity.lastInput)
+      createMediaExtraction(currentId, mediaExtractIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -8111,6 +8190,8 @@ export default function CanvasPage() {
     if (audioTrimIdentity?.lastInput) {
       // 截取卡分流（IKHB7A，镜像分离）：契约无 retry 端点，重试 = 冻结 input（源素材+
       // 起止+格式，贴边省略形态原样保留）重发创建接口，不从零再选。
+      // 重试创建同走 silent 传输（IKI8L4）：失败收敛到本卡失败态（errorText 可读可再重试），
+      // http 层不叠弹——迟到失败同样不打扰用户后来开启的编辑会话（口径同调速重试）。
       if (!currentId) {
         showToast('warn', '未选中项目，无法截取');
         return;
@@ -8120,7 +8201,7 @@ export default function CanvasPage() {
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(nodeId, activeAtCreate);
       stopJobPolling(nodeId, jobTimersRef.current);
-      createAudioTrim(currentId, audioTrimIdentity.lastInput)
+      createAudioTrim(currentId, audioTrimIdentity.lastInput, { silent: true })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.job_id });
@@ -9067,8 +9148,9 @@ export default function CanvasPage() {
   };
 
   /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
-   *  工具/活笔/发送中标记一并复位。 */
+   *  工具/活笔/发送中标记一并复位。IKI61O：退出即推进纪元，在途响应 settle 失效。 */
   const exitEraseEditing = () => {
+    toolSessionEpochRef.current.exit('erase');
     setEraseTargetNodeId(null);
     setEraseMaskState(EMPTY_MASK_EDIT);
     setEraseLiveOp(null);
@@ -9080,8 +9162,9 @@ export default function CanvasPage() {
 
   /** 退出去字幕会话（IKGZ83 四退出共用，IKH3OU 起含模式复位）：未发送的框状态全部丢弃
    *  （无卡、无边、无任务），活框与发送中标记一并复位，模式回默认 smart
-   *  （规格故事 22「退出后不留痕迹」）。 */
+   *  （规格故事 22「退出后不留痕迹」）。IKI61O：退出即推进纪元。 */
   const exitSubtitleEraseEditing = () => {
+    toolSessionEpochRef.current.exit('subtitleErase');
     setSubtitleEraseTargetNodeId(null);
     setSubtitleEraseMode('smart');
     setSubtitleEraseBoxes(EMPTY_SUBTITLE_BOX_EDIT);
@@ -9092,8 +9175,9 @@ export default function CanvasPage() {
 
   /** 退出音视频分离编辑态（IKH28U 四退出共用）：会话参数（分离格式）与发送中复位——
    *  格式不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
-   *  自动恢复（MediaNode 承担）。 */
+   *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitAudioVideoSplitEditing = () => {
+    toolSessionEpochRef.current.exit('audioVideoSplit');
     setAudioVideoSplitTargetNodeId(null);
     setAudioVideoSplitFormat(AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT);
     setAudioVideoSplitSubmitting(false);
@@ -9101,14 +9185,21 @@ export default function CanvasPage() {
 
   /** 退出截取编辑态（IKHB7A 四退出共用：发送条 X/Esc/点其他卡/点画布空白）：未发送的
    *  选区全部丢弃（无卡、无边、无任务），会话身份与发送中复位；音频暂停与编辑态标记
-   *  随 trimEditing 注入移除自动恢复（MediaNode 承担）。 */
+   *  随 trimEditing 注入移除自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitAudioTrimEditing = () => {
+    toolSessionEpochRef.current.exit('audioTrim');
     setAudioTrimTargetNodeId(null);
     setAudioTrimSelection(null);
     setAudioTrimSubmitting(false);
   };
 
+  /** 退出音频混合会话（四路共用：发送条 X/Esc 公共链/点选其他卡/源卡删除绑定清理）：
+   *  未发送的所选输入与格式全部丢弃（无卡、无边、无任务），提交 state 复位——
+   *  任务在途锁（ref）不在此复位，由发送链 finally 释放（防并发创建的粒度是请求而非会话）。
+   *  IKI8L8：退出即推进纪元（对齐其余十一工具——此前唯一不推进者，发送在途 Esc 退出后
+   *  重开的会话会被旧响应误关）。 */
   const exitAudioMixEditing = () => {
+    toolSessionEpochRef.current.exit('audioMix');
     setAudioMixSourceNodeId(null);
     setAudioMixSelectedInputs([]);
     setAudioMixFormat('mp3');
@@ -9117,9 +9208,9 @@ export default function CanvasPage() {
   /** 退出调速编辑态（IKHW5S 四退出共用：发送条 X/Esc/点其他卡/点画布空白）：未发送的
    *  倍速选择全部丢弃（无卡、无边、无任务），会话身份、倍速（复位 1.0，不跨会话记忆）
    *  与发送中复位；speedEditing 注入移除后 playbackRate 经 AudioPlayer 倍速 effect 恢复
-   *  1.0、时间行恢复源时长显示。 */
+   *  1.0、时间行恢复源时长显示。IKI61O：退出即推进纪元（取代 IKI6EB 专属 ref）。 */
   const exitAudioSpeedEditing = () => {
-    audioSpeedSessionRef.current.epoch += 1;
+    toolSessionEpochRef.current.exit('audioSpeed');
     setAudioSpeedTargetNodeId(null);
     setAudioSpeedSpeed(1);
     setAudioSpeedSubmitting(false);
@@ -9127,8 +9218,9 @@ export default function CanvasPage() {
 
   /** 退出人声背景分离编辑态（IKHA2W 四退出共用）：会话参数（场景/格式）与发送中复位——
    *  参数不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
-   *  自动恢复（MediaNode 承担）。 */
+   *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitVocalSplitEditing = () => {
+    toolSessionEpochRef.current.exit('vocalSplit');
     setVocalSplitTargetNodeId(null);
     setVocalSplitScene(VOCAL_SPLIT_DEFAULT_SESSION_SCENE);
     setVocalSplitFormat(VOCAL_SPLIT_DEFAULT_FORMAT);
@@ -9137,8 +9229,9 @@ export default function CanvasPage() {
 
   /** 退出场景切分编辑会话（IKH8BR 四退出共用）：会话参数（切分粒度）与发送中复位——
    *  粒度不跨会话记忆（每次进入重置 standard），未发送退出无卡无边无任务；播放控制随
-   *  splitEditing 标记移除自动恢复（MediaNode 承担）。 */
+   *  splitEditing 标记移除自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitSceneSplitEditing = () => {
+    toolSessionEpochRef.current.exit('sceneSplit');
     setSceneSplitTargetNodeId(null);
     setSceneSplitGranularity(SCENE_SPLIT_DEFAULT_GRANULARITY);
     setSceneSplitSubmitting(false);
@@ -9147,8 +9240,9 @@ export default function CanvasPage() {
   /** 退出智能抠像编辑态（IKHK9N 四退出共用：X/Esc/点其他卡/点画布空白）：会话参数
    *  （模式/输出格式/背景色）与发送中复位——参数不跨会话记忆（每次进入重置
    *  WEBM + 白色），未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
-   *  自动恢复（MediaNode 承担）。 */
+   *  自动恢复（MediaNode 承担）。IKI61O：退出即推进纪元。 */
   const exitSmartMattingEditing = () => {
+    toolSessionEpochRef.current.exit('smartMatting');
     setSmartMattingTargetNodeId(null);
     setSmartMattingMode('portrait');
     setSmartMattingFormat(SMART_MATTING_DEFAULT_FORMAT);
@@ -9157,8 +9251,10 @@ export default function CanvasPage() {
   };
 
   /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
-   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。 */
+   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留；框与比例回默认（不记忆上次状态）。
+   *  IKI61O：退出即推进纪元。 */
   const exitCropMode = () => {
+    toolSessionEpochRef.current.exit('crop');
     setCropTargetNodeId(null);
     setCropRect(null);
     setCropPreset('free');
@@ -9205,6 +9301,8 @@ export default function CanvasPage() {
     if (!node || node.type !== 'mediaNode') return;
     runToolSessionEntry('crop', () => {
       const bounds = cropBoundsOf(node);
+      // IKI61O：新会话锁重新计时——旧会话在途请求的 finally 按纪元跳过复位，锁在此归位
+      cropSubmittingRef.current = false;
       setCropPreset('free');
       setCropRect(fullCropRect(bounds));
       setCropTargetNodeId(id);
@@ -9282,7 +9380,6 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
     runToolSessionEntry('audioSpeed', () => {
-      audioSpeedSessionRef.current.epoch += 1;
       setAudioSpeedSpeed(1);
       setAudioSpeedTargetNodeId(id);
     });
@@ -9369,6 +9466,7 @@ export default function CanvasPage() {
       return;
     }
     cropSubmittingRef.current = true;
+    const sessionEpoch = toolSessionEpochRef.current.capture('crop');
     const natural = cropRectToNatural(rect, bounds, space);
     const format = cropOutputFormat({
       mime: typeof data.mime === 'string' ? data.mime : undefined,
@@ -9379,12 +9477,16 @@ export default function CanvasPage() {
       try {
         const file = await cropImageToFile(src, natural, format);
         if (!file) {
-          showToast('error', '裁切生成失败，请重试');
+          // 迟到失败不打扰用户当前会话（IKI61O）
+          if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
+            showToast('error', '裁切生成失败，请重试');
+          }
           return;
         }
-        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined });
-        // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）
-        exitCropMode();
+        const uploaded = await uploadAssetFile(file, { projectId: currentId ?? undefined, silent: true });
+        // 发送即退出模式（先退再建卡，对齐擦除链路顺序；skipSelect 下无选中误判）；
+        // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
+        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) exitCropMode();
         const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
           fileName: '裁切',
           skipSelect: true,
@@ -9405,9 +9507,16 @@ export default function CanvasPage() {
         });
         addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_CROP_EDGE_ORIGIN });
       } catch (e: unknown) {
-        showToast('error', isApiError(e) ? e.message : '裁切上传失败，请重试');
+        // 迟到失败不打扰用户当前会话（IKI61O）
+        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
+          showToast('error', isApiError(e) ? e.message : '裁切上传失败，请重试');
+        }
       } finally {
-        cropSubmittingRef.current = false;
+        // 锁复位三态：失败留态时复位本会话锁（参数可调后重发）；成功时 exit 已推进纪元、
+        // 本分支跳过，锁由下次进入会话时复位兜底；迟到响应跳过——不动新会话的锁
+        if (toolSessionEpochRef.current.isCurrent('crop', sessionEpoch)) {
+          cropSubmittingRef.current = false;
+        }
       }
     })();
   };
@@ -9511,6 +9620,7 @@ export default function CanvasPage() {
   const startAudioVideoSplitJob = async (
     sourceNodeId: string,
     payload: { source_asset_id: string; output_format: AudioVideoSplitFormat },
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法音视频分离');
@@ -9522,9 +9632,10 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createMediaExtraction(currentId, payload);
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitAudioVideoSplitEditing();
+      const created = await createMediaExtraction(currentId, payload, { silent: true });
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
+      // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
+      if (toolSessionEpochRef.current.isCurrent('audioVideoSplit', sessionEpoch)) exitAudioVideoSplitEditing();
       const nodeId = mediaExtractNodeId(created.job_id);
       const placeholder = attachCallbacks(
         buildMediaExtractPlaceholderNode({
@@ -9548,6 +9659,8 @@ export default function CanvasPage() {
       await flushCanvasSave(currentId).catch(() => {});
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O）
+      if (!toolSessionEpochRef.current.isCurrent('audioVideoSplit', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '音视频分离任务创建失败，请重试');
       return false;
     }
@@ -9555,7 +9668,8 @@ export default function CanvasPage() {
 
   /** 音视频分离发送（发送条发送钮）：源素材身份 + 当前所选格式 → 建任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioVideoSplitJob 承担，
-   *  失败停留编辑态（格式可调后重发）。 */
+   *  失败停留编辑态（格式可调后重发）。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleAudioVideoSplitSend = (): boolean => {
     const nodeId = audioVideoSplitTargetNodeId;
     if (!nodeId) return false;
@@ -9565,11 +9679,15 @@ export default function CanvasPage() {
       showToast('warn', '当前视频尚未关联资产，无法音视频分离');
       return false;
     }
+    const sessionEpoch = toolSessionEpochRef.current.capture('audioVideoSplit');
     setAudioVideoSplitSubmitting(true);
     void startAudioVideoSplitJob(nodeId, {
       source_asset_id: String(sourceAssetId),
       output_format: audioVideoSplitFormat,
-    }).finally(() => setAudioVideoSplitSubmitting(false));
+    }, sessionEpoch).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('audioVideoSplit', sessionEpoch)) return;
+      setAudioVideoSplitSubmitting(false);
+    });
     return true;
   };
 
@@ -9580,10 +9698,15 @@ export default function CanvasPage() {
    *  「源名(截取).{格式}」；带 audioTrim 身份——lastInput 供失败重试原样重发）、拉来源边
    *  （origin=audio-trim，参考推导跳过，源音频不占参考位防参考污染）、启动轮询
    *  （applyJobTerminal 的截取分支回填成品/失败，时长以火山返回为权威值）、立刻落盘。
-   *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。 */
+ *  创建失败（网络）不建卡不退编辑态（用户可调格式后重发，分离同口径）。
+ *  会话纪元（IKI61O）：settle 时纪元已推进（退出/重进/切项目）即迟到响应——仍建卡收尾，
+ *  但不退用户当前会话、不向它弹旧失败提示。
+ *  错误提示单源（IKI8L4）：创建走 silent 传输（http 层不 toast），失败由本 catch 按
+ *  纪元归属提示恰一次——迟到失败全链路静默，当前会话失败恰一条且可重试。 */
   const startAudioTrimJob = async (
     sourceNodeId: string,
     payload: AudioTrimInput,
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法截取');
@@ -9595,9 +9718,10 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createAudioTrim(currentId, payload);
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitAudioTrimEditing();
+      const created = await createAudioTrim(currentId, payload, { silent: true });
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
+      // 纪元失效（迟到响应）则不退用户当前会话，只收尾建卡
+      if (toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) exitAudioTrimEditing();
       const nodeId = audioTrimNodeId(created.job_id);
       const placeholder = attachCallbacks(
         buildAudioTrimPlaceholderNode({
@@ -9619,6 +9743,8 @@ export default function CanvasPage() {
       await flushCanvasSave(currentId).catch(() => {});
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（无旧错误提示、不动其提交锁）
+      if (!toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '音频截取任务创建失败，请重试');
       return false;
     }
@@ -9663,7 +9789,7 @@ export default function CanvasPage() {
         return true;
       }
       // 只退出本次发送的会话；旧会话成功仍建自己的任务卡，不触碰后来开启的编辑态。
-      if (audioSpeedSessionRef.current.epoch === sessionEpoch) exitAudioSpeedEditing();
+      if (toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) exitAudioSpeedEditing();
       const nodeId = audioSpeedNodeId(created.job_id);
       const placeholder = attachCallbacks(
         buildAudioSpeedPlaceholderNode({
@@ -9687,7 +9813,7 @@ export default function CanvasPage() {
       return true;
     } catch (e: unknown) {
       // 失败提示也归发送时的会话，不能打扰同项目或往返项目后新开的编辑态。
-      if (activeProjectRef.current !== projectId || audioSpeedSessionRef.current.epoch !== sessionEpoch) return false;
+      if (activeProjectRef.current !== projectId || !toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '音频调速任务创建失败，请重试');
       return false;
     }
@@ -9704,6 +9830,7 @@ export default function CanvasPage() {
   const startVocalSplitJob = async (
     sourceNodeId: string,
     payload: { source_asset_id: string; scene: VocalSplitScene; output_format: VocalSplitFormat },
+    sessionEpoch: number,
   ): Promise<boolean> => {
     if (!currentId) {
       showToast('warn', '未选中项目，无法人声背景分离');
@@ -9715,9 +9842,10 @@ export default function CanvasPage() {
       return false;
     }
     try {
-      const created = await createVocalSplit(currentId, payload);
-      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
-      exitVocalSplitEditing();
+      const created = await createVocalSplit(currentId, payload, { silent: true });
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）；
+      // 纪元失效（IKI61O 迟到响应）则不退用户当前会话，只收尾建卡
+      if (toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) exitVocalSplitEditing();
       const nodeId = vocalSplitNodeId(created.job_id);
       const placeholder = attachCallbacks(
         buildVocalSplitPlaceholderNode({
@@ -9742,6 +9870,8 @@ export default function CanvasPage() {
       await flushCanvasSave(currentId).catch(() => {});
       return true;
     } catch (e: unknown) {
+      // 迟到失败不打扰用户当前会话（IKI61O）
+      if (!toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) return false;
       showToast('error', isApiError(e) ? e.message : '人声背景分离任务创建失败，请重试');
       return false;
     }
@@ -9757,10 +9887,12 @@ export default function CanvasPage() {
    *  ——lastInput 供失败重试原参数原粒度重发）、拉来源边（origin=scene-split，参考推导
    *  跳过）、创建成功回写 job_id 并启动轮询（applyJobTerminal 场景切分分支收敛终态；
    *  completed 分支的段卡扇出归 IKH8C1）、立刻落盘（best-effort，防刚建任务就关页丢卡）。
-   *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
-   *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
-   *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
-   *  无积分预估、不走余额拦截门。 */
+ *  创建失败（门槛拒/网络）：会话已按 BO 顺序先退，占位卡转失败态（文案可读、卡上重试
+ *  按原参数原粒度重发——不静默删卡，用户重试不必重新进会话配置）。
+ *  错误提示单源（IKI8L4）：创建走 silent 传输（http 层不 toast），失败由本 catch 按
+ *  「退出后捕获纪元」提示——无后来会话不吞本次有效失败，有后来会话旧失败不打扰。
+ *  免费口径同 media_extract / image_enhance：无幂等头（幂等走 body client_token）、
+ *  无积分预估、不走余额拦截门。 */
   const startSceneSplitJob = async (
     sourceNodeId: string,
     payload: { source_asset_id: string; target_node_id: string; granularity: SceneSplitGranularity },
@@ -9776,6 +9908,9 @@ export default function CanvasPage() {
     }
     // 发送即退会话（BO 定死顺序：先退再建卡——占位卡节点 id 要作为 target_node_id 发送）
     exitSceneSplitEditing();
+    // IKI61O：纪元在同步退出之后捕获——此后才开启的新会话（或切项目）再推进，
+    // 迟到失败提示不打扰它们；发送即退意味着 settle 时原会话恒已结束，不能以发送前纪元比对
+    const epochAfterSendExit = toolSessionEpochRef.current.capture('sceneSplit');
     const placeholderId = payload.target_node_id;
     const placeholder = attachCallbacks(
       buildSceneSplitPlaceholderNode({
@@ -9796,7 +9931,7 @@ export default function CanvasPage() {
       const created = await createVideoSceneSplit(currentId, {
         ...payload,
         client_token: newIdempotencyKey(),
-      });
+      }, { silent: true });
       // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startVideoSubtitleEraseJob）
       const activeAtCreate = newNodeId('pending-generation');
       activeJobByNodeRef.current.set(placeholderId, activeAtCreate);
@@ -9812,14 +9947,18 @@ export default function CanvasPage() {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '场景切分任务创建失败，请重试',
       });
-      showToast('error', isApiError(e) ? e.message : '场景切分任务创建失败，请重试');
+      // 旧错误提示不打扰后来开启的新会话/新项目（IKI61O）；卡上失败态与重试不受影响
+      if (toolSessionEpochRef.current.isCurrent('sceneSplit', epochAfterSendExit)) {
+        showToast('error', isApiError(e) ? e.message : '场景切分任务创建失败，请重试');
+      }
       return false;
     }
   };
 
   /** 截取发送（发送条发送钮）：源素材身份 + 当前选区（贴边省略/两位小数收口）+ 当前
    *  所选格式 → 建任务。请求发出即返回；编辑态退出与建卡在创建成功后由
-   *  startAudioTrimJob 承担，失败停留编辑态（选区/格式可调后重发）。 */
+   *  startAudioTrimJob 承担，失败停留编辑态（选区/格式可调后重发）。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleAudioTrimSend = (): boolean => {
     const nodeId = audioTrimTargetNodeId;
     const selection = audioTrimSelection;
@@ -9836,6 +9975,7 @@ export default function CanvasPage() {
       showToast('warn', '音频时长缺失，无法截取');
       return false;
     }
+    const sessionEpoch = toolSessionEpochRef.current.capture('audioTrim');
     setAudioTrimSubmitting(true);
     // 贴边省略与两位小数在契约构造内收口（buildAudioTrimTimeParams 口径只此一份）：
     // 判定在全精度、量化在判定后
@@ -9846,7 +9986,11 @@ export default function CanvasPage() {
         timeRange: { start: selection.start, end: selection.end, sourceDuration },
         outputFormat: audioTrimFormat,
       }),
-    ).finally(() => setAudioTrimSubmitting(false));
+      sessionEpoch,
+    ).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('audioTrim', sessionEpoch)) return;
+      setAudioTrimSubmitting(false);
+    });
     return true;
   };
 
@@ -9865,6 +10009,17 @@ export default function CanvasPage() {
     });
   };
 
+  /** 混合发送（发送条发送钮）：源素材身份 + 所选输入清单 + 输出格式 → 建任务。
+   *  请求发出即返回；编辑态退出与建卡在创建成功后由本异步链承担，失败停留会话
+   *  （输入/格式可调后重发）。
+   *  会话纪元（IKI8L8，机制单源 toolSessionCoordinator，不设工具专属纪元）：发送捕获
+   *  纪元，settle 比对——纪元失效（在途 Esc 退出/重开/切项目）即迟到响应：仍做任务收尾
+   *  （建卡/连线/首保存/轮询/释放任务在途锁），但不退用户当前会话、不复位其提交
+   *  state、不弹旧错误（素材关联/创建/首保存失败提示同归发送时的会话）。
+   *  双锁口径：audioMixInFlightRef（ref）是任务在途锁，防并发创建的粒度是请求——
+   *  在途时后来的发送被守卫挡回、拿不到锁，故 finally 无条件释放的必是本请求的锁，
+   *  且不能因会话失效跳过（否则永久锁死后续发送）；audioMixSubmitting（state）是
+   *  会话 UI 提交状态——仅发送时会话仍有效才复位，迟到响应不动新会话的提交状态。 */
   const handleAudioMixSend = (): void => {
     if (audioMixInFlightRef.current || !currentId || !audioMixSourceNodeId) return;
     const source = mediaNodesRef.current.find((node) => node.id === audioMixSourceNodeId);
@@ -9896,6 +10051,7 @@ export default function CanvasPage() {
       output_format: audioMixFormat,
     };
     const projectId = currentId;
+    const sessionEpoch = toolSessionEpochRef.current.capture('audioMix');
     audioMixInFlightRef.current = true;
     setAudioMixSubmitting(true);
     void (async () => {
@@ -9906,13 +10062,17 @@ export default function CanvasPage() {
             assetIds: selected.filter((input) => !input.nodeId).map((input) => input.assetId),
           });
         } catch (error) {
-          showToast('error', isApiError(error) ? `素材关联项目失败：${error.message}` : '素材关联项目失败，请重试');
+          // 迟到失败不向用户当前会话弹旧错误（任务未创建，无收尾要做）
+          if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+            showToast('error', isApiError(error) ? `素材关联项目失败：${error.message}` : '素材关联项目失败，请重试');
+          }
           return;
         }
         if (activeProjectRef.current !== projectId) return;
         const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
         if (activeProjectRef.current !== projectId) return;
-        exitAudioMixEditing();
+        // 只退出本次发送的会话；迟到成功仍建自己的任务卡收尾，不触碰后来开启的会话
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) exitAudioMixEditing();
         const nodeId = audioMixNodeId(created.job_id);
         const occupied = [
           ...mediaNodesRef.current,
@@ -9937,19 +10097,32 @@ export default function CanvasPage() {
         const firstSave = flushCanvasSave(projectId);
         audioMixFirstSaveRef.current.set(nodeId, firstSave);
         try {
-          if (!(await firstSave)) showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
-          else audioMixUnpersistedCardsRef.current.delete(nodeId);
+          if (!(await firstSave)) {
+            // 首保存失败提示归发送时的会话；簿记清理是任务收尾，无条件执行
+            if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+              showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+            }
+          } else {
+            audioMixUnpersistedCardsRef.current.delete(nodeId);
+          }
         } catch {
-          showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+            showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
+          }
         } finally {
           if (audioMixFirstSaveRef.current.get(nodeId) === firstSave) audioMixFirstSaveRef.current.delete(nodeId);
         }
         pollJob(nodeId, created.job_id);
       } catch (error) {
-        showToast('error', isApiError(error) ? error.message : '音频混合任务创建失败，请重试');
+        // 迟到失败不打扰用户当前会话（无旧错误提示、不动其提交状态）
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+          showToast('error', isApiError(error) ? error.message : '音频混合任务创建失败，请重试');
+        }
       } finally {
+        // 任务在途锁永远释放（守卫下持有者必是本请求，不能用会话守卫跳过——否则永久锁死
+        // 后续发送）；会话 UI 提交状态仅发送时会话仍有效才复位，迟到不动新会话
         audioMixInFlightRef.current = false;
-        setAudioMixSubmitting(false);
+        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) setAudioMixSubmitting(false);
       }
     })();
   };
@@ -9958,8 +10131,8 @@ export default function CanvasPage() {
    *  建任务。发送守卫（1.00x 置灰）由发送条承担，此处兜底拦截原速无意义任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startAudioSpeedJob 承担，
    *  失败停留编辑态（倍速可调后重发）。
-   *  提交会话隔离（IKI6EB）：退出/重进/切换项目都会推进会话代际；迟到响应仍可
-   *  收敛原项目任务卡，但退出编辑态、提示与 finally 释放锁仅作用于发送时的会话。 */
+   *  提交会话隔离（IKI61O 统一纪元，承 IKI6EB）：退出/重进/切换项目都会推进会话纪元；
+   *  迟到响应仍可收敛原项目任务卡，但退出编辑态、提示与 finally 释放锁仅作用于发送时的会话。 */
   const handleAudioSpeedSend = (): boolean => {
     const nodeId = audioSpeedTargetNodeId;
     if (!nodeId || audioSpeedSubmitting) return false;
@@ -9971,12 +10144,12 @@ export default function CanvasPage() {
     }
     const speed = audioSpeedSpeed;
     if (speed === 1) return false;
-    const sessionEpoch = audioSpeedSessionRef.current.epoch;
+    const sessionEpoch = toolSessionEpochRef.current.capture('audioSpeed');
     setAudioSpeedSubmitting(true);
     // 贴原速省略与两位小数在契约构造内收口（buildAudioSpeedInput 口径只此一份）
     void startAudioSpeedJob(nodeId, buildAudioSpeedInput({ sourceAssetId: String(sourceAssetId), speed }), sessionEpoch)
       .finally(() => {
-        if (audioSpeedSessionRef.current.epoch !== sessionEpoch) return;
+        if (!toolSessionEpochRef.current.isCurrent('audioSpeed', sessionEpoch)) return;
         setAudioSpeedSubmitting(false);
       });
     return true;
@@ -9984,7 +10157,8 @@ export default function CanvasPage() {
 
   /** 人声背景分离发送（发送条发送钮）：源素材身份 + 当前所选场景与格式 → 建任务。
    *  请求发出即返回；编辑态退出与建卡在创建成功后由 startVocalSplitJob 承担，
-   *  失败停留编辑态（参数可调后重发）。 */
+   *  失败停留编辑态（参数可调后重发）。
+   *  会话纪元（IKI61O）：发送捕获纪元，finally 释放锁仅作用于发送时的会话。 */
   const handleVocalSplitSend = (): boolean => {
     const nodeId = vocalSplitTargetNodeId;
     if (!nodeId) return false;
@@ -9994,12 +10168,16 @@ export default function CanvasPage() {
       showToast('warn', '当前视频尚未关联资产，无法人声背景分离');
       return false;
     }
+    const sessionEpoch = toolSessionEpochRef.current.capture('vocalSplit');
     setVocalSplitSubmitting(true);
     void startVocalSplitJob(nodeId, {
       source_asset_id: String(sourceAssetId),
       scene: vocalSplitScene,
       output_format: vocalSplitFormat,
-    }).finally(() => setVocalSplitSubmitting(false));
+    }, sessionEpoch).finally(() => {
+      if (!toolSessionEpochRef.current.isCurrent('vocalSplit', sessionEpoch)) return;
+      setVocalSplitSubmitting(false);
+    });
     return true;
   };
 
@@ -12566,6 +12744,7 @@ export default function CanvasPage() {
           <ImageEraseDialog
             onClose={exitEraseEditing}
             onSendTextErase={handleEraseDialogSendText}
+            onCaptureSendSession={handleEraseDialogCaptureMaskSession}
             onSendMask={handleEraseDialogSendMask}
             tool={eraseTool}
             onToolChange={setEraseTool}
