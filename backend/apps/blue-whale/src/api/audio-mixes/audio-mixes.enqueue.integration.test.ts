@@ -111,6 +111,38 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     expect(jobs[0]).toMatchObject({ status: "failed", error: { code: "enqueue_failed" } });
   });
 
+  it("入队失败后同键重放恢复原任务并再次入队", async () => {
+    vi.mocked(enqueueAudioMixJob).mockReset();
+    vi.mocked(enqueueAudioMixJob).mockRejectedValueOnce(new Error("MQ unavailable"));
+    const send = () => fetch(`${baseUrl}/api/projects/${projectId}/audio-mixes`, {
+      method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": "enqueue-recover" },
+      body: JSON.stringify({ source_node_id: "source-node", inputs: [
+        { asset_id: String(sourceId), node_id: "source-node" }, { asset_id: String(otherId) },
+      ] }),
+    });
+    const failed = await send();
+    expect(failed.status).toBe(400);
+    const record = await prisma.client.command_idempotency.findUniqueOrThrow({
+      where: { project_id_operation_idempotency_key: {
+        project_id: projectId, operation: "audio_mix.create", idempotency_key: "enqueue-recover",
+      } },
+    });
+    const jobId = record.generation_job_id!;
+    expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jobId } })).status)
+      .toBe("failed");
+
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const recovered = await send();
+    expect(recovered.status).toBe(201);
+    const data = (await recovered.json()).data;
+    expect(data).toMatchObject({ job_id: jobId.toString(), status: "queued", replayed: true, enqueue_required: true });
+    expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[jobId.toString()], [jobId.toString()]]);
+    const job = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jobId } });
+    expect(job.status).toBe("queued");
+    expect(job.error).toBeNull();
+    expect(await prisma.client.generation_jobs.count({ where: { id: jobId } })).toBe(1);
+  });
+
   it("同键并发创建仅产生一个任务，重放不重复入队，请求变化返回 409", async () => {
     vi.mocked(enqueueAudioMixJob).mockReset();
     vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);

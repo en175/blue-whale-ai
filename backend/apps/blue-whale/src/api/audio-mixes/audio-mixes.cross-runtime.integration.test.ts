@@ -93,15 +93,11 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       }
       expect(ready).toBe(true);
       process.env.DATABASE_URL = `mysql://test:test@127.0.0.1:${port}/${databaseName}`;
-      // Testcontainers DDL 固定在 09-12；只在此临时库补执行仓内 09-19 的纯新增列迁移。
+      // 建库走金标 DDL（含手工追加列）；只在此临时库补执行金标尚未收录的 09-19 纯新增列迁移。
       const additiveSql = readFileSync(join(repo,
         "backend/prisma/migrations/20260919190000_ikh1yi_project_last_opened_pinned/migration.sql"));
       execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
         { input: additiveSql, stdio: ["pipe", "pipe", "pipe"] });
-      const assetNameSql = readFileSync(join(repo,
-        "backend/prisma/migrations/20260923153000_iki8az_asset_name/migration.sql"));
-      execFileSync("docker", ["exec", "-i", mysqlId, "mysql", "-utest", "-ptest", databaseName],
-        { input: assetNameSql, stdio: ["pipe", "pipe", "pipe"] });
       execFileSync("docker", ["exec", mysqlId, "mysql", "-utest", "-ptest", databaseName,
         "-e", `CREATE TABLE iki68n_test_guard (guard_token CHAR(32) PRIMARY KEY); INSERT INTO iki68n_test_guard VALUES ('${guardToken}')`],
       { stdio: "pipe" });
