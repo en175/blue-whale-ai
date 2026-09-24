@@ -2594,10 +2594,10 @@ assert_file_not_has_text ".githooks/pre-commit" "禁止在 master/main 上提交
 assert_file_not_has_text "scripts/start-task-worktree.sh" "git worktree" "workflow: shell 入口不复制 Git 业务逻辑"
 assert_file_not_has_text "scripts/cleanup-task-worktree.sh" "sync-master.sh" "workflow: cleanup-task-worktree 不再同步用户本地 master"
 assert_file_not_has_text "scripts/publish-review-package.sh" "任务 worktree 内执行" "workflow: publish-review-package 支持发布包装分支"
-assert_file_has_text "scripts/start-task-worktree.py" '"fetch", "origin", "master"' "workflow: Python 入口先 fetch origin/master"
-assert_file_has_text "scripts/start-task-worktree.py" '"merge", "--ff-only", "origin/master"' "workflow: 远程领先时 fast-forward"
-assert_file_has_text "scripts/start-task-worktree.py" '"--no-ff"' "workflow: 分叉时普通 merge"
-assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, base_sha' "workflow: worktree 基于同步后的精确 SHA"
+assert_file_has_text "scripts/start-task-worktree.py" 'with release_line_lock(root)' "workflow: 同步与建任务区共用发布线锁"
+assert_file_has_text "scripts/start-task-worktree.py" 'synced = sync_current_release(root)' "workflow: 开工前同步活动发布线"
+assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, synced["sha"]' "workflow: worktree 基于同步后的精确 SHA"
+assert_file_has_text "scripts/start-task-worktree.py" 'write_task_metadata(target, synced["branch"], synced["sha"])' "workflow: 开工后记录目标发布线与起点"
 assert_file_has_text "AGENTS.md" '`CLAUDE.md` 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/check-hook-closed-loop.py" "workflow: 新人路径包含三端闭环检查"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/query-hook-audit.py" "workflow: 新人路径包含审计查询入口"
@@ -2689,7 +2689,7 @@ run_repo_script() {
   local cwd="$1"; shift
   local out err
   out="$(mktemp)"; err="$(mktemp)"
-  ( cd "$cwd" && bash "$@" ) >"$out" 2>"$err"
+  ( cd "$cwd" && PYTHONDONTWRITEBYTECODE=1 bash "$@" ) >"$out" 2>"$err"
   RUN_EXIT=$?
   RUN_STDOUT="$(cat "$out")"
   RUN_STDERR="$(cat "$err")"
@@ -2708,6 +2708,8 @@ build_repo_at() {
   cp "$REPO_ROOT/scripts/cleanup-release-branch.sh" "$repo/scripts/"
   cp "$REPO_ROOT/scripts/manage-release-branch.sh" "$repo/scripts/"
   cp "$REPO_ROOT/scripts/lib/release-line-state.py" "$repo/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/release_line_sync.py" "$repo/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$repo/scripts/lib/"
   cp "$REPO_ROOT/scripts/start-task-worktree.py" "$repo/scripts/"
   (
     cd "$repo"
@@ -3024,6 +3026,8 @@ if [ -f "$CASE_PROBE_DIR/mixedcaseprobe" ]; then
   cp "$REPO_ROOT/scripts/start-task-worktree.sh" "$CASE_REPO/scripts/"
   cp "$REPO_ROOT/scripts/start-task-worktree.py" "$CASE_REPO/scripts/"
   cp "$REPO_ROOT/scripts/lib/python3-command.sh" "$CASE_REPO/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/release_line_sync.py" "$CASE_REPO/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$CASE_REPO/scripts/lib/"
   (
     cd "$CASE_REPO"
     git config user.email t@t

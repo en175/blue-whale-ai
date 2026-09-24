@@ -41,7 +41,7 @@ class ReleaseLineFixture:
         (self.repo / "scripts" / "lib").mkdir(parents=True)
         for name in ("manage-release-branch.sh", "start-task-worktree.py", "sync-release-line.sh", "sync-release-line.py"):
             shutil.copy2(SCRIPTS / name, self.repo / "scripts" / name)
-        for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py"):
+        for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py", "task_metadata.py"):
             shutil.copy2(SCRIPTS / "lib" / name, self.repo / "scripts" / "lib" / name)
         (self.repo / "base.txt").write_text("base\n", encoding="utf-8")
         run("git", "add", ".", cwd=self.repo)
