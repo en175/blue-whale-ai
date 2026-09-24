@@ -133,6 +133,14 @@ run_hook() {
   rm -f "$tmp_err"
 }
 
+run_hook_from() {
+  local from="$1"; shift
+  local previous="$PWD"
+  cd "$from" || return 1
+  run_hook "$@"
+  cd "$previous" || return 1
+}
+
 # run_command_hook <command> <json>
 # 喂 stdin JSON 到 settings/hooks.json 中的 command 字符串，捕获边界输出。
 run_command_hook() {
@@ -1173,13 +1181,50 @@ assert_stdout_empty "release: publish-review-package update 无交互输出"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr --update-pr 65"}}'
 assert_exit 2 "release: publish-review-package 双模式被拦截"
 
-# 普通本地 commit / merge 是可逆操作，直接放行。
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
+# 普通本地 commit 在带有效元数据的独立任务 worktree 中放行。
+GATE_MAIN="$(mktemp -d)"
+GATE_TASK="${GATE_MAIN}-task"
+git -C "$GATE_MAIN" init -q
+git -C "$GATE_MAIN" symbolic-ref HEAD refs/heads/master
+git -C "$GATE_MAIN" config user.name "Gate Test"
+git -C "$GATE_MAIN" config user.email "gate@example.com"
+mkdir -p "$GATE_MAIN/scripts/lib"
+cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$GATE_MAIN/scripts/lib/task_metadata.py"
+printf 'base\n' >"$GATE_MAIN/base.txt"
+git -C "$GATE_MAIN" add -A
+git -C "$GATE_MAIN" -c core.hooksPath=/dev/null commit -q -m 'chore: gate base'
+git -C "$GATE_MAIN" branch release/prod
+git -C "$GATE_MAIN" worktree add -q -b feature/gate-task "$GATE_TASK"
+GATE_START="$(git -C "$GATE_TASK" rev-parse HEAD)"
+python3 "$GATE_TASK/scripts/lib/task_metadata.py" repair --worktree "$GATE_TASK" \
+  --target-branch release/prod --start-sha "$GATE_START" --user-authorized >/dev/null
+git -C "$GATE_MAIN" switch -q -c chore/manual-bypass
+
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"git -C %s commit -m feat:test"}}' "$GATE_TASK")"
 assert_exit 0 "release: 直接 git commit 放行"
 
 # amend 同样是任务分支内的本地操作。
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit --amend"}}'
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"git -C %s commit --amend"}}' "$GATE_TASK")"
 assert_exit 0 "release: 直接 git commit --amend 放行"
+
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"cat > %s/bypass.txt; git -C %s add bypass.txt; git -C %s commit -m bypass"}}' "$GATE_MAIN" "$GATE_MAIN" "$GATE_MAIN")"
+assert_exit 2 "release: Bash 直接写入后主 checkout 手工 chore 分支 commit 拦截"
+assert_stderr_has "独立任务 worktree" "release: Bash 复合命令提示标准任务区"
+run_hook_from "$GATE_MAIN" "$RELEASE_HOOK" \
+  '{"tool_input":{"command":"cat > bypass.txt; git add bypass.txt; git commit -m bypass"}}'
+assert_exit 2 "release: 主 checkout 中无 -C 的写入提交组合被拦截"
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"cd %s; cat > bypass.txt; git add bypass.txt; git commit -m bypass"}}' "$GATE_MAIN")"
+assert_exit 2 "release: 命令内切换到主 checkout 后的直接提交被拦截"
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"cat > %s/allowed.txt; git -C %s add allowed.txt; git -C %s commit -m allowed"}}' "$GATE_TASK" "$GATE_TASK" "$GATE_TASK")"
+assert_exit 0 "release: Bash 复合命令有效任务区 commit 放行"
+GATE_METADATA="$(git -C "$GATE_TASK" rev-parse --absolute-git-dir)/blue-whale/task-base.json"
+mv "$GATE_METADATA" "$GATE_METADATA.saved"
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"git -C %s commit -m bypass"}}' "$GATE_TASK")"
+assert_exit 2 "release: 独立任务区缺元数据时直接提交拦截"
+mv "$GATE_METADATA.saved" "$GATE_METADATA"
+( cd "$GATE_MAIN" && bash "$REPO_ROOT/.githooks/pre-commit" >/dev/null 2>&1 )
+RUN_EXIT=$?
+assert_exit 0 "pre-commit: 普通 Git 用户提交保持软提醒"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --no-ff feature/x"}}'
 assert_exit 0 "release: 直接 git merge --no-ff 放行"
@@ -1327,14 +1372,14 @@ assert_exit 0 "release: bash -lc publish-review-package update 授权入口放�
 assert_stdout_empty "release: bash -lc publish-review-package update 无交互输出"
 
 # 标准入口后的普通 Git 操作不再由发布 Gate 拦截。
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && git commit -m \"bypass\""}}'
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m feat:x && git -C %s commit -m bypass"}}' "$GATE_TASK")"
 assert_exit 0 "release: 标准 commit 入口后普通 commit 放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && scripts/merge-task-to-local-master.sh feature/x"}}'
 assert_exit 2 "release: commit-task 入口后接无授权 merge-task 仍硬拦"
 assert_stderr_has "--user-authorized" "release: 复合命令提示 merge 授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
 assert_exit 2 "release: 旧本地 master 合入入口即使有授权也阻断"
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr && git commit -m \"bypass\""}}'
+run_hook "$RELEASE_HOOK" "$(printf '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr && git -C %s commit -m bypass"}}' "$GATE_TASK")"
 assert_exit 0 "release: 标准 publish 入口后普通 commit 放行"
 
 # 内联和仓库 Git alias 不能绕过 push / commit / merge 分类。
@@ -1975,7 +2020,7 @@ unset AUDIT_DEGRADE_REPO AUDIT_DEGRADE_SAVED audited_gate
 MASTER_EDIT_HOOK=block-master-edit.sh
 
 setup_git_stub
-# 两个工作树共存：主 checkout（master）+ worktree（工单分支）
+# stub 只提供分支名与路径，不提供独立 Git 目录和任务元数据。
 export FAKE_BRANCH_MAP=$'/tmp/repo\tmaster\n/tmp/worktree\tfeature/ik096s'
 export FAKE_TOPLEVEL_MAP=$'/tmp/repo\t/tmp/repo\n/tmp/worktree\t/tmp/worktree'
 
@@ -1987,12 +2032,12 @@ assert_exit 2 "master-edit: 主 checkout master 文件拦截"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_call_id":"tool_k1","tool_input":{"path":"/tmp/repo/src/a.py"}}'
 assert_exit 2 "master-edit: Kimi path 形状 master 文件拦截"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_call_id":"tool_k2","tool_input":{"path":"/tmp/worktree/src/b.py"}}'
-assert_exit 0 "master-edit: Kimi path 形状工单分支文件放行"
+assert_exit 2 "master-edit: Kimi path 形状缺任务区证据拦截"
 
-# 主 checkout session（cwd=master），Edit worktree 工单分支文件 → 放行
-# 核心：按 file_path 所属工作树解析得工单分支，不靠「worktree 路径不在主 toplevel 前缀内」的布局假设
+# 主 checkout session（cwd=master），Edit 仅有工单分支名的工作树文件 → 拦截。
+# 有效独立工作树与元数据的放行路径由下方真实 Git 测试覆盖。
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/worktree/src/b.py"}}'
-assert_exit 0 "master-edit: cwd=master 编辑 worktree 工单分支文件放行"
+assert_exit 2 "master-edit: cwd=master 编辑无元数据工单分支文件拦截"
 
 # 主 checkout session，Edit 仓库外 dotfile → 放行（-C 目录未命中 MAP → 非工作树）
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/Users/x/.codex/config.toml"}}'
@@ -2031,13 +2076,13 @@ assert_exit 2 "master-edit(real): file_path 缺失 cwd=master 退化拦截（#2 
 
 rm -rf "$REAL_REPO"
 
-# 非 master 分支 + 不存在子目录 Write → 向上遍历解析得非 master → 放行
-# 锁定 walk 不过度阻塞（与 #1 对称的 must-not-regress，stub 屏蔽 walk 故走真实 git）
+# 手工在主 checkout 建任务名分支，缺独立工作树和元数据时，Write 必须拦截。
 FEATURE_REPO="$(mktemp -d)"
 git -C "$FEATURE_REPO" init -q
 git -C "$FEATURE_REPO" symbolic-ref HEAD refs/heads/feature/x
 run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/brand/new/sub/f.ts"}}' "$FEATURE_REPO")"
-assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放行（walk 不过度阻塞）"
+assert_exit 2 "master-edit(real): 主 checkout 手工任务分支的新文件 Write 拦截"
+assert_stderr_has "独立任务 worktree" "master-edit(real): 绕过开工入口的诊断"
 rm -rf "$FEATURE_REPO"
 unset REAL_REPO FEATURE_REPO
 
@@ -2176,7 +2221,16 @@ assert_audit_has_field "$AUDIT_LOG" tool_use_id tu_blk "audit: 阻断记录含 t
 assert_audit_has_field "$AUDIT_LOG" session_id s_audit "audit: 阻断记录含 session_id"
 
 # AC2: 非 master 放行 → exit 0 + stdout 空 + 放行记录
+mkdir -p "$AUDIT_REPO/scripts/lib"
+cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$AUDIT_REPO/scripts/lib/task_metadata.py"
+printf 'base\n' >"$AUDIT_REPO/base.txt"
+git -C "$AUDIT_REPO" add scripts/lib/task_metadata.py base.txt
+git -C "$AUDIT_REPO" -c core.hooksPath=/dev/null commit -q -m 'chore: audit base'
+git -C "$AUDIT_REPO" branch release/prod
 git -C "$AUDIT_REPO" worktree add -b feature/audit-wt "$AUDIT_REPO-wt" 2>/dev/null
+AUDIT_START="$(git -C "$AUDIT_REPO-wt" rev-parse HEAD)"
+python3 "$AUDIT_REPO-wt/scripts/lib/task_metadata.py" repair --worktree "$AUDIT_REPO-wt" \
+  --target-branch release/prod --start-sha "$AUDIT_START" --user-authorized >/dev/null
 run_hook "$AUDIT_HOOK" '{"tool_name":"Write","tool_use_id":"tu_allow","session_id":"s_audit","tool_input":{"file_path":"'"$AUDIT_REPO-wt"'/src/b.py"}}'
 assert_exit 0 "audit: 非 master Write 放行（exit 0 不变）"
 assert_stdout_empty "audit: 放行 stdout 保持为空"
@@ -2185,6 +2239,14 @@ assert_audit_has_field "$AUDIT_LOG" branch feature/audit-wt "audit: 放行记录
 assert_audit_has_field "$AUDIT_LOG" exit_code 0 "audit: 放行记录含 exit_code=0"
 assert_audit_has_field "$AUDIT_LOG" reason allowed-non-master "audit: 放行记录含 reason=allowed-non-master"
 assert_audit_has_field "$AUDIT_LOG" tool_use_id tu_allow "audit: 放行记录含 tool_use_id"
+
+AUDIT_METADATA="$(git -C "$AUDIT_REPO-wt" rev-parse --absolute-git-dir)/blue-whale/task-base.json"
+mv "$AUDIT_METADATA" "$AUDIT_METADATA.saved"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$AUDIT_REPO-wt"'/src/b.py"}}'
+assert_exit 2 "audit: 独立 worktree 缺元数据时阻断"
+mv "$AUDIT_METADATA.saved" "$AUDIT_METADATA"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$AUDIT_REPO-wt"'/src/b.py"}}'
+assert_exit 0 "audit: 显式修复的任务元数据放行"
 
 # AC3: 审计记录可按 session_id 筛选，并能区分阻断与放行
 # 同一 session_id=s_audit 下既有阻断（tu_blk, exit_code=2）又有放行（tu_allow, exit_code=0）
@@ -2593,13 +2655,21 @@ assert_stderr_empty "codex probe: 成功时 stderr 为空"
 CODEX_PATCH_ROOT="$(mktemp -d)"
 CODEX_PATCH_MASTER="$CODEX_PATCH_ROOT/master"
 CODEX_PATCH_FEATURE="$CODEX_PATCH_ROOT/feature"
-mkdir -p "$CODEX_PATCH_MASTER" "$CODEX_PATCH_FEATURE"
+mkdir -p "$CODEX_PATCH_MASTER"
 git -C "$CODEX_PATCH_MASTER" init -q
 git -C "$CODEX_PATCH_MASTER" symbolic-ref HEAD refs/heads/master
-git -C "$CODEX_PATCH_FEATURE" init -q
-git -C "$CODEX_PATCH_FEATURE" symbolic-ref HEAD refs/heads/feature/x
+git -C "$CODEX_PATCH_MASTER" config user.name "Codex Hook Test"
+git -C "$CODEX_PATCH_MASTER" config user.email "codex-hook@example.com"
+mkdir -p "$CODEX_PATCH_MASTER/scripts/lib"
+cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$CODEX_PATCH_MASTER/scripts/lib/task_metadata.py"
 printf 'before\n' >"$CODEX_PATCH_MASTER/existing.txt"
-printf 'before\n' >"$CODEX_PATCH_FEATURE/existing.txt"
+git -C "$CODEX_PATCH_MASTER" add -A
+git -C "$CODEX_PATCH_MASTER" -c core.hooksPath=/dev/null commit -q -m 'chore: patch base'
+git -C "$CODEX_PATCH_MASTER" branch release/probe
+git -C "$CODEX_PATCH_MASTER" worktree add -q -b feature/x "$CODEX_PATCH_FEATURE"
+CODEX_PATCH_START="$(git -C "$CODEX_PATCH_FEATURE" rev-parse HEAD)"
+python3 "$CODEX_PATCH_FEATURE/scripts/lib/task_metadata.py" repair --worktree "$CODEX_PATCH_FEATURE" \
+  --target-branch release/probe --start-sha "$CODEX_PATCH_START" --user-authorized >/dev/null
 
 run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: created.txt\\n+created\\n*** End Patch\"}}' "$CODEX_PATCH_MASTER")"
 assert_exit 2 "codex apply_patch: master 创建文件由共享 Gate 拦截"
@@ -3124,6 +3194,7 @@ else
   unset CLAUDE_PROJECT_DIR
 fi
 rm -rf "$HOOK_AUDIT_TEST_ROOT"
+rm -rf "$GATE_MAIN" "$GATE_TASK"
 
 # ── summary ────────────────────────────────────────────────────
 TOTAL=$((PASS + FAIL))

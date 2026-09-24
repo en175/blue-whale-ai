@@ -268,6 +268,13 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" release-dire
   block "检测到在 release 工作树直接 commit/pull/merge/rebase/cherry-pick。同步请运行 scripts/sync-release-line.sh --json；任务写入与提交在独立 worktree，合入须经目标 release PR。"
 fi
 
+# Bash 可在同一命令中直接写文件再 git commit。仅有工单分支名前缀不足以
+# 证明已通过开工入口；在 Agent Gate 校验独立工作树与任务元数据。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" unmanaged-task-commit; then
+  AUDIT_OPERATION="git-commit"
+  block "检测到任务名分支上的直接提交，但当前不是带有效发布线元数据的独立任务 worktree。请通过开工入口创建任务区或显式修复元数据。"
+fi
+
 # 扫描整条命令以分类审计，并保留任务分支错误同步的专门纠偏。
 # 普通 commit / merge 是任务分支内可逆操作，不属于发布授权边界。
 # 任务分支错误 merge/pull 同步必须指向任务同步入口；生产 master 不承接日常任务集成。

@@ -82,7 +82,17 @@ target_branch="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" re
   || fail "任务目标发布线读取失败；请按上方指引修复。"
 
 branch_has_own_commit() {
-  [ "$base_sha" != "$(git -C "$ROOT" rev-parse HEAD)" ]
+  local head_sha target_ref target_sha found_target=0
+  head_sha="$(git -C "$ROOT" rev-parse HEAD)"
+  [ "$base_sha" != "$head_sha" ] || return 1
+  # 同步任务后，HEAD 可能只是前进的 release 提交。只允许修订尚未进入
+  # 本地或已抓取远端目标发布线的任务顶端提交。
+  for target_ref in "refs/heads/$target_branch" "refs/remotes/origin/$target_branch"; do
+    target_sha="$(git -C "$ROOT" rev-parse --verify --quiet "$target_ref" 2>/dev/null)" || continue
+    found_target=1
+    git -C "$ROOT" merge-base --is-ancestor "$head_sha" "$target_sha" && return 1
+  done
+  [ "$found_target" = 1 ]
 }
 
 if [ "$AMEND" = 1 ]; then

@@ -7,7 +7,7 @@
 #   当目标文件所属工作树不是任务分支时拦截。
 #
 # 放行：
-#   - 目标文件在任务分支 worktree
+#   - 目标文件在带有效发布线元数据的独立任务 worktree
 #   - 目标文件不在任何 git 工作树内（仓库外 dotfile，如 ~/.codex/config.toml）
 #   - master 分支但目标是已被 Git 忽略的根 CLAUDE.local.md 或 .codex/config.toml
 #   - 非 Edit/Write 工具
@@ -18,7 +18,7 @@
 #
 # 分支判定按 file_path 所属工作树（git -C），不看 cwd：
 #   主 checkout session（cwd=master）编辑 worktree 工单分支文件时，
-#   按 file_path 解析得到工单分支 → 放行，不依赖「worktree 必在主 toplevel 外」的布局假设。
+#   按 file_path 解析得到工单分支与任务元数据 → 放行，不依赖固定目录布局。
 #
 # 审计闭环（IK10CW）：对仓库内 Edit/Write 的判定（阻断或放行）追加一条单行
 #   结构化审计记录（时间/hook/工具/file_path/分支/session_id/tool_use_id/exit_code/reason）。
@@ -110,11 +110,24 @@ if [ -z "$TOPLEVEL" ]; then
   exit 0
 fi
 
-# 只有任务分支可写。release 工作树用于同步与读代码，不能直接 Edit/Write。
+# 任务名分支也必须属于独立 worktree，且元数据能与当前分支和起点核对。
+# 只按分支前缀放行会允许在主 checkout 手工切出 chore/* 后绕过开工入口。
 case "$BRANCH" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*)
-    audit 0 "allowed-non-master"
-    exit 0
+    GIT_DIR="$(git -C "$TOPLEVEL" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    COMMON_DIR="$(git -C "$TOPLEVEL" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    if [ -n "$GIT_DIR" ] && [ -n "$COMMON_DIR" ] && [ "$GIT_DIR" != "$COMMON_DIR" ] \
+      && python3 "$TOPLEVEL/scripts/lib/task_metadata.py" read --worktree "$TOPLEVEL" --field task_branch >/dev/null 2>&1; then
+      audit 0 "allowed-non-master"
+      exit 0
+    fi
+    audit 2 "blocked-unmanaged-task"
+    cat >&2 <<EOF
+BLOCKED: ${BRANCH} 缺少可核对的独立任务 worktree 或发布线起点元数据。
+
+Agent 须从活动发布线通过 scripts/start-task-worktree.sh 创建任务区；旧任务区须在授权后显式修复 task_metadata.py repair。
+EOF
+    exit 2
     ;;
 esac
 

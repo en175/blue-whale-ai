@@ -81,7 +81,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 
 - AI 用 Gitee MCP `merge_enterprise_pull` 时必须先获得用户合并授权，并使用 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/confirm-release-action.sh`（PreToolUse，在凭证校验前）拦（`exit 2`）。
 - 人在 Gitee 网页手动合并同样选 **merge**——hook 拦不到服务端人操作，靠自觉 + 本文档约束。
-- 合并即删源分支：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。PR 合并进目标 release 后，Agent 回到 task worktree 运行 `scripts/cleanup-task-worktree.sh` 清理本地分支和 worktree；远程源分支保留，后续由负责人决定。
+- 合并后清理本地任务区：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。PR 合并进目标 release 后，Agent 回到 task worktree 运行 `scripts/cleanup-task-worktree.sh` 清理本地分支和 worktree；远程源分支保留，后续由负责人决定。
 
 ---
 

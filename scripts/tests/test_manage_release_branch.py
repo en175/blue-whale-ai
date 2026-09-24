@@ -94,6 +94,12 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         adopted = self.command("activate", "--branch", old, "--user-authorized", "--json")
         self.assertEqual(0, adopted.returncode, adopted.stderr)
         old_sha = json.loads(adopted.stdout)["state_sha"]
+        task = self.root / "task-old"
+        task_branch = "chore/IKITEST-旧发布线任务"
+        run("git", "worktree", "add", "-b", task_branch, task, old, cwd=self.repo)
+        task_start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", task_start, "--user-authorized", cwd=task)
         self.release(new)
         blocked = self.command("current", "--json")
         self.assertNotEqual(0, blocked.returncode)
@@ -101,6 +107,8 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         no_snapshot = self.command("activate", "--branch", new, "--user-authorized")
         self.assertNotEqual(0, no_snapshot.returncode)
         self.assertIn("尚未进入 origin/master", no_snapshot.stderr)
+        self.assertIn(task_branch, no_snapshot.stderr)
+        self.assertIn("开放 PR：未核对", no_snapshot.stderr)
         run("git", "merge", "--no-ff", "--no-edit", old, cwd=self.repo)
         run("git", "push", "origin", "master", cwd=self.repo)
         no_snapshot = self.command("activate", "--branch", new, "--user-authorized")
@@ -110,12 +118,23 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         inventory = self.command("list", "--pr-snapshot", snapshot, "--json")
         self.assertEqual(0, inventory.returncode, inventory.stderr)
         self.assertEqual(42, json.loads(inventory.stdout)["open_prs"][0]["number"])
+        self.assertEqual(old, next(item["target_branch"] for item in
+                                    json.loads(inventory.stdout)["task_worktrees"]
+                                    if item["branch"] == task_branch))
         open_pr = self.command("activate", "--branch", new, "--user-authorized",
                                "--pr-snapshot", snapshot)
         self.assertNotEqual(0, open_pr.returncode)
         self.assertIn("42", open_pr.stderr)
+        self.assertIn(task_branch, open_pr.stderr)
         self.assertEqual(old_sha, json.loads(self.command("list", "--json").stdout)["state_sha"])
         snapshot = self.snapshot()
+        unresolved_task = self.command("activate", "--branch", new, "--user-authorized",
+                                       "--pr-snapshot", snapshot)
+        self.assertNotEqual(0, unresolved_task.returncode)
+        self.assertIn(task_branch, unresolved_task.stderr)
+        self.assertIn("开放 PR：无", unresolved_task.stderr)
+        run("git", "worktree", "remove", task, cwd=self.repo)
+        run("git", "branch", "-d", task_branch, cwd=self.repo)
         changed = self.command("activate", "--branch", new, "--user-authorized",
                                "--pr-snapshot", snapshot, "--json")
         self.assertEqual(0, changed.returncode, changed.stderr)
@@ -177,6 +196,49 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         offline = self.command("current", "--json")
         self.assertNotEqual(0, offline.returncode)
         self.assertIn("远端不可达", offline.stderr)
+
+    def test_create_rejects_second_line_with_old_tasks_and_pr_inventory(self):
+        first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
+        self.assertEqual(0, first.returncode, first.stderr)
+        old = json.loads(first.stdout)["branch"]
+        task = self.root / "task-old"
+        branch = "chore/IKITEST-旧任务"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        snapshot = self.snapshot([{"number": 91, "target_branch": old, "state": "opened"}])
+        rejected = self.command("create", "--summary", "下期发布验证", "--user-authorized",
+                                "--pr-snapshot", snapshot)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(branch, rejected.stderr)
+        self.assertIn("!91", rejected.stderr)
+        self.assertEqual(1, len(run("git", "ls-remote", "--heads", "origin",
+                                    "release/*", cwd=self.repo).stdout.splitlines()))
+
+    def test_create_rejects_unattributed_legacy_task_worktree(self):
+        first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
+        self.assertEqual(0, first.returncode, first.stderr)
+        old = json.loads(first.stdout)["branch"]
+        task = self.root / "task-without-metadata"
+        branch = "chore/IKITEST-归属待核对"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        snapshot = self.snapshot()
+
+        blocked = self.command("create", "--summary", "下期发布验证", "--user-authorized",
+                               "--pr-snapshot", snapshot)
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("归属未核实任务", blocked.stderr)
+        self.assertIn(branch, blocked.stderr)
+        self.assertIn("开放 PR：无", blocked.stderr)
+        self.assertEqual(1, len(run("git", "ls-remote", "--heads", "origin",
+                                    "release/*", cwd=self.repo).stdout.splitlines()))
+
+        run("git", "worktree", "remove", task, cwd=self.repo)
+        run("git", "branch", "-d", branch, cwd=self.repo)
+        created = self.command("create", "--summary", "下期发布验证", "--user-authorized",
+                               "--pr-snapshot", snapshot, "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
 
     def test_create_after_closeout_retains_old_branch_and_uses_suffix(self):
         first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")

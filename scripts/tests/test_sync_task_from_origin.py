@@ -18,6 +18,7 @@ except ImportError:  # 经 discover -s scripts/tests 顶层导入
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-task-from-origin.sh"
+COMMIT_SCRIPT = REPO_ROOT / "scripts" / "commit-task-for-review.sh"
 
 
 def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -138,6 +139,46 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.response(second)["status"], "UP_TO_DATE")
         self.assertEqual(self.git("rev-parse", "HEAD"), rebased_head)
+
+    def test_amend_rejects_release_head_after_zero_commit_sync(self) -> None:
+        start_sha = self.git("rev-parse", "HEAD")
+        release_head = self.advance_release()
+        synced = self.invoke("sync", "--json")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), release_head)
+        self.assertNotEqual(start_sha, release_head)
+
+        # The commit entry reads its helpers from the task worktree. Copying them
+        # after sync leaves the release commit untouched and tests the real CLI.
+        (self.worktree / "scripts" / "lib").mkdir(parents=True)
+        for name in ("commit-task-for-review.sh",):
+            (self.worktree / "scripts" / name).write_bytes((REPO_ROOT / "scripts" / name).read_bytes())
+        for name in ("worktree-paths.sh", "python3-command.sh", "task_metadata.py"):
+            source = REPO_ROOT / "scripts" / "lib" / name
+            (self.worktree / "scripts" / "lib" / name).write_bytes(source.read_bytes())
+        (self.worktree / "task.txt").write_text("task\n", encoding="utf-8")
+        rejected = run("bash", str(self.worktree / "scripts" / COMMIT_SCRIPT.name),
+                       "--amend", cwd=self.worktree)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("尚无自己的 commit", rejected.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), release_head)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.main), release_head)
+        self.assertEqual((self.worktree / "task.txt").read_text(encoding="utf-8"), "task\n")
+
+        committed = run("bash", str(self.worktree / "scripts" / COMMIT_SCRIPT.name),
+                        "-m", "feat: task change", cwd=self.worktree)
+        self.assertEqual(committed.returncode, 0, committed.stderr)
+        task_head = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(task_head, release_head)
+        (self.worktree / "task.txt").write_text("revised\n", encoding="utf-8")
+        amended = run("bash", str(self.worktree / "scripts" / COMMIT_SCRIPT.name),
+                      "--amend", cwd=self.worktree)
+        self.assertEqual(amended.returncode, 0, amended.stderr)
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), task_head)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.main), release_head)
+        metadata = json.loads((Path(self.git("rev-parse", "--absolute-git-dir")) /
+                               "blue-whale/task-base.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["start_sha"], start_sha)
 
     def test_sync_rebases_onto_release_target(self) -> None:
         original_head = self.commit_task_change()

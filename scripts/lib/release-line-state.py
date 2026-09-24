@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from task_metadata import TASK_PREFIXES, TaskMetadataError, read_task_metadata
+
 ROOT = Path(__file__).resolve().parents[2]
 STATE_REF = "refs/heads/chore/发布线状态记录"
 STATE_FILE = "release-line.json"
@@ -90,7 +92,13 @@ def worktrees():
     for line in output.splitlines() + [""]:
         if not line:
             if path and branch and branch != "refs/heads/master":
-                rows.append({"path": path, "branch": branch.removeprefix("refs/heads/")})
+                item = {"path": path, "branch": branch.removeprefix("refs/heads/")}
+                if item["branch"].startswith(TASK_PREFIXES):
+                    try:
+                        item["target_branch"] = read_task_metadata(Path(path))["target_branch"]
+                    except TaskMetadataError as exc:
+                        item["metadata_error"] = str(exc)
+                rows.append(item)
             path = branch = None
         elif line.startswith("worktree "):
             path = line[9:]
@@ -138,9 +146,10 @@ def listing(args):
         print(f"  {branch}")
     print("待授权候选：" + (", ".join(pending) or "无"))
     print("历史分支：" + (", ".join(data["legacy"]) or "无"))
-    print("任务 worktree（归属待核对）：")
+    print("任务 worktree：")
     for item in data["task_worktrees"]:
-        print(f"  {item['branch']}  {item['path']}")
+        target = item.get("target_branch", item.get("metadata_error", "非任务分支"))
+        print(f"  {item['branch']}  {item['path']}  {target}")
     if args.pr_snapshot and data["branch"]:
         print("以当前发布线为目标的开放 PR：")
         for pull in data["open_prs"]:
@@ -198,13 +207,25 @@ def pr_snapshot(path, targets):
 def assert_closed(old, snapshot):
     if git("rev-parse", "--verify", "origin/master", check=False).returncode:
         raise ReleaseError("origin/master 不可用，无法核实旧批次。")
+    inventory_rows = worktrees()
+    old_tasks = [item for item in inventory_rows if item.get("target_branch") == old]
+    unassigned = [item for item in inventory_rows if "metadata_error" in item]
+    tasks = ", ".join(item["branch"] for item in old_tasks) or "无"
+    unknown = ", ".join(item["branch"] for item in unassigned) or "无"
+    if snapshot:
+        open_pulls = pr_snapshot(snapshot, old)
+        pulls = ", ".join(f"!{p.get('number', p.get('id', '?'))}" for p in open_pulls) or "无"
+    else:
+        open_pulls = []
+        pulls = "未核对（需 --pr-snapshot）"
+    inventory = f"待处理任务：{tasks}；归属未核实任务：{unknown}；开放 PR：{pulls}"
     if git("merge-base", "--is-ancestor", f"origin/{old}", "origin/master",
            check=False).returncode:
-        raise ReleaseError(f"旧活动发布线 {old} 尚未进入 origin/master，拒绝换期。")
-    open_pulls = pr_snapshot(snapshot, old)
-    if open_pulls:
-        numbers = ", ".join(str(p.get("number", p.get("id", "?"))) for p in open_pulls)
-        raise ReleaseError(f"旧活动发布线仍有开放 PR：{numbers}；请负责人决定去向。")
+        raise ReleaseError(f"旧活动发布线 {old} 尚未进入 origin/master，拒绝换期；{inventory}。")
+    if not snapshot:
+        raise ReleaseError(f"换期需 --pr-snapshot <JSON>；{inventory}。")
+    if old_tasks or unassigned or open_pulls:
+        raise ReleaseError(f"旧活动发布线仍有待处理或归属未核实的任务、开放 PR，拒绝换期；{inventory}；请负责人决定去向。")
 
 
 def write_state(previous, active, legacy):

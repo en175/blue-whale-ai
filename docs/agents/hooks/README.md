@@ -254,14 +254,11 @@ scripts/cleanup-task-worktree.sh
 
 Agent 必须在对应 task worktree 内执行清理脚本。脚本抓取任务元数据记录的目标 release，证明远端目标包含当前 HEAD，复核工作区干净和远端 SHA，再删除本地任务 worktree 与分支。远程源分支保留，由负责人另行决定去向。
 
-### 判断用 `-d` 还是 `-D`
+### 清理判据
 
-| 情况 | 命令 | 原因 |
-|---|---|---|
-| 分支已合并到目标 release | `git branch -d` | Git 校验合并历史；标准入口先核对远端目标。 |
-| 分支未合并就删 | `git branch -D` | 强删 —— 但本项目 AI **禁**用 `-D`（`block-dangerous-git.sh` 会拦） |
+`scripts/cleanup-task-worktree.sh` 先抓取元数据记录的远端目标 release，确认任务 HEAD 已进入该提交，再通过 `ls-remote` 复核远端 SHA。工作区干净时，入口删除本地 worktree，并用 `git update-ref -d` 删除本地任务分支。它不使用 `git branch -d` 判断是否合并，也不删除远程源分支。
 
-> 反过来用：`-d` 报"未合并" = 提醒你"这个分支可能漏合了，先 review 再决定"。
+远端目标未包含任务 HEAD、远端不可达或工作区有未保存改动时，入口拒绝清理。不要用 `git branch -D` 绕过判据，`block-dangerous-git.sh` 也会拦截该命令。
 
 ### 防忘窍门
 
