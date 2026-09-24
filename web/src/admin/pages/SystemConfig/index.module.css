@@ -205,7 +205,7 @@
   border: none;
   border-radius: 8px;
   background: #4a4a4a;
-  color: #fff;
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   font-weight: 500;
   cursor: pointer;

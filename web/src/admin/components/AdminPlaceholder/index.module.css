@@ -5,7 +5,7 @@
   margin: 0;
   font-size: var(--font-size-xl);
   font-weight: 700;
-  color: #fff;
+  color: var(--admin-text);
 }
 
 .subtitle {
