@@ -1,4 +1,4 @@
-# billing-svc 配置（骨架，ADR-0113 / ADR-0114）
+# billing-svc 配置（ADR-0113 / ADR-0114）
 #
 # 端口约定：worker=4002，billing=4003（同段 4xxx，容器内网）
 server:
@@ -11,10 +11,30 @@ spring:
     virtual:
       enabled: true             # Java 21 虚拟线程：计费是 I/O 密集（DB + gRPC），线程不是瓶颈
 
+  # ── 自有库（ADR-0113 数据主权：每个服务数据私有，禁止跨服务直连） ──
+  #
+  # ⚠️ **凭据只走环境变量、不落任何入库文件**（对齐测试站连接串的治理口径）。
+  #    本地开发从 docker 容器取：
+  #      docker inspect bw-mysql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD
+  #    然后 export BILLING_DB_PASSWORD=...
+  datasource:
+    url: ${BILLING_DB_URL:jdbc:mysql://localhost:13306/bw_billing?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${BILLING_DB_USERNAME:root}
+    password: ${BILLING_DB_PASSWORD:}
+
+  # ── schema 权威在 billing 自己手里（Flyway），不走 backend 的 Prisma ──
+  #    理由见 pom.xml 的注释：表若由 Prisma 管，「数据私有」就只剩口号。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 生产禁止自动 clean；本地也别开——误清库的代价远大于省下的手动操作
+    clean-disabled: true
+    baseline-on-migrate: false
+
 logging:
   level:
     com.bluewhale: INFO
+    # 首次接入时想看 Flyway 实际跑了哪些迁移，临时调到 INFO 即可
+    org.flywaydb: INFO
 
-# ⚠️ 骨架阶段刻意**不配** DB / MQ / catalog：
-#    定价目录、账本、账户要等 ADR-0113 的 P2–P3 落地时按真实形状加；
-#    现在配上去只会是猜的，还会带出未使用的连接池与探活噪音。
+# ⚠️ MQ / 账本 / 账户尚未接入：按 ADR-0113 的 P2–P4 落地时按真实形状加。

@@ -70,6 +70,31 @@ public final class PricingKeys {
         return normalize(picked);
     }
 
+    /**
+     * 规范化**一个已有的表键**（把它本身重新拼成规范形式）。
+     *
+     * <p>表键是运营手写的，可能写成 {@code "Size=2K"} 或 {@code "size=2k|duration=5"}。
+     * 编译期统一重拼，运行时只做等值查找——两端用同一份规范化结果，
+     * 「写入与查询写法不一致」这类 bug 从源头消失。
+     *
+     * @param rawKey 形如 {@code "size=2k"} 或 {@code "duration=5|size=2k"}（顺序任意）
+     * @throws IllegalArgumentException 键里没有 {@code =}
+     */
+    public static String normalizeKey(String rawKey) {
+        if (rawKey == null || rawKey.isBlank()) {
+            throw new IllegalArgumentException("空的规格键");
+        }
+        Map<String, String> pairs = new LinkedHashMap<>();
+        for (String pair : rawKey.split("\\" + SEPARATOR)) {
+            int at = pair.indexOf(ASSIGN);
+            if (at <= 0) {
+                throw new IllegalArgumentException("规格键缺少 '='：" + pair + "（完整键：" + rawKey + "）");
+            }
+            pairs.put(normalizeOne(pair.substring(0, at)), normalizeOne(pair.substring(at + 1)));
+        }
+        return normalize(pairs);
+    }
+
     /** 从表键集合里抽出出现过的维度名（去重、有序）。 */
     public static java.util.Set<String> axesOf(Iterable<String> tableKeys) {
         var axes = new java.util.TreeSet<String>();
