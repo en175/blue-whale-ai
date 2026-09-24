@@ -488,7 +488,8 @@ public class JobStateMachineService {
         return affected == 1;
     }
 
-    /** 仅在重试收割回退提交前续租；无法确认执行权时禁止产生新的上游任务。 */
+    /** 仅在重试收割回退提交前续租（IKIHKH：owner+fence 定执行权，租约过期不褫夺）；
+     *  无法确认执行权时禁止产生新的上游任务。 */
     public boolean reserveParentReuseSubmit(String jobId, String workerId, long fencingToken) {
         try {
             LocalDateTime leaseExpiresAt = WorkerClock.now()
@@ -496,7 +497,7 @@ public class JobStateMachineService {
             boolean reserved = jobMapper.reserveParentReuseSubmit(
                     Long.parseLong(jobId), workerId, fencingToken, leaseExpiresAt) == 1;
             if (!reserved) {
-                log.warn("[parent-reuse] 回退提交前租约守卫未命中，停止本次执行 jobId={}", jobId);
+                log.warn("[parent-reuse] 回退提交前执行权守卫未命中（owner/fence 已变或已提交），停止本次执行 jobId={}", jobId);
             }
             return reserved;
         } catch (Exception error) {

@@ -289,7 +289,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
         //    background_color——出站形状在客户端测试钉）
         if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
                 claim.id(), claim.workerId(), claim.fencingToken())) {
-            log.warn("[video_matting] 重试收割回退提交前失租或续租状态无法确认，停止本次执行 jobId={}", claim.id());
+            log.warn("[video_matting] 重试收割回退提交前执行权守卫未命中（owner/fence 已变或已提交），停止本次执行 jobId={}", claim.id());
             return;
         }
         String taskId = matteVideoClient.submit(
