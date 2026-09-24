@@ -22,7 +22,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
-import { appliedPlanAssetIds, dropReversedTextIndexEdges, textIndexEdgesForAppliedPlan } from './planApplyEdges';
+import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, audioMergedRefsError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
@@ -10674,6 +10674,11 @@ export default function CanvasPage() {
     setApplying(true);
     (document.activeElement as HTMLElement | null)?.blur();
     try {
+      const missingNodeIds = new Set(
+        mediaNodesRef.current
+          .filter((node) => (node.data as { assetMissing?: boolean }).assetMissing === true)
+          .map((node) => node.id),
+      );
       if (!(await flushCanvasSave(projectId))) return;
       const result = await applyMutation.mutateAsync({ projectId, source: payload.source, position: spawnPosition() });
       if (activeProjectRef.current !== projectId) return;
@@ -10683,16 +10688,28 @@ export default function CanvasPage() {
       const textNodeId = result.node.id;
       const extraAssetIds = (payload.assetRefItems ?? []).map((item) => item.assetId);
       const assetIds = appliedPlanAssetIds(result.node as Node, extraAssetIds);
-      const oriented = dropReversedTextIndexEdges(textNodeId, savedEdges);
-      const indexEdges = textIndexEdgesForAppliedPlan(textNodeId, assetIds, savedNodes, oriented);
-      let nextNodes = savedNodes;
+      const rebuilt = replaceMissingPlanMediaNodes({
+        textNodeId,
+        assetIds,
+        nodes: savedNodes.map((node) => (
+          node.id === result.node.id
+            ? { ...node, data: { ...(node.data ?? {}), ...((result.node as Node).data ?? {}) } }
+            : node
+        )),
+        missingNodeIds,
+        createNodeId: () => newNodeId('media'),
+      });
+      const keptEdges = savedEdges.filter((edge) => !rebuilt.removedNodeIds.has(edge.source) && !rebuilt.removedNodeIds.has(edge.target));
+      const oriented = dropReversedTextIndexEdges(textNodeId, keptEdges);
+      const indexEdges = textIndexEdgesForAppliedPlan(textNodeId, assetIds, rebuilt.nodes, oriented);
+      let nextNodes = rebuilt.nodes;
       let nextEdges = [...oriented, ...indexEdges];
       let nextVersion = result.canvas.version;
-      if (indexEdges.length > 0 || oriented.length !== savedEdges.length) {
+      if (indexEdges.length > 0 || oriented.length !== savedEdges.length || rebuilt.replaced) {
         try {
           const persisted = await saveCanvasDoc(
             projectId,
-            { viewport: savedViewport ?? viewport, nodes: savedNodes, edges: nextEdges },
+            { viewport: savedViewport ?? viewport, nodes: nextNodes, edges: nextEdges },
             result.canvas.version,
           );
           nextVersion = persisted.version;
