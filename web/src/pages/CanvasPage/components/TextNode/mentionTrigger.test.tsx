@@ -552,28 +552,10 @@ async function renderPromptNode() {
   }, { selected: true });
 }
 
-/** 非方案来源的素材标签节点（!734/IKG99G 起方案来源卡不再渲染素材下拉——素材由方案同步，
- *  手动替换/新增素材标签的用例须落在非方案卡上才有下拉可点）。非编辑态入口用例按真实
- *  用户路径唯一选中卡片（IKGYYE 后操作条在钉屏幕层）。 */
-async function renderManualMentionNode() {
-  return renderNode({
-    text: '看这张素材#1中间素材#2结尾',
-    promptMentions: [
-      { start: 3, end: 7, assetId: 'a1', index: 1 },
-      { start: 9, end: 13, assetId: 'a2', index: 2 },
-    ],
-    promptMaterials: [
-      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
-      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
-    ],
-    mediaMentions: [],
-    mediaRefs: [],
-    onPromptChange: vi.fn(),
-  }, { selected: true });
-}
-
-/** 点选指定素材标签后，在节点操作条（钉屏幕层，IKGYYE 后不在节点卡 DOM 内）点对应按钮 */
-async function clickNodeBarButton(label: string) {  const button = [...document.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
+/** 点选引用标签后，在标签操作层点对应按钮（与 media 标签同一套菜单） */
+async function clickChipMenuButton(label: string) {
+  const menu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+  const button = [...menu.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
   await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 }
 
@@ -581,7 +563,7 @@ it('非编辑态删除素材标签后，进入编辑光标落被删标签原位�
   const { editor } = await renderPromptNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickNodeBarButton('删除标签 #1');
+  await clickChipMenuButton('删除标签');
   expect(editor.querySelector('[data-prompt-index="1"]')).toBeNull();
   await enterEditing(editor);
   // 被删标签原位置 = 「看这张」之后（DOM 流：chip 文本为 #N，offset 3）
@@ -589,34 +571,20 @@ it('非编辑态删除素材标签后，进入编辑光标落被删标签原位�
 });
 
 it('非编辑态替换素材标签后，进入编辑光标落替换后标签后', async () => {
-  const { editor } = await renderManualMentionNode();
+  const { editor } = await renderPromptNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  const select = document.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
-  await act(async () => {
-    select.value = 'a2';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  await clickChipMenuButton('替换来源');
+  expect(menuOpen()).toBe(true);
+  await selectMenuItem('素材图二');
+  const replaced = editor.querySelector<HTMLElement>('[data-media-node="m2"]')!;
+  expect(replaced).toBeTruthy();
+  expect(editor.querySelector('[data-prompt-index="1"]')).toBeNull();
   await enterEditing(editor);
-  const replaced = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
-  expect(replaced.dataset.promptAsset).toBe('a2');
   expect(caretAtChip(replaced, 'after')).toBe(true);
 });
 
-it('非编辑态新增素材标签后，进入编辑光标落新标签后', async () => {
-  const { editor } = await renderManualMentionNode();
-  const select = document.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
-  await act(async () => {
-    select.value = 'a1';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await enterEditing(editor);
-  const added = editor.querySelector<HTMLElement>('[data-prompt-index="3"]')!;
-  expect(added).toBeTruthy();
-  expect(caretAtChip(added, 'after')).toBe(true);
-});
-
-it('同编号多张素材标签删除，锚点取点击的那张原位置', async () => {
+it('同编号多张素材标签删除，只移除点击的那张，锚点取该张原位置', async () => {
   const { editor } = await renderNode({
     promptSource: 'chat',
     text: '素材#1素材#2素材#1',
@@ -633,13 +601,11 @@ it('同编号多张素材标签删除，锚点取点击的那张原位置', asyn
     mediaRefs: [],
     onPromptChange: vi.fn(),
   }, { selected: true });
-  // 点第二张 #1（#2 之后）：删除全部 #1 后幸存 #2 在点击位置之前，光标应落 #2 后
   const ones = () => [...editor.querySelectorAll<HTMLElement>('[data-prompt-index="1"]')];
   await act(async () => ones()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickNodeBarButton('删除标签 #1');
-  expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(0);
+  await clickChipMenuButton('删除标签');
+  expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(1);
   await enterEditing(editor);
-  // 重放后正文只剩 #2：其文本「#2」在 DOM 流占 1 字符，被删位置 = 原第二张 #1 处 = offset 2（chip#1+chip#2）
   expect(caretTextOffset(editor)).toBe(2);
 });
 
@@ -660,10 +626,10 @@ it('同编号多张素材标签删除，点第一张时锚点取第一张原位�
     mediaRefs: [],
     onPromptChange: vi.fn(),
   }, { selected: true });
-  // 点第一张 #1（正文开头）：删除后光标应落正文开头，而非第二张 #1 的位置
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickNodeBarButton('删除标签 #1');
+  await clickChipMenuButton('删除标签');
+  expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(1);
   await enterEditing(editor);
   expect(caretTextOffset(editor)).toBe(0);
 });
