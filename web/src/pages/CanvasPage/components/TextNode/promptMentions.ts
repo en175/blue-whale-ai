@@ -119,8 +119,7 @@ function buildMentionChip(
     chip.dataset.promptMirrorUrl = part.mirror.url;
     chip.dataset.mediaName = part.mirror.name;
   } else {
-    const material = materials.find(item => item.assetId === part.assetId);
-    chip.dataset.mediaName = material?.name ?? part.label;
+    chip.dataset.mediaName = part.label;
   }
   const material = materials.find(item => item.assetId === part.assetId);
   const thumb = document.createElement('span');
