@@ -188,6 +188,7 @@ public class VideoJobProcessor implements JobProcessor {
     private final GenerationMessageProducer producer;
     private final String workerId;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VideoJobProcessor(
             JobStateMachineService stateMachine,
             AssetSourceService assetSource,
@@ -197,13 +198,26 @@ public class VideoJobProcessor implements JobProcessor {
             @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
+        this(stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-" + hostname() + "-" + ProcessHandle.current().pid());
+    }
+
+    VideoJobProcessor(
+            JobStateMachineService stateMachine,
+            AssetSourceService assetSource,
+            GenerationCredentialService credentialService,
+            NewApiVideoClient videoClient,
+            TosVideoMediaRelay mediaRelay,
+            GenerationMessageProducer producer,
+            String workerId
+    ) {
         this.stateMachine = stateMachine;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.videoClient = videoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
-        this.workerId = "video-" + hostname() + "-" + ProcessHandle.current().pid();
+        this.workerId = workerId;
     }
 
     @Override
@@ -383,7 +397,7 @@ public class VideoJobProcessor implements JobProcessor {
      * IKICD3：失租后停止重复提交。
      * <p>
      * 父 job 的 provider_task_id 对应的上游 task SUCCESS → 复用其结果 URL 走 publishVideoResult。
-     * FAILED / 不存在 / 查询失败 / 结果 URL 缺失 → 返回 false（走现有 submit 逻辑重新生成）。
+     * FAILED / 不存在 / 查询失败 / 结果 URL 为 null 或空白 → 返回 false（走现有 submit 逻辑重新生成）。
      * <p>
      * IKICD3 边界：已取得旧结果但发布守卫（publishVideoGuard CAS：status=processing +
      * lease_owner + fencing_token）未命中，说明当前 Worker 已失去该 GenerationJob 的执行权
@@ -404,7 +418,8 @@ public class VideoJobProcessor implements JobProcessor {
             return false;
         }
 
-        if (!"succeeded".equals(observation.status()) || observation.url() == null) {
+        if (!"succeeded".equals(observation.status())
+                || observation.url() == null || observation.url().isBlank()) {
             log.info("[video] 重试收割未命中(旧结果不可用) jobId={} parentTask={} status={}，回退重新提交",
                     claim.id(), claim.parentProviderTaskId(), observation.status());
             return false;
