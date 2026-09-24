@@ -1,0 +1,269 @@
+package com.bluewhale.billing.ledger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 积分账户的写操作入口 —— 预扣 / 结算 / 返还（《计费逻辑详细设计》§4.2 – §4.4）。
+ *
+ * <h2>为什么是「预扣」而不是「直接扣」</h2>
+ *
+ * 生成任务是异步且可能失败的：提交时不知道最终消耗多少（拆镜头后可能只成功一部分），
+ * 甚至可能一分钱都不花。若提交时就扣掉，失败后要退款——用户会看到「扣了 40 又退 10」
+ * 两条记录，还得理解「预扣」这个词。
+ *
+ * <p>预扣把这段不确定性做成**用户不可见**的：钱在提交时被冻结（不能再用，但还在），
+ * 完成时按实际消耗结算，失败时原样解冻。用户只看到一行
+ * 「处理中 · 预计消耗 40」变成「已完成 · 消耗 30」。
+ *
+ * <h2>三个方法都在一个事务里</h2>
+ *
+ * 批次冻结、预留写库、账本记账必须同生共死。任一失败整体回滚——
+ * 最怕的中间态是「冻结了但没记账」：钱少了却查不出原因，人工只能猜。
+ *
+ * <h2>幂等</h2>
+ *
+ * 每个方法进来先查幂等键。**但真正的保证在唯一索引上**，不在这次查询——
+ * 查询只是让重放走「返回首次结果」的快路径；两个并发请求同时通过查询时，
+ * 唯一索引会拦下后到的那个（抛 {@code DuplicateKeyException}，事务回滚）。
+ * 应用层判重有 TOCTOU 窗口，唯一索引没有。
+ */
+@Service
+public class CreditService {
+
+    private static final Logger log = LoggerFactory.getLogger(CreditService.class);
+
+    private final CreditLotRepository lots;
+    private final LedgerRepository ledger;
+    private final ReservationRepository reservations;
+
+    public CreditService(CreditLotRepository lots,
+                         LedgerRepository ledger,
+                         ReservationRepository reservations) {
+        this.lots = lots;
+        this.ledger = ledger;
+        this.reservations = reservations;
+    }
+
+    /**
+     * 预扣。幂等键 {@code hold:{commandId}}。
+     *
+     * <p>余额不足抛 {@link InsufficientCreditsException}（上层映射 402），**不创建 job**。
+     *
+     * @param commandId      客户端生成的命令 id —— 幂等键来自它而不是 jobId：
+     *                       重试发生在 job 创建**之前**，那时还没有 jobId 可用
+     * @param amount         预扣额（mc）
+     * @param catalogVersion 本次计价用的目录版本
+     */
+    @Transactional
+    public HoldResult hold(long userId, String commandId, long jobId,
+                           long amount, int catalogVersion) {
+
+        String idempotencyKey = "hold:" + commandId;
+        if (ledger.existsByVoucherBase(idempotencyKey)) {
+            // 重复提交：返回首次结果，绝不二次冻结
+            return reservations.findByJobId(jobId)
+                    .map(r -> new HoldResult(r.reservedCredits(), r.catalogVersion()))
+                    .orElseThrow(() -> new IllegalStateException(
+                            "幂等键已存在但找不到对应预留：jobId=" + jobId));
+        }
+        if (amount <= 0) {
+            throw new IllegalArgumentException("预扣额必须为正：" + amount);
+        }
+
+        // ── 锁该用户的全部有效批次，返回时已按扣减顺序排好（§4.1 的三级 tie-break）
+        List<CreditLotRepository.Lot> active = lots.lockActiveLots(userId);
+
+        long available = active.stream().mapToLong(CreditLotRepository.Lot::available).sum();
+        if (available < amount) {
+            throw new InsufficientCreditsException(available, amount);
+        }
+
+        // ── 按顺序冻结，直到凑够
+        long rest = amount;
+        List<Allocation> allocations = new ArrayList<>();
+        for (CreditLotRepository.Lot lot : active) {
+            if (rest == 0) {
+                break;
+            }
+            long take = Math.min(lot.available(), rest);
+            if (take <= 0) {
+                continue;
+            }
+            lots.addFrozen(lot.id(), take);
+            allocations.add(new Allocation(lot.id(), take));
+            rest -= take;
+        }
+        if (rest != 0) {
+            // 上面已确认 available >= amount，走到这里说明冻结逻辑漏了一部分。
+            // 抛异常回滚，而不是带着「冻结不足」的记录继续——后者结算时必然对不上账。
+            throw new IllegalStateException("冻结金额不足，剩余 " + rest + "（可用 " + available + "，需 " + amount + "）");
+        }
+
+        reservations.insert(jobId, userId, amount, catalogVersion, allocations);
+
+        // 复式分录（§3 分录 5）：钱从「可用」转为「受限」，两边都要记
+        ledger.insert(Voucher.base(idempotencyKey, userId, BizType.HOLD, String.valueOf(jobId))
+                .debit(Account.WALLET, amount, "提交预扣")
+                .credit(Account.FROZEN, amount, "提交预扣")
+                .build());
+
+        return new HoldResult(amount, catalogVersion);
+    }
+
+    /**
+     * 发放一批积分。幂等键 {@code grant:{grantKey}}。
+     *
+     * <p><b>不做事前判重</b>：批次表 {@code uk_lots__grant_key} 与账本 {@code uk_ledger__idem}
+     * 两道唯一索引都拦得住。重复调用会抛 {@code DuplicateKeyException} 并整体回滚——
+     * 这正是想要的：发放是「要么记一次，要么一次都没有」，没有中间态。
+     *
+     * <p>⚠️ 本方法只管**记账本身**。每种来源的有效期策略（每日 23:59 过期 / 充值赠送 30 天 /
+     * 注册赠送永久）、以及「每日登录只能领一次」这类业务规则，属于发放策略，另行落地。
+     *
+     * @param expiresAt 批次有效期；<b>null = 永久</b>
+     * @param grantKey  发放幂等键（{@code register:{userId}} / {@code daily:{userId}:{date}} …）
+     * @return 新建批次的 id
+     */
+    @Transactional
+    public long grant(long userId, CreditSource source, long amount, Instant expiresAt,
+                      String bizType, String bizId, String grantKey) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("发放量必须为正：" + amount);
+        }
+        long lotId = lots.grant(userId, source, amount, expiresAt, bizType, bizId, grantKey);
+
+        // 复式分录（§3 分录 3）：发放是平台成本，用户余额同时增加
+        ledger.insert(Voucher.base("grant:" + grantKey, userId, BizType.GRANT, bizId)
+                .debit(Account.COST, amount, "积分发放")
+                .credit(Account.WALLET, amount, "积分发放")
+                .build());
+
+        return lotId;
+    }
+
+    /**
+     * 结算。幂等键 {@code settle:{jobId}}。
+     *
+     * <p>按预扣时**同一份分配明细**扣减实际额：先解冻全部冻结量，再从各批次扣掉实际用量，
+     * 差额自动回到可用余额。**不重算分配**——期间可能插入了新批次或旧批次过期，
+     * 重算会扣到别的批次上。
+     *
+     * @param actualCredits 实际消耗（mc）。{@code > 预扣} 理论不该发生（预扣已按上限冻结），
+     *                      真发生说明定价漏算了维度：差额记应收并告警，**不悄悄多扣用户**
+     */
+    @Transactional
+    public void settle(long jobId, long actualCredits) {
+
+        String idempotencyKey = "settle:" + jobId;
+        if (ledger.existsByVoucherBase(idempotencyKey)) {
+            return;
+        }
+        if (actualCredits < 0) {
+            throw new IllegalArgumentException("实际消耗不能为负：" + actualCredits);
+        }
+
+        Reservation reservation = reservations.lockByJobId(jobId);
+        if (reservation == null || !reservation.isPending()) {
+            // 不存在（任务未走预扣）或已结算/已释放 —— 都是无操作，不是错误。
+            // 结算与超时兜底扫描会并发到达，第二条必然走这里。
+            return;
+        }
+
+        long reserved = reservation.reservedCredits();
+        long consumed = Math.min(actualCredits, reserved);
+
+        // ── 把实际消耗按**同一顺序**铺回各批次；剩余部分（若实际 > 预扣）走应收
+        Map<Long, Long> actualByLot = new LinkedHashMap<>();
+        List<Allocation> settled = new ArrayList<>();
+        long rest = consumed;
+        for (Allocation allocation : reservation.allocations()) {
+            long take = Math.min(allocation.take(), rest);
+            rest -= take;
+            actualByLot.put(allocation.lotId(), take);
+            if (take > 0) {
+                settled.add(new Allocation(allocation.lotId(), take));
+            }
+        }
+
+        for (Allocation allocation : reservation.allocations()) {
+            // 解冻整笔分配量，只从 remaining 扣实际用量 —— 差额留在批次里变回可用
+            lots.settle(allocation.lotId(), allocation.take(),
+                    actualByLot.getOrDefault(allocation.lotId(), 0L));
+        }
+
+        // ── 消耗记收入还是成本，**按批次来源逐笔判定**，不能整单一个科目（§3 注）
+        Map<Account, Long> consumedByAccount = new LinkedHashMap<>();
+        Account marginalAccount = Account.REVENUE;
+        for (Allocation allocation : settled) {
+            marginalAccount = lots.sourceOf(allocation.lotId()).consumptionAccount();
+            consumedByAccount.merge(marginalAccount, allocation.take(), Long::sum);
+        }
+        if (rest > 0) {
+            // 实际 > 预扣。超出的部分会继续沿扣减顺序吃下一批，但那时没有分配明细可查，
+            // 只能挂在「最后一个被吃到的批次」的科目上——这个近似只在漏算维度时出现。
+            consumedByAccount.merge(marginalAccount, rest, Long::sum);
+            log.warn("结算超出预扣：jobId={} 预扣={} 实际={} 多出={} —— 预扣阶段可能漏算了计价维度",
+                    jobId, reserved, actualCredits, rest);
+        }
+
+        // ── 复式分录（§3 分录 6/7/8）
+        Voucher.Builder voucher = Voucher.base(idempotencyKey, reservation.userId(),
+                BizType.SETTLE, String.valueOf(jobId));
+        voucher.debit(Account.FROZEN, reserved, "结算解冻");
+        consumedByAccount.forEach((account, amount) -> voucher.credit(account, amount, "实际消耗"));
+
+        long refund = reserved - actualCredits;
+        if (refund > 0) {
+            // 实际 < 预扣：差额解冻回钱包。用户可见层面这不产生「退款」记录，
+            // 只体现为「预计消耗 40」变成「消耗 30」
+            voucher.credit(Account.WALLET, refund, "差额回可用余额");
+        } else if (refund < 0) {
+            voucher.debit(Account.RECEIVABLE, -refund, "超扣转应收");
+        }
+        ledger.insert(voucher.build());
+
+        reservations.markSettled(jobId, actualCredits);
+    }
+
+    /**
+     * 全额返还（任务失败）。幂等键 {@code refund:{jobId}}。
+     *
+     * <p><b>只解冻，不动 remaining，也不新建批次</b>：批次连同它的 {@code expires_at}
+     * 原封不动地回到可用状态。若改成「扣掉再新建一个批次返回」，用户会凭空获得一次
+     * 有效期重置——那部分多出来的时间不是他应得的权益。
+     */
+    @Transactional
+    public void refund(long jobId, String reason) {
+
+        String idempotencyKey = "refund:" + jobId;
+        if (ledger.existsByVoucherBase(idempotencyKey)) {
+            return;
+        }
+
+        Reservation reservation = reservations.lockByJobId(jobId);
+        if (reservation == null || !reservation.isPending()) {
+            return;
+        }
+
+        for (Allocation allocation : reservation.allocations()) {
+            lots.releaseFrozen(allocation.lotId(), allocation.take());
+        }
+
+        ledger.insert(Voucher.base(idempotencyKey, reservation.userId(),
+                        BizType.REFUND, String.valueOf(jobId))
+                .debit(Account.FROZEN, reservation.reservedCredits(), "释放冻结")
+                .credit(Account.WALLET, reservation.reservedCredits(), "任务失败返还")
+                .build());
+
+        reservations.markReleased(jobId, reason);
+    }
+}
