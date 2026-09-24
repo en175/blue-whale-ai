@@ -96,7 +96,7 @@
   left: 14px;
   top: 50%;
   transform: translateY(-50%);
-  color: #7a7a7a;
+  color: var(--admin-text-muted);
   pointer-events: none;
 }
 
@@ -113,7 +113,7 @@
 }
 
 .searchInput:focus {
-  border-color: #555;
+  border-color: var(--admin-text-faint);
 }
 
 .searchInput::placeholder,
@@ -149,11 +149,11 @@
 }
 
 .dateInput:focus {
-  border-color: #555;
+  border-color: var(--admin-text-faint);
 }
 
 .rangeDash {
-  color: #7a7a7a;
+  color: var(--admin-text-muted);
   flex-shrink: 0;
 }
 
@@ -561,7 +561,7 @@
 }
 
 .input:focus {
-  border-color: #555;
+  border-color: var(--admin-text-faint);
 }
 
 /* ============ 底部按钮 ============ */
