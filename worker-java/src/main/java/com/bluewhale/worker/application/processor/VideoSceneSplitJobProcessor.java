@@ -274,12 +274,13 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
                 // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
                 // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
                 // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
-                // 生成中。与 processing 分支同一判定、同一兜底码、同一文案。
+                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
                 if (claim.pollCount() >= MAX_SCENE_SPLIT_POLLS) {
                     log.warn("[video_scene_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                     failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
-                            "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS + " 次）");
+                            "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS + " 次），上游持续错误: "
+                                    + pollError.getMessage());
                     return;
                 }
                 log.warn("[video_scene_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",

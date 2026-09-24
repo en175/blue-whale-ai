@@ -502,7 +502,8 @@ class VideoJobProcessorTest {
         processor.handle("110");
 
         verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
-                eq("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS + " 次）"),
+                eq("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS
+                        + " 次），上游持续错误: 查询超时"),
                 any(), anyString(), eq(1L));
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());

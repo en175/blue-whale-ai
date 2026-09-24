@@ -546,7 +546,8 @@ class VideoEnhanceJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
-                eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS + " 次）"),
+                eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS
+                        + " 次），上游持续错误: MediaKit 画质增强任务查询超时"),
                 any(), eq("worker-1"), eq(5L));
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());

@@ -533,7 +533,8 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
         assertThat(captor.getValue().message())
                 .isEqualTo("音频提取轮询超时（超过 "
-                        + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS + " 次）");
+                        + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
+                        + " 次），上游持续错误: MediaKit 音频提取任务查询超时");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
