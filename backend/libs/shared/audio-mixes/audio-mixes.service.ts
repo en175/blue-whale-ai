@@ -10,6 +10,7 @@ import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
   AUDIO_MIX_JOB_TYPE,
   AUDIO_MIX_SOURCE,
+  AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
@@ -261,9 +262,7 @@ export class AudioMixesService {
         const frozen = job.input as { estimated_duration_ms?: unknown } | null;
         const duration = typeof frozen?.estimated_duration_ms === "number" ? frozen.estimated_duration_ms : null;
         const previousError = job.error;
-        const unauthorized = previousError && typeof previousError === "object" && !Array.isArray(previousError)
-          && "message" in previousError && typeof previousError.message === "string"
-          && /\bHTTP 401\b/.test(previousError.message);
+        const unauthorized = isUpstreamUnauthorized(previousError);
         const refreshedInput = unauthorized && providerCredential && frozen
           ? { ...frozen, provider_credential: providerCredential } as Prisma.InputJsonValue
           : undefined;
@@ -310,4 +309,17 @@ function audioMixDeadline(estimatedDurationMs: number | null): Date {
     ? Math.max(day, estimatedDurationMs * 4 + 6 * 60 * 60 * 1000)
     : 7 * day;
   return new Date(Date.now() + Math.min(budget, 365 * day));
+}
+
+/** 上游 401 判定（IKIHGQ）：error.details 的结构化 HTTP 状态（worker 写入）存在即以它为准；
+ *  仅旧任务数据（无数值状态）回退 message 文案正则——文案措辞变化不影响换凭证重试。 */
+function isUpstreamUnauthorized(previousError: unknown): boolean {
+  if (!previousError || typeof previousError !== "object" || Array.isArray(previousError)) return false;
+  const record = previousError as Record<string, unknown>;
+  const details = record.details;
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    const status = (details as Record<string, unknown>)[AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS];
+    if (typeof status === "number") return status === 401;
+  }
+  return typeof record.message === "string" && /\bHTTP 401\b/.test(record.message);
 }

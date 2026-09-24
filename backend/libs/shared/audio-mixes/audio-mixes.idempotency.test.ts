@@ -57,12 +57,31 @@ describe("audio mix create idempotency", () => {
 
 describe("audio mix retry credential refresh", () => {
   it.each([
-    ["MediaKit 混音任务查询失败: HTTP 401 body=unauthorized", "sk-new"],
-    ["MediaKit 混音任务查询失败: HTTP 500 body=unavailable", "sk-old"],
-  ])("keeps the frozen media while retrying %s", async (message, expectedCredential) => {
+    ["keeps the frozen media while retrying a structured 401", {
+      code: "audio_mix_failed", message: "上游凭证被拒绝",
+      details: { raw: "上游凭证被拒绝", http_status: 401 },
+    }, "sk-new"],
+    ["keeps the frozen credential for a structured non-401 status", {
+      code: "audio_mix_failed", message: "上游暂时不可用",
+      details: { raw: "上游暂时不可用", http_status: 500 },
+    }, "sk-old"],
+    ["treats the structured status as authoritative over a 401-looking message", {
+      code: "audio_mix_failed", message: "任务查询失败: HTTP 401 body=unexpected",
+      details: { raw: "任务查询失败: HTTP 401 body=unexpected", http_status: 500 },
+    }, "sk-old"],
+    ["keeps the frozen media while retrying a legacy 401 message", {
+      code: "audio_mix_failed", message: "MediaKit 混音任务查询失败: HTTP 401 body=unauthorized",
+    }, "sk-new"],
+    ["keeps the frozen credential for a legacy non-401 message", {
+      code: "audio_mix_failed", message: "MediaKit 混音任务查询失败: HTTP 500 body=unavailable",
+    }, "sk-old"],
+    ["keeps the frozen credential when the message mentions no 401 and no structured status", {
+      code: "audio_mix_failed", message: "上游拒绝访问，请稍后重试",
+    }, "sk-old"],
+  ])("%s", async (_, error, expectedCredential) => {
     const originalInput = { source_node_id: "node-1", output_format: "mp3", inputs: [{ asset_id: "11", url: "https://store.test/a" }], provider_credential: "sk-old" };
     const job = { id: 70n, status: "failed", fencing_token: 3n, version: 0,
-      input: originalInput, error: { code: "audio_mix_failed", message } };
+      input: originalInput, error };
     let command: { request_hash: string; generation_job_id: bigint } | null = null;
     const client = {
       generation_jobs: {
