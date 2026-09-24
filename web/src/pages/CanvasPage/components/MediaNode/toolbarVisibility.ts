@@ -15,8 +15,8 @@ export function mediaNodeToolbarVisibility(mediaType: CanvasMediaType | undefine
     /** 「HD」高清增强（IKH3VG）：文字徽标单按钮（渲染位置在「智能去字幕」之前），仅视频卡
      *  显示；门槛置灰见 videoEnhance.ts */
     videoEnhance: isVideo,
-    /** 音频卡五功能钮（IKH8Q3，ADR-0109）：截取/调速/混合/音视频合成/转码仅音频卡显示，
-     *  截取、调速、混合已点亮，音视频合成与转码维持置灰占位「即将上线」；
+    /** 音频卡功能钮（IKH8Q3，ADR-0109；原五钮中「转码」已撤除）：截取/调速/混合/音视频合成
+     *  仅音频卡显示，截取、调速、混合已点亮，音视频合成维持置灰占位「即将上线」；
      *  详情钮随改版对音频退役（音频卡信息稀薄，右键菜单与双击重命名已覆盖） */
     audioTools: isAudio,
   };
