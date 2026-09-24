@@ -21,6 +21,7 @@ import {
   LoginFailureTracker,
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -74,6 +75,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
+    private readonly identity: IdentityService,
   ) {}
 
   private get sms(): SmsProvider {
@@ -136,14 +138,22 @@ export class AuthController {
   async login(
     @Body() body: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    // 只取第一跳：x-forwarded-for 可被客户端伪造，末尾几跳才是可信代理加上的。
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+
     if (!username || !password) {
+      // 空凭据也算一次尝试——它同样可能来自撞库脚本，不留痕就看不见这条路径
+      await this.recordLogin({ username, ip, userAgent, success: false, reason: "凭据为空" });
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
     if (await this.limiter.isBlocked(LOGIN_LOCK_SCOPE, username)) {
       // 失败锁定期内（IKDR4J）：直接 429，跳过对 new-api 的无效调用。
+      await this.recordLogin({ username, ip, userAgent, success: false, reason: "账号锁定" });
       throw new NewApiError(
         "尝试次数过多，账号已锁定，请稍后再试",
         429,
@@ -156,15 +166,58 @@ export class AuthController {
       await this.loginFailures.clear(username);
       const sessionToken = await this.establishSession(result);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+      await this.recordLogin({
+        userId: result.userId == null ? null : String(result.userId),
+        username,
+        ip,
+        userAgent,
+        success: true,
+      });
       return ok(loginData(result, false));
     } catch (error) {
       const projected = projectAccountBusinessFailure(error, 401);
       if (projected) {
         // 仅账密错误计数（IKDR4J）：上游 5xx/超时是服务问题，不是撞库信号。
         await this.loginFailures.recordFailure(username);
+        await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw projected;
       }
       throw toAuthError(error);
+    }
+  }
+
+  /**
+   * 记一条登录日志。
+   *
+   * <p>⚠️ **吞掉异常只记 error**：日志是旁路，写不进去不该让用户登不上。
+   * 但也不能静默——一个坏掉的日志表若表现为「一切正常」，
+   * 那它在真正被需要的那天（查撞库、查「我明明登录成功了」）同样是空的。
+   */
+  private async recordLogin(entry: {
+    // ⚠️ 可选属性显式带 `| undefined`：本仓开了 `exactOptionalPropertyTypes`，
+    //    不加的话调用方传一个可能为 undefined 的 @Headers 值就编译不过。
+    userId?: string | null | undefined;
+    username: string;
+    ip: string;
+    userAgent?: string | undefined;
+    success: boolean;
+    reason?: string | undefined;
+  }): Promise<void> {
+    try {
+      await this.identity.recordLogin({
+        userId: entry.userId ?? null,
+        username: entry.username,
+        ip: entry.ip,
+        userAgent: entry.userAgent ?? "",
+        success: entry.success,
+        reason: entry.reason,
+      });
+    } catch (error) {
+      logger.error(
+        `登录日志写入失败（username=${entry.username} success=${entry.success}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 

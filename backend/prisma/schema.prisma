@@ -553,9 +553,12 @@ model creative_skill_version {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model users {
+/// 账号主体（自建用户体系）。改到 identity_ 前缀、username 唯一、phone 可空，
+/// 理由与 pre-flight 见 migration 20260924180000。
+/// ⚠️ `username` 是**登录凭据**；`phone` 只是「多一种登录方式」，存量用户没有它。
+model identity_users {
   id           BigInt   @id @default(autoincrement())
-  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
@@ -564,9 +567,12 @@ model users {
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
   password     String?  @db.VarChar(63)
+
+  @@unique([username], map: "uk_identity_users__username")
 }
 
-model verification_codes {
+/// 短信验证码。手机号登录是**后续**能力（发码已通、登录未接，`loginWithCode` 零调用者）。
+model identity_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
   code       String   @db.VarChar(6)
@@ -834,4 +840,77 @@ model legacy_card_history {
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, node_id], map: "uk_legacy_card_history")
+}
+
+/// 会员周期（identity_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
+/// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
+/// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。
+model identity_memberships {
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  tier         String    @db.VarChar(16)
+  status       String    @default("active") @db.VarChar(16)
+  started_at   DateTime  @db.DateTime(0)
+  expires_at   DateTime? @db.DateTime(0)
+  source       String    @db.VarChar(24)
+  biz_id       String    @db.VarChar(128)
+  grant_key    String    @db.VarChar(190)
+  gmt_create   DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified DateTime  @default(now()) @db.DateTime(0)
+  version      Int       @default(0)
+  is_delete    Boolean   @default(false)
+
+  @@unique([grant_key], map: "uk_identity_memberships__grant_key")
+  @@index([user_id, status, expires_at], map: "idx_identity_memberships__user_status_expiry")
+}
+
+/// 角色（identity_roles）。替代 `auth.guard.ts` 里 `role >= 10` 的魔数——
+/// 判断管理员是「持不持有 admin 类角色」的**集合成员**问题，不是数值比较问题。
+/// 内置三行由 migration 20260924200000 播种。
+model identity_roles {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @db.VarChar(32)
+  name         String   @db.VarChar(64)
+  description  String   @default("") @db.VarChar(255)
+  is_builtin   Boolean  @default(false)
+  sort_order   Int      @default(0)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([code], map: "uk_identity_roles__code")
+}
+
+/// 用户 ↔ 角色（identity_user_roles）。存 role_id 而非 code：角色改名只改一行，
+/// 不散落成几十条待更新的关联行。
+model identity_user_roles {
+  id           BigInt   @id @default(autoincrement())
+  user_id      BigInt
+  role_id      BigInt
+  granted_by   String   @default("system") @db.VarChar(64)
+  grant_key    String   @db.VarChar(190)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([grant_key], map: "uk_identity_user_roles__grant_key")
+  @@index([user_id, is_delete], map: "idx_identity_user_roles__user")
+}
+
+/// 登录日志（identity_login_logs）。`user_id` 可空——登录失败时用户可能压根不存在，
+/// 而这些恰恰是最需要留痕的尝试。
+model identity_login_logs {
+  id         BigInt   @id @default(autoincrement())
+  user_id    BigInt?
+  username   String   @db.VarChar(50)
+  ip         String   @db.VarChar(50)
+  user_agent String   @default("") @db.VarChar(255)
+  success    Boolean
+  reason     String   @default("") @db.VarChar(64)
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@index([user_id, gmt_create], map: "idx_identity_login_logs__user_time")
+  @@index([ip, gmt_create], map: "idx_identity_login_logs__ip_time")
 }

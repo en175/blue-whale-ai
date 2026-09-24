@@ -55,6 +55,7 @@ import { VocalSplitsApiModule } from "./api/vocal-splits/vocal-splits.module.js"
 import { VideoSceneSplitsApiModule } from "./api/video-scene-splits/video-scene-splits.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
+import { IdentityModule } from "@lib/shared/identity/identity.module.js";
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AgentV1Module,
     CostSettlementModule,
     HealthModule,
+    IdentityModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

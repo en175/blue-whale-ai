@@ -11,6 +11,7 @@ import {
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -27,6 +28,7 @@ export class MeController {
   constructor(
     private readonly account: AccountService,
     private readonly sessions: SessionService,
+    private readonly identity: IdentityService,
   ) {}
 
   @Get("me")
@@ -38,7 +40,15 @@ export class MeController {
       email: user.email,
       phone: "",
       has_password: true,
-      is_admin: user.isAdmin,
+      is_admin: await this.identity.isAdmin(user.userId),
+      // 会员等级：前端据此展示会员标识，**billing 侧据此算折扣**。
+      // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
+      // 会话里带的等级会一直停在登录那一刻。
+      tier: await this.identity.resolveTier(user.userId),
+      // 角色：**我们自己的**权威（identity_user_roles），与上面的 is_admin 不是同一个来源。
+      // is_admin 目前仍来自 new-api 的 role 字段，new-api 独立后就没了；
+      // roles 是它的替代，两者并存到断链那天（见 migration 20260924200000 的文末说明）。
+      roles: await this.identity.listRoleCodes(user.userId),
     });
   }
 
