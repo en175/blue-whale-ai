@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    Java 模块聚合根（ADR-0114）。
+
+    ⚠️ 这是 **aggregation（聚合）**，不是 inheritance（继承）——刻意不设 <parent>：
+    各模块保留自己的 parent（worker 用 spring-boot-starter-parent），
+    聚合 pom 只负责「一次构建全部模块 + 统一 module 列表」。
+    用继承会把 Spring Boot 的依赖管理强加到 libs 上，而 libs 是被依赖方、不该被版本锁定。
+
+    ⚠️ 本 pom **不是** worker 的 parent，所以不构成发布物的一部分。
+
+    构建：
+      mvn -f java/pom.xml test            # 全部模块
+      mvn -f java/worker/pom.xml test     # 单个模块（流水线仍用这条）
+
+    ⚠️ 火山流水线的构建配置**不在本仓**：`worker-java/` → `java/worker/` 的搬迁
+    需要运维同步改流水线的 Dockerfile 路径与构建上下文，否则镜像构建会失败。
+    -->
+  <groupId>com.bluewhale</groupId>
+  <artifactId>bluewhale-java</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>bluewhale-java</name>
+  <description>Blue-Whale Java 模块聚合根：worker（执行面）+ 后续 libs / billing（控制面）。</description>
+
+  <modules>
+    <module>worker</module>
+    <!-- ADR-0114：后续加入
+         <module>libs</module>      共享基础设施（只放 DB/MQ/HTTP/错误体系，不放领域规则）
+         <module>billing</module>   billing-svc 控制面
+    -->
+  </modules>
+</project>

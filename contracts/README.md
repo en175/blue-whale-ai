@@ -10,7 +10,7 @@
 
 > **注**：早期设计文档里写的是 `packages/contracts/`，但本仓**没有 `packages/`**，
 > `pnpm-workspace.yaml` 只有 `backend` 一个成员。故落在顶层 `contracts/`，
-> 与现有平铺结构（`backend/` · `web/` · `worker-java/`）一致，且不用动 workspace。
+> 与现有平铺结构（`backend/` · `web/` · `java/worker/`）一致，且不用动 workspace。
 
 ## 结构
 

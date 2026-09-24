@@ -107,14 +107,14 @@ test("classifies backend BFF sources as scoped/backend", async () => {
 });
 
 test("classifies the Java worker as its own area and actually runs Maven", async () => {
-  // 整棵 worker-java/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
+  // 整棵 java/worker/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
   // 看似安全，但计划里一条 Java 命令都没有——TS 侧有门禁、Java 侧静默裸奔。
   // 与 backend / web/scripts 那两个洞同形：有验证手段，只是选择器够不着。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
-    "worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
-    "worker-java/pom.xml",
+    "java/worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
+    "java/worker/pom.xml",
   ]);
   assert.equal(classification.tier, "scoped");
   assert.deepEqual(classification.areas, ["worker-java"]);
@@ -124,7 +124,7 @@ test("classifies the Java worker as its own area and actually runs Maven", async
   );
   assert.ok(
     flattened.some(
-      (command) => command.startsWith("mvn ") && command.includes("worker-java/pom.xml"),
+      (command) => command.startsWith("mvn ") && command.includes("java/worker/pom.xml"),
     ),
     "worker-java 是独立 Maven 工程，必须真的跑它的测试",
   );
@@ -132,7 +132,7 @@ test("classifies the Java worker as its own area and actually runs Maven", async
   // worker-java 是产品生成运行时：PR 阶段按产品影响路径升 full。
   // 补归类前它靠「未归类」兜底才升 full——归类后必须仍升 full，不能被这次修复顺带降级。
   const prClassification = classifyChanges(
-    ["worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
+    ["java/worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
     { stage: "pr" },
   );
   assert.equal(prClassification.tier, "full");
