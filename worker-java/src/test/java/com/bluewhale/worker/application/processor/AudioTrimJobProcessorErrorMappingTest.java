@@ -523,6 +523,77 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input(), AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS - 1, 7);
+        when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new AudioTrimError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 音频截取任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
+        verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1048 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input(), AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS, 7);
+        when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new AudioTrimError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 音频截取任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
+        verify(stateMachine).failAudioTrimJob(captor.capture());
+        assertThat(captor.getValue().code())
+                .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
+        assertThat(captor.getValue().message())
+                .isEqualTo("音频截取轮询超时（超过 "
+                        + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS + " 次）");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1048（瞬时错误各形态同受上限约束）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input(), AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS, 7);
+        AudioTrimError gatewayBusy = new AudioTrimError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 音频截取任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input(), 3, 7);
+        when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new AudioTrimError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 音频截取任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1048 兜底")
     void pollHardError_fails() {
         stubPollClaim(input(), 3, 7);

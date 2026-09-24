@@ -40,7 +40,8 @@ import java.util.Set;
  *       网关提交（scene 出站映射官方首字母大写枚举 + output_format 同名同值，**不是
  *       extract-audio 的 format**）→ markProviderSubmitted（存 provider_task_id + 释放租约 +
  *       next+5s + progress=1）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1047）；processing →
  *       续排（超限 1047）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
  *       （火山各轨 URL 仅 24h 有效）** → 按 scene 轨序发布 2/3 条音频 Asset → 终态 succeeded
  *       （轨数组回填终态日志 payload，getStatus 投影见契约 VocalSplitTrackResult）</li>
@@ -275,6 +276,18 @@ public class VocalSplitJobProcessor implements JobProcessor {
             observation = separateVoiceClient.poll(providerToken, claim.providerTaskId());
         } catch (VocalSplitError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码、同一文案。
+                if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
+                    log.warn("[vocal_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
+                            "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次）");
+                    return;
+                }
                 log.warn("[vocal_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(

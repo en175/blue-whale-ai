@@ -523,6 +523,77 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS - 1, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
+        verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1047 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(captor.capture());
+        assertThat(captor.getValue().code())
+                .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        assertThat(captor.getValue().message())
+                .isEqualTo("人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS + " 次）");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047（瞬时错误各形态同受上限约束）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
+        VocalSplitError gatewayBusy = new VocalSplitError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 人声背景分离任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("audio"), 3, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1047 兜底")
     void pollHardError_fails() {
         stubPollClaim(input("audio"), 3, 7);
