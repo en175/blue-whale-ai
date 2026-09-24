@@ -179,7 +179,9 @@ export function useCanvasDoc(projectId: string) {
         } else if (
           existing.access_url !== item.access_url ||
           existing.width !== item.width ||
-          existing.height !== item.height
+          existing.height !== item.height ||
+          existing.material_id !== item.material_id ||
+          existing.material_status !== item.material_status
         ) {
           next[key] = { ...existing, ...item };
           changed = true;

@@ -39,6 +39,8 @@ function stubUploadFlow() {
         duration: null,
         mime: 'image/png',
         size: 4,
+        material_id: null,
+        material_status: null,
       }),
     );
   vi.stubGlobal('fetch', fetchMock);
@@ -83,6 +85,8 @@ describe('uploadAssetFile', () => {
     await expect(uploadAssetFile(file, { projectId: 'project-9' })).resolves.toMatchObject({
       asset_id: '123',
       url: 'https://cdn.example.test/a.png',
+      material_id: null,
+      material_status: null,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -114,6 +118,8 @@ describe('uploadAssetFile', () => {
       duration: null,
       mime: 'image/png',
       size: 4,
+      material_id: 'asset-20260820153209-6c9z8',
+      material_status: 'Active',
     };
     const fetchMock = vi.fn().mockResolvedValueOnce(envelope({ dedup: true, asset }));
     vi.stubGlobal('fetch', fetchMock);
@@ -122,6 +128,8 @@ describe('uploadAssetFile', () => {
     await expect(uploadAssetFile(file, { projectId: 'project-9' })).resolves.toMatchObject({
       asset_id: '526',
       url: 'https://cdn.example.test/dup.png',
+      material_id: 'asset-20260820153209-6c9z8',
+      material_status: 'Active',
     });
     // 命中后只发生一次 dedup 请求，TOS 三步全部跳过
     expect(fetchMock).toHaveBeenCalledTimes(1);
