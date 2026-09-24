@@ -15,6 +15,8 @@ import {
   Settings,
   Sparkles,
   Images,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
@@ -36,10 +38,27 @@ const navItems = [
   { to: '/admin/settings', end: false, label: '系统管理', icon: Settings },
 ];
 
+/** 侧栏收起状态存在本地：管理端是天天用的工具，每次进来都重新展开很烦。 */
+const COLLAPSE_KEY = 'admin-sidebar-collapsed';
+
 export default function AdminLayout() {
   useDocumentTitle();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [checking, setChecking] = useState(true);
+  const [collapsed, setCollapsed] = useState(
+    () => globalThis.localStorage?.getItem(COLLAPSE_KEY) === '1',
+  );
+
+  const toggleCollapsed = () =>
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        globalThis.localStorage?.setItem(COLLAPSE_KEY, next ? '1' : '0');
+      } catch {
+        // 隐私模式下 localStorage 可能不可用；存不上只是记不住偏好，不影响功能
+      }
+      return next;
+    });
 
   // 布局加载时实时校验管理员身份：非管理员置 isAdmin=false 由 RequireAdmin 守卫跳回首页
   // 401 时 http 层已清空会话，守卫同样会拦截
@@ -70,16 +89,28 @@ export default function AdminLayout() {
     // 只在后台生效——前台不该被管理端的样式影响。
     <div className={`adminRoot ${styles.layout}`}>
       {/* 侧边栏 */}
-      <aside className={styles.sidebar}>
-        {/* 品牌区 */}
+      <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`}>
+        {/* 品牌区 + 收起开关 */}
         <div className={styles.brand}>
           <div className={styles.brandIcon}>
             <Shield size={18} strokeWidth={2} />
           </div>
-          <div className={styles.brandText}>
-            <div className={styles.brandName}>管理后台</div>
-            <div className={styles.brandSub}>Blue-Whale Admin</div>
-          </div>
+          {!collapsed && (
+            <div className={styles.brandText}>
+              <div className={styles.brandName}>管理后台</div>
+              <div className={styles.brandSub}>Blue-Whale Admin</div>
+            </div>
+          )}
+          <button
+            type="button"
+            className={styles.collapseBtn}
+            onClick={toggleCollapsed}
+            title={collapsed ? '展开侧栏' : '收起侧栏'}
+            aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
 
         {/* 菜单 */}
@@ -91,12 +122,16 @@ export default function AdminLayout() {
                 key={item.to}
                 to={item.to}
                 end={item.end}
+                // 收起时只留图标：靠 title 提供可读名称，
+                // 否则一列无字图标对不熟悉的人就是猜谜
+                title={collapsed ? item.label : undefined}
+                aria-label={item.label}
                 className={({ isActive }) =>
                   `${styles.navItem} ${isActive ? styles.navActive : ''}`
                 }
               >
                 <Icon size={18} strokeWidth={2} />
-                <span>{item.label}</span>
+                {!collapsed && <span>{item.label}</span>}
               </NavLink>
             );
           })}
@@ -105,10 +140,12 @@ export default function AdminLayout() {
         {/* 底部管理员信息 */}
         <div className={styles.footer}>
           <div className={styles.avatar}>{user.username.charAt(0).toUpperCase()}</div>
-          <div className={styles.footerText}>
-            <div className={styles.footerName}>管理员</div>
-            <div className={styles.footerMail}>{user.email}</div>
-          </div>
+          {!collapsed && (
+            <div className={styles.footerText}>
+              <div className={styles.footerName}>管理员</div>
+              <div className={styles.footerMail}>{user.email}</div>
+            </div>
+          )}
         </div>
       </aside>
 

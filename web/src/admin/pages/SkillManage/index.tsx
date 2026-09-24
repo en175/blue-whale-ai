@@ -1,6 +1,9 @@
 /* ============================================
  * SkillManage 技能管理：官方技能归类与分类维护（IKA64P）
  * 效率优化：行内改动暂存高亮 + 顶部一键保存；多选批量归类；分类 chip 过滤表格
+ *
+ * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
+ * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
@@ -15,7 +18,19 @@ import {
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
-import styles from './index.module.css';
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  Input,
+  Modal,
+  Page,
+  PageHeader,
+  Select,
+  Table,
+  Toolbar,
+} from '../../ui';
 
 /** 下拉选项：新分类（随归类创建） */
 const NEW_CAT = '__new__';
@@ -168,106 +183,103 @@ export default function SkillManage() {
     }
   };
 
+  const catOptions = [
+    { value: '', label: '选择目标分类…' },
+    ...cats.map((c) => ({ value: c.name, label: c.name })),
+    { value: NEW_CAT, label: '新分类…' },
+  ];
+
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>技能管理</h1>
-          <p className={styles.subtitle}>官方技能归类与分类维护（用户侧分类展示已隐藏）</p>
+    <Page>
+      <PageHeader
+        title="技能管理"
+        subtitle="官方技能归类与分类维护（用户侧分类展示已隐藏）"
+        extra={
+          <Button
+            variant="primary"
+            disabled={busy || pending.length === 0}
+            onClick={saveAll}
+          >
+            {busy ? '保存中…' : `一键保存（${pending.length}）`}
+          </Button>
+        }
+      />
+
+      {actionError && <Card>{actionError}</Card>}
+
+      <Card padded={false}>
+        {/* 分类条（点击过滤表格） */}
+        <div style={{ padding: 12 }}>
+          <Toolbar>
+            <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
+              全部
+            </Chip>
+            {hasUncat && (
+              <Chip active={filter === FILTER_NONE} onClick={() => setFilter(FILTER_NONE)}>
+                未分类
+              </Chip>
+            )}
+            {cats.map((c) => (
+              <span key={c.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                <Chip active={filter === c.name} onClick={() => setFilter(c.name)}>
+                  {c.name}
+                  <Badge tone="neutral">{c.count}</Badge>
+                </Chip>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="重命名分类"
+                  aria-label={`重命名分类 ${c.name}`}
+                  icon={<Pencil size={12} strokeWidth={2} />}
+                  onClick={() => setRenameTarget(c.name)}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="删除分类（其下技能变未分类）"
+                  aria-label={`删除分类 ${c.name}`}
+                  icon={<Trash2 size={12} strokeWidth={2} />}
+                  onClick={() => setDeleteTarget(c.name)}
+                />
+              </span>
+            ))}
+          </Toolbar>
         </div>
-        <button className={styles.saveBtn} disabled={busy || pending.length === 0} onClick={saveAll}>
-          {busy ? '保存中…' : `一键保存（${pending.length}）`}
-        </button>
-      </div>
 
-      {actionError && <div className={styles.actionError}>{actionError}</div>}
+        {/* 批量栏 */}
+        <div style={{ padding: '0 12px 12px' }}>
+          <Toolbar>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
+              <span>已选 {selected.size} 项</span>
+            </label>
+            <Select
+              options={catOptions}
+              value={bulkCat}
+              onChange={(e) => setBulkCat(e.target.value)}
+            />
+            {bulkCat === NEW_CAT && (
+              <Input
+                maxLength={32}
+                placeholder="新分类名（≤32字）"
+                value={bulkNew}
+                onChange={(e) => setBulkNew(e.target.value)}
+              />
+            )}
+            <Button disabled={selected.size === 0 || !bulkCat} onClick={applyBulk}>
+              应用到选中（暂存）
+            </Button>
+            <span style={{ color: 'var(--admin-text-faint)', fontSize: 12 }}>
+              改动先暂存高亮，点右上「一键保存」统一提交
+            </span>
+          </Toolbar>
+        </div>
 
-      {/* 分类条（点击过滤表格） */}
-      <div className={styles.catRow}>
-        <button
-          className={`${styles.catChip} ${filter === 'all' ? styles.catChipActive : ''}`}
-          onClick={() => setFilter('all')}
-        >
-          全部
-        </button>
-        {hasUncat && (
-          <button
-            className={`${styles.catChip} ${filter === FILTER_NONE ? styles.catChipActive : ''}`}
-            onClick={() => setFilter(FILTER_NONE)}
-          >
-            未分类
-          </button>
-        )}
-        {cats.map((c) => (
-          <span
-            className={`${styles.catChip} ${filter === c.name ? styles.catChipActive : ''}`}
-            key={c.name}
-            onClick={() => setFilter(c.name)}
-          >
-            <span>{c.name}</span>
-            <span className={styles.catCount}>{c.count}</span>
-            <button
-              className={styles.catEdit}
-              title="重命名分类"
-              onClick={(e) => {
-                e.stopPropagation();
-                setRenameTarget(c.name);
-              }}
-            >
-              <Pencil size={12} strokeWidth={2} />
-            </button>
-            <button
-              className={styles.catEdit}
-              title="删除分类（其下技能变未分类）"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget(c.name);
-              }}
-            >
-              <Trash2 size={12} strokeWidth={2} />
-            </button>
-          </span>
-        ))}
-      </div>
-
-      {/* 批量栏 */}
-      <div className={styles.bulkBar}>
-        <label className={styles.bulkLabel}>
-          <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
-          <span>已选 {selected.size} 项</span>
-        </label>
-        <select className={styles.select} value={bulkCat} onChange={(e) => setBulkCat(e.target.value)}>
-          <option value="">选择目标分类…</option>
-          {cats.map((c) => (
-            <option key={c.name} value={c.name}>{c.name}</option>
-          ))}
-          <option value={NEW_CAT}>新分类…</option>
-        </select>
-        {bulkCat === NEW_CAT && (
-          <input
-            className={styles.input}
-            maxLength={32}
-            placeholder="新分类名（≤32字）"
-            value={bulkNew}
-            onChange={(e) => setBulkNew(e.target.value)}
-          />
-        )}
-        <button
-          className={styles.ghostBtn}
-          disabled={selected.size === 0 || !bulkCat}
-          onClick={applyBulk}
-        >
-          应用到选中（暂存）
-        </button>
-        <span className={styles.bulkHint}>改动先暂存高亮，点右上「一键保存」统一提交</span>
-      </div>
-
-      {/* 技能表 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
+        {/* 技能表 */}
+        <Table>
           <thead>
             <tr>
-              <th className={styles.thCheck}></th>
+              <th style={{ width: 40 }} />
               <th>封面</th>
               <th>名称</th>
               <th>分类</th>
@@ -276,82 +288,102 @@ export default function SkillManage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={4} className={styles.tableState}>加载中…</td>
+                <td colSpan={4}>
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-text-faint)' }}>
+                    加载中…
+                  </div>
+                </td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={4} className={styles.tableState}>{loadError}</td>
+                <td colSpan={4}>
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-danger)' }}>
+                    {loadError}
+                  </div>
+                </td>
               </tr>
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className={styles.tableState}>暂无技能</td>
+                <td colSpan={4}>
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-text-faint)' }}>
+                    暂无技能
+                  </div>
+                </td>
               </tr>
             )}
             {filtered.map((s) => {
               const sel = drafts[s.id] ?? s.category;
               const dirty = effectiveTarget(s) !== s.category;
+              const rowOptions = [
+                ...(s.category === '' ? [{ value: '', label: '未分类' }] : []),
+                ...(!cats.some((c) => c.name === s.category) && s.category !== ''
+                  ? [{ value: s.category, label: s.category }]
+                  : []),
+                ...cats.map((c) => ({ value: c.name, label: c.name })),
+                { value: NEW_CAT, label: '新分类…' },
+              ];
               return (
-                <tr key={s.id} className={dirty ? styles.rowDirty : ''}>
-                  <td className={styles.thCheck}>
-                    <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleOne(s.id)} />
+                <tr key={s.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.id)}
+                      onChange={() => toggleOne(s.id)}
+                    />
                   </td>
                   <td>
                     {s.cover_url ? (
-                      <img className={styles.cover} src={s.cover_url} alt="" />
+                      <img
+                        src={s.cover_url}
+                        alt=""
+                        style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }}
+                      />
                     ) : (
-                      <span className={styles.coverNone}>—</span>
+                      <span style={{ color: 'var(--admin-text-faint)' }}>—</span>
                     )}
                   </td>
                   <td>{s.name}</td>
                   <td>
-                    <div className={styles.catCell}>
-                      <select
-                        className={styles.select}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Select
+                        options={rowOptions}
                         value={sel}
                         onChange={(e) => setDrafts((p) => ({ ...p, [s.id]: e.target.value }))}
-                      >
-                        {s.category === '' && <option value="">未分类</option>}
-                        {!cats.some((c) => c.name === s.category) && s.category !== '' && (
-                          <option value={s.category}>{s.category}</option>
-                        )}
-                        {cats.map((c) => (
-                          <option key={c.name} value={c.name}>{c.name}</option>
-                        ))}
-                        <option value={NEW_CAT}>新分类…</option>
-                      </select>
+                      />
                       {sel === NEW_CAT && (
-                        <input
-                          className={styles.input}
+                        <Input
                           maxLength={32}
                           placeholder="新分类名（≤32字）"
                           value={newNames[s.id] ?? ''}
                           onChange={(e) => setNewNames((p) => ({ ...p, [s.id]: e.target.value }))}
                         />
                       )}
-                      {dirty && <span className={styles.dirtyDot} title="未保存" />}
+                      {dirty && (
+                        <Badge tone="warning" dot>
+                          未保存
+                        </Badge>
+                      )}
                     </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </Card>
 
-      {/* 改名弹窗 */}
-      {renameTarget !== null && (
-        <RenameModal
-          from={renameTarget}
-          onClose={() => setRenameTarget(null)}
-          onSave={(to) =>
-            run(() => renameAdminSkillCategory(renameTarget, to)).then(() => setRenameTarget(null))
-          }
-        />
-      )}
+      <RenameModal
+        from={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSave={(to) =>
+          run(() => renameAdminSkillCategory(renameTarget as string, to)).then(() =>
+            setRenameTarget(null),
+          )
+        }
+      />
 
-      {/* 删除二次确认 */}
       {deleteTarget !== null && (
         <ConfirmModal
           title="删除分类"
@@ -363,7 +395,7 @@ export default function SkillManage() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -373,13 +405,21 @@ function RenameModal({
   onClose,
   onSave,
 }: {
-  from: string;
+  from: string | null;
   onClose: () => void;
   onSave: (to: string) => Promise<void>;
 }) {
-  const [to, setTo] = useState(from);
+  const [to, setTo] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // 每次打开以当前分类名初始化
+  useEffect(() => {
+    setTo(from ?? '');
+    setError('');
+  }, [from]);
+
+  if (from === null) return null;
 
   const save = async () => {
     const value = to.trim();
@@ -399,30 +439,28 @@ function RenameModal({
   };
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.smallModal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>重命名分类（{from}）</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            ×
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <input
-            className={styles.input}
-            maxLength={32}
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-          {error && <div className={styles.formError}>{error}</div>}
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>取消</button>
-          <button className={styles.saveBtn} disabled={saving} onClick={save}>
+    <Modal
+      open
+      title={`重命名分类（${from}）`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" disabled={saving} onClick={save}>
             {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      <Input
+        maxLength={32}
+        value={to}
+        onChange={(e) => setTo(e.target.value)}
+        style={{ width: '100%' }}
+      />
+      {error && (
+        <p style={{ margin: '8px 0 0', color: 'var(--admin-danger)', fontSize: 12 }}>{error}</p>
+      )}
+    </Modal>
   );
 }

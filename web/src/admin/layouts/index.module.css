@@ -164,3 +164,75 @@
   overflow-y: auto;
   padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-2xl);
 }
+
+/* ---- 收起态 ----
+ * 只留一列图标。三条要点：
+ *   ① 宽度只够图标 + 内边距，不能留白
+ *   ② 品牌区与底部都改成居中，否则图标会贴在左边一条线上
+ *   ③ 切换动画只做 width —— 做 padding/gap 会让文字在收起过程中被挤压变形 */
+.sidebar {
+  transition: width 0.18s ease;
+}
+
+.collapsed {
+  width: 60px;
+}
+
+.collapsed .brand {
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 8px;
+}
+
+.collapsed .nav {
+  padding: 8px;
+  align-items: center;
+}
+
+.collapsed .navItem {
+  justify-content: center;
+  width: 40px;
+  padding: 8px 0;
+}
+
+.collapsed .footer {
+  justify-content: center;
+  padding: 12px 8px;
+}
+
+/* 收起开关：常驻在品牌区右侧，不要做成 hover 才出现——
+   那样每次想收起都要先找到它，而这是个高频动作 */
+.collapseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--admin-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.collapseBtn:hover {
+  background: var(--admin-row-hover);
+  color: var(--admin-text);
+}
+
+.collapseBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.collapsed .collapseBtn {
+  margin-left: 0;
+}
+
+/* 收起时品牌名会被隐藏，brandText 不该再占位 */
+.collapsed .brandText {
+  display: none;
+}
