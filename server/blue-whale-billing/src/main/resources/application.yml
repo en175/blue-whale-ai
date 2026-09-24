@@ -91,6 +91,7 @@ billing:
     enabled: ${BILLING_ADMIN_ENABLED:true}
 
   # ── MQ：结算 / 返还的消费端 ──
+  #
   # ⚠️ 缺 ROCKETMQ_ENDPOINTS 会**启动失败**（与 worker 同一立场）：静默跳过消费者的话，
   #    服务照常起来、Hold 照常工作，但任务跑完后没人结算也无人解冻，用户的钱一直冻着，
   #    而所有健康检查都是绿的 —— 这种「起来了一半」比起不来难查得多。
@@ -99,19 +100,6 @@ billing:
     enabled: ${BILLING_MQ_ENABLED:true}
     topic-completed: ${BILLING_MQ_TOPIC_COMPLETED:generation.job.completed}
     topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation.job.failed}
-
-  # ── 影子模式（《迁移与切换 runbook》§3.2） ──
-  #
-  # true  = 消费 job 事件时**只算不扣**，把结果写进 billing_shadow_entries 供每日对账
-  # false = 权威生效：按预扣时冻结的版本与折扣结算，真的动钱
-  #
-  # ⚠️ **默认必须是 true。** 切换期的硬约束是「billing 上线与 sk- 断链同时发生」——
-  #    在这个开关还是 false 的情况下先部署一次，就是每个任务被扣两遍
-  #    （我们一遍、new-api 一遍）。等切换窗口执行完 runbook §3.3 的十一步，
-  #    再把它显式设成 false。
-  #
-  # 判断当前处于哪一期的接口：GET /admin/shadow/summary（响应里回显 shadowMode）。
-  shadow-mode: ${BILLING_SHADOW_MODE:true}
 
 # gRPC proxy 端点。键名与 worker 逐字相同，部署时不必记两套；凭证只走 env（不落库）。
 rocketmq:
