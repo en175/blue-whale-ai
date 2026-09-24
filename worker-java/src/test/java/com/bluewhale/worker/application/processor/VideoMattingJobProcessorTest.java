@@ -30,6 +30,9 @@ import org.mockito.quality.Strictness;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -96,6 +99,8 @@ class VideoMattingJobProcessorTest {
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         // 结果转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenReturn(true);
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong()))
                 .thenReturn(true);
     }
 
@@ -603,6 +608,90 @@ class VideoMattingJobProcessorTest {
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @Timeout(10)
+    @DisplayName("parent-reuse 转存抛普通异常时心跳已失租，旧 worker 停止而不重新提交")
+    void parentReuseTransferFailureAfterHeartbeatLost_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-race")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        CountDownLatch leaseLost = new CountDownLatch(1);
+        AtomicInteger renewals = new AtomicInteger();
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenAnswer(invocation -> {
+                    if (renewals.incrementAndGet() == 1) return true;
+                    leaseLost.countDown();
+                    return false;
+                });
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(invocation -> {
+                    assertThat(leaseLost.await(3, TimeUnit.SECONDS)).isTrue();
+                    throw new RuntimeException("生成视频下载失败: HTTP 404");
+                });
+        processor.leaseRenewIntervalMs = 20;
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 转存异常后续租状态无法确认，旧 worker 停止而不重新提交")
+    void parentReuseTransferFailureThenLeaseUnknown_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-unknown")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-unknown"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenReturn(true)
+                .thenThrow(new IllegalStateException("DB unavailable"));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 发布异常后提交前失租，旧 worker 不创建无人轮询的上游任务")
+    void parentReuseLeaseLostBeforeFallbackSubmit_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-before-submit")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-before-submit"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(),
+                anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========

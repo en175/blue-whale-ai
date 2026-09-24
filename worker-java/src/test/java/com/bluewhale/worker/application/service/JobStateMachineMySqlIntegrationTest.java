@@ -1152,6 +1152,26 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
+    @DisplayName("重试收割回退提交续租后，持旧候选快照的新 worker 不能再接管")
+    void parentReuseSubmitReservationBlocksStaleCandidateClaim() {
+        long jobId = seedClaimedJob(9L, "video_matting", "dock", "old-worker", 5L);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
+                + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
+
+        // 新 worker 先前读到的候选仍带相同 status/fence；CAS 必须重新检查到期条件。
+        assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
+                5L, "processing")).isZero();
+        assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
+
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "new-worker", 5L)).isFalse();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isFalse();
+    }
+
+    @Test
     @DisplayName("audio_mix 真库闭环：领取→保存 task_id→转存后发布自家音频资产和精确时长")
     void audioMixTaskPersistsProviderIdentityAndLongLivedAsset() {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,

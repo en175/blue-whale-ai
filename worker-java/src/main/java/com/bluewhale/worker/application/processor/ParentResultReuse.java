@@ -22,8 +22,8 @@ import org.slf4j.LoggerFactory;
  * 与「收割发布期间失租或守卫未命中」两种形态（后者当前 worker 已被接管或任务已终态，
  * 回退提交只会在守卫丢弃前白付一次上游 submit，产生无人轮询的孤儿上游任务；任务保持
  * processing，新 worker 重新领取后重新检查父任务继续收割）。false = 回退，调用方继续
- * 正常提交——父任务失败 / 不存在 / 查询异常 / 仍持有执行权时的收割发布失败（下载转存
- * 异常，如结果 URL 已超 24h 失效下载 404）。
+ * 正常提交——父任务失败 / 不存在 / 查询异常 / 收割发布失败（下载转存异常，如结果
+ * URL 已超 24h 失效下载 404）；提交前由调用方再次续租确认执行权（IKIDEE）。
  * <p>
  * 家族参数：{@code tag}（日志前缀，传各家族契约 TAG 常量）、{@code poll}（查父任务上游，
  * 8 家族 client 签名同构）、{@code resultIncomplete}（结果齐全判定，返回 null=齐全、
@@ -49,7 +49,7 @@ public final class ParentResultReuse {
     /**
      * 重试收割共享骨架：true = 终局（已发布，或收割发布失租 / 守卫未命中停止执行），
      * 调用方跳过重新提交；false = 回退形态（父任务失败 / 不存在 / 查询异常 / 仍持有
-     * 执行权的发布失败），调用方继续正常提交。
+     * 执行权待复核的发布失败），调用方在提交前续租确认执行权。
      */
     public static <C extends ParentReuseClaim, O extends ParentTaskObservation> boolean tryReuseParentResult(
             String tag,
@@ -95,9 +95,9 @@ public final class ParentResultReuse {
             }
             return true;
         } catch (Exception error) {
-            // 结果取回/发布失败（如结果 URL 已超 24h 失效下载 404）→ 当前 worker 仍持有
-            // 执行权，回退重新提交兜底
-            log.warn("[{}] 重试收割发布失败(仍持有执行权) jobId={} parentTask={} err={}，回退重新提交",
+            // 结果取回/发布失败（如结果 URL 已超 24h 失效下载 404）→ 提交前再次续租
+            // 确认执行权，失租或无法确认时停止本次执行
+            log.warn("[{}] 重试收割发布失败 jobId={} parentTask={} err={}，准备复核租约后回退提交",
                     tag, claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
             return false;
         }
