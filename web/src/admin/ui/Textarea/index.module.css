@@ -1,0 +1,39 @@
+.textarea {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-size: 13px;
+  /* 等宽 + 允许换行：这里装的多半是 JSON / 模板正文，逐行对照比连排好读 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.6;
+  /* 只允许纵向拉伸：横向会让它撑破所在栅格 */
+  resize: vertical;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.textarea::placeholder {
+  color: var(--admin-text-faint);
+  font-family: inherit;
+}
+
+.textarea:hover:not(:disabled) {
+  border-color: var(--admin-border-strong);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+.textarea:disabled {
+  color: var(--admin-text-disabled);
+  background: var(--admin-surface-sunken);
+  cursor: not-allowed;
+}

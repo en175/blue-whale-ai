@@ -1,0 +1,77 @@
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--admin-text);
+}
+
+.row.disabled {
+  cursor: not-allowed;
+  color: var(--admin-text-disabled);
+}
+
+.label {
+  user-select: none;
+}
+
+.box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: 4px;
+  background: var(--admin-surface);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.box:hover {
+  border-color: var(--admin-accent);
+}
+
+.box:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.on {
+  background: var(--admin-accent);
+  border-color: var(--admin-accent);
+}
+
+/* 勾：两段边框旋转 45°。比塞一个 SVG 少一个 DOM 节点，且随字号缩放 */
+.on::after {
+  content: '';
+  width: 3.5px;
+  height: 7px;
+  margin-top: -2px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* 中间态：只有横杠，没有勾 —— 勾会让人以为「全选了」 */
+.mixed::after {
+  content: '';
+  width: 7px;
+  height: 1.5px;
+  margin: 0;
+  border: none;
+  background: #fff;
+  transform: none;
+}
+
+/* ⚠️ 必须带 .box 前缀：CSS Modules 只给**类名**加哈希，属性选择器会原样输出成全局规则，
+   写成裸的 [aria-disabled='true'] 会把这个样式糊到页面上每一个带该属性的元素上 */
+.box[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
