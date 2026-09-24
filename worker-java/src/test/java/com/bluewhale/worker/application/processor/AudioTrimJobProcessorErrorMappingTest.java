@@ -74,6 +74,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 credentialService, trimAudioClient, mediaRelay, producer);
         when(stateMachine.failAudioTrimJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源音频素材（worker 不消费其时长——截取产物时长只取官方 duration，不回落）。 */
@@ -368,6 +369,22 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-race")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
         when(stateMachine.claimAudioTrim(eq("100"), anyString()))
@@ -449,8 +466,8 @@ class AudioTrimJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimAudioTrim(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-guard")));
         when(trimAudioClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -462,15 +479,14 @@ class AudioTrimJobProcessorErrorMappingTest {
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishAudioTrimResult(any())).thenReturn(false);
         stubSourceAsset();
-        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(trimAudioClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failAudioTrimJob(any());
     }
 
     // ========== poll 相：状态机 + 进度口径（家族对齐） ==========

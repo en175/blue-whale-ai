@@ -55,7 +55,8 @@ import java.util.concurrent.TimeUnit;
  * job（claim 投影带 parentProviderTaskId）submit 相先查父任务的上游任务——已成功且结果
  * 齐全（videoUrl+resolution 双非空，对齐轮询相成功口径）则不重新提交，直接以父任务
  * observation 走既有 publishResult 发布（转存期租约心跳一并继承，收割期间租约由本
- * worker 心跳续）；父失败 / 不存在 / 查询异常 / 收割发布失败四种形态回退正常重新提交。
+ * worker 心跳续）；父失败 / 不存在 / 查询异常 / 仍持有执行权的收割发布失败回退正常
+ * 重新提交，收割发布期间失租或守卫未命中则停止本次执行不回退提交（IKICD0）。
  * <p>
  * 下载与转存复用 {@link TosVideoMediaRelay}（同套校验：fetch → video/ mime 校验 → TOS
  * 公开读 → md5），但走**流式** {@code persistStreaming} 并带本工具上限（审查修复 P2：
@@ -221,7 +222,8 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关按模式分流提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoMattingJobDto claim, String providerToken) {
-        // 0. IKI89Z（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89Z（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoMattingContract.TAG, claim, providerToken,
@@ -285,6 +287,11 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         // 3. 网关按模式分流提交（端点与模型名映射在客户端经契约常量单处定义；MP4 才带
         //    background_color——出站形状在客户端测试钉）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            log.warn("[video_matting] 重试收割回退提交前失租或续租状态无法确认，停止本次执行 jobId={}", claim.id());
+            return;
+        }
         String taskId = matteVideoClient.submit(
                 providerToken, source.getUrl(), mode, format,
                 "MP4".equals(format) ? backgroundColor : null);
@@ -404,10 +411,11 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 归并 1050）→ 单事务建 Asset（type=video / source='generated'）+ 契约 result 三键
      * （video_url=转存后地址 / resolution / duration）回传 → 终态 succeeded。
      * <p>
-     * 返回发布终局语义（IKI89Z：重试收割据此判定复用是否成立）：true = 发布成功或租约
-     * 丢失静默退出（已被接管/已终态，收割方不得回退重新提交——回退只会白付一次上游
-     * 费用）；false = 发布守卫未命中（stale worker 或已终态，按 IKI89P 定型口径回退正常
-     * 重新提交）；下载/转存失败经异常上抛，由收割方 catch 后回退。
+     * 返回发布终局语义（IKI89Z / IKICD0：重试收割据此判定复用是否成立）：true = 发布
+     * 成功或租约丢失静默退出（已被接管/已终态，收割方不得回退重新提交——回退只会白付
+     * 一次上游费用）；false = 发布守卫未命中（stale worker 或已终态，收割方同样停止
+     * 本次执行不回退提交，与本家族心跳失租路径同一停止语义）；下载/转存失败经异常上抛，
+     * 由收割方 catch 后回退（此时仍持有执行权）。
      */
     private boolean publishResult(ClaimedVideoMattingJobDto claim,
                                   MatteVideoTaskObservation observation) {
@@ -473,6 +481,16 @@ public class VideoMattingJobProcessor implements JobProcessor {
             log.warn("[video_matting] 结果转存被中止，本 worker 静默退出 jobId={}: {}", claim.id(), e.getMessage());
             return true;
         } catch (Exception e) {
+            // parentProviderTaskId 非空对重试任务全生命周期为真（含回退自提交后的轮询相）：
+            // 轮询相自身结果转存失败叠加续租不明也走静默退出属有意行为——等 recovery 接手
+            // 比写失败终态更稳（失败终态会丢弃重试链路，静默退出留给新 Worker / recovery 判定）
+            if (claim.parentProviderTaskId() != null) {
+                boolean leaseConfirmed = !abortHandle.aborted() && renewLeaseForResultTransfer(claim);
+                if (!leaseConfirmed || abortHandle.aborted()) {
+                    log.warn("[video_matting] 结果转存异常后执行权无法确认，停止本次执行 jobId={}", claim.id());
+                    return true;
+                }
+            }
             // 下载/转存失败 → 整体失败（契约口径）：上抛由 handle 归并兜底码；无 Asset 行
             // 落库，不留半成品资产悬挂（TOS 孤儿对象与家族先例同口径）
             VideoMattingError transferFailure = new VideoMattingError(

@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
+import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
@@ -23,6 +24,8 @@ import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMappe
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
+import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
+import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.sun.net.httpserver.HttpServer;
@@ -40,6 +43,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.mapper.MapperFactoryBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -78,6 +82,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 /**
  * JobStateMachineService 真库集成测试（blade-1：Testcontainers 安全网）。
@@ -1151,6 +1156,146 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
+    @DisplayName("重试收割跨 120 分钟：恢复重投后重新领取父结果，发布一次且不重新提交")
+    void retryHarvestHandoffAcrossRecoveryWindow() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(130));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long retryId = seedJob(9L, "media_extract", "dock", "processing", 4L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"provider_credential\":\"sk-frozen-token\",\"source_asset_id\":\"555\",\"output_format\":\"mp3\"}");
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, lease_owner='worker-old', "
+                + "lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE), "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
+
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).doesNotContain(retryId);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+
+        @SuppressWarnings("unchecked")
+        ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
+        GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
+        when(recoveryProvider.getIfAvailable()).thenReturn(recoveryProducer);
+        var recovery = new RecoveryService(jobMapper,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, 120);
+        recovery.recover();
+        verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
+
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitExtractAudioClient client = mock(NewApiMediaKitExtractAudioClient.class);
+        TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        when(credentials.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(client.poll("sk-frozen-token", "amk-parent"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded", "https://volc/old.mp3", 12.5, null, null));
+        when(relay.persist("https://volc/old.mp3", "9", "mp3"))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio("https://cdn/old.mp3", "gen/old.mp3",
+                        "audio/mpeg", 500L, "0123456789abcdef0123456789abcdef"));
+        var processor = new MediaExtractJobProcessor(service, new AssetSourceService(assetMapper),
+                credentials, client, relay, producer);
+
+        processor.handle(String.valueOf(retryId));
+
+        assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+        verify(client).poll("sk-frozen-token", "amk-parent");
+        verify(client, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), org.mockito.ArgumentMatchers.anyLong());
+        assertThat(service.publishMediaExtractResult(new PublishMediaExtractDto(
+                String.valueOf(retryId), "99", "9", "worker-old", 4L,
+                "https://cdn/old.mp3", "gen/old.mp3", "audio/mpeg", 500L,
+                "0123456789abcdef0123456789abcdef", 12.5))).isFalse();
+        processor.handle(String.valueOf(retryId));
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("重试收割超过 130 分钟不复活；非重试与终态仍受原有条件约束")
+    void retryHarvestHandoffHasBoundedDeadline() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long expiredRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long lastChanceRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long submittedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long queuedRetryId = seedJob(9L, "media_extract", "dock", "queued", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long parentWithoutTaskId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        long retryWithoutParentTaskId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long oldNonRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long terminalRetryId = seedJob(9L, "media_extract", "dock", "succeeded", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long videoParentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        long videoRetryId = seedJob(9L, "video", "bottom_dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent' WHERE id=?", videoParentId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 131 MINUTE) WHERE id=?", parentId, expiredRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 129 MINUTE) WHERE id=?", parentId, lastChanceRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, provider_task_id='own-task', "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, submittedRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, queuedRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
+                parentWithoutTaskId, retryWithoutParentTaskId);
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
+                oldNonRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, terminalRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", videoParentId, videoRetryId);
+
+        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
+        assertThat(due).contains(lastChanceRetryId);
+        assertThat(due).doesNotContain(expiredRetryId, submittedRetryId, queuedRetryId,
+                retryWithoutParentTaskId, oldNonRetryId, terminalRetryId);
+        assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(videoRetryId);
+    }
+
+    @Test
+    @DisplayName("重试收割停止点晚于创建后 122 分钟仍被接手；超出租约接管期不收")
+    void retryHarvestHandoffIsLeaseAwareBeyondCreateDeadline() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long handoffRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long missedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        // 创建 132 分钟前（超出 gmt_create 创建+130 分钟分支）、租约 5 分钟前到期：
+        // 停止点晚于创建后 122 分钟但落在租约到期+10 分钟接管期内 → 应收
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
+                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 5 MINUTE) WHERE id=?", parentId, handoffRetryId);
+        // 创建 132 分钟前、租约 20 分钟前到期：超出租约到期+10 分钟接管期 → 不收
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
+                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE id=?", parentId, missedRetryId);
+
+        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
+        assertThat(due).contains(handoffRetryId);
+        assertThat(due).doesNotContain(missedRetryId);
+    }
+
+    @Test
     @DisplayName("audio_mix 退避期间恢复扫描不提前重投，DB 与 MQ 使用同一延迟")
     void audioMixRecoveryRespectsPersistedPollBackoff() {
         long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
@@ -1178,6 +1323,62 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 4L)).isFalse();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
         assertThat(service.renewAudioMixLease(String.valueOf(jobId), "mix-worker", 5L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("重试收割回退提交续租后，持旧候选快照的新 worker 不能再接管")
+    void parentReuseSubmitReservationBlocksStaleCandidateClaim() {
+        long jobId = seedClaimedJob(9L, "video_matting", "dock", "old-worker", 5L);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
+                + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
+
+        // 新 worker 先前读到的候选仍带相同 status/fence；CAS 必须重新检查到期条件。
+        assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
+                5L, "processing")).isZero();
+        assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
+
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "new-worker", 5L)).isFalse();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("media_extract 旧候选快照不能接管已续租任务；孤儿租约过期仍可接管")
+    void mediaExtractStaleCandidateCannotTakeOverRenewedLease() {
+        // 场景一（应拒绝）：领取（fence=F）→ 租约过期 → 读到旧候选快照 → 无守卫续租到未来 →
+        // 旧快照参数 CAS 必须拒绝。该竞态无法从正常通道构造（心跳是死代码、reserve 有过期守卫），
+        // 直接用 SQL 预置租约状态钉不变量。
+        long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        var claimed = service.claimMediaExtract(String.valueOf(renewedId), "worker-old");
+        assertThat(claimed).isPresent();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
+                renewedId);
+        GenerationJobEntity stale = jobMapper.findMediaExtractCandidate(renewedId);
+        assertThat(stale).isNotNull();
+        // 模拟无守卫续租通道（updateMediaExtractProgress 复活形态）把租约推到未来
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE) WHERE id=?",
+                renewedId);
+        assertThat(jobMapper.claimMediaExtractCas(renewedId, "new-worker",
+                WorkerClock.now().plusSeconds(420),
+                stale.getFencingToken(), stale.getStatus())).isZero();
+        assertThat(readJob(renewedId).getLeaseOwner()).isEqualTo("worker-old");
+
+        // 场景二（对照，孤儿接管语义保持）：领取 → 租约过期 → 读候选快照 → 不续租 → 同参数 CAS 成功
+        long orphanId = seedJob(9L, "media_extract", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        assertThat(service.claimMediaExtract(String.valueOf(orphanId), "worker-old")).isPresent();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
+                orphanId);
+        GenerationJobEntity orphanSnap = jobMapper.findMediaExtractCandidate(orphanId);
+        assertThat(orphanSnap).isNotNull();
+        assertThat(jobMapper.claimMediaExtractCas(orphanId, "new-worker",
+                WorkerClock.now().plusSeconds(420),
+                orphanSnap.getFencingToken(), orphanSnap.getStatus())).isOne();
+        assertThat(readJob(orphanId).getLeaseOwner()).isEqualTo("new-worker");
     }
 
     @Test

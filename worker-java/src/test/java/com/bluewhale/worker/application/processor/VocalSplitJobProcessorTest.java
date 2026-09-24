@@ -75,6 +75,7 @@ class VocalSplitJobProcessorTest {
                 credentialService, separateVoiceClient, mediaRelay, producer);
         when(stateMachine.failVocalSplitJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（时长供结果 duration 回落）。 */
@@ -368,6 +369,22 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-race")));
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset("video");
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
         when(stateMachine.claimVocalSplit(eq("100"), anyString()))
@@ -453,8 +470,8 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVocalSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-guard")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -462,15 +479,15 @@ class VocalSplitJobProcessorTest {
         when(mediaRelay.persist(anyString(), eq("9"), eq("aac"))).thenReturn(stored("v"));
         when(stateMachine.publishVocalSplitResult(any())).thenReturn(false);
         stubSourceAsset("video");
-        when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(separateVoiceClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(),
+                anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVocalSplitJob(any());
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐家族） ==========

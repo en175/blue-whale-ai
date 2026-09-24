@@ -190,7 +190,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 单处映射）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
-        // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoSceneSplitContract.TAG, claim, providerToken,
@@ -230,6 +231,10 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（granularity 映射 / 高级参数不暴露在客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = segmentScenesClient.submit(providerToken, source.getUrl(), granularity);
         log.info("[video_scene_split] 上游已提交 jobId={} providerTaskId={} granularity={}",
                 claim.id(), taskId, granularity);
@@ -337,10 +342,11 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
      * + 契约 result 回传（段序 / 起止秒 / 段资产引用 / 总时长）→ 终态 succeeded。
      * <p>
-     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存）、终态发布守卫未命中。poll 相
-     * 调用方忽略返回值（静默退出）；重试收割调用方据此回退正常重新提交——续租/发布/提交
-     * 三守卫 WHERE 同构，回退后 markProviderSubmitted 必同样未命中，无 DB 双写，代价为一份
-     * 无人轮询的孤儿上游任务。
+     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存，含续租状态无法确认的 DB
+     * 异常）、终态发布守卫未命中。poll 相调用方忽略返回值（静默退出）；重试收割调用方
+     * 对两者均停止本次执行不回退提交（IKICD0：失租或已终态后回退只会在 markProviderSubmitted
+     * 守卫丢弃前白付一次上游 submit，产生无人轮询的孤儿上游任务；任务保持 processing，
+     * 由新 worker 重新领取后重新检查父任务继续收割）。
      */
     private boolean publishResult(ClaimedVideoSceneSplitJobDto claim,
                                   SceneSplitTaskObservation observation) {

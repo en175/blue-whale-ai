@@ -49,11 +49,15 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     GenerationJobEntity findMediaExtractCandidate(@Param("jobId") Long jobId);
 
     /**
-     * 领取 media_extract 作业：CAS 更新（claim-ops.ts:472-486）。
+     * 领取 media_extract 作业：CAS 更新（claim-ops.ts:472-486 + 租约复核）。
      * <p>
      * SET status='processing', lease_owner=?, lease_expires_at=now+120s,
      *     last_polled_at=now, fencing_token=fencing_token+1, version=version+1
      * WHERE id = ? AND fencing_token = ? AND status = ?
+     *   AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at &lt; now)
+     * <p>
+     * WHERE 末行是租约复核（claimImageCas 同款）：候选快照读取与 CAS 之间租约被续期时，
+     * 旧快照不得接管仍在租约内的任务。
      * <p>
      * 返回受影响行数（0 = 守卫失败）。
      */
@@ -68,6 +72,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND fencing_token = #{fencingToken}
               AND status = #{candidateStatus}
+              AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at < NOW())
             """)
     int claimMediaExtractCas(
             @Param("jobId") Long jobId,
@@ -398,7 +403,8 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /**
      * 领取图片 / image_enhance 作业：CAS 更新（claim-ops.ts:358-372）。
      * <p>
-     * CAS UPDATE 的 WHERE 只含 id / fencing_token / status，与媒体类型和 source 白名单无关，
+     * CAS UPDATE 的 WHERE 含 id / fencing_token / status 与租约复核（status='queued' 或
+     * 租约空/过期，防旧候选快照接管已续租任务），与媒体类型和 source 白名单无关，
      * 故 image 与 image_enhance（契约 §14）共用本方法；租约时长由 JobClaimService 按媒体类型传入。
      */
     @Update("""
@@ -412,6 +418,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND fencing_token = #{fencingToken}
               AND status = #{candidateStatus}
+              AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at < NOW())
             """)
     int claimImageCas(
             @Param("jobId") Long jobId,
@@ -617,6 +624,24 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextPollAt") java.time.LocalDateTime nextPollAt
     );
 
+    @Update("""
+            UPDATE generation_jobs
+            SET lease_expires_at = #{leaseExpiresAt},
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND lease_expires_at > NOW()
+              AND provider_task_id IS NULL
+            """)
+    int reserveParentReuseSubmit(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
+    );
+
     /**
      * 重排生成任务轮询（generation-worker-video-ops.ts rescheduleProviderPoll 逐字）。
      * <p>
@@ -819,6 +844,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * sources 为空 → 不套 source 白名单（audio / media_extract 形态：专属来源值
      * 不在白名单，套了漏真卡任务，IKC9EJ 教训）；非空 → source IN 白名单（与该媒体类型
      * claim 候选查询同源）。
+     * IKIDEK：八个收割家族中可复用父上游任务、尚未提交自身上游任务的 processing 重试 job
+     * 保留租约感知的恢复接手期：接手期限 = max(创建后 maxAgeMinutes+10 分钟（默认 130 分钟）,
+     * 租约到期后 10 分钟)，期限外不自动复活；其余任务仍走原有条件。
      */
     @Select("""
             <script>
@@ -830,7 +858,23 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             </if>
             AND is_delete = false
             <if test="maxAgeMinutes > 0">
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND (
+                gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+                OR (
+                    -- 收割八家族 type 清单：与各家族 Contract.TAG 及 ParentResultReuse 的八家族
+                    -- 调用方保持同步维护（防漂移互指）——三处任一变化须同步核对另两处
+                    type IN ('media_extract', 'audio_trim', 'vocal_split', 'video_enhance',
+                             'video_scene_split', 'video_subtitle_erase', 'video_matting',
+                             'video_frame_interpolation')
+                    AND retry_of_job_id IS NOT NULL AND status = 'processing'
+                    AND provider_task_id IS NULL
+                    AND EXISTS (SELECT 1 FROM generation_jobs parent
+                                WHERE parent.id = generation_jobs.retry_of_job_id
+                                  AND parent.provider_task_id IS NOT NULL
+                                  AND parent.provider_task_id != '')
+                    AND (gmt_create > (NOW() - INTERVAL (#{maxAgeMinutes} + 10) MINUTE)
+                         OR lease_expires_at > (NOW() - INTERVAL 10 MINUTE)))
+              )
             </if>
             AND next_action_at &lt;= NOW()
             AND (

@@ -179,7 +179,8 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSubtitleEraseJobDto claim, String providerToken) {
-        // 0. IKI89U（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89U（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoSubtitleEraseContract.TAG, claim, providerToken,
@@ -225,6 +226,10 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（mode 映射 / 固定参数 / 框出站规则在客户端单处定义，§17.3）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = subtitleEraseClient.submit(
                 providerToken, source.getUrl(), detectMode, eraseBoxes);
         log.info("[video_subtitle_erase] 上游已提交 jobId={} providerTaskId={}", claim.id(), taskId);
@@ -314,7 +319,8 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 结果发布：立即下载转存（火山 URL 仅 24h 有效，官方明确「请及时下载保存」）→
      * 建 Asset（type=video / source='generated' / generation_job_id）→ 终态 succeeded。
      * <p>
-     * 返回发布守卫结果（IKI89U：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI89U：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedVideoSubtitleEraseJobDto claim,
                                   SubtitleEraseTaskObservation observation) {

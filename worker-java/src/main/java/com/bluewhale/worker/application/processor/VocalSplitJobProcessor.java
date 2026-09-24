@@ -184,7 +184,8 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVocalSplitJobDto claim, String providerToken) {
-        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VocalSplitContract.TAG, claim, providerToken,
@@ -233,6 +234,10 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         // 3. 网关提交异步任务（scene 经契约 SCENE_UPSTREAM_MAP 换算官方首字母大写枚举，
         //    出站键是 scene + output_format，客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = separateVoiceClient.submit(
                 providerToken, source.getUrl(), sourceIsVideo, scene, outputFormat);
         log.info("[vocal_split] 上游已提交 jobId={} providerTaskId={} scene={} format={}",
@@ -341,7 +346,8 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * 缺任一轨 URL / 任一轨转存失败 → 整单失败（契约口径：无部分成功；已转存的 TOS 对象
      * 随失败留弃，与家族单轨转存失败的孤儿口径一致）。
      * <p>
-     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedVocalSplitJobDto claim,
                                   SeparateVoiceTaskObservation observation) {
