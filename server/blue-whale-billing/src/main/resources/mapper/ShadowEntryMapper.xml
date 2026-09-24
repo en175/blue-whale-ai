@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.bluewhale.billing.infrastructure.mapper.ShadowEntryMapper">
+
+  <!--
+    影子期总览：算出的价 vs 上游扣用户的钱。
+
+    两个刻意的写法：
+
+    ① `SUM(CASE WHEN ... THEN x END)` 而不是 `SUM(x)` —— 未回填 upstream_user_credits
+       的行是 NULL，`SUM` 会跳过它们（对），但用 CASE 显式表达「只在有值时才计入」
+       能让「计入了几行」这件事也可查（COUNT 那两个）。若某天回填任务停了，
+       SUM 依然给出一个数字，而 counted 那一列会立刻显形。
+
+    ② 没配 `status` 之外的过滤 —— 时间窗是唯一的条件，且走
+       idx_billing_shadow_entries__created。
+  -->
+  <select id="summarize" resultType="java.util.Map">
+    SELECT
+      COUNT(*)                                                        AS total,
+      SUM(CASE WHEN status = 'priced'      THEN 1 ELSE 0 END)         AS priced,
+      SUM(CASE WHEN status = 'unpriceable' THEN 1 ELSE 0 END)         AS unpriceable,
+      COALESCE(SUM(computed_credits), 0)                              AS computed_credits,
+      COALESCE(SUM(upstream_user_credits), 0)                         AS upstream_user_credits,
+      SUM(CASE WHEN upstream_user_credits IS NOT NULL THEN 1 ELSE 0 END) AS compared
+    FROM billing_shadow_entries
+    WHERE gmt_create &gt;= #{from} AND gmt_create &lt; #{to}
+  </select>
+
+  <!--
+    未配规则的 (model, task) 清单 —— 切换前要修掉的漏配。
+
+    模型与任务类型没有单独的列（只存在 usage_json 里），所以用 JSON 取。
+    走 idx_billing_shadow_entries__status 先缩小到 unpriceable，再解析 JSON。
+
+    排序按出现次数降序：先修最常被碰到的，收益最大。
+  -->
+  <select id="unpriceableBreakdown" resultType="java.util.Map">
+    SELECT
+      COALESCE(JSON_UNQUOTE(JSON_EXTRACT(usage_json, '$[0].modelId')), '(未知模型)') AS model_id,
+      COALESCE(JSON_UNQUOTE(JSON_EXTRACT(usage_json, '$[0].taskType')), '(未知任务)') AS task_type,
+      COUNT(*) AS hits
+    FROM billing_shadow_entries
+    WHERE status = 'unpriceable'
+      AND gmt_create &gt;= #{from} AND gmt_create &lt; #{to}
+    GROUP BY model_id, task_type
+    ORDER BY hits DESC
+    LIMIT #{limit}
+  </select>
+
+</mapper>

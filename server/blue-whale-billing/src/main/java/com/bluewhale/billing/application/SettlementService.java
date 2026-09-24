@@ -1,24 +1,27 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.catalog.CatalogCompiler;
+import com.bluewhale.billing.catalog.CatalogHolder;
 import com.bluewhale.billing.catalog.CatalogRepository;
 import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.Reservation;
 import com.bluewhale.billing.ledger.ReservationRepository;
+import com.bluewhale.billing.pricing.BasePriceResolver;
 import com.bluewhale.billing.pricing.DiscountResolver;
 import com.bluewhale.billing.pricing.MediaPricingCalculator;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.PricingRequest;
 import com.bluewhale.billing.pricing.Usage;
-import com.bluewhale.billing.pricing.UsageDim;
+import com.bluewhale.billing.shadow.ShadowEntryRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.Objects;
 
 /**
  * 结算与返还（《计费逻辑详细设计》§4.3 / §4.4），由 MQ 事件触发。
@@ -51,13 +54,38 @@ public class SettlementService {
     private final CatalogRepository catalogRepository;
     private final ReservationRepository reservations;
     private final CreditService credits;
+    private final PricingEngine pricing;
+    private final CatalogHolder catalog;
+    private final ShadowEntryRepository shadowRepository;
+    private final ObjectMapper json = new ObjectMapper();
 
+    /**
+     * @param shadowMode ★ **默认 true**。影子期只算不扣（runbook §3.2）。
+     *                   默认值必须是「不扣」：反过来（默认就结算）在切换前部署一次，
+     *                   就是每个任务被扣两遍——我们一遍、new-api 一遍。
+     *                   切换窗口里显式设成 false 才是权威生效。
+     */
     public SettlementService(CatalogRepository catalogRepository,
                              ReservationRepository reservations,
-                             CreditService credits) {
+                             CreditService credits,
+                             PricingEngine pricing,
+                             CatalogHolder catalog,
+                             ShadowEntryRepository shadowRepository,
+                             @Value("${billing.shadow-mode:true}") boolean shadowMode) {
         this.catalogRepository = catalogRepository;
         this.reservations = reservations;
         this.credits = credits;
+        this.pricing = pricing;
+        this.catalog = catalog;
+        this.shadowRepository = shadowRepository;
+        this.shadowMode = shadowMode;
+    }
+
+    private final boolean shadowMode;
+
+    /** 当前是否处于影子期（只算不扣）。 */
+    public boolean isShadowMode() {
+        return shadowMode;
     }
 
     /**
@@ -70,6 +98,13 @@ public class SettlementService {
      *         **抛出去让 MQ 重投**，不要静默按 0 结算：钱少收比暂时不结算更难发现
      */
     public void settle(JobEventPayload.JobCompleted event) {
+        if (shadowMode) {
+            // ★ 影子期：算一遍、只记不扣。**这就是切换前敢跑整周的原因**——
+            //   它对钱零影响，new-api 那边该扣扣它的，我们这边只攒数据。
+            recordShadow(event);
+            return;
+        }
+
         Reservation reservation = reservations.findByJobId(event.jobId()).orElse(null);
         if (reservation == null || !reservation.isPending()) {
             log.info("跳过结算：jobId={} 无待结算预留（未预扣，或已被结算/返还）", event.jobId());
@@ -113,6 +148,66 @@ public class SettlementService {
                 reservation.catalogVersion(), reservation.discountBp(), event.usage().size());
 
         credits.settle(event.jobId(), actualCredits);
+    }
+
+    /**
+     * 影子期的一条记录（只算不扣）。
+     *
+     * <p>与 {@link #settle} 的三点不同：
+     * <ul>
+     *   <li><b>不要求有预留</b>——影子期 worker 直接用统一 key 调上游，根本没走 Hold</li>
+     *   <li><b>用当前目录与当前折扣</b>，不用冻结值——影子期问的是「照现在这套规则，
+     *       这单该收多少」，正是不扣钱才敢这么问</li>
+     *   <li><b>算不出价不抛异常</b>，而是记一行 unpriceable——影子期的漏配清单必须被
+     *       完整记录下来，抛出去重投只会让同一批漏配反复进 DLQ</li>
+     * </ul>
+     */
+    private void recordShadow(JobEventPayload.JobCompleted event) {
+        int catalogVersion = catalog.currentVersion();
+
+        if (event.usage().isEmpty()) {
+            // 没有用量就算不出价（连 model/task 都不知道）。影子期 worker 会上报用量，
+            // 空的就是漏报——记下来，别让它悄悄跳过。
+            shadowRepository.record(event.jobId(), event.userId(),
+                    ShadowEntryRepository.STATUS_UNPRICEABLE, null, catalogVersion, null,
+                    null, "[]", "事件未带用量，无法计价");
+            log.warn("影子计价跳过：jobId={} 事件未带用量", event.jobId());
+            return;
+        }
+
+        try {
+            long computed = 0;
+            for (JobEventPayload.UsageLine line : event.usage()) {
+                PricingRequest request = new PricingRequest(
+                        event.userId(), line.modelId(), line.taskType(), line.specs(), "free");
+                computed += pricing.compute(request, line.toUsage(), Instant.now()).credits();
+            }
+
+            Long upstreamCost = event.usage().stream()
+                    .map(JobEventPayload.UsageLine::upstreamCostCredits)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+
+            shadowRepository.record(event.jobId(), event.userId(),
+                    ShadowEntryRepository.STATUS_PRICED, computed, catalogVersion,
+                    null, upstreamCost, toJson(event.usage()), "");
+        } catch (PricingEngine.RuleNotFoundException | BasePriceResolver.UnpriceableSpecException e) {
+            // **成功记录的一种**：影子期跑出来的 unpriceable 就是切换前要修掉的漏配清单
+            shadowRepository.record(event.jobId(), event.userId(),
+                    ShadowEntryRepository.STATUS_UNPRICEABLE, null, catalogVersion, null,
+                    null, toJson(event.usage()), e.getMessage());
+            log.warn("影子计价算不出价：jobId={} —— {}", event.jobId(), e.getMessage());
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return json.writeValueAsString(value);
+        } catch (Exception e) {
+            // 用量都是字符串与整数，序列化不可能失败；真失败说明是致命的编码问题
+            throw new IllegalStateException("影子用量快照无法序列化", e);
+        }
     }
 
     /**

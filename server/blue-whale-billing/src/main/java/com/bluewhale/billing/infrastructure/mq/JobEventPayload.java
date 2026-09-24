@@ -48,7 +48,12 @@ public final class JobEventPayload {
             String modelId,
             String taskType,
             Map<String, Long> quantities,
-            Map<String, String> specs
+            Map<String, String> specs,
+            /**
+             * 上游实际收**我们**的（mc）。毛利分析原料；影子对账时与
+             * {@code upstream_user_credits} 是两个不同的数——别混。
+             */
+            Long upstreamCostCredits
     ) {
         public UsageLine {
             quantities = quantities == null ? Map.of() : Map.copyOf(quantities);

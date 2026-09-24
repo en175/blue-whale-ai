@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>所以下面有两个测试是**故意在中途改价/删活动**，再断言结算仍按老值走。
  */
-@SpringBootTest
+@SpringBootTest(properties = "billing.shadow-mode=false")
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class SettlementIntegrationTest {
 
@@ -192,7 +192,9 @@ class SettlementIntegrationTest {
     private JobEventPayload.JobCompleted completedWithUsage(long jobId) {
         return new JobEventPayload.JobCompleted(jobId, USER, "succeeded", 1, 1,
                 List.of(new JobEventPayload.UsageLine(MODEL, TASK,
-                        Map.of(), Map.of("resolution", "1080p"))));
+                        Map.of(), Map.of("resolution", "1080p"),
+                        // 上游收我们的（mc）——影子对账要它，权威结算不用
+                        12_000L)));
     }
 
     private long remainingFrozen(long lotId) {
