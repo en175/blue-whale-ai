@@ -133,13 +133,17 @@ describe("AudioVideoMuxesService.create", () => {
     ["wrong media type", { id: 12n, type: "audio", url: "https://tos.example/12.mp3", storage_key: "12.mp3" }],
     ["temporary URL", { id: 12n, type: "video", url: "blob:browser", storage_key: "12.mp4" }],
     ["no stored object", { id: 12n, type: "video", url: "https://tos.example/12.mp4", storage_key: null }],
+    // 契约 §20.1 冻结白名单（https/mediakit/vod/tos）不含 http：即使 storage_key 存在、
+    // 桶对象本身可公开读取，http URL 也在入口拒绝（收紧自照抄 audio-mix 的 https?: 前置）。
+    ["plain http URL outside the frozen allowlist", { id: 12n, type: "video", url: "http://tos.example/12.mp4", storage_key: "12.mp4" }],
   ])("rejects %s video inputs with no persisted job", async (_reason, second) => {
-    const { service, create } = makeService({
+    const { service, create, inspectObject } = makeService({
       "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3" },
       "12": { project_id: 0n, ...second },
     });
     await expect(service.create("9", "5", input)).rejects.toMatchObject({ status: expect.any(Number) });
     expect(create).not.toHaveBeenCalled();
+    if (_reason.startsWith("plain http")) expect(inspectObject).not.toHaveBeenCalledWith("12.mp4");
   });
 
   it("rejects a stored object whose public URL cannot be read by the gateway", async () => {

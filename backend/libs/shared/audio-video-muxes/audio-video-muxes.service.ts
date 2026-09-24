@@ -70,7 +70,10 @@ export class AudioVideoMuxesService {
       if (asset.project_id !== BigInt(projectId) && asset.project_id !== 0n && !linkedIds.has(input.assetId)) {
         throw new DomainError(RESOURCE_NOT_FOUND_CODE);
       }
-      if (asset.type !== expectedType || !/^(https?:\/\/|mediakit:\/\/|vod:\/\/|tos:\/\/)/i.test(asset.url)) {
+      // 协议白名单与迁移契约 §20.1 冻结一致（https/mediakit/vod/tos，不含 http）：http URL
+      // 即使 storage_key 存在也不放行——冻结 url 恒取 inspectObject 的 https publicUrl，
+      // http 的 asset.url 从来不能成为任务输入（无 storage_key 时 TOS origin 还原也只认 https）。
+      if (asset.type !== expectedType || !/^(https:\/\/|mediakit:\/\/|vod:\/\/|tos:\/\/)/i.test(asset.url)) {
         throw new DomainError(FAILURE_CODE, `${label}资产不可用`);
       }
       let storageKey = asset.storage_key;
