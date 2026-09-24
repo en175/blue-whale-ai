@@ -1,15 +1,30 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
+  createAudioMix,
+  retryAudioMix,
   createAudioTrim,
+  createAudioSpeed,
+  createFrameInterpolation,
   createMediaExtraction,
   createVocalSplit,
   createVideoEnhancement,
+  createVideoMatting,
+  createImageErase,
+  createImageCutout,
+  createVideoSubtitleErase,
+  createVideoSceneSplit,
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
 } from './jobs';
+import { audioMixJobsOptions } from './audioMixRecovery';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 describe('createMediaExtraction', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -34,6 +49,142 @@ describe('createMediaExtraction', () => {
       source_asset_id: '3985',
       output_format: 'mp3',
     });
+  });
+});
+
+describe('createAudioMix', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('提交冻结双源，静默传输错误交由画布提示一次', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 1028, msg: '混合任务创建失败', data: null }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const payload = {
+      source_node_id: 'source',
+      inputs: [{ asset_id: '8', node_id: 'source' }, { asset_id: '6', node_id: 'second' }],
+      output_format: 'mp3' as const,
+    };
+
+    await expect(createAudioMix('project/1', payload, { silent: true })).rejects.toThrow('混合任务创建失败');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/audio-mixes');
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(payload);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('retryAudioMix', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('同一结果卡重试时提交原 jobId 与稳定幂等键，不重发输入', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '73', status: 'queued', replayed: false } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(retryAudioMix('project/1', '73', 'retry-key-73', { silent: true }))
+      .resolves.toMatchObject({ job_id: '73', status: 'queued' });
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-mixes/73/retry');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
+    expect(init.body).toBeUndefined();
+  });
+});
+
+describe('audioMixJobsOptions', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('逐页读取同项目混合任务，能找回超过首 100 条后的未落盘任务', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, msg: 'ok', data: {
+        records: Array.from({ length: 100 }, (_, index) => ({ job_id: String(index + 1), type: 'audio_mix' })),
+        total: 101, size: 100, current: 1,
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, msg: 'ok', data: {
+        records: [{ job_id: '101', type: 'audio_mix', canvas_card_state: 'pending' }],
+        total: 101, size: 100, current: 2,
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const records = await audioMixJobsOptions('project/1').queryFn!({} as never);
+    expect(records).toHaveLength(101);
+    expect(records[100]).toMatchObject({ job_id: '101', canvas_card_state: 'pending' });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/jobs?projectId=project%2F1&type=audio_mix&size=100&page=1',
+      '/api/jobs?projectId=project%2F1&type=audio_mix&size=100&page=2',
+    ]);
+  });
+});
+
+describe('createVideoMatting', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('向项目智能抠像端点提交冻结五键（源素材/占位卡/模式/格式/token）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '77', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVideoMatting('project/1', {
+        source_asset_id: '3985',
+        target_node_id: 'smart-matting-1',
+        mode: 'greenscreen',
+        format: 'MP4',
+        background_color: 'green',
+        client_token: 'token-01',
+      }),
+    ).resolves.toEqual({ job_id: '77', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/video-mattings');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '3985',
+      target_node_id: 'smart-matting-1',
+      mode: 'greenscreen',
+      format: 'MP4',
+      background_color: 'green',
+      client_token: 'token-01',
+    });
+  });
+
+  it('创建失败：错误提示单源——HTTP 层恰好提示一次（审查修复 S1，调用方不得二次 toast）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ code: 1050, msg: '智能抠像失败，请重试', data: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(
+      createVideoMatting('p1', {
+        source_asset_id: '1',
+        target_node_id: 'smart-matting-1',
+        mode: 'portrait',
+        format: 'WEBM',
+        client_token: 'token-02',
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    // 不传 silent = 失败提示由 HTTP 层承担且只承担一次；页面只落占位卡失败态
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('智能抠像失败，请重试');
   });
 });
 
@@ -66,6 +217,83 @@ describe('createVideoEnhancement', () => {
       target_node_id: 'media-draft-1',
       resolution: '2k',
     });
+  });
+});
+
+describe('createFrameInterpolation', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目视频插帧端点提交冻结三键（IKHLKX / IKHLK3 端点，契约键名恒等、fps 整型直传、无幂等头）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '902', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createFrameInterpolation('project/1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 120,
+      }),
+    ).resolves.toEqual({ job_id: '902', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/video-frame-interpolations');
+    expect(init.method).toBe('POST');
+    // 免费口径（ADR-0113 同 HD 高清）：无幂等头，body 也不带 client_token
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({
+      source_asset_id: '3985',
+      target_node_id: 'media-draft-7',
+      fps: 120,
+    });
+  });
+
+  it('silent 透传：创建失败仍抛 ApiError 但 http 层不 toast（调用方 catch 统一提示一次，IKHSFH）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 1028, msg: '任务入队失败', data: null }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(toast.error).mockClear();
+
+    await expect(
+      createFrameInterpolation('p1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 60,
+      }, { silent: true }),
+    ).rejects.toThrow('任务入队失败');
+
+    // silent：http 层不弹（面板保留可重发的错误由 CanvasPage catch 提示，全链路只一次）
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('缺省 init：维持家族默认 toast 口径（不传 silent 时 http 层照常提示）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 1028, msg: '任务入队失败', data: null }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(toast.error).mockClear();
+
+    await expect(
+      createFrameInterpolation('p1', {
+        source_asset_id: '3985',
+        target_node_id: 'media-draft-7',
+        fps: 60,
+      }),
+    ).rejects.toThrow('任务入队失败');
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('任务入队失败');
   });
 });
 
@@ -146,6 +374,47 @@ describe('createAudioTrim', () => {
       source_asset_id: '5',
       output_format: 'wav',
     });
+  });
+});
+
+describe('createAudioSpeed', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('向项目音频调速端点提交源素材 + 倍速（IKHW5S，契约键名恒等、无幂等头）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1132', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createAudioSpeed('project/1', { source_asset_id: '3985', speed: 1.35 }),
+    ).resolves.toEqual({ job_id: '1132', status: 'queued' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-speeds');
+    expect(init.method).toBe('POST');
+    expect(init.headers).not.toHaveProperty('Idempotency-Key');
+    expect(JSON.parse(init.body as string)).toEqual({ source_asset_id: '3985', speed: 1.35 });
+  });
+
+  it('贴原速省略：speed 1.0 不出现键（走官方默认 1，契约 buildAudioSpeedInput 口径）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '1133', status: 'queued' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createAudioSpeed('p1', { source_asset_id: '5' }),
+    ).resolves.toEqual({ job_id: '1133', status: 'queued' });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ source_asset_id: '5' });
   });
 });
 
@@ -262,5 +531,59 @@ describe('fetchJobStatus', () => {
       code: 100301,
       message: '资源不存在',
     });
+  });
+});
+
+/* IKI8L4 工具会话创建函数 silent 透传：错误提示归属持有发送身份的调用方——
+   创建传输走 silent（http 层不 toast），迟到失败不抢在会话纪元判断之前弹出，
+   当前会话失败由页面 catch 统一提示一次（audioSpeed IKI4LX / 插帧 IKHSFH 先例推广）。 */
+describe('IKI8L4 工具会话创建 silent 透传', () => {
+  // 前序 describe 的 afterEach 不清 toast spy，进入本组用例前先清零计数
+  beforeEach(() => vi.mocked(toast.error).mockClear());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  /** 统一业务失败桩：HTTP 200 + 信封 code!==200 + msg */
+  function stubCreateFail(msg = '服务繁忙，请稍后重试') {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 1, msg, data: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+  }
+
+  it.each([
+    ['createAudioTrim', () => createAudioTrim('p1', { source_asset_id: '3985', output_format: 'mp3' }, { silent: true })],
+    ['createVocalSplit', () => createVocalSplit('p1', { source_asset_id: '3985' }, { silent: true })],
+    ['createMediaExtraction', () => createMediaExtraction('p1', { source_asset_id: '3985' }, { silent: true })],
+    ['createVideoSubtitleErase', () => createVideoSubtitleErase('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', detect_mode: 'subtitle_smart', erase_boxes: [],
+    }, { silent: true })],
+    ['createImageCutout', () => createImageCutout('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', cutout_scene: 'general',
+    }, { silent: true })],
+    ['createImageErase', () => createImageErase('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', erase_scene: 'full_screen_text_erase',
+    }, { silent: true })],
+    ['createVideoSceneSplit', () => createVideoSceneSplit('p1', {
+      source_asset_id: '3985', target_node_id: 'scene-split-1', granularity: 'standard', client_token: 'tok',
+    }, { silent: true })],
+  ] as const)('%s：silent 失败仍抛 ApiError 但 http 层不 toast', async (_name, invoke) => {
+    stubCreateFail();
+    await expect(invoke()).rejects.toThrow('服务繁忙，请稍后重试');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('缺省 init：家族默认 toast 口径不变（其他调用方行为不受 IKI8L4 影响）', async () => {
+    stubCreateFail('服务繁忙，请稍后重试');
+    await expect(createAudioTrim('p1', { source_asset_id: '3985', output_format: 'mp3' })).rejects.toThrow('服务繁忙，请稍后重试');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('服务繁忙，请稍后重试');
   });
 });

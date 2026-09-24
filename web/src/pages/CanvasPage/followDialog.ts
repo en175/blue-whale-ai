@@ -39,8 +39,14 @@ export function computeFollowAnchor(opts: {
 export const FOLLOW_ABOVE_LIFT = 52;
 /** 上方锚定水平视口钳制默认估半宽（屏幕像素）：仅用于钳制边界，不参与居中。
  *  IKH3XZ 五画质工具横排后工具条实测 473px；IKH8BJ 视频卡追加「场景切分」后视频工具条
- *  实测 528px（真实半宽约 264），250→270 保证贴边不被裁。 */
-export const FOLLOW_ABOVE_HALF_WIDTH = 270;
+ *  记 528px（真实半宽约 264），250→270 保证贴边不被裁。
+ *  IKHLKR 首位「HD」单按钮升为「高清 ▾」下拉触发钮后**重新实测**：视频卡工具条 564px
+ *  （headless chromium + 仓内 global.css 渲染真实工具条；同环境复核图片卡工具条 473px，
+ *  与 ADR-0107 记录一致，测量口径可信），真实半宽约 282，270→288 维持同一 6px 余量。
+ *  新增宽度来自触发钮的下拉箭头（ChevronDown 12px + toolBtn gap 6px = +18px）。
+ *  IKHK7N 视频卡再追加「智能抠像 ▾」（图标+文字+chevron，形状同「智能去字幕 ▾」约 106px），
+ *  与「高清 ▾」并存后估约 670px（真实半宽约 335），288→341 维持同一 6px 余量。 */
+export const FOLLOW_ABOVE_HALF_WIDTH = 341;
 /** 上方锚定垂直钳顶保底（屏幕像素）：卡片顶到视口上方时工具条不被容器裁掉 */
 export const FOLLOW_ABOVE_MIN_TOP = 8;
 

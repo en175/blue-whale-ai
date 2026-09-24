@@ -3,7 +3,7 @@
  * 一次拉取项目快照，提取画布（节点 + 视口 + 版本号）与资产字典；
  * 加载失败静默降级为空画布，不阻断画布操作
  * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { fetchProjectSnapshot, type SnapshotAsset } from '@/api/projects';
 import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/api/canvas';
@@ -45,24 +45,40 @@ function parseNodes(raw: unknown): Node[] {
  */
 export function useCanvasDoc(projectId: string) {
   const [doc, setDoc] = useState<CanvasDoc | null>(null);
+  const [docProjectId, setDocProjectId] = useState<string | null>(null);
   /** 快照资产字典（key 为 assetId），供节点还原资产 URL */
   const [assets, setAssets] = useState<Record<string, SnapshotAsset>>({});
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   /** 旧生成卡迁移报告（IKDLQK）：随本次打开响应透传，无迁移为 null */
   const [legacyMigration, setLegacyMigration] = useState<LegacyMigrationReport | null>(null);
+  const activeProjectRef = useRef(projectId);
+  activeProjectRef.current = projectId;
+  const loadSerialRef = useRef(0);
 
   /** 拉取快照并水合；手动刷新时保留现有画布，避免节点短暂清空。返回本次读到的节点，供调用方在 React 提交前判断注入结果。 */
   const load = useCallback((preserveCurrent = false): Promise<Node[]> => {
+    if (activeProjectRef.current !== projectId) return Promise.resolve([]);
+    const serial = ++loadSerialRef.current;
+    const isCurrent = () => activeProjectRef.current === projectId && loadSerialRef.current === serial;
     if (!projectId) {
       setDoc(null);
+      setDocProjectId(null);
       setAssets({});
       setLegacyMigration(null);
+      setLoadFailed(false);
       return Promise.resolve([]);
     }
-    if (!preserveCurrent) setDoc(null);
+    if (!preserveCurrent) {
+      setDoc(null);
+      setDocProjectId(null);
+      setLoadFailed(false);
+    }
     setLoading(true);
     return fetchProjectSnapshot(projectId)
       .then(async (snap) => {
+        if (!isCurrent()) return [];
+        setLoadFailed(false);
         setAssets(snap.assets ?? {});
         const canvas = snap.canvas;
         setLegacyMigration(snap.legacy_migration ?? null);
@@ -82,18 +98,28 @@ export function useCanvasDoc(projectId: string) {
         if (!canvas || canvas.nodes == null) {
           try {
             const rec = await fetchCanvasDoc(projectId);
+            if (!isCurrent()) return [];
             if (import.meta.env.DEV) {
               console.info('[canvas] canvases 回退结果:', { version: rec.version, nodeCount: rec.nodes.length });
             }
             setLegacyMigration(rec.legacyMigration ?? null);
+            setLoadFailed(false);
+            setDocProjectId(projectId);
             setDoc(rec);
             return rec.nodes;
           } catch {
-            if (!preserveCurrent) setDoc(EMPTY_DOC);
+            if (isCurrent()) {
+              setLoadFailed(true);
+              if (!preserveCurrent) {
+                setDocProjectId(projectId);
+                setDoc(EMPTY_DOC);
+              }
+            }
             return [];
           }
         }
         const nodes = parseNodes(canvas.nodes);
+        setDocProjectId(projectId);
         setDoc({
           id: null,
           version: canvas.version ?? null,
@@ -104,11 +130,17 @@ export function useCanvasDoc(projectId: string) {
         return nodes;
       })
       .catch(() => {
-        if (!preserveCurrent) setDoc(EMPTY_DOC);
+        if (isCurrent()) {
+          setLoadFailed(true);
+          if (!preserveCurrent) {
+            setDocProjectId(projectId);
+            setDoc(EMPTY_DOC);
+          }
+        }
         return [];
       })
       .finally(() => {
-        setLoading(false);
+        if (isCurrent()) setLoading(false);
       });
   }, [projectId]);
 
@@ -157,5 +189,5 @@ export function useCanvasDoc(projectId: string) {
     });
   }, []);
 
-  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration, patchAsset, upsertAssets };
+  return { doc: docProjectId === projectId ? doc : null, assets, loading, loadFailed, refetch, acceptDoc: setDoc, legacyMigration, patchAsset, upsertAssets };
 }

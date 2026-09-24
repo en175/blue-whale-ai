@@ -8,6 +8,7 @@ import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageO
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
@@ -294,7 +295,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           resolve(0);
           audio.src = '';
         };
-        audio.src = src;
+        audio.src = resolveMediaSrc(src);
       });
       if (duration <= MAX_VOICE_DURATION) {
         results.push({ id: `voice-${Date.now()}-${results.length}`, src, name: f.name, duration });
@@ -410,9 +411,9 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                         <ImageOff size={16} strokeWidth={1.8} color="#666" />
                       </div>
                     ) : ref.type === 'video' ? (
-                      <video src={ref.src} className={styles.refThumbImg} muted playsInline />
+                      <video src={resolveMediaSrc(ref.src)} className={styles.refThumbImg} muted playsInline />
                     ) : (
-                      <img src={ref.src} alt="参考图" className={styles.refThumbImg} />
+                      <img src={resolveMediaSrc(ref.src)} crossOrigin={remoteImageCrossOrigin(ref.src)} alt="参考图" className={styles.refThumbImg} />
                     )}
                     <button
                       className={styles.refRemove}
@@ -550,7 +551,8 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                     <div key={v.id} className={styles.voicePlayer}>
                       <audio
                         className={styles.voiceAudio}
-                        src={v.src}
+                        src={resolveMediaSrc(v.src)}
+                        crossOrigin={remoteImageCrossOrigin(v.src)}
                         controls
                         preload="metadata"
                       />

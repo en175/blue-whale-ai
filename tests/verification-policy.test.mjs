@@ -107,14 +107,14 @@ test("classifies backend BFF sources as scoped/backend", async () => {
 });
 
 test("classifies the Java worker as its own area and actually runs Maven", async () => {
-  // 整棵 worker-java/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
+  // 整棵 server/blue-whale-worker/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
   // 看似安全，但计划里一条 Java 命令都没有——TS 侧有门禁、Java 侧静默裸奔。
   // 与 backend / web/scripts 那两个洞同形：有验证手段，只是选择器够不着。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
-    "worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
-    "worker-java/pom.xml",
+    "server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
+    "server/blue-whale-worker/pom.xml",
   ]);
   assert.equal(classification.tier, "scoped");
   assert.deepEqual(classification.areas, ["worker-java"]);
@@ -124,15 +124,22 @@ test("classifies the Java worker as its own area and actually runs Maven", async
   );
   assert.ok(
     flattened.some(
-      (command) => command.startsWith("mvn ") && command.includes("worker-java/pom.xml"),
+      (command) =>
+        command.startsWith("mvn ") &&
+        command.includes("server/pom.xml") &&
+        // ⚠️ 必须**从聚合根**跑并带 -pl worker -am：worker 依赖 server/blue-whale-common，
+        //    直接 `mvn -f server/blue-whale-worker/pom.xml` 会解析不到模块内依赖。
+        //    这条断言就是在钉住这一点——否则门禁会静默跑不起来。
+        command.includes("-pl blue-whale-worker") &&
+        command.includes("-am"),
     ),
-    "worker-java 是独立 Maven 工程，必须真的跑它的测试",
+    "worker-java 必须从聚合根用 -pl worker -am 跑（它依赖 server/blue-whale-common）",
   );
 
   // worker-java 是产品生成运行时：PR 阶段按产品影响路径升 full。
   // 补归类前它靠「未归类」兜底才升 full——归类后必须仍升 full，不能被这次修复顺带降级。
   const prClassification = classifyChanges(
-    ["worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
+    ["server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
     { stage: "pr" },
   );
   assert.equal(prClassification.tier, "full");

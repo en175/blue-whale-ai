@@ -179,6 +179,7 @@ model generation_jobs {
   gmt_modified             DateTime  @default(now()) @db.DateTime(0)
   version                  Int       @default(0)
   is_delete                Boolean   @default(false)
+  canvas_card_state        String    @default("pending") @db.VarChar(16)
   input                    Json?
 
   @@index([project_id], map: "idx_project_id")

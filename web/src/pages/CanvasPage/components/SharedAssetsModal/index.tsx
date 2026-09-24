@@ -39,6 +39,7 @@ import {
   type SharedAssetSceneSnapshot,
 } from '@/api/sharedAssets';
 import { isApiError } from '@/api/http';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** Tab 定义（对齐现有画布卡片类型） */
@@ -498,7 +499,8 @@ export default function SharedAssetsModal({
                         ) : cUrl ? (
                           <img
                             className={styles.coverImg}
-                            src={cUrl}
+                            src={resolveMediaSrc(cUrl)}
+                            crossOrigin={remoteImageCrossOrigin(cUrl)}
                             alt={titleFromAsset(item)}
                             loading="lazy"
                           />
@@ -617,18 +619,18 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
     case 'media': {
       const snap = item.snapshot as SharedAssetMediaSnapshot;
       if (item.kind === 'video') {
-        return <video className={styles.previewMedia} src={snap.url} controls />;
+        return <video className={styles.previewMedia} src={resolveMediaSrc(snap.url)} controls />;
       }
       if (item.kind === 'audio') {
         return (
           <div className={styles.previewAudioBox}>
             <AudioLines size={48} strokeWidth={1.5} className={styles.previewAudioIcon} />
             <p className={styles.previewAudioName}>{titleFromAsset(item)}</p>
-            <audio className={styles.previewAudio} src={snap.url} controls />
+            <audio className={styles.previewAudio} src={resolveMediaSrc(snap.url)} crossOrigin={remoteImageCrossOrigin(snap.url)} controls />
           </div>
         );
       }
-      return <img className={styles.previewMedia} src={snap.url} alt={titleFromAsset(item)} />;
+      return <img className={styles.previewMedia} src={resolveMediaSrc(snap.url)} crossOrigin={remoteImageCrossOrigin(snap.url)} alt={titleFromAsset(item)} />;
     }
     case 'card': {
       const snap = item.snapshot as SharedAssetCardSnapshot;
@@ -637,7 +639,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.referenceImages?.length > 0 && (
             <div className={styles.previewImgGrid}>
               {snap.referenceImages.map((img) => (
-                <img key={img.id} className={styles.previewImgItem} src={img.src} alt="参考图" />
+                <img key={img.id} className={styles.previewImgItem} src={resolveMediaSrc(img.src)} crossOrigin={remoteImageCrossOrigin(img.src)} alt="参考图" />
               ))}
             </div>
           )}
@@ -645,7 +647,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.voice && (
             <div className={styles.previewVoice}>
               <span className={styles.previewVoiceName}>音色：{snap.voice.name}</span>
-              <audio className={styles.previewAudio} src={snap.voice.src} controls />
+              <audio className={styles.previewAudio} src={resolveMediaSrc(snap.voice.src)} crossOrigin={remoteImageCrossOrigin(snap.voice.src)} controls />
             </div>
           )}
         </div>
@@ -659,7 +661,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
           {snap.images?.length > 0 && (
             <div className={styles.previewImgGrid}>
               {snap.images.map((img) => (
-                <img key={img.id} className={styles.previewImgItem} src={img.src} alt={snap.name} />
+                <img key={img.id} className={styles.previewImgItem} src={resolveMediaSrc(img.src)} crossOrigin={remoteImageCrossOrigin(img.src)} alt={snap.name} />
               ))}
             </div>
           )}

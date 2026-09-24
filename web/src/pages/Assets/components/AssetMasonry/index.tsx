@@ -9,6 +9,7 @@ import type { AssetRecord } from '@/api/assets';
 import Skeleton from '@/components/Skeleton';
 import AudioPlayer, { type AudioPlayerHandle } from '../AudioPlayer';
 import { assetMediaDisplay } from '../../assetMediaSrc';
+import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
 import { assetAspectRatio, typeLabel } from '../../assetGrid';
 import { startVideoPreview, stopVideoPreview } from '../../videoPreview';
 import styles from '../../index.module.css';
@@ -100,6 +101,7 @@ export function AssetMedia({
           ref={imgRef}
           className={styles.media}
           src={mediaSrc}
+          crossOrigin={remoteImageCrossOrigin(mediaSrc)}
           alt=""
           loading="lazy"
           onLoad={markLoaded}

@@ -125,6 +125,13 @@ img {
   white-space: nowrap;
 }
 
+/* 点在左侧工具栏等上层控件时，禁止画布节点/空白接手指针 */
+html.canvas-chrome-lock .react-flow__node,
+html.canvas-chrome-lock .react-flow__node *,
+html.canvas-chrome-lock .react-flow__pane {
+  pointer-events: none !important;
+}
+
 /* ---- React Flow 覆盖样式 ---- */
 .react-flow__background {
   background-color: var(--color-bg-primary) !important;
@@ -134,6 +141,9 @@ img {
   background-color: var(--color-bg-secondary) !important;
   border: 1px solid var(--color-border-primary) !important;
   border-radius: var(--radius-md) !important;
+  isolation: isolate;
+  transform: translateZ(0);
+  pointer-events: auto;
 }
 
 /* 小地图全局内容等对比度展示；视口用白框标示，不靠压暗非视口区域 */

@@ -427,6 +427,7 @@
  * ============================================ */
 .chipMenu {
   position: fixed;
+  transform: translateY(calc(-100% - 8px));
   display: flex;
   flex-direction: column;
   gap: 2px;

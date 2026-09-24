@@ -332,6 +332,28 @@ describe('gpt / banana mapping', () => {
     expect(result.value.request_mapping).toEqual({ matrix: { '1K': { '1:1': '2048x2048' } } });
   });
 
+  it('seedream：提交时矩阵键换回 api_value 拼写（worker 的查找键），不是 size.id', () => {
+    // IKHTL0：表单内部按 size.id 存键（渲染要按 id 取格），但 worker 查表用的是该档位的
+    // api_value。若按 id 提交，一次「什么都没改」的保存就会把库里 `1K` 的键改写成 `1k`，
+    // 靠 worker 的大小写兜底才不出事——隐性不变式被悄悄写坏。无 api_value 的档位回落用 id。
+    const result = buildCreateParams(
+      snapshot({
+        parser: 'seedream',
+        originalParser: 'seedream',
+        sizes: [
+          { id: '1k', label: '1K', apiValue: '1K' },
+          { id: '1.5k', label: '1.5K' },
+        ],
+        seedreamMatrix: { '1k': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.request_mapping).toEqual({
+      matrix: { '1K': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
+    });
+  });
+
   it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
     const result = buildCreateParams(
       snapshot({ parser: 'seedream', originalParser: 'gpt', seedreamMatrix: {} }),
@@ -533,6 +555,50 @@ describe('mergeMatrix：集合变化时保住其它格（IKHBDO）', () => {
     expect(mergeMatrix(prev, [{ id: '1K' }, { id: '2K' }], ['1:1'])).toEqual({
       '1K': { '1:1': '1024x1024' },
       '2K': { '1:1': '2048x2048' },
+    });
+  });
+});
+
+// IKHTL0：库里 matrix 的键与 supported_sizes 的 id 由两次迁移分别写入，大小写可能不一致
+// （IKDBYY 写 id 小写 `1k`，IK629 写矩阵键大写 `1K`）。读侧原本精确匹配 → 这些 seedream 行的
+// 矩阵整张显空白；而 worker 查表本来就大小写不敏感（ImageChannelMapper.resolveSeedreamSize
+// 有显式兜底），所以线上生成一直正常，坏的只有管理端显示。读侧必须与 worker 同口径。
+describe('parseGptMatrix：库中键大小写与表单 id 不一致（IKHTL0）', () => {
+  const sizes = [
+    { id: '1k', label: '1K' },
+    { id: '2k', label: '2K' },
+  ];
+  const ratios = ['1:1'];
+
+  it('库里键大写、表单 id 小写 → 归一到表单 id，格子有值', () => {
+    expect(parseGptMatrix({ matrix: { '1K': { '1:1': '1024x1024' } } }, sizes, ratios)).toEqual({
+      '1k': { '1:1': '1024x1024' },
+      '2k': { '1:1': '' },
+    });
+  });
+
+  it('库里键小写、表单 id 大写 → 同样归一到表单 id', () => {
+    expect(
+      parseGptMatrix(
+        { matrix: { '1k': { '1:1': '1024x1024' } } },
+        [{ id: '1K', label: '1K' }],
+        ratios,
+      ),
+    ).toEqual({ '1K': { '1:1': '1024x1024' } });
+  });
+
+  it('比例键大小写不同也归一', () => {
+    expect(parseGptMatrix({ matrix: { '1k': { auto: '1024x1024' } } }, sizes, ['Auto'])).toEqual({
+      '1k': { Auto: '1024x1024' },
+      '2k': { Auto: '' },
+    });
+  });
+
+  it('表单里没有的库键原样保留——保存时不得静默抹掉', () => {
+    expect(parseGptMatrix({ matrix: { '4K': { '1:1': '4096x4096' } } }, sizes, ratios)).toEqual({
+      '1k': { '1:1': '' },
+      '2k': { '1:1': '' },
+      '4K': { '1:1': '4096x4096' },
     });
   });
 });

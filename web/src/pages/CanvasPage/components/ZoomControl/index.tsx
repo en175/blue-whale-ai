@@ -12,7 +12,7 @@ export default function ZoomControl() {
   const percentage = Math.round(zoom * 100);
 
   return (
-    <div className={styles.zoomControl}>
+    <div className={styles.zoomControl} data-canvas-chrome>
       <button
         className={styles.zoomBtn}
         onClick={() => zoomOut()}

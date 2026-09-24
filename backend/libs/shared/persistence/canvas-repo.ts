@@ -97,6 +97,39 @@ function outputSlotIds(nodes: unknown): bigint[] {
   return [...ids];
 }
 
+function audioMixCardIds(nodes: unknown): bigint[] {
+  if (!Array.isArray(nodes)) return [];
+  const ids = new Set<bigint>();
+  for (const node of nodes) {
+    if (!node || typeof node !== "object" || Array.isArray(node) || node.type !== "mediaNode") continue;
+    const match = typeof node.id === "string" ? /^audio-mix-([1-9][0-9]*)$/.exec(node.id) : null;
+    if (!match || String(node.data?.jobId) !== match[1]) continue;
+    ids.add(BigInt(match[1]));
+  }
+  return [...ids];
+}
+
+async function markAudioMixCards(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+  nodes: unknown,
+  ownerId?: string,
+): Promise<void> {
+  if (!ownerId || !/^[1-9][0-9]*$/.test(ownerId)) return;
+  const ids = audioMixCardIds(nodes);
+  const scope = { project_id: projectId, user_id: BigInt(ownerId), type: "audio_mix", is_delete: false };
+  if (ids.length > 0) {
+    await tx.generation_jobs.updateMany({
+      where: { ...scope, id: { in: ids } },
+      data: { canvas_card_state: "present" },
+    });
+  }
+  await tx.generation_jobs.updateMany({
+    where: { ...scope, canvas_card_state: "present", ...(ids.length > 0 ? { id: { notIn: ids } } : {}) },
+    data: { canvas_card_state: "removed" },
+  });
+}
+
 async function markOutputSlotsPlaced(
   tx: Prisma.TransactionClient,
   projectId: bigint,
@@ -175,6 +208,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
             });
             await linkPromptMaterials(tx, pid, materials);
             await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+            await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
             return toView(row);
           });
         } catch (error) {
@@ -197,6 +231,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         if (result.count !== 1) return null;
         await linkPromptMaterials(tx, pid, materials);
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+        await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
         const row = await tx.canvas.findFirst({ where: { project_id: pid } });
         return row ? toView(row) : null;
       });

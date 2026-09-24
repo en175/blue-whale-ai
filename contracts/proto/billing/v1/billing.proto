@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+// billing-svc 的**同步 RPC 面**。
+//
+// ⚠️ 结算 / 返还**不走 RPC**，走 MQ 事件（见 events.proto）——
+//    它们不该阻塞任何用户请求。**只有 Hold 在用户等待路径上。**
+//
+// ⚠️ 金额单位：int64 **整数积分**（账本单位，见《计费逻辑详细设计》§1）。
+//    管线内部用 mc（1 积分 = 1000 mc）保精度，出口一次性四舍五入成积分——
+//    所以**线上的金额字段一律是积分**，不是 mc。看到 mc 只可能是在讲单价/中间量。
+package billing.v1;
+
+import "common/v1/types.proto";
+import "billing/v1/usage.proto";
+
+option java_package = "com.bluewhale.contracts.billing.v1";
+option java_multiple_files = true;
+
+service BillingService {
+
+  // 预扣。**在用户等待路径上——调用方超时预算 50ms。**
+  //
+  // 幂等键 hold:{command_id}。重复请求返回首次结果 + duplicated=true（**不是错误**）。
+  //
+  // 失败语义（调用方须 fail closed，见《架构设计》§11）：
+  //   - 余额不足        → FAILED_PRECONDITION / INSUFFICIENT_CREDITS
+  //   - 该组合算不出价  → INVALID_ARGUMENT / UNPRICEABLE（说明**定价漏配**）
+  //   - billing 不可用  → UNAVAILABLE
+  rpc Hold(HoldRequest) returns (HoldResponse);
+
+  // 余额与持有批次（用户可见）。允许短缓存（Redis，写时失效）。
+  rpc QueryBalance(QueryBalanceRequest) returns (QueryBalanceResponse);
+
+  // 用户可见流水（**一个业务动作一行**，见《计费逻辑详细设计》§2.3）。
+  rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
+
+  // 计价 —— **只算不扣**。切换前的影子模式与前端价格预览用。
+  //
+  // ⚠️ **不复用 Hold**：Hold 会真的冻结积分。影子模式每天要算成千上万次，
+  //    每次都冻一笔再退一笔，既不必要，也会把账本与对账搅浑——
+  //    影子期的意义正是「不碰钱也能知道算得对不对」（runbook §3.2）。
+  //
+  // 与 Hold 的另外两点差别：
+  //   · 不校验余额：报价是「这个组合多少钱」，与用户有多少钱无关
+  //   · 允许带真实用量报价（结算/影子场景），留空则按契约用量（提交前预览）
+  //
+  // 失败语义与 Hold 一致（算不出价 → INVALID_ARGUMENT / UNPRICEABLE）：
+  // 影子模式跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单。
+  rpc Quote(QuoteRequest) returns (QuoteResponse);
+}
+
+message HoldRequest {
+  int64  user_id           = 1;
+  // ★ 幂等键来源——**客户端生成，不是 job_id**。
+  //   这样 Hold 能发生在写 job 之前：Hold 成功但写 job 失败时，
+  //   重试命中幂等即可，不需要跨服务补偿、不产生垃圾 job。
+  string command_id        = 2;
+  int64  job_id            = 3;
+  string model_id          = 4;
+  string task_type         = 5;
+  common.v1.SpecAttrs specs = 6; // 原始规格，billing 内部 normalize
+  string title             = 7;  // 展示文案快照，写进用户流水
+
+  // ★ 用户等级：free | basic | pro | max（空 = free）。
+  //
+  // 为什么由调用方传、而不是 billing 反查 identity：
+  //   会员折扣与「限等级」的营销活动都要用它，而 Hold 在用户等待路径上（预算 50ms）。
+  //   调用方在校验会话时**已经拿到** tier（identity.VerifySession 的返回值里就有），
+  //   多传一个字段是零成本；让 billing 再发一次 RPC 则是在最热的路径上加一跳。
+  //
+  // ⚠️ 这是**由调用方断言**的输入：传错档位就能拿到不该有的折扣。
+  //    所以 Hold 只对该调用方（backend）开放，**不可由公网直达**。
+  string tier              = 8;
+}
+
+message HoldResponse {
+  int64 reserved_credits = 1; // 整数积分
+  // ★ 调用方须冻结进 generation_jobs（经 billing_cost_reservations），
+  //   结算时按它复现定价——改价不影响已提交任务。
+  int32 catalog_version  = 2;
+  bool  duplicated       = 3; // 幂等命中
+}
+
+message QuoteRequest {
+  int64  user_id           = 1;
+  string model_id          = 2;
+  string task_type         = 3;
+  common.v1.SpecAttrs specs = 4;
+  // 用户等级：free | basic | pro | max（空 = free）。折扣解析用。
+  // 与 Hold 同理：由调用方传，避免在最热的路径上多一跳 RPC。
+  string tier              = 5;
+  // 用量。留空 = 按契约用量报价（提交前预览）；
+  // 带上 = 按真实用量报价（结算、影子对账）。
+  repeated UsageLine usage = 6;
+}
+
+message QuoteResponse {
+  int64 credits          = 1; // **整数积分** —— 用户看到的与账本记的是同一个数
+  int32 catalog_version  = 2; // 报了哪个版本；影子对账时按它复现
+  // 命中的折扣系数（万分比，10000 = 原价）与明细，供「为什么这个价」追溯
+  int32 discount_bp                = 3;
+  repeated AppliedDiscount applied = 4;
+}
+
+message AppliedDiscount {
+  string source    = 1; // member | promotion | frozen
+  string code      = 2; // 营销活动的业务码；会员折扣为空
+  int32  factor_bp = 3; // 该条规则自身的系数
+}
+
+message QueryBalanceRequest {
+  int64 user_id = 1;
+}
+
+message QueryBalanceResponse {
+  int64 available_credits = 1; // 整数积分，Σ(remaining − frozen)
+  int64 frozen_credits    = 2; // 整数积分
+  repeated ExpiringLot expiring = 3; // 临期批次，前端展示「X 积分将于 Y 日过期」
+}
+
+message ExpiringLot {
+  int64  credits    = 1; // 整数积分
+  string expires_at = 2; // RFC3339
+  string source     = 3; // register | daily | invite | redeem | purchased | bonus
+                         // | subscription | gift | compensation —— 决定展示文案
+}
+
+message ListTransactionsRequest {
+  int64  user_id     = 1;
+  string type_filter = 2; // 可选：consume | recharge | daily | ... 空 = 全部
+  common.v1.PageRequest page = 3;
+}
+
+message ListTransactionsResponse {
+  repeated UserTransaction items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// ★ 用户可见流水。
+//
+// ⚠️ **刻意不含 reserved_amount** —— 落实「任何用户可见界面永远只出现一个金额」这条硬规则
+//    （《计费逻辑详细设计》§2.3.1）。预扣值只对客服/运营后台可见。
+message UserTransaction {
+  string id         = 1;
+  string type       = 2; // consume | recharge | bonus | daily | invite | redeem
+                         // | subscription | gift | compensation | refund | expire
+  string direction  = 3; // in | out
+  string title      = 4; // 「视频生成 · seedance-2.5 1080p 5s」
+  int64  amount     = 5; // 整数积分，**最终值，唯一金额**
+  string status     = 6; // pending | done
+  string created_at = 7; // RFC3339
+  string settled_at = 8; // RFC3339，仅 done 时非空
+}

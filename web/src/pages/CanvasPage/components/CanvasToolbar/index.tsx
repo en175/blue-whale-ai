@@ -1,7 +1,8 @@
 /* ============================================
  * CanvasToolbar 画布左侧工具栏：节点创建、对话窗口与扩展工具菜单入口
  * ============================================ */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Hand,
   MousePointer2,
@@ -26,6 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import styles from './index.module.css';
+import { lockChromeSelection, registerCanvasChrome } from '../Canvas/chromeHitGuard';
 
 type ToolMode = 'drag' | 'select';
 
@@ -109,6 +111,28 @@ export default function CanvasToolbar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [openMenu, setOpenMenu] = useState<ToolMenuKey | 'upload' | null>(null);
+  const [stageAnchor, setStageAnchor] = useState({ left: 16, top: typeof window === 'undefined' ? 0 : window.innerHeight / 2 });
+
+  useEffect(() => registerCanvasChrome(toolbarRef.current), []);
+
+  useLayoutEffect(() => {
+    const update = () => {
+      const stage = document.querySelector('[data-canvas-stage]');
+      if (!(stage instanceof HTMLElement)) return;
+      const rect = stage.getBoundingClientRect();
+      const pad = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--spacing-lg')) || 16;
+      setStageAnchor({ left: rect.left + pad, top: rect.top + rect.height / 2 });
+    };
+    update();
+    const stage = document.querySelector('[data-canvas-stage]');
+    const observer = stage ? new ResizeObserver(update) : null;
+    if (stage) observer?.observe(stage);
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   /** 点击外部关闭弹出菜单 */
   useEffect(() => {
@@ -187,8 +211,16 @@ export default function CanvasToolbar({
     );
   };
 
-  return (
-    <div ref={toolbarRef} className={styles.toolbar}>
+  return createPortal(
+    <div
+      ref={toolbarRef}
+      className={styles.toolbar}
+      data-canvas-chrome
+      style={{ left: stageAnchor.left, top: stageAnchor.top, zIndex: 2147483000 }}
+      onPointerDownCapture={() => {
+        lockChromeSelection();
+      }}
+    >
       {/* 菜单打开时点击外部收起 */}
       {openMenu && <div className={styles.menuOverlay} onClick={() => setOpenMenu(null)} />}
 
@@ -284,6 +316,7 @@ export default function CanvasToolbar({
 
       {/* 商品（弹出：新建商品 / 导入商品） */}
       {renderMenuTool('goods')}
-    </div>
+    </div>,
+    document.body,
   );
 }

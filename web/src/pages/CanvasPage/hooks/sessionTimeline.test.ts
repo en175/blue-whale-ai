@@ -18,6 +18,7 @@ import {
   phasesOf,
   processItemElapsedMs,
   reduceSessionEvent,
+  showsTurnFooter,
   startLiveRun,
   toolLabel,
   type SessionState,
@@ -309,6 +310,28 @@ describe('终态兜底（铁律一）：有开始就有结束', () => {
     expect(state.runningRunId).toBeNull();
     // 失败后什么都不画正文：条目只剩思考（没有原话与步骤时连思考也没有）。
     expect(kinds(itemsOf(turn, ''))).toEqual([]);
+  });
+
+  /**
+   * IKHV7G 本地真机：上游过载重试用尽，run 落 failed，对话里「都按推荐来」下面一片空——没有失败那句话，
+   * 也没有「重新回答」，只剩状态行「上一轮未完成」；刷新之后两样才出现。失败的轮为了留思考与工具行
+   * 回看，`live` 保留着（ended），而轮尾那一行的条件是「没有 live」，于是实时画面里永远不给。
+   */
+  it('失败的轮实时就给轮尾那一行，不必等刷新', () => {
+    const state = replay([
+      ...base,
+      runEvent('run.failed', 'run1', 'A', 3000, {
+        run: { failure: { code: 'upstream_unavailable', message: '模型服务暂时不可用，请稍后重试。', retryable: true } },
+      }),
+    ]);
+    const [turn] = turnsOf(state);
+    expect(turn.live?.ended).toBe(true);
+    expect(showsTurnFooter(turn)).toBe(true);
+  });
+
+  it('还在跑的轮不给轮尾：账还没结', () => {
+    const [turn] = turnsOf(replay(base));
+    expect(showsTurnFooter(turn)).toBe(false);
   });
 
   it('取消：已流出的字固化成本地回答，形状与服务端一致；服务端消息随后按 run_id 替换', () => {

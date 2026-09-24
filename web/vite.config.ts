@@ -135,9 +135,14 @@ function tosFetchProxy(): Plugin {
           const respBuf = Buffer.from(await forwardRes.arrayBuffer())
           console.log('[TOS Fetch Proxy] TOS 响应:', forwardRes.status, `${respBuf.length} bytes`)
 
-          const respHeaders: Record<string, string> = {}
+          const respHeaders: Record<string, string> = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+            'Accept-Ranges': 'bytes',
+          }
           forwardRes.headers.forEach((value, key) => {
-            if (!['transfer-encoding', 'connection', 'accept-ranges'].includes(key.toLowerCase())) {
+            if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
               respHeaders[key] = value
             }
           })

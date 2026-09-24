@@ -1,0 +1,57 @@
+package com.bluewhale.billing.catalog;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.stereotype.Component;
+
+/**
+ * 启动时把生效中的定价目录装进内存。
+ *
+ * <h2>为什么必须有这个类</h2>
+ *
+ * {@link CatalogHolder#reload()} 此前**只有测试在调**。也就是说服务正常启动后
+ * 目录是空的，`lookup()` 一律返回 null，**每一次 Hold 都会以 UNPRICEABLE 被拒**——
+ * 表现是「计价功能整个不可用」，而日志里只有一条 WARN，很容易被当成配置没配对。
+ *
+ * <h2>为什么是 ApplicationRunner 而不是 {@code @PostConstruct}</h2>
+ *
+ * 表是 Flyway 建的，而 Flyway 的执行时机由 Boot 的自动配置编排。
+ * 在 {@code @PostConstruct} 里读表，可能在迁移跑完**之前**——首次部署时表还不存在，
+ * 于是拿到「目录为空」并一直保持到下次重启。{@code ApplicationRunner} 在容器
+ * 完全就绪后执行，此时迁移必已完成。
+ *
+ * <h2>没有 active 版本时不阻止启动</h2>
+ *
+ * 这是刻意的（见 {@link CatalogHolder} 的说明）：进程起得来，运维才能进去发目录；
+ * 起不来就只剩「改配置文件重启」一条路。代价是计价会拒绝——而这是**正确的**反应，
+ * 比按 0 计价白送强。
+ *
+ * <p>⚠️ 发布新目录后要使它生效，目前需要重启进程或显式调用 {@code reload()}——
+ * 「发布即热生效」要走管理端接口（《架构设计》§12），尚未落地。
+ */
+@Component
+public class CatalogBootstrap implements ApplicationRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(CatalogBootstrap.class);
+
+    private final CatalogHolder holder;
+
+    public CatalogBootstrap(CatalogHolder holder) {
+        this.holder = holder;
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
+        boolean loaded = holder.reload();
+        if (loaded) {
+            log.info("启动装载定价目录：v{}", holder.currentVersion());
+        } else {
+            // 说清后果，别让运维去猜这条 WARN 要不要紧
+            log.warn("启动时没有可用的定价目录（v{}）——计价会拒绝所有提交（UNPRICEABLE），"
+                            + "直到发布一条 status='active' 的目录并重启",
+                    holder.currentVersion());
+        }
+    }
+}

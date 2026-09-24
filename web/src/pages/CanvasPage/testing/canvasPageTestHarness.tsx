@@ -13,6 +13,7 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
+import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/api/jobs';
 
 vi.mock('../components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
@@ -41,7 +42,10 @@ vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null 
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 /** API 打桩：fetchProjects 默认单项目、fetchGenerationModels 默认空、fetchJobStatus 默认无实现——
- *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖 */
+ *  需要多项目/生成模型/任务状态的测试在各自 beforeEach 里 mockResolvedValue / mockImplementation 覆盖。
+ *  cancelGenerationJob 默认成功返回（取消确认链 .then 需要 promise）；createFrameInterpolation
+ *  默认无实现（IKHLKX 插帧发送：需要的测试显式 mockResolvedValue）；fetchFrameInterpolationCurrent
+ *  默认 null（IKHSFF 关页恢复：无关联任务时水合恢复查询为 no-op，需要恢复的测试显式覆盖）。 */
 export const apiMocks = {
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   createProject: vi.fn(),
@@ -56,6 +60,19 @@ export const apiMocks = {
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
+  cancelGenerationJob: vi.fn(async () => null),
+  retryGenerationJob: vi.fn(),
+  retryAudioMix: vi.fn(),
+  newIdempotencyKey: vi.fn(() => 'test-retry-key'),
+  createFrameInterpolation: vi.fn(),
+  fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
+  fetchJobs: vi.fn(async (_params?: FetchJobsParams): Promise<JobListData> => ({ records: [], total: 0, size: 20, current: 1 })),
+  /** 调速创建（IKI4LX 项目隔离回归：默认无实现，需要的测试显式 mockResolvedValue /
+   *  挂起手工放行；断言第三参 { silent: true } 同插帧先例） */
+  createAudioSpeed: vi.fn(),
+  /** 截取创建（IKI61O 会话纪元回归：默认无实现，需要的测试显式 mockResolvedValue /
+   *  挂起手工放行） */
+  createAudioTrim: vi.fn(),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -94,12 +111,18 @@ vi.mock('@/api/canvas', () => ({
 }));
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: vi.fn(),
-  cancelGenerationJob: vi.fn(),
-  retryGenerationJob: vi.fn(),
+  cancelGenerationJob: apiMocks.cancelGenerationJob,
+  retryGenerationJob: apiMocks.retryGenerationJob,
+  retryAudioMix: apiMocks.retryAudioMix,
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: vi.fn(),
+  createFrameInterpolation: apiMocks.createFrameInterpolation,
+  fetchFrameInterpolationCurrent: apiMocks.fetchFrameInterpolationCurrent,
+  fetchJobs: apiMocks.fetchJobs,
   createMediaExtraction: vi.fn(),
-  createAudioTrim: vi.fn(),
+  createAudioTrim: apiMocks.createAudioTrim,
+  createAudioSpeed: apiMocks.createAudioSpeed,
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));

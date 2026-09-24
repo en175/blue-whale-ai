@@ -3,6 +3,7 @@
  * top 是工具栏顶边；尺寸不随画布缩放（容器在 viewport transform 之外）。 */
 .toolbarLayer {
   position: absolute;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
+  isolation: isolate;
   z-index: 30;
 }

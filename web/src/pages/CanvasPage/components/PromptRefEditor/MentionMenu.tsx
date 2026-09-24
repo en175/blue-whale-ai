@@ -5,6 +5,7 @@
  * 纯展示组件：过滤由调用方完成，键盘导航下标扁平（refs + 添加入口）。
  * ============================================ */
 import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, AudioLines } from 'lucide-react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface MentionRefItem {
@@ -27,10 +28,10 @@ export function MentionRefRow({ item, active, onPick, onHover, testId }: {
   testId?: string;
 }) {
   const renderThumb = () => {
-    if (item.mediaType === 'video') return <video className={styles.mentionThumb} src={item.url} muted preload="metadata" />;
+    if (item.mediaType === 'video') return <video className={styles.mentionThumb} src={resolveMediaSrc(item.url)} muted preload="metadata" />;
     if (item.mediaType === 'audio') return <AudioLines size={20} strokeWidth={1.5} />;
     if (item.mediaType === 'text') return <FileText size={20} strokeWidth={1.5} />;
-    if (item.url) return <img className={styles.mentionThumb} src={item.url} alt="" />;
+    if (item.url) return <img className={styles.mentionThumb} src={resolveMediaSrc(item.url)} crossOrigin={remoteImageCrossOrigin(item.url)} alt="" />;
     return <ImageIcon size={20} strokeWidth={1.5} />;
   };
   return (

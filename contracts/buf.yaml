@@ -1,0 +1,24 @@
+version: v2
+
+# 跨进程契约的**唯一权威**（ADR-0113 决策 8：契约用 Buf proto，TS 类型不再跨服务使用）。
+#
+# 目录约定：
+#   contracts/proto/{common,billing,identity}/v1/*.proto   ← 源文件（本目录，入仓）
+#   生成物                                                   ← **不入仓**，构建时生成
+#
+# 为什么生成物不入仓：TS 与 Java 两端各生成一份，入库会漂移；
+# 构建时生成保证「同一份 .proto 产出两端一致的代码」。
+modules:
+  - path: proto
+
+lint:
+  # STANDARD 全开，**不设 except** —— 例外要有理由，不写「反正先关了」。
+  # 目前零告警；将来要加例外，必须在下面写清楚理由。
+  use:
+    - STANDARD
+
+breaking:
+  # FILE 粒度：任何破坏性字段变更都要被 CI 拦下。
+  # 对照基线在 CI 里指定（`--against '.git#branch=release/2026.09.29'`）。
+  use:
+    - FILE

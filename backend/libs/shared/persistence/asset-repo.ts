@@ -8,6 +8,8 @@ import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 export interface AssetView {
   id: string;
   type: string;
+  /** 资产入库状态；仅 normal 可作为音频混合输入。 */
+  status: string | null;
   url: string;
   width: number | null;
   height: number | null;
@@ -75,6 +77,7 @@ export interface AssetInternal {
  */
 export interface AssetSourceFields {
   type: string;
+  project_id: bigint;
   storage_key: string | null;
   url: string;
   mime: string | null;
@@ -401,6 +404,7 @@ function toAssetView(
   a: {
     id: bigint;
     type: string;
+    status?: string | null;
     url: string;
     width: number | null;
     height: number | null;
@@ -420,6 +424,7 @@ function toAssetView(
   return {
     id: a.id.toString(),
     type: a.type,
+    status: a.status ?? null,
     url: a.url,
     width: a.width,
     height: a.height,
@@ -657,6 +662,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       if (!row) return null;
       return {
         type: row.type,
+        project_id: row.project_id,
         storage_key: row.storage_key,
         url: row.url,
         mime: row.mime,

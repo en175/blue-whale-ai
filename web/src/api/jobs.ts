@@ -2,24 +2,36 @@
  * jobs 接口：生成任务创建/取消/重试/轮询/列表
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
-import { apiRequest, isApiError, type ApiError } from './http';
+import { apiRequest, isApiError, silentInit, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { VideoSubtitleEraseInput } from '@lib/contracts/video-subtitle-erase';
 import type { VideoEnhanceInput } from '@lib/contracts/video-enhance';
+import {
+  VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+} from '@lib/contracts/video-frame-interpolation';
+import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-interpolation';
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
+import type { AudioMixCreate } from '@lib/contracts/audio-mix';
+import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
+import type {
+  VideoMattingBackgroundColor,
+  VideoMattingFormat,
+  VideoMattingMode,
+} from '@lib/contracts/video-matting';
 
 /** 可由普通生成端点创建的任务类型（image_enhance / image_outpaint 走专属创建端点，不在此列） */
 export type GenerationJobType = 'image' | 'video' | 'audio';
 
 /** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim';
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'video_frame_interpolation';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -181,12 +193,14 @@ export interface VocalSplitCreatedData {
 export function createVocalSplit(
   projectId: string,
   payload: CreateVocalSplitPayload,
+  init?: { silent?: boolean },
 ): Promise<VocalSplitCreatedData> {
   return apiRequest<VocalSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -262,7 +276,7 @@ export interface JobDetail {
 
 /** GET /api/jobs 列表项 */
 export interface JobRecord {
-  job_id: number;
+  job_id: number | string;
   type: JobType;
   status: JobStatus;
   progress: number;
@@ -270,6 +284,7 @@ export interface JobRecord {
   created_at: string;
   output_assets: JobAsset[];
   error?: JobError | null;
+  canvas_card_state?: 'pending' | 'present' | 'removed';
 }
 
 /** GET /api/jobs 返回 */
@@ -316,12 +331,14 @@ export function createGenerationJob(
 export function createMediaExtraction(
   projectId: string,
   payload: CreateMediaExtractionPayload,
+  init?: { silent?: boolean },
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -339,16 +356,77 @@ export interface AudioTrimCreatedData {
   status: 'queued';
 }
 
-/** 创建音频截取任务（IKHB7A，编辑态发送闭环）。 */
+/** 创建音频截取任务（IKHB7A，编辑态发送闭环）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：静默传输失败仍抛 ApiError
+ *  但 http 层不 toast，由持有发送身份的页面 catch 统一提示一次（先例 createAudioSpeed）。 */
 export function createAudioTrim(
   projectId: string,
   payload: CreateAudioTrimPayload,
+  init?: { silent?: boolean },
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-trims`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** 业务 API 接受后返回任务 id；画布结果卡在受理后创建。 */
+export function createAudioMix(
+  projectId: string,
+  payload: AudioMixCreate,
+  init?: { silent?: boolean },
+): Promise<AudioTrimCreatedData> {
+  return apiRequest<AudioTrimCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
+    { method: 'POST', body: JSON.stringify(payload), ...silentInit(init) },
+  );
+}
+
+/** 使用服务端冻结输入重试同一音频混合任务；调用方为一次重试尝试保留同一个幂等键。 */
+export function retryAudioMix(
+  projectId: string,
+  jobId: string | number,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
+  return apiRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
+    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...silentInit(init) },
+  );
+}
+
+/** POST /api/projects/:id/audio-speeds 请求体（键名与 backend/libs/contracts/audio-speed.ts
+ *  契约恒等；source_asset_id 必传、speed 可选——贴原速省略口径，1.0 不传走官方默认；
+ *  构造走契约 buildAudioSpeedInput 单源，web 不各自拼键）。 */
+export type CreateAudioSpeedPayload = AudioSpeedInput;
+
+/** 创建音频调速任务返回（IKHW5S）；免费口径同 media_extract——不带幂等头、无积分预估、
+ *  不走余额拦截门。调速占位卡由前端在创建成功后本地插入（源音频卡右侧 +60px），
+ *  产物经 GET /api/jobs/:id 的 asset 回填（duration 以火山返回为权威时长）。 */
+export interface AudioSpeedCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建音频调速任务（IKHW5S，编辑态发送闭环）。
+ *  init.silent 透传 apiRequest（IKI4LX「请求错误只提示一次」，同 createFrameInterpolation
+ *  先例）：静默传输失败仍抛 ApiError 但 http 层不 toast，由调用方 catch 统一提示一次。 */
+export function createAudioSpeed(
+  projectId: string,
+  payload: CreateAudioSpeedPayload,
+  init?: { silent?: boolean },
+): Promise<AudioSpeedCreatedData> {
+  return apiRequest<AudioSpeedCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-speeds`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -385,12 +463,14 @@ export interface ImageEraseCreatedData {
 export function createImageErase(
   projectId: string,
   payload: CreateImageErasePayload,
+  init?: { silent?: boolean },
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -411,12 +491,14 @@ export interface ImageCutoutCreatedData {
 export function createImageCutout(
   projectId: string,
   payload: CreateImageCutoutPayload,
+  init?: { silent?: boolean },
 ): Promise<ImageCutoutCreatedData> {
   return apiRequest<ImageCutoutCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -456,12 +538,14 @@ export interface VideoSubtitleEraseCreatedData {
 export function createVideoSubtitleErase(
   projectId: string,
   payload: CreateVideoSubtitleErasePayload,
+  init?: { silent?: boolean },
 ): Promise<VideoSubtitleEraseCreatedData> {
   return apiRequest<VideoSubtitleEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -494,6 +578,68 @@ export function createVideoEnhancement(
   );
 }
 
+/** POST /api/projects/:id/video-frame-interpolations 请求体（三键，键名与
+ *  backend/libs/contracts/video-frame-interpolation.ts 契约恒等；IKHLK3 创建入口 strict zod 复核：
+ *  source_asset_id 正整数字符串、target_node_id 非空、fps ∈ 30/60/120 **整型直传**）。 */
+export type CreateFrameInterpolationPayload = VideoFrameInterpolationInput;
+
+/** 创建视频插帧任务返回（IKHLK3）；同 HD 高清：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface FrameInterpolationCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频插帧任务（IKHLK3 端点；免费口径同 HD 高清 / 去字幕——不带幂等头、
+ *  无 body 内 client_token、无积分预估、不走余额拦截门）。
+ *  插帧草稿卡已由前端本地建好（target_node_id 指向它），产物经 GET /api/jobs/:id 的 asset 回填。
+ *  init.silent 透传 apiRequest（IKHSFH「请求错误只提示一次」）：静默传输失败仍抛 ApiError
+ *  但 http 层不 toast，由调用方 catch 统一提示一次（先例 createConversationQuote）。 */
+export function createFrameInterpolation(
+  projectId: string,
+  payload: CreateFrameInterpolationPayload,
+  init?: { silent?: boolean },
+): Promise<FrameInterpolationCreatedData> {
+  return apiRequest<FrameInterpolationCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** GET /api/projects/:projectId/video-frame-interpolations/current 返回（IKHSFE 恢复契约）：
+ *  键名与契约 VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS 恒等；目标节点无任何关联任务时
+ *  data 为 null（不另设空对象形态）。响应不含 input（凭证不外泄），成品/失败详情走
+ *  GET /api/jobs/:id。status 不过滤——failed / cancelled 也能查回（前端决定是否复活轮询）。 */
+export interface FrameInterpolationCurrentData {
+  /** 当前关联任务 id（同节点多历史任务按 gmt_create/id 降序取最新） */
+  job_id: string;
+  /** 任务状态（generation_jobs.status 原值） */
+  status: JobStatus;
+  /** 进度百分比原值（终态恒 0 或 100） */
+  progress: number;
+  /** 创建时间 ISO 串 */
+  created_at: string;
+}
+
+/** 查询目标节点当前关联的插帧任务（IKHSFE 恢复契约；路由段与查询键均契约同源）：
+ *  浏览器未收到创建响应就关页时，前端只持有草稿卡的 target_node_id（本地生成），
+ *  服务端按「同 user + 同 project + 同 target_node_id 的未软删任务取最新」查回当前关联，
+ *  供重新进入画布恢复原卡与任务（IKHSFF 关页恢复闭环）。 */
+export function fetchFrameInterpolationCurrent(
+  projectId: string,
+  targetNodeId: string,
+): Promise<FrameInterpolationCurrentData | null> {
+  return apiRequest<FrameInterpolationCurrentData | null>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-frame-interpolations/${VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT}` +
+      `?${VIDEO_FRAME_INTERPOLATION_INPUT_KEYS.targetNodeId}=${encodeURIComponent(targetNodeId)}`,
+    { silent: true },
+  );
+}
+
 /** POST /api/projects/:id/video-scene-splits 请求体（四键，业务键名与
  *  backend/libs/contracts/video-scene-split.ts 契约恒等；IKH8BO 创建入口 strict 复核：
  *  source_asset_id 正整数字符串、target_node_id 非空（发送前本地建的占位卡节点 id）、
@@ -516,13 +662,59 @@ export interface VideoSceneSplitCreatedData {
 /** 创建视频场景切分任务（IKH8BR）；免费口径同 image_enhance / media_extract——不带幂等头
  *  （幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡由前端在发送前
  *  本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id 轮询至终态
- *  （completed 分支的段卡扇出归 IKH8C1）。 */
+ *  （completed 分支的段卡扇出归 IKH8C1）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：发送即同步退会话，失败提示由页面
+ *  catch 按「退出后捕获纪元」单源提示（无后来会话不吞、有后来会话不扰），先例 createAudioSpeed。 */
 export function createVideoSceneSplit(
   projectId: string,
   payload: CreateVideoSceneSplitPayload,
+  init?: { silent?: boolean },
 ): Promise<VideoSceneSplitCreatedData> {
   return apiRequest<VideoSceneSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-scene-splits`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...silentInit(init),
+    },
+  );
+}
+
+/** POST /api/projects/:id/video-mattings 请求体（IKHK9N，键名与 backend/libs/contracts/
+ *  video-matting.ts 契约恒等；IKHK98 创建入口 strict 复核：source_asset_id 正整数字符串、
+ *  target_node_id 非空（发送前本地建的占位卡节点 id）、mode ∈ portrait/greenscreen（必填
+ *  无默认，入口下拉直选）、format ∈ WEBM/MP4（缺省补 WEBM）、background_color 仅 MP4
+ *  （缺省补 white；WEBM 传即拒——前端按 buildSmartMattingInput 保证 WEBM 形态恒无该键）；
+ *  client_token 为幂等基础设施键（≤64 可打印 ASCII），每次发送、每次失败重试都新生成
+ *  ——同 token 只会重放旧任务，禁复用。 */
+export interface CreateVideoMattingPayload {
+  source_asset_id: string;
+  target_node_id: string;
+  mode: VideoMattingMode;
+  format: VideoMattingFormat;
+  background_color?: VideoMattingBackgroundColor;
+  client_token: string;
+}
+
+/** 创建视频智能抠像任务返回（IKHK9N）；同家族：入队失败创建响应仍 200、
+ *  任务随即 enqueue_failed 经轮询呈现。 */
+export interface VideoMattingCreatedData {
+  job_id: string;
+  status: 'queued';
+}
+
+/** 创建视频智能抠像任务（IKHK9N）；免费口径同 image_enhance / media_extract / 场景切分
+ *  ——不带幂等头（幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡
+ *  由前端在发送前本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id
+ *  轮询至终态（succeeded 成品卡回填归 IKHKAC，failed 占位卡按冻结 input 原参数重试）。
+ *  错误面单源（审查修复 S1）：**不传 silent**——失败由 HTTP 层默认 toast 提示一次，调用方
+ *  （画布页）只落占位卡失败态，不得再 showToast 二次提示（request.md「Do not toast again」）。 */
+export function createVideoMatting(
+  projectId: string,
+  payload: CreateVideoMattingPayload,
+): Promise<VideoMattingCreatedData> {
+  return apiRequest<VideoMattingCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/video-mattings`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -575,6 +767,7 @@ export async function fetchJobStatus(jobId: number | string): Promise<JobDetail>
 /** GET /api/jobs 查询参数 */
 export interface FetchJobsParams {
   projectId?: string;
+  type?: JobType;
   status?: JobStatus;
   size?: number;
   /** 批量查询指定任务ID */
@@ -583,13 +776,14 @@ export interface FetchJobsParams {
 }
 
 /** 列出任务 GET /api/jobs（画布水合恢复时按状态批量查询） */
-export function fetchJobs(params: FetchJobsParams = {}) {
+export function fetchJobs(params: FetchJobsParams = {}, init?: { silent?: boolean }) {
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('projectId', params.projectId);
+  if (params.type) qs.set('type', params.type);
   if (params.status) qs.set('status', params.status);
   if (params.size !== undefined) qs.set('size', String(params.size));
   if (params.ids?.length) qs.set('ids', params.ids.join(','));
   if (params.page !== undefined) qs.set('page', String(params.page));
   const suffix = qs.toString();
-  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`);
+  return apiRequest<JobListData>(`/api/jobs${suffix ? `?${suffix}` : ''}`, init);
 }
