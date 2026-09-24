@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the current task worktree after its branch is merged into origin/master.
+# Remove a task worktree after its recorded release branch contains the task HEAD.
 
 set -euo pipefail
 
@@ -9,6 +9,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 ROOT="$(cd "$ROOT" && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"
+source "$ROOT/scripts/lib/python3-command.sh"
 WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"
 
 fail() {
@@ -25,7 +26,7 @@ branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
   "") fail "当前不是分支状态。" ;;
-  *) fail "当前分支不是工单分支：$branch" ;;
+  *) fail "当前分支不是工单分支：${branch}" ;;
 esac
 
 if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
@@ -33,10 +34,27 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   fail "工作区不干净，不能清理。"
 fi
 
-git -C "$ROOT" fetch origin
+select_python3_command || fail "找不到 Python 3，无法读取任务基线元数据。"
+target_branch="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read \
+  --worktree "$ROOT" --field target_branch)" || fail "任务基线元数据校验失败，未清理。"
+task_sha="$(git -C "$ROOT" rev-parse --verify HEAD)"
 
-if ! git -C "$ROOT" merge-base --is-ancestor HEAD origin/master; then
-  fail "当前分支尚未被 origin/master 包含。请等待 PR 合并，或继续处理审查反馈。"
+if ! git -C "$ROOT" fetch --no-tags origin "refs/heads/$target_branch"; then
+  fail "无法读取远端目标 ${target_branch}，未清理。"
+fi
+fetched_sha="$(git -C "$ROOT" rev-parse --verify 'FETCH_HEAD^{commit}')" \
+  || fail "远端目标 ${target_branch} 的提交无法验证，未清理。"
+if ! git -C "$ROOT" merge-base --is-ancestor "$task_sha" "$fetched_sha"; then
+  fail "远端目标 ${target_branch} 尚未包含任务提交 ${task_sha}，未清理。"
+fi
+
+# Fetch proves the target commit existed remotely. Check it again before local deletion
+# so a target branch moved during cleanup does not turn a stale fetch into proof.
+remote_line="$(git -C "$ROOT" ls-remote --exit-code --heads origin "refs/heads/$target_branch")" \
+  || fail "无法复核远端目标 ${target_branch}，未清理。"
+remote_sha="${remote_line%%[[:space:]]*}"
+if [ "$remote_sha" != "$fetched_sha" ]; then
+  fail "远端目标 ${target_branch} 在校验期间发生变化，未清理。"
 fi
 
 # 主 checkout = 不在 $WORKTREE_BASE 下的那个 worktree。
@@ -53,28 +71,9 @@ main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_B
 
 cd "$main_root"
 
-# 删除顺序（IK00BP 修复）：先 ls-remote 探活 + 删远程（网络操作），确认后再删本地
-# （worktree + ref）。不变式：网络操作必须最先且在本地删除之前。ls-remote --exit-code 三态：
-#   exit 0=远程存在 → push --delete；exit 2=远程不存在 → 幂等跳过；
-#   其他（1/128 等：网络瞬断/认证失败）→ 远程状态未知，报错且不动本地（worktree+ref+远程全未变），可安全重试。
-# 旧逻辑先删 worktree+本地 ref 再探活，网络瞬断返回非0非2被当「不存在」跳过删远程，
-# 留下「本地删、远程留」终态且 worktree 已无，重跑入口校验卡死。worktree remove / update-ref
-# 为本地操作放最后——若它们失败，远程已正确清理，无残留源分支，仅需本地重试或手动 prune。
-probe_rc=0
-git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1 || probe_rc=$?
-if [ "$probe_rc" = 0 ]; then
-  git push origin --delete "$branch"
-elif [ "$probe_rc" != 2 ]; then
-  fail "ls-remote 探活失败（exit ${probe_rc}），远程状态未知，未删本地分支：${branch}。网络恢复后重试即可。"
-fi
-
-# 远程已处理：删 worktree（本地，可重建）。
+# The remote task branch is retained. Remove only the local worktree and ref.
 git worktree remove "$ROOT"
 
-# 本地 master 可能是用户本地集成区，未必包含 origin/master。
-# 前面已经证明任务分支 HEAD 被 origin/master 包含，因此直接删除本地 ref 是安全清理。
-git update-ref -d "refs/heads/$branch"
+git update-ref -d "refs/heads/$branch" "$task_sha"
 
-git fetch --prune
-
-echo "✅ 已清理任务 worktree 和分支：$branch"
+echo "✅ 已清理本地任务 worktree 和分支：${branch}（远端任务分支保留）"
