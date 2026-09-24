@@ -330,7 +330,7 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("PR !854 审查修订: parent-reuse 转存/发布异常 → 按旧结果不可用回退重新提交（不写终态失败）")
+    @DisplayName("IKICD3: parent-reuse 转存/发布异常 → 按旧结果不可用回退重新提交（不写终态失败）")
     void parentReusePublishError_fallThroughToSubmit() {
         ClaimedVideoJobDto claim = videoClaim("118", false, null, 0, 0, "parent-task-expired");
         doReturn(Optional.of(claim)).when(stateMachine)
@@ -349,6 +349,7 @@ class VideoJobProcessorTest {
 
         verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
         verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
+        verify(producer).enqueue(eq("118"), eq(5000L));
         verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
