@@ -835,3 +835,25 @@ model legacy_card_history {
 
   @@unique([project_id, node_id], map: "uk_legacy_card_history")
 }
+
+/// 会员周期（identity_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
+/// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
+/// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。
+model identity_memberships {
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  tier         String    @db.VarChar(16)
+  status       String    @default("active") @db.VarChar(16)
+  started_at   DateTime  @db.DateTime(0)
+  expires_at   DateTime? @db.DateTime(0)
+  source       String    @db.VarChar(24)
+  biz_id       String    @db.VarChar(128)
+  grant_key    String    @db.VarChar(190)
+  gmt_create   DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified DateTime  @default(now()) @db.DateTime(0)
+  version      Int       @default(0)
+  is_delete    Boolean   @default(false)
+
+  @@unique([grant_key], map: "uk_identity_memberships__grant_key")
+  @@index([user_id, status, expires_at], map: "idx_identity_memberships__user_status_expiry")
+}

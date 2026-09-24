@@ -11,6 +11,7 @@ import {
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -27,6 +28,7 @@ export class MeController {
   constructor(
     private readonly account: AccountService,
     private readonly sessions: SessionService,
+    private readonly identity: IdentityService,
   ) {}
 
   @Get("me")
@@ -39,6 +41,10 @@ export class MeController {
       phone: "",
       has_password: true,
       is_admin: user.isAdmin,
+      // 会员等级：前端据此展示会员标识，**billing 侧据此算折扣**。
+      // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
+      // 会话里带的等级会一直停在登录那一刻。
+      tier: await this.identity.resolveTier(user.userId),
     });
   }
 
