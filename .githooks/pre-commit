@@ -5,6 +5,7 @@
 #   2. 后端改动时跑 py_compile（软提醒，不拦提交）
 #   3. 远程落后软提醒（工单分支落后 origin/master）
 #   4. 错误码改码注释对账（staged 含 error-codes.ts 时；无 node 环境跳过）
+#   5. 契约 breaking 检测（staged 含 contracts/proto/ 时；无 buf 环境软提醒）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
@@ -77,6 +78,20 @@ esac
 # ============================================================
 if printf '%s\n' "$staged_files" | grep -qx 'backend/libs/contracts/error-codes.ts' && command -v node >/dev/null 2>&1; then
   node scripts/check-error-code-drift.mjs || exit 1
+fi
+
+# ============================================================
+# 5. 契约 breaking 检测（staged 含 contracts/proto/ 时）
+#    破坏性契约变更是**不可逆的**：字段号复用会让新旧两端读到的数据静默错位，
+#    且线上无法回滚。pre-commit 只拦「本地这次改动」；PR 门禁另跑一次对照批次分支：
+#      bash scripts/check-contract-breaking.sh release/2026.09.29
+#    脚本自身处理 buf 未安装（退出码 2 = 软提醒放行），与第 3 节同一约定。
+# ============================================================
+if printf '%s\n' "$staged_files" | grep -q '^contracts/proto/'; then
+  bash scripts/check-contract-breaking.sh
+  _contract_rc=$?
+  # 1 = 破坏性变更 → 拦；0 = 通过；2 = buf 未装（已软提醒）→ 放行
+  [ "$_contract_rc" -eq 1 ] && exit 1
 fi
 
 exit 0

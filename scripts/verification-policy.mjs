@@ -22,7 +22,13 @@ const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
 const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-error-code-drift|check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
-const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|worker-java\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|worker-java\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+// 跨进程契约源（顶层 contracts/）。**此前整棵树没有归类规则**：改 .proto 在收口阶段
+// 落进「未归类」→ 一条命令都不跑（`.proto` 不在 EXECUTABLE_FILE 里，连 UNCLASSIFIED_PATH 都不报）；
+// 在 PR 阶段才被兜底升为 full——方向对了但代价是满量。与 backend / worker-java 那几个洞同形：
+// 有验证手段（buf breaking），只是选择器够不着它。
+// 归 product-impact 的理由：契约是两端（TS / Java）生成代码的源头，改了它两端都要重新生成。
+const CONTRACTS_SOURCE = /^contracts\//;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
 const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
@@ -54,6 +60,7 @@ function hasProductImpact(file, documentationOnlyFiles) {
 
 function sourceArea(file) {
   if (SKILL_ASSET_FILES.has(file)) return "skill-assets";
+  if (CONTRACTS_SOURCE.test(file)) return "contracts";
   if (NODE_SOURCE.test(file)) return "node";
   if (BACKEND_SOURCE.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
@@ -232,6 +239,14 @@ function appendAreaCommands(commands, areas, base) {
   if (areas.includes("worker-java")) {
     // worker-java 是独立 Maven 工程（不在 pnpm workspace 内），直接对它自己的 pom 跑测试。
     commands.push(["mvn", "-f", "worker-java/pom.xml", "-q", "test"]);
+  }
+  if (areas.includes("contracts")) {
+    // 契约破坏性变更**不可逆**：字段号复用会让新旧两端读到的数据静默错位，线上无法回滚。
+    // 对照 base（merge-base SHA）跑 buf breaking；脚本自身处理三种边界：
+    //   · base 尚无 contracts/proto（契约首次引入）→ 跳过
+    //   · buf 未安装 → 软提醒放行（退出码 2）
+    //   · 真破坏 → 退出码 1 → 门禁失败
+    commands.push(["bash", "scripts/check-contract-breaking.sh", base]);
   }
   if (areas.includes("governance")) {
     commands.push([
