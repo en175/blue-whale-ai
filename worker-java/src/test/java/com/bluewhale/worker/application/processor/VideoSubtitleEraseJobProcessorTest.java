@@ -640,7 +640,8 @@ class VideoSubtitleEraseJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED),
-                eq("去字幕轮询超时（超过 " + VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS + " 次）"),
+                eq("去字幕轮询超时（超过 " + VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS
+                        + " 次），上游持续错误: MediaKit 去字幕任务查询超时"),
                 any(), eq("worker-1"), eq(5L));
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());

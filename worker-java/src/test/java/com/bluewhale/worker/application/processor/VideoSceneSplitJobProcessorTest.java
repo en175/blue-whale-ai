@@ -593,7 +593,8 @@ class VideoSceneSplitJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
-                eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS + " 次）"),
+                eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 场景切分任务查询超时"),
                 any(), eq("worker-1"), eq(5L));
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());

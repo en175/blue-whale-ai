@@ -372,13 +372,14 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         assertThat(captor.getValue().message())
                 .isEqualTo("音频调速轮询超时（超过 "
-                        + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS + " 次）");
+                        + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
+                        + " 次），上游持续错误: MediaKit 音频调速任务查询超时");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1051（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1051，文案摘要可区分网关 5xx（瞬时错误各形态同受上限约束）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input(), AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS, 7);
         AudioSpeedError gatewayBusy = new AudioSpeedError(
@@ -388,7 +389,13 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        assertFailCode(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> gatewayCaptor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
+        verify(stateMachine).failAudioSpeedJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
+        assertThat(gatewayCaptor.getValue().message())
+                .contains("上游持续错误: MediaKit 音频调速任务查询失败: HTTP 503");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

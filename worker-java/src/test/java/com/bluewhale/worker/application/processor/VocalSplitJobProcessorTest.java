@@ -573,7 +573,8 @@ class VocalSplitJobProcessorTest {
                 .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
         assertThat(captor.getValue().message())
                 .isEqualTo("人声背景分离轮询超时（超过 "
-                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS + " 次）");
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

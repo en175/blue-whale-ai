@@ -572,7 +572,8 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         assertThat(captor.getValue().message())
                 .isEqualTo("音频截取轮询超时（超过 "
-                        + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS + " 次）");
+                        + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
+                        + " 次），上游持续错误: MediaKit 音频截取任务查询超时");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
