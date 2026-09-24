@@ -14,7 +14,7 @@
   -->
   <select id="lockByJobId" resultType="com.bluewhale.billing.domain.entity.CostReservationEntity">
     SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, status,
-           allocations, catalog_version, release_note, gmt_create, gmt_modified, version
+           allocations, catalog_version, discount_bp, release_note, gmt_create, gmt_modified, version
     FROM billing_cost_reservations
     WHERE generation_job_id = #{jobId}
     FOR UPDATE

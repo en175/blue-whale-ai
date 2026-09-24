@@ -31,7 +31,7 @@ public class ReservationRepository {
 
     /** 建预留。幂等键是 {@code uk_reservation__job}（job_id 唯一）——重复预扣靠它拦下。 */
     public long insert(long jobId, long userId, long reservedCredits,
-                       int catalogVersion, List<Allocation> allocations) {
+                       int catalogVersion, int discountBp, List<Allocation> allocations) {
         CostReservationEntity entity = new CostReservationEntity();
         entity.setGenerationJobId(jobId);
         entity.setUserId(userId);
@@ -39,6 +39,7 @@ public class ReservationRepository {
         entity.setStatus(Reservation.Status.HELD.key());
         entity.setAllocations(writeAllocations(allocations));
         entity.setCatalogVersion(catalogVersion);
+        entity.setDiscountBp(discountBp);
         mapper.insert(entity);
         return entity.getId();
     }
@@ -78,6 +79,7 @@ public class ReservationRepository {
                 Reservation.Status.of(entity.getStatus()),
                 readAllocations(entity.getAllocations()),
                 entity.getCatalogVersion(),
+                entity.getDiscountBp(),
                 entity.getReleaseNote());
     }
 

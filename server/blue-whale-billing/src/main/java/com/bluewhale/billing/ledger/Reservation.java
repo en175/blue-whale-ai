@@ -13,6 +13,9 @@ import java.util.List;
  * @param status          状态机见 {@link Status}
  * @param allocations     预扣分配的批次明细；结算与返还**按同一份**处理
  * @param catalogVersion  冻结的定价版本——改价不影响已提交任务
+ * @param discountBp      冻结的折扣系数（万分比）——同理，改折扣也不影响已提交任务。
+ *                        与 catalogVersion 是同一件事的两半：一个冻结「用哪套规则算」，
+ *                        一个冻结「当时打了多少折」；少任何一半都复现不出预扣时那个价
  * @param releaseNote     释放原因；仅 released 时有值
  */
 public record Reservation(
@@ -24,6 +27,7 @@ public record Reservation(
         Status status,
         List<Allocation> allocations,
         int catalogVersion,
+        int discountBp,
         String releaseNote
 ) {
 

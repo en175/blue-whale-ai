@@ -62,10 +62,13 @@ public class CreditService {
      *                       重试发生在 job 创建**之前**，那时还没有 jobId 可用
      * @param amount         预扣额（积分）
      * @param catalogVersion 本次计价用的目录版本
+     * @param discountBp     本次计价命中的折扣系数（万分比，10000 = 原价）。
+     *                       与 catalogVersion 一起冻进预留——**结算时按它复现，不重新解析**，
+     *                       否则「提交后被停掉的营销活动」会让结算按原价扣
      */
     @Transactional
     public HoldResult hold(long userId, String commandId, long jobId,
-                           long amount, int catalogVersion) {
+                           long amount, int catalogVersion, int discountBp) {
 
         String idempotencyKey = "hold:" + commandId;
         if (ledger.existsByVoucherBase(idempotencyKey)) {
@@ -77,6 +80,11 @@ public class CreditService {
         }
         if (amount <= 0) {
             throw new IllegalArgumentException("预扣额必须为正：" + amount);
+        }
+        if (discountBp <= 0 || discountBp > 10_000) {
+            // 折扣可以到 0（白送）吗？不行——那意味着这个模型不该配价格，而不是配 0 折扣。
+            // 上界 10000 是因为加价不该由「折扣」表达（那是 multipliers 的事）。
+            throw new IllegalArgumentException("折扣系数必须在 1..10000 之间：" + discountBp);
         }
 
         // ── 锁该用户的全部有效批次，返回时已按扣减顺序排好（§4.1 的三级 tie-break）
@@ -108,7 +116,7 @@ public class CreditService {
             throw new IllegalStateException("冻结金额不足，剩余 " + rest + "（可用 " + available + "，需 " + amount + "）");
         }
 
-        reservations.insert(jobId, userId, amount, catalogVersion, allocations);
+        reservations.insert(jobId, userId, amount, catalogVersion, discountBp, allocations);
 
         // 复式分录（§3 分录 5）：钱从「可用」转为「受限」，两边都要记
         ledger.insert(Voucher.base(idempotencyKey, userId, BizType.HOLD, String.valueOf(jobId))

@@ -119,7 +119,7 @@ public class BillingApplicationService {
         }
 
         return credits.hold(command.userId(), command.commandId(), command.jobId(),
-                priced.credits(), catalogVersion);
+                priced.credits(), catalogVersion, priced.discount().factorBp());
     }
 
     /** 余额与临期批次（用户可见）。 */

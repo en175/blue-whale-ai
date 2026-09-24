@@ -40,6 +40,8 @@ class LedgerIntegrationTest {
     private static final long USER = 9001L;
     private static final long JOB = 501L;
     private static final int CATALOG_VERSION = 1;
+    /** 原价（万分比）。本测试考的是账本本身，折扣另有专测。 */
+    private static final int NO_DISCOUNT = 10_000;
 
     /** 明天到期——扣减顺序的第一级（先过期先扣）会优先吃掉它。 */
     private static final Instant SOON = Instant.now().plus(1, ChronoUnit.DAYS);
@@ -70,7 +72,7 @@ class LedgerIntegrationTest {
         long daily = grant(CreditSource.DAILY, 100, SOON, "d1");
         long purchased = grant(CreditSource.PURCHASED, 1_000, null, "p1");
 
-        credits.hold(USER, "cmd-1", JOB, 120, CATALOG_VERSION);
+        credits.hold(USER, "cmd-1", JOB, 120, CATALOG_VERSION, NO_DISCOUNT);
 
         // 第一级 tie-break：expires_at ASC —— 快到期的那批先被吃完，付费批次只动零头
         assertThat(frozenOf(daily)).isEqualTo(100);
@@ -86,7 +88,7 @@ class LedgerIntegrationTest {
         long gift = grant(CreditSource.GIFT, 100, null, "g1");
         long purchased = grant(CreditSource.PURCHASED, 1_000, null, "p2");
 
-        credits.hold(USER, "cmd-2", JOB, 60, CATALOG_VERSION);
+        credits.hold(USER, "cmd-2", JOB, 60, CATALOG_VERSION, NO_DISCOUNT);
 
         // 第二级 tie-break：source_priority ASC（gift=30 < purchased=80）。
         // 两级有效期都相同（都是永久）时才轮到这里生效。
@@ -100,7 +102,7 @@ class LedgerIntegrationTest {
         long expired = grant(CreditSource.DAILY, 100, PAST, "e1");
         long purchased = grant(CreditSource.PURCHASED, 100, null, "p3");
 
-        credits.hold(USER, "cmd-3", JOB, 60, CATALOG_VERSION);
+        credits.hold(USER, "cmd-3", JOB, 60, CATALOG_VERSION, NO_DISCOUNT);
 
         assertThat(frozenOf(expired)).isZero();
         assertThat(frozenOf(purchased)).isEqualTo(60);
@@ -117,7 +119,7 @@ class LedgerIntegrationTest {
     void 预扣_只冻结不动remaining() {
         long lot = grant(CreditSource.GIFT, 100, null, "g2");
 
-        credits.hold(USER, "cmd-4", JOB, 40, CATALOG_VERSION);
+        credits.hold(USER, "cmd-4", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
 
         // 钱还没花掉，只是不能用了 —— remaining 原封不动
         assertThat(remainingOf(lot)).isEqualTo(100);
@@ -131,7 +133,7 @@ class LedgerIntegrationTest {
     void 预扣_余额不足_抛异常且不留痕迹() {
         grant(CreditSource.GIFT, 10, null, "g3");
 
-        assertThatThrownBy(() -> credits.hold(USER, "cmd-5", JOB, 11, CATALOG_VERSION))
+        assertThatThrownBy(() -> credits.hold(USER, "cmd-5", JOB, 11, CATALOG_VERSION, NO_DISCOUNT))
                 .isInstanceOf(InsufficientCreditsException.class)
                 .hasMessageContaining("还差 1");
 
@@ -146,8 +148,8 @@ class LedgerIntegrationTest {
     void 预扣_幂等_重复命令不二次冻结() {
         long lot = grant(CreditSource.GIFT, 100, null, "g4");
 
-        HoldResult first = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION);
-        HoldResult second = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION);
+        HoldResult first = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
+        HoldResult second = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
 
         // ★ 重放要能被识别出来。「返回了相同的数字」不足以区分「刚扣的」与「上次就扣过的」，
         //   而调用方可能需要据此决定要不要再写一次自己的副作用。
@@ -168,7 +170,7 @@ class LedgerIntegrationTest {
     @Test
     void 结算_实际小于预扣_差额回到可用余额() {
         long lot = grant(CreditSource.GIFT, 100, null, "g5");
-        credits.hold(USER, "cmd-7", JOB, 40, CATALOG_VERSION);
+        credits.hold(USER, "cmd-7", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
 
         credits.settle(JOB, 30);
 
@@ -187,7 +189,7 @@ class LedgerIntegrationTest {
         long gift = grant(CreditSource.GIFT, 20, null, "g6");            // priority 30，先扣
         long purchased = grant(CreditSource.PURCHASED, 100, null, "p4"); // priority 80，后扣
 
-        credits.hold(USER, "cmd-8", JOB, 40, CATALOG_VERSION);   // gift 20 + purchased 20
+        credits.hold(USER, "cmd-8", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);   // gift 20 + purchased 20
         credits.settle(JOB, 35);                                 // gift 20 + purchased 15
 
         assertThat(remainingOf(gift)).isZero();
@@ -213,7 +215,7 @@ class LedgerIntegrationTest {
         long lot = grant(CreditSource.DAILY, 100, LATER, "g7");
         Instant expiresBefore = expiresOf(lot);
 
-        credits.hold(USER, "cmd-9", JOB, 40, CATALOG_VERSION);
+        credits.hold(USER, "cmd-9", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
         credits.refund(JOB, "上游任务失败");
 
         assertThat(remainingOf(lot)).isEqualTo(100);
@@ -231,7 +233,7 @@ class LedgerIntegrationTest {
     @Test
     void 结算之后再返还_无操作() {
         long lot = grant(CreditSource.GIFT, 100, null, "g8");
-        credits.hold(USER, "cmd-10", JOB, 40, CATALOG_VERSION);
+        credits.hold(USER, "cmd-10", JOB, 40, CATALOG_VERSION, NO_DISCOUNT);
         credits.settle(JOB, 40);
         int entriesAfterSettle = ledgerEntryCount();
 
@@ -269,7 +271,7 @@ class LedgerIntegrationTest {
         long expiring = grant(CreditSource.GIFT, 100, Instant.now().plus(1, ChronoUnit.HOURS), "tz-a");
         long expired = grant(CreditSource.GIFT, 100, Instant.now().minus(1, ChronoUnit.HOURS), "tz-b");
 
-        credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION);
+        credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION, NO_DISCOUNT);
 
         assertThat(frozenOf(expiring)).isEqualTo(60);
         assertThat(frozenOf(expired)).isZero();

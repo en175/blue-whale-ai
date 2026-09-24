@@ -19,6 +19,23 @@ public interface DiscountResolver {
     DiscountResolver NONE = ctx -> Discount.none();
 
     /**
+     * **冻结的折扣** —— 结算时按预扣时定下的系数复现，**不重新解析**。
+     *
+     * <p>为什么结算不能重新解析：折扣规则在两张 live 表里，运营随时改、随时停，
+     * 而结算发生在预扣之后几分钟到几十分钟。重新解析会让「提交之后被停掉的活动」
+     * 突然不生效——用户看着 7 折提交，结算按原价扣。
+     *
+     * <p>把系数冻进 {@code billing_cost_reservations.discount_bp} 之后，
+     * 结算只需把它还原成一个固定解析器——本方法就是那个还原点。
+     *
+     * @param factorBp 万分比系数（10000 = 原价）
+     */
+    static DiscountResolver frozen(int factorBp) {
+        return ctx -> new Discount(factorBp,
+                List.of(new AppliedDiscount("frozen", 0L, null, factorBp)));
+    }
+
+    /**
      * 解析本次计价命中的折扣。
      *
      * @return 最终系数与命中明细。**永不返回 null**——无命中返回 {@link Discount#none()}

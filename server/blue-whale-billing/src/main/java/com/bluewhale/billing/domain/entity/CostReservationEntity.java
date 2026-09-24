@@ -37,6 +37,9 @@ public class CostReservationEntity {
     /** 冻结的定价版本——改价不影响已提交任务。 */
     private Integer catalogVersion;
 
+    /** 预扣时的折扣系数（万分比）——结算按它复现，不重新解析（见 V4 迁移）。 */
+    private Integer discountBp;
+
     /** 释放原因；仅 released 时有值。 */
     private String releaseNote;
 
@@ -62,6 +65,8 @@ public class CostReservationEntity {
     public void setAllocations(String allocations) { this.allocations = allocations; }
     public Integer getCatalogVersion() { return catalogVersion; }
     public void setCatalogVersion(Integer catalogVersion) { this.catalogVersion = catalogVersion; }
+    public Integer getDiscountBp() { return discountBp; }
+    public void setDiscountBp(Integer discountBp) { this.discountBp = discountBp; }
     public String getReleaseNote() { return releaseNote; }
     public void setReleaseNote(String releaseNote) { this.releaseNote = releaseNote; }
     public LocalDateTime getGmtCreate() { return gmtCreate; }

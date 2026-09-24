@@ -91,6 +91,14 @@
       <version>${grpc.version}</version>
     </dependency>
 
+    <!-- MQ 客户端：结算 / 返还走事件不走 RPC（不该阻塞用户请求，且必须能重投）。
+         与 worker 同款同版本（ADR-0114 技术栈逐项对齐）。 -->
+    <dependency>
+      <groupId>org.apache.rocketmq</groupId>
+      <artifactId>rocketmq-client-java</artifactId>
+      <version>${rocketmq-client.version}</version>
+    </dependency>
+
     <!-- ⚠️ schema 权威在 billing 自己手里（Flyway），**不走 backend 的 Prisma**。
          理由：ADR-0113 定的是「每个服务数据私有」——若 billing 的表由 Prisma 管，
          它的 schema 就绑死在 backend 的迁移节奏上，「私有」只剩口号。
@@ -140,6 +148,9 @@
                  这里用系统属性而不是测试 profile：一行覆盖全部用例，
                  且**优先级低于** @SpringBootTest 的 properties，用例可以逐条覆盖。 -->
             <billing.grpc.enabled>false</billing.grpc.enabled>
+            <!-- 测试也不连 MQ：单元/集成测试各自直接调 SettlementService，
+                 走真实 RocketMQ 只会让测试依赖一个外部进程。 -->
+            <billing.mq.enabled>false</billing.mq.enabled>
           </systemPropertyVariables>
         </configuration>
       </plugin>
