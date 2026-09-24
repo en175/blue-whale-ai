@@ -6,7 +6,7 @@
 import type { InputHTMLAttributes } from 'react';
 import styles from './index.module.css';
 
-interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'className'> {
+interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'className' | 'size'> {
   size?: 'sm' | 'md';
 }
 

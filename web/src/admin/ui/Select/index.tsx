@@ -20,7 +20,7 @@ export interface SelectOption {
   disabled?: boolean;
 }
 
-interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'className' | 'children'> {
+interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'className' | 'children' | 'size'> {
   options: readonly SelectOption[];
   /** 占位项（值为空字符串）。给了才渲染 */
   placeholder?: string;
