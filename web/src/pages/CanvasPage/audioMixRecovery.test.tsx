@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import MediaNode from './components/MediaNode';
 import {
   apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage,
 } from './testing/canvasPageTestHarness';
@@ -38,12 +41,53 @@ describe('IKI697 同卡失败重试', () => {
     await act(async () => { flowProps.current.onDeleteNode(['audio-mix-73']); await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
     expect(mediaNodes().map((node) => node.id)).toContain('audio-mix-73');
+    expect(mediaNodes().find((node) => node.id === 'audio-mix-73')?.data.audioMixCancelPending).toBe(true);
+    await vi.waitFor(() => expect((apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[string, { nodes: Array<{ id: string; data: { audioMixCancelPending?: boolean } }> }]>).some(
+      ([, body]) => body.nodes.some((node) => node.id === 'audio-mix-73' && node.data.audioMixCancelPending === true),
+    )).toBe(true));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2700)); });
     expect(mediaNodes().map((node) => node.id)).not.toContain('audio-mix-73');
     expect(flowProps.current.edges.some((edge: { target: string }) => edge.target === 'audio-mix-73')).toBe(false);
     const saves = apiMocks.saveCanvasDoc.mock.calls as unknown as Array<[string, { nodes: Array<{ id: string }> }]>;
     expect(saves.at(-1)?.[1].nodes.map((node) => node.id)).not.toContain('audio-mix-73');
   }, 8000);
+
+  it('刷新后从持久化卡恢复取消等待，任务失败终态时仍移除卡和来源线', async () => {
+    seed([{ id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { src: 'https://audio.test/source.mp3', mediaType: 'audio', assetId: '1' } },
+    { ...failedCard, data: { ...failedCard.data, genStatus: 'generating',
+      errorText: undefined, audioMixCancelPending: true } }]);
+    apiMocks.fetchJobs.mockResolvedValue({ records: [{ job_id: '73', type: 'audio_mix', status: 'failed', progress: 20,
+      input: { source_node_id: 'source', inputs: [{ asset_id: '1', node_id: 'source' }], output_format: 'mp3' },
+      created_at: '2026-09-23T00:00:00Z', output_assets: [], canvas_card_state: 'present' }],
+    total: 1, size: 100, current: 1 });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '73', status: 'failed', progress: 20, asset: null });
+    await renderPage();
+    await vi.waitFor(() => expect(mediaNodes().map((node) => node.id)).not.toContain('audio-mix-73'));
+    expect(flowProps.current.edges.some((edge: { target: string }) => edge.target === 'audio-mix-73')).toBe(false);
+  });
+
+  it('刷新后任务仍排队时卡面继续显示正在取消', async () => {
+    seed([{ id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { src: 'https://audio.test/source.mp3', mediaType: 'audio', assetId: '1' } },
+    { ...failedCard, data: { ...failedCard.data, genStatus: 'generating',
+      errorText: undefined, audioMixCancelPending: true } }]);
+    apiMocks.fetchJobs.mockResolvedValue({ records: [{ job_id: '73', type: 'audio_mix', status: 'queued', progress: 0,
+      input: { source_node_id: 'source', inputs: [{ asset_id: '1', node_id: 'source' }], output_format: 'mp3' },
+      created_at: '2026-09-23T00:00:00Z', output_assets: [], canvas_card_state: 'present' }],
+    total: 1, size: 100, current: 1 });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '73', status: 'queued', progress: 0, asset: null });
+    await renderPage();
+    await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalled());
+    const card = mediaNodes().find((node) => node.id === 'audio-mix-73');
+    expect(card?.data.audioMixCancelPending).toBe(true);
+    const html = renderToStaticMarkup(createElement(ReactFlowProvider, null, createElement(MediaNode, {
+      ...card, selected: false, dragging: false, zIndex: 1, selectable: true, deletable: true,
+      draggable: true, isConnectable: true, positionAbsoluteX: 0, positionAbsoluteY: 0,
+    } as never)));
+    expect(html).toContain('正在取消');
+    expect(html).not.toContain('取消生成');
+  });
 
   it('删除等待期间任务抢先成功时保留原卡与产物', async () => {
     seed([{ id: 'source', type: 'mediaNode', position: { x: 0, y: 0 },

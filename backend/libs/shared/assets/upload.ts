@@ -24,6 +24,7 @@ export type PresignAssetInput = {
 export type CompleteAssetInput = PresignAssetInput & {
   project_id?: string;
   storage_key: string;
+  name?: string;
   width?: number;
   height?: number;
   duration?: number;
@@ -532,6 +533,9 @@ export async function handleCompleteAsset(
     mime: input.mime,
     size: input.size,
     storageKey: input.storage_key,
+    ...(typeof input.name === "string" && input.name.trim()
+      ? { name: Array.from(input.name.trim().split(/[\\/]/).pop() ?? "").slice(0, 255).join("") }
+      : {}),
     url: object.publicUrl,
     ...(input.width == null ? {} : { width: input.width }),
     ...(input.height == null ? {} : { height: input.height }),

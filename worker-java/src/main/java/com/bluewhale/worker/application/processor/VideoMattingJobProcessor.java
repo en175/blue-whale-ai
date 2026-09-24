@@ -481,6 +481,9 @@ public class VideoMattingJobProcessor implements JobProcessor {
             log.warn("[video_matting] 结果转存被中止，本 worker 静默退出 jobId={}: {}", claim.id(), e.getMessage());
             return true;
         } catch (Exception e) {
+            // parentProviderTaskId 非空对重试任务全生命周期为真（含回退自提交后的轮询相）：
+            // 轮询相自身结果转存失败叠加续租不明也走静默退出属有意行为——等 recovery 接手
+            // 比写失败终态更稳（失败终态会丢弃重试链路，静默退出留给新 Worker / recovery 判定）
             if (claim.parentProviderTaskId() != null) {
                 boolean leaseConfirmed = !abortHandle.aborted() && renewLeaseForResultTransfer(claim);
                 if (!leaseConfirmed || abortHandle.aborted()) {

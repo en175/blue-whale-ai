@@ -124,8 +124,11 @@ async function markAudioMixCards(
       data: { canvas_card_state: "present" },
     });
   }
+  const removable = { ...scope, canvas_card_state: "present", ...(ids.length > 0 ? { id: { notIn: ids } } : {}) };
+  const existing = await tx.generation_jobs.findFirst({ where: removable, select: { id: true } });
+  if (!existing) return;
   await tx.generation_jobs.updateMany({
-    where: { ...scope, canvas_card_state: "present", ...(ids.length > 0 ? { id: { notIn: ids } } : {}) },
+    where: removable,
     data: { canvas_card_state: "removed" },
   });
 }

@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE · 音视频合成（最终设计）</title>
+<!--
+  PROTOTYPE — 用完即删。双击打开即可演示，无持久化、无测试。
+  本原型固定音视频合成的已确认交互（2026-09-24 评审拍板：方案丙拖线绑定胜出，甲/乙淘汰，去掉本地上传）：
+    草稿卡 + 拖线绑定视频 + 参数面板 + 原地回填。
+  状态流：入口（工具条「音视频合成」高亮）→ 未绑定（发送置灰）→ 拖线绑定中（虚线跟随鼠标，
+  拖到草稿卡吸附成实线）→ 已绑定（信息条 + 可移除重选 + 发送可用）→ 生成中（面板消失、
+  草稿卡占位、工具条恢复）→ 已完成（原地回填视频成品卡，双线保留）/ 失败（原因 + 重试）。
+  视频来源两种：画布视频卡拖线绑定（拉输入线）、素材库选择（浮层选中即绑定，不拉线）。
+  截图走查便利参数（非评审路径）：?demo=unbound|bound|generating|done|failed
+  ——直接落到指定状态；demo=generating 时不会自动跳转，便于静态截图。
+-->
+<style>
+  :root {
+    /* 对齐 web/src/styles/variables.css 令牌 */
+    --bg: #131313;
+    --card: #1a1a1a;
+    --well: #121212;
+    --overlay: #1e1e1e;          /* --color-bg-overlay */
+    --overlay-line: #2c2c2c;     /* --color-border-overlay */
+    --overlay-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); /* --shadow-overlay */
+    --text: #ffffff;
+    --text2: #a0a0a0;
+    --accent: #4c6ef5;           /* --color-accent-primary */
+    --accent-hover: #5c7cff;
+    --err: #fa5252;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    background-image: radial-gradient(rgba(255, 255, 255, .1) 1px, transparent 1.2px);
+    background-size: 26px 26px;
+    color: var(--text);
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ================= 画布连线层 ================= */
+  #edges { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1; }
+
+  /* ================= 画布卡片通用 ================= */
+  .node { position: absolute; z-index: 2; }
+  .meta {
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 8px; width: 100%;
+  }
+  .meta svg { width: 15px; height: 15px; color: #7a7a7a; flex: none; }
+  .meta .name { color: var(--text2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta .dur { margin-left: auto; color: #5f5f5f; font-size: 12px; }
+
+  /* ---- 源音频成品卡（480×240） ---- */
+  #audioCard { left: 90px; top: 320px; width: 480px; }
+  .acard {
+    background: var(--card);
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+    height: 240px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .wave {
+    flex: 1; min-height: 0;
+    background: var(--well);
+    border: 1px solid rgba(255, 255, 255, .045);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, .35);
+    padding: 14px;
+    overflow: hidden;
+  }
+  .bars { height: 100%; display: flex; align-items: center; justify-content: space-between; }
+  .bar { width: 2px; border-radius: 1px; background: #9db2a3; flex: none; }
+  .acontrols { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+  .atime { justify-self: start; font-size: 15px; font-weight: 500; color: #e8e8e8; }
+  .aplay {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: #2e2e2e; border: 1px solid rgba(255, 255, 255, .08);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+  }
+  .aplay svg { width: 16px; height: 16px; }
+
+  /* ---- 源卡悬浮工具条（入口态可见；进入合成会话后整条不渲染） ---- */
+  #toolbar {
+    position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center;
+    background: var(--overlay);
+    border: 1px solid var(--overlay-line);
+    border-radius: 12px;            /* 浮条档：12px 微圆角，非胶囊 */
+    padding: 6px 10px;
+    box-shadow: var(--overlay-shadow);
+    white-space: nowrap; z-index: 5;
+  }
+  .tb {
+    position: relative; display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 8px; font-size: 12px; color: #ddd;
+    transition: background .12s, color .12s;
+  }
+  .tb svg { width: 14px; height: 14px; flex: none; }
+  .tb:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+  .tb.disabled { color: #666; cursor: not-allowed; }
+  .tb.disabled:hover { background: transparent; color: #666; }
+  /* 「音视频合成」刚被点击的高亮态：唯一强调色蓝 */
+  .tb.hot { background: rgba(76, 110, 245, .18); color: #9db0ff; }
+  .tb.hot:hover { background: rgba(76, 110, 245, .26); color: #c4d0ff; }
+  .sep { width: 1px; height: 18px; background: rgba(255, 255, 255, .14); margin: 0 6px; flex: none; }
+
+  /* ---- 视频卡（候选 / 草稿 / 成品共用 16:9 骨架） ---- */
+  .vnode { width: 320px; }
+  #candA { left: 660px; top: 60px; }
+  #candB { left: 1080px; top: 330px; }
+  #draftCard { left: 660px; top: 272px; }
+  .vframe {
+    position: relative;
+    width: 320px; height: 180px;    /* 16:9 */
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 12px;
+    background: #111;
+    transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  .vposter {
+    position: absolute; inset: 0; border-radius: 11px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vposter svg { width: 30px; height: 30px; color: rgba(255, 255, 255, .28); }
+  .vlen {
+    position: absolute; right: 8px; bottom: 8px;
+    padding: 1px 6px; border-radius: 4px;
+    background: rgba(0, 0, 0, .6); color: rgba(255, 255, 255, .85);
+    font-size: 11px; line-height: 1.5;
+  }
+  /* 候选卡右侧 ＋ 拖线锚点（拖线绑定的手势起点） */
+  .anchor {
+    position: absolute; right: -11px; top: 50%; transform: translateY(-50%);
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #2a2a2a; border: 1px solid #3a3a3a; color: #ddd;
+    display: flex; align-items: center; justify-content: center;
+    cursor: crosshair; z-index: 3;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+  }
+  .anchor:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .anchor svg { width: 12px; height: 12px; }
+
+  /* 草稿卡：虚线占位 */
+  .draftEmpty {
+    position: absolute; inset: 8px;
+    border: 1.5px dashed #3a3a3a; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    color: #666; font-size: 12px;
+  }
+  .draftEmpty svg { width: 22px; height: 22px; color: #4a4a4a; }
+  /* 草稿卡：生成中 / 失败 */
+  .genBox {
+    position: absolute; inset: 0; border-radius: 11px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: #111;
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid #333; border-top-color: #ccc; border-radius: 50%;
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .genText { color: #aaa; font-size: 12px; }
+  .failText { color: var(--err); font-size: 13px; font-weight: 600; }
+  .retryBtn {
+    padding: 6px 14px; border-radius: 6px; font-size: 12px;
+    color: #ddd; background: #2a2a2a; border: 1px solid #3a3a3a;
+  }
+  .retryBtn:hover { color: #fff; background: #333; }
+  /* 草稿卡：回填为成品 */
+  .donePoster {
+    position: absolute; inset: 0; border-radius: 11px;
+    background: linear-gradient(135deg, #1c2b52 0%, #243a6e 45%, #101a33 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .donePlay {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .25);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+  }
+  .donePlay svg { width: 18px; height: 18px; margin-left: 2px; }
+  #draftCard.flash .vframe { animation: refill .6s ease; }
+  @keyframes refill { 0% { box-shadow: 0 0 0 3px rgba(76, 110, 245, .8); } 100% { box-shadow: none; } }
+
+  /* ================= 参数面板（草稿卡下方跟随） ================= */
+  #panel {
+    position: absolute; left: 660px; top: 488px; width: 320px; z-index: 4;
+    background: var(--overlay);
+    border: 1px solid var(--overlay-line);
+    border-radius: 16px;            /* 大容器档 */
+    box-shadow: var(--overlay-shadow);
+    padding: 14px;
+  }
+  .phead { display: flex; align-items: center; margin-bottom: 12px; }
+  .ptitle { font-size: 13px; font-weight: 600; color: #fff; }
+  .pclose {
+    margin-left: auto; width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: #888;
+  }
+  .pclose:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+  .pclose svg { width: 13px; height: 13px; }
+
+  .plabel { font-size: 11px; color: #666; margin: 0 0 6px 2px; }
+  .pgroup { margin-bottom: 12px; }
+
+  /* 视频槽：引导文案 + 素材库次级入口 */
+  .slotGuide {
+    border: 1.5px dashed #3a3a3a; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: #777; line-height: 1.5;
+  }
+  .subLink { color: var(--accent-hover); font-size: 12px; }
+  .subLink:hover { text-decoration: underline; }
+
+  /* 视频槽：已绑定信息条 */
+  .boundBar {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid #333; border-radius: 8px; background: #181818;
+    padding: 8px 10px;
+  }
+  .boundThumb {
+    width: 56px; height: 32px; border-radius: 4px; flex: none;
+    background: linear-gradient(135deg, #22335f, #101a33);
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255, 255, 255, .4);
+  }
+  .boundThumb svg { width: 14px; height: 14px; }
+  .boundName { font-size: 12.5px; color: #e8e8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .boundDur { font-size: 11px; color: #666; line-height: 1.2; }
+  .boundRemove {
+    margin-left: auto; flex: none; width: 20px; height: 20px; border-radius: 5px;
+    color: #888; display: flex; align-items: center; justify-content: center;
+  }
+  .boundRemove:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+  .boundRemove svg { width: 12px; height: 12px; }
+
+  /* 素材库浮层（简洁列表，无页签无上传；点外部自动关闭） */
+  #slotWrap { position: relative; }
+  #libPop {
+    position: absolute; top: calc(100% + 6px); left: 0; width: 280px;
+    background: var(--overlay);
+    border: 1px solid var(--overlay-line);
+    border-radius: 12px;
+    box-shadow: var(--overlay-shadow);
+    padding: 6px; z-index: 30;
+  }
+  .libTitle { padding: 4px 8px 6px; font-size: 11px; color: #666; }
+  .libList { display: flex; flex-direction: column; max-height: 168px; overflow-y: auto; }
+  .libRow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 8px; border-radius: 6px; text-align: left;
+    color: var(--text2); font-size: 12px;
+    transition: background .12s, color .12s;
+  }
+  .libRow:hover { background: #222; color: #fff; }
+  .libRow .boundThumb { width: 48px; height: 27px; }
+  .libRow .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .libRow .du { color: #666; font-size: 11px; flex: none; }
+
+  /* 分段钮 */
+  .seg {
+    display: flex; gap: 2px; padding: 2px;
+    background: var(--well); border: 1px solid rgba(255, 255, 255, .045);
+    border-radius: 8px;
+  }
+  .seg button {
+    flex: 1; padding: 6px 4px; font-size: 12px; border-radius: 6px;
+    color: var(--text2); transition: background .12s, color .12s;
+    white-space: nowrap;
+  }
+  .seg button:hover { color: #fff; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .seg button.on:hover { background: var(--accent-hover); }
+
+  /* 面板底部行：免费标识 + 发送 */
+  .pfoot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .free { display: inline-flex; align-items: center; gap: 3px; color: #888; font-size: 11px; }
+  .free svg { width: 11px; height: 11px; }
+  .sendHint { font-size: 11px; color: #666; }
+  .sendBtn {
+    margin-left: auto;
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent); color: #fff;
+    transition: background .12s, transform .12s;
+  }
+  .sendBtn:hover { background: var(--accent-hover); }
+  .sendBtn:active { transform: scale(.94); }
+  .sendBtn svg { width: 13px; height: 13px; }
+  .sendBtn:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; transform: none; }
+
+  /* ================= 原型标注条（非被评审设计） ================= */
+  #anno {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: #ececec; color: #1a1a1a;
+    border: 2px dashed #9a9a9a; border-radius: 9999px;
+    padding: 6px 14px; font-size: 12px; z-index: 100;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+    white-space: nowrap;
+  }
+  #anno .tag { font-size: 10px; color: #fff; background: #444; border-radius: 3px; padding: 1px 5px; letter-spacing: .05em; }
+  #annoState { font-weight: 700; }
+  #anno button {
+    font-size: 11px; color: #1a1a1a; background: #fff;
+    border: 1px solid #bbb; border-radius: 9999px; padding: 2px 10px;
+  }
+  #anno button:hover { background: #f5f5f5; border-color: #888; }
+  #anno button.on { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  #anno .gap { width: 1px; height: 16px; background: #bbb; }
+</style>
+</head>
+<body>
+
+<!-- 连线层 -->
+<svg id="edges"></svg>
+
+<!-- 原型标注条：状态名 / 结果模拟 / 重置（非被评审设计） -->
+<div id="anno">
+  <span class="tag">原型标注</span>
+  <span>当前状态：<span id="annoState">入口（未进入会话）</span></span>
+  <span class="gap"></span>
+  <span style="color:#666">下次生成结果</span>
+  <button id="annoOk" class="on">成功</button>
+  <button id="annoFail">失败</button>
+  <span class="gap"></span>
+  <button id="annoReset">重置</button>
+  <button id="annoEntry">回到入口</button>
+</div>
+
+<!-- 源音频成品卡 + 悬浮工具条 -->
+<div class="node" id="audioCard">
+  <div id="toolbar">
+    <button class="tb disabled" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+      截取
+    </button>
+    <button class="tb disabled" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+      调速
+    </button>
+    <button class="tb disabled" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+      混合
+    </button>
+    <button class="tb hot" id="btnMux">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      音视频合成
+    </button>
+    <button class="tb disabled" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+      转码
+    </button>
+    <span class="sep"></span>
+    <button class="tb">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+      下载
+    </button>
+  </div>
+  <div class="meta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+    <span class="name">海浪环境音.mp3</span>
+    <span class="dur num">03:47</span>
+  </div>
+  <div class="acard" id="audioContent">
+    <div class="wave"><div class="bars" id="bars"></div></div>
+    <div class="acontrols">
+      <div class="atime num">00:00 / 03:47</div>
+      <button class="aplay" aria-label="播放">
+        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      </button>
+      <div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 候选视频卡 A -->
+<div class="node vnode cand" id="candA">
+  <div class="meta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+    <span class="name">城市夜景.mp4</span>
+    <span class="dur num">00:12</span>
+  </div>
+  <div class="vframe" data-vid-frame="v1">
+    <div class="vposter" style="background: linear-gradient(135deg, #2b2350 0%, #1a2a4a 55%, #101322 100%);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3Z"/></svg>
+    </div>
+    <span class="vlen num">00:12</span>
+    <button class="anchor" data-anchor="v1" title="拖线绑定到合成卡">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- 候选视频卡 B -->
+<div class="node vnode cand" id="candB">
+  <div class="meta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+    <span class="name">产品开箱.mp4</span>
+    <span class="dur num">00:45</span>
+  </div>
+  <div class="vframe" data-vid-frame="v2">
+    <div class="vposter" style="background: linear-gradient(135deg, #14342a 0%, #1d3a4a 55%, #0e1a1a 100%);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3Z"/></svg>
+    </div>
+    <span class="vlen num">00:45</span>
+    <button class="anchor" data-anchor="v2" title="拖线绑定到合成卡">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- 音视频合成草稿卡 -->
+<div class="node vnode" id="draftCard" style="display:none">
+  <div class="meta" id="draftMeta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+    <span class="name" id="draftName">音视频合成</span>
+    <span class="dur num" id="draftDur"></span>
+  </div>
+  <div class="vframe" id="draftContent">
+    <div class="draftEmpty" id="draftEmpty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg>
+      选择视频并配置参数
+    </div>
+    <div class="genBox" id="draftGen" style="display:none">
+      <div class="spinner"></div>
+      <div class="genText">生成中…</div>
+    </div>
+    <div class="genBox" id="draftFail" style="display:none">
+      <div class="failText">生成失败：网络超时（模拟）</div>
+      <button class="retryBtn" id="btnRetry">重试</button>
+    </div>
+    <div class="donePoster" id="draftDone" style="display:none">
+      <button class="donePlay" aria-label="播放">
+        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      </button>
+      <span class="vlen num">03:47</span>
+    </div>
+  </div>
+</div>
+
+<!-- 参数面板 -->
+<div id="panel" style="display:none">
+  <div class="phead">
+    <span class="ptitle">音视频合成</span>
+    <button class="pclose" id="btnClosePanel" title="退出合成">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <div class="pgroup">
+    <p class="plabel">视频</p>
+    <div id="slotWrap">
+      <div id="slot"></div>
+      <!-- 素材库浮层：简洁视频列表，选中即绑定（不拉线），点外部自动关闭 -->
+      <div id="libPop" style="display:none">
+        <div class="libTitle">素材库视频（选中即绑定）</div>
+        <div class="libList" id="libList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pgroup">
+    <p class="plabel">原声处理</p>
+    <div class="seg" id="segSound">
+      <button class="on">保留原声</button>
+      <button>替换原声</button>
+    </div>
+  </div>
+
+  <div class="pgroup">
+    <p class="plabel">时长对齐</p>
+    <div class="seg" id="segDur">
+      <button class="on">保持原长</button>
+      <button>裁到视频长</button>
+      <button>裁到音频长</button>
+    </div>
+  </div>
+
+  <div class="pfoot">
+    <span class="free" title="本期免费">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>0 本期免费
+    </span>
+    <span class="sendHint" id="sendHint">先选择视频</span>
+    <button class="sendBtn" id="btnSend" disabled title="先选择视频">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+/* ================= 数据 ================= */
+const CANDIDATES = {
+  v1: { id: 'v1', name: '城市夜景.mp4', dur: '00:12' },
+  v2: { id: 'v2', name: '产品开箱.mp4', dur: '00:45' },
+};
+const LIBRARY = [
+  { assetId: '10241', name: '素材库视频 #10241', dur: '00:08' },
+  { assetId: '10239', name: '素材库视频 #10239', dur: '00:32' },
+  { assetId: '10218', name: '素材库视频 #10218', dur: '01:05' },
+];
+const STATE_NAMES = {
+  entry: '入口（未进入会话）',
+  unbound: '未绑定',
+  binding: '绑定中',
+  bound: '已绑定',
+  generating: '生成中',
+  done: '已完成',
+  failed: '失败',
+};
+
+/* ================= 状态 ================= */
+let state = 'entry';          // entry | unbound | binding | bound | generating | done | failed
+let bound = null;             // { name, dur, nodeId? } nodeId 存在=画布拖线来源要拉线；否则素材库来源不拉线
+let libOpen = false;          // 素材库浮层
+let outcome = 'ok';           // 标注条：下次生成结果
+let genTimer = null;
+let demoMode = false;         // ?demo= 直达截图模式：generating 不自动跳转
+
+/* ================= 元素 ================= */
+const $ = id => document.getElementById(id);
+const panel = $('panel'), slot = $('slot'), libPop = $('libPop'), libList = $('libList');
+const draftCard = $('draftCard'), draftContent = $('draftContent');
+const draftEmpty = $('draftEmpty'), draftGen = $('draftGen'), draftFail = $('draftFail'), draftDone = $('draftDone');
+const draftName = $('draftName'), draftDur = $('draftDur');
+const toolbar = $('toolbar'), btnSend = $('btnSend'), sendHint = $('sendHint');
+const annoState = $('annoState');
+
+/* ================= 波形（固定种子伪随机，对齐 audio-card-landscape） ================= */
+(function () {
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const rand = mulberry32(7), N = 72, barsEl = $('bars');
+  for (let i = 0; i < N; i++) {
+    const x = i / (N - 1);
+    const env = Math.pow(Math.sin(Math.PI * x), 0.65);
+    const wave = 0.55 + 0.45 * Math.sin(x * Math.PI * 5.2 + 1.3) * Math.sin(x * Math.PI * 2.3 + 0.5);
+    const v = env * (0.35 + 0.65 * wave) * (0.45 + 0.55 * rand());
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.height = Math.max(5, Math.round(8 + v * 108)) + 'px';
+    barsEl.appendChild(bar);
+  }
+})();
+
+/* ================= 连线 ================= */
+const svg = $('edges');
+function edgePath(x1, y1, x2, y2) {
+  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+}
+function addPath(d, color, dash) {
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', d);
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', color);
+  p.setAttribute('stroke-width', '1.5');
+  if (dash) p.setAttribute('stroke-dasharray', '6 5');
+  svg.appendChild(p);
+}
+function midRight(el) { const r = el.getBoundingClientRect(); return [r.right, r.top + r.height / 2]; }
+function midLeft(el) { const r = el.getBoundingClientRect(); return [r.left, r.top + r.height / 2]; }
+
+let dragLine = null; // { vid, x, y } 拖线中的临时虚线
+function drawEdges() {
+  svg.innerHTML = '';
+  if (state === 'entry') return;
+  // 音频输入线：源音频卡 → 草稿卡（会话期间常驻）
+  const [ax, ay] = midRight($('audioContent'));
+  const [dx1, dy1] = midLeft(draftContent);
+  addPath(edgePath(ax, ay, dx1, dy1), '#4a4a4a');
+  // 视频输入线：仅画布拖线绑定拉实线（蓝色，表达新增绑定）；素材库来源不拉线
+  if (bound && bound.nodeId) {
+    const frame = document.querySelector(`[data-vid-frame="${bound.nodeId}"]`);
+    const fromRight = frame.getBoundingClientRect().left < draftContent.getBoundingClientRect().left;
+    const [vx, vy] = fromRight ? midRight(frame) : midLeft(frame);
+    const [gx, gy] = fromRight ? midLeft(draftContent) : midRight(draftContent);
+    addPath(edgePath(vx, vy, gx, gy), '#4c6ef5');
+  }
+  // 拖线中的虚线
+  if (dragLine) {
+    const frame = document.querySelector(`[data-vid-frame="${dragLine.vid}"]`);
+    const [sx, sy] = midRight(frame);
+    addPath(edgePath(sx, sy, dragLine.x, dragLine.y), '#4c6ef5', true);
+  }
+}
+
+/* ================= 渲染 ================= */
+function render() {
+  annoState.textContent = STATE_NAMES[state];
+
+  const inSession = state !== 'entry';
+  // 模态口径：面板打开期间（未绑定/绑定中/已绑定）源卡工具条整条不渲染；
+  // 发送后面板消失，工具条回来，「音视频合成」保留高亮
+  const panelOpen = inSession && ['unbound', 'binding', 'bound'].includes(state);
+  toolbar.style.display = (inSession && panelOpen) ? 'none' : 'flex';
+  draftCard.style.display = inSession ? 'block' : 'none';
+  panel.style.display = panelOpen ? 'block' : 'none';
+  if (!panelOpen) libOpen = false;
+
+  // 草稿卡内容区
+  draftEmpty.style.display = 'none';
+  draftGen.style.display = 'none';
+  draftFail.style.display = 'none';
+  draftDone.style.display = 'none';
+  if (state === 'unbound' || state === 'binding' || state === 'bound') {
+    draftEmpty.style.display = 'flex';
+    draftEmpty.lastChild.textContent = state === 'bound' ? '已就绪，点击发送生成' : '选择视频并配置参数';
+    draftName.textContent = '音视频合成';
+    draftDur.textContent = '';
+  } else if (state === 'generating') {
+    draftGen.style.display = 'flex';
+    draftName.textContent = '音视频合成';
+    draftDur.textContent = '';
+  } else if (state === 'failed') {
+    draftFail.style.display = 'flex';
+    draftName.textContent = '音视频合成';
+    draftDur.textContent = '';
+  } else if (state === 'done') {
+    draftDone.style.display = 'flex';
+    draftName.textContent = '合成视频.mp4';
+    draftDur.textContent = '03:47';
+  }
+
+  if (panelOpen) renderSlot();
+  libPop.style.display = libOpen ? 'block' : 'none';
+
+  // 发送钮
+  btnSend.disabled = state !== 'bound';
+  btnSend.title = state === 'bound' ? '生成合成视频' : '先选择视频';
+  sendHint.style.display = state === 'bound' ? 'none' : '';
+
+  drawEdges();
+}
+
+/* 视频槽：未绑定=引导文案+素材库次级入口；绑定中=手势提示；已绑定=信息条 */
+function renderSlot() {
+  if (state === 'bound') {
+    slot.innerHTML = `
+      <div class="boundBar">
+        <span class="boundThumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3Z"/></svg>
+        </span>
+        <span style="min-width:0">
+          <div class="boundName">${bound.name}</div>
+          <div class="boundDur num">${bound.dur}${bound.nodeId ? ' · 画布' : ' · 素材库'}</div>
+        </span>
+        <button class="boundRemove" id="btnUnbind" title="移除重选">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>`;
+    $('btnUnbind').onclick = () => { bound = null; state = 'unbound'; render(); };
+    return;
+  }
+  slot.innerHTML = `
+    <div class="slotGuide">
+      ${state === 'binding' ? '拖到合成草稿卡上松开，完成绑定' : '从视频卡右侧 ＋ 拖线到本卡'}<br />
+      <button class="subLink" id="btnLib">或从素材库选择</button>
+    </div>`;
+  $('btnLib').onclick = e => {
+    e.stopPropagation();
+    libOpen = !libOpen;
+    render();
+  };
+}
+
+/* 素材库浮层列表 */
+function renderLibrary() {
+  libList.innerHTML = LIBRARY.map(a => `
+    <button class="libRow" data-bind-asset="${a.assetId}">
+      <span class="boundThumb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3Z"/></svg>
+      </span>
+      <span class="nm">${a.name}</span><span class="du num">${a.dur}</span>
+    </button>`).join('');
+  libList.querySelectorAll('[data-bind-asset]').forEach(b => {
+    b.onclick = () => bindFrom({ ...LIBRARY.find(a => a.assetId === b.dataset.bindAsset) });
+  });
+}
+renderLibrary();
+/* 点浮层外部自动关闭（对齐 AudioMixBar outside-dismiss 口径） */
+document.addEventListener('pointerdown', e => {
+  if (libOpen && !e.target.closest('#slotWrap')) { libOpen = false; render(); }
+});
+
+/* ================= 行为 ================= */
+function bindFrom(info) {
+  bound = info;
+  libOpen = false;
+  state = 'bound';
+  render();
+}
+
+function startGenerate() {
+  state = 'generating';
+  render();
+  clearTimeout(genTimer);
+  if (demoMode) return; // 截图直达模式：停在生成中
+  genTimer = setTimeout(() => {
+    state = outcome === 'ok' ? 'done' : 'failed';
+    if (state === 'done') {
+      draftCard.classList.remove('flash');
+      void draftCard.offsetWidth;
+      draftCard.classList.add('flash');
+    }
+    render();
+  }, 2600);
+}
+btnSend.onclick = () => { if (state === 'bound') startGenerate(); };
+$('btnRetry').onclick = startGenerate;
+
+/* 入口：点击「音视频合成」进入会话 */
+$('btnMux').onclick = () => { if (state === 'entry') { state = 'unbound'; render(); } };
+/* 面板关闭：退出会话回入口 */
+$('btnClosePanel').onclick = () => { bound = null; state = 'entry'; render(); };
+
+/* 分段钮（纯演示选中态） */
+document.querySelectorAll('.seg').forEach(seg => {
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+  });
+});
+
+/* 拖线绑定：按住候选卡右侧 ＋ 锚点拖出虚线，拖到草稿卡吸附成实线 */
+document.querySelectorAll('.anchor').forEach(a => {
+  a.addEventListener('pointerdown', e => {
+    if (!['unbound', 'binding'].includes(state)) return;
+    e.preventDefault();
+    a.setPointerCapture(e.pointerId);
+    libOpen = false;
+    dragLine = { vid: a.dataset.anchor, x: e.clientX, y: e.clientY };
+    state = 'binding';
+    render();
+    const move = ev => { dragLine.x = ev.clientX; dragLine.y = ev.clientY; drawEdges(); };
+    const up = ev => {
+      a.removeEventListener('pointermove', move);
+      a.removeEventListener('pointerup', up);
+      const r = draftContent.getBoundingClientRect();
+      const hit = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      const vid = dragLine.vid;
+      dragLine = null;
+      if (hit) bindFrom({ ...CANDIDATES[vid], nodeId: vid });
+      else { state = 'unbound'; render(); }
+    };
+    a.addEventListener('pointermove', move);
+    a.addEventListener('pointerup', up);
+  });
+});
+
+/* Esc 取消拖线 / 关闭素材库浮层 */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (libOpen) { libOpen = false; render(); return; }
+  if (state === 'binding') { dragLine = null; state = 'unbound'; render(); }
+});
+
+/* ================= 原型标注条 ================= */
+$('annoOk').onclick = () => { outcome = 'ok'; $('annoOk').classList.add('on'); $('annoFail').classList.remove('on'); };
+$('annoFail').onclick = () => { outcome = 'fail'; $('annoFail').classList.add('on'); $('annoOk').classList.remove('on'); };
+function resetSession() { clearTimeout(genTimer); bound = null; dragLine = null; libOpen = false; state = 'unbound'; render(); }
+$('annoReset').onclick = resetSession;
+$('annoEntry').onclick = () => { clearTimeout(genTimer); bound = null; dragLine = null; libOpen = false; state = 'entry'; render(); };
+
+/* ================= 启动：?demo= 直达截图 ================= */
+(function init() {
+  const q = new URLSearchParams(location.search);
+  const demo = q.get('demo');
+  if (demo && STATE_NAMES[demo] && demo !== 'entry') {
+    demoMode = true;
+    if (demo === 'unbound' || demo === 'binding') state = 'unbound';
+    else {
+      bound = { ...CANDIDATES.v1, nodeId: 'v1' };
+      state = demo; // bound | generating | done | failed
+    }
+  }
+  render();
+})();
+
+window.addEventListener('resize', drawEdges);
+</script>
+</body>
+</html>

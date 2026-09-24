@@ -15,6 +15,7 @@ describe("createAssetRepo.listByUser", () => {
     const row = {
       id: 42n,
       type: "image",
+      name: "海浪素材.png",
       url: "https://tos.test/a.png",
       width: 800,
       height: 600,
@@ -51,6 +52,7 @@ describe("createAssetRepo.listByUser", () => {
     expect(page.records[0]).toMatchObject({
       id: "42",
       type: "image",
+      name: "海浪素材.png",
       source: "generated",
       size: 5242880,
       generation_job_id: "7",
@@ -58,6 +60,18 @@ describe("createAssetRepo.listByUser", () => {
       mime: "image/png",
       model: "Seedance 2.0 标准版",
     });
+  });
+
+  it("未单独命名的混音产物返回生成任务名", async () => {
+    const row = { id: 88n, type: "audio", name: null, url: "https://tos.test/mix.mp3", width: null,
+      height: null, duration_ms: 1000, source: "generated", gmt_create: new Date(), size: 10n,
+      generation_job_id: 70n, project_id: 55n, mime: "audio/mpeg" };
+    const prisma = {
+      assets: { count: vi.fn().mockResolvedValue(1), findMany: vi.fn().mockResolvedValue([row]) },
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 70n, type: "audio_mix", input: {} }]) },
+    };
+    const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });
+    expect(page.records[0]?.name).toBe("音频混合 70");
   });
 
   it("IKGOTB：listByUser 排除擦除遮罩中间素材（NOT source=mask_erase，资产列表不可见）", async () => {

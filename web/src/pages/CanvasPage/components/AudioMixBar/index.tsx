@@ -39,14 +39,17 @@ function AudioMixLibrary({ selectedIds, full, submitting, onAdd }: {
   return <>
     {library.isPending && <div className={styles.hint}>载入音频素材…</div>}
     {library.isError && <div className={styles.hint}>素材库加载失败，请重试</div>}
-    {library.data?.pages.flatMap((page) => page.records).filter((asset) => asset.type === 'audio').map((asset) => (
-      <button key={String(asset.id)} type="button" role="menuitem" className={bar.formatMenuItem}
-        data-testid={`audio-mix-library-${asset.id}`}
-        disabled={asset.status !== 'normal' || !asset.url || selectedIds.has(String(asset.id)) || full || submitting}
-        onClick={() => onAdd({ assetId: String(asset.id), name: `音频 #${asset.id}`, duration: asset.duration })}>
-        音频 #{asset.id}
-      </button>
-    ))}
+    {library.data?.pages.flatMap((page) => page.records).filter((asset) => asset.type === 'audio').map((asset) => {
+      const name = asset.name?.trim() || `音频 #${asset.id}`;
+      return (
+        <button key={String(asset.id)} type="button" role="menuitem" className={bar.formatMenuItem}
+          data-testid={`audio-mix-library-${asset.id}`}
+          disabled={asset.status !== 'normal' || !asset.url || selectedIds.has(String(asset.id)) || full || submitting}
+          onClick={() => onAdd({ assetId: String(asset.id), name, duration: asset.duration })}>
+          {name}
+        </button>
+      );
+    })}
     {library.hasNextPage && <button type="button" className={bar.formatMenuItem}
       disabled={library.isFetchingNextPage} onClick={() => { void library.fetchNextPage(); }}>
       {library.isFetchingNextPage ? '载入中…' : '加载更多'}
@@ -77,6 +80,10 @@ export default function AudioMixBar({
   const sourceAssetId = readAssetId(source.data);
   const selectedIds = new Set<string>([...(sourceAssetId ? [sourceAssetId] : []), ...selected.map((item) => item.assetId)]);
   const full = selected.length >= 99;
+  const hasCanvasCandidate = candidates.some((node) => {
+    const assetId = readAssetId(node.data);
+    return !audioMixSourceError(node) && !!assetId && !selectedIds.has(assetId);
+  });
   const durations = [source.data?.duration, ...selected.map((item) => item.duration)];
   const duration = durations.every((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
     ? String(Math.round(Math.max(...durations as number[]))) + 's'
@@ -144,6 +151,8 @@ export default function AudioMixBar({
               ))}
             </div>
             <div className={styles.candidateList} role="tabpanel">
+              {tab === 'canvas' && !full && !hasCanvasCandidate &&
+                <div className={styles.hint}>画布暂无其它音频，可从素材库或上传添加</div>}
               {tab === 'canvas' && candidates.map((node) => {
                 const assetId = readAssetId(node.data);
                 return (

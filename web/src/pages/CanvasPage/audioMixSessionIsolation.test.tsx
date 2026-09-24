@@ -67,6 +67,7 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createAudioMix: vi.fn(),
+  newIdempotencyKey: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   uploadAssetFile: vi.fn(),
@@ -121,6 +122,7 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: apiMocks.createMediaExtraction,
   createAudioTrim: apiMocks.createAudioTrim,
   createAudioMix: apiMocks.createAudioMix,
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
@@ -260,6 +262,8 @@ beforeEach(() => {
   sessionStorage.clear();
   seedDoc();
   apiMocks.createAudioMix.mockReset();
+  apiMocks.newIdempotencyKey.mockReset();
+  apiMocks.newIdempotencyKey.mockImplementation(() => 'session-iso-key');
   apiMocks.saveCanvasDoc.mockReset();
   apiMocks.saveCanvasDoc.mockResolvedValue({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
   apiMocks.fetchJobStatus.mockReset();
@@ -352,7 +356,7 @@ describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应�
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
     await sendMix();
     expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(2);
-    expect(apiMocks.createAudioMix).toHaveBeenLastCalledWith('p1', expect.objectContaining({ output_format: 'wav' }), { silent: true });
+    expect(apiMocks.createAudioMix).toHaveBeenLastCalledWith('p1', expect.objectContaining({ output_format: 'wav' }), expect.objectContaining({ silent: true }));
     // 新会话自己的成功闭环不受会话保护影响（发送条正常退出、j2 建卡）
     expect(sendBar()).toBeNull();
     expect(nodeById('audio-mix-j2')).toBeTruthy();

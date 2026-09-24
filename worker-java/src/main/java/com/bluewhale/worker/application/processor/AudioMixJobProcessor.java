@@ -93,6 +93,7 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private void runStep(ClaimedMediaExtractJobDto job) {
+        if (cancelIfRequested(job)) return;
         Object credential = job.input().get("provider_credential");
         if (!(credential instanceof String frozen) || frozen.isBlank()) {
             fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音频混合任务缺少供应商凭证");
@@ -122,6 +123,7 @@ public class AudioMixJobProcessor implements JobProcessor {
             return;
         }
         String taskId = gateway.submit(token, urls, format);
+        if (cancelIfRequested(job)) return;
         if (stateMachine.markProviderSubmitted(job.id(), job.workerId(), job.fencingToken(), taskId)) {
             producer.enqueue(job.id(), POLL_INTERVAL_MS);
         }
@@ -152,12 +154,14 @@ public class AudioMixJobProcessor implements JobProcessor {
         try {
             observed = gateway.poll(token, job.providerTaskId());
         } catch (MediaExtractError error) {
+            if (cancelIfRequested(job)) return;
             if (transientPollError(error) && !timedOut(job)) {
                 scheduleNext(job);
                 return;
             }
             throw error;
         }
+        if (cancelIfRequested(job)) return;
         if ("processing".equals(observed.status())) {
             if (timedOut(job)) {
                 fail(job, AudioMixContract.ERROR_AUDIO_MIX_FAILED, "音频混合查询超时");
@@ -185,11 +189,11 @@ public class AudioMixJobProcessor implements JobProcessor {
             return;
         }
         String format = (String) job.input().get(AudioMixContract.INPUT_KEY_OUTPUT_FORMAT);
-        if (!renewLease(job)) return;
+        if (cancelIfRequested(job) || !renewLease(job)) return;
         AtomicBoolean lostLease = new AtomicBoolean();
         ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
-                if (!renewLease(job)) lostLease.set(true);
+                if (!lostLease.get() && (cancelIfRequested(job) || !renewLease(job))) lostLease.set(true);
             } catch (Exception error) {
                 lostLease.set(true);
                 log.warn("[audio_mix] 结果转存续租异常 jobId={}", job.id(), error);
@@ -206,7 +210,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         } finally {
             heartbeat.cancel(false);
         }
-        if (lostLease.get() || !renewLease(job)) return;
+        if (lostLease.get() || cancelIfRequested(job) || !renewLease(job)) return;
         boolean published = stateMachine.publishAudioMixResult(new PublishMediaExtractDto(
                 job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
@@ -219,10 +223,15 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private void scheduleNext(ClaimedMediaExtractJobDto job) {
+        if (cancelIfRequested(job)) return;
         long delayMs = pollDelayMs(job.pollCount());
         if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress(), delayMs)) {
             producer.enqueue(job.id(), delayMs);
         }
+    }
+
+    private boolean cancelIfRequested(ClaimedMediaExtractJobDto job) {
+        return stateMachine.cancelAudioMixIfRequested(job.id(), job.workerId(), job.fencingToken());
     }
 
     private static long pollDelayMs(int pollCount) {
