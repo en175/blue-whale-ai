@@ -133,7 +133,7 @@ it('悬停有效标签后预览挂在 body 下，贴近屏幕顶部时翻到标�
   expect(preview.style.top).toBe('78px');
 });
 
-it('悬停位置充裕时预览保持在标签上方', async () => {
+it('悬停位置充裕时预览仍固定在标签下方', async () => {
   const { chip } = await renderNode();
   chipRectSpy.current = rectOf(400, 420, 10);
   await act(async () => chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
@@ -141,7 +141,8 @@ it('悬停位置充裕时预览保持在标签上方', async () => {
   const preview = document.querySelector('[data-testid="media-chip-preview"]') as HTMLElement;
   expect(preview).toBeTruthy();
   expect(container.contains(preview)).toBe(false);
-  expect(preview.style.top).toBe('400px');
+  // !851：预览固定标签下方（chip.bottom + 8），位置充裕也不翻到上方
+  expect(preview.style.top).toBe('428px');
 });
 
 it('编辑态点击标签后操作层挂在 body 下，不落在画布节点内', async () => {

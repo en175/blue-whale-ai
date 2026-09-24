@@ -290,9 +290,7 @@ async function rebindCancelRestoresCaret(closeMenu: () => Promise<void>) {
   scatterSelection(editor, 2);
   const chip = editor.querySelector<HTMLElement>('[data-media-node="m1"]')!;
   await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
-  const rebind = [...chipMenu.querySelectorAll('button')].find(b => b.textContent?.includes('重新绑定'))!;
-  await act(async () => rebind.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await pressChipMenuButton('重新绑定');
   expect(menuOpen()).toBe(true);
   scatterSelection(editor);
   await closeMenu();
@@ -434,9 +432,7 @@ it('替换来源后光标落替换后新标签后', async () => {
   await enterEditing(editor);
   const chip = chipByNode(editor, 'm1', 1)!;
   await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
-  const replace = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('替换来源'))!;
-  await act(async () => replace.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await pressChipMenuButton('替换来源');
   expect(menuOpen()).toBe(true);
   await selectMenuItem('素材图二');
   expect(menuOpen()).toBe(false);
@@ -501,9 +497,7 @@ it('失效多张标签重新绑定后光标落触发那张替换后的新标签�
     await enterEditing(editor);
     const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
     await act(async () => chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
-    const rebind = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('重新绑定'))!;
-    await act(async () => rebind.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await pressChipMenuButton('重新绑定');
     expect(menuOpen()).toBe(true);
     await selectMenuItem('素材图二');
     expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(0);
@@ -552,18 +546,19 @@ async function renderPromptNode() {
   }, { selected: true });
 }
 
-/** 点选引用标签后，在标签操作层点对应按钮（与 media 标签同一套菜单） */
-async function clickChipMenuButton(label: string) {
+/** 点选引用标签后，在标签操作层按对应按钮。
+ *  替换/重绑定只绑 pointerdown（真实指针会先 pointerdown 再 click）；删除两条都绑。 */
+async function pressChipMenuButton(label: string) {
   const menu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
   const button = [...menu.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
-  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await act(async () => button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })));
 }
 
 it('非编辑态删除素材标签后，进入编辑光标落被删标签原位置', async () => {
   const { editor } = await renderPromptNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickChipMenuButton('删除标签');
+  await pressChipMenuButton('删除标签');
   expect(editor.querySelector('[data-prompt-index="1"]')).toBeNull();
   await enterEditing(editor);
   // 被删标签原位置 = 「看这张」之后（DOM 流：chip 文本为 #N，offset 3）
@@ -574,7 +569,7 @@ it('非编辑态替换素材标签后，进入编辑光标落替换后标签后'
   const { editor } = await renderPromptNode();
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickChipMenuButton('替换来源');
+  await pressChipMenuButton('替换来源');
   expect(menuOpen()).toBe(true);
   await selectMenuItem('素材图二');
   const replaced = editor.querySelector<HTMLElement>('[data-media-node="m2"]')!;
@@ -603,10 +598,11 @@ it('同编号多张素材标签删除，只移除点击的那张，锚点取该�
   }, { selected: true });
   const ones = () => [...editor.querySelectorAll<HTMLElement>('[data-prompt-index="1"]')];
   await act(async () => ones()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickChipMenuButton('删除标签');
+  await pressChipMenuButton('删除标签');
   expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(1);
   await enterEditing(editor);
-  expect(caretTextOffset(editor)).toBe(2);
+  // 方案胶囊可见文本是 `#N`（2 字符）。删掉第三张后，光标落被删原位置 = 前两张合计 4
+  expect(caretTextOffset(editor)).toBe(4);
 });
 
 it('同编号多张素材标签删除，点第一张时锚点取第一张原位置（不取第二张）', async () => {
@@ -628,7 +624,7 @@ it('同编号多张素材标签删除，点第一张时锚点取第一张原位�
   }, { selected: true });
   const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
   await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await clickChipMenuButton('删除标签');
+  await pressChipMenuButton('删除标签');
   expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(1);
   await enterEditing(editor);
   expect(caretTextOffset(editor)).toBe(0);
