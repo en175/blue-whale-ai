@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>风格 C · 数据密集（GitHub / 数据台系）</title>
+<style>
+/* ============================================================
+ * 风格 C —— 数据密集
+ *
+ * 特征：蓝灰底（不是纯黑）、分隔线明确、行更紧、**顶部一条指标带**。
+ * 观感来源是「信息密度 + 秩序」：一屏能看更多，且每列的边界都清楚。
+ * 与前两套最大的区别是顶部 KPI 条——管理端最高频的问题「现在什么情况」
+ * 应该一眼可见，而不是要翻进某个页面。
+ * 语义色只在指标与状态点上出现，表格本身是灰的。
+ * ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font: 13px/1.5 -apple-system, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #0d1117; color: #e6edf3;
+  -webkit-font-smoothing: antialiased;
+}
+
+.layout { display: flex; height: 100vh; }
+
+.sidebar {
+  width: 216px; flex-shrink: 0; padding: 16px 10px;
+  background: #010409; border-right: 1px solid #21262d;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px; }
+.brand-mark {
+  width: 24px; height: 24px; border-radius: 5px; display: grid; place-items: center;
+  background: #161b22; border: 1px solid #30363d; color: #4493f8; font-size: 11px;
+}
+.brand-name { font-size: 13px; font-weight: 600; }
+
+.nav { display: flex; flex-direction: column; gap: 1px; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: 5px; color: #8b949e; cursor: pointer; font-size: 13px;
+}
+.nav-item:hover { background: #161b22; color: #e6edf3; }
+.nav-item.active { background: #1f6feb26; color: #e6edf3; font-weight: 500; }
+.nav-bar { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; }
+
+.main { flex: 1; overflow: auto; }
+.page { padding: 24px 28px 48px; }
+
+.page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+h1 { font-size: 18px; font-weight: 600; }
+.page-sub { font-size: 12px; color: #8b949e; margin-top: 3px; }
+
+.btn {
+  padding: 5px 12px; border-radius: 6px; border: 1px solid #30363d;
+  background: #21262d; color: #e6edf3; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.btn:hover { background: #30363d; border-color: #8b949e; }
+.btn-primary { background: #238636; border-color: #2ea043; color: #fff; font-weight: 500; }
+.btn-primary:hover { background: #2ea043; border-color: #3fb950; }
+
+/* 顶部指标带：这一套的标志性元素 */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #21262d; border: 1px solid #21262d; border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
+.stat { background: #0d1117; padding: 14px 16px; }
+.stat-label { font-size: 11px; color: #8b949e; letter-spacing: .02em; }
+.stat-value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.stat-delta { font-size: 11px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.up { color: #3fb950; }
+.down { color: #f85149; }
+
+.panel { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; overflow: hidden; }
+.panel-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  background: #161b22; border-bottom: 1px solid #21262d; font-size: 13px; font-weight: 600;
+}
+.count { background: #30363d; color: #8b949e; border-radius: 999px; padding: 0 7px; font-size: 11px; font-weight: 400; }
+
+.filters { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.input, .select {
+  height: 28px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid #30363d; background: #0d1117; color: #e6edf3;
+  font-size: 12px; font-family: inherit;
+}
+.input { width: 260px; }
+.input::placeholder { color: #6e7681; }
+.input:focus, .select:focus { outline: none; border-color: #4493f8; box-shadow: 0 0 0 3px #4493f833; }
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 8px 16px; font-size: 11px; font-weight: 600;
+  color: #8b949e; background: #161b22; border-bottom: 1px solid #21262d; white-space: nowrap;
+}
+td { padding: 9px 16px; border-bottom: 1px solid #21262d; font-size: 13px; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #161b22; }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+.uid { color: #6e7681; font-size: 11px; font-variant-numeric: tabular-nums; }
+.muted { color: #8b949e; font-size: 12px; }
+
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 1px 7px; border-radius: 999px; font-size: 11px;
+  border: 1px solid #30363d; color: #8b949e;
+}
+.tag-accent { border-color: #1f6feb; color: #4493f8; }
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+.dot-ok { background: #3fb950; }
+.dot-warn { background: #d29922; }
+.dot-off { background: #6e7681; }
+
+.link { color: #4493f8; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+.sep { color: #30363d; margin: 0 8px; }
+
+.pager { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #161b22; border-top: 1px solid #21262d; font-size: 12px; color: #8b949e; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">◆</div><div class="brand-name">Blue-Whale</div></div>
+    <nav class="nav">
+      <div class="nav-item"><span class="nav-bar"></span>仪表盘</div>
+      <div class="nav-item"><span class="nav-bar"></span>充值档位</div>
+      <div class="nav-item"><span class="nav-bar"></span>模板管理</div>
+      <div class="nav-item active"><span class="nav-bar"></span>用户管理</div>
+      <div class="nav-item"><span class="nav-bar"></span>订单管理</div>
+      <div class="nav-item"><span class="nav-bar"></span>操作日志</div>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>用户管理</h1>
+          <p class="page-sub">管理用户积分、冻结解冻账户、查看调整记录</p>
+        </div>
+        <button class="btn">导出 CSV</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="stat-label">总用户</div><div class="stat-value">1,284</div><div class="stat-delta up">+38 本周</div></div>
+        <div class="stat"><div class="stat-label">已冻结</div><div class="stat-value">17</div><div class="stat-delta muted">1.3%</div></div>
+        <div class="stat"><div class="stat-label">积分余额合计</div><div class="stat-value">2.41M</div><div class="stat-delta up">+4.2%</div></div>
+        <div class="stat"><div class="stat-label">近 24h 消费</div><div class="stat-value">86,420</div><div class="stat-delta down">−2.1%</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">用户列表 <span class="count">1,284</span></div>
+        <div class="filters">
+          <input class="input" placeholder="搜索昵称 / 手机号 / 用户 ID" />
+          <select class="select"><option>全部状态</option></select>
+          <select class="select"><option>全部余额</option></select>
+          <div style="flex:1"></div>
+          <button class="btn">重置</button>
+          <button class="btn btn-primary">查询</button>
+        </div>
+        <table>
+          <thead><tr>
+            <th>用户</th><th>角色</th><th class="num">余额</th><th class="num">累计消费</th>
+            <th>状态</th><th>注册时间</th><th></th>
+          </tr></thead>
+          <tbody>
+            <tr><td>alice <span class="uid">#1001</span></td><td><span class="tag tag-accent">管理员</span></td><td class="num">12,480</td><td class="num">3,120</td><td><span class="tag"><span class="dot dot-ok"></span>正常</span></td><td class="muted">2026-03-12</td><td><span class="link">冻结</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+            <tr><td>bob <span class="uid">#1002</span></td><td><span class="tag">普通用户</span></td><td class="num">860</td><td class="num">14,900</td><td><span class="tag"><span class="dot dot-ok"></span>正常</span></td><td class="muted">2026-04-02</td><td><span class="link">冻结</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+            <tr><td>carol <span class="uid">#1003</span></td><td><span class="tag">普通用户</span></td><td class="num">0</td><td class="num">420</td><td><span class="tag"><span class="dot dot-warn"></span>待验证</span></td><td class="muted">2026-05-18</td><td><span class="link">冻结</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+            <tr><td>dave <span class="uid">#1004</span></td><td><span class="tag">普通用户</span></td><td class="num">45,200</td><td class="num">1,050</td><td><span class="tag"><span class="dot dot-off"></span>已冻结</span></td><td class="muted">2026-06-01</td><td><span class="link">解冻</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+            <tr><td>erin <span class="uid">#1005</span></td><td><span class="tag">普通用户</span></td><td class="num">3,720</td><td class="num">28,300</td><td><span class="tag"><span class="dot dot-ok"></span>正常</span></td><td class="muted">2026-06-14</td><td><span class="link">冻结</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+            <tr><td>frank <span class="uid">#1006</span></td><td><span class="tag">普通用户</span></td><td class="num">150</td><td class="num">60</td><td><span class="tag"><span class="dot dot-ok"></span>正常</span></td><td class="muted">2026-07-09</td><td><span class="link">冻结</span><span class="sep">|</span><span class="link">调整积分</span></td></tr>
+          </tbody>
+        </table>
+        <div class="pager"><span>共 1,284 个用户</span><span>1 / 65 页　<span class="link">下一页</span></span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

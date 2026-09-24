@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>风格 B · 层次浮起（Vercel / Geist 系）</title>
+<style>
+/* ============================================================
+ * 风格 B —— 层次浮起
+ *
+ * 特征：纯黑页面底 + **卡片化**内容、圆角大（12px）、留白多、主按钮是**白底黑字**。
+ * 观感来源是「层次」：每个区块都是一张浮起来的卡片，靠
+ * ① 描边 ② 顶部内高光（inset 0 1px 0 rgba(255,255,255,.05)）
+ * ③ 极轻投影 三者叠出来——深色界面的「高级感」八成来自这一条内高光。
+ * 彩色几乎为零：只在状态点和链接上出现。
+ * ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font: 13.5px/1.6 -apple-system, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #000; color: #ededed;
+  -webkit-font-smoothing: antialiased;
+}
+
+.layout { display: flex; height: 100vh; }
+
+.sidebar {
+  width: 240px; flex-shrink: 0; padding: 20px 14px;
+  border-right: 1px solid #1a1a1a;
+  display: flex; flex-direction: column; gap: 28px;
+}
+.brand { display: flex; align-items: center; gap: 11px; padding: 0 6px; }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(180deg, #1c1c1c, #141414);
+  border: 1px solid #262626; color: #ededed; font-size: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+.brand-name { font-size: 13.5px; font-weight: 600; }
+.brand-sub { font-size: 10.5px; color: #666; margin-top: 2px; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-label { font-size: 10.5px; color: #555; padding: 0 8px 6px; letter-spacing: .06em; text-transform: uppercase; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px;
+  border-radius: 8px; color: #a1a1a1; cursor: pointer;
+}
+.nav-item:hover { background: #141414; color: #ededed; }
+.nav-item.active { background: #1a1a1a; color: #fff; font-weight: 500; box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+.nav-item.active .nav-dot { background: #fff; }
+.nav-dot { width: 5px; height: 5px; border-radius: 50%; background: #404040; }
+
+.main { flex: 1; overflow: auto; }
+.page { max-width: 1120px; margin: 0 auto; padding: 40px 32px 64px; }
+
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.page-sub { font-size: 13px; color: #666; margin-top: 6px; }
+
+.btn {
+  padding: 7px 14px; border-radius: 8px; border: 1px solid #262626;
+  background: #0a0a0a; color: #ededed; font-size: 13px; cursor: pointer; font-family: inherit;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  transition: background .15s ease, border-color .15s ease;
+}
+.btn:hover { background: #141414; border-color: #333; }
+/* 白底黑字的主按钮：彩色按钮容易显得廉价，纯黑白是这套的关键 */
+.btn-primary { background: #fff; border-color: #fff; color: #000; font-weight: 500; box-shadow: none; }
+.btn-primary:hover { background: #e5e5e5; border-color: #e5e5e5; }
+
+/* 卡片：这一套的基本单位 */
+.card {
+  background: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 1px 2px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.card-pad { padding: 16px 20px; }
+
+.filters { display: flex; gap: 10px; align-items: center; }
+.input, .select {
+  height: 34px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid #1f1f1f; background: #000; color: #ededed;
+  font-size: 13px; font-family: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.input { flex: 1; max-width: 320px; }
+.input::placeholder { color: #555; }
+.input:focus, .select:focus {
+  outline: none; border-color: #444;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.06);
+}
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 12px 20px; font-size: 11.5px; font-weight: 500;
+  color: #666; background: #0d0d0d; border-bottom: 1px solid #1f1f1f;
+  white-space: nowrap; letter-spacing: .02em;
+}
+td { padding: 14px 20px; border-bottom: 1px solid #141414; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background .12s ease; }
+tbody tr:hover { background: #0d0d0d; }
+.num { font-variant-numeric: tabular-nums; text-align: right; font-weight: 500; }
+.uid { color: #555; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.muted { color: #666; }
+
+/* 标签：细描边而非填充——填充标签一多，页面立刻花 */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border-radius: 999px; font-size: 11.5px;
+  border: 1px solid #262626; color: #a1a1a1;
+}
+.tag-accent { border-color: rgba(255,255,255,.24); color: #fff; }
+.tag-dot { width: 5px; height: 5px; border-radius: 50%; }
+.dot-ok { background: #3fb950; }
+.dot-warn { background: #d29922; }
+.dot-off { background: #555; }
+
+.link { color: #ededed; cursor: pointer; text-decoration: underline; text-decoration-color: #333; text-underline-offset: 3px; }
+.link:hover { text-decoration-color: #666; }
+.sep { color: #262626; margin: 0 10px; }
+
+.pager { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; font-size: 12.5px; color: #666; border-top: 1px solid #141414; background: #0d0d0d; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">◆</div>
+      <div><div class="brand-name">Blue-Whale</div><div class="brand-sub">管理后台</div></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-label">概览</div>
+      <div class="nav-item"><span class="nav-dot"></span>仪表盘</div>
+      <div class="nav-label" style="margin-top:14px">运营</div>
+      <div class="nav-item"><span class="nav-dot"></span>充值档位</div>
+      <div class="nav-item"><span class="nav-dot"></span>模板管理</div>
+      <div class="nav-item active"><span class="nav-dot"></span>用户管理</div>
+      <div class="nav-item"><span class="nav-dot"></span>订单管理</div>
+      <div class="nav-item"><span class="nav-dot"></span>操作日志</div>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>用户管理</h1>
+          <p class="page-sub">管理用户积分、冻结解冻账户、查看调整记录</p>
+        </div>
+        <button class="btn">导出 CSV</button>
+      </div>
+
+      <div class="card card-pad" style="margin-bottom:16px">
+        <div class="filters">
+          <input class="input" placeholder="搜索昵称 / 手机号 / 用户 ID" />
+          <select class="select"><option>全部状态</option></select>
+          <select class="select"><option>全部余额</option></select>
+          <div style="flex:1"></div>
+          <button class="btn">重置</button>
+          <button class="btn btn-primary">查询</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr>
+            <th>用户</th><th>角色</th><th class="num">余额</th><th class="num">累计消费</th>
+            <th>状态</th><th>注册时间</th><th></th>
+          </tr></thead>
+          <tbody>
+            <tr><td>alice<br><span class="uid">#1001</span></td><td><span class="tag tag-accent">管理员</span></td><td class="num">12,480</td><td class="num">3,120</td><td><span class="tag"><span class="tag-dot dot-ok"></span>正常</span></td><td class="muted">2026-03-12</td><td><span class="link">冻结</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+            <tr><td>bob<br><span class="uid">#1002</span></td><td><span class="tag">普通用户</span></td><td class="num">860</td><td class="num">14,900</td><td><span class="tag"><span class="tag-dot dot-ok"></span>正常</span></td><td class="muted">2026-04-02</td><td><span class="link">冻结</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+            <tr><td>carol<br><span class="uid">#1003</span></td><td><span class="tag">普通用户</span></td><td class="num">0</td><td class="num">420</td><td><span class="tag"><span class="tag-dot dot-warn"></span>待验证</span></td><td class="muted">2026-05-18</td><td><span class="link">冻结</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+            <tr><td>dave<br><span class="uid">#1004</span></td><td><span class="tag">普通用户</span></td><td class="num">45,200</td><td class="num">1,050</td><td><span class="tag"><span class="tag-dot dot-off"></span>已冻结</span></td><td class="muted">2026-06-01</td><td><span class="link">解冻</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+            <tr><td>erin<br><span class="uid">#1005</span></td><td><span class="tag">普通用户</span></td><td class="num">3,720</td><td class="num">28,300</td><td><span class="tag"><span class="tag-dot dot-ok"></span>正常</span></td><td class="muted">2026-06-14</td><td><span class="link">冻结</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+            <tr><td>frank<br><span class="uid">#1006</span></td><td><span class="tag">普通用户</span></td><td class="num">150</td><td class="num">60</td><td><span class="tag"><span class="tag-dot dot-ok"></span>正常</span></td><td class="muted">2026-07-09</td><td><span class="link">冻结</span><span class="sep">·</span><span class="link">调整积分</span></td></tr>
+          </tbody>
+        </table>
+        <div class="pager"><span>共 1,284 个用户</span><span>1 / 65 页　<span class="link">下一页</span></span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
