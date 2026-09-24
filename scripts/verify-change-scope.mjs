@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { arch, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildVerificationPlan,
   classifyChanges,
@@ -13,6 +14,35 @@ import {
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
+}
+
+function gitSucceeds(...args) {
+  return spawnSync("git", args, { stdio: "ignore" }).status === 0;
+}
+
+function taskBaseline() {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "lib", "task_metadata.py");
+  const candidates = process.platform === "win32"
+    ? [["py", "-3"], ["python3"], ["python"]]
+    : [["python3"], ["python"]];
+  for (const [command, ...prefix] of candidates) {
+    try {
+      return JSON.parse(execFileSync(command, [...prefix, script, "read", "--json"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }));
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw new Error(error.stderr?.toString().trim() || error.message);
+    }
+  }
+  throw new Error("读取任务起点需要可用的 Python 3");
+}
+
+function remoteTargetSha(targetBranch) {
+  const line = git("ls-remote", "--heads", "origin", `refs/heads/${targetBranch}`);
+  if (!line) throw new Error(`远端目标 origin/${targetBranch} 不存在`);
+  return line.split(/\s/)[0];
 }
 
 function valueAfter(args, option, fallback) {
@@ -44,7 +74,17 @@ function documentationOnlyFiles(files, base, head) {
 
 function currentScope({ baseRef, risk, stage }) {
   const head = git("rev-parse", "HEAD");
-  const base = git("merge-base", baseRef, head);
+  const metadata = taskBaseline();
+  const startSha = metadata.start_sha;
+  if (baseRef && git("rev-parse", "--verify", `${baseRef}^{commit}`) !== startSha) {
+    throw new Error(`显式基线 ${baseRef} 与任务起点 ${startSha} 不一致`);
+  }
+  const targetBranch = metadata.target_branch;
+  const targetSha = remoteTargetSha(targetBranch);
+  const base = gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
+    gitSucceeds("merge-base", "--is-ancestor", targetSha, head)
+    ? targetSha
+    : startSha;
   const changedFiles = git("diff", "--name-only", "-z", `${base}...${head}`)
     .split("\0")
     .filter(Boolean)
@@ -65,6 +105,9 @@ function currentScope({ baseRef, risk, stage }) {
   return {
     head,
     base,
+    startSha,
+    targetBranch,
+    targetSha,
     changedFiles,
     changedFilesHash,
     classification,
@@ -182,6 +225,9 @@ function loadRetryableReceipt(scope) {
     receipt.status === "failed" &&
     receipt.head === scope.head &&
     receipt.base === scope.base &&
+    receipt.startSha === scope.startSha &&
+    receipt.targetBranch === scope.targetBranch &&
+    receipt.targetSha === scope.targetSha &&
     receipt.changedFilesHash === scope.changedFilesHash &&
     receipt.inputHash === scope.inputHash &&
     JSON.stringify(receipt.classification) === JSON.stringify(scope.classification) &&
@@ -214,7 +260,7 @@ function main() {
   if (!["plan", "run", "check", "summary"].includes(command)) {
     throw new Error("usage: verify-change-scope.mjs <plan|run|check|summary> [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
   }
-  const baseRef = valueAfter(args, "--base", "origin/master");
+  const baseRef = valueAfter(args, "--base", null);
   const risk = valueAfter(args, "--risk", "auto");
   const stage = valueAfter(args, "--stage", "completion");
   const retryKind = valueAfter(args, "--retry-kind", null);

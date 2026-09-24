@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from sync_recovery import RecoveryError, load_recovery, write_recovery
+from lib.task_metadata import TaskMetadataError, read_task_metadata
 
 
 RECOVERY_FILE = "agent-sync-recovery.json"
@@ -143,8 +144,11 @@ def emit(as_json: bool, status: str, **details: object) -> None:
         print("{}: {}".format(status, json.dumps(details, ensure_ascii=False, sort_keys=True)))
 
 
-def synchronize(root: Path, as_json: bool, target_branch: str) -> int:
+def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     git_dir, branch = worktree_context(root)
+    metadata = read_task_metadata(root, target_branch)
+    target_branch = metadata["target_branch"]
+    start_sha = metadata["start_sha"]
     ensure_clean(root)
     ensure_no_git_operation(git_dir)
     upstream_ref = "origin/{}".format(target_branch)
@@ -153,6 +157,12 @@ def synchronize(root: Path, as_json: bool, target_branch: str) -> int:
         raise WorkflowError("fetch {} 失败：{}".format(upstream_ref, fetch.stderr.strip()))
 
     upstream_sha = git_output(root, "rev-parse", upstream_ref)
+    remote_target = git_output(root, "ls-remote", "--heads", "origin", "refs/heads/{}".format(target_branch))
+    if not remote_target or remote_target.split()[0] != upstream_sha:
+        raise WorkflowError("远端目标在 fetch 后变化；重新读取并同步。")
+    if git(root, "merge-base", "--is-ancestor", start_sha, upstream_sha, check=False).returncode != 0:
+        pending = git_output(root, "log", "--format=%h %s", "--reverse", "{}..{}".format(upstream_sha, start_sha))
+        raise WorkflowError("origin/{} 尚未包含任务起点 {}；待共享基线提交：\n{}".format(target_branch, start_sha, pending))
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode == 0:
@@ -295,7 +305,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("sync", "rollback", "finalize"))
     parser.add_argument("--json", action="store_true", dest="as_json")
-    parser.add_argument("--target-branch", default="master")
+    parser.add_argument("--target-branch")
     return parser.parse_args(argv)
 
 
@@ -309,18 +319,13 @@ def main(argv: list[str] | None = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv or sys.argv[1:])
     try:
-        if args.target_branch != "master" and not (
-            args.target_branch.startswith("release/")
-            and len(args.target_branch) > len("release/")
-        ):
-            raise WorkflowError("目标分支仅允许 master 或 release/*。")
         root = repository_root()
         if args.action == "sync":
             return synchronize(root, args.as_json, args.target_branch)
         if args.action == "rollback":
             return rollback(root, args.as_json)
         return finalize(root, args.as_json)
-    except (RecoveryError, WorkflowError, subprocess.CalledProcessError) as exc:
+    except (RecoveryError, TaskMetadataError, WorkflowError, subprocess.CalledProcessError) as exc:
         emit(args.as_json, "ERROR", detail=str(exc))
         return 1
 

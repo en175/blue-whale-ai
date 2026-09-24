@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Black-box tests for the cross-platform task worktree entrypoint."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -19,6 +20,9 @@ SOURCE = Path(__file__).resolve().parents[1] / "start-task-worktree.py"
 SOURCE_SH = Path(__file__).resolve().parents[1] / "start-task-worktree.sh"
 SOURCE_LIB = Path(__file__).resolve().parents[1] / "lib" / "python3-command.sh"
 SOURCE_PRE_PUSH = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
+SOURCE_SYNC = Path(__file__).resolve().parents[1] / "lib" / "release_line_sync.py"
+SOURCE_STATE = Path(__file__).resolve().parents[1] / "lib" / "release-line-state.py"
+SOURCE_METADATA = Path(__file__).resolve().parents[1] / "lib" / "task_metadata.py"
 
 
 def run(*args, cwd, check=True):
@@ -27,6 +31,7 @@ def run(*args, cwd, check=True):
     result = subprocess.run(
         [str(arg) for arg in args],
         cwd=str(cwd),
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         text=True,
         encoding="utf-8",
         stdout=subprocess.PIPE,
@@ -45,7 +50,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.repo = self.root / "project"
+        self.main = self.root / "project"
+        self.repo = self.root / "blue-whale-worktrees" / "release-test"
         self.origin = self.root / "origin.git"
         self.actor = self.root / "actor"
 
@@ -54,27 +60,35 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertTrue(SOURCE_LIB.exists(), "shared python3 launcher lib does not exist")
         self.assertTrue(SOURCE_PRE_PUSH.exists(), "pre-push hook does not exist")
         run("git", "init", "--bare", "--initial-branch=master", self.origin, cwd=self.root)
-        run("git", "init", "--initial-branch=master", self.repo, cwd=self.root)
-        self.configure_user(self.repo)
+        run("git", "init", "--initial-branch=master", self.main, cwd=self.root)
+        self.configure_user(self.main)
 
-        scripts = self.repo / "scripts"
+        scripts = self.main / "scripts"
         scripts.mkdir()
         shutil.copy2(SOURCE, scripts / SOURCE.name)
         shutil.copy2(SOURCE_SH, scripts / SOURCE_SH.name)
         lib = scripts / "lib"
         lib.mkdir()
         shutil.copy2(SOURCE_LIB, lib / SOURCE_LIB.name)
-        hooks = self.repo / ".githooks"
+        for source in (SOURCE_SYNC, SOURCE_STATE, SOURCE_METADATA):
+            shutil.copy2(source, lib / source.name)
+        shutil.copy2(Path(__file__).resolve().parents[1] / "manage-release-branch.sh", scripts / "manage-release-branch.sh")
+        hooks = self.main / ".githooks"
         hooks.mkdir()
         shutil.copy2(SOURCE_PRE_PUSH, hooks / "pre-push")
-        (self.repo / "shared.txt").write_text("base\n", encoding="utf-8")
-        run("git", "add", ".", cwd=self.repo)
-        run("git", "commit", "-m", "chore: 初始化测试仓库", cwd=self.repo)
-        run("git", "remote", "add", "origin", self.origin, cwd=self.repo)
-        run("git", "push", "-u", "origin", "master", cwd=self.repo)
+        (self.main / "shared.txt").write_text("base\n", encoding="utf-8")
+        run("git", "add", ".", cwd=self.main)
+        run("git", "commit", "-m", "chore: 初始化测试仓库", cwd=self.main)
+        run("git", "remote", "add", "origin", self.origin, cwd=self.main)
+        run("git", "push", "-u", "origin", "master", cwd=self.main)
+        created = run(BASH, self.main / "scripts/manage-release-branch.sh", "create",
+                      "--summary", "发布流程验证", "--user-authorized", "--json", cwd=self.main)
+        self.release_branch = json.loads(created.stdout)["branch"]
+        run("git", "worktree", "add", self.repo, self.release_branch, cwd=self.main)
 
         run("git", "clone", self.origin, self.actor, cwd=self.root)
         self.configure_user(self.actor)
+        run("git", "switch", "--track", f"origin/{self.release_branch}", cwd=self.actor)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -109,20 +123,24 @@ class StartTaskWorktreeTest(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
 
-    def task_worktree(self):
+    def task_worktrees(self):
         output = run("git", "worktree", "list", "--porcelain", cwd=self.repo).stdout
         paths = [
             Path(line.removeprefix("worktree "))
             for line in output.splitlines()
             if line.startswith("worktree ")
         ]
-        tasks = [path for path in paths if path.resolve() != self.repo.resolve()]
-        self.assertEqual(1, len(tasks), output)
+        tasks = [path for path in paths if path.resolve() not in (self.repo.resolve(), self.main.resolve())]
+        return tasks
+
+    def task_worktree(self):
+        tasks = self.task_worktrees()
+        self.assertEqual(1, len(tasks), tasks)
         return tasks[0]
 
-    def assert_worktree_matches_master(self):
+    def assert_worktree_matches_release(self):
         task = self.task_worktree()
-        master_sha = run("git", "rev-parse", "master", cwd=self.repo).stdout.strip()
+        master_sha = run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip()
         task_sha = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
         self.assertEqual(master_sha, task_sha)
         return task
@@ -132,7 +150,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
             "--type", "fix", "--issue", "IK094T", "--summary", "修复工作树写入护栏"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        task = self.assert_worktree_matches_master()
+        task = self.assert_worktree_matches_release()
+        self.assertEqual(self.repo.parent.resolve(), task.parent.resolve())
         branch = run("git", "branch", "--show-current", cwd=task).stdout.strip()
         self.assertEqual("fix/IK094T-修复工作树写入护栏", branch)
 
@@ -149,7 +168,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        task = self.assert_worktree_matches_master()
+        task = self.assert_worktree_matches_release()
         branch = run("git", "branch", "--show-current", cwd=task).stdout.strip()
         self.assertEqual("docs/补全工作树使用说明", branch)
 
@@ -178,6 +197,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertIn("结构化中文规范", invalid.stderr)
 
     def test_pre_push_allows_valid_task_branch_behind_master(self):
+        run("git", "switch", "master", cwd=self.actor)
         self.commit(self.actor, "upstream.txt", "upstream\n", "chore: 推进主干")
         run("git", "push", "origin", "master", cwd=self.actor)
 
@@ -227,30 +247,30 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertIn("结构化中文规范", new_branch.stderr)
 
     def test_rejects_ascii_summary_without_creating_worktree(self):
-        before = run("git", "rev-parse", "master", cwd=self.repo).stdout.strip()
+        before = run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip()
         result = self.invoke(
             "--type", "fix", "--no-issue", "--summary", "fixworktree"
         )
         self.assertNotEqual(0, result.returncode)
         self.assertIn("中文", result.stderr)
-        self.assertEqual(before, run("git", "rev-parse", "master", cwd=self.repo).stdout.strip())
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertEqual(before, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
+        self.assertEqual(0, len(self.task_worktrees()))
 
-    def test_rejects_dirty_master(self):
+    def test_dirty_release_files_remain_local_and_do_not_enter_task(self):
         (self.repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
         result = self.invoke(
             "--type", "chore", "--no-issue", "--summary", "完善工作树启动流程"
         )
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn("不干净", result.stderr)
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((self.task_worktree() / "dirty.txt").exists())
+        self.assertTrue((self.repo / "dirty.txt").exists())
 
     def test_rejects_in_progress_merge_without_aborting_it(self):
         self.commit(self.repo, "shared.txt", "same\n", "fix: 修改本地共享内容")
         self.commit(self.actor, "shared.txt", "same\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", "master", cwd=self.actor)
-        run("git", "fetch", "origin", "master", cwd=self.repo)
-        run("git", "merge", "--no-commit", "--no-ff", "origin/master", cwd=self.repo)
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+        run("git", "fetch", "origin", self.release_branch, cwd=self.repo)
+        run("git", "merge", "--no-commit", "--no-ff", f"origin/{self.release_branch}", cwd=self.repo)
         self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
         merge_head = run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip()
 
@@ -259,12 +279,12 @@ class StartTaskWorktreeTest(unittest.TestCase):
         )
 
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("进行中的 Git 操作", result.stderr)
+        self.assertIn("未结束的 Git 操作", result.stderr)
         self.assertEqual(
             merge_head,
             run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip(),
         )
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertEqual(0, len(self.task_worktrees()))
 
     def test_local_ahead_is_preserved_as_worktree_base(self):
         local_sha = self.commit(
@@ -274,20 +294,56 @@ class StartTaskWorktreeTest(unittest.TestCase):
             "--type", "feature", "--no-issue", "--summary", "保留本地模块更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(local_sha, run("git", "rev-parse", "master", cwd=self.repo).stdout.strip())
-        self.assert_worktree_matches_master()
+        self.assertEqual(local_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
+        task = self.assert_worktree_matches_release()
+        self.assertIn(self.release_branch, result.stdout)
+        self.assertIn(local_sha, result.stdout)
+        metadata = self.read_metadata(task)
+        self.assertEqual(self.release_branch, metadata["target_branch"])
+        self.assertEqual(local_sha, metadata["start_sha"])
+
+    def read_metadata(self, task, *args):
+        result = run(sys.executable, task / "scripts/lib/task_metadata.py", "read",
+                     "--worktree", task, "--json", *args, cwd=task, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_missing_metadata_and_explicit_target_conflict_fail_closed(self):
+        result = self.invoke("--type", "fix", "--no-issue", "--summary", "保护任务基线记录")
+        self.assertEqual(0, result.returncode, result.stderr)
+        task = self.task_worktree()
+        metadata_dir = Path(run("git", "rev-parse", "--absolute-git-dir", cwd=task).stdout.strip())
+        (metadata_dir / "blue-whale/task-base.json").unlink()
+        missing = run(sys.executable, task / "scripts/lib/task_metadata.py", "read",
+                      "--worktree", task, "--json", cwd=task, check=False)
+        self.assertNotEqual(0, missing.returncode)
+        self.assertIn("repair", missing.stderr)
+        start_sha = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        bad = run(sys.executable, task / "scripts/lib/task_metadata.py", "repair",
+                  "--worktree", task, "--target-branch", "release/2030.01.01_错误发布验证",
+                  "--start-sha", start_sha, "--user-authorized", cwd=task, check=False)
+        self.assertNotEqual(0, bad.returncode)
+        restored = run(sys.executable, task / "scripts/lib/task_metadata.py", "repair",
+                       "--worktree", task, "--target-branch", self.release_branch,
+                       "--start-sha", start_sha, "--user-authorized", cwd=task, check=False)
+        self.assertEqual(0, restored.returncode, restored.stderr)
+        conflict = run(sys.executable, task / "scripts/lib/task_metadata.py", "read",
+                       "--worktree", task, "--target-branch", "release/2030.01.01_错误发布验证",
+                       cwd=task, check=False)
+        self.assertNotEqual(0, conflict.returncode)
+        self.assertIn("冲突", conflict.stderr)
 
     def test_remote_ahead_fast_forwards_master_before_creation(self):
         remote_sha = self.commit(
             self.actor, "remote.txt", "remote\n", "feat: 添加远程模块改动"
         )
-        run("git", "push", "origin", "master", cwd=self.actor)
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
         result = self.invoke(
             "--type", "feature", "--no-issue", "--summary", "融合远程模块更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(remote_sha, run("git", "rev-parse", "master", cwd=self.repo).stdout.strip())
-        self.assert_worktree_matches_master()
+        self.assertEqual(remote_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
+        self.assert_worktree_matches_release()
 
     def test_diverged_master_merges_both_histories_before_creation(self):
         local_sha = self.commit(
@@ -296,33 +352,33 @@ class StartTaskWorktreeTest(unittest.TestCase):
         remote_sha = self.commit(
             self.actor, "remote.txt", "remote\n", "feat: 添加远程模块改动"
         )
-        run("git", "push", "origin", "master", cwd=self.actor)
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
 
         result = self.invoke(
             "--type", "feature", "--no-issue", "--summary", "融合本地远程更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        run("git", "merge-base", "--is-ancestor", local_sha, "master", cwd=self.repo)
-        run("git", "merge-base", "--is-ancestor", remote_sha, "master", cwd=self.repo)
-        parents = run("git", "rev-list", "--parents", "-n", "1", "master", cwd=self.repo).stdout.split()
+        run("git", "merge-base", "--is-ancestor", local_sha, self.release_branch, cwd=self.repo)
+        run("git", "merge-base", "--is-ancestor", remote_sha, self.release_branch, cwd=self.repo)
+        parents = run("git", "rev-list", "--parents", "-n", "1", self.release_branch, cwd=self.repo).stdout.split()
         self.assertEqual(3, len(parents), parents)
-        self.assert_worktree_matches_master()
+        self.assert_worktree_matches_release()
 
     def test_conflict_aborts_and_does_not_create_worktree(self):
         local_sha = self.commit(
             self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容"
         )
         self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", "master", cwd=self.actor)
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
 
         result = self.invoke(
             "--type", "fix", "--no-issue", "--summary", "处理共享内容冲突"
         )
         self.assertNotEqual(0, result.returncode)
         self.assertIn("冲突", result.stderr)
-        self.assertEqual(local_sha, run("git", "rev-parse", "master", cwd=self.repo).stdout.strip())
+        self.assertEqual(local_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
         self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertEqual(0, len(self.task_worktrees()))
 
     @unittest.skipIf(
         os.name == "nt",
@@ -334,7 +390,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
         # 强制失败，其余 git 调用透传真实 git，验证文案如实、不误报成功。
         self.commit(self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容")
         self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", "master", cwd=self.actor)
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
 
         fake_dir = self.root / "fake-git-bin"
         fake_dir.mkdir()
@@ -375,10 +431,10 @@ class StartTaskWorktreeTest(unittest.TestCase):
         )
 
         self.assertNotEqual(0, result.returncode, result.stderr)
-        self.assertIn("冲突", result.stderr)
+        self.assertIn("合并失败", result.stderr)
         self.assertNotIn("已自动 abort", result.stderr)
-        self.assertIn("手动", result.stderr)
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertIn("请检查未完成的 Git 合并", result.stderr)
+        self.assertEqual(0, len(self.task_worktrees()))
 
     def test_wrapper_skips_microsoft_store_python3_stub(self):
         """合成 Store 桩（路径含 WindowsApps）且不提供 py launcher，验证 wrapper 跳过桩、报桩引导、不建 worktree。当前平台 PATH 注入模拟 Windows Git Bash 链路，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
@@ -411,7 +467,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertIn("桩", result.stderr)
         # 桩未被 exec：stderr 不应含桩的特征输出
         self.assertNotIn("Python was not found", result.stderr)
-        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+        self.assertEqual(0, len(self.task_worktrees()))
 
     def test_wrapper_falls_back_to_py_launcher_when_python3_is_stub(self):
         """合成桩 + 假 py launcher（shift 去掉 -3，转给真 python3 绝对路径），验证 wrapper 跳过桩后 fallback py -3 成功建 worktree。逻辑等价模拟，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
@@ -458,7 +514,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn("Python was not found", result.stderr)
-        task = self.assert_worktree_matches_master()
+        task = self.assert_worktree_matches_release()
         branch = run("git", "branch", "--show-current", cwd=task).stdout.strip()
         self.assertEqual("fix/回退py启动器场景", branch)
 

@@ -1,6 +1,6 @@
 # ADR-0010：本地 master 是用户本地集成区，Agent 写入任务必须进 task worktree
 
-- **状态**：Accepted
+- **状态**：已被 [ADR-0115](0115-local-release-code-baseline.md) 替代。以下保留历史决策记录。
 - **日期**：2026-07-09
 - **决策者**：JJNNReno（与 Codex 经 `/grill-with-docs` 会话共同得出）
 - **更新**：

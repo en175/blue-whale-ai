@@ -47,7 +47,7 @@ release/YYYY.MM.DD_<中文描述> # 日期 + 中文描述（6–15 字）
 - **日期** = 创建日期（发布日期，`YYYY.MM.DD`，零填充）。
 - **描述**：须含中文，6–15 字，禁空格 / 下划线 / 连字符 / 斜杠（与任务分支简述同规）；可省（纯日期批次）。
 - **同日多次发布**：同名已存在时入口自动追加序号 `_2` / `_3`。
-- **唯一创建入口**：`scripts/manage-release-branch.sh`（`list` / `create`），不手工 `git checkout -b release/...`；发布后清理走 `scripts/cleanup-release-branch.sh`。
+- **唯一管理入口**：`scripts/manage-release-branch.sh` 的 `list/current/create/activate`；`create/activate` 需发布负责人授权，旧活动批次未收口时拒绝换期。发布后清理走 `scripts/cleanup-release-branch.sh`。
 - **校验**：与任务分支同一权威校验器（`scripts/start-task-worktree.py --validate-branch`，pre-push 复用），不合规命名首次 push 即被拒。
 - `release/prod` 等历史遗留 ASCII 分支不迁移，只收尾不新建。
 
@@ -83,7 +83,7 @@ scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树
 py -3 scripts/start-task-worktree.py --type fix --issue IK094T --summary 修复工作树写入护栏
 ```
 
-Agent 不直接拼接完整分支名或 Work Tree 目录名；入口根据结构化参数生成并验证。
+Agent 从当前本地 release 工作树调用入口，不直接拼接完整分支名或 Work Tree 目录名。普通 docs/chore 也走当前 release；`hotfix` 前缀本身不授予生产修复权限。
 
 ### 实例
 
@@ -104,11 +104,11 @@ Agent 不直接拼接完整分支名或 Work Tree 目录名；入口根据结构
 
 ## 生命周期
 
-- **合并即删源分支**：Gitee 合并界面勾「删除源分支」，或 PR 合并后在 task worktree 运行 `scripts/cleanup-task-worktree.sh`。
-- **本地清理**：由 `scripts/cleanup-task-worktree.sh` 删除 task worktree、本地分支并 `git fetch --prune`。
+- **合入目标 release 后清理本地任务区**：在 task worktree 运行 `scripts/cleanup-task-worktree.sh`，入口核对任务 HEAD 已进入远端目标。
+- **远端源分支保留**：本地清理入口只删除 task worktree 与本地分支。远端源分支由负责人另行决定去向。
 - **废弃分支**（开了不提 PR）：作者自删，不留 stale。
 - **不设保留期**：代码历史在 git log + PR 记录里，删分支不丢历史。
-- `hotfix` 同理：一次性，合并即删。
+- 紧急生产 hotfix 另需负责人授权；日常发布线入口不会自动选择 master。
 
 ## 保护分支
 
