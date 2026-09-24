@@ -443,7 +443,7 @@ public class VideoJobProcessor implements JobProcessor {
         try {
             published = publishVideo(claim, observation);
         } catch (Exception error) {
-            // PR !854 审查修订：转存/发布异常按「旧结果不可用」回退重新提交（对齐共享骨架
+            // 转存/发布异常按「旧结果不可用」回退重新提交（对齐共享骨架
             // ParentResultReuse「发布异常走回退分支兜底」口径），不把手动重试写成终态失败
             log.warn("[video] 重试收割发布异常(旧结果不可用) jobId={} parentTask={} err={}，回退重新提交",
                     claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
