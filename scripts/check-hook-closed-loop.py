@@ -176,9 +176,10 @@ def load_kimi_chain(platform: Platform) -> ConfigChain:
     return ConfigChain(platform, "Edit|Write", command, gates[0])
 
 
-def setup_fixture(root: Path, platforms: tuple[Platform, ...]) -> tuple[Path, Path]:
+def setup_fixture(root: Path, platforms: tuple[Platform, ...]) -> tuple[Path, Path, Path]:
     master = root / "master"
     task = root / "task"
+    release = root / "release"
     subprocess.run(
         ["git", "init", "--initial-branch=master", str(master)],
         check=True,
@@ -187,6 +188,9 @@ def setup_fixture(root: Path, platforms: tuple[Platform, ...]) -> tuple[Path, Pa
     )
     run_git(master, "config", "user.name", "Hook Closed Loop")
     run_git(master, "config", "user.email", "hook-closed-loop@example.com")
+    (master / "scripts" / "lib").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "scripts" / "lib" / "task_metadata.py",
+                 master / "scripts" / "lib" / "task_metadata.py")
     for platform in platforms:
         (master / f"existing-{platform.slug}.txt").write_text(
             "before\n", encoding="utf-8"
@@ -194,7 +198,17 @@ def setup_fixture(root: Path, platforms: tuple[Platform, ...]) -> tuple[Path, Pa
     run_git(master, "add", ".")
     run_git(master, "commit", "-m", "test: initialize Hook closure fixture")
     run_git(master, "worktree", "add", "-b", TASK_BRANCH, str(task))
-    return master, task
+    run_git(master, "worktree", "add", "-b", "release/2026.09.29", str(release))
+    start_sha = run_git(task, "rev-parse", "HEAD")
+    repaired = subprocess.run(
+        [sys.executable, str(task / "scripts/lib/task_metadata.py"), "repair",
+         "--worktree", str(task), "--target-branch", "release/2026.09.29",
+         "--start-sha", start_sha, "--user-authorized"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if repaired.returncode:
+        fail("shared", "fixture", repaired.stderr.strip())
+    return master, release, task
 
 
 def native_input(
@@ -352,7 +366,7 @@ def verify(platforms: tuple[Platform, ...]) -> None:
 
     expected_ids: set[str] = set()
     with tempfile.TemporaryDirectory() as temp:
-        master, task = setup_fixture(Path(temp), platforms)
+        master, release, task = setup_fixture(Path(temp), platforms)
         # Kimi CLI shim 安装到临时 HOME：command 中的 $HOME 指向它，
         # shim 再按会话 cwd(REPO_ROOT) 的 opt-in 标记路由到权威 Gate。
         kimi_home = Path(temp) / "kimi-home"
@@ -365,6 +379,7 @@ def verify(platforms: tuple[Platform, ...]) -> None:
             env_extra = {"HOME": str(kimi_home)} if chain.platform.kimi else None
             for area, cwd, exit_code, branch, reason in (
                 ("master", master, 2, "master", "blocked-master"),
+                ("release", release, 2, "release/2026.09.29", "blocked-protected-branch"),
                 ("task", task, 0, TASK_BRANCH, "allowed-non-master"),
             ):
                 for operation in ("create", "update"):
@@ -440,7 +455,7 @@ def verify(platforms: tuple[Platform, ...]) -> None:
     for chain in chains:
         print(
             f"[配置链集成] {chain.platform.name} matcher={chain.matcher} "
-            f"gate={chain.gate} master=create/update blocked task=create/update allowed"
+            f"gate={chain.gate} master/release=create/update blocked task=create/update allowed"
         )
     print(
         f"[配置链集成] audit={len(expected_ids)}/{len(expected_ids)} unique correlated records; "

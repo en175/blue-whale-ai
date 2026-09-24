@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Commit a task worktree diff as a reviewable, revertable checkpoint.
-# worktree 工单分支上的 commit 是本地可逆动作（不碰 master、不 push、不 PR），
-# 不属发布红线，无需用户授权门槛。用户确认环节落在 merge 本地 master 前。
+# worktree 工单分支上的 commit 是本地可逆动作（不碰发布线、不 push、不 PR），
+# 不属发布红线，无需用户授权门槛。推送并创建 PR 前须有用户授权。
 #
 # 两种模式：
 #   提交（默认）：把已完成的子 issue diff 落成一个新 commit。一个工单分支可以提交多次——
@@ -63,7 +63,7 @@ WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"
 
 case "$ROOT" in
   "$WORKTREE_BASE"/*) ;;
-  *) fail "请在 $WORKTREE_BASE 下的任务 worktree 内执行，不能在用户本地 master 直接提交任务。" ;;
+  *) fail "请在 $WORKTREE_BASE 下的任务 worktree 内执行，不能在本地发布线直接提交任务。" ;;
 esac
 
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
@@ -73,23 +73,26 @@ case "$branch" in
   *) fail "当前分支不是工单分支：$branch" ;;
 esac
 
-# amend 的唯一真实前提是「这个分支上已经有属于它自己的 commit」，否则 amend 会改写 worktree
-# 基线（分出来时的 master SHA）。以前用一个标记文件表示这件事，副作用是把「一个分支只能提交
-# 一次」也一起钉死了；改用向 master 求 merge-base 直接问 git，既准确又不再限制提交次数。
-base_ref=""
-for candidate in origin/master master; do
-  if git -C "$ROOT" rev-parse --verify --quiet "$candidate" >/dev/null; then
-    base_ref="$candidate"
-    break
-  fi
-done
-[ -n "$base_ref" ] || fail "找不到 master 基线引用（origin/master 或 master），无法判断分支是否已有自己的 commit。"
+# 任务起点由开工入口写入私有 Git 元数据，缺失时禁止回退 master 推断。
+source "$ROOT/scripts/lib/python3-command.sh"
+select_python3_command || fail "未找到可用的 Python 3，无法读取任务起点。"
+base_sha="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field start_sha)" \
+  || fail "任务起点元数据读取失败；请按上方指引修复。"
+target_branch="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field target_branch)" \
+  || fail "任务目标发布线读取失败；请按上方指引修复。"
 
 branch_has_own_commit() {
-  local base
-  base="$(git -C "$ROOT" merge-base "$base_ref" HEAD 2>/dev/null || true)"
-  [ -n "$base" ] || return 1
-  [ "$base" != "$(git -C "$ROOT" rev-parse HEAD)" ]
+  local head_sha target_ref target_sha found_target=0
+  head_sha="$(git -C "$ROOT" rev-parse HEAD)"
+  [ "$base_sha" != "$head_sha" ] || return 1
+  # 同步任务后，HEAD 可能只是前进的 release 提交。只允许修订尚未进入
+  # 本地或已抓取远端目标发布线的任务顶端提交。
+  for target_ref in "refs/heads/$target_branch" "refs/remotes/origin/$target_branch"; do
+    target_sha="$(git -C "$ROOT" rev-parse --verify --quiet "$target_ref" 2>/dev/null)" || continue
+    found_target=1
+    git -C "$ROOT" merge-base --is-ancestor "$head_sha" "$target_sha" && return 1
+  done
+  [ "$found_target" = 1 ]
 }
 
 if [ "$AMEND" = 1 ]; then
@@ -108,9 +111,9 @@ else
   fi
   git -C "$ROOT" add -A
   git -C "$ROOT" commit -m "$MESSAGE"
-  commit_count="$(git -C "$ROOT" rev-list --count "$base_ref"..HEAD)"
+  commit_count="$(git -C "$ROOT" rev-list --count "$base_sha"..HEAD)"
   # ${} 包起来：紧跟其后的全角括号是多字节字符，裸 $branch 会被 bash 当成变量名的一部分。
   echo "✅ 已提交任务验收分支：${branch}（本分支第 ${commit_count} 个 commit）"
 fi
 
-echo "下一步：用户确认后，可在本地 master 运行 scripts/merge-task-to-local-master.sh --user-authorized $branch"
+echo "下一步：用户确认后，运行 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch ${target_branch}。"

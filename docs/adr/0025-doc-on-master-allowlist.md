@@ -1,6 +1,6 @@
 # ADR-0025：文档白名单——AI 可在本地 master 直改散文规格文档
 
-- **状态**：Accepted
+- **状态**：已被 [ADR-0115](0115-local-release-code-baseline.md) 替代。散文文档不再直写本地 master；以下保留历史决策记录。
 - **日期**：2026-07-25
 - **决策者**：JJNNReno（经 `/grilling` 会话共同得出）
 - **修订**：[ADR-0010](0010-local-master-is-user-integration-zone.md)（窄例外）

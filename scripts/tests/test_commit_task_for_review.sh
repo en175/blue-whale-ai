@@ -36,10 +36,26 @@ git -C "$REPO" config user.email "commit-guard-test@example.com"
 git -C "$REPO" config core.hooksPath /dev/null
 cp "$SOURCE_ROOT/scripts/commit-task-for-review.sh" "$REPO/scripts/commit-task-for-review.sh"
 cp "$SOURCE_ROOT/scripts/lib/worktree-paths.sh" "$REPO/scripts/lib/worktree-paths.sh"
+cp "$SOURCE_ROOT/scripts/lib/python3-command.sh" "$REPO/scripts/lib/python3-command.sh"
+cp "$SOURCE_ROOT/scripts/lib/task_metadata.py" "$REPO/scripts/lib/task_metadata.py"
 printf 'base\n' >"$REPO/shared.txt"
 git -C "$REPO" add -A
 git -C "$REPO" commit -q -m "base"
+BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+TARGET_BRANCH="release/2026.09.24_发布流程验证"
+git -C "$REPO" branch "$TARGET_BRANCH"
 git -C "$REPO" switch -q -c "$TASK_BRANCH"
+
+# 缺失元数据不得向 master 猜测起点。
+if out="$(run_commit -m "chore: 不得静默回退")"; then
+  fail "缺元数据时提交应当失败，却成功了"
+fi
+case "$out" in
+  *"缺少任务基线元数据"*) ;;
+  *) fail "缺元数据时应给出修复指引，实际：$out" ;;
+esac
+python3 "$REPO/scripts/lib/task_metadata.py" repair --worktree "$REPO" \
+  --target-branch "$TARGET_BRANCH" --start-sha "$BASE_SHA" --user-authorized >/dev/null
 
 # ---- 1. 分支还没有自己的 commit：--amend 必须拒绝 ----
 printf 'first\n' >>"$REPO/shared.txt"
@@ -50,26 +66,32 @@ case "$out" in
   *"尚无自己的 commit"*) ;;
   *) fail "拒绝理由应指出分支尚无自己的 commit，实际：$out" ;;
 esac
-[ "$(git -C "$REPO" rev-list --count master..HEAD)" = "0" ] \
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "0" ] \
   || fail "--amend 被拒后不该产生任何 commit"
 
 # ---- 2. 首次提交后 --amend 放行 ----
 out="$(run_commit -m "chore: 第一个子项")" || fail "首次提交应当成功，实际：$out"
-[ "$(git -C "$REPO" rev-list --count master..HEAD)" = "1" ] || fail "首次提交后应有 1 个 commit"
+case "$out" in
+  *"--target-branch $TARGET_BRANCH"*) ;;
+  *) fail "提交提醒应指向任务记录的发布线，实际：$out" ;;
+esac
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "1" ] || fail "首次提交后应有 1 个 commit"
 
 printf 'amended\n' >>"$REPO/shared.txt"
 out="$(run_commit --amend)" || fail "已有自己的 commit 后 --amend 应当放行，实际：$out"
-[ "$(git -C "$REPO" rev-list --count master..HEAD)" = "1" ] \
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "1" ] \
   || fail "--amend 不该增加 commit 数"
 
 # ---- 3. 同一分支可以连续提交多次（旧标记文件正是挡掉这件事） ----
 printf 'second\n' >>"$REPO/shared.txt"
 out="$(run_commit -m "chore: 第二个子项")" || fail "同一分支的第二次提交应当成功，实际：$out"
-[ "$(git -C "$REPO" rev-list --count master..HEAD)" = "2" ] \
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "2" ] \
   || fail "一个工单分支必须能落多个 commit（一个父工单一个 worktree，逐子项各一个 commit）"
 
 printf 'third\n' >>"$REPO/shared.txt"
 out="$(run_commit -m "chore: 第三个子项")" || fail "第三次提交应当成功，实际：$out"
-[ "$(git -C "$REPO" rev-list --count master..HEAD)" = "3" ] || fail "第三次提交后应有 3 个 commit"
+[ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "3" ] || fail "第三次提交后应有 3 个 commit"
+[ "$(python3 "$REPO/scripts/lib/task_metadata.py" read --worktree "$REPO" --field start_sha)" = "$BASE_SHA" ] \
+  || fail "修订提交不得改变任务起点 SHA"
 
 echo "PASS: commit-task-for-review.sh --amend 判据与多次提交"

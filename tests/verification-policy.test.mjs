@@ -50,7 +50,7 @@ function git(cwd, ...args) {
   }).trim();
 }
 
-function createRepository({ flakyRuleTest = false } = {}) {
+function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "blue-whale-verification-"));
   git(directory, "init", "-b", "master");
   git(directory, "config", "user.email", "agent@example.com");
@@ -74,8 +74,28 @@ function createRepository({ flakyRuleTest = false } = {}) {
   );
   git(directory, "add", ".");
   git(directory, "commit", "-m", "docs: baseline");
+  const origin = join(directory, ".git", "test-origin.git");
+  git(directory, "init", "--bare", origin);
+  git(directory, "remote", "add", "origin", origin);
+  git(directory, "branch", "release/prod");
+  git(directory, "push", "origin", "release/prod");
+  if (localAhead) {
+    git(directory, "switch", "release/prod");
+    mkdirSync(join(directory, "docs"));
+    writeFileSync(join(directory, "docs", "shared-baseline.md"), "local baseline\n");
+    git(directory, "add", "docs/shared-baseline.md");
+    git(directory, "commit", "-m", "docs: local release baseline");
+  }
   git(directory, "switch", "-c", "chore/test-verification");
-  mkdirSync(join(directory, "docs"));
+  const startSha = git(directory, "rev-parse", "HEAD");
+  mkdirSync(join(directory, ".git", "blue-whale"), { recursive: true });
+  writeFileSync(join(directory, ".git", "blue-whale", "task-base.json"), JSON.stringify({
+    version: 1,
+    task_branch: "chore/test-verification",
+    target_branch: "release/prod",
+    start_sha: startSha,
+  }));
+  mkdirSync(join(directory, "docs"), { recursive: true });
   writeFileSync(join(directory, "docs", "change.md"), "change\n");
   git(directory, "add", "docs/change.md");
   git(directory, "commit", "-m", "docs: change");
@@ -346,6 +366,16 @@ test("keeps hook and git control-plane changes scoped at PR stage", async () => 
   );
 });
 
+test("classifies the release sync entrypoints as control-plane at both stages", () => {
+  for (const stage of ["completion", "pr"]) {
+    assert.deepEqual(
+      classifyChanges(["scripts/sync-release-line.py", "scripts/sync-release-line.sh"], { stage }),
+      { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
+    );
+  }
+  assert.throws(() => classifyChanges(["scripts/sync-release-line-new.sh"]), /UNCLASSIFIED_PATH/);
+});
+
 test("classifies operational scripts without product acceptance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -477,6 +507,10 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_release_task_workflow",
     ],
   ]);
 
@@ -498,6 +532,10 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_release_task_workflow",
     ],
     ["pnpm", "verify"],
   ]);
@@ -642,9 +680,13 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "-m",
         "unittest",
         "scripts.tests.test_cbm_context",
-      "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
+        "scripts.tests.test_manage_release_branch",
+        "scripts.tests.test_sync_release_line",
+        "scripts.tests.test_cleanup_task_worktree",
+        "scripts.tests.test_release_task_workflow",
       ],
     ],
   );
@@ -974,7 +1016,7 @@ test("plans verification from the committed Git diff", () => {
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--json"],
+      [CLI, "plan", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -988,6 +1030,72 @@ test("plans verification from the committed Git diff", () => {
   }
 });
 
+test("local release commits stay outside task verification and block publication until shared", () => {
+  const repository = createRepository({ localAhead: true });
+  try {
+    const plan = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(plan.status, 0, plan.stderr);
+    assert.deepEqual(JSON.parse(plan.stdout).changedFiles, ["docs/change.md"]);
+
+    const conflict = spawnSync(process.execPath,
+      [CLI, "plan", "--base", "origin/release/prod", "--json"], {
+        cwd: repository, encoding: "utf8", env: childEnvironment(),
+      });
+    assert.equal(conflict.status, 2);
+    assert.match(conflict.stderr, /显式基线.*任务起点/);
+
+    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(publish.status, 12, publish.stderr);
+    const payload = JSON.parse(publish.stdout);
+    assert.equal(payload.status, "TASK_BASE_NOT_SHARED");
+    assert.match(payload.pending_commits, /local release baseline/);
+    assert.equal(git(repository, "ls-remote", "--heads", "origin",
+      "refs/heads/chore/test-verification"), "");
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("target advance invalidates a receipt and synced target files leave the task scope", () => {
+  const repository = createRepository();
+  try {
+    const initial = spawnSync(process.execPath, [CLI, "run", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(initial.status, 0, initial.stderr);
+
+    git(repository, "switch", "release/prod");
+    mkdirSync(join(repository, "docs"), { recursive: true });
+    writeFileSync(join(repository, "docs", "remote-only.md"), "target change\n");
+    git(repository, "add", "docs/remote-only.md");
+    git(repository, "commit", "-m", "docs: advance release");
+    const targetSha = git(repository, "rev-parse", "HEAD");
+    git(repository, "push", "origin", "release/prod");
+    git(repository, "switch", "chore/test-verification");
+
+    const stale = spawnSync(process.execPath, [CLI, "check", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(stale.status, 4, stale.stderr);
+    assert.equal(JSON.parse(stale.stdout).reason, "PR target changed after verification");
+
+    git(repository, "rebase", "release/prod");
+    const synced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(synced.status, 0, synced.stderr);
+    const scope = JSON.parse(synced.stdout);
+    assert.equal(scope.base, targetSha);
+    assert.deepEqual(scope.changedFiles, ["docs/change.md"]);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test("plans Chinese documentation paths from raw Git names without escalating", () => {
   const repository = createRepository();
   try {
@@ -995,19 +1103,15 @@ test("plans Chinese documentation paths from raw Git names without escalating", 
     writeFileSync(join(repository, "docs", "API", "视觉模型.md"), "说明\n");
     git(repository, "add", ".");
     git(repository, "commit", "-m", "docs: add Chinese path");
-    git(repository, "branch", "-f", "master", "HEAD");
-    rmSync(join(repository, "docs", "API", "视觉模型.md"));
-    git(repository, "add", "-A");
-    git(repository, "commit", "-m", "docs: remove Chinese path");
 
-    const result = spawnSync(process.execPath, [CLI, "plan", "--base", "master", "--stage", "pr", "--json"], {
+    const result = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
       cwd: repository,
       encoding: "utf8",
       env: childEnvironment(),
     });
     assert.equal(result.status, 0, result.stderr);
     const scope = JSON.parse(result.stdout);
-    assert.deepEqual(scope.changedFiles, ["docs/API/视觉模型.md"]);
+    assert.deepEqual(scope.changedFiles, ["docs/API/视觉模型.md", "docs/change.md"]);
     assert.equal(scope.classification.tier, "docs");
   } finally {
     rmSync(repository, { recursive: true, force: true });
@@ -1019,7 +1123,7 @@ test("reports a machine-readable error when verification evidence is missing", (
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "check", "--base", "master", "--json"],
+      [CLI, "check", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1033,13 +1137,41 @@ test("reports a machine-readable error when verification evidence is missing", (
   }
 });
 
+test("verification refuses missing task metadata", () => {
+  const repository = createRepository();
+  try {
+    rmSync(join(repository, ".git", "blue-whale", "task-base.json"));
+    const result = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /缺少任务基线元数据/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("verification refuses a task HEAD that no longer descends from its start", () => {
+  const repository = createRepository({ localAhead: true });
+  try {
+    git(repository, "reset", "--hard", "origin/release/prod");
+    const result = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /HEAD 已脱离记录的起点 SHA/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test("refuses to verify an uncommitted worktree", () => {
   const repository = createRepository();
   try {
     writeFileSync(join(repository, "uncommitted.txt"), "not in HEAD\n");
     const result = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1058,7 +1190,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
   try {
     const run = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1078,7 +1210,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
 
     const check = spawnSync(
       process.execPath,
-      [CLI, "check", "--base", "master", "--json"],
+      [CLI, "check", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(check.status, 0, check.stderr);
@@ -1086,7 +1218,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
 
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master"],
+      [CLI, "summary"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1132,7 +1264,7 @@ test("captures full verification stage timings in the receipt", () => {
 
     const run = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "run", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
 
@@ -1148,7 +1280,7 @@ test("captures full verification stage timings in the receipt", () => {
 
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master", "--stage", "pr"],
+      [CLI, "summary", "--stage", "pr"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1166,7 +1298,7 @@ test("retries a declared infrastructure failure once and records both attempts",
     assert.equal(existsSync(join(repository, ".git", "fixture-retry")), false);
     const failedRun = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(failedRun.status, 5, failedRun.stdout + failedRun.stderr);
@@ -1176,8 +1308,6 @@ test("retries a declared infrastructure failure once and records both attempts",
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "known-flaky",
         "--retry-reason",
@@ -1204,7 +1334,7 @@ test("retries a declared infrastructure failure once and records both attempts",
     rmSync(join(repository, ".git", "fixture-retry"));
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master"],
+      [CLI, "summary"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1222,8 +1352,6 @@ test("requires a failed receipt before accepting retry metadata", () => {
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "infrastructure",
         "--retry-reason",
@@ -1251,7 +1379,7 @@ test("does not apply an earlier retry reason to a later failing command", () => 
 
     const failedRun = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "run", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(failedRun.status, 5, failedRun.stdout + failedRun.stderr);
@@ -1269,8 +1397,6 @@ test("does not apply an earlier retry reason to a later failing command", () => 
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--stage",
         "pr",
         "--retry-kind",
@@ -1302,8 +1428,6 @@ test("rejects an unknown retry category", () => {
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "test-failed",
         "--retry-reason",
@@ -1324,9 +1448,6 @@ test("blocks publishing when the current HEAD has no valid verification receipt"
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   try {
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const result = spawnSync(
       "bash",
@@ -1346,13 +1467,10 @@ test("allows publishing when the current HEAD has a valid verification receipt",
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   try {
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const verification = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "origin/master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(verification.status, 0, verification.stderr);
@@ -1381,9 +1499,6 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
     writeFileSync(join(repository, "backend", "libs", "core", "result.ts"), "export {};\n");
     git(repository, "add", "backend/libs/core/result.ts");
     git(repository, "commit", "-m", "feat: add source change");
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(fakePnpm, ["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
@@ -1396,7 +1511,7 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
 
     const completion = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "origin/master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(completion.status, 0, completion.stderr);
@@ -1427,7 +1542,7 @@ test("CLI rejects an unclassified script without planning full verification", ()
 
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "plan", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1444,7 +1559,7 @@ test("rejects an unknown verification stage on the command line", () => {
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--stage", "merge", "--json"],
+      [CLI, "plan", "--stage", "merge", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 

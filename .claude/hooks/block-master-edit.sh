@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook — 拦截 AI 在 master 分支直接 Edit/Write 文件
+# Claude Code PreToolUse hook — 拦截 AI 在 master 和 release 分支直接 Edit/Write 文件
 #
 # 拦截对象：
 #   - Edit 工具（agent 编辑文件时触发）
 #   - Write 工具（agent 创建文件时触发）
-#   当 Edit/Write 目标文件所属工作树的 git 分支为 master 时拦截。
+#   当目标文件所属工作树不是任务分支时拦截。
 #
 # 放行：
-#   - 目标文件在非 master 分支的工作树（工单分支 worktree / detached HEAD）
+#   - 目标文件在带有效发布线元数据的独立任务 worktree
 #   - 目标文件不在任何 git 工作树内（仓库外 dotfile，如 ~/.codex/config.toml）
 #   - master 分支但目标是已被 Git 忽略的根 CLAUDE.local.md 或 .codex/config.toml
-#   - master 分支但目标在文档白名单（根 CONTEXT.md + docs/**/*.md；ADR-0025）
 #   - 非 Edit/Write 工具
 #
-# 为什么拦：Agent 不得在本地 master 直接修改文件。
+# 为什么拦：Agent 不得在本地 master 或活动 release 直接修改文件。
 #   所有改动必须在工单分支 worktree 中完成，走分支→PR→合并流程。
-#   决策见 docs/adr/0010-local-master-is-user-integration-zone.md
+#   决策见 docs/adr/0115-local-release-code-baseline.md
 #
 # 分支判定按 file_path 所属工作树（git -C），不看 cwd：
 #   主 checkout session（cwd=master）编辑 worktree 工单分支文件时，
-#   按 file_path 解析得到工单分支 → 放行，不依赖「worktree 必在主 toplevel 外」的布局假设。
+#   按 file_path 解析得到工单分支与任务元数据 → 放行，不依赖固定目录布局。
 #
 # 审计闭环（IK10CW）：对仓库内 Edit/Write 的判定（阻断或放行）追加一条单行
 #   结构化审计记录（时间/hook/工具/file_path/分支/session_id/tool_use_id/exit_code/reason）。
@@ -111,16 +110,28 @@ if [ -z "$TOPLEVEL" ]; then
   exit 0
 fi
 
-# 非 master 分支（工单分支 worktree / detached HEAD）→ 放行并审计
-if [ "$BRANCH" != "master" ]; then
-  audit 0 "allowed-non-master"
-  exit 0
-fi
+# 任务名分支也必须属于独立 worktree，且元数据能与当前分支和起点核对。
+# 只按分支前缀放行会允许在主 checkout 手工切出 chore/* 后绕过开工入口。
+case "$BRANCH" in
+  feature/*|fix/*|hotfix/*|docs/*|chore/*)
+    GIT_DIR="$(git -C "$TOPLEVEL" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    COMMON_DIR="$(git -C "$TOPLEVEL" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    if [ -n "$GIT_DIR" ] && [ -n "$COMMON_DIR" ] && [ "$GIT_DIR" != "$COMMON_DIR" ] \
+      && python3 "$TOPLEVEL/scripts/lib/task_metadata.py" read --worktree "$TOPLEVEL" --field task_branch >/dev/null 2>&1; then
+      audit 0 "allowed-non-master"
+      exit 0
+    fi
+    audit 2 "blocked-unmanaged-task"
+    cat >&2 <<EOF
+BLOCKED: ${BRANCH} 缺少可核对的独立任务 worktree 或发布线起点元数据。
 
-# master 分支但目标在文档白名单 → 放行（AI 可直改散文规格文档；ADR-0025）
-#   白名单：根 CONTEXT.md（领域语言权威源）+ docs/**/*.md（纯记录散文）。
-#   仍拦：.claude/（hooks/settings/rules/CLAUDE.md 规则源）、scripts/、代码、
-#         docs/specs/*.json schema/契约、fixtures、PDF——改这些=改行为，走 worktree。
+Agent 须从活动发布线通过 scripts/start-task-worktree.sh 创建任务区；旧任务区须在授权后显式修复 task_metadata.py repair。
+EOF
+    exit 2
+    ;;
+esac
+
+# master 上已忽略的两处本地个人配置是唯一写入例外。
 #   实化 FILE_PATH 目录（解 macOS /var→/private/var 等 symlink）再剥离 TOPLEVEL 前缀；
 #   剥离失败（文件不在本工作树根下）→ 不命中，落入下方硬拦（fail closed）。
 if REAL_DIR="$(cd "$FILE_DIR" 2>/dev/null && pwd -P)" && [ -n "$REAL_DIR" ]; then
@@ -134,30 +145,29 @@ if REAL_DIR="$(cd "$FILE_DIR" 2>/dev/null && pwd -P)" && [ -n "$REAL_DIR" ]; the
 
   # 本地个人配置只有同时满足「精确路径 + Git 已忽略」才放行。
   # 路径白名单防止扩大 master 写面；check-ignore 防止配置意外进入团队仓库。
-  case "$REL_PATH" in
-    CLAUDE.local.md|.codex/config.toml)
-      if git -C "$TOPLEVEL" check-ignore -q -- "$REL_PATH" 2>/dev/null; then
-        audit 0 "allowed-local-personal-config"
-        exit 0
-      fi
-      ;;
-  esac
-
-  case "$REL_PATH" in
-    CONTEXT.md|docs/*.md)
-      audit 0 "allowed-doc-allowlist"
-      exit 0
-      ;;
-  esac
+  if [ "$BRANCH" = "master" ]; then
+    case "$REL_PATH" in
+      CLAUDE.local.md|.codex/config.toml)
+        if git -C "$TOPLEVEL" check-ignore -q -- "$REL_PATH" 2>/dev/null; then
+          audit 0 "allowed-local-personal-config"
+          exit 0
+        fi
+        ;;
+    esac
+  fi
 fi
 
-# master 分支 + 仓库内 Edit/Write → 硬拦并审计
-audit 2 "blocked-master"
+# 保护分支或 detached HEAD + 仓库内 Edit/Write → 硬拦并审计
+if [ "$BRANCH" = "master" ]; then
+  audit 2 "blocked-master"
+else
+  audit 2 "blocked-protected-branch"
+fi
 cat >&2 <<EOF
-BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。
+BLOCKED: 禁止在 ${BRANCH:-detached HEAD} 直接 Edit/Write 文件。
   工具: $TOOL_NAME
 
-Agent 不得在本地 master 直接修改文件（最高红线）。
+Agent 须从活动发布线通过唯一入口创建任务 worktree 后写入。
 - 请使用唯一入口创建 task worktree：scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏
 - 在 worktree 的工单分支上完成开发后，走 PR 流程合并
 - 详见 CLAUDE.md「Task Worktree」与 docs/agents/worktree-workflow.md
