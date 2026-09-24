@@ -524,8 +524,8 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-guard")));
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -537,14 +537,15 @@ class VideoFrameInterpolationJobProcessorTest {
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(false);
-        when(interpolateVideoClient.submit(anyString(), anyString(), anyInt())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq(60));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========

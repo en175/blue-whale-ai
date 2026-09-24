@@ -55,7 +55,8 @@ import java.util.concurrent.TimeUnit;
  * job（claim 投影带 parentProviderTaskId）submit 相先查父任务的上游任务——已成功且结果
  * 齐全（videoUrl+resolution 双非空，对齐轮询相成功口径）则不重新提交，直接以父任务
  * observation 走既有 publishResult 发布（转存期租约心跳一并继承，收割期间租约由本
- * worker 心跳续）；父失败 / 不存在 / 查询异常 / 收割发布失败四种形态回退正常重新提交。
+ * worker 心跳续）；父失败 / 不存在 / 查询异常 / 仍持有执行权的收割发布失败回退正常
+ * 重新提交，收割发布期间失租或守卫未命中则停止本次执行不回退提交（IKICD0）。
  * <p>
  * 下载与转存复用 {@link TosVideoMediaRelay}（同套校验：fetch → video/ mime 校验 → TOS
  * 公开读 → md5），但走**流式** {@code persistStreaming} 并带本工具上限（审查修复 P2：
@@ -221,7 +222,8 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关按模式分流提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoMattingJobDto claim, String providerToken) {
-        // 0. IKI89Z（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89Z（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoMattingContract.TAG, claim, providerToken,
@@ -404,10 +406,11 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 归并 1050）→ 单事务建 Asset（type=video / source='generated'）+ 契约 result 三键
      * （video_url=转存后地址 / resolution / duration）回传 → 终态 succeeded。
      * <p>
-     * 返回发布终局语义（IKI89Z：重试收割据此判定复用是否成立）：true = 发布成功或租约
-     * 丢失静默退出（已被接管/已终态，收割方不得回退重新提交——回退只会白付一次上游
-     * 费用）；false = 发布守卫未命中（stale worker 或已终态，按 IKI89P 定型口径回退正常
-     * 重新提交）；下载/转存失败经异常上抛，由收割方 catch 后回退。
+     * 返回发布终局语义（IKI89Z / IKICD0：重试收割据此判定复用是否成立）：true = 发布
+     * 成功或租约丢失静默退出（已被接管/已终态，收割方不得回退重新提交——回退只会白付
+     * 一次上游费用）；false = 发布守卫未命中（stale worker 或已终态，收割方同样停止
+     * 本次执行不回退提交，与本家族心跳失租路径同一停止语义）；下载/转存失败经异常上抛，
+     * 由收割方 catch 后回退（此时仍持有执行权）。
      */
     private boolean publishResult(ClaimedVideoMattingJobDto claim,
                                   MatteVideoTaskObservation observation) {

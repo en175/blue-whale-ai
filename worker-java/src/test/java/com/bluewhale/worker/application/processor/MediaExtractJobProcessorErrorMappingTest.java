@@ -410,8 +410,8 @@ class MediaExtractJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimMediaExtract(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-guard")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -423,14 +423,14 @@ class MediaExtractJobProcessorErrorMappingTest {
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishMediaExtractResult(any())).thenReturn(false);
         stubSourceAsset();
-        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(extractAudioClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq("mp3"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failMediaExtractJob(any());
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐去字幕） ==========
