@@ -1246,6 +1246,24 @@ interface GenerationDeps {
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
+  /**
+   * ★ 新计费（billing-svc）的预扣。由装配层注入 —— 它负责解析用户等级、提取规格、
+   * 调 billing 客户端；本函数只把「哪个用户、哪个 job、什么模型/任务」交给它。
+   *
+   * <p>调用时机在**建 job 的同一个事务里、job 行插入之后**（见 generation-command-repo）：
+   * 预扣失败整体回滚，不产生垃圾 job。实现抛出的异常（余额不足 / billing 不可用）
+   * 会原样冒泡，由上层翻成对用户的响应（fail closed —— 扣不动就不要开始干活）。
+   */
+  billingHold?: (ctx: {
+    userId: string;
+    jobId: number;
+    /** 幂等键来源：同一动作重试要命中同一个 commandId */
+    commandId: string;
+    modelId: string;
+    taskType: string;
+    /** 冻结后的 input，供装配层提取规格 */
+    input: Record<string, unknown>;
+  }) => Promise<void>;
   /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
    *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
    *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
@@ -1639,6 +1657,20 @@ export async function handleCreateGenerationJob(
     if (snapshot) {
       cmdInput.costReservation = snapshot;
     }
+  }
+  // ★ 新计费：预扣交给 repo 在**建 job 的事务内**执行（job 行插入后、提交前）。
+  //   用 actionIdentity 作 commandId —— 它是同一动作的稳定指纹，重试命中同一幂等键。
+  if (deps.billingHold) {
+    const hold = deps.billingHold;
+    cmdInput.billingHold = (jobId) =>
+      hold({
+        userId: String(userId),
+        jobId,
+        commandId: actionIdentity,
+        modelId: resolvedModelId,
+        taskType: type,
+        input: input as unknown as Record<string, unknown>,
+      });
   }
   const created = await deps.command.createJob(cmdInput);
   return ok(created);

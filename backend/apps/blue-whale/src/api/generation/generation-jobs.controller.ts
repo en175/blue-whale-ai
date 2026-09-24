@@ -1,3 +1,6 @@
+import { billingEndpoint, createBillingClient, enforceHold } from "@lib/shared/billing/billing-client.js";
+import { createBillingHold } from "@lib/shared/billing/billing-hold.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { DomainError } from "@lib/contracts";
@@ -39,7 +42,33 @@ export class GenerationJobsController {
     private readonly canvas: CanvasService,
     private readonly material: MaterialService,
     private readonly assets: AssetService,
+    private readonly identity: IdentityService,
   ) {}
+
+  /**
+   * 预扣依赖（懒建一次）。
+   *
+   * <p>两种情况下**不接线**：`BILLING_GRPC_URL` 未配置、或 `BILLING_ENFORCE_HOLD` 未开。
+   * 后者是默认 —— 切换前 billing 一旦真扣，new-api 那边还在扣，用户会被扣两遍
+   * （《迁移与切换 runbook》§3.1）。等断 sk- 链的同一个发布窗口再打开。
+   */
+  private billingHoldDep?: ReturnType<typeof createBillingHold> | null;
+
+  private billingHold() {
+    if (this.billingHoldDep === undefined) {
+      const endpoint = billingEndpoint();
+      this.billingHoldDep =
+        endpoint && enforceHold()
+          ? createBillingHold({
+              client: createBillingClient(endpoint),
+              resolveTier: (userId) => this.identity.resolveTier(userId),
+              enforce: true,
+              logger,
+            })
+          : null;
+    }
+    return this.billingHoldDep ?? undefined;
+  }
 
   /** IKF YHJ：造素材校验状态门（ADR-0087）。生产判定逻辑在 `material-gate-wiring.ts`，
    *  这里只把本请求的依赖（用户、凭证、仓库面、失败处置）接上去——抽出去是为了可测：
@@ -101,6 +130,7 @@ export class GenerationJobsController {
     @Headers("authorization") authorization?: string,
   ) {
     const internal = sealProviderCredential(authorization);
+    const holdDep = this.billingHold();
     const result = await handleCreateGenerationJob(
       user.userId,
       projectId,
@@ -114,6 +144,9 @@ export class GenerationJobsController {
         assets: this.command.assets,
         materialGate: this.buildMaterialGate(user.userId, authorization),
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
+        // ⚠️ 先取到局部变量再条件展开：exactOptionalPropertyTypes 下
+        //    直接写 `...(f() ? { k: f() } : {})` 会得到 `k: T | undefined`，不被接受
+        ...(holdDep ? { billingHold: holdDep } : {}),
       },
       internal,
     );

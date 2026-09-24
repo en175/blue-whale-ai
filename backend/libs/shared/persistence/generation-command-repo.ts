@@ -43,6 +43,19 @@ export interface CreateJobInput {
   /** IK7G9X：建预留时写入 cost_reservations 的记账快照（真实预估金额 + 定价口径版本）。
    *  缺省时沿用旧行为：reserved_amount_fen=0 + 四版本 "dev"。 */
   costReservation?: CostReservationSnapshot;
+  /**
+   * ★ 新计费（billing-svc）的**预扣**。由 handler 注入——它知道该冻多少
+   * （模型 / 任务类型 / 规格 / 等级都是领域知识，这一层不该知道）。
+   *
+   * <p><b>为什么在事务里执行</b>：此时 job 行已插入、id 已拿到，但**尚未提交**。
+   * 预扣失败（余额不足 / billing 不可用）则整体回滚——**不产生垃圾 job**，
+   * 也不会有「冻了钱但没建成任务」或「建了任务但没冻钱」的中间态。
+   * 代价是事务里多一次外部 RPC（billing 的 50ms 预算），这是刻意的取舍。
+   *
+   * <p>与 {@link costReservation} 的区别：那个是**旧**体系写进记账表的快照，
+   * 一分钱都不动；这个是**真的冻结**。
+   */
+  billingHold?: (jobId: number) => Promise<void>;
 }
 
 export interface CreatedJob {
@@ -327,6 +340,11 @@ export async function createJobWithinTx(
       fencing_token: 0,
     },
   });
+  // ★ 预扣：job 行已插入（id 已拿到），但事务未提交 —— 失败整体回滚，不留垃圾 job。
+  if (input.billingHold) {
+    await input.billingHold(Number(job.id));
+  }
+
   // IK67HE/T14：固定输出槽（spec §4.4「输出槽位在首次提交时固定」）。
   if (input.expectedOutputCount > 0) {
     for (let i = 0; i < input.expectedOutputCount; i += 1) {
