@@ -507,6 +507,10 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_release_task_workflow",
     ],
   ]);
 
@@ -528,6 +532,10 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_release_task_workflow",
     ],
     ["pnpm", "verify"],
   ]);
@@ -672,9 +680,13 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "-m",
         "unittest",
         "scripts.tests.test_cbm_context",
-      "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
+        "scripts.tests.test_manage_release_branch",
+        "scripts.tests.test_sync_release_line",
+        "scripts.tests.test_cleanup_task_worktree",
+        "scripts.tests.test_release_task_workflow",
       ],
     ],
   );

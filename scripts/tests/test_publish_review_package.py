@@ -125,10 +125,17 @@ class PublishReviewPackageTest(unittest.TestCase):
             env=env or self.base_env,
         )
 
-    def invoke_create_pr_hook(self) -> subprocess.CompletedProcess[str]:
+    def invoke_create_pr_hook(self, *, enterprise_id=None, project_id=None,
+                              source_repo=None) -> subprocess.CompletedProcess[str]:
         payload = {"tool_name": "mcp__gitee-ent__create_enterprise_repo_pull", "tool_input": {
             "source_branch": BRANCH, "target_branch": "release/prod", "draft": False,
         }}
+        if enterprise_id is not None:
+            payload["tool_input"]["enterprise_id"] = enterprise_id
+        if project_id is not None:
+            payload["tool_input"]["project_id"] = project_id
+        if source_repo is not None:
+            payload["tool_input"]["source_repo"] = source_repo
         return subprocess.run(
             [BASH, str(CREATE_PR_HOOK)], cwd=self.worktree,
             input=json.dumps(payload), text=True, encoding="utf-8", capture_output=True,
@@ -273,6 +280,23 @@ class PublishReviewPackageTest(unittest.TestCase):
 
         self.assertEqual(2, blocked.returncode)
         self.assertIn("目标分支", blocked.stderr)
+
+    def test_create_pr_hook_rejects_other_repository_scope(self) -> None:
+        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        self.assertEqual(0, created.returncode, created.stderr)
+
+        same_repository = self.invoke_create_pr_hook(enterprise_id=16660949, project_id=48854568)
+        other_project = self.invoke_create_pr_hook(project_id=123456)
+        other_enterprise = self.invoke_create_pr_hook(enterprise_id=123456)
+        other_source = self.invoke_create_pr_hook(source_repo="123456")
+
+        self.assertEqual(0, same_repository.returncode, same_repository.stderr)
+        self.assertEqual(2, other_project.returncode)
+        self.assertIn("project_id", other_project.stderr)
+        self.assertEqual(2, other_enterprise.returncode)
+        self.assertIn("enterprise_id", other_enterprise.stderr)
+        self.assertEqual(2, other_source.returncode)
+        self.assertIn("source_repo", other_source.stderr)
 
     def test_update_mode_rejects_draft_creation_flag(self) -> None:
         result = self.invoke_update(self.pr_snapshot(), "--draft-pr")

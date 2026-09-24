@@ -252,6 +252,10 @@ function appendAreaCommands(commands, areas, base) {
         "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
+        "scripts.tests.test_manage_release_branch",
+        "scripts.tests.test_sync_release_line",
+        "scripts.tests.test_cleanup_task_worktree",
+        "scripts.tests.test_release_task_workflow",
       ],
     );
   }

@@ -108,6 +108,21 @@ def worktrees():
     return rows
 
 
+def unmerged_task_branches(inventory_rows):
+    checked_out = {item["branch"] for item in inventory_rows}
+    branches = git("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads").stdout.splitlines()
+    pending = []
+    for branch in branches:
+        if not branch.startswith(TASK_PREFIXES) or branch in checked_out:
+            continue
+        contained = git("for-each-ref", f"--contains=refs/heads/{branch}",
+                        "--format=%(refname)", "refs/remotes/origin/master",
+                        "refs/remotes/origin/release").stdout.strip()
+        if not contained:
+            pending.append(branch)
+    return pending
+
+
 def emit(data, as_json, message):
     print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if as_json else message)
 
@@ -130,10 +145,12 @@ def listing(args):
     branches = releases()
     sha, state = read_state()
     pending = candidates(state, branches)
+    inventory_rows = worktrees()
     data = {"branch": state["active"] if state else None, "state_sha": sha,
             "candidates": pending, "legacy": state["legacy"] if state else [],
             "recent": recent_releases(args.count),
-            "task_worktrees": worktrees()}
+            "task_worktrees": inventory_rows,
+            "unmerged_task_branches": unmerged_task_branches(inventory_rows)}
     if args.pr_snapshot and data["branch"]:
         data["open_prs"] = pr_snapshot(args.pr_snapshot, data["branch"])
     if args.json:
@@ -151,6 +168,7 @@ def listing(args):
     for item in data["task_worktrees"]:
         target = item.get("target_branch", item.get("metadata_error", "非任务分支"))
         print(f"  {item['branch']}  {item['path']}  {target}")
+    print("未检出且未合入的任务分支：" + (", ".join(data["unmerged_task_branches"]) or "无"))
     if args.pr_snapshot and data["branch"]:
         print("以当前发布线为目标的开放 PR：")
         for pull in data["open_prs"]:
@@ -212,6 +230,7 @@ def assert_closed(old, snapshot, require_merged=True):
     inventory_rows = worktrees()
     old_tasks = [item for item in inventory_rows if item.get("target_branch") in old_branches]
     unassigned = [item for item in inventory_rows if "metadata_error" in item]
+    unmerged_branches = unmerged_task_branches(inventory_rows)
     tasks = ", ".join(item["branch"] for item in old_tasks) or "无"
     unknown = ", ".join(item["branch"] for item in unassigned) or "无"
     local_commits = []
@@ -236,6 +255,7 @@ def assert_closed(old, snapshot, require_merged=True):
         open_pulls = []
         pulls = "未核对（需 --pr-snapshot）"
     inventory = (f"待处理任务：{tasks}；归属未核实任务：{unknown}；"
+                 f"未检出且未合入的任务分支：{', '.join(unmerged_branches) or '无'}；"
                  f"本地领先提交：{'; '.join(local_commits) or '无'}；"
                  f"未保存文件：{'; '.join(dirty) or '无'}；开放 PR：{pulls}")
     if require_merged:
@@ -245,7 +265,7 @@ def assert_closed(old, snapshot, require_merged=True):
                 raise ReleaseError(f"旧活动发布线 {branch} 尚未进入 origin/master，拒绝换期；{inventory}。")
     if not snapshot:
         raise ReleaseError(f"换期需 --pr-snapshot <JSON>；{inventory}。")
-    if old_tasks or unassigned or local_commits or dirty or open_pulls:
+    if old_tasks or unassigned or unmerged_branches or local_commits or dirty or open_pulls:
         raise ReleaseError(f"旧发布线仍有待处理事项，拒绝换期；{inventory}；请负责人决定去向。")
 
 

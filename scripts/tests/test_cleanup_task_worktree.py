@@ -43,6 +43,7 @@ class CleanupTaskWorktreeTest(unittest.TestCase):
         scripts = self.main / "scripts"
         (scripts / "lib").mkdir(parents=True)
         shutil.copy2(SCRIPTS / "cleanup-task-worktree.sh", scripts)
+        shutil.copy2(SCRIPTS / "list-task-worktrees.sh", scripts)
         for name in ("worktree-paths.sh", "python3-command.sh", "task_metadata.py"):
             shutil.copy2(SCRIPTS / "lib" / name, scripts / "lib")
         (self.main / "base.txt").write_text("base\n", encoding="utf-8")
@@ -83,6 +84,10 @@ class CleanupTaskWorktreeTest(unittest.TestCase):
         return run(BASH, self.task / "scripts/cleanup-task-worktree.sh",
                    cwd=self.task, check=False)
 
+    def inspect(self):
+        return run(BASH, self.main / "scripts/list-task-worktrees.sh",
+                   cwd=self.main, check=False)
+
     def assert_local_intact(self):
         self.assertTrue(self.task.is_dir())
         self.assertEqual(self.task_sha, run("git", "rev-parse", TASK_BRANCH,
@@ -102,6 +107,37 @@ class CleanupTaskWorktreeTest(unittest.TestCase):
                                    cwd=self.main, check=False).returncode)
         self.assertIn(self.task_sha, run("git", "ls-remote", "--heads", "origin",
                                           f"refs/heads/{TASK_BRANCH}", cwd=self.main).stdout)
+
+    def test_inspection_recommends_cleanup_after_release_merge_without_master(self):
+        self.merge_remote(TARGET_BRANCH)
+
+        result = self.inspect()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(f"目标发布线: {TARGET_BRANCH}", result.stdout)
+        self.assertIn("目标发布线包含任务: merged", result.stdout)
+        self.assertIn("可进入该 worktree 执行 scripts/cleanup-task-worktree.sh", result.stdout)
+
+    def test_inspection_keeps_unknown_when_remote_unreachable(self):
+        run("git", "remote", "set-url", "origin", self.root / "missing.git", cwd=self.task)
+
+        result = self.inspect()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("目标发布线包含任务: unknown", result.stdout)
+        self.assertIn("核对任务元数据或远端状态后重试", result.stdout)
+        self.assertNotIn("可进入该 worktree 执行", result.stdout)
+
+    def test_inspection_keeps_unknown_when_metadata_missing(self):
+        metadata = run("git", "rev-parse", "--absolute-git-dir", cwd=self.task).stdout.strip()
+        (Path(metadata) / "blue-whale" / "task-base.json").unlink()
+
+        result = self.inspect()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("目标发布线: 元数据不可用", result.stdout)
+        self.assertIn("目标发布线包含任务: unknown", result.stdout)
+        self.assertNotIn("可进入该 worktree 执行", result.stdout)
 
     def test_only_master_contains_task(self):
         self.merge_remote("master")

@@ -383,6 +383,19 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   DRAFT=$(extract_json_value "draft")
   TARGET_BRANCH=$(extract_json_value "target_branch")
   SOURCE_BRANCH=$(extract_json_value "source_branch")
+  ENTERPRISE_ID=$(extract_json_value "enterprise_id")
+  PROJECT_ID=$(extract_json_value "project_id")
+  SOURCE_REPO=$(extract_json_value "source_repo")
+
+  if [ -n "$ENTERPRISE_ID" ] && [ "$ENTERPRISE_ID" != "16660949" ]; then
+    block "创建 Gitee PR 的 enterprise_id 与本仓不符。"
+  fi
+  if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "48854568" ]; then
+    block "创建 Gitee PR 的 project_id 与本仓不符。"
+  fi
+  if [ -n "$SOURCE_REPO" ] && [ "$SOURCE_REPO" != "48854568" ]; then
+    block "创建 Gitee PR 的 source_repo 与本仓不符。"
+  fi
 
   case "$DRAFT" in
     true|false) ;;

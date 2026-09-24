@@ -206,6 +206,67 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertFalse(run("git", "ls-remote", "--heads", "origin",
                              "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
 
+    def test_initial_adoption_rejects_unchecked_task_branch_without_worktree(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        task = self.root / "orphan-task"
+        branch = "chore/IKITEST-遗留未合任务"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: unmerged task", cwd=task)
+        run("git", "worktree", "remove", task, cwd=self.repo)
+
+        rejected = self.command("activate", "--branch", new, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(branch, rejected.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
+    def test_create_rejects_unchecked_task_branch_without_worktree(self):
+        first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
+        self.assertEqual(0, first.returncode, first.stderr)
+        old = json.loads(first.stdout)["branch"]
+        task = self.root / "orphan-task"
+        branch = "chore/IKITEST-遗留未合任务"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: unmerged task", cwd=task)
+        run("git", "worktree", "remove", task, cwd=self.repo)
+
+        rejected = self.command("create", "--summary", "新版发布验证",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(branch, rejected.stderr)
+        self.assertEqual(old, json.loads(self.command("current", "--json").stdout)["branch"])
+        inventory = json.loads(self.command("list", "--json").stdout)
+        self.assertIn(branch, inventory["unmerged_task_branches"])
+
+    def test_create_allows_retained_task_branch_already_merged_to_release(self):
+        first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
+        self.assertEqual(0, first.returncode, first.stderr)
+        old = json.loads(first.stdout)["branch"]
+        task = self.root / "merged-task"
+        branch = "chore/IKITEST-已合入任务"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: merged task", cwd=task)
+        run("git", "worktree", "remove", task, cwd=self.repo)
+        run("git", "switch", old, cwd=self.repo)
+        run("git", "merge", "--no-ff", "--no-edit", branch, cwd=self.repo)
+        run("git", "push", "origin", old, cwd=self.repo)
+        run("git", "switch", "master", cwd=self.repo)
+        run("git", "merge", "--no-ff", "--no-edit", old, cwd=self.repo)
+        run("git", "push", "origin", "master", cwd=self.repo)
+
+        created = self.command("create", "--summary", "新版发布验证",
+                               "--user-authorized", "--pr-snapshot", self.snapshot(), "--json")
+
+        self.assertEqual(0, created.returncode, created.stderr)
+        self.assertEqual(branch, run("git", "branch", "--list", branch,
+                                     cwd=self.repo).stdout.strip().lstrip("* "))
+
     def test_switch_rejects_unshared_local_release_commit_and_dirty_file(self):
         created = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
