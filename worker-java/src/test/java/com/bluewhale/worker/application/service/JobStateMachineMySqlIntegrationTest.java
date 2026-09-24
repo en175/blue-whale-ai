@@ -10,6 +10,7 @@ import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
+import com.bluewhale.worker.application.processor.VideoJobProcessorFixtures;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
@@ -26,8 +27,11 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
+import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.sun.net.httpserver.HttpServer;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -73,10 +77,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -1239,6 +1248,99 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(due).doesNotContain(expiredRetryId, submittedRetryId, queuedRetryId,
                 retryWithoutParentTaskId, oldNonRetryId, terminalRetryId);
         assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(videoRetryId);
+    }
+
+    @Test
+    @DisplayName("视频重试收割跨窗接手：旧领取迟到发布被 publishVideoGuard 拒绝，新 Worker 收割发布一次且不重新提交")
+    void videoRetryHarvestHandoffAcrossRecoveryWindow() {
+        long parentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(130));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent-task' WHERE id=?", parentId);
+        long retryId = seedJob(9L, "video", "bottom_dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"provider_credential\":\"sk-frozen-token\",\"prompt\":\"一只猫在跑步\","
+                        + "\"model_id\":\"seedance-2\",\"duration\":5.0,"
+                        + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\"}");
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
+        String retry = String.valueOf(retryId);
+        var spiedService = spy(service);
+
+        // 旧 Worker 真实领取（不打桩）：fencing token 0→1，携父任务上游 taskId
+        var staleClaim = spiedService.claimVideoJobById(retry, "video-worker-old");
+        assertThat(staleClaim).isPresent();
+        assertThat(staleClaim.get().fencingToken()).isEqualTo(1L);
+        assertThat(staleClaim.get().workerId()).isEqualTo("video-worker-old");
+        assertThat(staleClaim.get().parentProviderTaskId()).isEqualTo("video-parent-task");
+
+        // 租约未到期不进 due 名单；到期后落入恢复扫描窗口（同型参考断言）
+        assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(retryId);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
+                retryId);
+        assertThat(jobMapper.listDueVideoJobIds(100, 120)).contains(retryId);
+
+        // 恢复扫描重投
+        @SuppressWarnings("unchecked")
+        ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
+        GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
+        when(recoveryProvider.getIfAvailable()).thenReturn(recoveryProducer);
+        var recovery = new RecoveryService(jobMapper,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, 120);
+        recovery.recover();
+        verify(recoveryProducer).enqueue(retry, 1000L);
+
+        // 新 Worker 真实领取接手（token 1→2），沿父结果收割路径发布成功
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiVideoClient client = mock(NewApiVideoClient.class);
+        TosVideoMediaRelay relay = mock(TosVideoMediaRelay.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        when(credentials.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(client.poll("sk-frozen-token", "video-parent-task"))
+                .thenReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null));
+        when(relay.persist("http://parent-video.mp4", "9"))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("http://cdn/video.mp4", "gen/video.mp4",
+                        "video/mp4", 500L, "0123456789abcdef0123456789abcdef"));
+        var newProcessor = VideoJobProcessorFixtures.withWorkerId(
+                spiedService, new AssetSourceService(assetMapper),
+                credentials, client, relay, producer, "video-worker-new");
+
+        newProcessor.handle(retry);
+
+        assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
+        assertThat(readJob(retryId).getFencingToken()).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?",
+                String.class, retryId)).isEqualTo("http://cdn/video.mp4");
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+
+        // 旧 Worker 携旧领取身份/旧 fencing token 的迟到收割发布 → publishVideoGuard CAS 拒绝，零迟到 Finalize 写入
+        assertThat(spiedService.publishVideoResult(retry, "99", "9",
+                "video-worker-old", 1L,
+                "http://cdn/video.mp4", "gen/video.mp4", "video/mp4", 500L,
+                "0123456789abcdef0123456789abcdef", 1280, 720, 5.0)).isFalse();
+        assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+
+        // 全程零上游 submit、零 MQ 自投
+        verify(client, never()).submit(anyString(), any());
+        verify(client).poll("sk-frozen-token", "video-parent-task");
+        verify(producer, never()).enqueue(anyString(), anyLong());
+
+        // 两次发布分别携带对应领取身份与 fencing token（两次领取均走真实实现先后落库）
+        var handoff = inOrder(spiedService);
+        handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-old");
+        handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-new");
+        handoff.verify(spiedService).publishVideoResult(eq(retry), eq("99"), eq("9"),
+                eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(), any(),
+                anyString(), anyInt(), anyInt(), anyDouble());
+        handoff.verify(spiedService).publishVideoResult(eq(retry), eq("99"), eq("9"),
+                eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(), any(),
+                anyString(), anyInt(), anyInt(), anyDouble());
     }
 
     @Test
