@@ -61,6 +61,7 @@ import type { Response } from "express";
 import type { AccountService } from "@lib/shared/account/account.service.js";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
+import type { IdentityService } from "@lib/shared/identity/identity.service.js";
 import {
   RATE_LIMIT_KEY,
   type RateLimitBucket,
@@ -92,15 +93,19 @@ function setup() {
   const sessions = { createSession: vi.fn(async () => "session-token") };
   // IKF YHJ：登录成功后写 user_info（执行凭证）；缺 mock 时旁路抛错被吞，不影响登录。
   const prisma = { client: { user_info: { upsert: vi.fn(async () => ({})) } } };
+  // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
+  // 否则「日志到底写没写」这件事在测试里永远看不出来。
+  const identity = { recordLogin: vi.fn(async () => undefined) };
   const controller = new AuthController(
     account as unknown as AccountService,
     prisma as unknown as PrismaService,
     sessions as unknown as SessionService,
     limiter,
     tracker,
+    identity as unknown as IdentityService,
   );
   const res = { cookie: vi.fn() } as unknown as Response;
-  return { controller, account, sessions, res, limiter, tracker, prisma };
+  return { controller, account, sessions, res, limiter, tracker, prisma, identity };
 }
 
 const LOGIN_BODY = { username: "alice", password: "wrong-pass" };
@@ -239,6 +244,83 @@ describe("AuthController IKF YHJ 执行凭证落库", () => {
 
     await controller.login(LOGIN_BODY, res);
 
+    expect(res.cookie).toHaveBeenCalled();
+  });
+});
+
+describe("AuthController 登录日志", () => {
+  it("登录成功记一条 success=true，并带上 userId", async () => {
+    const { controller, account, identity, res } = setup();
+    account.login.mockResolvedValue(loginResult());
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9", "vitest-agent");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "42",
+        username: "alice",
+        ip: "203.0.113.9",
+        userAgent: "vitest-agent",
+        success: true,
+      }),
+    );
+  });
+
+  it("账密错误记一条 success=false 并带原因", async () => {
+    const { controller, account, identity, res } = setup();
+    // ⚠️ status 必须是 200：上游「HTTP 200 + success:false」才算业务失败
+    // （projectAccountBusinessFailure 判的就是这个），401 会被归到「服务异常」分支，
+    // 那条路径不记失败日志——上游挂了不是撞库信号。
+    account.login.mockRejectedValue(
+      new NewApiError("用户名或密码错误", 200, "invalid_credentials"),
+    );
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, reason: "账密错误" }),
+    );
+  });
+
+  it("上游 5xx 不记为账密错误——服务问题不是撞库信号", async () => {
+    const { controller, account, identity, res } = setup();
+    account.login.mockRejectedValue(
+      new NewApiError("账户服务暂不可用", 503, "account_service_unavailable"),
+    );
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
+
+    expect(identity.recordLogin).not.toHaveBeenCalled();
+  });
+
+  it("空凭据也留痕——撞库脚本同样会发空请求", async () => {
+    const { controller, identity, res } = setup();
+
+    await controller.login({ username: "", password: "" }, res, "203.0.113.9");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, reason: "凭据为空" }),
+    );
+  });
+
+  it("x-forwarded-for 有多跳时只取第一跳", async () => {
+    const { controller, account, identity, res } = setup();
+    account.login.mockResolvedValue(loginResult());
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9, 10.0.0.1, 10.0.0.2");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ ip: "203.0.113.9" }),
+    );
+  });
+
+  it("日志写失败不阻断登录", async () => {
+    // 日志是旁路：一个坏掉的日志表不该让所有人都登不上。
+    const { controller, account, identity, res } = setup();
+    account.login.mockResolvedValue(loginResult());
+    identity.recordLogin.mockRejectedValue(new Error("db down"));
+
+    await expect(controller.login(LOGIN_BODY, res)).resolves.toMatchObject({ data: expect.anything() });
     expect(res.cookie).toHaveBeenCalled();
   });
 });

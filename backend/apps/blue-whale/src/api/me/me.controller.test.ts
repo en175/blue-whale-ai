@@ -13,6 +13,7 @@ function createController(overrides: {
   revokeAllForUser?: ReturnType<typeof vi.fn>;
   revoke?: ReturnType<typeof vi.fn>;
   resolveTier?: ReturnType<typeof vi.fn>;
+  listRoleCodes?: ReturnType<typeof vi.fn>;
 } = {}) {
   const account = {
     changePassword:
@@ -24,6 +25,7 @@ function createController(overrides: {
   };
   const identity = {
     resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
+    listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
   };
   const controller = new MeController(
     account as never,

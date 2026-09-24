@@ -2,11 +2,13 @@ import { Injectable } from "@nestjs/common";
 
 import type { Tier } from "@lib/core/identity/tier.js";
 import { createLogger } from "@lib/core/logging";
+import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-login-log-repo.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
+import { createIdentityRoleRepo } from "@lib/shared/persistence/identity-role-repo.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 /**
- * 用户身份域的对内入口 —— 目前只回答一个问题：**这个用户现在是什么等级**。
+ * 用户身份域的对内入口 —— 三件事：**等级（花多少钱）、角色（能做什么）、登录留痕**。
  *
  * <h2>为什么这一层存在，而不是让调用方直接用 repo</h2>
  *
@@ -15,14 +17,50 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
  *
  * <p>反过来，如果每个调用方各自处理，就会出现「有的地方记了、有的地方吞了」，
  * 而吞掉的那一处正是用户投诉「我升了级却没打折」时最难查的。
+ *
+ * <p>⚠️ 等级与角色是**两回事**，见 {@code @lib/core/identity/roles.ts}：
+ * 一个决定折扣，一个决定权限。这里放在一起只是因为它们同属身份域。
  */
 @Injectable()
 export class IdentityService {
   private readonly logger = createLogger("identity");
   private readonly memberships;
+  private readonly roles;
+  private readonly loginLogs;
 
   constructor(prisma: PrismaService) {
     this.memberships = createIdentityMembershipRepo(prisma.client);
+    this.roles = createIdentityRoleRepo(prisma.client);
+    this.loginLogs = createIdentityLoginLogRepo(prisma.client);
+  }
+
+  /** 该用户持有的角色 code（已排除软删的角色行）。 */
+  async listRoleCodes(userId: string | number): Promise<string[]> {
+    return this.roles.listRoleCodes(String(userId));
+  }
+
+  /** 是否具备管理员权限（持有 admin / super_admin 中任意一个）。 */
+  async isAdmin(userId: string | number): Promise<boolean> {
+    return this.roles.isAdmin(String(userId));
+  }
+
+  /**
+   * 记一条登录日志。
+   *
+   * <p>⚠️ **写失败不阻断登录**——日志是旁路。但调用方要 catch 并记 error，
+   * 别让它静默消失：一个坏掉的日志表不该表现为「一切正常」。
+   */
+  async recordLogin(entry: {
+    // ⚠️ 可选属性显式带 `| undefined`：本仓开了 `exactOptionalPropertyTypes`，
+    //    不加的话调用方传一个可能为 undefined 的值（如未取的 @Headers）就编译不过。
+    userId?: string | null | undefined;
+    username: string;
+    ip: string;
+    userAgent: string;
+    success: boolean;
+    reason?: string | undefined;
+  }): Promise<void> {
+    await this.loginLogs.record(entry);
   }
 
   /**

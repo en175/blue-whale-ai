@@ -45,6 +45,10 @@ export class MeController {
       // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
       // 会话里带的等级会一直停在登录那一刻。
       tier: await this.identity.resolveTier(user.userId),
+      // 角色：**我们自己的**权威（identity_user_roles），与上面的 is_admin 不是同一个来源。
+      // is_admin 目前仍来自 new-api 的 role 字段，new-api 独立后就没了；
+      // roles 是它的替代，两者并存到断链那天（见 migration 20260924200000 的文末说明）。
+      roles: await this.identity.listRoleCodes(user.userId),
     });
   }
 
