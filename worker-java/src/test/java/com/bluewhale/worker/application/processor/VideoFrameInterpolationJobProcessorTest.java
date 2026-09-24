@@ -74,6 +74,7 @@ class VideoFrameInterpolationJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（横屏 1920x1080 / 65s：宽高作输出近似值、时长供回落）。 */
@@ -441,6 +442,22 @@ class VideoFrameInterpolationJobProcessorTest {
                 eq("https://example.com/src.mp4"), eq(60));
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoFrameInterpolation(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(60), null, 0, "amk-parent-race")));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset(1920, 1080);
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test

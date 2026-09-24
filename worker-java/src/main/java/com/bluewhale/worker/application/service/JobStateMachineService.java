@@ -54,6 +54,9 @@ public class JobStateMachineService {
     /** video_matting 进度续租秒数（与 JobClaimService.VIDEO_MATTING_LEASE_SECONDS 同值）。 */
     private static final int VIDEO_MATTING_PROGRESS_LEASE_SECONDS = 420;
 
+    /** 八个 MediaKit 家族原有的 420 秒租约，长于上游 submit 的 30 秒超时。 */
+    private static final int PARENT_REUSE_SUBMIT_LEASE_SECONDS = 420;
+
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -478,6 +481,24 @@ public class JobStateMachineService {
                     jobId, workerId, fencingToken);
         }
         return affected == 1;
+    }
+
+    /** 仅在重试收割回退提交前续租；无法确认执行权时禁止产生新的上游任务。 */
+    public boolean reserveParentReuseSubmit(String jobId, String workerId, long fencingToken) {
+        try {
+            LocalDateTime leaseExpiresAt = WorkerClock.now()
+                    .plusSeconds(PARENT_REUSE_SUBMIT_LEASE_SECONDS);
+            boolean reserved = jobMapper.reserveParentReuseSubmit(
+                    Long.parseLong(jobId), workerId, fencingToken, leaseExpiresAt) == 1;
+            if (!reserved) {
+                log.warn("[parent-reuse] 回退提交前租约守卫未命中，停止本次执行 jobId={}", jobId);
+            }
+            return reserved;
+        } catch (Exception error) {
+            log.warn("[parent-reuse] 回退提交前续租状态无法确认，停止本次执行 jobId={}: {}",
+                    jobId, error.getMessage(), error);
+            return false;
+        }
     }
 
     /**

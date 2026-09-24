@@ -233,6 +233,10 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         // 3. 网关提交异步任务（scene 经契约 SCENE_UPSTREAM_MAP 换算官方首字母大写枚举，
         //    出站键是 scene + output_format，客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = separateVoiceClient.submit(
                 providerToken, source.getUrl(), sourceIsVideo, scene, outputFormat);
         log.info("[vocal_split] 上游已提交 jobId={} providerTaskId={} scene={} format={}",

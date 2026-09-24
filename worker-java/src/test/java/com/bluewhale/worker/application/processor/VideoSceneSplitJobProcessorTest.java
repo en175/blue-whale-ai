@@ -75,6 +75,7 @@ class VideoSceneSplitJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
         // 段转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true);
@@ -363,6 +364,22 @@ class VideoSceneSplitJobProcessorTest {
         verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-race")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test

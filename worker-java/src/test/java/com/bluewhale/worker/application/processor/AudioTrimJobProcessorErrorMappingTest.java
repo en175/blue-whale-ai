@@ -74,6 +74,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 credentialService, trimAudioClient, mediaRelay, producer);
         when(stateMachine.failAudioTrimJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源音频素材（worker 不消费其时长——截取产物时长只取官方 duration，不回落）。 */
@@ -365,6 +366,22 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(trimAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
         verify(stateMachine, never()).failAudioTrimJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimAudioTrim(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-race")));
+        when(trimAudioClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
