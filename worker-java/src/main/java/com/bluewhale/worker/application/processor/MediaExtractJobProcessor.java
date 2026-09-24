@@ -180,6 +180,13 @@ public class MediaExtractJobProcessor implements JobProcessor {
      * 续排轮询。
      */
     private void submitPhase(ClaimedMediaExtractJobDto claim, String providerToken) {
+        // 0. IKI89P（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        if (claim.parentProviderTaskId() != null) {
+            if (tryReuseParentResult(claim, providerToken)) {
+                return;
+            }
+        }
+
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（§18.2 两键恒在、值恒为合法枚举，创建时定死；此处为
@@ -219,6 +226,54 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 claim.id(), claim.workerId(), claim.fencingToken(), taskId);
         if (updated) {
             scheduleNext(claim.id(), MEDIA_EXTRACT_POLL_INTERVAL_MS);
+        }
+    }
+
+    /**
+     * IKI89P（ADR-0114）：重试收割（parent-reuse，视频 IKEA26 先例推广）。
+     * <p>
+     * 超窗判失败后上游任务仍在跑；用户手动重试时先查父任务的上游任务：已成功且结果
+     * URL 齐全 → 不重新提交，直接以父任务 observation 走既有 {@link #publishResult}
+     * 发布（资产入库、槽位回填、项目事件与正常完成同型，不新建 cost 记录）。
+     * 父任务失败 / 不存在 / 查询异常 / 收割发布失败四种形态一律返回 false，
+     * 回退 submit 相正常重新提交，无第三种行为分支。
+     */
+    private boolean tryReuseParentResult(ClaimedMediaExtractJobDto claim, String providerToken) {
+        ExtractAudioTaskObservation observation;
+        try {
+            observation = extractAudioClient.poll(providerToken, claim.parentProviderTaskId());
+        } catch (Exception error) {
+            // 不存在与查询异常同路处理（视频先例 D6 同款：当不存在，重新 submit）
+            log.warn("[media_extract] 重试收割查父任务失败 jobId={} parentTask={} err={}，按不存在处理重新提交",
+                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
+            return false;
+        }
+
+        if (!"succeeded".equals(observation.status())) {
+            log.info("[media_extract] 重试收割未命中(父任务未成功) jobId={} parentTask={} status={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId(), observation.status());
+            return false;
+        }
+        if (observation.audioUrl() == null || observation.audioUrl().isEmpty()) {
+            log.info("[media_extract] 重试收割未命中(父任务结果不齐全) jobId={} parentTask={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId());
+            return false;
+        }
+
+        log.info("[media_extract] 重试收割命中 jobId={} parentTask={}，复用旧结果发布（不重新提交）",
+                claim.id(), claim.parentProviderTaskId());
+        try {
+            boolean published = publishResult(claim, observation);
+            if (!published) {
+                log.warn("[media_extract] 重试收割发布未命中守卫 jobId={}（stale worker 或已终态），回退重新提交",
+                        claim.id());
+            }
+            return published;
+        } catch (Exception error) {
+            // 结果取回/发布失败（如结果 URL 已超 24h 失效下载 404）→ 回退重新提交兜底
+            log.warn("[media_extract] 重试收割发布失败 jobId={} parentTask={} err={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
+            return false;
         }
     }
 
@@ -286,9 +341,11 @@ public class MediaExtractJobProcessor implements JobProcessor {
     /**
      * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
      * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
+     * <p>
+     * 返回发布守卫结果（IKI89P：重试收割据此判定复用是否成立，false 回退正常重新提交）。
      */
-    private void publishResult(ClaimedMediaExtractJobDto claim,
-                               ExtractAudioTaskObservation observation) {
+    private boolean publishResult(ClaimedMediaExtractJobDto claim,
+                                  ExtractAudioTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（对齐去字幕的强依赖口径）
         if (mediaRelay == null) {
             throw new MediaExtractError(
@@ -336,6 +393,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
             log.warn("[media_extract] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
         }
+        return published;
     }
 
     // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========

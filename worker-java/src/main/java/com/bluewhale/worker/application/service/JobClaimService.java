@@ -230,6 +230,9 @@ public class JobClaimService {
      * providerTaskId / pollCount / progress 三字段——火山异步链复用视频轮询骨架，分相判据
      * 与超限判定需要富投影，形态对齐 claimVideoSubtitleErase；候选查询本就 SELECT *
      * 全列，仅投影侧补字段，SQL 零改动）。
+     * <p>
+     * IKI89P（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
@@ -265,6 +268,14 @@ public class JobClaimService {
             return Optional.empty();
         }
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89P（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new ClaimedMediaExtractJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -273,7 +284,7 @@ public class JobClaimService {
                 candidate.getProviderTaskId(), workerId, candidate.getFencingToken() + 1,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
-                candidate.getGmtCreate(), candidate.getExecutionDeadlineAt()));
+                candidate.getGmtCreate(), candidate.getExecutionDeadlineAt(), parentProviderTaskId));
     }
 
     /**
@@ -291,6 +302,9 @@ public class JobClaimService {
      * CAS 复用 {@code claimImageCas}（UPDATE WHERE 只含 id / fencing_token / status，
      * 与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
      * 分相判据与超限判定，media_extract 同款富投影）。
+     * <p>
+     * IKI89Q（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
             String jobId, String workerId) {
@@ -313,6 +327,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89Q（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -322,7 +344,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
@@ -638,6 +661,9 @@ public class JobClaimService {
      * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
      * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     * <p>
+     * IKI89U（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<ClaimedVideoSubtitleEraseJobDto> claimVideoSubtitleErase(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
@@ -662,6 +688,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89U（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new ClaimedVideoSubtitleEraseJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -671,7 +705,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
@@ -680,6 +715,9 @@ public class JobClaimService {
      * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
      * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     * <p>
+     * IKI89S（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto> claimVideoEnhance(
             String jobId, String workerId) {
@@ -705,6 +743,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89S（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -714,7 +760,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
@@ -723,6 +770,9 @@ public class JobClaimService {
      * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
      * 租约 420s（completed 步含 2/3 轨结果下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     * <p>
+     * IKI89R（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<ClaimedVocalSplitJobDto> claimVocalSplit(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
@@ -747,6 +797,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89R（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new ClaimedVocalSplitJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -756,7 +814,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
@@ -765,6 +824,9 @@ public class JobClaimService {
      * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
      * 租约 420s（completed 步含 N 段切片逐段下载 + TOS 转存，见常量注释）。
      * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
+     * <p>
+     * IKI89T（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
+     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
      */
     public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto> claimVideoSceneSplit(
             String jobId, String workerId) {
@@ -790,6 +852,14 @@ public class JobClaimService {
 
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKI89T（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
+        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
         return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -799,7 +869,8 @@ public class JobClaimService {
                 workerId,
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId));
     }
 
     /**
