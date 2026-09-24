@@ -35,4 +35,25 @@ export class AudioVideoMuxesController {
     }
     return result;
   }
+
+  @Post(":jobId/retry")
+  async retry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    const result = await this.audioVideoMuxes.retry(user.userId, projectId, jobId, idempotencyKey ?? "");
+    if (result.data?.enqueue_required) {
+      try {
+        await enqueueAudioVideoMuxJob(jobId);
+      } catch (error) {
+        logger.error(`[audio_video_mux] retry enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
+        const status = await this.audioVideoMuxes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
+        if (status === "failed") throw new DomainError(FAILURE_CODE, "重试任务入队失败");
+        return { ...result, data: { ...result.data, status } };
+      }
+    }
+    return result;
+  }
 }

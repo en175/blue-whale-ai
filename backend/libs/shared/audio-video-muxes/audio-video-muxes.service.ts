@@ -1,4 +1,6 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
@@ -11,6 +13,7 @@ import {
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
+  ERROR_ENQUEUE_FAILED,
   DomainError,
   audioVideoMuxCreateSchema,
   ok,
@@ -156,6 +159,116 @@ export class AudioVideoMuxesService {
       },
     });
     return ok({ job_id: job.id.toString(), status: "queued", enqueue_required: true });
+  }
+
+  /** 重试入口（IKIHPL）：读冻结快照重放，不读画布当前选中态、不重新解析资产 URL；
+   *  快照缺失或输入资产已删除时给出明确拒绝原因。仅 failed 态可重试，其他状态拒绝。
+   *  幂等双轨：Idempotency-Key + command_idempotency 表（operation audio_video_mux.retry），
+   *  同事务 CAS failed→queued；免费任务同创建：无积分冻结、无成本预留、无余额拦截。 */
+  async retry(userId: string, projectId: string, jobId: string, idempotencyKey: string) {
+    if (!/^[!-~]{1,128}$/.test(idempotencyKey)) {
+      throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
+    }
+    if (!/^[1-9][0-9]*$/.test(jobId) || !/^[1-9][0-9]*$/.test(projectId)) {
+      throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    }
+    const pid = BigInt(projectId);
+    const jid = BigInt(jobId);
+    const owned = await this.prisma.client.generation_jobs.findFirst({
+      where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_VIDEO_MUX_JOB_TYPE,
+        source: AUDIO_VIDEO_MUX_SOURCE, is_delete: false },
+      select: { id: true },
+    });
+    if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    const hash = createHash("sha256").update(`POST:audio_video_mux.retry:${projectId}:${jobId}`).digest("hex");
+    const key = { project_id: pid, operation: "audio_video_mux.retry", idempotency_key: idempotencyKey };
+    const replay = async () => {
+      const existing = await this.prisma.client.command_idempotency.findUnique({
+        where: { project_id_operation_idempotency_key: key },
+      });
+      if (!existing) return null;
+      if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+        throw new DomainError(409, "幂等键已用于另一项音视频合成重试");
+      }
+      const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid } });
+      const error = current.error;
+      if (current.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
+          && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
+        const resumed = await this.prisma.client.generation_jobs.updateMany({
+          where: { id: jid, status: "failed", version: current.version },
+          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000),
+            version: { increment: 1 } },
+        });
+        if (resumed.count === 1) return ok({ job_id: jobId, status: "queued", replayed: true, enqueue_required: true });
+      }
+      const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid }, select: { status: true } });
+      return ok({ job_id: jobId, status: latest.status, replayed: true, enqueue_required: false });
+    };
+    try {
+      const result = await this.prisma.client.$transaction(async (tx) => {
+        const existing = await tx.command_idempotency.findUnique({
+          where: { project_id_operation_idempotency_key: key },
+        });
+        if (existing) {
+          if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+            throw new DomainError(409, "幂等键已用于另一项音视频合成重试");
+          }
+          return { replayed: true };
+        }
+        const job = await tx.generation_jobs.findFirst({
+          where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_VIDEO_MUX_JOB_TYPE,
+            source: AUDIO_VIDEO_MUX_SOURCE, is_delete: false },
+        });
+        if (!job) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+        if (job.status !== "failed") throw new DomainError(409, "只有失败的音视频合成任务可重试");
+        const frozen = job.input as {
+          audio?: { assetId?: unknown };
+          video?: { assetId?: unknown };
+          estimated_duration_ms?: unknown;
+          submit_attempt?: unknown;
+        } | null;
+        const audioAssetId = frozen?.audio?.assetId;
+        const videoAssetId = frozen?.video?.assetId;
+        const attempt = frozen?.submit_attempt;
+        const snapshotUsable = typeof audioAssetId === "string" && /^[1-9][0-9]*$/.test(audioAssetId)
+          && typeof videoAssetId === "string" && /^[1-9][0-9]*$/.test(videoAssetId)
+          && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
+        if (!frozen || !snapshotUsable) throw new DomainError(409, "冻结快照缺失，无法重试音视频合成");
+        // 冻结输入资产仍须存活：软删（is_delete）或物理删除都视为已删除，明确拒绝。
+        const living = await tx.assets.findMany({
+          where: { id: { in: [BigInt(audioAssetId), BigInt(videoAssetId)] }, is_delete: false },
+          select: { id: true },
+        });
+        if (living.length !== 2) throw new DomainError(409, "输入资产已删除，无法重试音视频合成");
+        const duration = typeof frozen.estimated_duration_ms === "number" ? frozen.estimated_duration_ms : null;
+        const updated = await tx.generation_jobs.updateMany({
+          where: { id: jid, status: "failed", fencing_token: job.fencing_token },
+          data: {
+            status: "queued", progress: 0, error: Prisma.DbNull, output_asset_ids: Prisma.DbNull,
+            provider_task_id: null, poll_count: 0, next_poll_at: null,
+            next_action_at: new Date(Date.now() - 60_000),
+            execution_deadline_at: audioVideoMuxDeadline(duration),
+            lease_owner: null, lease_expires_at: null,
+            // 冻结快照不动：仅递增 submit_attempt。worker 的 client_token 从 (jobId, submit_attempt)
+            // 派生（契约 audioVideoMuxClientToken），递增即换新 token，不被供应商按旧 token 去重。
+            input: { ...frozen, submit_attempt: attempt + 1 } as Prisma.InputJsonValue,
+            fencing_token: { increment: 1 }, retry_count: { increment: 1 }, version: { increment: 1 },
+          },
+        });
+        if (updated.count !== 1) throw new DomainError(409, "音视频合成任务正在重试");
+        await tx.command_idempotency.create({
+          data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
+        });
+        return { replayed: false };
+      });
+      if (result.replayed) return (await replay())!;
+      return ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true });
+    } catch (error) {
+      if (error instanceof DomainError && error.status !== 409) throw error;
+      const existing = await replay();
+      if (existing) return existing;
+      throw error;
+    }
   }
 
   async markFailed(jobId: string, code: string, message: string): Promise<string> {
