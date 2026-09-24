@@ -8,6 +8,7 @@ import {
 } from "@lib/core/identity/roles.js";
 import { createLogger } from "@lib/core/logging";
 import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-login-log-repo.js";
+import { createAdminUserQuery, type AdminUserListOptions } from "@lib/shared/persistence/admin-user-query.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
 import { createIdentityRoleRepo } from "@lib/shared/persistence/identity-role-repo.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -32,11 +33,23 @@ export class IdentityService {
   private readonly memberships;
   private readonly roles;
   private readonly loginLogs;
+  private readonly adminUsers;
 
   constructor(prisma: PrismaService) {
     this.memberships = createIdentityMembershipRepo(prisma.client);
     this.roles = createIdentityRoleRepo(prisma.client);
     this.loginLogs = createIdentityLoginLogRepo(prisma.client);
+    this.adminUsers = createAdminUserQuery(prisma.client);
+  }
+
+  /**
+   * 管理端用户列表 —— 读我们自己的库。
+   *
+   * <p>原先这条转发给 new-api，导致「管理员」有两个概念：进不进得了管理端看我们的角色表，
+   * 查不查得到列表看 new-api 的 role。new-api 独立后后者消失，列表会直接断。
+   */
+  async listAdminUsers(options: AdminUserListOptions) {
+    return this.adminUsers.listAdminUsers(options);
   }
 
   /** 该用户持有的角色 code（已排除软删的角色行）。 */

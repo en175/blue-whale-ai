@@ -21,6 +21,7 @@ import {
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
@@ -41,6 +42,7 @@ export class AdminUsersController {
   private readonly logger = createLogger("admin-users");
 
   constructor(
+    private readonly identity: IdentityService,
     private readonly account: AccountService,
     private readonly operationLog: OperationLogService,
     private readonly sessions: SessionService,
@@ -77,19 +79,11 @@ export class AdminUsersController {
     if (status !== undefined) options.status = status;
     if (role !== undefined) options.role = role;
 
-    try {
-      const result = await this.account.listAdminUsers(
-        token,
-        Number(user.userId),
-        options,
-      );
-      return {
-        success: true,
-        data: { list: result.items.map(mapAdminUser), total: result.total },
-      };
-    } catch (error) {
-      throw toAdminError(error);
-    }
+    // ★ 查我们自己的库，不再转发 new-api。
+    //   原来那条链路有两个问题：new-api 独立后会断；且它要求调用者在 new-api 那边
+    //   也是管理员 —— 于是「我们给了 super_admin 却看不到列表」。
+    const result = await this.identity.listAdminUsers(options);
+    return { success: true, data: { list: result.items, total: result.total } };
   }
 
   @Post(":userId/manage")

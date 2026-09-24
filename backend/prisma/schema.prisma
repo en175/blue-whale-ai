@@ -559,6 +559,8 @@ model creative_skill_version {
 model identity_users {
   id           BigInt   @id @default(autoincrement())
   phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
+  /// 邮箱。设计 §6.2 要求；与 username 一样是登录方式之一（email + password）。
+  email        String?  @db.VarChar(50)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
