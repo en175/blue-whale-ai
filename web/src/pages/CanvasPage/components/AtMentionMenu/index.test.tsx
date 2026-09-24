@@ -27,6 +27,7 @@ afterEach(async () => { if (root) await act(async () => root.unmount()); host?.r
 
 it('同一菜单直接呈现已引用和原有四种素材分类', async () => {
   await render();
+  expect(document.querySelector('[data-testid="mention-menu"]')?.hasAttribute('data-canvas-overlay')).toBe(true);
   const menu = document.querySelector('input[placeholder="搜索"]')!.parentElement!.parentElement!;
   expect(menu.textContent).toContain('已引用');
   expect(menu.textContent).toContain('素材引用');

@@ -428,6 +428,41 @@ test('直接删关系线：标签置失效不自动补回；重新绑定到新�
   expect(smokeFailures(tracking)).toEqual([]);
 });
 
+test('直接删关系线：重新绑定同一素材补回关系线', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await expect(node(page, 'media-img-1')).toBeVisible();
+
+  await editor(page, 'text-1').dblclick();
+  await page.keyboard.type('参考 ');
+  await insertMedia(page, 'text-1', '猫咪.png');
+  await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '图片1');
+  await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '关系线落盘');
+  await page.locator('.react-flow__pane').click({ position: { x: 900, y: 700 } });
+
+  const hitPath = page.locator('.react-flow__edge [class*="hitPath"]').first();
+  const hitBox = (await hitPath.boundingBox())!;
+  await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2);
+  await page.waitForTimeout(300);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-invalid', '1');
+
+  await mediaChip(page, 'text-1', 'media-img-1').click();
+  await page.locator('[data-testid="media-chip-menu"] button', { hasText: '重新绑定' }).click();
+  await pickFromMentionMenu(page, '猫咪.png');
+  await expect(mediaChip(page, 'text-1', 'media-img-1')).toHaveAttribute('data-media-label', '图片1');
+  await expect(mediaChip(page, 'text-1', 'media-img-1')).not.toHaveAttribute('data-media-invalid', '1');
+  await waitPut(tracking, doc => hasEdge(doc, 'media-img-1', 'text-1'), '同来源重绑定补线落盘');
+  const rebound = lastPut(tracking);
+  expect(rebound.nodes.find(n => n.id === 'text-1')!.data.mediaRefs).toEqual([
+    { nodeId: 'media-img-1', assetId: '9001', mediaType: 'image', name: '猫咪.png', url: 'https://e2e.media/cat.png' },
+  ]);
+  await page.screenshot({ path: join(evidenceDir, 'rebind-same-source.png') });
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
 test('删除来源媒体节点：标签置失效；刷新后失效态与无连线一致恢复', async ({ page }) => {
   const tracking = await setupPage(page);
   await page.goto('/canvas?project=project-1');

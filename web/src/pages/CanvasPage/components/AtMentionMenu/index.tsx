@@ -160,6 +160,7 @@ export default function AtMentionMenu({
       ref={rootRef}
       className={`${styles.portal} ${renderInline ? styles.inline : ''}`}
       data-testid="mention-menu"
+      data-canvas-overlay
       data-canvas-keyboard-scope="mention"
       data-gen-panel-territory
       onFocus={(e) => {
