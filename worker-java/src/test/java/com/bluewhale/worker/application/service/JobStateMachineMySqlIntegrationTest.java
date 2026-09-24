@@ -1428,7 +1428,7 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("重试收割回退提交续租后，持旧候选快照的新 worker 不能再接管")
+    @DisplayName("收割 reserve 以 owner+fence 定执行权：过期租约放行复活，旧候选快照不能接管")
     void parentReuseSubmitReservationBlocksStaleCandidateClaim() {
         long jobId = seedClaimedJob(9L, "video_matting", "dock", "old-worker", 5L);
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
@@ -1442,17 +1442,62 @@ class JobStateMachineMySqlIntegrationTest {
                 5L, "processing")).isZero();
         assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
 
+        // 执行权以 owner+fence 为准：owner 不符一律拒绝
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "new-worker", 5L)).isFalse();
+
+        // IKIHKH：收割转存耗尽租约（过期）但 owner+fence 未变 → reserve 放行并复活租约；
+        // 复活后持过期时旧候选快照的领取仍被复核行挡住，不双跑。
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
-        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isFalse();
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND, NOW(), lease_expires_at) "
+                + "FROM generation_jobs WHERE id=?", Integer.class, jobId)).isGreaterThan(400);
+        assertThat(jobMapper.claimImageCas(jobId, "new-worker", WorkerClock.now().plusSeconds(420),
+                5L, "processing")).isZero();
+        assertThat(readJob(jobId).getLeaseOwner()).isEqualTo("old-worker");
+    }
+
+    @Test
+    @DisplayName("收割慢转存耗尽租约后仍能收口：reserve 放行回退提交，脱离重投循环不双提交")
+    void parentReuseSlowTransferRecoversAfterLeaseExhaustion() {
+        // 父任务已提交上游；重试 job 在收割转存中耗尽 420 秒租约（转存 >420s 场景）。
+        long parentId = seedJob(9L, "video", "bottom_dock", "processing", 0L,
+                WorkerClock.now().minusMinutes(200));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='provider-parent-1' WHERE id=?", parentId);
+        long jobId = seedClaimedJob(9L, "video_matting", "video_matting", "harvest-worker", 7L);
+        jdbc.update("""
+                UPDATE generation_jobs SET retry_of_job_id=?, provider_task_id=NULL,
+                  gmt_create=DATE_SUB(NOW(), INTERVAL 200 MINUTE),
+                  lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND),
+                  next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND)
+                WHERE id=?
+                """, parentId, jobId);
+
+        // IKIDEK 接手期内（租约到期后 10 分钟内）恢复扫描仍会重投——修复前这一步之后
+        // reserve 因租约过期被拒、按 IKICD0 停止执行，形成全量重新下载的循环。
+        assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).contains(jobId);
+
+        // IKIHKH：owner+fence 未变 → reserve 放行，回退提交不再被拒。
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isTrue();
+        // 回退提交完成：provider_task_id 落库、租约释放，任务进入轮询相。
+        assertThat(service.markProviderSubmitted(String.valueOf(jobId), "harvest-worker", 7L,
+                "provider-retry-1")).isTrue();
+        assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("provider-retry-1");
+        assertThat(readJob(jobId).getLeaseOwner()).isNull();
+
+        // 已提交后 reserve 不放行（provider_task_id IS NULL 守卫）——不产生第二个上游任务。
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "harvest-worker", 7L)).isFalse();
+
+        // 脱离收割接手重投：即使到点，接手条款（要求 provider_task_id IS NULL）不再命中；
+        // 接手期外的收割循环与永久卡 processing 形态同源消除。
+        jdbc.update("UPDATE generation_jobs SET next_action_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
+        assertThat(jobMapper.listDueVideoMattingJobIds(100, 120)).doesNotContain(jobId);
     }
 
     @Test
     @DisplayName("media_extract 旧候选快照不能接管已续租任务；孤儿租约过期仍可接管")
     void mediaExtractStaleCandidateCannotTakeOverRenewedLease() {
-        // 场景一（应拒绝）：领取（fence=F）→ 租约过期 → 读到旧候选快照 → 无守卫续租到未来 →
-        // 旧快照参数 CAS 必须拒绝。该竞态无法从正常通道构造（心跳是死代码、reserve 有过期守卫），
-        // 直接用 SQL 预置租约状态钉不变量。
+        // 场景一（应拒绝）：领取（fence=F）→ 租约过期 → 读到旧候选快照 → 回退提交前 reserve
+        // 复活租约（IKIHKH：owner+fence 未变即放行，真实通道）→ 旧快照参数 CAS 必须拒绝。
         long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
         var claimed = service.claimMediaExtract(String.valueOf(renewedId), "worker-old");
@@ -1461,9 +1506,8 @@ class JobStateMachineMySqlIntegrationTest {
                 renewedId);
         GenerationJobEntity stale = jobMapper.findMediaExtractCandidate(renewedId);
         assertThat(stale).isNotNull();
-        // 模拟无守卫续租通道（updateMediaExtractProgress 复活形态）把租约推到未来
-        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE) WHERE id=?",
-                renewedId);
+        assertThat(service.reserveParentReuseSubmit(String.valueOf(renewedId), "worker-old",
+                stale.getFencingToken())).isTrue();
         assertThat(jobMapper.claimMediaExtractCas(renewedId, "new-worker",
                 WorkerClock.now().plusSeconds(420),
                 stale.getFencingToken(), stale.getStatus())).isZero();

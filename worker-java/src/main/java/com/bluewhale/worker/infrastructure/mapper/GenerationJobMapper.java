@@ -624,6 +624,23 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextPollAt") java.time.LocalDateTime nextPollAt
     );
 
+    /**
+     * 重试收割回退提交前的原子续租（IKIDEE 引入守卫；IKIHKH 放行过期租约）。
+     * <p>
+     * SET lease_expires_at=now+420s, version=version+1
+     * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
+     *   AND provider_task_id IS NULL
+     * <p>
+     * 执行权口径与 {@link #updateMediaExtractProgress} 等进度续租统一：owner+fence 定执行权，
+     * 租约过期不褫夺——不再要求 {@code lease_expires_at > NOW()}。收割转存（父产物下载 + TOS
+     * 转存）可长于 420 秒租约；若回退提交前因租约恰好耗尽被拒，IKICD0 停止语义下恢复扫描会
+     * 在接手期内循环重投（全量重新下载）、接手期外永久卡 processing。
+     * <p>
+     * 安全前提：收割家族领取 CAS（claimImageCas / claimMediaExtractCas）均带租约复核行，
+     * 本写复活的过期租约挡得住旧候选快照接管（真库用例
+     * parentReuseSubmitReservationBlocksStaleCandidateClaim /
+     * mediaExtractStaleCandidateCannotTakeOverRenewedLease）。
+     */
     @Update("""
             UPDATE generation_jobs
             SET lease_expires_at = #{leaseExpiresAt},
@@ -632,7 +649,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND status = 'processing'
               AND lease_owner = #{workerId}
               AND fencing_token = #{fencingToken}
-              AND lease_expires_at > NOW()
               AND provider_task_id IS NULL
             """)
     int reserveParentReuseSubmit(
