@@ -1,4 +1,5 @@
 package com.bluewhale.worker.infrastructure.gateway;
+import com.bluewhale.libs.http.NewApiHttpSupport;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -29,9 +29,10 @@
   <description>Blue-Whale Java 模块聚合根：worker（执行面）+ 后续 libs / billing（控制面）。</description>
 
   <modules>
+    <!-- 共享基础设施在前：worker / billing 都依赖它，构建顺序由 Maven 按依赖自动定。 -->
+    <module>libs</module>
     <module>worker</module>
     <!-- ADR-0114：后续加入
-         <module>libs</module>      共享基础设施（只放 DB/MQ/HTTP/错误体系，不放领域规则）
          <module>billing</module>   billing-svc 控制面
     -->
   </modules>

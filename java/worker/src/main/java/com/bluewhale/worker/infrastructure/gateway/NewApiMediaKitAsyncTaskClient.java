@@ -1,4 +1,5 @@
 package com.bluewhale.worker.infrastructure.gateway;
+import com.bluewhale.libs.http.NewApiHttpSupport;
 
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.fasterxml.jackson.databind.JsonNode;

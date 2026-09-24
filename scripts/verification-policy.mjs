@@ -240,9 +240,12 @@ function appendAreaCommands(commands, areas, base) {
     );
   }
   if (areas.includes("worker-java")) {
-    // worker-java 是独立 Maven 工程（不在 pnpm workspace 内），直接对它自己的 pom 跑测试。
-    // 路径由 `worker-java/` 改为 `java/worker/`（ADR-0114：Java 模块聚合到 java/）。
-    commands.push(["mvn", "-f", "java/worker/pom.xml", "-q", "test"]);
+    // worker 是独立 Maven 工程（不在 pnpm workspace 内）。
+    // ⚠️ 必须**从聚合根**跑并带 `-pl worker -am`：worker 依赖 java/libs，
+    //    直接 `mvn -f java/worker/pom.xml` 会解析不到该模块内依赖
+    //    （Could not find artifact com.bluewhale:bluewhale-java-libs）。
+    //    -am（also-make）让 Maven 先构建 libs 再构建 worker。
+    commands.push(["mvn", "-f", "java/pom.xml", "-pl", "worker", "-am", "-q", "test"]);
   }
   if (areas.includes("contracts")) {
     // 契约破坏性变更**不可逆**：字段号复用会让新旧两端读到的数据静默错位，线上无法回滚。

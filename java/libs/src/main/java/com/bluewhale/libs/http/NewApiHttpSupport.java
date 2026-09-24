@@ -1,4 +1,4 @@
-package com.bluewhale.worker.infrastructure.gateway;
+package com.bluewhale.libs.http;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;

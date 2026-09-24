@@ -19,19 +19,23 @@
 | `docs` | 根规则/上下文、普通 README 及 `docs/**/*.md` | `git diff --check` + Agent 规则结构测试 |
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + Vitest `--changed` |
 | `scoped/backend` | `backend/apps/*`、`backend/libs/*` 下的 TypeScript（NestJS BFF） | backend typecheck（自带 tsconfig 与 `@lib/*` 别名）+ 根 Vitest 过滤 `backend` `--changed` |
-| `scoped/worker-java` | `java/worker/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f java/worker/pom.xml -q test` |
+| `scoped/worker-java` | `java/worker/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f java/pom.xml -pl worker -am -q test` |
 | `scoped/web` | Web app/components/hooks/lib/workers、`web/src` 下的契约副本 JSON、`web/scripts` 工具脚本 | Web typecheck + Web lint + Web Vitest `--changed` |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
 | `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和技能同步 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |
 | `scoped/operations` | 探针、隧道、一次性修复和维护工具 | `scripts/tests` 下的脚本单测 |
 | `full` | 产品构建、运行时、数据库、部署、整栈验收入口或显式高风险 | 当前影响面的定向检查 + `pnpm verify` |
 
-环境前提：`scoped/worker-java` 与 `full` 档会执行 `mvn -f java/worker/pom.xml -q test`，要求 PATH 上有 mvn；本机未装 Maven 时经容器执行同一命令（挂 `java/worker` 目录与 ~/.m2 缓存，勿跳过或标记与己无关）：
+环境前提：`scoped/worker-java` 与 `full` 档会执行 `mvn -f java/pom.xml -pl worker -am -q test`，要求 PATH 上有 mvn；本机未装 Maven 时经容器执行同一命令（挂 `java/` 聚合根与 ~/.m2 缓存，勿跳过或标记与己无关）：
 
 ```bash
-docker run --rm -v "$PWD/java/worker":/workspace -w /workspace \
-  -v "$HOME/.m2":/root/.m2 maven:3.9-eclipse-temurin-21 mvn -q test
+docker run --rm -v "$PWD/java":/workspace -w /workspace \
+  -v "$HOME/.m2":/root/.m2 maven:3.9-eclipse-temurin-21 \
+  mvn -f pom.xml -pl worker -am -q test
 ```
+
+> ⚠️ **必须挂聚合根 `java/` 并从根跑**：worker 依赖 `java/libs`，
+> 只挂 `java/worker` 会解析不到模块内依赖（`Could not find artifact com.bluewhale:bluewhale-java-libs`）。
 
 验证分两个阶段：选择器默认**收口阶段（`--stage completion`）**；**PR 阶段（`--stage pr`）**继续按影响面选择验证，不再把所有代码 PR 无条件升级为 `full`。普通 Node/Web、治理、Hook 与工程控制面、运维工具改动保持 `scoped`；只有产品影响路径或显式 `--risk high` 才升级 `full`。纯文档保持 `docs`。
 

@@ -1,0 +1,7 @@
+# 多阶段构建后镜像内自行编译：外部 target/ 不进构建上下文
+# （避免陈旧 jar 进镜像、以及体积膨胀）
+#
+# ⚠️ 本条从 java/worker/.dockerignore 上移而来 —— ADR-0114 后 worker 依赖 java/libs，
+#    构建上下文抬到聚合根 java/，Docker 只认**上下文根**的 .dockerignore。
+target/
+*/target/

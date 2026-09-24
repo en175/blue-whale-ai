@@ -56,10 +56,10 @@ public class NewApiAudioClient {
 
     /** 测试用构造器：注入 base URL。 */
     NewApiAudioClient(String baseUrl) {
-        this.baseUrl = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+        this.baseUrl = com.bluewhale.libs.http.NewApiHttpSupport.normalizeBaseUrl(baseUrl);
 
         int timeoutMs = loadTimeoutMs();
-        this.httpClient = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
+        this.httpClient = com.bluewhale.libs.http.NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
     }
 
     /**
@@ -102,7 +102,7 @@ public class NewApiAudioClient {
                 .url(baseUrl + "/v1/audio/speech")
                 .post(RequestBody.create(bodyJson, JSON_TYPE))
                 .header("Content-Type", "application/json");
-        com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        com.bluewhale.libs.http.NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
         Request request = requestBuilder.build();
 
         Response response;
