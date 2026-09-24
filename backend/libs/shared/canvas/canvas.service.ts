@@ -11,6 +11,14 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
+/** 应用方案卡时能否复用已有素材卡：空地址、上传中、已标缺失都不能当源，必须新建。 */
+function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
+  if (item.type !== "mediaNode") return false;
+  if (item.data?.assetMissing === true) return false;
+  const src = typeof item.data?.src === "string" ? item.data.src : "";
+  return src.length > 0 && !src.startsWith("blob:");
+}
+
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
 function toQuoteView(row: ConversationQuoteRow) {
   const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
@@ -205,8 +213,12 @@ export class CanvasService {
         if (!asset) throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
         materialViews.push({ ...material, url: asset.url });
         if (existing) continue;
-        // 画布上已有同 assetId 的媒体节点则复用，否则新建；两种情况都建 textIndex 关系线
-        const existingMedia = nodes.find(item => item.type === "mediaNode" && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId);
+        // 画布上已有同 assetId 且可播放的媒体节点则复用；没有、或只剩「素材已被删除」空壳则新建
+        const existingMedia = nodes.find(item =>
+          item.type === "mediaNode"
+          && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId
+          && isReusableApplyMediaNode(item),
+        );
         const mediaNodeId = existingMedia?.id ?? `media-${randomUUID()}`;
         if (!existingMedia) additions.push({ id: mediaNodeId, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
           data: { assetId: material.assetId, mediaType: material.mediaType, src: asset.url, width: asset.width, height: asset.height } });
