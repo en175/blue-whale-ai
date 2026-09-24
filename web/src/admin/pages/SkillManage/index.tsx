@@ -256,7 +256,7 @@ export default function SkillManage() {
             <Select
               options={catOptions}
               value={bulkCat}
-              onChange={(e) => setBulkCat(e.target.value)}
+              onChange={setBulkCat}
             />
             {bulkCat === NEW_CAT && (
               <Input
@@ -350,7 +350,7 @@ export default function SkillManage() {
                       <Select
                         options={rowOptions}
                         value={sel}
-                        onChange={(e) => setDrafts((p) => ({ ...p, [s.id]: e.target.value }))}
+                        onChange={(v) => setDrafts((p) => ({ ...p, [s.id]: v }))}
                       />
                       {sel === NEW_CAT && (
                         <Input

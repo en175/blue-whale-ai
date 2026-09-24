@@ -1,33 +1,96 @@
-.select {
+/* 自绘下拉。所有颜色走 token，因此**与操作系统主题无关**——
+   这正是它相对原生 select 的唯一意义。 */
+.root {
+  position: relative;
+  display: inline-block;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 140px;
   height: 32px;
-  padding: 0 28px 0 10px;
+  padding: 0 10px;
   border: 1px solid var(--admin-border);
   border-radius: 6px;
-  background-color: var(--admin-surface);
-  /* 自绘箭头：原生箭头各浏览器长相不一，且颜色不跟随主题。
-     用内联 SVG 保证两种主题下都是当前文字色。 */
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
+  background: var(--admin-surface);
   color: var(--admin-text);
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  appearance: none;
   transition: border-color 0.15s ease;
 }
 
-.select:hover:not(:disabled) {
+.trigger:hover:not(:disabled) {
   border-color: var(--admin-border-strong);
 }
 
-.select:focus {
+.trigger:focus-visible {
   outline: none;
   border-color: var(--admin-accent);
   box-shadow: var(--admin-focus);
 }
 
-.select:disabled {
+.trigger:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder {
+  color: var(--admin-text-faint);
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--admin-text-faint);
+}
+
+.menu {
+  position: absolute;
+  z-index: 300;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  box-shadow: var(--admin-shadow-pop);
+}
+
+.option {
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--admin-text);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--admin-row-hover);
+}
+
+.optionActive {
+  color: var(--admin-accent);
+  font-weight: 500;
+  background: var(--admin-accent-soft);
+}
+
+.optionDisabled {
   color: var(--admin-text-disabled);
   cursor: not-allowed;
 }
