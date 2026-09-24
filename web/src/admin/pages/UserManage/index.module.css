@@ -651,3 +651,156 @@
     overflow-x: auto;
   }
 }
+
+/* ============================================================
+ * 浅色化桥接（临时）
+ *
+ * 原文件的所有深色声明**保持不动**，这里用后置规则统一覆盖——CSS 后写的胜出。
+ * 这样迁移风险最小：改错了删掉这一块就回到原状。
+ *
+ * ⚠️ 这是**过渡态**，不是终态。下一步把本页 TSX 迁到 admin/ui 的组件
+ * （PageHeader / Card / Table / Button / Badge）时，这一整块连同上面
+ * 原有的深色声明会一起删掉。**不要在这里加新样式**——它注定要消失。
+ * ============================================================ */
+.page {
+  background: transparent; /* 页面底由壳（.content）提供 */
+  color: var(--admin-text);
+}
+
+.title {
+  color: var(--admin-text);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--admin-text-muted);
+}
+
+/* 筛选栏控件 */
+.searchWrap,
+.input,
+.select {
+  background: var(--admin-surface);
+  border-color: var(--admin-border);
+  color: var(--admin-text);
+}
+
+.searchInput {
+  background: transparent;
+  color: var(--admin-text);
+}
+
+.searchInput::placeholder,
+.input::placeholder {
+  color: var(--admin-text-faint);
+}
+
+.searchInput:focus,
+.input:focus,
+.select:focus {
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+/* 表格 */
+.tableWrap {
+  background: var(--admin-surface);
+  border-color: var(--admin-border);
+  border-radius: 8px;
+  box-shadow: var(--admin-shadow-card);
+}
+
+.table th {
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
+  border-bottom-color: var(--admin-border);
+}
+
+.table td {
+  color: var(--admin-text);
+  border-bottom-color: var(--admin-divider);
+}
+
+.table tbody tr:hover td {
+  background: var(--admin-row-hover);
+}
+
+.cellId,
+.cellTime {
+  color: var(--admin-text-faint);
+}
+
+.cellNum,
+.cellPos,
+.cellNeg {
+  font-variant-numeric: tabular-nums;
+}
+
+.nickLink {
+  color: var(--admin-accent);
+}
+
+.emptyCell {
+  color: var(--admin-text-faint);
+}
+
+/* 标签：柔和底 + 深字，与 Badge 基元同一套语言 */
+.badgeRole {
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+}
+
+.badgeOn {
+  background: var(--admin-success-soft);
+  color: var(--admin-success);
+}
+
+.badgeOff {
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
+}
+
+/* 弹窗 */
+.overlay {
+  background: rgb(17 24 39 / 0.45);
+}
+
+.modal {
+  background: var(--admin-surface);
+  border-color: var(--admin-border);
+  box-shadow: var(--admin-shadow-pop);
+}
+
+.modalTitle {
+  color: var(--admin-text);
+}
+
+/* 页签 */
+.tab {
+  color: var(--admin-text-muted);
+}
+
+.tab:hover {
+  color: var(--admin-text);
+}
+
+.tabActive,
+.tabActive:hover {
+  color: var(--admin-accent);
+}
+
+.tabActive::after {
+  background: var(--admin-accent);
+}
+
+/* 汇总卡 */
+.summaryBox {
+  background: var(--admin-surface);
+  border-color: var(--admin-border);
+  box-shadow: var(--admin-shadow-card);
+}
+
+.summaryText,
+.summarySub {
+  color: var(--admin-text);
+}
