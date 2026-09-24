@@ -62,6 +62,7 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createAudioMix: vi.fn(),
+  newIdempotencyKey: vi.fn(),
   linkAssetToProject: vi.fn(),
   fetchAssetPage: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
@@ -119,6 +120,7 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: apiMocks.createMediaExtraction,
   createAudioTrim: apiMocks.createAudioTrim,
   createAudioMix: apiMocks.createAudioMix,
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
@@ -235,6 +237,8 @@ beforeEach(() => {
   sessionStorage.clear();
   seedDoc();
   apiMocks.createAudioMix.mockReset();
+  let keySequence = 0;
+  apiMocks.newIdempotencyKey.mockImplementation(() => `mix-key-${++keySequence}`);
   apiMocks.fetchAssetPage.mockReset();
   apiMocks.fetchAssetPage.mockResolvedValue({ records: [{ id: 7, type: "audio", status: "normal", url: "http://aud/7.mp3", duration: null, width: null, height: null, source: "uploaded", model: null, created_at: null }], total: 1, current: 1, size: 30 });
   apiMocks.linkAssetToProject.mockReset();
@@ -288,7 +292,7 @@ describe('IKI68X 三来源与多段提交', () => {
         { asset_id: '9' },
       ],
       output_format: 'wav',
-    }, { silent: true });
+    }, { silent: true, idempotencyKey: expect.any(String) });
     expect(flowProps.current.edges.filter((edge) => edge.target === 'audio-mix-j1')
       .map((edge) => [edge.source, edge.data?.origin])).toEqual([
         ['a1', AUDIO_MIX_EDGE_ORIGIN], ['a2', AUDIO_MIX_EDGE_ORIGIN],

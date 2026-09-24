@@ -775,6 +775,22 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken
     );
 
+    /** audio_mix 软取消：仅当前 owner/fence 可消费取消请求，已提交上游时停止本地轮询和结果接纳。 */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'cancelled', progress = 0,
+                next_action_at = NULL, next_poll_at = NULL,
+                lease_owner = NULL, lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId} AND type = 'audio_mix' AND source = 'dock'
+              AND status = 'processing' AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND cancel_requested_at IS NOT NULL
+            """)
+    int cancelAudioMixIfRequested(@Param("jobId") Long jobId,
+                                  @Param("workerId") String workerId,
+                                  @Param("fencingToken") Long fencingToken);
+
     /**
      * 按 id 查 provider_task_id（IKEA26 parent-reuse 用：retry job 查父 job 的上游 task）。
      */

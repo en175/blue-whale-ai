@@ -136,6 +136,8 @@ export interface MediaNodeData {
   jobId?: number | string;
   /** 生成状态：见 MediaGenStatus */
   genStatus?: MediaGenStatus;
+  /** 音频混合结果卡删除后，等待任务取消终态。 */
+  audioMixCancelPending?: boolean;
   /** 草稿身份标记（IKDMQQ）：待生成/生成中/失败的草稿卡均为 true；成功后清除转为普通成品卡 */
   draft?: boolean;
   /** 草稿持久化参数（IKDMQQ）：面板编辑实时写回，随画布保存恢复 */
@@ -681,6 +683,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return (
         <div className={styles.genBox}>
           <div className={styles.genSpinner} />
+          {isAudioMixCard && data.audioMixCancelPending === true &&
+            <span className={styles.genText}>正在取消</span>}
           {generationOverlay.showProgress && (
             <>
               <span className={styles.genText}>

@@ -99,6 +99,7 @@ describe('uploadAssetFile', () => {
     const completeBody = JSON.parse(String((fetchMock.mock.calls[3] as [string, RequestInit])[1].body));
     expect(completeBody).toMatchObject({
       storage_key: 'uploads/7/image/a.png',
+      name: '海边人像.png',
       type: 'image',
       mime: 'image/png',
       size: 32,

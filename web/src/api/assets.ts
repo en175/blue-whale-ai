@@ -11,6 +11,8 @@ export type AssetType = 'image' | 'video' | 'audio' | 'character';
 export interface AssetRecord {
   /** 资产唯一标识，用于删除操作 */
   id: number | string;
+  /** 资产名称；旧列表响应可能缺失。 */
+  name?: string | null;
   /** 资产类型，决定预览渲染方式 */
   type: AssetType;
   /** 服务端入库状态；只有 normal 可作为音频混合输入。 */
@@ -230,6 +232,7 @@ export interface UploadCompleteParams {
   type: AssetType;
   mime: string;
   size: number;
+  name?: string;
   /** presign 返回的 storage_key */
   storage_key: string;
   /** 关联项目 ID，资产页上传不传 */

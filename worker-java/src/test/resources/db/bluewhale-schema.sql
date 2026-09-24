@@ -8,6 +8,8 @@
 --   backend/prisma/migrations/20260915170000_ikfyhj_material_compliance/migration.sql
 --   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
 --   按上面命令全量再生成时，这两表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
+-- 2026-09-24（IKI8AZ）手工追加 assets.name 列——取自
+--   backend/prisma/migrations/20260923153000_iki8az_asset_name/migration.sql。
 -- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -15,6 +17,7 @@ CREATE TABLE `assets` (
     `project_id` BIGINT NOT NULL DEFAULT 0,
     `generation_job_id` BIGINT NULL,
     `type` VARCHAR(16) NOT NULL,
+    `name` VARCHAR(255) NULL,
     `storage_key` VARCHAR(512) NULL,
     `content_sha256` VARCHAR(64) NULL,
     `md5` VARCHAR(32) NULL,

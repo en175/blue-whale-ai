@@ -278,6 +278,16 @@ describe("complete 的文件头校验（IKE53U）", () => {
     await expect(complete(deps)).resolves.toMatchObject({ code: 200 });
   });
 
+  it("complete 将上传原文件名交给资产仓库", async () => {
+    const deps = completeDeps(head(0xff, 0xd8, 0xff, 0xe0));
+    await handleCompleteAsset("7", {
+      type: "image", mime: "image/jpeg", size: 524,
+      storage_key: "uploads/7/image/x.jpg", name: "海浪.jpg",
+    }, deps);
+    expect((deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> }).createUploadedAsset)
+      .toHaveBeenCalledWith(expect.objectContaining({ name: "海浪.jpg" }));
+  });
+
   it("认出来但不是声明的那一类也拒——按字节说的算", async () => {
     // 声明 image，字节是 MP4：ftyp 盒子的 brand 是 isom。
     const mp4 = new Uint8Array(32);

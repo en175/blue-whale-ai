@@ -738,6 +738,7 @@ export default function CanvasPage() {
   const [audioMixFormat, setAudioMixFormat] = useState<AudioMixFormat>('mp3');
   const [audioMixSubmitting, setAudioMixSubmitting] = useState(false);
   const audioMixInFlightRef = useRef(false);
+  const audioMixCreateAttemptRef = useRef<{ projectId: string; payload: string; key: string } | null>(null);
   const audioMixRetryInFlightRef = useRef(new Set<string>());
   const audioMixRetryKeysRef = useRef(new Map<string, string>());
   /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
@@ -2044,8 +2045,8 @@ export default function CanvasPage() {
       createFrameInterpolation(vars.projectId, vars.payload, { silent: true }),
   });
   const createAudioMixMutation = useMutation({
-    mutationFn: (vars: { projectId: string; payload: AudioMixCreate }) =>
-      createAudioMix(vars.projectId, vars.payload, { silent: true }),
+    mutationFn: (vars: { projectId: string; payload: AudioMixCreate; key: string }) =>
+      createAudioMix(vars.projectId, vars.payload, { silent: true, idempotencyKey: vars.key }),
   });
   const linkAudioMixAssetsMutation = useMutation({
     mutationFn: (vars: { projectId: string; assetIds: string[] }) =>
@@ -6656,7 +6657,7 @@ export default function CanvasPage() {
     if (isAudioMixNodeId(nodeId)) {
       const mixPatch = audioMixTerminalPatch(detail);
       if (mixPatch) {
-        if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+        if (pendingDeleteJobNodesRef.current.has(nodeId) || node.data.audioMixCancelPending === true) {
           if (detail.status === 'failed' || detail.status === 'cancelled') {
             removeWithPendingDelete();
             return 'terminal';
@@ -6669,7 +6670,7 @@ export default function CanvasPage() {
         stopJobPolling(nodeId, jobTimersRef.current);
         settledExtractNodesRef.current.add(nodeId);
         if (detail.status === 'succeeded') rememberGeneratedAsset(detail.asset, 'audio');
-        patchMediaNode(nodeId, mixPatch);
+        patchMediaNode(nodeId, { ...mixPatch, audioMixCancelPending: undefined });
         return 'terminal';
       }
     }
@@ -7687,6 +7688,14 @@ export default function CanvasPage() {
     // 仍 queued/processing（软取消已登记）或状态不可得：不抢先移除（worker 竞态完成的作品
     // 不得失去入口）——登记删除意图，轮询终态驱动移除/挂载
     pendingDeleteJobNodesRef.current.add(nodeId);
+    if (isAudioMixNodeId(nodeId)) {
+      const nextNodes = mediaNodesRef.current.map((item) => item.id === nodeId
+        ? { ...item, data: { ...item.data, audioMixCancelPending: true } }
+        : item);
+      mediaNodesRef.current = nextNodes;
+      setMediaNodes(nextNodes);
+      void flushCanvasSave(currentId).catch(() => {});
+    }
     finish();
   };
 
@@ -10087,7 +10096,13 @@ export default function CanvasPage() {
           return;
         }
         if (activeProjectRef.current !== projectId) return;
-        const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
+        const payloadText = JSON.stringify(payload);
+        const previous = audioMixCreateAttemptRef.current;
+        const key = previous?.projectId === projectId && previous.payload === payloadText
+          ? previous.key : newIdempotencyKey();
+        audioMixCreateAttemptRef.current = { projectId, payload: payloadText, key };
+        const created = await createAudioMixMutation.mutateAsync({ projectId, payload, key });
+        if (audioMixCreateAttemptRef.current?.key === key) audioMixCreateAttemptRef.current = null;
         if (activeProjectRef.current !== projectId) return;
         // 只退出本次发送的会话；迟到成功仍建自己的任务卡收尾，不触碰后来开启的会话
         const sessionCurrent = toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch);
@@ -11635,6 +11650,7 @@ export default function CanvasPage() {
         type: assetType,
         mime: file.type,
         size: file.size,
+        name: file.name,
         storage_key: presign.storage_key,
         project_id: currentId || undefined,
         ...meta,

@@ -215,6 +215,15 @@ describe('MediaNode draft overlay (IKDMQQ)', () => {
 });
 
 describe('MediaNode generating overlay', () => {
+  it('音频混合卡等待删除取消终态时显示正在取消，不出现卡内取消钮', async () => {
+    await renderNode('audio', {
+      id: 'audio-mix-73', genStatus: 'generating', selected: false,
+      data: { src: '', jobId: '73', audioMix: { format: 'mp3' }, audioMixCancelPending: true },
+    });
+    expect(mountNode.textContent).toContain('正在取消');
+    expect(labels()).not.toContain('取消生成');
+  });
+
   it('hides fake progress copy and bar for image generation, keeps cancel', async () => {
     await renderNode('image', { genStatus: 'generating', progress: 0, selected: false });
     expect(mountNode.textContent).not.toContain('正在生成');
