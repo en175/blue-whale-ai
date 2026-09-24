@@ -4,7 +4,7 @@
 # 规则：
 #   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
 #   - 其他本地分支：分支名必须通过结构化中文命名校验。
-#   - 工单分支允许日常 push；创建/更新 PR 时由发布入口要求同步最新 origin/master。
+#   - 工单分支允许日常 push；创建/更新 PR 时由发布入口检查任务目标 release。
 #
 # 退出码非 0 = 拦截 push。
 # 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。

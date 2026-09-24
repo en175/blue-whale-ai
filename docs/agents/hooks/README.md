@@ -11,10 +11,10 @@
 
 | 脚本 | 挂载 matcher | 触发事件 | 作用 | 关联硬约束 |
 |---|---|---|---|---|
-| `block-master-edit.sh` | ZCode / Claude Code / Codex `Edit\|Write` | `PreToolUse` | 三端主检出区写入兜底；仅精确放行 Git 已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`，其他 ignored 文件仍拦。Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path`。对仓库内写入的阻断/放行判定追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
+| `block-master-edit.sh` | ZCode / Claude Code / Codex / Kimi CLI `Edit\|Write` | `PreToolUse` | 四端 master、release 与 detached HEAD 直写兜底；仅精确放行 Git 已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`，其他 ignored 文件仍拦。Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path`。对仓库内写入的阻断/放行判定追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .`；放行/阻断均审计，但只记工具名、稳定操作类别和决定，不记完整命令 | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式）；放行/阻断均审计，但不记完整命令或目标 ref 值 | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 任务分支普通 commit/push/merge 放行；任务分支错误 merge/pull 同步 `origin/master`、`release/*` 直推、发布入口缺授权/模式、合入本地 master 缺授权仍硬拦；发布/合入标准入口带 `--user-authorized` 无交互放行；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；所有 Pre 判定均审计且不记 Bash 命令或 MCP 参数值；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留，Post 不审计 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 任务分支普通 commit/push/merge 放行；任务分支错误 merge/pull 同步、release 工作树直接 commit/pull/merge/rebase/cherry-pick、`release/*` 直推、发布入口缺授权/模式、旧本地 master 集成入口仍硬拦；标准入口带 `--user-authorized` 无交互放行；PR 请求的 draft 须与入口标记一致；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；所有 Pre 判定均审计且不记 Bash 命令或 MCP 参数值；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留，Post 不审计 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0115](../../adr/0115-local-release-code-baseline.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
 | `block-squash-merge.sh` | _(已并入 `confirm-release-action.sh`，三端配置不再注册)_ | `PreToolUse` | 脚本逻辑保留为独立可测单元（`test-hooks.sh` 仍覆盖），但 squash/rebase 检查职责已迁移到 `confirm-release-action.sh` 内部，消除多 hook 执行顺序不确定导致的纠正信号误导 | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见；放行/阻断均审计，但不记企业、仓库、项目、Issue 等 MCP 参数值 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 | `remind-issue-state.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` | `PostToolUse` | **纯提醒型**，四端均挂载但始终 `exit 0`，不阻断、不审计、不自动改状态：worktree 入口带 `--issue` 成功后提醒置「进行中/修复中」；PR 创建后提醒打 `ready-for-review`；PR 合并后提醒置「已完成/已修复」（缺陷另打「修复待验证」）。状态机规则见 `docs/agents/issue-tracker.md`「任务状态机」 | CLAUDE.md「任务状态机」 |
@@ -128,10 +128,10 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 按下面的顺序排查，不要把 Hook 当作正常开工入口：
 
-1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在用户本地集成区，停止写入并先运行 `scripts/start-task-worktree.sh`。
+1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在 master 或 release 工作树，停止写入，从当前发布线运行 `scripts/start-task-worktree.sh`。
 2. **检查四端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex、Kimi CLI 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
 3. **执行配置链闭环**：运行 `python3 scripts/check-hook-closed-loop.py`。它逐端执行 master 与 Agent 任务区的创建/修改场景，并按唯一会话标识和工具调用标识核对阻断/放行结果与审计记录。
-4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 写入应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。
+4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 和 release 直写应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。
 5. **最后检查外部客户端**：若真实 ZCode、Claude Code、Codex 或 Kimi CLI 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
 
 这条路径保持“文档驱动、Hook 兜底”：第 1 步是 Agent 正常执行机制，第 2–4 步验证仓库兜底与审计，第 5 步才进入外部客户端取证。
@@ -148,7 +148,7 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 ## 查询阻断型 PreToolUse 审计记录
 
-运行时已注册的五个阻断型 PreToolUse Gate 共享 `.git/hook-audit/` 下的单行 JSON 审计契约。主检出区和 task worktree 通过 Git common dir 看到同一组日志；每个 Gate 有一个活跃 `.log` 和至多一个 `.log.1` 归档。记录时间为 UTC，核心字段为 `timestamp`、`hook`、`tool`、`operation`、`session_id`、`tool_use_id`、`exit_code` 和稳定 `reason`。master 写入 Gate 还保留目标 `file_path` 与 `branch`；其余 Bash/MCP Gate 的这两个字段为空，避免复制命令或工具参数。
+运行时已注册的五个阻断型 PreToolUse Gate 共享 `.git/hook-audit/` 下的单行 JSON 审计契约。主检出区和 task worktree 通过 Git common dir 看到同一组日志；每个 Gate 有一个活跃 `.log` 和至多一个 `.log.1` 归档。记录时间为 UTC，核心字段为 `timestamp`、`hook`、`tool`、`operation`、`session_id`、`tool_use_id`、`exit_code` 和稳定 `reason`。保护分支写入 Gate 还保留目标 `file_path` 与 `branch`；其余 Bash/MCP Gate 的这两个字段为空，避免复制命令或工具参数。
 
 稳定查询入口可同时按起始时间、会话标识和工具调用标识筛选；不需要的条件省略：
 
@@ -173,7 +173,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；同一黑盒边界还观测 git common dir 中的持久日志、脱敏内容与审计失败降级，`block-master-edit.sh` 另覆盖轮转和并发副作用。`confirm-release-action.sh` 覆盖任务分支普通 commit/push/merge 放行、同步/create/update 标准入口无输出放行、缺授权/缺模式/发布基线直推/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留，并断言 Post 不生成 PreToolUse 审计记录。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；同一黑盒边界还观测 git common dir 中的持久日志、脱敏内容与审计失败降级，`block-master-edit.sh` 另覆盖 release 直写、轮转和并发副作用。`confirm-release-action.sh` 覆盖任务分支普通 commit/push/merge 放行、同步/create/update 标准入口无输出放行、缺授权/缺模式/发布基线直推/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留，并断言 Post 不生成 PreToolUse 审计记录。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
 
 夹具还校验 ZCode / Claude Code / Codex / Kimi CLI 挂载层：
 - `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json`、`.kimi-code/hooks.toml` 必须存在。
@@ -182,7 +182,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 ZCode / Claude Code Hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
-- `bash scripts/probe-codex-write-hook.sh` 必须读取真实 `.codex/hooks.json`，以官方 `apply_patch` 形状探测真实 wrapper → 共享 Gate，证明 master 创建/修改阻断、任务区创建/修改放行且不实际执行补丁。
+- `bash scripts/probe-codex-write-hook.sh` 必须读取真实 `.codex/hooks.json`，以官方 `apply_patch` 形状探测真实 wrapper → 共享 Gate，证明 master 与 release 创建/修改阻断、任务区创建/修改放行且不实际执行补丁。
 - Kimi CLI shim 在参数异常、非 git 目录、无 `.kimi-code/hooks.toml` opt-in 标记、Gate 缺失时一律静默放行；标记与 Gate 齐备时 stdin 与 exit code/stderr 原样透传（Slice 7）。
 - 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 ZCode / Claude Code / Codex / Kimi CLI 均无交互放行。
 - `.gitignore` 必须忽略根 `CLAUDE.local.md`；`.codex/` 只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`，`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。`.kimi-code/hooks.toml` 与 `.kimi-code/hooks/` 可提交，`.kimi-code/local.toml` 保持忽略。
@@ -229,7 +229,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ---
 
-## MCP 合并后清理源分支 SOP
+## MCP 合并后清理本地任务区
 
 > 适用：用户明确授权后，用 `mcp__gitee-ent__merge_enterprise_pull` 合并低风险 PR 后。
 > 来源：实战踩坑 —— PR #7 合并后源分支未自动删除。
@@ -252,13 +252,13 @@ $ git branch -a
 scripts/cleanup-task-worktree.sh
 ```
 
-Agent 必须在对应 task worktree 内执行清理脚本。脚本会先证明当前分支已被 `origin/master` 包含、工作区干净、路径位于 task worktree，再删除远程源分支、本地分支和 worktree。
+Agent 必须在对应 task worktree 内执行清理脚本。脚本抓取任务元数据记录的目标 release，证明远端目标包含当前 HEAD，复核工作区干净和远端 SHA，再删除本地任务 worktree 与分支。远程源分支保留，由负责人另行决定去向。
 
 ### 判断用 `-d` 还是 `-D`
 
 | 情况 | 命令 | 原因 |
 |---|---|---|
-| 分支已合并到 master | `git branch -d` | safe deletion，git 校验过合并历史 |
+| 分支已合并到目标 release | `git branch -d` | Git 校验合并历史；标准入口先核对远端目标。 |
 | 分支未合并就删 | `git branch -D` | 强删 —— 但本项目 AI **禁**用 `-D`（`block-dangerous-git.sh` 会拦） |
 
 > 反过来用：`-d` 报"未合并" = 提醒你"这个分支可能漏合了，先 review 再决定"。

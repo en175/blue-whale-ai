@@ -267,14 +267,16 @@ publish_marker_path() {
 
 write_publish_marker() {
   local branch="$1"; shift
-  local target="${1:-master}"; shift || true
+  local target="${1:-release/prod}"; shift || true
   local created_at="${1:-$(date +%s)}"; shift || true
+  local draft="${1:-false}"; shift || true
   local marker
   marker="$(publish_marker_path "$branch")"
   mkdir -p "$(dirname "$marker")"
   cat >"$marker" <<EOF
 branch=$branch
 target=$target
+draft=$draft
 created_at=$created_at
 EOF
 }
@@ -1185,8 +1187,8 @@ assert_exit 0 "release: 直接 git merge --no-ff 放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
 assert_exit 0 "release: 直接 git merge 工单分支放行"
 
-# git merge origin/master 分支感知（ADR-0010）：
-# 任务分支上拦截并指向 rebase 同步入口；master 集成区放行。
+# 任务分支错误同步 origin/master 时指向目标 release 的同步入口。
+# 生产 master 的上游刷新不属于任务分支发布门禁。
 setup_git_stub
 export FAKE_BRANCH=feature/ik0test
 
@@ -1202,6 +1204,10 @@ assert_stderr_has "sync-task-from-origin.sh sync" "release: 任务分支 pull �
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull origin master"}}'
 assert_exit 2 "release: 任务分支上 git pull origin master 硬拦"
 assert_stderr_has "sync-task-from-origin.sh sync" "release: 任务分支 pull origin master 指向 rebase 同步入口"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/release/2026.09.29"}}'
+assert_exit 2 "release: 任务分支直接 merge 目标 release 硬拦"
+assert_stderr_has "--target-branch" "release: 任务分支 merge 目标发布线指向同步入口"
 
 # --ff-only / --rebase 变体在任务分支上放行（安全同步模式）
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull --ff-only"}}'
@@ -1225,7 +1231,27 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull --ff-only=refs/head
 assert_exit 0 "release: git pull --ff-only=<ref> 正确放行"
 assert_stdout_empty "release: git pull --ff-only=<ref> 无交互输出"
 
-# master 分支上 merge/pull origin/master 不拦截（用户本地集成区，ADR-0010）
+# 发布线目录的直接 pull/merge 不能绕过同步入口。
+export FAKE_BRANCH=release/2026.09.29
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull origin release/2026.09.29"}}'
+assert_exit 2 "release: 发布线目录直接 pull 拦截"
+assert_stderr_has "sync-release-line.sh" "release: 发布线目录指向同步入口"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/release/2026.09.29"}}'
+assert_exit 2 "release: 发布线目录直接 merge 拦截"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
+assert_exit 2 "release: 发布线目录直接合入任务分支拦截"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/master"}}'
+assert_exit 2 "release: 发布线目录直接合入生产基线拦截"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/release/2026.09.29"}}'
+assert_exit 2 "release: 发布线目录直接快进仍须标准同步入口"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m bypass"}}'
+assert_exit 2 "release: 发布线目录直接 commit 拦截"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git rebase origin/master"}}'
+assert_exit 2 "release: 发布线目录直接 rebase 拦截"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git cherry-pick deadbeef"}}'
+assert_exit 2 "release: 发布线目录直接 cherry-pick 拦截"
+
+# master 分支的生产镜像刷新属于非任务路径；普通任务旧本地合入入口另行硬拦。
 export FAKE_BRANCH=master
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/master"}}'
@@ -1287,8 +1313,8 @@ assert_exit 2 "release: merge-task-to-local-master 缺参数被拦截"
 assert_stderr_has "--user-authorized" "release: merge-task-to-local-master 缺参数提示授权参数"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
-assert_exit 0 "release: merge-task-to-local-master 授权入口放行"
-assert_stdout_empty "release: merge-task-to-local-master 无交互输出"
+assert_exit 2 "release: merge-task-to-local-master 授权也不能绕过新流程"
+assert_stderr_has "已废止" "release: 旧本地 master 合入入口给出迁移指引"
 
 # bash 包裹新发布审查包入口带授权和模式 → 仍应无交互放行
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized --create-pr"}}'
@@ -1307,7 +1333,7 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-revi
 assert_exit 2 "release: commit-task 入口后接无授权 merge-task 仍硬拦"
 assert_stderr_has "--user-authorized" "release: 复合命令提示 merge 授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
-assert_exit 0 "release: 标准 merge 入口后普通 merge 放行"
+assert_exit 2 "release: 旧本地 master 合入入口即使有授权也阻断"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr && git commit -m \"bypass\""}}'
 assert_exit 0 "release: 标准 publish 入口后普通 commit 放行"
 
@@ -1358,10 +1384,10 @@ assert_exit 0 "release: 复合验证命令放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale\nscripts/cleanup-task-worktree.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/ensure-graphify-worktree.sh 2>&1; echo \"exit=$?\""}}'
 assert_exit 0 "release: 非发布验证复合命令放行"
 
-# 创建合法普通 PR（缺 draft）→ Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
+# 创建非草稿 PR，Pre 校验发布标记并等待 Post 消费。
 setup_publish_test_repo
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_use_id":"tu_create_pr_allow","session_id":"s_ik10dr_release","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"SECRET_PR_TITLE"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_use_id":"tu_create_pr_allow","session_id":"s_ik10dr_release","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"SECRET_PR_TITLE"}}'
 assert_exit 0 "release: 普通 PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 普通 PR 不二次确认"
 assert_file_exists "$(publish_marker_path feature/x)" "release: 普通 PR Pre 阶段不消费标记（延后到 Post）"
@@ -1372,14 +1398,14 @@ assert_file_not_has_text "$PUBLISH_AUDIT_LOG" SECRET_PR_TITLE "audit-all: create
 
 # 创建显式非 draft PR → Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":"false","title":"test"}}'
 assert_exit 0 "release: 非 draft PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 非 draft PR 不二次确认"
 assert_file_exists "$(publish_marker_path feature/x)" "release: 非 draft PR Pre 阶段不消费标记（延后到 Post）"
 
 # 直接创建合法形态普通 PR 但缺少发布审查包标记 → 阻断
 remove_publish_marker feature/x
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
 assert_exit 2 "release: 普通 PR 缺发布标记拦截"
 assert_stderr_has "--create-pr" "release: 普通 PR 缺发布标记提示 create 模式"
 
@@ -1387,23 +1413,42 @@ assert_stderr_has "--create-pr" "release: 普通 PR 缺发布标记提示 create
 # 找不到 → 落到「缺标记」阻断（等效防伪造消费授权，失败模式从「不匹配」变为「缺标记」，
 # 因标记路径本身含分支 slug，结构性消除了「找到别人标记」的可能）。
 write_publish_marker "feature/other"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
 assert_exit 2 "release: 跨分支 PR 找不到对应标记拦截"
 assert_stderr_has "--create-pr" "release: 跨分支 PR 缺标记提示 create 模式"
 remove_publish_marker feature/other
 
 # 过期发布标记 → 阻断并消费标记
-write_publish_marker "feature/x" "master" "1"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+write_publish_marker "feature/x" "release/prod" "1"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
 assert_exit 2 "release: 普通 PR 发布标记过期"
 assert_stderr_has "已过期" "release: 普通 PR 发布标记过期提示"
 assert_file_missing "$(publish_marker_path feature/x)" "release: 普通 PR 过期标记被清理"
 
-# 创建 draft PR → 阻断
+# 创建 draft PR 时，标记与请求必须一致。
+write_publish_marker "feature/x" "release/prod" "$(date +%s)" true
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":"true","title":"test"}}'
+assert_exit 0 "release: draft PR 与标记一致放行"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
+assert_exit 2 "release: draft 参数与标记不一致拦截"
+assert_stderr_has "draft 参数" "release: draft 不匹配提示"
+remove_publish_marker feature/x
+
+write_publish_marker "feature/x" "release/prod" "$(date +%s)" invalid
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
+assert_exit 2 "release: 无效 draft 标记拦截"
+remove_publish_marker feature/x
+
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 2 "release: draft PR 拦截"
-assert_stderr_has "不使用 draft PR" "release: draft PR 提示普通 PR"
+grep -v '^draft=' "$(publish_marker_path feature/x)" > "$(publish_marker_path feature/x).old"
+mv "$(publish_marker_path feature/x).old" "$(publish_marker_path feature/x)"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":false,"title":"test"}}'
+assert_exit 2 "release: 旧发布标记缺 draft 字段拦截"
+remove_publish_marker feature/x
+
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","title":"test"}}'
+assert_exit 2 "release: 请求缺 draft 参数拦截"
 remove_publish_marker feature/x
 
 # 创建 PR 缺 target_branch → 阻断
@@ -1411,12 +1456,19 @@ run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_p
 assert_exit 2 "release: 缺 target_branch PR 拦截"
 
 # 创建 PR 缺 source_branch → 阻断
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"release/prod","title":"test"}}'
 assert_exit 2 "release: 缺 source_branch PR 拦截"
 
-# 创建非 master 目标 PR → 阻断
+# 创建非 release 目标 PR → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
-assert_exit 2 "release: 非 master 目标 PR 拦截"
+assert_exit 2 "release: 非 release 目标 PR 拦截"
+
+# 旧 master 标记不能把普通任务 PR 送往生产基线。
+write_publish_marker "feature/x" "master"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
+assert_exit 2 "release: 旧 master 标记仍拒绝普通任务 PR"
+assert_stderr_has "生产 hotfix" "release: master 目标指向独立授权通道"
+remove_publish_marker feature/x
 
 # release/* 是受保护的发布基线，只能通过与 marker 绑定的 PR 更新。
 write_publish_marker "feature/x" "release/prod"
@@ -1572,7 +1624,7 @@ write_publish_marker "feature/aaa"
 write_publish_marker "feature/bbb"
 assert_file_exists "$(publish_marker_path feature/aaa)" "release: G+ 并行 aaa 标记独立存在"
 assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ 并行 bbb 标记独立存在"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"release/prod","draft":false,"title":"test"}}'
 assert_exit 0 "release: G+ 并行场景 aaa PR 放行"
 assert_file_exists "$(publish_marker_path feature/aaa)" "release: G+ aaa Pre 阶段不消费（延后到 Post）"
 assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ bbb 标记不受 aaa 影响"
@@ -1582,7 +1634,7 @@ remove_publish_marker "feature/bbb"
 # G+ Post 隔离回归：Post 消费 aaa 不应误删 bbb（恢复跨分支隔离守卫意图）。
 write_publish_marker "feature/aaa"
 write_publish_marker "feature/bbb"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"release/prod","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: G+ Post aaa 放行"
 assert_file_missing "$(publish_marker_path feature/aaa)" "release: G+ Post aaa 被消费"
 assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ Post aaa 消费不误删 bbb"
@@ -1593,7 +1645,7 @@ remove_publish_marker "feature/bbb"
 write_publish_marker "feature/x"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 消费前标记存在"
 post_audit_lines_before=$(grep -c '' "$PUBLISH_AUDIT_LOG" 2>/dev/null || echo 0)
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: Post create PR 放行（不阻断已执行工具）"
 assert_file_missing "$(publish_marker_path feature/x)" "release: Post 创建成功消费标记"
 post_audit_lines_after=$(grep -c '' "$PUBLISH_AUDIT_LOG" 2>/dev/null || echo 0)
@@ -1606,28 +1658,28 @@ fi
 
 # Post 响应缺失或类型畸形时不能证明成功，保留发布标记等待明确结果或 TTL。
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master"},"tool_response":{"isError":"false"}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod"},"tool_response":{"isError":"false"}}'
 assert_exit 0 "release: Post 畸形 isError 放行不阻断"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 畸形 isError 保留标记"
 remove_publish_marker feature/x
 
 # Kimi CLI Post：载荷无 tool_response，成功输出字段为 tool_output（kimi PostToolUse 仅成功时触发）→ 撕票。
 write_publish_marker "feature/kimi-post"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","session_id":"kimi-s1","cwd":"/tmp","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/kimi-post","target_branch":"master","title":"test"},"tool_call_id":"tool_kimi_post_1","tool_output":"{\"iid\":1}"}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","session_id":"kimi-s1","cwd":"/tmp","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/kimi-post","target_branch":"release/prod","title":"test"},"tool_call_id":"tool_kimi_post_1","tool_output":"{\"iid\":1}"}'
 assert_exit 0 "release: Kimi Post create PR 放行"
 assert_file_missing "$(publish_marker_path feature/kimi-post)" "release: Kimi Post tool_output 视为成功并消费标记"
 remove_publish_marker "feature/kimi-post"
 
 # 无 tool_response 且无 tool_output 的 Post 载荷（畸形/未知平台）保守保留标记。
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","title":"test"}}'
 assert_exit 0 "release: Post 无成功证明字段放行不阻断"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 无成功证明字段保留标记"
 remove_publish_marker feature/x
 
 # Post 缺 source_branch 不 consume（guard）：撕票需 source_branch 算路径，缺失则不动标记。
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"release/prod","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: Post 缺 source_branch 放行不阻断"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 缺 source_branch 不消费标记"
 remove_publish_marker feature/x
@@ -1950,11 +2002,11 @@ assert_exit 0 "master-edit: 仓库外 dotfile 放行"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Read","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
 assert_exit 0 "master-edit: 非 Edit 工具放行"
 
-# detached HEAD worktree（分支解析为空）→ 放行
+# detached HEAD 不是任务分支，禁止直接写入
 export FAKE_BRANCH_MAP=$'/tmp/detached\t'
 export FAKE_TOPLEVEL_MAP=$'/tmp/detached\t/tmp/detached'
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/detached/src/c.py"}}'
-assert_exit 0 "master-edit: detached HEAD worktree 放行"
+assert_exit 2 "master-edit: detached HEAD worktree 拦截"
 
 teardown_git_stub
 unset FAKE_BRANCH FAKE_GIT_TOPLEVEL FAKE_BRANCH_MAP FAKE_TOPLEVEL_MAP
@@ -1989,6 +2041,17 @@ assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放�
 rm -rf "$FEATURE_REPO"
 unset REAL_REPO FEATURE_REPO
 
+RELEASE_EDIT_REPO="$(mktemp -d)"
+git -C "$RELEASE_EDIT_REPO" init -q
+git -C "$RELEASE_EDIT_REPO" symbolic-ref HEAD refs/heads/release/2026.09.29
+mkdir -p "$RELEASE_EDIT_REPO/docs"
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"%s/src/a.py\"}}' "$RELEASE_EDIT_REPO")"
+assert_exit 2 "release-edit: release 工作树代码直写拦截"
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"%s/docs/new.md\"}}' "$RELEASE_EDIT_REPO")"
+assert_exit 2 "release-edit: release 工作树散文文档直写拦截"
+rm -rf "$RELEASE_EDIT_REPO"
+unset RELEASE_EDIT_REPO
+
 # Slice 4.6.5 — block-master-edit 本地个人配置白名单
 # 只放行根 CLAUDE.local.md + .codex/config.toml，且必须先被 Git 明确忽略；
 # 其他 ignored 文件与未忽略的同名配置仍按 master 写入硬拦。
@@ -2015,8 +2078,7 @@ export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_LOCALCFG"
 rm -rf "$LOCALCFG_REPO"
 unset LOCALCFG_REPO SAVED_CLAUDE_PROJECT_DIR_LOCALCFG
 
-# Slice 4.6.6 — block-master-edit 文档白名单（ADR-0025）
-# 真实 master 仓库：根 CONTEXT.md + docs/**/*.md 放行；代码 / .claude 规则源 / 契约仍拦。
+# Slice 4.6.6 — 散文文档也必须走任务 worktree
 DOCALLO_REPO="$(mktemp -d)"
 git -C "$DOCALLO_REPO" init -q
 git -C "$DOCALLO_REPO" symbolic-ref HEAD refs/heads/master
@@ -2024,17 +2086,17 @@ mkdir -p "$DOCALLO_REPO/docs/adr" "$DOCALLO_REPO/docs/specs" "$DOCALLO_REPO/.cla
 SAVED_CLAUDE_PROJECT_DIR_DOCALLO="${CLAUDE_PROJECT_DIR:-}"
 export CLAUDE_PROJECT_DIR="$DOCALLO_REPO"
 
-# 放行：根 CONTEXT.md + 审计 reason=allowed-doc-allowlist
+# master 根 CONTEXT.md 被拦截
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_ctx","session_id":"s_doc","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CONTEXT.md"}}'
-assert_exit 0 "doc-allowlist: master Edit 根 CONTEXT.md 放行（ADR-0025）"
+assert_exit 2 "doc-allowlist: master Edit 根 CONTEXT.md 拦截"
 DOCALLO_LOG="$(audit_log_path "$DOCALLO_REPO" "$MASTER_EDIT_HOOK")"
-assert_audit_has_field "$DOCALLO_LOG" reason allowed-doc-allowlist "doc-allowlist: CONTEXT.md 放行审计 reason=allowed-doc-allowlist"
+assert_audit_has_field "$DOCALLO_LOG" reason blocked-master "doc-allowlist: CONTEXT.md 拦截审计"
 
-# 放行：docs 任意层级 .md（含子目录、全新文件 Write）
+# docs 任意层级 .md（含子目录、全新文件 Write）也不得直写 master
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/adr/0001.md"}}'
-assert_exit 0 "doc-allowlist: master Edit docs/adr/0001.md 放行"
+assert_exit 2 "doc-allowlist: master Edit docs/adr/0001.md 拦截"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/new.md"}}'
-assert_exit 0 "doc-allowlist: master Write docs/new.md 放行"
+assert_exit 2 "doc-allowlist: master Write docs/new.md 拦截"
 
 # 仍拦：代码 / 规则源（CLAUDE.md + .claude/rules）/ 契约（docs/**/*.json 非 .md 散文）
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/src/a.py"}}'
@@ -2491,7 +2553,7 @@ assert_stdout_has "[配置链集成] ZCode" "closed-loop: 报告含 ZCode 配置
 assert_stdout_has "[配置链集成] Claude Code" "closed-loop: 报告含 Claude Code 配置链证据"
 assert_stdout_has "[配置链集成] Codex" "closed-loop: 报告含 Codex 配置链证据"
 assert_stdout_has "[配置链集成] Kimi CLI" "closed-loop: 报告含 Kimi CLI 配置链证据"
-assert_stdout_has "audit=16/16 unique correlated records" "closed-loop: 报告含唯一审计关联证据"
+assert_stdout_has "audit=24/24 unique correlated records" "closed-loop: 报告含唯一审计关联证据"
 assert_stdout_has "[直接 Gate 黑盒]" "closed-loop: 报告区分直接 Gate 黑盒"
 assert_stdout_has "[外部客户端实机探针] 未执行" "closed-loop: 报告不冒充外部客户端实机证据"
 assert_stderr_empty "closed-loop: 成功时 stderr 为空"
@@ -2584,7 +2646,7 @@ assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认�
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "开工入口" "workflow: 自检指向唯一 Work Tree 入口（开工入口）"
 assert_markdown_section_has_text "CLAUDE.md" "## 最高红线（摘要，细节见 rules 文件）" "scripts/start-task-worktree.sh" "workflow: 红线 4 定义开工入口唯一签名"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认目标路径" "workflow: 自检确认目标路径"
-assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "用户本地集成区（master 主检出区）" "workflow: 自检识别主检出区"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "master 或 release 检出区" "workflow: 自检识别保护分支"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认 Git 写入区域" "workflow: 自检确认 Git 写入区域"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "工单分支" "workflow: 自检要求工单分支"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "立即停止写入" "workflow: 自检失败时停止写入"
@@ -2638,9 +2700,9 @@ assert_exit 0 "codex: 普通 update issue 放行"
 run_command_hook "$CODEX_ISSUE_CMD" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306}}'
 assert_exit 2 "codex: update 子 issue 缺归属拦截"
 
-run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":"true","title":"test"}}'
 assert_exit 2 "codex: draft PR 包装命令拦截"
-assert_stderr_has "不使用 draft PR" "codex: draft PR 包装命令提示普通 PR"
+assert_stderr_has "--create-pr" "codex: 缺发布标记时提示标准入口"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git push -u origin feature/x"}}'
 assert_exit 0 "codex: 任务分支直接 git push 包装命令放行"
@@ -2659,8 +2721,8 @@ run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit --am
 assert_exit 0 "codex: direct commit --amend 放行"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
-assert_exit 0 "codex: local merge 授权入口无交互放行"
-assert_stdout_empty "codex: local merge 授权入口无输出"
+assert_exit 2 "codex: 旧本地 master 合入入口阻断"
+assert_stderr_has "已废止" "codex: 旧本地 master 合入入口指路"
 
 # 一次性凭证依赖真实 git common-dir/hash-object；前面的 fake git 只用于分支查询型 gate。
 teardown_git_stub
@@ -2829,7 +2891,7 @@ else
 fi
 
 # lag：本地 master 落后 origin/master（PR 已合远端、本地未拉）→ 仍能清理。
-# ADR-0010 核心：本地 master 是用户集成区，未必含 origin/master。
+# 历史清理入口须兼容本地 master 未追上 origin/master 的旧状态；不代表当前任务流程。
 # 此用例锁定「用 update-ref -d 而非 branch -d」——后者在本地 master 落后时会误判未合并而拒绝。
 setup_release_repo
 git -C "$RELEASE_TMP/main" checkout -b feature/lag-release >/dev/null 2>&1
@@ -3049,10 +3111,10 @@ fi
 rm -rf "$CASE_PROBE_DIR"
 unset CASE_PROBE_DIR
 
-# Slice 9 — 本地 merge 冲突解决后的标准续接入口
+# Slice 9 — 旧本地 master 合入入口废止后不改写仓库
 run_command_hook "bash \"$REPO_ROOT/scripts/tests/test_merge_task_to_local_master.sh\"" ""
-assert_exit 0 "merge-entry: 冲突解决后通过标准入口续接"
-assert_stdout_has "PASS: merge-task-to-local-master 冲突续接" "merge-entry: 续接黑盒覆盖成功与未解决冲突"
+assert_exit 0 "merge-entry: 旧本地 master 合入入口保持关闭"
+assert_stdout_has "PASS: merge-task-to-local-master 废止入口不改写 master" "merge-entry: 废止入口不改写仓库"
 
 # 恢复调用者环境并删除全局审计隔离仓库。
 if [ -n "$ORIGINAL_CLAUDE_PROJECT_DIR" ]; then

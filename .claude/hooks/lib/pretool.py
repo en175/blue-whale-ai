@@ -629,6 +629,9 @@ def mode_task_acceptance_git(command: str) -> int:
             print("git commit")
             return 0
         if invocation.subcommand == "merge" and not has_ff_only(invocation.args):
+            if is_task_branch(invocation.cwd) and any(arg.startswith("origin/release/") for arg in invocation.args):
+                print("git merge origin/release")
+                return 0
             if "origin/master" in invocation.args and not is_task_branch(invocation.cwd):
                 continue
             print("git merge origin/master" if "origin/master" in invocation.args else "git merge")
@@ -637,6 +640,15 @@ def mode_task_acceptance_git(command: str) -> int:
             if not is_task_branch(invocation.cwd):
                 continue
             print("git pull")
+            return 0
+    return 1
+
+
+def mode_release_direct_git(command: str) -> int:
+    for invocation in git_invocations(command):
+        if not current_branch(invocation.cwd).startswith("release/"):
+            continue
+        if invocation.subcommand in ("commit", "pull", "merge", "rebase", "cherry-pick"):
             return 0
     return 1
 
@@ -720,6 +732,8 @@ def main() -> int:
         return mode_force_lease_non_work(command)
     if mode == "task-acceptance-git":
         return mode_task_acceptance_git(command)
+    if mode == "release-direct-git":
+        return mode_release_direct_git(command)
     if mode == "publish-review-mode":
         return mode_publish_review_mode(command)
     if mode == "dangerous-pattern":

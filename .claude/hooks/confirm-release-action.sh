@@ -5,7 +5,7 @@
 # 兜底对象：
 #   - Bash: 任务分支的普通 commit / push / merge 放行；发布基线 release/* 直推硬拦
 #   - Bash: 发布 create/update / 合入标准入口带 --user-authorized 无交互放行；同步入口出现即放行
-#   - Bash: 任务分支用 merge/pull 同步 origin/master 时硬拦并指向 rebase 同步入口
+#   - Bash: 任务分支错误 merge/pull 与 release 工作树直接 commit/pull/merge/rebase/cherry-pick 硬拦
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
 #   - mcp__gitee-ent__create_enterprise_repo_release: 创建 Gitee release
@@ -13,7 +13,7 @@
 # 规则：
 #   - 发布审查包只允许通过标准入口触发；--user-authorized 即 Agent 对人类授权的声明。
 #   - 普通任务分支 push 不需要发布授权；保护分支与发布审查包不得绕过入口。
-#   - 创建 PR 校验标准入口写入的短期标记（target=master|release/*、source_branch、no draft）；
+#   - 创建 PR 校验标准入口写入的短期标记（target、source_branch、draft）；
 #     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
 #   - 合并 PR / 创建 release 使用 AI 自动生成、绑定对象、TTL 900s 的一次性凭证。
 #   - Pre 仅校验，Post 成功后消费；失败保留凭证供有限重试。
@@ -66,8 +66,8 @@ BLOCKED: ${reason}
 		- 首次发布使用 scripts/publish-review-package.sh --user-authorized --create-pr
 		- 已有 PR 更新使用 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号>
 		- 分支落后时，Agent 依据规则主动运行 scripts/sync-task-from-origin.sh sync；Hook 不自动同步
-	- 本地任务提交走 scripts/commit-task-for-review.sh（出现即放行）；合入本地 master 走带 --user-authorized 的标准入口
-	- 创建 PR 不使用 draft=true
+	- 本地任务提交走 scripts/commit-task-for-review.sh（出现即放行）
+	- 创建 PR 的 draft 必须与发布入口标记一致
 	- 合并 PR / 创建 release 必须由 Agent 自动生成绑定具体对象的一次性凭证
 
 详见 CLAUDE.md「发布动作必须先获用户授权」。
@@ -158,13 +158,15 @@ consume_publish_marker() {
 validate_publish_marker() {
   source_branch="$1"
   target_branch="$2"
+  requested_draft="$3"
   marker_path="$(marker_path_for_branch "$source_branch")"
 
   marker_branch="$(read_publish_marker branch "$marker_path" || true)"
   marker_target="$(read_publish_marker target "$marker_path" || true)"
+  marker_draft="$(read_publish_marker draft "$marker_path" || true)"
   marker_created_at="$(read_publish_marker created_at "$marker_path" || true)"
 
-  if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ]; then
+  if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ] || [ -z "$marker_draft" ]; then
     block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized --create-pr 推送当前工单分支。"
   fi
 
@@ -180,6 +182,14 @@ validate_publish_marker() {
 
   if [ "$marker_branch" != "$source_branch" ] || [ "$marker_target" != "$target_branch" ]; then
     block "PR 分支与发布审查包授权标记不匹配。请重新执行 scripts/publish-review-package.sh --user-authorized --create-pr。"
+  fi
+
+  case "$marker_draft" in
+    true|false) ;;
+    *) block "发布审查包 draft 标记无效。请重新执行发布入口。" ;;
+  esac
+  if [ "$marker_draft" != "$requested_draft" ]; then
+    block "PR draft 参数与发布审查包标记不匹配。请按发布入口记录的草稿状态创建 PR。"
   fi
 
   # 成功路径不在此消费：消费延后到 PostToolUse（PR 创建成功后），见 ADR-0011。
@@ -251,10 +261,16 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push
   fi
 fi
 
-# 扫描整条命令以分类审计，并保留任务分支错误同步 origin/master 的专门纠偏。
+# 发布线同步和任务合入只走标准入口。Hook 拦截 release 工作树直接改动提交史，
+# 但不代替入口执行 Git 操作。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" release-direct-git; then
+  AUDIT_OPERATION="release-direct-git"
+  block "检测到在 release 工作树直接 commit/pull/merge/rebase/cherry-pick。同步请运行 scripts/sync-release-line.sh --json；任务写入与提交在独立 worktree，合入须经目标 release PR。"
+fi
+
+# 扫描整条命令以分类审计，并保留任务分支错误同步的专门纠偏。
 # 普通 commit / merge 是任务分支内可逆操作，不属于发布授权边界。
-# 分支感知（ADR-0010）：master 上 merge/pull origin/master 是用户集成区合法操作，不拦；
-# 仅在任务分支前缀上拦截并指向标准入口。
+# 任务分支错误 merge/pull 同步必须指向任务同步入口；生产 master 不承接日常任务集成。
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
@@ -266,6 +282,10 @@ case "$task_acceptance" in
   "git merge origin/master")
     AUDIT_OPERATION="git-merge-sync"
     block "检测到在任务分支上用 merge 同步 origin/master。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
+    ;;
+  "git merge origin/release")
+    AUDIT_OPERATION="git-merge-sync"
+    block "检测到在任务分支上用 merge 同步目标 release。请运行 scripts/sync-task-from-origin.sh sync --target-branch <任务目标release> --json。"
     ;;
   "git pull")
     AUDIT_OPERATION="git-pull"
@@ -298,14 +318,10 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes sync
   allow
 fi
 
-# Bash: 合入本地 master 入口（发布链路关键检查点）。必须在 commit-task 白名单之前校验：
-# 否则 `commit-task ... && merge-task <无授权>` 会被 commit-task 的 exit 0 短路，跳过 merge 授权。
+# 旧本地 master 集成入口已废止。必须在 commit-task 放行之前拦截复合命令。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh; then
   AUDIT_OPERATION="merge-local-master"
-  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh --user-authorized; then
-    block "合入用户本地 master 入口缺少 --user-authorized。必须先获得用户明确授权。"
-  fi
-  allow
+  block "本地 master 集成入口已废止。任务经目标 release PR 合入；紧急生产 hotfix 另获授权。"
 fi
 
 # Bash: release 分支管理入口。list/current 为只读；create/activate 必须带 --user-authorized。
@@ -325,13 +341,13 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes mana
 fi
 
 # Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
-# 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
+# 出现即放行，不校验 --user-authorized；提交仍在独立任务 worktree 内。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
   AUDIT_OPERATION="commit-task"
   allow
 fi
 
-# Bash: cleanup-task-worktree.sh 依靠脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
+# Bash: cleanup-task-worktree.sh 依靠脚本自身校验目标 release 已包含任务 HEAD、工作区干净、路径正确。
 
 # Gitee: 创建 PR。只校验发布审查包形态，不做二次确认。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
@@ -341,12 +357,13 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   SOURCE_BRANCH=$(extract_json_value "source_branch")
 
   case "$DRAFT" in
-    true|TRUE|True|1) block "本项目不使用 draft PR；创建 Gitee PR 时请省略 draft 字段或传 draft=false。" ;;
+    true|false) ;;
+    *) block "创建 Gitee PR 时必须显式传 draft=true 或 draft=false。" ;;
   esac
 
   case "$TARGET_BRANCH" in
-    master|release/?*) ;;
-    *) block "发布审查包只允许创建指向 master 或 release/* 的 PR。" ;;
+    release/?*) ;;
+    *) block "普通任务发布审查包只允许创建指向 release/* 的 PR；生产 hotfix 须独立授权流程。" ;;
   esac
 
   case "$SOURCE_BRANCH" in
@@ -354,7 +371,7 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
     *) block "创建 Gitee PR 时 source_branch 必须是工单分支。" ;;
   esac
 
-  validate_publish_marker "$SOURCE_BRANCH" "$TARGET_BRANCH"
+  validate_publish_marker "$SOURCE_BRANCH" "$TARGET_BRANCH" "$DRAFT"
 
   allow
 fi
