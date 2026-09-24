@@ -1,0 +1,38 @@
+.select {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+  background-color: var(--admin-surface);
+  /* 自绘箭头：原生箭头各浏览器长相不一，且颜色不跟随主题。
+     用内联 SVG 保证两种主题下都是当前文字色。 */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color 0.15s ease;
+}
+
+.select:hover:not(:disabled) {
+  border-color: var(--admin-border-strong);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+.select:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.sm {
+  height: 26px;
+  font-size: 12px;
+}
