@@ -1,20 +1,28 @@
 import type { Edge, Node } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
+import type { JobRecord } from '@/api/jobs';
 import {
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,
   AUDIO_VIDEO_MUX_EDGE_ORIGIN,
+  AUDIO_VIDEO_MUX_FAIL_TEXT,
   AUDIO_VIDEO_MUX_TITLE,
   AUDIO_VIDEO_MUX_UNAVAILABLE_REASON,
   AUDIO_VIDEO_MUX_UNSUPPORTED_REASON,
   AUDIO_VIDEO_MUX_VIDEO_UNAVAILABLE_REASON,
   AUDIO_VIDEO_MUX_VIDEO_UNSUPPORTED_REASON,
+  audioVideoMuxErrorText,
   audioVideoMuxIdentityOf,
+  audioVideoMuxNodeId,
+  audioVideoMuxResultName,
   audioVideoMuxSourceError,
   audioVideoMuxVideoError,
   buildAudioVideoMuxIdentity,
+  buildAudioVideoMuxPlaceholderNode,
+  frozenAudioVideoMuxInput,
   isAudioVideoMuxAudioEdge,
   isAudioVideoMuxBindEdge,
   isAudioVideoMuxDraftNode,
+  planAudioVideoMuxRecovery,
 } from './audioVideoMux';
 
 /* IKIHPK 音视频合成纯逻辑：入口门槛（仅源音频 URL 缺失置灰）、拖线绑定源校验
@@ -152,5 +160,151 @@ describe('合成语义边识别（固定音频输入线与视频绑定线）', (
 
   it('固定音频线删除拦截文案用户可读', () => {
     expect(AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON).toContain('不可移除');
+  });
+});
+
+/* IKIHP M 提交与恢复纯逻辑：冻结快照解析、结果卡命名与失败文案、恢复规划
+   （进行中补占位卡 / 来源线按冻结输入补画 / 终态补轮询 / 已删卡不复活）。
+   页面级链路（提交、占位回填、失败重试）见 audioVideoMuxSend.test.tsx 与
+   audioVideoMuxRecovery.test.tsx。 */
+describe('音视频合成冻结快照与结果卡命名', () => {
+  it('冻结快照四键齐全才可用：缺键/畸形/非法 sync 与 assetId 一律拒绝', () => {
+    const valid = {
+      audio: { assetId: '8', nodeId: 'a1', url: 'https://tos/aud.mp3' },
+      video: { assetId: '5', nodeId: 'v1', url: 'https://tos/vid.mp4' },
+      is_audio_reserve: true,
+      sync: 'none',
+    };
+    expect(frozenAudioVideoMuxInput(job({ input: valid }))).toEqual({
+      audio: { assetId: '8', nodeId: 'a1' },
+      video: { assetId: '5', nodeId: 'v1' },
+      is_audio_reserve: true,
+      sync: 'none',
+    });
+    // 素材库视频输入没有 nodeId：合法
+    expect(frozenAudioVideoMuxInput(job({
+      input: { ...valid, video: { assetId: '5' } },
+    }))?.video).toEqual({ assetId: '5' });
+    expect(frozenAudioVideoMuxInput(job({ input: null }))).toBeNull();
+    expect(frozenAudioVideoMuxInput(job({ input: { ...valid, sync: 'trim' } }))).toBeNull();
+    expect(frozenAudioVideoMuxInput(job({ input: { ...valid, is_audio_reserve: 'yes' } }))).toBeNull();
+    expect(frozenAudioVideoMuxInput(job({ input: { ...valid, audio: { assetId: '08', nodeId: 'a1' } } }))).toBeNull();
+    expect(frozenAudioVideoMuxInput(job({ input: { ...valid, audio: { assetId: '8' } } }))).toBeNull();
+    expect(frozenAudioVideoMuxInput(job({ input: { ...valid, video: { assetId: '5', nodeId: '' } } }))).toBeNull();
+  });
+
+  it('结果卡名 = 源视频名去扩展名 + (音视频合成).mp4（与 worker 同款；空名回落「视频」）', () => {
+    expect(audioVideoMuxResultName('城市夜景.mp4')).toBe('城市夜景(音视频合成).mp4');
+    expect(audioVideoMuxResultName('产品开箱')).toBe('产品开箱(音视频合成).mp4');
+    expect(audioVideoMuxResultName(' 海浪.mov ')).toBe('海浪(音视频合成).mp4');
+    expect(audioVideoMuxResultName(undefined)).toBe('视频(音视频合成).mp4');
+    expect(audioVideoMuxResultName('   ')).toBe('视频(音视频合成).mp4');
+  });
+
+  it('失败文案透传服务端 msg，缺失落 1053 兜底', () => {
+    expect(audioVideoMuxErrorText({ msg: '音视频合成失败，请重试' })).toBe('音视频合成失败，请重试');
+    expect(audioVideoMuxErrorText({ message: '资产不可用' })).toBe('资产不可用');
+    expect(audioVideoMuxErrorText(null)).toBe(AUDIO_VIDEO_MUX_FAIL_TEXT);
+    expect(audioVideoMuxErrorText({ msg: '  ' })).toBe(AUDIO_VIDEO_MUX_FAIL_TEXT);
+  });
+
+  it('占位卡恢复 id 由 jobId 确定性派生，视频型且不可播放', () => {
+    expect(audioVideoMuxNodeId('73')).toBe('audio-video-mux-73');
+    const card = buildAudioVideoMuxPlaceholderNode('73',
+      buildAudioVideoMuxIdentity('a1', '8'), { x: 600, y: 0 });
+    expect(card).toMatchObject({
+      id: 'audio-video-mux-73', position: { x: 600, y: 0 },
+      data: { src: '', fileName: AUDIO_VIDEO_MUX_TITLE, mediaType: 'video', genStatus: 'generating', jobId: '73' },
+    });
+  });
+});
+
+function job(overrides: Partial<JobRecord> = {}): JobRecord {
+  return {
+    job_id: '73', type: 'audio_video_mux', status: 'queued', progress: 0,
+    input: null, created_at: '2026-09-24T00:00:00Z', output_assets: [], error: null,
+    ...overrides,
+  };
+}
+
+const frozenInput = {
+  audio: { assetId: '8', nodeId: 'a1', url: 'https://tos/aud.mp3' },
+  video: { assetId: '5', nodeId: 'v1', url: 'https://tos/vid.mp4' },
+  is_audio_reserve: true,
+  sync: 'none',
+};
+
+describe('planAudioVideoMuxRecovery 恢复规划', () => {
+  const pending = job({ input: frozenInput });
+
+  it('受理后尚未落盘的任务补视频型占位卡与现存两条冻结来源线，多次恢复不复制', () => {
+    const initial = [readyAudio('a1'), readyVideo('v1')];
+    const first = planAudioVideoMuxRecovery(initial, [], [pending]);
+    expect(first.nodes.map((node) => node.id)).toEqual(['a1', 'v1', 'audio-video-mux-73']);
+    const card = first.nodes.find((node) => node.id === 'audio-video-mux-73')!;
+    expect((card.data as Record<string, unknown>).mediaType).toBe('video');
+    expect(audioVideoMuxIdentityOf(card)).toEqual({
+      sourceNodeId: 'a1', sourceAssetId: '8', reserveAudio: true, sync: 'none',
+      video: {
+        assetId: '5', nodeId: 'v1', name: '视v1', duration: null, width: null, height: null,
+      },
+    });
+    expect(first.edges.map((edge) => [edge.source, edge.target, edge.data?.origin])).toEqual([
+      ['a1', 'audio-video-mux-73', AUDIO_VIDEO_MUX_EDGE_ORIGIN],
+      ['v1', 'audio-video-mux-73', AUDIO_VIDEO_MUX_EDGE_ORIGIN],
+    ]);
+    expect(first.pollJobIds).toEqual(['73']);
+    const again = planAudioVideoMuxRecovery(first.nodes, first.edges, [pending]);
+    expect(again.nodes).toHaveLength(3);
+    expect(again.edges).toHaveLength(2);
+  });
+
+  it('素材库视频输入（无 nodeId）只补固定音频线，不建悬空线', () => {
+    const initial = [readyAudio('a1')];
+    const result = planAudioVideoMuxRecovery(initial, [], [job({
+      input: { ...frozenInput, video: { assetId: '5' } },
+    })]);
+    expect(result.edges.map((edge) => edge.source)).toEqual(['a1']);
+  });
+
+  it('输入卡已删除时不复活、不创建悬空线；已产出成品卡不在恢复中重建', () => {
+    const result = planAudioVideoMuxRecovery([readyAudio('a1')], [], [pending]);
+    expect(result.edges.map((edge) => edge.source)).toEqual(['a1']);
+    // 视频输入卡已删：只剩固定音频线
+    const noVideo = planAudioVideoMuxRecovery([], [], [job({ input: { ...frozenInput, video: { assetId: '5' } } })]);
+    expect(noVideo.edges).toEqual([]);
+  });
+
+  it('画布上的卡按任务态续轮询：失败卡转生成中清旧错误，终态任务补轮询', () => {
+    const card = buildAudioVideoMuxPlaceholderNode('73',
+      buildAudioVideoMuxIdentity('a1', '8'), { x: 600, y: 0 });
+    const failed = { ...card, data: { ...card.data, genStatus: 'failed', errorText: '供应商失败' } };
+    const requeued = planAudioVideoMuxRecovery([readyAudio('a1'), failed], [], [pending]);
+    expect(requeued.nodes.find((node) => node.id === 'audio-video-mux-73')?.data).toMatchObject({
+      jobId: '73', genStatus: 'generating', errorText: undefined,
+    });
+    expect(requeued.pollJobIds).toEqual(['73']);
+    // 任务已终态：不补状态（终态由轮询回填），只补轮询
+    const succeededJob = job({ status: 'succeeded', input: frozenInput });
+    const settled = planAudioVideoMuxRecovery([readyAudio('a1'), failed], [], [succeededJob]);
+    expect(settled.pollJobIds).toEqual(['73']);
+    expect(settled.nodes.find((node) => node.id === 'audio-video-mux-73')?.data.genStatus).toBe('failed');
+  });
+
+  it('卡已落盘的任务不重复补卡与来源线（幂等），畸形任务跳过', () => {
+    const present = job({ input: frozenInput, canvas_card_state: 'present' });
+    const card = buildAudioVideoMuxPlaceholderNode('73',
+      buildAudioVideoMuxIdentity('a1', '8'), { x: 600, y: 0 });
+    const existing = [
+      readyAudio('a1'), readyVideo('v1'), { ...card, data: { ...card.data, genStatus: 'generating' } },
+    ];
+    const edges = [
+      edge('e1', 'a1', 'audio-video-mux-73', { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN }),
+      edge('e2', 'v1', 'audio-video-mux-73', { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN }),
+    ];
+    const result = planAudioVideoMuxRecovery(existing, edges, [present, job({ job_id: '74', input: { sync: 'trim' } })]);
+    expect(result.nodes.map((node) => node.id)).toEqual(['a1', 'v1', 'audio-video-mux-73']);
+    expect(result.edges).toHaveLength(2);
+    expect(result.pollJobIds).toEqual([]);
   });
 });

@@ -14,7 +14,10 @@
  * - 视频绑定只接受已完成、关联资产的视频成品卡（同一时刻只绑一个，重绑即替换）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
+import type { JobRecord } from '@/api/jobs';
+import { AUDIO_VIDEO_MUX_SYNC_MODES } from '@lib/contracts/audio-video-mux';
 import { readAssetId } from './mediaRefs';
+import { findAudioMixPosition } from './audioMix';
 
 /** 合成语义边标记（写 edge.data.origin）：参考推导/@ 编号跳过此来源边（防参考污染） */
 export const AUDIO_VIDEO_MUX_EDGE_ORIGIN = 'audio-video-mux';
@@ -40,12 +43,16 @@ export const AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON = '固定音频源不可�
 /** 时长对齐三档（规格「全为裁剪语义」；none=保持原长不传 is_video_audio_sync） */
 export type AudioVideoMuxSync = 'none' | 'video' | 'audio';
 
-/** 已绑定视频（画布拖线带 nodeId，素材库选择无 nodeId——来源标注据此分流） */
+/** 已绑定视频（画布拖线带 nodeId，素材库选择无 nodeId——来源标注据此分流）；
+ *  宽高/时长在绑定时刻随身份冻结：终态回填的「供应商值缺失回落源资产」不依赖
+ *  视频卡是否还在画布上（输入卡删除后成品仍要显示时长与分辨率）。 */
 export interface AudioVideoMuxBoundVideo {
   assetId: string;
   nodeId?: string;
   name: string;
   duration?: number | null;
+  width?: number | null;
+  height?: number | null;
 }
 
 /** 合成草稿卡身份（随卡持久化，记住直到终态回填）：固定音频源 + 参数 + 可选绑定视频 */
@@ -146,4 +153,173 @@ export function isAudioVideoMuxBindEdge(edge: Edge, draft: Node | undefined): bo
   const identity = audioVideoMuxIdentityOf(draft);
   if (!identity || !isAudioVideoMuxEdgeOfDraft(edge, draft)) return false;
   return edge.source !== identity.sourceNodeId;
+}
+
+/* ============ IKIHP M：提交冻结、占位卡、终态回填与恢复 ============ */
+
+/** 合成结果卡命名后缀（worker 同款格式化：源视频资产名去扩展名 + 本后缀） */
+export const AUDIO_VIDEO_MUX_RESULT_SUFFIX = '(音视频合成).mp4';
+
+/** 合成失败兜底文案（契约 1053；poll 已带 msg 时原样透传） */
+export const AUDIO_VIDEO_MUX_FAIL_TEXT = '音视频合成失败，请重试';
+
+/** 服务端冻结的输入快照（创建时落库、重试按快照重放；跨进程字段同字） */
+export interface AudioVideoMuxFrozenInput {
+  audio: { assetId: string; nodeId: string };
+  video: { assetId: string; nodeId?: string };
+  is_audio_reserve: boolean;
+  sync: AudioVideoMuxSync;
+}
+
+/** 结果卡节点 id（仅恢复补卡用；正常发送是草稿卡原地转生成中，id 不变） */
+export function audioVideoMuxNodeId(jobId: string | number): string {
+  return `audio-video-mux-${jobId}`;
+}
+
+/** 结果卡名 = 源视频名去扩展名 + 「(音视频合成).mp4」（与 worker 命名同款；空名回落「视频」） */
+export function audioVideoMuxResultName(videoName?: string | null): string {
+  const raw = typeof videoName === 'string' ? videoName.trim() : '';
+  const dot = raw.lastIndexOf('.');
+  const base = (dot > 0 ? raw.slice(0, dot) : raw) || '视频';
+  return `${base}${AUDIO_VIDEO_MUX_RESULT_SUFFIX}`;
+}
+
+/** 失败原因（msg/message 原样透传，缺失落 1053 兜底文案；同插帧家族映射口径） */
+export function audioVideoMuxErrorText(
+  error?: { msg?: string | null; message?: string | null } | null,
+): string {
+  for (const value of [error?.msg, error?.message]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return AUDIO_VIDEO_MUX_FAIL_TEXT;
+}
+
+/** 冻结快照解析（同 planAudioMixRecovery 的冻结校验口径）：四键齐全且取值合法才算可用快照，
+ *  畸形/缺键任务不参与恢复（不补卡、不补边、不续轮询）。 */
+export function frozenAudioVideoMuxInput(job: JobRecord): AudioVideoMuxFrozenInput | null {
+  const frozen = job.input as Partial<AudioVideoMuxFrozenInput> | null;
+  if (!frozen || typeof frozen !== 'object') return null;
+  const audio = frozen.audio;
+  const video = frozen.video;
+  if (!audio || typeof audio.assetId !== 'string' || !/^[1-9][0-9]*$/.test(audio.assetId)
+    || typeof audio.nodeId !== 'string' || audio.nodeId === '') return null;
+  if (!video || typeof video.assetId !== 'string' || !/^[1-9][0-9]*$/.test(video.assetId)) return null;
+  if (video.nodeId !== undefined && (typeof video.nodeId !== 'string' || video.nodeId === '')) return null;
+  if (typeof frozen.is_audio_reserve !== 'boolean') return null;
+  if (!AUDIO_VIDEO_MUX_SYNC_MODES.includes(frozen.sync as AudioVideoMuxSync)) return null;
+  return {
+    audio: { assetId: audio.assetId, nodeId: audio.nodeId },
+    video: { assetId: video.assetId, ...(video.nodeId ? { nodeId: video.nodeId } : {}) },
+    is_audio_reserve: frozen.is_audio_reserve,
+    sync: frozen.sync as AudioVideoMuxSync,
+  };
+}
+
+/** 卡上合成身份 ← 冻结快照（恢复补卡用）：视频名/宽高/时长优先取画布视频卡现值
+ *  （素材库绑定卡不在画布，回落为空由终态口径兜住）。 */
+export function audioVideoMuxIdentityFromFrozen(
+  frozen: AudioVideoMuxFrozenInput,
+  nodes: Node[],
+): AudioVideoMuxIdentity {
+  const videoNode = frozen.video.nodeId ? nodes.find((n) => n.id === frozen.video.nodeId) : undefined;
+  const videoData = (videoNode?.data ?? {}) as Record<string, unknown>;
+  const videoName = typeof videoData.fileName === 'string' && videoData.fileName !== ''
+    ? videoData.fileName : '视频素材';
+  return {
+    sourceNodeId: frozen.audio.nodeId,
+    sourceAssetId: frozen.audio.assetId,
+    reserveAudio: frozen.is_audio_reserve,
+    sync: frozen.sync,
+    video: {
+      assetId: frozen.video.assetId,
+      ...(frozen.video.nodeId ? { nodeId: frozen.video.nodeId } : {}),
+      name: videoName,
+      duration: typeof videoData.duration === 'number' ? videoData.duration : null,
+      width: typeof videoData.width === 'number' ? videoData.width : null,
+      height: typeof videoData.height === 'number' ? videoData.height : null,
+    },
+  };
+}
+
+/** 恢复补的合成占位卡：视频型、不可播放（无 src、生成中）、记住合成身份直到回填
+ *  （不能复用写死音频类型的音频混合占位卡工厂）。 */
+export function buildAudioVideoMuxPlaceholderNode(
+  jobId: string | number,
+  identity: AudioVideoMuxIdentity,
+  position: { x: number; y: number },
+): Node {
+  return {
+    id: audioVideoMuxNodeId(jobId),
+    type: 'mediaNode',
+    position,
+    data: {
+      src: '',
+      fileName: AUDIO_VIDEO_MUX_TITLE,
+      mediaType: 'video',
+      genStatus: 'generating',
+      progress: 0,
+      draft: true,
+      jobId,
+      toolMode: 'select',
+      audioVideoMux: identity,
+    },
+  };
+}
+
+/** 以服务端任务为准恢复画布（同 planAudioMixRecovery 同构）：任务卡缺失且任务仍在
+ *  进行中时补占位卡（进行中无卡即「卡尚未落盘」——生成中卡删除会连带取消任务，
+ *  故不会与用户主动移除相撞）；卡在画布上时按任务态续轮询；来源线按冻结输入补画
+ *  （已删节点不复活、不建悬空线）；返回的 pollJobIds 去重。 */
+export function planAudioVideoMuxRecovery(
+  nodes: Node[],
+  edges: Edge[],
+  jobs: JobRecord[],
+  occupied: Node[] = nodes,
+): { nodes: Node[]; edges: Edge[]; pollJobIds: string[] } {
+  let nextNodes = nodes;
+  let nextEdges = edges;
+  const pollJobIds: string[] = [];
+  for (const job of jobs) {
+    if (job.type !== 'audio_video_mux' || !/^[1-9][0-9]*$/.test(String(job.job_id))) continue;
+    const frozen = frozenAudioVideoMuxInput(job);
+    if (!frozen) continue;
+    const jobId = String(job.job_id);
+    const inFlight = job.status === 'queued' || job.status === 'processing';
+    let card = nextNodes.find((node) => node.type === 'mediaNode'
+      && audioVideoMuxIdentityOf(node) !== undefined
+      && String((node.data ?? {}).jobId) === jobId);
+    if (!card && inFlight) {
+      const source = nextNodes.find((node) => node.id === frozen.audio.nodeId);
+      const anchor = source ?? nextNodes[0];
+      const position = anchor ? findAudioMixPosition(anchor, [...occupied, ...nextNodes]) : { x: 0, y: 0 };
+      card = buildAudioVideoMuxPlaceholderNode(
+        jobId, audioVideoMuxIdentityFromFrozen(frozen, nextNodes), position,
+      );
+      nextNodes = [...nextNodes, card];
+      pollJobIds.push(jobId);
+    }
+    if (!card) continue;
+    const cardId = card.id;
+    if (inFlight && card.data.genStatus !== 'generating') {
+      nextNodes = nextNodes.map((node) => node.id === cardId
+        ? { ...node, data: { ...node.data, genStatus: 'generating', progress: job.progress, errorText: undefined } }
+        : node);
+      pollJobIds.push(jobId);
+    } else if ((job.status === 'failed' && card.data.genStatus !== 'failed')
+      || (job.status === 'succeeded' && card.data.genStatus != null)) {
+      pollJobIds.push(jobId);
+    }
+    const liveIds = new Set(nextNodes.map((node) => node.id));
+    for (const input of [frozen.audio, frozen.video]) {
+      const sourceId = input.nodeId;
+      if (typeof sourceId !== 'string' || !liveIds.has(sourceId) || sourceId === cardId) continue;
+      if (nextEdges.some((edge) => edge.source === sourceId && edge.target === cardId)) continue;
+      nextEdges = [...nextEdges, {
+        id: `audio-video-mux-edge-${sourceId}-${jobId}`,
+        source: sourceId, target: cardId, type: 'custom',
+        style: { stroke: '#444' }, data: { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN },
+      }];
+    }
+  }
+  return { nodes: nextNodes, edges: nextEdges, pollJobIds: [...new Set(pollJobIds)] };
 }

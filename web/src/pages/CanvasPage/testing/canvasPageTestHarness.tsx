@@ -63,6 +63,10 @@ export const apiMocks = {
   cancelGenerationJob: vi.fn(async () => null),
   retryGenerationJob: vi.fn(),
   retryAudioMix: vi.fn(),
+  /** 音视频合成创建/重试（IKIHPM 发送与失败重试闭环：默认无实现，需要的测试显式
+   *  mockResolvedValue / mockRejectedValue；断言第三参 { silent: true } 与幂等键） */
+  createAudioVideoMux: vi.fn(),
+  retryAudioVideoMux: vi.fn(),
   newIdempotencyKey: vi.fn(() => 'test-retry-key'),
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
@@ -138,6 +142,8 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: apiMocks.createAudioTrim,
   createAudioSpeed: apiMocks.createAudioSpeed,
+  createAudioVideoMux: apiMocks.createAudioVideoMux,
+  retryAudioVideoMux: apiMocks.retryAudioVideoMux,
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));

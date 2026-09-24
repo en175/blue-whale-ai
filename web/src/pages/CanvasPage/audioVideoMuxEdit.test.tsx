@@ -96,7 +96,9 @@ function seedDoc(opts?: { audioUnlinked?: boolean; withMuxDraft?: boolean; withB
           sourceAssetId: '8',
           reserveAudio: true,
           sync: 'none',
-          ...(opts?.withBound ? { video: { assetId: '5', nodeId: 'v1', name: '城市夜景.mp4', duration: 12 } } : {}),
+          ...(opts?.withBound
+            ? { video: { assetId: '5', nodeId: 'v1', name: '城市夜景.mp4', duration: 12, width: 1280, height: 720 } }
+            : {}),
         },
       },
     });
@@ -325,6 +327,8 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       nodeId: 'v1',
       name: '城市夜景.mp4',
       duration: 12,
+      width: 1280,
+      height: 720,
     });
     // 视频槽转入已绑定信息条：文件名 + 时长 + 来源标注「· 画布」
     expect(boundBar()).toBeTruthy();
@@ -350,6 +354,8 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       nodeId: 'v2',
       name: '产品开箱.mp4',
       duration: 45,
+      width: 1920,
+      height: 1080,
     });
     // 固定音频输入线不受影响
     expect(edges().some((e) => e.source === 'a1' && e.target === 'm1')).toBe(true);
@@ -368,6 +374,8 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
       nodeId: 'v1',
       name: '城市夜景.mp4',
       duration: 12,
+      width: 1280,
+      height: 720,
     });
   });
 
@@ -482,6 +490,8 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
       assetId: '10241',
       name: '素材库视频 #10241',
       duration: 8,
+      width: 1920,
+      height: 1080,
     });
     expect(boundBar()!.textContent).toContain('· 素材库');
   });
@@ -526,6 +536,8 @@ describe('IKIHPK 视频槽三态与素材库浮层', () => {
       nodeId: 'v2',
       name: '产品开箱.mp4',
       duration: 45,
+      width: 1920,
+      height: 1080,
     });
   });
 });
@@ -631,6 +643,8 @@ describe('IKIHPK 会话注册、四退出与模态', () => {
       nodeId: 'v1',
       name: '城市夜景.mp4',
       duration: 12,
+      width: 1280,
+      height: 720,
     });
     // 再进合成会话：绑定与参数恢复（合成身份记住直到回填）
     await act(async () => {

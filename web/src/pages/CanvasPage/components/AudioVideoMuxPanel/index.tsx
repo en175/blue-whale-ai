@@ -75,7 +75,13 @@ function MuxVideoLibrary({ onPick }: { onPick: (video: AudioVideoMuxBoundVideo) 
               className={styles.libraryRow}
               data-testid={`audio-video-mux-library-${asset.id}`}
               disabled={asset.status !== 'normal' || !asset.url}
-              onClick={() => onPick({ assetId: String(asset.id), name, duration: asset.duration })}
+              onClick={() => onPick({
+                assetId: String(asset.id),
+                name,
+                duration: asset.duration,
+                width: asset.width,
+                height: asset.height,
+              })}
             >
               <span className={styles.libraryThumb} aria-hidden><Film size={12} strokeWidth={1.8} /></span>
               <span className={styles.libraryRowName}>{name}</span>
