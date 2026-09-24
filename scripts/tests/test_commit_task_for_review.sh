@@ -71,6 +71,10 @@ esac
 
 # ---- 2. 首次提交后 --amend 放行 ----
 out="$(run_commit -m "chore: 第一个子项")" || fail "首次提交应当成功，实际：$out"
+case "$out" in
+  *"--target-branch $TARGET_BRANCH"*) ;;
+  *) fail "提交提醒应指向任务记录的发布线，实际：$out" ;;
+esac
 [ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "1" ] || fail "首次提交后应有 1 个 commit"
 
 printf 'amended\n' >>"$REPO/shared.txt"

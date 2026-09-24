@@ -312,6 +312,12 @@ export function validateReceipt(receipt, current) {
   if (receipt.base !== current.base) {
     return { valid: false, reason: "verification base changed" };
   }
+  if (receipt.startSha !== current.startSha) {
+    return { valid: false, reason: "task start changed after verification" };
+  }
+  if (receipt.targetBranch !== current.targetBranch || receipt.targetSha !== current.targetSha) {
+    return { valid: false, reason: "PR target changed after verification" };
+  }
   if (receipt.changedFilesHash !== current.changedFilesHash) {
     return { valid: false, reason: "changed file scope changed" };
   }

@@ -10,8 +10,9 @@ MODE=""
 MODE_COUNT=0
 PR_IID=""
 PR_SNAPSHOT=""
-TARGET_BRANCH="master"
+TARGET_BRANCH=""
 TARGET_BRANCH_EXPLICIT=0
+CREATE_DRAFT=0
 AS_JSON=0
 PYTHON=()
 ALLOW_SCOPE_FILES=()
@@ -74,13 +75,14 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch master|release/<name>] [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/<name>] [--draft-pr] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
 --pr-snapshot FILE  Agent 通过 Gitee MCP 刚读取并规范化的 PR 快照；update 必填
---target-branch NAME 创建 PR 的目标分支；默认 master，仅允许 master 或 release/*
+--target-branch NAME 创建 PR 的目标分支；默认任务记录的 release/*
+--draft-pr          创建草稿 PR；标记会绑定 draft=true，供 Gitee Hook 核对
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
 EOF
 }
@@ -94,6 +96,10 @@ while [ "$#" -gt 0 ]; do
     --create-pr)
       MODE="create"
       MODE_COUNT=$((MODE_COUNT + 1))
+      shift
+      ;;
+    --draft-pr)
+      CREATE_DRAFT=1
       shift
       ;;
     --update-pr)
@@ -135,7 +141,9 @@ done
 
 [ "$AUTHORIZED" = 1 ] || fail_status 2 AUTHORIZATION_REQUIRED "缺少 --user-authorized。必须先获得用户明确授权。"
 [ "$MODE_COUNT" = 1 ] || fail_status 2 INVALID_MODE "--create-pr 与 --update-pr 必须且只能选择一个。"
-case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支仅允许 master 或 release/*：$TARGET_BRANCH" ;; esac
+if [ "$MODE" = update ] && [ "$CREATE_DRAFT" = 1 ]; then
+  fail_status 2 INVALID_ARGUMENT "--draft-pr 仅用于首次创建 PR。"
+fi
 if [ "$MODE" = update ]; then
   case "$PR_IID" in
     ''|*[!0-9]*|0) fail_status 2 INVALID_PR_IID "PR 编号必须是正整数。" ;;
@@ -149,7 +157,7 @@ import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8")).get("target_branch", ""))
 PY
 )" || fail_status 8 PR_EVIDENCE_INVALID "无法从 PR 快照读取目标分支。"
-  case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支仅允许 master 或 release/*。" ;; esac
+  case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支必须是 release/*。" ;; esac
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -168,16 +176,37 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   fail_status 1 DIRTY_WORKTREE "工作区不干净。请先提交或处理改动。"
 fi
 
+[ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取任务起点需要可用的 Python 3。"
+metadata=("${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT")
+if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
+  TARGET_BRANCH="$("${metadata[@]}" --field target_branch)" \
+    || fail_status 12 TASK_BASE_INVALID "无法读取任务记录的目标发布线。"
+fi
+case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/*：$TARGET_BRANCH" ;; esac
+start_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field start_sha)" \
+  || fail_status 12 TASK_BASE_INVALID "任务起点或目标发布线与元数据不符。"
+
 if ! fetch_detail="$(git -C "$ROOT" fetch origin "$TARGET_BRANCH" 2>&1)"; then
   fail_status 7 REMOTE_READ_FAILED "无法读取 origin/${TARGET_BRANCH}；可按规则最多重试两次。" detail "$fetch_detail"
 fi
 head_sha="$(git -C "$ROOT" rev-parse HEAD)"
 upstream_ref="origin/${TARGET_BRANCH}"
 upstream_sha="$(git -C "$ROOT" rev-parse "$upstream_ref")"
+if ! target_line="$(git -C "$ROOT" ls-remote --heads origin "refs/heads/$TARGET_BRANCH" 2>&1)"; then
+  fail_status 7 REMOTE_READ_FAILED "无法复核远端目标；可按规则最多重试两次。" detail "$target_line"
+fi
+actual_target_sha="${target_line%%[[:space:]]*}"
+if [ "$actual_target_sha" != "$upstream_sha" ]; then
+  fail_status 7 REMOTE_TARGET_CHANGED "远端目标在 fetch 后变化；重新读取并验证。" fetched_sha "$upstream_sha" actual_sha "$actual_target_sha"
+fi
+if ! git -C "$ROOT" merge-base --is-ancestor "$start_sha" "$upstream_sha"; then
+  pending="$(git -C "$ROOT" log --format='%h %s' --reverse "$upstream_sha..$start_sha")"
+  fail_status 12 TASK_BASE_NOT_SHARED "origin/${TARGET_BRANCH} 尚未包含任务起点；先让以下基线提交进入目标分支。" target_branch "$TARGET_BRANCH" start_sha "$start_sha" pending_commits "$pending"
+fi
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
   fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
-if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base "$upstream_ref" --stage pr --json 2>&1)"; then
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --stage pr --json 2>&1)"; then
   fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
 fi
 
@@ -250,9 +279,12 @@ if [ "$MODE" = create ]; then
   fi
   mkdir -p "$common"
   umask 077
+  draft_marker=false
+  [ "$CREATE_DRAFT" = 0 ] || draft_marker=true
   cat >"$marker_path" <<EOF
 branch=$branch
 target=$TARGET_BRANCH
+draft=$draft_marker
 created_at=$(date +%s)
 EOF
   emit_status PUSHED_CREATE_PR branch "$branch" head "$head_sha"

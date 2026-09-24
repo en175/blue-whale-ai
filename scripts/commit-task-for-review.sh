@@ -78,6 +78,8 @@ source "$ROOT/scripts/lib/python3-command.sh"
 select_python3_command || fail "未找到可用的 Python 3，无法读取任务起点。"
 base_sha="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field start_sha)" \
   || fail "任务起点元数据读取失败；请按上方指引修复。"
+target_branch="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field target_branch)" \
+  || fail "任务目标发布线读取失败；请按上方指引修复。"
 
 branch_has_own_commit() {
   [ "$base_sha" != "$(git -C "$ROOT" rev-parse HEAD)" ]
@@ -104,4 +106,4 @@ else
   echo "✅ 已提交任务验收分支：${branch}（本分支第 ${commit_count} 个 commit）"
 fi
 
-echo "下一步：用户确认后，运行 scripts/publish-review-package.sh --user-authorized --create-pr。"
+echo "下一步：用户确认后，运行 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch ${target_branch}。"

@@ -53,6 +53,9 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         run("git", "remote", "add", "origin", str(self.origin), cwd=self.main, check=True)
         run("git", "push", "-u", "origin", "master", cwd=self.main, check=True)
 
+        run("git", "branch", "release/prod", cwd=self.main, check=True)
+        run("git", "push", "origin", "release/prod", cwd=self.main, check=True)
+
         run("git", "branch", "feature/测试已有PR更新流程", cwd=self.main, check=True)
         self.worktree.parent.mkdir(parents=True)
         run(
@@ -67,6 +70,15 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         run("git", "config", "user.name", "Test User", cwd=self.worktree, check=True)
         run("git", "config", "user.email", "test@example.com", cwd=self.worktree, check=True)
         run("git", "config", "commit.gpgsign", "false", cwd=self.worktree, check=True)
+        start_sha = self.git("rev-parse", "HEAD")
+        git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
+        metadata = git_dir / "blue-whale" / "task-base.json"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(json.dumps({
+            "version": 1, "task_branch": "feature/测试已有PR更新流程",
+            "target_branch": "release/prod", "start_sha": start_sha,
+        }), encoding="utf-8")
+        run("git", "checkout", "release/prod", cwd=self.main, check=True)
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
@@ -81,11 +93,11 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.git("commit", "-m", "feat: task change")
         return self.git("rev-parse", "HEAD")
 
-    def advance_master(self, filename: str = "upstream.txt", content: str = "upstream\n") -> str:
+    def advance_release(self, filename: str = "upstream.txt", content: str = "upstream\n") -> str:
         (self.main / filename).write_text(content, encoding="utf-8")
         self.git("add", filename, cwd=self.main)
         self.git("commit", "-m", "chore: upstream change", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         return self.git("rev-parse", "HEAD", cwd=self.main)
 
     def invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -95,9 +107,9 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertTrue(result.stdout.strip(), result.stderr)
         return json.loads(result.stdout.strip().splitlines()[-1])
 
-    def test_sync_rebases_onto_origin_master_and_is_idempotent(self) -> None:
+    def test_sync_rebases_onto_origin_release_and_is_idempotent(self) -> None:
         original_head = self.commit_task_change()
-        upstream_head = self.advance_master()
+        upstream_head = self.advance_release()
 
         first = self.invoke("sync", "--json")
 
@@ -129,13 +141,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_sync_rebases_onto_release_target(self) -> None:
         original_head = self.commit_task_change()
-        self.git("checkout", "-b", "release/prod", cwd=self.main)
-        (self.main / "release-base.txt").write_text("release base\n", encoding="utf-8")
-        self.git("add", "release-base.txt", cwd=self.main)
-        self.git("commit", "-m", "chore: advance release baseline", cwd=self.main)
-        release_head = self.git("rev-parse", "HEAD", cwd=self.main)
-        self.git("push", "-u", "origin", "release/prod", cwd=self.main)
-        self.git("checkout", "master", cwd=self.main)
+        release_head = self.advance_release("release-base.txt", "release base\n")
 
         result = self.invoke("sync", "--target-branch", "release/prod", "--json")
 
@@ -162,18 +168,37 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         )
         self.assertEqual(recovery["target_branch"], "release/prod")
 
+    def test_sync_refuses_local_baseline_not_shared_to_remote_release(self) -> None:
+        (self.main / "local-baseline.txt").write_text("local\n", encoding="utf-8")
+        self.git("add", "local-baseline.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: local release baseline", cwd=self.main)
+        local_start = self.git("rev-parse", "HEAD", cwd=self.main)
+        self.git("merge", "--ff-only", "release/prod")
+        metadata_path = Path(self.git("rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["start_sha"] = local_start
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        task_head = self.commit_task_change()
+
+        result = self.invoke("sync", "--json")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("local release baseline", str(self.response(result)["detail"]))
+        self.assertEqual(self.git("rev-parse", "HEAD"), task_head)
+        self.assertFalse((metadata_path.parent.parent / "agent-sync-recovery.json").exists())
+
     def test_sync_rejects_unprotected_target(self) -> None:
         result = self.invoke("sync", "--target-branch", "develop", "--json")
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("master 或 release/*", str(self.response(result)["detail"]))
+        self.assertIn("目标", str(self.response(result)["detail"]))
 
     def test_sync_aborts_conflict_and_reports_decision_evidence(self) -> None:
         (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
         self.git("add", "shared.txt")
         self.git("commit", "-m", "fix: task edits shared line")
         original_head = self.git("rev-parse", "HEAD")
-        upstream_head = self.advance_master("shared.txt", "upstream side\n")
+        upstream_head = self.advance_release("shared.txt", "upstream side\n")
 
         result = self.invoke("sync", "--json")
 
@@ -190,7 +215,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_rollback_restores_original_head_and_removes_recovery_point(self) -> None:
         original_head = self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         synced = self.invoke("sync", "--json")
         self.assertEqual(synced.returncode, 0, synced.stderr)
         synced_payload = self.response(synced)
@@ -215,7 +240,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_finalize_rejects_recovery_point_that_has_not_been_pushed(self) -> None:
         self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         synced = self.invoke("sync", "--json")
         self.assertEqual(synced.returncode, 0, synced.stderr)
         synced_payload = self.response(synced)
@@ -242,7 +267,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_finalize_rejects_dirty_worktree_and_preserves_recovery(self) -> None:
         self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         synced = self.invoke("sync", "--json")
         payload = self.response(synced)
         marker = Path(str(payload["recovery_file"]))
@@ -260,7 +285,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_finalize_preserves_recovery_when_backup_ref_cannot_be_deleted(self) -> None:
         self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         synced = self.invoke("sync", "--json")
         payload = self.response(synced)
         marker = Path(str(payload["recovery_file"]))
@@ -293,7 +318,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_sync_accepts_legacy_gbk_polluted_recovery_branch_field(self) -> None:
         original_head = self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
         branch = "feature/测试已有PR更新流程"
         # 模拟 PR577 前旧版脚本污染：真实分支名 UTF-8 字节按 GBK 解码得到的乱码 str，
@@ -307,7 +332,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
                     "branch": polluted,
                     "original_head": original_head,
                     "upstream_sha": self.git("rev-parse", "HEAD"),
-                    "target_branch": "master",
+                    "target_branch": "release/prod",
                     "remote_branch_sha": "",
                     "backup_ref": "refs/agent-sync-backups/{}/{}".format(
                         "feature", "测试已有PR更新流程"
@@ -332,7 +357,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
     def test_sync_records_existing_remote_source_sha_and_private_marker_mode(self) -> None:
         original_head = self.commit_task_change()
         self.git("push", "-u", "origin", "HEAD")
-        self.advance_master()
+        self.advance_release()
 
         result = self.invoke("sync", "--json")
 
@@ -358,7 +383,7 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_recovery_atomic_write_failure_returns_structured_error(self) -> None:
         original_head = self.commit_task_change()
-        self.advance_master()
+        self.advance_release()
         git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
         blocked_temporary = git_dir / "agent-sync-recovery.json.tmp"
         blocked_temporary.mkdir()
@@ -374,11 +399,11 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
     def test_repeated_sync_preserves_the_original_transaction_recovery_head(self) -> None:
         original_head = self.commit_task_change()
-        self.advance_master("upstream-one.txt", "one\n")
+        self.advance_release("upstream-one.txt", "one\n")
         first = self.invoke("sync", "--json")
         self.assertEqual(first.returncode, 0, first.stderr)
 
-        self.advance_master("upstream-two.txt", "two\n")
+        self.advance_release("upstream-two.txt", "two\n")
         second = self.invoke("sync", "--json")
 
         self.assertEqual(second.returncode, 0, second.stderr)

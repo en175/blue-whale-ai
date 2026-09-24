@@ -78,6 +78,14 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.worktree.parent.mkdir(parents=True)
         self.git("worktree", "add", str(self.worktree), BRANCH, cwd=self.main)
         self.configure(self.worktree)
+        start_sha = self.git("rev-parse", "HEAD")
+        metadata = Path(self.git("rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(json.dumps({
+            "version": 1, "task_branch": BRANCH,
+            "target_branch": "release/prod", "start_sha": start_sha,
+        }), encoding="utf-8")
+        self.git("checkout", "release/prod", cwd=self.main)
         self.commit_followup("initial task")
 
     def tearDown(self) -> None:
@@ -122,7 +130,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         iid: object = 65,
         state: str = "opened",
         source_branch: str = BRANCH,
-        target_branch: str = "master",
+        target_branch: str = "release/prod",
         head_sha: str | None = None,
         conflict: bool = False,
         changed_files: list[str] | None = None,
@@ -219,12 +227,25 @@ class PublishReviewPackageTest(unittest.TestCase):
             expected_head,
         )
         self.assertTrue(self.publish_marker().exists())
+        self.assertIn("draft=false", self.publish_marker().read_text(encoding="utf-8"))
+
+    def test_create_mode_can_bind_an_explicit_draft_marker(self) -> None:
+        result = self.invoke("--user-authorized", "--create-pr", "--draft-pr", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("draft=true", self.publish_marker().read_text(encoding="utf-8"))
+
+    def test_update_mode_rejects_draft_creation_flag(self) -> None:
+        result = self.invoke_update(self.pr_snapshot(), "--draft-pr")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.response(result)["status"], "INVALID_ARGUMENT")
 
     def test_create_mode_reports_needs_sync_under_utf8_locale(self) -> None:
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         env = self.base_env.copy()
         env["LC_ALL"] = "C.UTF-8"
 
@@ -244,7 +265,7 @@ class PublishReviewPackageTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("target=release/prod", self.publish_marker().read_text(encoding="utf-8"))
-        self.assertIn("--base origin/release/prod", self.verification_log.read_text(encoding="utf-8"))
+        self.assertIn("check --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
 
     def test_create_mode_rejects_unprotected_target(self) -> None:
         for target in ("develop", "release/"):
@@ -264,25 +285,26 @@ class PublishReviewPackageTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.response(result)["head"], expected_head)
-        self.assertIn("--base origin/release/prod", self.verification_log.read_text(encoding="utf-8"))
+        self.assertIn("check --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
 
-    def test_update_mode_rejects_sync_recovery_for_another_target(self) -> None:
+    def test_update_mode_rejects_snapshot_target_outside_task_metadata(self) -> None:
         remote_head = self.git("rev-parse", "HEAD")
         self.git("push", "-u", "origin", "HEAD")
         self.commit_followup("review fix")
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
 
         result = self.invoke_update(
-            self.pr_snapshot(target_branch="release/prod", head_sha=remote_head)
+            self.pr_snapshot(target_branch="release/other", head_sha=remote_head,
+                             changed_files=["task.txt"])
         )
 
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(self.response(result)["status"], "INVALID_RECOVERY")
+        self.assertEqual(result.returncode, 12)
+        self.assertEqual(self.response(result)["status"], "TASK_BASE_INVALID")
 
     def test_update_mode_rejects_explicit_target_even_when_master(self) -> None:
         result = self.invoke_update(self.pr_snapshot(), "--target-branch", "master")
@@ -345,7 +367,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
 
@@ -372,7 +394,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
         published = self.invoke_update()
@@ -539,7 +561,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
         recovery_file = Path(str(self.response(synced)["recovery_file"]))
@@ -585,7 +607,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
 
@@ -622,7 +644,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
         published = self.invoke("--user-authorized", "--create-pr", "--json")
@@ -653,7 +675,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
         self.git("add", "upstream.txt", cwd=self.main)
         self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "master", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
 
