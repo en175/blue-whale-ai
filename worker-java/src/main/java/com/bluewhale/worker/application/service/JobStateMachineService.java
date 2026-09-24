@@ -416,7 +416,8 @@ public class JobStateMachineService {
      * completed 相逐段下载转存是长窗口（N 段串行，单段可达源视频体量），claim 时的
      * 420s 租约覆盖不了全程——每段转存前调本方法把租约推回 now+420s，否则 recovery
      * 会在租约过期后判孤儿重投，新 claim 从头重新下载全部段（每轮重复带宽消耗）；
-     * 创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     * 非重试任务在创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后不再扫描；
+     * 重试任务有 IKIDEK 的 10 分钟有界接手期。
      * 续租秒数与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值（单段转存窗口），
      * 不复用 LEASE_SECONDS(120s)——大段下载+TOS 上传可超 120s，段中途即会过期。
      */
@@ -438,8 +439,8 @@ public class JobStateMachineService {
      * <p>
      * completed 相单产物下载转存是长窗口（输入可达 10GB 级），claim 时的 420s 租约可能
      * 覆盖不了全程——转存前调本方法把租约推回 now+420s（progress 沿用 claim 快照不倒退），
-     * 否则 recovery 会在租约过期后判孤儿重投，新 claim 重复下载同一产物；创建后 120 分钟
-     * 重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     * 否则 recovery 会在租约过期后判孤儿重投，新 claim 重复下载同一产物；非重试任务
+     * 仍受创建后 120 分钟扫描窗口限制，重试任务有 IKIDEK 的 10 分钟有界接手期。
      */
     public boolean updateVideoMattingProgress(
             com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto input) {

@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
+import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
@@ -23,6 +24,8 @@ import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMappe
 import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
+import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
+import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.sun.net.httpserver.HttpServer;
@@ -40,6 +43,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.mapper.MapperFactoryBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -77,6 +81,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 /**
  * JobStateMachineService 真库集成测试（blade-1：Testcontainers 安全网）。
@@ -1119,6 +1124,121 @@ class JobStateMachineMySqlIntegrationTest {
 
         assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).doesNotContain(jobId);
         assertThat(jobMapper.listDueAudioMixJobIds(100, 0)).contains(jobId);
+    }
+
+    @Test
+    @DisplayName("重试收割跨 120 分钟：恢复重投后重新领取父结果，发布一次且不重新提交")
+    void retryHarvestHandoffAcrossRecoveryWindow() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(130));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long retryId = seedJob(9L, "media_extract", "dock", "processing", 4L,
+                WorkerClock.now().minusSeconds(10), 99L,
+                "{\"provider_credential\":\"sk-frozen-token\",\"source_asset_id\":\"555\",\"output_format\":\"mp3\"}");
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, lease_owner='worker-old', "
+                + "lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE), "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
+
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).doesNotContain(retryId);
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", retryId);
+        assertThat(jobMapper.listDueMediaExtractJobIds(100, 120)).contains(retryId);
+
+        @SuppressWarnings("unchecked")
+        ObjectProvider<GenerationMessageProducer> recoveryProvider = mock(ObjectProvider.class);
+        GenerationMessageProducer recoveryProducer = mock(GenerationMessageProducer.class);
+        when(recoveryProvider.getIfAvailable()).thenReturn(recoveryProducer);
+        var recovery = new RecoveryService(jobMapper,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
+                recoveryProvider, 120);
+        recovery.recover();
+        verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
+
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitExtractAudioClient client = mock(NewApiMediaKitExtractAudioClient.class);
+        TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        when(credentials.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(client.poll("sk-frozen-token", "amk-parent"))
+                .thenReturn(new ExtractAudioTaskObservation("succeeded", "https://volc/old.mp3", 12.5, null, null));
+        when(relay.persist("https://volc/old.mp3", "9", "mp3"))
+                .thenReturn(new TosAudioMediaRelay.StoredAudio("https://cdn/old.mp3", "gen/old.mp3",
+                        "audio/mpeg", 500L, "0123456789abcdef0123456789abcdef"));
+        var processor = new MediaExtractJobProcessor(service, new AssetSourceService(assetMapper),
+                credentials, client, relay, producer);
+
+        processor.handle(String.valueOf(retryId));
+
+        assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+        verify(client).poll("sk-frozen-token", "amk-parent");
+        verify(client, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), org.mockito.ArgumentMatchers.anyLong());
+        assertThat(service.publishMediaExtractResult(new PublishMediaExtractDto(
+                String.valueOf(retryId), "99", "9", "worker-old", 4L,
+                "https://cdn/old.mp3", "gen/old.mp3", "audio/mpeg", 500L,
+                "0123456789abcdef0123456789abcdef", 12.5))).isFalse();
+        processor.handle(String.valueOf(retryId));
+        assertThat(countAssets(retryId)).isEqualTo(1);
+        assertThat(countLogs(retryId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("重试收割超过 130 分钟不复活；非重试与终态仍受原有条件约束")
+    void retryHarvestHandoffHasBoundedDeadline() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long expiredRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long lastChanceRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long submittedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long queuedRetryId = seedJob(9L, "media_extract", "dock", "queued", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long parentWithoutTaskId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        long retryWithoutParentTaskId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long oldNonRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long terminalRetryId = seedJob(9L, "media_extract", "dock", "succeeded", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long videoParentId = seedJob(9L, "video", "bottom_dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        long videoRetryId = seedJob(9L, "video", "bottom_dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='video-parent' WHERE id=?", videoParentId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 131 MINUTE) WHERE id=?", parentId, expiredRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 129 MINUTE) WHERE id=?", parentId, lastChanceRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, provider_task_id='own-task', "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, submittedRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, queuedRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
+                parentWithoutTaskId, retryWithoutParentTaskId);
+        jdbc.update("UPDATE generation_jobs SET gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?",
+                oldNonRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", parentId, terminalRetryId);
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 127 MINUTE) WHERE id=?", videoParentId, videoRetryId);
+
+        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
+        assertThat(due).contains(lastChanceRetryId);
+        assertThat(due).doesNotContain(expiredRetryId, submittedRetryId, queuedRetryId,
+                retryWithoutParentTaskId, oldNonRetryId, terminalRetryId);
+        assertThat(jobMapper.listDueVideoJobIds(100, 120)).doesNotContain(videoRetryId);
     }
 
     @Test
