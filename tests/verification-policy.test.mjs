@@ -346,6 +346,16 @@ test("keeps hook and git control-plane changes scoped at PR stage", async () => 
   );
 });
 
+test("classifies the release sync entrypoints as control-plane at both stages", () => {
+  for (const stage of ["completion", "pr"]) {
+    assert.deepEqual(
+      classifyChanges(["scripts/sync-release-line.py", "scripts/sync-release-line.sh"], { stage }),
+      { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
+    );
+  }
+  assert.throws(() => classifyChanges(["scripts/sync-release-line-new.sh"]), /UNCLASSIFIED_PATH/);
+});
+
 test("classifies operational scripts without product acceptance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 

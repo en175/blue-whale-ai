@@ -27,7 +27,7 @@ def run(*argv, cwd, check=True):
     return result
 
 
-class ReleaseLineTest(unittest.TestCase):
+class ReleaseLineFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -39,9 +39,9 @@ class ReleaseLineTest(unittest.TestCase):
         run("git", "config", "user.name", "Release Test", cwd=self.repo)
         run("git", "config", "user.email", "release@example.com", cwd=self.repo)
         (self.repo / "scripts" / "lib").mkdir(parents=True)
-        for name in ("manage-release-branch.sh", "start-task-worktree.py"):
+        for name in ("manage-release-branch.sh", "start-task-worktree.py", "sync-release-line.sh", "sync-release-line.py"):
             shutil.copy2(SCRIPTS / name, self.repo / "scripts" / name)
-        for name in ("python3-command.sh", "release-line-state.py"):
+        for name in ("python3-command.sh", "release-line-state.py", "release_line_sync.py"):
             shutil.copy2(SCRIPTS / "lib" / name, self.repo / "scripts" / "lib" / name)
         (self.repo / "base.txt").write_text("base\n", encoding="utf-8")
         run("git", "add", ".", cwd=self.repo)
@@ -72,6 +72,8 @@ class ReleaseLineTest(unittest.TestCase):
         }), encoding="utf-8")
         return path
 
+
+class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
     def test_create_records_one_active_line_and_current_selects_it(self):
         created = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
