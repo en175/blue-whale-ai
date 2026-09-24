@@ -70,6 +70,9 @@ export const apiMocks = {
   /** 调速创建（IKI4LX 项目隔离回归：默认无实现，需要的测试显式 mockResolvedValue /
    *  挂起手工放行；断言第三参 { silent: true } 同插帧先例） */
   createAudioSpeed: vi.fn(),
+  /** 截取创建（IKI61O 会话纪元回归：默认无实现，需要的测试显式 mockResolvedValue /
+   *  挂起手工放行） */
+  createAudioTrim: vi.fn(),
 };
 
 vi.mock('@/api/projects', () => ({
@@ -118,7 +121,7 @@ vi.mock('@/api/jobs', () => ({
   fetchFrameInterpolationCurrent: apiMocks.fetchFrameInterpolationCurrent,
   fetchJobs: apiMocks.fetchJobs,
   createMediaExtraction: vi.fn(),
-  createAudioTrim: vi.fn(),
+  createAudioTrim: apiMocks.createAudioTrim,
   createAudioSpeed: apiMocks.createAudioSpeed,
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),

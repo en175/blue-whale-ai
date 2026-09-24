@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
@@ -12,6 +12,10 @@ import {
   createVocalSplit,
   createVideoEnhancement,
   createVideoMatting,
+  createImageErase,
+  createImageCutout,
+  createVideoSubtitleErase,
+  createVideoSceneSplit,
   fetchJobStatus,
   isGenerationDomainError,
   readJobFailText,
@@ -527,5 +531,59 @@ describe('fetchJobStatus', () => {
       code: 100301,
       message: '资源不存在',
     });
+  });
+});
+
+/* IKI8L4 工具会话创建函数 silent 透传：错误提示归属持有发送身份的调用方——
+   创建传输走 silent（http 层不 toast），迟到失败不抢在会话纪元判断之前弹出，
+   当前会话失败由页面 catch 统一提示一次（audioSpeed IKI4LX / 插帧 IKHSFH 先例推广）。 */
+describe('IKI8L4 工具会话创建 silent 透传', () => {
+  // 前序 describe 的 afterEach 不清 toast spy，进入本组用例前先清零计数
+  beforeEach(() => vi.mocked(toast.error).mockClear());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  /** 统一业务失败桩：HTTP 200 + 信封 code!==200 + msg */
+  function stubCreateFail(msg = '服务繁忙，请稍后重试') {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 1, msg, data: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+  }
+
+  it.each([
+    ['createAudioTrim', () => createAudioTrim('p1', { source_asset_id: '3985', output_format: 'mp3' }, { silent: true })],
+    ['createVocalSplit', () => createVocalSplit('p1', { source_asset_id: '3985' }, { silent: true })],
+    ['createMediaExtraction', () => createMediaExtraction('p1', { source_asset_id: '3985' }, { silent: true })],
+    ['createVideoSubtitleErase', () => createVideoSubtitleErase('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', detect_mode: 'subtitle_smart', erase_boxes: [],
+    }, { silent: true })],
+    ['createImageCutout', () => createImageCutout('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', cutout_scene: 'general',
+    }, { silent: true })],
+    ['createImageErase', () => createImageErase('p1', {
+      source_asset_id: '3985', target_node_id: 'media-draft-7', erase_scene: 'full_screen_text_erase',
+    }, { silent: true })],
+    ['createVideoSceneSplit', () => createVideoSceneSplit('p1', {
+      source_asset_id: '3985', target_node_id: 'scene-split-1', granularity: 'standard', client_token: 'tok',
+    }, { silent: true })],
+  ] as const)('%s：silent 失败仍抛 ApiError 但 http 层不 toast', async (_name, invoke) => {
+    stubCreateFail();
+    await expect(invoke()).rejects.toThrow('服务繁忙，请稍后重试');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('缺省 init：家族默认 toast 口径不变（其他调用方行为不受 IKI8L4 影响）', async () => {
+    stubCreateFail('服务繁忙，请稍后重试');
+    await expect(createAudioTrim('p1', { source_asset_id: '3985', output_format: 'mp3' })).rejects.toThrow('服务繁忙，请稍后重试');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('服务繁忙，请稍后重试');
   });
 });

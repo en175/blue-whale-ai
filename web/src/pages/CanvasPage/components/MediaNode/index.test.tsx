@@ -473,6 +473,21 @@ describe('MediaNode external title (image/video)', () => {
     expect(title).not.toContain('MB');
   });
 
+  it('shows the Seedance compliance icon above the image when compliancePassed', async () => {
+    await renderNode('image', {
+      selected: false,
+      data: { fileName: 'photo.png', compliancePassed: true },
+    });
+    const badge = titleRow().querySelector('img[src="/success.png"]');
+    expect(badge).toBeTruthy();
+    expect(titleRow().querySelector('[title="校验通过，可用于seedance视频生成"]')).toBeTruthy();
+  });
+
+  it('does not show the Seedance compliance icon when the node is not verified', async () => {
+    await renderNode('image', { selected: false, data: { fileName: 'photo.png' } });
+    expect(titleRow().querySelector('img[src="/success.png"]')).toBeNull();
+  });
+
   it('leaves meta blank when real dims are missing', async () => {
     await renderNode('image', { selected: false, data: { fileName: 'unknown.png' } });
     const title = titleRow().textContent ?? '';

@@ -225,6 +225,10 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（mode 映射 / 固定参数 / 框出站规则在客户端单处定义，§17.3）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = subtitleEraseClient.submit(
                 providerToken, source.getUrl(), detectMode, eraseBoxes);
         log.info("[video_subtitle_erase] 上游已提交 jobId={} providerTaskId={}", claim.id(), taskId);

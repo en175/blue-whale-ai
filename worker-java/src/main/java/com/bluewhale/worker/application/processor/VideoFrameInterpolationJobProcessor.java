@@ -240,6 +240,10 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（出站仅 model + video_url + 整型 fps，见客户端 payload 注释）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = interpolateVideoClient.submit(providerToken, source.getUrl(), fps);
         log.info("[video_frame_interpolation] 上游已提交 jobId={} providerTaskId={} fps={}",
                 claim.id(), taskId, fps);

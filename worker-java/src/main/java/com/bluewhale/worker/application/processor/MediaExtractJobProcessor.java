@@ -221,6 +221,10 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（format 出站映射官方参数，客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = extractAudioClient.submit(providerToken, source.getUrl(), outputFormat);
         log.info("[media_extract] 上游已提交 jobId={} providerTaskId={} format={}",
                 claim.id(), taskId, outputFormat);

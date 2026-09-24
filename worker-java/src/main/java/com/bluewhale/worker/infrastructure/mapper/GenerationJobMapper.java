@@ -412,6 +412,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             WHERE id = #{jobId}
               AND fencing_token = #{fencingToken}
               AND status = #{candidateStatus}
+              AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at < NOW())
             """)
     int claimImageCas(
             @Param("jobId") Long jobId,
@@ -617,6 +618,24 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("nextPollAt") java.time.LocalDateTime nextPollAt
     );
 
+    @Update("""
+            UPDATE generation_jobs
+            SET lease_expires_at = #{leaseExpiresAt},
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND lease_expires_at > NOW()
+              AND provider_task_id IS NULL
+            """)
+    int reserveParentReuseSubmit(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt
+    );
+
     /**
      * 重排生成任务轮询（generation-worker-video-ops.ts rescheduleProviderPoll 逐字）。
      * <p>
@@ -803,6 +822,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * sources 为空 → 不套 source 白名单（audio / media_extract 形态：专属来源值
      * 不在白名单，套了漏真卡任务，IKC9EJ 教训）；非空 → source IN 白名单（与该媒体类型
      * claim 候选查询同源）。
+     * IKIDEK：八个收割家族中可复用父上游任务、尚未提交自身上游任务的 processing 重试 job
+     * 额外保留 10 分钟恢复接手期。默认 120 分钟窗口下最晚在创建后 130 分钟前重投，
+     * 覆盖 420 秒租约到期、下一轮 60 秒扫描及余量；其余任务仍走原有条件。
      */
     @Select("""
             <script>
@@ -814,7 +836,19 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             </if>
             AND is_delete = false
             <if test="maxAgeMinutes > 0">
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND (
+                gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+                OR (type IN ('media_extract', 'audio_trim', 'vocal_split', 'video_enhance',
+                             'video_scene_split', 'video_subtitle_erase', 'video_matting',
+                             'video_frame_interpolation')
+                    AND retry_of_job_id IS NOT NULL AND status = 'processing'
+                    AND provider_task_id IS NULL
+                    AND EXISTS (SELECT 1 FROM generation_jobs parent
+                                WHERE parent.id = generation_jobs.retry_of_job_id
+                                  AND parent.provider_task_id IS NOT NULL
+                                  AND parent.provider_task_id != '')
+                    AND gmt_create > (NOW() - INTERVAL (#{maxAgeMinutes} + 10) MINUTE))
+              )
             </if>
             AND next_action_at &lt;= NOW()
             AND (

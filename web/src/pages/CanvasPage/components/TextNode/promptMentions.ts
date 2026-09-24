@@ -39,7 +39,7 @@ export function createMediaMentionChip(identity: MediaChipIdentity, label: strin
 }
 
 type ChipQueueItem =
-  | { kind: 'prompt'; part: MentionChipPart }
+  | { kind: 'prompt'; part: MentionChipPart; invalid: boolean }
   | { kind: 'media'; part: MediaChipIdentity };
 
 /** 正文素材标签 chip 类：胶囊视觉与生成面板共用 mediaChip.module.css（IKG7NH），
@@ -99,8 +99,12 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
   return chip;
 }
 
-/** Construct tags from trusted identity metadata; never inject source HTML. */
-function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial & { url: string }>): HTMLElement {
+/** 方案胶囊：身份走 prompt dataset；有镜像时失效态与 media 标签同源（剪线只失效不删）。 */
+function buildMentionChip(
+  part: MentionChipPart,
+  materials: Array<PromptMaterial & { url: string }>,
+  invalid: boolean,
+): HTMLElement {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.dataset.promptAsset = part.assetId;
@@ -113,17 +117,20 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
     chip.dataset.promptMirrorType = part.mirror.mediaType;
     chip.dataset.promptMirrorName = part.mirror.name;
     chip.dataset.promptMirrorUrl = part.mirror.url;
+    chip.dataset.mediaName = part.mirror.name;
+  } else {
+    chip.dataset.mediaName = part.label;
   }
-  chip.title = `${part.label}（素材 #${part.index}）`;
-  chip.setAttribute('aria-label', chip.title);
-  chip.className = MEDIA_CHIP_CLASS;
   const material = materials.find(item => item.assetId === part.assetId);
+  const thumb = document.createElement('span');
+  thumb.dataset.mediaThumb = '1';
+  thumb.className = chipStyles.mediaChipThumbWrap;
   if (material?.mediaType === 'audio') {
     const icon = document.createElement('span');
     icon.textContent = '♫';
     icon.setAttribute('aria-hidden', 'true');
     icon.className = chipStyles.mediaChipAudioIcon;
-    chip.append(icon);
+    thumb.append(icon);
   } else if (material && /^https?:\/\//.test(material.url)) {
     const media = document.createElement(material.mediaType === 'image' ? 'img' : 'video');
     media.src = resolveMediaSrc(material.url);
@@ -133,12 +140,15 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
       media.crossOrigin = 'anonymous';
     }
     else { media.preload = 'metadata'; media.muted = true; }
-    chip.append(media);
+    thumb.append(media);
   }
+  if (thumb.childNodes.length > 0) chip.append(thumb);
   const labelEl = document.createElement('span');
+  labelEl.dataset.mediaLabelText = '1';
   labelEl.className = chipStyles.mediaChipLabel;
-  labelEl.textContent = `#${part.index}`;
   chip.append(labelEl);
+  const name = chip.dataset.mediaName ?? '';
+  applyMediaChipVisual(chip, invalid ? `已失效：${name}` : `#${part.index}`, invalid);
   return chip;
 }
 
@@ -170,7 +180,7 @@ function mountInlineHtml(html: string, chips: ChipQueueItem[], materials: Array<
       if (i < segments.length - 1) {
         const item = chips.shift();
         let replacement: ChildNode = document.createTextNode('');
-        if (item?.kind === 'prompt') replacement = buildMentionChip(item.part, materials);
+        if (item?.kind === 'prompt') replacement = buildMentionChip(item.part, materials, item.invalid);
         else if (item?.kind === 'media') {
           const state = mediaParts.get(item.part.nodeId) ?? { label: item.part.name, invalid: true };
           replacement = buildMediaChip(item.part, state.label, state.invalid);
@@ -243,6 +253,7 @@ export function renderPromptMentions(
       const ref = covered ? refByNode.get(covered.nodeId) : undefined;
       return {
         kind: 'prompt',
+        invalid: Boolean(covered && !isValid(covered.nodeId)),
         part: {
           assetId: item.mention.assetId,
           index: item.mention.index,
@@ -312,16 +323,24 @@ function readChipIdentity(chip: HTMLElement): MediaChipIdentity {
   };
 }
 
-/** 编辑中就地刷新 media chip 的编号与失效样式（连线/来源变化不重建 DOM，保住光标）。 */
+/** 编辑中就地刷新标签编号与失效样式（连线/来源变化不重建 DOM，保住光标）。
+ *  media 标签与带镜像的方案胶囊同一口径：剪线只失效，不删标签。 */
 export function applyMediaMentionState(editor: HTMLElement, isValid: (nodeId: string) => boolean) {
   const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node]')];
-  if (chips.length === 0) return;
-  const identities = chips.map(readChipIdentity);
-  const refs = dedupeMediaRefs(identities);
-  const labels = deriveMediaMentionLabelsInOrder(identities, refs, isValid);
-  for (const chip of chips) {
-    const nodeId = chip.dataset.mediaNode ?? '';
-    applyMediaChipVisual(chip, labels.get(nodeId) ?? (chip.dataset.mediaName ?? nodeId), !isValid(nodeId));
+  if (chips.length > 0) {
+    const identities = chips.map(readChipIdentity);
+    const refs = dedupeMediaRefs(identities);
+    const labels = deriveMediaMentionLabelsInOrder(identities, refs, isValid);
+    for (const chip of chips) {
+      const nodeId = chip.dataset.mediaNode ?? '';
+      applyMediaChipVisual(chip, labels.get(nodeId) ?? (chip.dataset.mediaName ?? nodeId), !isValid(nodeId));
+    }
+  }
+  for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-mirror-node]')) {
+    const nodeId = chip.dataset.promptMirrorNode ?? '';
+    const name = chip.dataset.promptMirrorName || chip.dataset.mediaName || '';
+    const invalid = !isValid(nodeId);
+    applyMediaChipVisual(chip, invalid ? `已失效：${name}` : `#${chip.dataset.promptIndex ?? ''}`, invalid);
   }
 }
 

@@ -390,8 +390,8 @@ public class VideoJobProcessor implements JobProcessor {
      * （新 Worker 接管租约或 job 已终态），此时返回 true 终止本路径：不调用上游 submit、
      * 不记录新 provider_task_id、不安排本轮询、不写迟到 Finalize；新 Worker 领取后沿同一路径
      * 继续收割。回退重新提交只发生在「旧结果不可用」形态，与「失去执行权而停止」以日志区分。
-     * 与八家族共享骨架（ParentResultReuse）「守卫未命中回退提交」的定版口径刻意不同——
-     * 视频为计费家族，失租后重复提交产生无主上游费用，先行修正（ADR-0114）。
+     * 八家族共享骨架（ParentResultReuse）也在 IKICD0 中将守卫未命中改为停止执行；
+     * 视频家族的相同边界由 IKICD3 修正（ADR-0114）。
      */
     private boolean tryReuseParentResult(ClaimedVideoJobDto claim, String providerToken) {
         VideoTaskObservation observation;

@@ -298,7 +298,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const mentionAnchorRef = useRef<HTMLSpanElement>(null);
   /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
   const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number; occurrence: number } | null>(null);
-  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；below=标签贴近屏幕顶部时翻到下方 */
+  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；固定标签下方 */
   const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number; below: boolean } | null>(null);
   const previewTimerRef = useRef<number | null>(null);
   /** 最近一次已同步的 media 索引（序列化 diff 的基线）：diff 只删线不补线（契约 §4） */
@@ -333,9 +333,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   // 非编辑态：权威正文变化时按 Markdown 渲染重放（编辑中的 DOM 是权威，不覆盖）；
   // mediaValidity 随节点/连线变化，失效态与编号随派生翻转（契约 §3）
-  // 菜单打开时不重放：否则 chip 被换掉，删除/替换打在已卸节点上等于没反应
+  // 标签操作层或 @ 菜单打开时不重放：关 chip 菜单去开替换/重绑定会卸掉 rebindChip，选中后等于没换
   useEffect(() => {
-    if (chipMenu) return;
+    if (chipMenu || mentionMenu) return;
     if (!editing && !contentError && editorRef.current && typeof data.text === 'string') {
       const committed = committedReplayRef.current;
       if (committed) {
@@ -347,7 +347,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       }
       renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? [], data.mediaMentions ?? [], data.mediaRefs ?? [], mediaValidity);
     }
-  }, [editing, contentError, chipMenu, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
+  }, [editing, contentError, chipMenu, mentionMenu, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
 
   // 编辑中连线/来源变化：就地翻转 chip 失效态与编号（不重建 DOM，保住光标）
   useEffect(() => {
@@ -414,7 +414,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const prevIds = new Set(mediaIndexRef.current.mediaMentions.map(mention => mention.nodeId));
     const nextIds = new Set(next.mediaMentions.map(mention => mention.nodeId));
     const removed = [...new Set([...delta.removed, ...[...prevIds].filter(nodeId => !nextIds.has(nodeId))])];
-    const added = delta.added.filter(nodeId => nextIds.has(nodeId) && !prevIds.has(nodeId));
+    // 显式插入/重绑定必须建线：剪线后身份仍在索引里，再选同一来源也要补回 textIndex 边
+    const added = delta.added.filter(nodeId => nextIds.has(nodeId));
     const changed = JSON.stringify(mediaIndexRef.current.mediaMentions) !== JSON.stringify(next.mediaMentions)
       || JSON.stringify(mediaIndexRef.current.mediaRefs) !== JSON.stringify(next.mediaRefs);
     mediaIndexRef.current = { mediaMentions: next.mediaMentions, mediaRefs: next.mediaRefs };
@@ -582,7 +583,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     editor.focus();
     if (menu?.mode === 'rebind') {
       const oldNodeId = menu.rebindNodeId ?? '';
-      if (oldNodeId && oldNodeId === identity.nodeId) { setChipMenu(null); return; }
+      const sameSource = Boolean(oldNodeId && oldNodeId === identity.nodeId);
+      // 剪线后标签仍指向旧身份：再选同一来源只补线，不换 DOM
+      if (sameSource) {
+        const live = menu.rebindChip?.isConnected ? menu.rebindChip : null;
+        commitMediaEdit({ added: [identity.nodeId], removed: [] },
+          live ? chipAnchorOf(editor, live, 'after') : undefined);
+        return;
+      }
       // 重绑定以身份为单位：该身份全部失效标签一并指向新来源（契约 §3）
       // 方案胶囊与 media chip 同路径：替换后写成 media 标签，与左侧工具栏文本节点一致
       let clickedNext: HTMLElement | null = null;
@@ -596,10 +604,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         for (const chip of editor.querySelectorAll<HTMLElement>(`[data-prompt-mirror-node="${CSS.escape(oldNodeId)}"]`)) replaceChip(chip);
       }
       if (menu.rebindChip?.isConnected && menu.rebindChip.dataset.promptIndex) replaceChip(menu.rebindChip);
-      const alreadyKnown = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
       const removed = oldNodeId && oldNodeId !== identity.nodeId ? [oldNodeId] : [];
       // 光标落触发重绑定的那张替换后的新标签后（契约 §5 替换落点）
-      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed },
+      commitMediaEdit({ added: [identity.nodeId], removed },
         clickedNext ? chipAnchorOf(editor, clickedNext, 'after') : undefined);
       return;
     }
@@ -614,15 +621,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       range.setStart(range.startContainer, range.startOffset - 1);
       range.deleteContents();
     }
-    const known = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
     // 临时以素材名占位：最终编号由 commitMediaEdit 全量重放按序派生（契约 §2）
     const chip = createMediaMentionChip(identity, identity.name, false);
     range.insertNode(chip);
     range.setStartAfter(chip);
     range.collapse(true);
     savedRangeRef.current = range;
-    // 光标落新标签后（契约 §5 插入落点）：锚点按插入后同身份序号计
-    commitMediaEdit({ added: known ? [] : [identity.nodeId], removed: [] }, chipAnchorOf(editor, chip, 'after'));
+    // 光标落新标签后（契约 §5 插入落点）；已有身份也传 added，剪线后再次 @ 同一来源能补线
+    commitMediaEdit({ added: [identity.nodeId], removed: [] }, chipAnchorOf(editor, chip, 'after'));
   }, [mentionMenu, restoreSelection, commitMediaEdit]);
 
   /** 点击有效标签（非编辑态）定位来源节点：平移居中 + 短暂高亮（契约 §5） */
@@ -1023,6 +1029,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           className={`${styles.chipMenu} nodrag nopan`}
           style={{ left: chipMenu.x, top: chipMenu.y }}
           data-testid="media-chip-menu"
+          data-canvas-overlay
           onPointerDown={event => event.stopPropagation()}
           onClick={event => event.stopPropagation()}
         >
@@ -1053,11 +1060,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       )}
 
       {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
-          IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
+          IKFR6A portal 到 body 钉在屏幕上，固定标签下方 */}
       {chipPreview && createPortal((() => {
         const preview = chipPreviewFields(chipPreview.chip);
         return (
-        <div className={`${chipStyles.chipPreview} ${chipPreview.below ? chipStyles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
+        <div className={`${chipStyles.chipPreview} ${chipPreview.below ? chipStyles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview" data-canvas-overlay>
           {preview.mediaType === 'image' && <img src={resolveMediaSrc(preview.url)} crossOrigin={remoteImageCrossOrigin(preview.url)} alt="" />}
           {preview.mediaType === 'video' && <video src={resolveMediaSrc(preview.url)} muted autoPlay loop playsInline />}
           {preview.mediaType === 'audio' && <div className={chipStyles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}

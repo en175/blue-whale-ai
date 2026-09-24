@@ -287,6 +287,11 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         // 3. 网关按模式分流提交（端点与模型名映射在客户端经契约常量单处定义；MP4 才带
         //    background_color——出站形状在客户端测试钉）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            log.warn("[video_matting] 重试收割回退提交前失租或续租状态无法确认，停止本次执行 jobId={}", claim.id());
+            return;
+        }
         String taskId = matteVideoClient.submit(
                 providerToken, source.getUrl(), mode, format,
                 "MP4".equals(format) ? backgroundColor : null);
@@ -476,6 +481,13 @@ public class VideoMattingJobProcessor implements JobProcessor {
             log.warn("[video_matting] 结果转存被中止，本 worker 静默退出 jobId={}: {}", claim.id(), e.getMessage());
             return true;
         } catch (Exception e) {
+            if (claim.parentProviderTaskId() != null) {
+                boolean leaseConfirmed = !abortHandle.aborted() && renewLeaseForResultTransfer(claim);
+                if (!leaseConfirmed || abortHandle.aborted()) {
+                    log.warn("[video_matting] 结果转存异常后执行权无法确认，停止本次执行 jobId={}", claim.id());
+                    return true;
+                }
+            }
             // 下载/转存失败 → 整体失败（契约口径）：上抛由 handle 归并兜底码；无 Asset 行
             // 落库，不留半成品资产悬挂（TOS 孤儿对象与家族先例同口径）
             VideoMattingError transferFailure = new VideoMattingError(

@@ -2,7 +2,7 @@
  * jobs 接口：生成任务创建/取消/重试/轮询/列表
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
-import { apiRequest, isApiError, type ApiError } from './http';
+import { apiRequest, isApiError, silentInit, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';
@@ -193,12 +193,14 @@ export interface VocalSplitCreatedData {
 export function createVocalSplit(
   projectId: string,
   payload: CreateVocalSplitPayload,
+  init?: { silent?: boolean },
 ): Promise<VocalSplitCreatedData> {
   return apiRequest<VocalSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/vocal-splits`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -329,12 +331,14 @@ export function createGenerationJob(
 export function createMediaExtraction(
   projectId: string,
   payload: CreateMediaExtractionPayload,
+  init?: { silent?: boolean },
 ): Promise<MediaExtractionCreatedData> {
   return apiRequest<MediaExtractionCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -352,16 +356,20 @@ export interface AudioTrimCreatedData {
   status: 'queued';
 }
 
-/** 创建音频截取任务（IKHB7A，编辑态发送闭环）。 */
+/** 创建音频截取任务（IKHB7A，编辑态发送闭环）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：静默传输失败仍抛 ApiError
+ *  但 http 层不 toast，由持有发送身份的页面 catch 统一提示一次（先例 createAudioSpeed）。 */
 export function createAudioTrim(
   projectId: string,
   payload: CreateAudioTrimPayload,
+  init?: { silent?: boolean },
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-trims`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -374,7 +382,7 @@ export function createAudioMix(
 ): Promise<AudioTrimCreatedData> {
   return apiRequest<AudioTrimCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes`,
-    { method: 'POST', body: JSON.stringify(payload), ...(init?.silent === true ? { silent: true } : {}) },
+    { method: 'POST', body: JSON.stringify(payload), ...silentInit(init) },
   );
 }
 
@@ -388,7 +396,7 @@ export function retryAudioMix(
   return apiRequest(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
     { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
-      ...(init?.silent === true ? { silent: true } : {}) },
+      ...silentInit(init) },
   );
 }
 
@@ -418,7 +426,7 @@ export function createAudioSpeed(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -455,12 +463,14 @@ export interface ImageEraseCreatedData {
 export function createImageErase(
   projectId: string,
   payload: CreateImageErasePayload,
+  init?: { silent?: boolean },
 ): Promise<ImageEraseCreatedData> {
   return apiRequest<ImageEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -481,12 +491,14 @@ export interface ImageCutoutCreatedData {
 export function createImageCutout(
   projectId: string,
   payload: CreateImageCutoutPayload,
+  init?: { silent?: boolean },
 ): Promise<ImageCutoutCreatedData> {
   return apiRequest<ImageCutoutCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/image-cutouts`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -526,12 +538,14 @@ export interface VideoSubtitleEraseCreatedData {
 export function createVideoSubtitleErase(
   projectId: string,
   payload: CreateVideoSubtitleErasePayload,
+  init?: { silent?: boolean },
 ): Promise<VideoSubtitleEraseCreatedData> {
   return apiRequest<VideoSubtitleEraseCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-subtitle-erasures`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }
@@ -591,7 +605,7 @@ export function createFrameInterpolation(
     {
       method: 'POST',
       body: JSON.stringify(payload),
-      ...(init?.silent === true ? { silent: true } : {}),
+      ...silentInit(init),
     },
   );
 }
@@ -648,16 +662,20 @@ export interface VideoSceneSplitCreatedData {
 /** 创建视频场景切分任务（IKH8BR）；免费口径同 image_enhance / media_extract——不带幂等头
  *  （幂等走 body 内 client_token）、无积分预估、不走余额拦截门。任务占位卡由前端在发送前
  *  本地建好（target_node_id 指向它），job_id 回写占位卡后经 GET /api/jobs/:id 轮询至终态
- *  （completed 分支的段卡扇出归 IKH8C1）。 */
+ *  （completed 分支的段卡扇出归 IKH8C1）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：发送即同步退会话，失败提示由页面
+ *  catch 按「退出后捕获纪元」单源提示（无后来会话不吞、有后来会话不扰），先例 createAudioSpeed。 */
 export function createVideoSceneSplit(
   projectId: string,
   payload: CreateVideoSceneSplitPayload,
+  init?: { silent?: boolean },
 ): Promise<VideoSceneSplitCreatedData> {
   return apiRequest<VideoSceneSplitCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/video-scene-splits`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
+      ...silentInit(init),
     },
   );
 }

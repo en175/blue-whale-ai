@@ -218,6 +218,10 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（bitrate_level 恒 medium / fps 不传在客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = enhanceVideoClient.submit(providerToken, source.getUrl(), resolution);
         log.info("[video_enhance] 上游已提交 jobId={} providerTaskId={} resolution={}",
                 claim.id(), taskId, resolution);

@@ -398,7 +398,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       start_time: 2.4,
       end_time: 13,
       output_format: 'mp3',
-    });
+    }, { silent: true });
     // 先退编辑态再建卡：发送条卸载、trimEditing 移除、占位卡已上画布（源卡右侧 +60px）
     expect(sendBar()).toBeNull();
     expect(a1Data().trimEditing).toBeUndefined();
@@ -431,7 +431,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
     expect(apiMocks.createAudioTrim).toHaveBeenCalledWith('p1', {
       source_asset_id: '8',
       output_format: 'flac',
-    });
+    }, { silent: true });
     expect(nodeById('audio-trim-j1')!.data.fileName).toBe('播客片头(截取).flac');
   });
 
@@ -501,7 +501,7 @@ describe('IKHB7A 发送闭环（建任务→占位卡→终态→重试）', () 
       start_time: 2.4,
       end_time: 13,
       output_format: 'mp3',
-    });
+    }, { silent: true });
     const retried = nodeById('audio-trim-j1')!;
     expect(retried.data.jobId).toBe('j2');
     expect(retried.data.genStatus).toBeUndefined();

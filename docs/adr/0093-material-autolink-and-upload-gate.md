@@ -7,6 +7,8 @@
   - `IKGQWR`【后端】素材上传口自动关联：补状态闸、material_group_id 与覆盖语义
   - `IKGQWS`【前端】人像库素材入画布统一走本地资产：去掉硬编码 Active、接上传口 400
   - `IKGQWW`【测试】素材上传口自动关联与状态闸验收（IKDE6X）
+  - `IKI65H`【后端】上传去重/完成接口返回素材关联与审核状态（material_id / material_status）
+    ——补上决策 6 末句「改由服务端返回值决定」缺的那一半（2026-09-23）
 - **上游决策**：[ADR-0087 素材校验状态镜像与生成拦截](0087-material-compliance-status-mirror-and-generation-gate.md)（本 ADR 是它在上传口的延伸）。ADR-0087 与 `material_assets` 表目前在 `release/2026.09.15` 批次分支上，随该批次合入 master；本 ADR 若先于它落到 master，该链接暂时悬空。
 - **部分实现**：`!726`（`a8d7d533`，2026-09-18 合入 `release/2026.09.15`）已落地本 ADR 的骨架，**缺口三条见「决策 6」**
 

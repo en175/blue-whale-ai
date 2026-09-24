@@ -230,6 +230,10 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（granularity 映射 / 高级参数不暴露在客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = segmentScenesClient.submit(providerToken, source.getUrl(), granularity);
         log.info("[video_scene_split] 上游已提交 jobId={} providerTaskId={} granularity={}",
                 claim.id(), taskId, granularity);

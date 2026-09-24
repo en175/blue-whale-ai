@@ -18,28 +18,20 @@
    IKHW5C 音频调速（audioSpeed，父单 IKHVYO，编辑态本体归 IKHW5S）按音频截取
    同档接入——互斥、选中规范化退出、Esc 公共链同家族口径；node-click 拦截不挂
    （无源卡切换语义，点其他卡走选中规范化退出）。
+   IKI61O 会话纪元（session epoch）接入本 module：进/出会话与项目切换推进纪元、
+   发送时捕获、迟到响应 settle 时比对——纪元不同即「当前会话已不是发起时的会话
+   （或已关闭）」，只做任务收尾（建卡/连线/轮询等），不关闭用户当前会话、不复位其
+   提交锁、不向它弹旧错误提示。机制单源在 createToolSessionEpoch，各家族不各自
+   发明（IKI6EB 调速专属 ref 由本机制取代）。
    约束：会话状态与完整退出动作的实现留在页面现有持有处（index.tsx），本 module 不持
    state、不建第二份「活动工具」事实源——活跃与否由调用方每次交互时从现有会话
-   target 装配快照传入。纯 in-process 依赖，无网络接口。 */
-
-/** 编辑会话身份 */
-export type ToolSessionKind =
-  | 'erase'
-  | 'cutout'
-  | 'crop'
-  | 'outpaint'
-  | 'subtitleErase'
-  | 'audioVideoSplit'
-  | 'audioTrim'
-  | 'audioMix'
-  | 'audioSpeed'
-  | 'sceneSplit'
-  | 'vocalSplit'
-  | 'smartMatting';
+   target 装配快照传入；纪元实例同样由页面以 ref 持有（createToolSessionEpoch 工厂
+   每次新建），module 只提供机制。纯 in-process 依赖，无网络接口。 */
 
 /** 会话统一遍历顺序（互斥退出的固定顺序）。各 exit 只清各自 state、相互独立，
- *  顺序不影响结果，固定只为确定性。 */
-const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
+ *  顺序不影响结果，固定只为确定性。编辑会话类型和纪元测试均从本数组派生，
+ *  新增工具时不会让类型联合与遍历集合分离。 */
+export const TOOL_SESSION_KINDS = [
   'erase',
   'cutout',
   'crop',
@@ -52,7 +44,10 @@ const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'sceneSplit',
   'vocalSplit',
   'smartMatting',
-];
+] as const;
+
+/** 编辑会话身份 */
+export type ToolSessionKind = (typeof TOOL_SESSION_KINDS)[number];
 
 /** 全会话活跃快照（IKH3ZH 收口时为八会话，IKHW5C 增至十一）：各会话 target node id
  *  （null=未进入）。由页面每次交互时从现有会话 state 装配最新值传入，module 不保存。 */
@@ -193,6 +188,55 @@ export function exitToolSessionOnEsc(deps: ToolSessionDeps): boolean {
     }
   }
   return false;
+}
+
+/* ======================= IKI61O 会话纪元（session epoch） ======================= */
+
+/** 会话纪元追踪器：按会话种类隔离的单调递增计数。推进时机（进/出会话、项目切换）
+ *  与比对规则（捕获纪元仍是当前纪元才可触碰会话状态）的知识只活在本 module；
+ *  实例由页面以 ref 持有一份，不经 React state（纪元读写都在事件/回调里，不驱动渲染）。
+ *
+ *  使用口径（全部异步发送型家族同规）：
+ *  - 进入会话经 enter 推进——同工具换卡重进不触发出，靠本推进区分前后两次会话身份；
+ *  - 退出会话（四路退出/互斥/绑定清理/发送成功 settle 共用的完整退出函数）经 exit 推进；
+ *  - 项目切换或进入任一新会话经 advanceAll 推进——旧身份不再代表当前会话；
+ *  - 发送时 capture 捕获当前纪元；settle 时 isCurrent 比对——false 即迟到响应，
+ *    只做任务收尾（建卡/连线/轮询/落盘），不退当前会话、不复位其提交锁、不弹旧错误。 */
+export interface ToolSessionEpoch {
+  /** 进入会话：推进该会话纪元（新会话身份生效） */
+  enter(kind: ToolSessionKind): void;
+  /** 退出会话：推进该会话纪元（在途响应随之失效） */
+  exit(kind: ToolSessionKind): void;
+  /** 项目切换或进入任一新会话：推进全部会话纪元 */
+  advanceAll(): void;
+  /** 发送时捕获该会话当前纪元 */
+  capture(kind: ToolSessionKind): number;
+  /** settle 比对：捕获纪元仍代表当前会话（期间无退出/重进/切项目） */
+  isCurrent(kind: ToolSessionKind, captured: number): boolean;
+}
+
+/** 创建会话纪元追踪器（每页面实例一份）。各会话种类独立计数、互不影响。 */
+export function createToolSessionEpoch(): ToolSessionEpoch {
+  const epochs = Object.fromEntries(
+    TOOL_SESSION_KINDS.map((kind) => [kind, 0]),
+  ) as Record<ToolSessionKind, number>;
+  return {
+    enter(kind) {
+      epochs[kind] += 1;
+    },
+    exit(kind) {
+      epochs[kind] += 1;
+    },
+    advanceAll() {
+      for (const kind of TOOL_SESSION_KINDS) epochs[kind] += 1;
+    },
+    capture(kind) {
+      return epochs[kind];
+    },
+    isCurrent(kind, captured) {
+      return epochs[kind] === captured;
+    },
+  };
 }
 
 /** 公共 Esc 链挂载条件中的会话判断：擦除/裁切/去字幕/分离/截取/调速/场景切分/人声背景

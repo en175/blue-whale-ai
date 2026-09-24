@@ -76,6 +76,7 @@ class MediaExtractJobProcessorErrorMappingTest {
                 credentialService, extractAudioClient, mediaRelay, producer);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（时长供结果 duration 回落）。 */
@@ -330,6 +331,22 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(extractAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("mp3"));
         verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-race")));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test

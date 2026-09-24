@@ -50,6 +50,13 @@ export function isApiError(e: unknown): e is ApiError {
 /** 在标准 fetch init 上增加 silent：失败仍抛 ApiError，但不 toast（轮询/水合/登录探测）。 */
 export type ApiRequestInit = RequestInit & { silent?: boolean };
 
+/** silent init 片段（IKI8KZ 审查收拢）：显式 true 才携带 silent，缺省不 silent。
+ *  供调用点 spread 进 apiRequest init（jobs/assets 家族 13 处同构展开）或整只作为
+ *  silent 型 init 实参（upload 工具透传）；口径与原手写展开一致，不改缺省行为。 */
+export function silentInit(init?: { silent?: boolean }): { silent?: true } {
+  return init?.silent === true ? { silent: true } : {};
+}
+
 function toFetchInit(init?: ApiRequestInit): RequestInit | undefined {
   if (!init) return undefined;
   const { silent: _silent, ...rest } = init;
