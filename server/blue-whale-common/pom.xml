@@ -23,6 +23,16 @@
 
     当前内容（随 billing 落地按需增长）：
       http/NewApiHttpSupport   调 new-api 的 HTTP 装配（baseUrl 归一化 / OkHttp 构建 / 标准请求头）
+      proto/                   契约生成物（见下）
+
+    ⚠️ **契约的 Java 生成物放这里**（`contracts/proto/` 是唯一权威，语言中立）：
+    放 common 而非各服务，是因为 worker 与 billing 都要消费同一份契约；
+    各生成各的等于引入第二、第三份事实源。
+
+    生成用 **protobuf-maven-plugin**（官方生态标准、自包含——自动下载 protoc 与
+    protoc-gen-grpc-java，构建环境不需要预装 buf）。
+    TS 侧仍由 buf 生成（`contracts/buf.gen.yaml`）。
+    **两端从同一份 .proto 生成，所以不是漂移**；工具不同，源头相同。
   -->
   <groupId>com.bluewhale</groupId>
   <artifactId>blue-whale-common</artifactId>
@@ -36,6 +46,10 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- 与 worker 保持一致；两边各自声明而非继承，避免被依赖方反向锁版本 -->
     <okhttp.version>4.12.0</okhttp.version>
+    <!-- ⚠️ 与 contracts/buf.gen.yaml 的 buf 插件版本对齐思路一致：契约源头一份，
+         生成器版本各自锁在本文件里，可追溯。升级时两端一起升。 -->
+    <protobuf.version>3.25.5</protobuf.version>
+    <grpc.version>1.68.1</grpc.version>
   </properties>
 
   <dependencies>
@@ -44,5 +58,87 @@
       <artifactId>okhttp</artifactId>
       <version>${okhttp.version}</version>
     </dependency>
+
+    <!-- 契约生成物（contracts/proto/）的运行期依赖 -->
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+      <version>${protobuf.version}</version>
+    </dependency>
+    <!-- gRPC 服务存根：contracts/proto/billing/v1/billing.proto 定义了 BillingService，
+         identity 侧同理。生成物里的 Stub/ImplBase 需要它。 -->
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-stub</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-protobuf</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+    <!-- 生成的 gRPC 存根带 @javax.annotation.Generated（保留在字节码里，需要编译期可见） -->
+    <dependency>
+      <groupId>org.apache.tomcat</groupId>
+      <artifactId>annotations-api</artifactId>
+      <version>6.0.53</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- 测试：不引 spring-boot-starter-test —— 本模块不是 Spring Boot 应用，
+         引它会带进整套 Spring 上下文，与「被依赖方不锁框架版本」的定位冲突。 -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.5</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>3.25.3</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <build>
+    <extensions>
+      <!-- 提供 ${os.detected.classifier}：protoc / protoc-gen-grpc-java 的可执行产物
+           按平台分发（osx-aarch_64 / linux-x86_64 …），没有它取不到正确的产物。 -->
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.1</version>
+      </extension>
+    </extensions>
+
+    <plugins>
+      <plugin>
+        <groupId>org.xolstice.maven.plugins</groupId>
+        <artifactId>protobuf-maven-plugin</artifactId>
+        <version>0.6.1</version>
+        <configuration>
+          <!-- ⚠️ 契约源在仓库根的 contracts/proto/（语言中立的唯一权威），不在本模块 src 下 -->
+          <protoSourceRoot>${project.basedir}/../../contracts/proto</protoSourceRoot>
+          <protocArtifact>
+            com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}
+          </protocArtifact>
+          <pluginId>grpc-java</pluginId>
+          <pluginArtifact>
+            io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}
+          </pluginArtifact>
+          <!-- 生成物不进仓（与 TS 侧同一约定），构建时产出到 target/ -->
+          <clearOutputDirectory>false</clearOutputDirectory>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>compile</goal>        <!-- message 类型 -->
+              <goal>compile-custom</goal> <!-- gRPC service 存根 -->
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
