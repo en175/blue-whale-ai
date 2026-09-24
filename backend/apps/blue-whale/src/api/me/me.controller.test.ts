@@ -14,6 +14,7 @@ function createController(overrides: {
   revoke?: ReturnType<typeof vi.fn>;
   resolveTier?: ReturnType<typeof vi.fn>;
   listRoleCodes?: ReturnType<typeof vi.fn>;
+  isAdmin?: ReturnType<typeof vi.fn>;
 } = {}) {
   const account = {
     changePassword:
@@ -26,6 +27,7 @@ function createController(overrides: {
   const identity = {
     resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
     listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
+    isAdmin: overrides.isAdmin ?? vi.fn().mockResolvedValue(false),
   };
   const controller = new MeController(
     account as never,
@@ -250,5 +252,35 @@ describe("MeController（GET /me 会员等级）", () => {
     expect(resolveTier).toHaveBeenCalled();
     const result = await controller.me({ userId: "42", username: "alice" } as never);
     expect(result).toMatchObject({ data: { tier: "max" } });
+  });
+
+  it("★ is_admin 来自 identity，不看会话里那个（它源头是 new-api）", async () => {
+    // 会话里的 isAdmin 来自 `session.role >= 10`，而 role 是 new-api 给的。
+    // new-api 独立后这个字段会消失（`undefined >= 10` = false），
+    // 那一刻**所有管理员的前端入口会静默消失**。所以这里必须现查我们自己的角色表。
+    const isAdmin = vi.fn().mockResolvedValue(true);
+    const { controller } = createController({ isAdmin });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      isAdmin: false, // 会话说不是
+    } as never);
+
+    expect(result).toMatchObject({ data: { is_admin: true } }); // 角色表说了算
+    expect(isAdmin).toHaveBeenCalledWith("42");
+  });
+
+  it("角色表说不是管理员，会话说是也不算", async () => {
+    const isAdmin = vi.fn().mockResolvedValue(false);
+    const { controller } = createController({ isAdmin });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      isAdmin: true, // 陈旧的会话快照
+    } as never);
+
+    expect(result).toMatchObject({ data: { is_admin: false } });
   });
 });

@@ -40,7 +40,7 @@ export class MeController {
       email: user.email,
       phone: "",
       has_password: true,
-      is_admin: user.isAdmin,
+      is_admin: await this.identity.isAdmin(user.userId),
       // 会员等级：前端据此展示会员标识，**billing 侧据此算折扣**。
       // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
       // 会话里带的等级会一直停在登录那一刻。
