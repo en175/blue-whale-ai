@@ -23,6 +23,11 @@ public enum JobTypeEnum {
     /** 音频混合。 */
     AUDIO_MIX("audio_mix"),
 
+    /** 音视频合成（tag=audio_video_mux，画布音频卡「音视频合成」，IKIHPJ，父规格 IKIHMX；契约 =
+     *  backend/libs/contracts/audio-video-mux.ts，规格见 docs/specs/2026-09-24-audio-video-mux-mediakit.md，
+     *  跨进程契约见迁移契约 §20）。 */
+    AUDIO_VIDEO_MUX("audio_video_mux"),
+
     /** 音频截取（tag=audio_trim，画布音频卡「截取」，Semaphore 2；契约 =
      * backend/libs/contracts/audio-trim.ts，ADR-0111；消费者与处理器由 IKHB6S 按附录 C 触点注册）。 */
     AUDIO_TRIM("audio_trim"),

@@ -7,6 +7,11 @@ export const MEDIA_EXTRACT_TAG = "media_extract";
 /** 音频混合任务单独消费，值与 generation_jobs.type 一致。 */
 export const AUDIO_MIX_TAG = "audio_mix";
 
+/** 音视频合成任务 tag（IKIHPJ，父规格 IKIHMX，契约见 @lib/contracts/audio-video-mux）：复用
+ *  GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；与 generation_jobs.type /
+ *  AUDIO_VIDEO_MUX_JOB_TYPE（@lib/contracts）保持一致。 */
+export const AUDIO_VIDEO_MUX_TAG = "audio_video_mux";
+
 /** 音频截取（音频卡「截取」，火山 MediaKit trim-audio）任务 tag（IKHB6S，契约见
  *  @lib/contracts/audio-trim）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
  *  与 generation_jobs.type / AUDIO_TRIM_JOB_TYPE（@lib/contracts）保持一致。 */
@@ -66,7 +71,7 @@ export const VIDEO_FRAME_INTERPOLATION_TAG = "video_frame_interpolation";
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
 export const VIDEO_GENERATION_TAG = "video";
 
-/** 十六个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
+/** 十八个 tag 的联合类型：入队函数只接受这些值，避免在新调用点发明字面量（修正六后 tag 已无 env 覆盖，
  *  发明一个字符串不会有任何运行时报错，只会静默滞留）。 */
 export type GenerationTag =
   | typeof VIDEO_GENERATION_TAG
@@ -74,6 +79,7 @@ export type GenerationTag =
   | typeof AUDIO_GENERATION_TAG
   | typeof MEDIA_EXTRACT_TAG
   | typeof AUDIO_MIX_TAG
+  | typeof AUDIO_VIDEO_MUX_TAG
   | typeof AUDIO_TRIM_TAG
   | typeof AUDIO_SPEED_TAG
   | typeof IMAGE_ENHANCE_TAG

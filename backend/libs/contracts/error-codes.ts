@@ -111,6 +111,12 @@ export const ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = "video_frame_interpolation
  *  轮询失败终态，无 worker 级重试；契约 = backend/libs/contracts/audio-speed.ts）。
  *  入队失败不走本码，落 ERROR_ENQUEUE_FAILED（同家族口径）。 */
 export const ERROR_AUDIO_SPEED_FAILED = "audio_speed_failed";
+/** IKIHPJ：音视频合成（audio_video_mux，火山 MediaKit mux-audio-video）执行兜底失败码（父规格
+ *  IKIHMX——网关分类链外的火山任务失败〔轮询 status=failed / 同步提交失败 / 无有效视频结果〕
+ *  与转存失败〔result.video_url 24h 临时链接 → 自家 TOS〕统一归并，异步任务轮询失败终态，
+ *  无 worker 级重试；契约 = backend/libs/contracts/audio-video-mux.ts）。
+ *  入队失败不走本码，落 ERROR_ENQUEUE_FAILED（同家族口径）。 */
+export const ERROR_AUDIO_VIDEO_MUX_FAILED = "audio_video_mux_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -210,6 +216,8 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_AUDIO_MIX_FAILED]: 1051,
   // IKHW48 注：1051 已由音频混合先行合入 release 占用，音频调速兜底码取下一空号 1052（父单 IKHVYO）。
   [ERROR_AUDIO_SPEED_FAILED]: 1052,
+  // IKIHPJ 注：落码前全仓 grep 1053 零命中（无并行分支撞号），音视频合成兜底码取下一空号 1053（父规格 IKIHMX）。
+  [ERROR_AUDIO_VIDEO_MUX_FAILED]: 1053,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -500,6 +508,7 @@ export const ERROR_CODES: Record<number, string> = {
   1050: "智能抠像失败，请重试", // video_matting_failed（火山 MediaKit matte-portrait/greenscreen-video 双端点；1049 已由 !820 插帧占用，让位取 1050）
   1051: "音频混合失败，请重试", // audio_mix_failed
   1052: "音频调速失败，请重试", // audio_speed_failed（火山 MediaKit adjust-audio-speed；1051 已由音频混合占用）
+  1053: "音视频合成失败，请重试", // audio_video_mux_failed（火山 MediaKit mux-audio-video）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
