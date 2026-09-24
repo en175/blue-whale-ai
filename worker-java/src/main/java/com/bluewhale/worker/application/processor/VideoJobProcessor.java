@@ -40,7 +40,8 @@ import java.util.regex.Pattern;
  *   <li>cancelRequested AND providerTaskId==null → cancelVideoBeforeDispatch</li>
  *   <li>providerTaskId==null → (a) parent-reuse 防双扣 → (b) buildSubmitRequest → submit →
  *       markProviderSubmitted → scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s);
+ *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s)（与
+ *       processing 共享 720 轮询预算，超限同归 provider_timeout）;
  *       pollCount>=720 → provider_timeout; succeeded+URL → relay → publishVideoResult;
  *       failed → failVideoJob</li>
  * </ol>
@@ -188,6 +189,7 @@ public class VideoJobProcessor implements JobProcessor {
     private final GenerationMessageProducer producer;
     private final String workerId;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VideoJobProcessor(
             JobStateMachineService stateMachine,
             AssetSourceService assetSource,
@@ -197,13 +199,26 @@ public class VideoJobProcessor implements JobProcessor {
             @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
+        this(stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-" + hostname() + "-" + ProcessHandle.current().pid());
+    }
+
+    VideoJobProcessor(
+            JobStateMachineService stateMachine,
+            AssetSourceService assetSource,
+            GenerationCredentialService credentialService,
+            NewApiVideoClient videoClient,
+            TosVideoMediaRelay mediaRelay,
+            GenerationMessageProducer producer,
+            String workerId
+    ) {
         this.stateMachine = stateMachine;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.videoClient = videoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
-        this.workerId = "video-" + hostname() + "-" + ProcessHandle.current().pid();
+        this.workerId = workerId;
     }
 
     @Override
@@ -319,6 +334,18 @@ public class VideoJobProcessor implements JobProcessor {
         } catch (VideoProviderError pollError) {
             // isTransientPollError（video-job-runner.ts:386-413）
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码、同一文案。
+                if (claim.pollCount() >= MAX_VIDEO_POLLS) {
+                    log.warn("[video] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failVideo(claim, GenerationError.ERROR_PROVIDER_TIMEOUT,
+                            "视频生成轮询超时（超过 " + MAX_VIDEO_POLLS + " 次）");
+                    return;
+                }
                 log.warn("[video] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(

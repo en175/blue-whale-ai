@@ -517,6 +517,75 @@ class VideoEnhanceJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS - 1);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1045 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+
+        processor.handle("100");
+
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
+                eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS + " 次）"),
+                any(), eq("worker-1"), eq(5L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1045（瞬时错误各形态同受上限约束）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS);
+        VideoEnhanceError gatewayBusy = new VideoEnhanceError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 画质增强任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        assertFailCode(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("1080p"), 3);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1045 兜底")
     void pollHardError_fails() {
         stubPollClaim(input("1080p"), 3);

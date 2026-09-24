@@ -40,7 +40,8 @@ import java.util.Set;
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（granularity 经契约
  *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1046）；processing →
  *       续排；failed → 分类终态；completed → **逐段下载切片转存自家 TOS（火山
  *       segment_video_url 仅 24h 有效；每段转存前心跳续租防长窗口租约过期）** → 单事务逐段
  *       建 Asset + 契约 result 回传 → 终态 succeeded</li>
@@ -269,6 +270,18 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             observation = segmentScenesClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoSceneSplitError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码、同一文案。
+                if (claim.pollCount() >= MAX_SCENE_SPLIT_POLLS) {
+                    log.warn("[video_scene_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
+                            "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS + " 次）");
+                    return;
+                }
                 log.warn("[video_scene_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(

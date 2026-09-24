@@ -22,6 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -383,6 +386,92 @@ class VideoJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 anyString(), any(), anyString(), eq(1L));
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        ClaimedVideoJobDto claim = videoClaim("109", false, "task-109",
+                VideoJobProcessor.MAX_VIDEO_POLLS - 1, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("109"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-109"));
+        doReturn(true).when(stateMachine)
+                .rescheduleProviderPoll(eq("109"), anyString(), eq(1L), eq(30));
+
+        processor.handle("109");
+
+        verify(stateMachine).rescheduleProviderPoll(eq("109"), anyString(), eq(1L), eq(30));
+        verify(producer).enqueue(eq("109"), eq(5000L));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ provider_timeout 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        ClaimedVideoJobDto claim = videoClaim("110", false, "task-110",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("110"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-110"));
+        doReturn(true).when(stateMachine)
+                .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                        anyString(), any(), anyString(), eq(1L));
+
+        processor.handle("110");
+
+        verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                eq("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS + " 次）"),
+                any(), anyString(), eq(1L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ provider_timeout（瞬时错误各形态同受上限约束）")
+    void pollTransientHttp503AtLimit_fails() {
+        ClaimedVideoJobDto claim = videoClaim("111", false, "task-111",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("111"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "网关繁忙",
+                new NewApiVideoClient.HttpStatusException(503)))
+                .when(videoClient).poll(eq("token"), eq("task-111"));
+        doReturn(true).when(stateMachine)
+                .failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                        anyString(), any(), anyString(), eq(1L));
+
+        processor.handle("111");
+
+        verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                anyString(), any(), anyString(), eq(1L));
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        ClaimedVideoJobDto claim = videoClaim("112", false, "task-112", 3, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("112"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-112"));
+        doReturn(false).when(stateMachine)
+                .rescheduleProviderPoll(eq("112"), anyString(), eq(1L), eq(30));
+
+        processor.handle("112");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test
