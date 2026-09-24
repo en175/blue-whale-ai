@@ -1,6 +1,10 @@
 package com.bluewhale.billing.admin;
 
+import com.bluewhale.billing.application.BillingApplicationService;
+import com.bluewhale.billing.application.HoldCommand;
 import com.bluewhale.billing.catalog.CatalogHolder;
+import com.bluewhale.billing.ledger.CreditService;
+import com.bluewhale.billing.ledger.CreditSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -10,6 +14,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.Instant;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -47,9 +54,16 @@ class AdminApiIntegrationTest {
     /** baseUnit 指向一个不存在的维度 —— 编译期就该被拒。 */
     private static final String BAD_CATALOG = CATALOG.replace("constant:1", "usage.不存在的维度");
 
+    /** 手动结算/返还要造出真实预扣，单独用一个用户，免得和发放类用例互相干扰。 */
+    private static final long USER_HOLD = 9306L;
+    private static final String MODEL = "seedance-2.5";
+    private static final String TASK = "text2video";
+
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CatalogHolder catalog;
+    @Autowired private BillingApplicationService billing;
+    @Autowired private CreditService credits;
 
     @BeforeEach
     void clean() {
@@ -227,12 +241,69 @@ class AdminApiIntegrationTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 手动结算 / 返还（运维兜底）
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void 手动返还_能解掉卡住的冻结() throws Exception {
+        // 走真实的预扣路径造出「预扣成功但完成事件丢了」的状态。
+        // ⚠️ 不能手工往表里插一条 frozen=40 的批次 + 一条预留就完事：
+        //    预扣必然同时写两条账本分录（借 wallet / 贷 frozen），漏掉它们之后
+        //    frozen 科目的余额就是 0，再一笔返还借 frozen 就变成 -40。
+        //    账本会当场把这个不一致显示出来——这正是复式记账该有的样子。
+        seedHoldable();
+        long jobId = 9_500L;
+        billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
+                Map.of(), "free", Instant.now()));
+
+        mvc.perform(post("/admin/credits/jobs/" + jobId + "/refund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"事件进死信，人工释放"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("released"));
+
+        // 冻结解掉了，钱回到可用
+        mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
+                .andExpect(jsonPath("$.availableCredits").value(1_000))
+                .andExpect(jsonPath("$.frozenCredits").value(0));
+    }
+
+    @Test
+    void 手动结算_按给定实际额扣减() throws Exception {
+        seedHoldable();
+        long jobId = 9_501L;
+        billing.hold(new HoldCommand(USER_HOLD, "cmd-stuck", jobId, MODEL, TASK,
+                Map.of(), "free", Instant.now()));
+
+        mvc.perform(post("/admin/credits/jobs/" + jobId + "/settle")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"actualCredits":30}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("settled"));
+
+        // 扣 30，差额 10 回可用；冻结归零
+        mvc.perform(get("/admin/credits/balances/" + USER_HOLD))
+                .andExpect(jsonPath("$.availableCredits").value(970))
+                .andExpect(jsonPath("$.frozenCredits").value(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────
 
     private void publish(String document) throws Exception {
         mvc.perform(post("/admin/catalogs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(document))
                 .andExpect(status().isOk());
+    }
+
+    /** 发一份目录 + 给 USER_HOLD 发 1000 积分，让手动结算/返还用例有真实预扣可解。 */
+    private void seedHoldable() throws Exception {
+        publish(CATALOG);
+        credits.grant(USER_HOLD, CreditSource.GIFT, 1_000, null, "grant", "hold-seed", "hold-seed");
     }
 
     private void exchangeGrant(String body) throws Exception {

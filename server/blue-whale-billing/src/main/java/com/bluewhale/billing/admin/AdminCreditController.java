@@ -2,6 +2,7 @@ package com.bluewhale.billing.admin;
 
 import com.bluewhale.billing.application.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
+import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.CreditSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * 积分的管理端接口（《架构设计》§12）。
@@ -34,9 +36,11 @@ public class AdminCreditController {
     private static final Logger log = LoggerFactory.getLogger(AdminCreditController.class);
 
     private final BillingApplicationService billing;
+    private final CreditService credits;
 
-    public AdminCreditController(BillingApplicationService billing) {
+    public AdminCreditController(BillingApplicationService billing, CreditService credits) {
         this.billing = billing;
+        this.credits = credits;
         log.warn("管理端接口已启用（{}）——**无鉴权**，仅限内网。管理端鉴权落地前禁止对外暴露。",
                 AdminCreditController.class.getSimpleName());
     }
@@ -77,6 +81,44 @@ public class AdminCreditController {
     public BalanceView balance(@PathVariable long userId) {
         return billing.balance(userId);
     }
+
+    /**
+     * **手动结算**一个任务（运维工具）。
+     *
+     * <p>两个用途：
+     * <ol>
+     *   <li><b>本地验证</b>：没有 RocketMQ 时也能验完整条资金链路，
+     *       不必为了看一眼结算去起一个 broker。</li>
+     *   <li><b>卡住的任务</b>：MQ 消息进了死信、或 job 在结算上线前就提交过，
+     *       运营得有个地方把它结掉。否则那笔冻结会永远挂在用户账上。</li>
+     * </ol>
+     *
+     * <p>⚠️ 正常路径是 MQ 事件，不是这里。手动结算**不会**按 worker 上报的用量重算——
+     * 调用方得自己给出实际消耗。走 MQ 时那一步由 {@code SettlementService} 完成。
+     *
+     * @param request {@code actualCredits} 实际消耗（积分）；必须 ≤ 预扣额，
+     *                超出部分按设计转应收并告警，不会多扣用户
+     */
+    @PostMapping("/jobs/{jobId}/settle")
+    public Map<String, Object> settle(@PathVariable long jobId, @RequestBody SettleRequest request) {
+        credits.settle(jobId, request.actualCredits());
+        return Map.of("jobId", jobId, "actualCredits", request.actualCredits(), "status", "settled");
+    }
+
+    /**
+     * **手动全额返还**一个任务（运维工具）。
+     *
+     * <p>任务失败本该由 {@code generation.job.failed} 触发；这里是给「事件丢了 / 进死信」
+     * 的情况兜底——钱冻在用户账上而任务早已失败，是最容易被投诉的那种状态。
+     */
+    @PostMapping("/jobs/{jobId}/refund")
+    public Map<String, Object> refund(@PathVariable long jobId, @RequestBody RefundRequest request) {
+        credits.refund(jobId, request.reason() == null ? "人工释放" : request.reason());
+        return Map.of("jobId", jobId, "status", "released");
+    }
+
+    public record SettleRequest(long actualCredits) {}
+    public record RefundRequest(String reason) {}
 
     /**
      * @param expiresAt 显式覆盖有效期；省略则按来源的默认策略
