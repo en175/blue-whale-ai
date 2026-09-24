@@ -308,14 +308,18 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merg
   allow
 fi
 
-# Bash: release 分支管理入口。list 为只读放行；create 是发布动作，必须带 --user-authorized。
+# Bash: release 分支管理入口。list/current 为只读；create/activate 必须带 --user-authorized。
 # 放在 merge-task 之后、commit-task 之前：授权型检查先于无条件放行，避免复合命令短路。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh; then
   AUDIT_OPERATION="release-branch"
-  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh list; then
+  if printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh create \
+    || printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh activate; then
     if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh --user-authorized; then
-      block "release 分支 create 是发布动作，缺少 --user-authorized。必须先获得用户明确授权。"
+      block "release 分支 create/activate 是发布动作，缺少 --user-authorized。必须先获得用户明确授权。"
     fi
+  elif ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh list \
+    && ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh current; then
+    block "release 分支管理入口只允许 list/current 只读调用；create/activate 必须带 --user-authorized。"
   fi
   allow
 fi

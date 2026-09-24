@@ -1247,16 +1247,27 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/sync-task-from-origi
 assert_exit 0 "release: 标准同步入口静默放行"
 assert_stdout_empty "release: 标准同步入口无 Hook 输出"
 
-# release 分支管理入口：list 为只读放行；create 是发布动作，缺 --user-authorized 硬拦。
+# release 分支管理入口：list/current 只读放行；create/activate 缺授权硬拦。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh list"}}'
 assert_exit 0 "release: manage-release-branch list 只读放行"
 assert_stdout_empty "release: manage-release-branch list 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh current --json"}}'
+assert_exit 0 "release: manage-release-branch current 只读放行"
+assert_stdout_empty "release: manage-release-branch current 无交互输出"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh create --summary 资产库优化批次"}}'
 assert_exit 2 "release: manage-release-branch create 缺授权被拦截"
 assert_stderr_has "--user-authorized" "release: manage-release-branch create 缺授权提示授权参数"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh activate --branch release/2026.09.29"}}'
+assert_exit 2 "release: manage-release-branch activate 缺授权被拦截"
+assert_stderr_has "--user-authorized" "release: manage-release-branch activate 缺授权提示授权参数"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh current --json && scripts/manage-release-branch.sh activate --branch release/2026.09.29"}}'
+assert_exit 2 "release: 复合命令中 activate 仍需授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh create --summary 资产库优化批次 --user-authorized"}}'
 assert_exit 0 "release: manage-release-branch create 授权入口放行"
 assert_stdout_empty "release: manage-release-branch create 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh activate --branch release/2026.09.29 --user-authorized"}}'
+assert_exit 0 "release: manage-release-branch activate 授权入口放行"
+assert_stdout_empty "release: manage-release-branch activate 无交互输出"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/master"}}'
 assert_exit 0 "release: git merge --ff-only 同步放行"
@@ -2696,6 +2707,7 @@ build_repo_at() {
   cp "$REPO_ROOT/scripts/lib/python3-command.sh" "$repo/scripts/lib/"
   cp "$REPO_ROOT/scripts/cleanup-release-branch.sh" "$repo/scripts/"
   cp "$REPO_ROOT/scripts/manage-release-branch.sh" "$repo/scripts/"
+  cp "$REPO_ROOT/scripts/lib/release-line-state.py" "$repo/scripts/lib/"
   cp "$REPO_ROOT/scripts/start-task-worktree.py" "$repo/scripts/"
   (
     cd "$repo"
@@ -2862,7 +2874,7 @@ setup_release_repo
 run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh
 assert_exit 2 "release-manage: 无操作走 usage exit 2"
 run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh bogus
-assert_exit 1 "release-manage: 未知操作拦截"
+assert_exit 2 "release-manage: 未知操作拦截"
 
 # M2 — list：远端无 release 分支 → exit 0 且提示
 setup_release_repo
@@ -2913,16 +2925,15 @@ else
   FAIL=$((FAIL + 1)); FAILURES+=("[release-manage: 应基于 origin/master] created=$created_sha master=$master_sha")
 fi
 
-# M7 — 同日重名 → 自动 _2 序号
+# M7 — 已启用的批次不能直接再建第二条
 run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary 资产库优化批次 --user-authorized --json
-assert_exit 0 "release-manage: 同日重名 create 成功"
-assert_stdout_has "\"branch\":\"release/${expected_base}_资产库优化批次_2\"" "release-manage: 重名自动加 _2 序号"
+assert_exit 1 "release-manage: 未核实旧批次收口时拒绝第二条活动线"
+assert_stderr_has "--pr-snapshot" "release-manage: 换期要求 PR 快照"
 
-# M8 — 重名后 list 应列出两个批次
+# M8 — list 明示唯一活动线
 run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh list
 assert_exit 0 "release-manage: list 放行"
 assert_stdout_has "release/${expected_base}_资产库优化批次" "release-manage: list 含首批次"
-assert_stdout_has "release/${expected_base}_资产库优化批次_2" "release-manage: list 含 _2 批次"
 
 # M9 — cleanup 守卫（经 cleanup-release-branch.sh）：release 分支带未发布提交 → 拦；合入 master 后 → 成功。
 # 注意：刚从 master 拉出的空批次与 origin/master 同 SHA，is-ancestor 自反为真、可直接清理（无未发布内容，语义正确）；
