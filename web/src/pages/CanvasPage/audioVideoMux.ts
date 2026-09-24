@@ -15,7 +15,7 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import type { JobRecord } from '@/api/jobs';
-import { AUDIO_VIDEO_MUX_SYNC_MODES } from '@lib/contracts/audio-video-mux';
+import { AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX, AUDIO_VIDEO_MUX_SYNC_MODES } from '@lib/contracts/audio-video-mux';
 import { readAssetId } from './mediaRefs';
 import { findAudioMixPosition } from './audioMix';
 
@@ -157,9 +157,6 @@ export function isAudioVideoMuxBindEdge(edge: Edge, draft: Node | undefined): bo
 
 /* ============ IKIHP M：提交冻结、占位卡、终态回填与恢复 ============ */
 
-/** 合成结果卡命名后缀（worker 同款格式化：源视频资产名去扩展名 + 本后缀） */
-export const AUDIO_VIDEO_MUX_RESULT_SUFFIX = '(音视频合成).mp4';
-
 /** 合成失败兜底文案（契约 1053；poll 已带 msg 时原样透传） */
 export const AUDIO_VIDEO_MUX_FAIL_TEXT = '音视频合成失败，请重试';
 
@@ -176,12 +173,13 @@ export function audioVideoMuxNodeId(jobId: string | number): string {
   return `audio-video-mux-${jobId}`;
 }
 
-/** 结果卡名 = 源视频名去扩展名 + 「(音视频合成).mp4」（与 worker 命名同款；空名回落「视频」） */
+/** 结果卡名 = 源视频名去扩展名 + 「(音视频合成).mp4」（后缀为契约常量，与 worker 命名
+ *  同款由 contracts 对账测试钉死；空名回落「视频」） */
 export function audioVideoMuxResultName(videoName?: string | null): string {
   const raw = typeof videoName === 'string' ? videoName.trim() : '';
   const dot = raw.lastIndexOf('.');
   const base = (dot > 0 ? raw.slice(0, dot) : raw) || '视频';
-  return `${base}${AUDIO_VIDEO_MUX_RESULT_SUFFIX}`;
+  return `${base}${AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX}`;
 }
 
 /** 失败原因（msg/message 原样透传，缺失落 1053 兜底文案；同插帧家族映射口径） */
