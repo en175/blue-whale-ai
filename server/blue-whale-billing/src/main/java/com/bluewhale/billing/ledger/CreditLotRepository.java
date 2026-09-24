@@ -52,6 +52,18 @@ public class CreditLotRepository {
         return mapper.sumAvailable(userId);
     }
 
+    /**
+     * 临期批次（按到期时间从近到远）。
+     *
+     * @param withinDays 只看这么多天内到期的
+     * @param limit      最多几条
+     */
+    public List<Lot> listExpiring(long userId, int withinDays, int limit) {
+        return mapper.listExpiring(userId, withinDays, limit).stream()
+                .map(CreditLotRepository::toLot)
+                .toList();
+    }
+
     /** 冻结：预扣用。**只动 frozen**，remaining 不动——钱还没花掉，只是不能用了。 */
     public void addFrozen(long lotId, long amount) {
         mapper.addFrozen(lotId, amount);

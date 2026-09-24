@@ -73,4 +73,13 @@ logging:
     # 排查「为什么这条查不到」时把下面这行放开，日志里会回显实际 SQL 与参数
     # com.bluewhale.billing.infrastructure.mapper: DEBUG
 
+# ── gRPC（契约的 server 端；契约见 contracts/proto/billing/v1/billing.proto） ──
+#
+# ⚠️ **默认关闭**：开着会让每个 @SpringBootTest 都去绑真实端口，测试之间随机冲突，
+#    而根因与测试内容毫无关系。这里显式打开，测试则需要时自行指定端口 0。
+billing:
+  grpc:
+    enabled: true
+    port: ${BILLING_GRPC_PORT:4004}
+
 # ⚠️ MQ / 账本 / 账户尚未接入：按 ADR-0113 的 P2–P4 落地时按真实形状加。

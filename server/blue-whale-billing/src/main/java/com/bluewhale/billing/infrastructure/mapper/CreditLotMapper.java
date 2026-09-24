@@ -42,6 +42,16 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
     /** 可用余额 = Σ(remaining − frozen)，仅计未过期的批次。 */
     long sumAvailable(@Param("userId") long userId);
 
+    /**
+     * 临期批次 —— 前端展示「X 积分将于 Y 日过期」用。
+     *
+     * @param withinDays 只看这么多天内到期的；更远的不用提醒
+     * @param limit      最多返回几条（按到期时间从近到远）
+     */
+    List<CreditLotEntity> listExpiring(@Param("userId") long userId,
+                                       @Param("withinDays") int withinDays,
+                                       @Param("limit") int limit);
+
     /** 冻结：预扣用。**只动 frozen**，remaining 不动。 */
     int addFrozen(@Param("lotId") long lotId, @Param("amount") long amount);
 

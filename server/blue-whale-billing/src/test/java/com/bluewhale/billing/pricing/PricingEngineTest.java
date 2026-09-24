@@ -65,7 +65,7 @@ class PricingEngineTest {
             "doubao-1.5-pro/chat", doubao());
 
     private static PricingEngine engine() {
-        return PricingEngine.forMedia((model, task) -> CATALOG.get(model + "/" + task));
+        return PricingEngine.forMedia((model, task) -> CATALOG.get(model + "/" + task), DiscountResolver.NONE);
     }
 
     private static PricingRequest req(String model, String task, Map<String, String> specs) {
@@ -178,7 +178,7 @@ class PricingEngineTest {
         @Test
         void 封顶在折扣之前生效() {
             var capped = seedream().withMaxCredits(5L).withMultiplier(UsageDim.REFERENCE_COUNT, 10_000);
-            var engine = PricingEngine.forMedia((m, t) -> capped);
+            var engine = PricingEngine.forMedia((m, t) -> capped, DiscountResolver.NONE);
 
             // 4 张 4k = 40 积分，封顶 5
             long credits = engine.compute(

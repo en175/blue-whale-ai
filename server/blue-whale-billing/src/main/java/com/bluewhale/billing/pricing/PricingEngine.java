@@ -29,9 +29,19 @@ public final class PricingEngine {
         this.calculator = calculator;
     }
 
-    /** 媒介类（图片 / 视频 / 音频 / 按次）的默认装配。 */
-    public static PricingEngine forMedia(CatalogLookup catalog) {
-        return new PricingEngine(catalog, new MediaPricingCalculator());
+    /**
+     * 媒介类（图片 / 视频 / 音频 / 按次）的默认装配。
+     *
+     * <p>⚠️ {@code discounts} **刻意是必填参数，不提供只传 catalog 的重载**：
+     * 曾经有过一个 {@code forMedia(catalog)} 的重载，内部默默用
+     * {@link DiscountResolver#NONE} 装配——于是任何用它接线的路径都会**静默地不打折**，
+     * 用户按原价被扣，且没有任何信号。折扣是这套系统的一部分，不该有一条「忘了它就按原价」的暗道。
+     *
+     * <p>确实不需要折扣的场景（纯计价单测）显式写 {@code DiscountResolver.NONE}，
+     * 让「这里不做折扣」变成写在调用处的一个决定。
+     */
+    public static PricingEngine forMedia(CatalogLookup catalog, DiscountResolver discounts) {
+        return new PricingEngine(catalog, new MediaPricingCalculator(discounts));
     }
 
     /**

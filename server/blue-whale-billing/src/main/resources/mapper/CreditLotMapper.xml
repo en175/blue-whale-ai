@@ -53,6 +53,28 @@
   </select>
 
   <!--
+    临期批次：前端展示「X 积分将于 Y 日过期」用。
+
+    三个条件各有理由：
+      expires_at > NOW()      已过期的不用提醒（它们已经用不上了，提醒也没用）
+      remaining > frozen      可用量为 0 的批次不必提醒——提醒一个「0 积分过期」只是噪音
+      expires_at <= 窗口      太远的别提示，否则用户天天看到「一年后过期 500 分」
+
+    按到期时间从近到远 + LIMIT：先到期的先提示（扣减顺序也是先扣它们）。
+  -->
+  <select id="listExpiring" resultType="com.bluewhale.billing.domain.entity.CreditLotEntity">
+    SELECT id, user_id, source, amount, remaining, frozen, expires_at
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+      AND expires_at IS NOT NULL
+      AND expires_at > NOW()
+      AND expires_at &lt;= DATE_ADD(NOW(), INTERVAL #{withinDays} DAY)
+      AND remaining > frozen
+    ORDER BY expires_at ASC
+    LIMIT #{limit}
+  </select>
+
+  <!--
     冻结：预扣用。**只动 frozen**，remaining 不动 —— 钱还没花掉，只是不能用了。
 
     SET frozen = frozen + #{amount} 是**自引用表达式**：Wrapper 的 set 只能赋常量，

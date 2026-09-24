@@ -5,7 +5,9 @@ syntax = "proto3";
 // ⚠️ 结算 / 返还**不走 RPC**，走 MQ 事件（见 events.proto）——
 //    它们不该阻塞任何用户请求。**只有 Hold 在用户等待路径上。**
 //
-// ⚠️ 金额单位：int64 mc（1 积分 = 1000 mc）。
+// ⚠️ 金额单位：int64 **整数积分**（账本单位，见《计费逻辑详细设计》§1）。
+//    管线内部用 mc（1 积分 = 1000 mc）保精度，出口一次性四舍五入成积分——
+//    所以**线上的金额字段一律是积分**，不是 mc。看到 mc 只可能是在讲单价/中间量。
 package billing.v1;
 
 import "common/v1/types.proto";
@@ -43,10 +45,21 @@ message HoldRequest {
   string task_type         = 5;
   common.v1.SpecAttrs specs = 6; // 原始规格，billing 内部 normalize
   string title             = 7;  // 展示文案快照，写进用户流水
+
+  // ★ 用户等级：free | basic | pro | max（空 = free）。
+  //
+  // 为什么由调用方传、而不是 billing 反查 identity：
+  //   会员折扣与「限等级」的营销活动都要用它，而 Hold 在用户等待路径上（预算 50ms）。
+  //   调用方在校验会话时**已经拿到** tier（identity.VerifySession 的返回值里就有），
+  //   多传一个字段是零成本；让 billing 再发一次 RPC 则是在最热的路径上加一跳。
+  //
+  // ⚠️ 这是**由调用方断言**的输入：传错档位就能拿到不该有的折扣。
+  //    所以 Hold 只对该调用方（backend）开放，**不可由公网直达**。
+  string tier              = 8;
 }
 
 message HoldResponse {
-  int64 reserved_credits = 1; // mc
+  int64 reserved_credits = 1; // 整数积分
   // ★ 调用方须冻结进 generation_jobs（经 billing_cost_reservations），
   //   结算时按它复现定价——改价不影响已提交任务。
   int32 catalog_version  = 2;
@@ -58,13 +71,13 @@ message QueryBalanceRequest {
 }
 
 message QueryBalanceResponse {
-  int64 available_credits = 1; // mc，Σ(remaining − frozen)
-  int64 frozen_credits    = 2; // mc
+  int64 available_credits = 1; // 整数积分，Σ(remaining − frozen)
+  int64 frozen_credits    = 2; // 整数积分
   repeated ExpiringLot expiring = 3; // 临期批次，前端展示「X 积分将于 Y 日过期」
 }
 
 message ExpiringLot {
-  int64  credits    = 1; // mc
+  int64  credits    = 1; // 整数积分
   string expires_at = 2; // RFC3339
   string source     = 3; // register | daily | invite | redeem | purchased | bonus
                          // | subscription | gift | compensation —— 决定展示文案
@@ -91,7 +104,7 @@ message UserTransaction {
                          // | subscription | gift | compensation | refund | expire
   string direction  = 3; // in | out
   string title      = 4; // 「视频生成 · seedance-2.5 1080p 5s」
-  int64  amount     = 5; // mc，**最终值，唯一金额**
+  int64  amount     = 5; // 整数积分，**最终值，唯一金额**
   string status     = 6; // pending | done
   string created_at = 7; // RFC3339
   string settled_at = 8; // RFC3339，仅 done 时非空

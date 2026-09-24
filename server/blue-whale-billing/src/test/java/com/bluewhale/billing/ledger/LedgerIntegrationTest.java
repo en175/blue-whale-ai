@@ -149,7 +149,13 @@ class LedgerIntegrationTest {
         HoldResult first = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION);
         HoldResult second = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION);
 
-        assertThat(second).isEqualTo(first);
+        // ★ 重放要能被识别出来。「返回了相同的数字」不足以区分「刚扣的」与「上次就扣过的」，
+        //   而调用方可能需要据此决定要不要再写一次自己的副作用。
+        assertThat(first.duplicated()).isFalse();
+        assertThat(second.duplicated()).isTrue();
+        assertThat(second.reservedCredits()).isEqualTo(first.reservedCredits());
+        assertThat(second.catalogVersion()).isEqualTo(first.catalogVersion());
+
         assertThat(frozenOf(lot)).isEqualTo(40);       // 没有冻结两次
         assertThat(ledgerEntryCount()).isEqualTo(4);   // grant 2 条 + hold 2 条
         assertInvariant();

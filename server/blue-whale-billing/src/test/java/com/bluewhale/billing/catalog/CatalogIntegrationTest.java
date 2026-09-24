@@ -1,5 +1,6 @@
 package com.bluewhale.billing.catalog;
 
+import com.bluewhale.billing.pricing.DiscountResolver;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.PricingRequest;
 import com.bluewhale.billing.pricing.Usage;
@@ -55,7 +56,8 @@ class CatalogIntegrationTest {
         // 且与测试事务语义冲突。
         jdbc.update("DELETE FROM billing_pricing_catalogs");
         holder.reload();  // 清空后 reload → 无 active 版本，lookup 返回 null
-        engine = PricingEngine.forMedia(holder);
+        // 本用例考的是「目录读出来能不能算价」，折扣不是考点，显式声明不做折扣
+        engine = PricingEngine.forMedia(holder, DiscountResolver.NONE);
     }
 
     private void publish(int version, String document, String status) {
@@ -178,7 +180,7 @@ class CatalogIntegrationTest {
         var frozenV1 = repository.loadVersion(1);
         assertThat(frozenV1).isNotNull();
         assertThat(PricingEngine.forMedia(
-                (m, t) -> frozenV1.index().get(CatalogCompiler.indexKey(m, t)))
+                (m, t) -> frozenV1.index().get(CatalogCompiler.indexKey(m, t)), DiscountResolver.NONE)
                 .compute(request, usage, T).credits())
                 .isEqualTo(5);
     }
@@ -210,7 +212,7 @@ class CatalogIntegrationTest {
         //    而它的 reload() 失败时**保持旧版本**（这正是设计要的行为）——
         //    共用它会带着上一个测试加载的版本，测不到「从未加载过」这个分支。
         var freshHolder = new CatalogHolder(repository);
-        var freshEngine = PricingEngine.forMedia(freshHolder);
+        var freshEngine = PricingEngine.forMedia(freshHolder, DiscountResolver.NONE);
 
         assertThat(freshHolder.currentVersion()).isEqualTo(-1);
         assertThat(freshHolder.lookup("seedream-4.0", "text2image")).isNull();

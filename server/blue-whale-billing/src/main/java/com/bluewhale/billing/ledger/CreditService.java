@@ -60,7 +60,7 @@ public class CreditService {
      *
      * @param commandId      客户端生成的命令 id —— 幂等键来自它而不是 jobId：
      *                       重试发生在 job 创建**之前**，那时还没有 jobId 可用
-     * @param amount         预扣额（mc）
+     * @param amount         预扣额（积分）
      * @param catalogVersion 本次计价用的目录版本
      */
     @Transactional
@@ -71,7 +71,7 @@ public class CreditService {
         if (ledger.existsByVoucherBase(idempotencyKey)) {
             // 重复提交：返回首次结果，绝不二次冻结
             return reservations.findByJobId(jobId)
-                    .map(r -> new HoldResult(r.reservedCredits(), r.catalogVersion()))
+                    .map(r -> HoldResult.replay(r.reservedCredits(), r.catalogVersion()))
                     .orElseThrow(() -> new IllegalStateException(
                             "幂等键已存在但找不到对应预留：jobId=" + jobId));
         }
@@ -116,7 +116,7 @@ public class CreditService {
                 .credit(Account.FROZEN, amount, "提交预扣")
                 .build());
 
-        return new HoldResult(amount, catalogVersion);
+        return HoldResult.fresh(amount, catalogVersion);
     }
 
     /**
@@ -157,7 +157,7 @@ public class CreditService {
      * 差额自动回到可用余额。**不重算分配**——期间可能插入了新批次或旧批次过期，
      * 重算会扣到别的批次上。
      *
-     * @param actualCredits 实际消耗（mc）。{@code > 预扣} 理论不该发生（预扣已按上限冻结），
+     * @param actualCredits 实际消耗（积分）。{@code > 预扣} 理论不该发生（预扣已按上限冻结），
      *                      真发生说明定价漏算了维度：差额记应收并告警，**不悄悄多扣用户**
      */
     @Transactional

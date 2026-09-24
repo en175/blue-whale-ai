@@ -21,12 +21,12 @@ public class InsufficientCreditsException extends RuntimeException {
         this.required = required;
     }
 
-    /** 当前可用积分（mc）。 */
+    /** 当前可用积分。 */
     public long available() {
         return available;
     }
 
-    /** 本次需要的积分（mc）。 */
+    /** 本次需要的积分。 */
     public long required() {
         return required;
     }

@@ -8,8 +8,8 @@ import java.util.List;
  * <p>它是**内部记录**，不暴露给用户端任何接口——用户只应看到「处理中 · 预计消耗 40」
  * 与「已完成 · 消耗 30」两个状态，不该知道中间存在过一笔预留。
  *
- * @param reservedCredits 预扣额（mc）
- * @param actualCredits   实际额（mc）；未结算时为 null
+ * @param reservedCredits 预扣额（积分）
+ * @param actualCredits   实际额（积分）；未结算时为 null
  * @param status          状态机见 {@link Status}
  * @param allocations     预扣分配的批次明细；结算与返还**按同一份**处理
  * @param catalogVersion  冻结的定价版本——改价不影响已提交任务

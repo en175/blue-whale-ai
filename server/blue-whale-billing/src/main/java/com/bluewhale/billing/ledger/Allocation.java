@@ -12,7 +12,7 @@ package com.bluewhale.billing.ledger;
  * 分配明细一旦写下就是这份预扣的唯一真相。
  *
  * @param lotId 批次 id
- * @param take  从该批次取走的量（mc），恒正
+ * @param take  从该批次取走的量（积分），恒正
  */
 public record Allocation(long lotId, long take) {
 

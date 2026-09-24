@@ -21,9 +21,9 @@ CREATE TABLE IF NOT EXISTS billing_credit_lots (
   --   枚举一改就静默错位；加了列则顺序由插入时决定，且能走复合索引。
   source_priority INT       NOT NULL COMMENT '扣减优先级（数值小者先扣），取自 CreditSource',
 
-  amount       BIGINT       NOT NULL COMMENT '发放总量（mc），发放后不变',
-  remaining    BIGINT       NOT NULL COMMENT '剩余总量（mc），含冻结',
-  frozen       BIGINT       NOT NULL DEFAULT 0 COMMENT '冻结中（mc）',
+  amount       BIGINT       NOT NULL COMMENT '发放总量（积分），发放后不变',
+  remaining    BIGINT       NOT NULL COMMENT '剩余总量（积分），含冻结',
+  frozen       BIGINT       NOT NULL DEFAULT 0 COMMENT '冻结中（积分）',
 
   -- NULL = 永久。扣减按 expires_at ASC（先过期先扣），过期靠查询条件排除，
   -- **不需要定时任务删**（定时任务会锁表、会因漏跑而不一致；查询条件永不出错）
@@ -101,8 +101,8 @@ CREATE TABLE IF NOT EXISTS billing_cost_reservations (
   generation_job_id BIGINT      NOT NULL,
   user_id          BIGINT       NOT NULL,
 
-  reserved_credits BIGINT       NOT NULL COMMENT '预扣额（mc）',
-  actual_credits   BIGINT       NULL COMMENT '实际额（mc），结算后填',
+  reserved_credits BIGINT       NOT NULL COMMENT '预扣额（积分）',
+  actual_credits   BIGINT       NULL COMMENT '实际额（积分），结算后填',
 
   -- held | settled | released
   status           VARCHAR(32)  NOT NULL COMMENT 'held / settled / released',
