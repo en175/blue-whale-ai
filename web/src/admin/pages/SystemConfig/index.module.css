@@ -19,26 +19,26 @@
   margin: 0;
   font-size: 24px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .subtitle {
   margin: 8px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* 首次加载占位 */
 .loadingBox {
   padding: 48px 0;
-  color: #888;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
   text-align: center;
 }
 
 /* 保存失败 */
 .formError {
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -50,7 +50,7 @@
 }
 
 .savedTip {
-  color: #22c55e;
+  color: var(--admin-success);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -59,7 +59,7 @@
   display: flex;
   align-items: center;
   gap: 36px;
-  border-bottom: 1px solid #262626;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .tab {
@@ -67,7 +67,7 @@
   padding: 12px 4px;
   border: none;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
   transition: color 0.15s;
@@ -75,15 +75,15 @@
 }
 
 .tab:hover {
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .tabActive {
-  color: #3e8efc;
+  color: var(--admin-accent);
 }
 
 .tabActive:hover {
-  color: #3e8efc;
+  color: var(--admin-accent);
 }
 
 .tabActive::after {
@@ -94,7 +94,7 @@
   bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: #3e8efc;
+  background: var(--admin-accent);
 }
 
 /* ============ tab 内容 ============ */
@@ -109,13 +109,13 @@
   margin: 8px 0 0;
   font-size: 16px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 /* ============ 凭证卡片 ============ */
 .card {
   padding: 22px 24px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--admin-border);
   border-radius: 12px;
   background: #1c1c1c;
 }
@@ -130,22 +130,22 @@
 .cardLabel {
   font-size: var(--font-size-md, 14px);
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .cardValue {
   margin-top: 8px;
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
   font-size: 13px;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 .editBtn {
   padding: 9px 20px;
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--admin-border-strong);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-sm, 13px);
   cursor: pointer;
   flex-shrink: 0;
@@ -153,7 +153,7 @@
 }
 
 .editBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 /* 编辑态 */
@@ -166,10 +166,10 @@
   width: 100%;
   height: 46px;
   padding: 0 44px 0 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
 }
@@ -191,12 +191,12 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
 }
 
 .eyeBtn:hover {
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .saveBtn {
@@ -228,30 +228,30 @@
 .hint {
   margin: 14px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* ============ 政策文案 ============ */
 .label {
   margin: 4px 0 0;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .labelSub {
   margin: 6px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 .textarea {
   width: 100%;
   min-height: 140px;
   padding: 14px 16px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 10px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   line-height: 1.7;
   outline: none;
@@ -274,10 +274,10 @@
   height: 46px;
   padding: 0 14px;
   margin-top: 10px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   color-scheme: dark;

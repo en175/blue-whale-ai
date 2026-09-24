@@ -19,19 +19,19 @@
   margin: 0;
   font-size: 24px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .subtitle {
   margin: 8px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* 表格加载/错误/空态行 */
 .tableState {
   padding: 48px 0;
-  color: #888;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
   text-align: center;
 }
@@ -41,7 +41,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: #3e8efc;
+  color: var(--admin-accent);
   font-size: var(--font-size-md);
   cursor: pointer;
 }
@@ -53,7 +53,7 @@
 /* 弹窗内保存错误 */
 .formError {
   margin-top: 12px;
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -62,10 +62,10 @@
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-sm, 13px);
   font-weight: 500;
   cursor: pointer;
@@ -74,7 +74,7 @@
 }
 
 .exportBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 /* ============ 筛选行 ============ */
@@ -104,10 +104,10 @@
   width: 100%;
   height: 46px;
   padding: 0 14px 0 40px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
 }
@@ -118,16 +118,16 @@
 
 .searchInput::placeholder,
 .input::placeholder {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .select {
   height: 46px;
   padding: 0 12px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   cursor: pointer;
@@ -139,10 +139,10 @@
   min-width: 170px;
   height: 46px;
   padding: 0 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   color-scheme: dark;
@@ -161,14 +161,14 @@
   margin: -8px 0;
   text-align: right;
   font-size: var(--font-size-sm, 13px);
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
 }
 
 /* ============ 表格 ============ */
 .tableWrap {
-  border: 1px solid #262626;
+  border: 1px solid var(--admin-border);
   border-radius: 12px;
-  background: #161616;
+  background: var(--admin-surface-sunken);
   overflow-x: auto;
 }
 
@@ -182,7 +182,7 @@
   padding: 16px;
   font-size: var(--font-size-sm, 13px);
   font-weight: 500;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   text-align: left;
   white-space: nowrap;
 }
@@ -195,7 +195,7 @@
   padding: 20px 16px;
   border-top: 1px solid #242424;
   font-size: var(--font-size-md, 14px);
-  color: #e6e6e6;
+  color: var(--admin-text);
   white-space: nowrap;
 }
 
@@ -203,7 +203,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: #3e8efc;
+  color: var(--admin-accent);
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
   font-size: 13px;
   cursor: pointer;
@@ -216,44 +216,44 @@
 }
 
 .cellUser {
-  color: #c9c9c9;
+  color: var(--admin-text-muted);
 }
 
 .cellNum {
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .cellTime {
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-sm, 13px);
 }
 
 .dash {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .emptyCell {
   text-align: center;
   padding: 36px 14px !important;
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 /* 状态文字色 */
 .st_pending {
-  color: #3e8efc;
+  color: var(--admin-accent);
 }
 
 .st_paid {
-  color: #22c55e;
+  color: var(--admin-success);
 }
 
 .st_expired {
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
 }
 
 .st_failed {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 /* 状态徽章 */
@@ -262,7 +262,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(62, 142, 252, 0.15);
-  color: #3e8efc;
+  color: var(--admin-accent);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -271,7 +271,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--admin-success);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -279,8 +279,8 @@
   display: inline-block;
   padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #9a9a9a;
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -289,7 +289,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -309,15 +309,15 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
 .iconBtn:hover {
-  background: #262626;
-  color: #22c55e;
+  background: #f3f4f6;
+  color: var(--admin-success);
 }
 
 /* ============ 弹窗 ============ */
@@ -328,7 +328,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgb(17 24 39 / 0.06);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -341,7 +341,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .modalNarrow {
@@ -352,7 +352,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .modalHead {
@@ -360,14 +360,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 22px 28px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .modalTitle {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .closeBtn {
@@ -379,13 +379,13 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
 }
 
 .closeBtn:hover {
-  background: #2a2a2a;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 .modalBody {
@@ -423,17 +423,17 @@
 }
 
 .stepDone .stepDot {
-  background: #22c55e;
+  background: var(--admin-success);
   color: #fff;
 }
 
 .stepFail .stepDot {
-  background: #ef4444;
+  background: var(--admin-danger);
   color: #fff;
 }
 
 .stepWait .stepDot {
-  border: 2px solid #3a3a3a;
+  border: 2px solid var(--admin-border-strong);
   background: transparent;
 }
 
@@ -443,15 +443,15 @@
 }
 
 .stepDone .stepLabel {
-  color: #22c55e;
+  color: var(--admin-success);
 }
 
 .stepFail .stepLabel {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 .stepWait .stepLabel {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .stepLine,
@@ -468,7 +468,7 @@
 }
 
 .stepLineDone {
-  background: #22c55e;
+  background: var(--admin-success);
 }
 
 /* ============ 信息网格 ============ */
@@ -481,13 +481,13 @@
 .infoLabel {
   margin-bottom: 6px;
   font-size: var(--font-size-xs, 12px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 .infoValue {
   font-size: var(--font-size-md, 14px);
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .mono {
@@ -495,7 +495,7 @@
 }
 
 .greenText {
-  color: #22c55e;
+  color: var(--admin-success);
 }
 
 /* ============ 摘要框 ============ */
@@ -505,9 +505,9 @@
   gap: 8px;
   padding: 16px 20px;
   border-radius: 10px;
-  background: #262626;
+  background: #f3f4f6;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .summaryLine {
@@ -516,12 +516,12 @@
 }
 
 .summaryLabel {
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   flex-shrink: 0;
 }
 
 .summaryLine b {
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 /* ============ 警告框 ============ */
@@ -531,7 +531,7 @@
   border: 1px solid rgba(245, 158, 11, 0.35);
   border-radius: 10px;
   background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
+  color: var(--admin-warning);
   font-size: var(--font-size-md, 14px);
   line-height: 1.7;
 }
@@ -540,21 +540,21 @@
 .label {
   margin: 20px 0 10px;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .required {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 .input {
   width: 100%;
   height: 46px;
   padding: 0 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   color-scheme: dark;
@@ -567,16 +567,16 @@
 /* ============ 底部按钮 ============ */
 .cancelBtn {
   padding: 11px 22px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
 }
 
 .cancelBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 .confirmGreen {
@@ -591,12 +591,12 @@
 }
 
 .confirmGreen:hover {
-  background: #22c55e;
+  background: var(--admin-success);
 }
 
 .confirmGreen:disabled {
   background: #1e3a2a;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   cursor: not-allowed;
 }
 
@@ -621,12 +621,12 @@
   margin: 0 0 12px;
   font-size: var(--font-size-md, 14px);
   font-weight: 600;
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .logEmpty {
   padding: 16px 0;
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -638,7 +638,7 @@
 
 .logItem {
   padding: 12px 16px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
   background: #202020;
 }
@@ -653,12 +653,12 @@
 .logAction {
   font-size: var(--font-size-md, 14px);
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .logMeta {
   font-size: var(--font-size-xs, 12px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   white-space: nowrap;
 }
 

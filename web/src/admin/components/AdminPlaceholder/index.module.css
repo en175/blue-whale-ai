@@ -10,7 +10,7 @@
 
 .subtitle {
   margin: 10px 0 0;
-  color: #888;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
 }
 
@@ -18,9 +18,9 @@
   margin-top: 32px;
   padding: 100px 0;
   text-align: center;
-  color: #666;
+  color: var(--admin-text-faint);
   font-size: var(--font-size-md);
-  background-color: #141414;
-  border: 1px dashed #333;
+  background-color: var(--admin-surface);
+  border: 1px dashed var(--admin-border);
   border-radius: 12px;
 }

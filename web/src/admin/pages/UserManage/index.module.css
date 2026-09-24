@@ -19,19 +19,19 @@
   margin: 0;
   font-size: 24px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .subtitle {
   margin: 8px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* 表格加载/错误/空态行 */
 .tableState {
   padding: 48px 0;
-  color: #888;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
   text-align: center;
 }
@@ -39,7 +39,7 @@
 /* 弹窗内保存错误 */
 .formError {
   margin-top: 12px;
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -70,10 +70,10 @@
   width: 100%;
   height: 46px;
   padding: 0 14px 0 40px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
 }
@@ -84,16 +84,16 @@
 
 .searchInput::placeholder,
 .input::placeholder {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .select {
   height: 46px;
   padding: 0 12px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   cursor: pointer;
@@ -118,10 +118,10 @@
 .input {
   height: 46px;
   padding: 0 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   color-scheme: dark;
@@ -133,9 +133,9 @@
 
 /* ============ 表格 ============ */
 .tableWrap {
-  border: 1px solid #262626;
+  border: 1px solid var(--admin-border);
   border-radius: 12px;
-  background: #161616;
+  background: var(--admin-surface-sunken);
   overflow-x: auto;
 }
 
@@ -149,7 +149,7 @@
   padding: 16px;
   font-size: var(--font-size-sm, 13px);
   font-weight: 500;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   text-align: left;
   white-space: nowrap;
 }
@@ -162,21 +162,21 @@
   padding: 20px 16px;
   border-top: 1px solid #242424;
   font-size: var(--font-size-md, 14px);
-  color: #e6e6e6;
+  color: var(--admin-text);
   white-space: nowrap;
 }
 
 .cellId {
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
   font-size: 13px;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
 }
 
 .nickLink {
   padding: 0;
   border: none;
   background: transparent;
-  color: #3e8efc;
+  color: var(--admin-accent);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
   transition: color 0.15s;
@@ -188,26 +188,26 @@
 }
 
 .dash {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .cellNum {
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .cellTime {
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-sm, 13px);
 }
 
 .cellNeg {
-  color: #ef4444;
+  color: var(--admin-danger);
   font-weight: 600;
 }
 
 .cellPos {
-  color: #22c55e;
+  color: var(--admin-success);
   font-weight: 600;
 }
 
@@ -215,8 +215,8 @@
   display: inline-block;
   padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #c9c9c9;
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -225,7 +225,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--admin-success);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -234,7 +234,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -243,7 +243,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   background: rgba(62, 142, 252, 0.15);
-  color: #3e8efc;
+  color: var(--admin-accent);
   font-size: var(--font-size-xs, 12px);
 }
 
@@ -264,15 +264,15 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
 .iconBtn:hover {
-  background: #262626;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 /* ============ 弹窗 ============ */
@@ -283,7 +283,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgb(17 24 39 / 0.06);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -296,7 +296,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .modalWide {
@@ -307,7 +307,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .modalHead {
@@ -315,14 +315,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 22px 28px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .modalTitle {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .closeBtn {
@@ -334,13 +334,13 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
 }
 
 .closeBtn:hover {
-  background: #2a2a2a;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 .modalBody {
@@ -359,7 +359,7 @@
   display: flex;
   align-items: center;
   gap: 32px;
-  border-bottom: 1px solid #262626;
+  border-bottom: 1px solid var(--admin-border);
   margin-bottom: 24px;
 }
 
@@ -368,7 +368,7 @@
   padding: 12px 4px;
   border: none;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
   transition: color 0.15s;
@@ -376,15 +376,15 @@
 }
 
 .tab:hover {
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .tabActive {
-  color: #3e8efc;
+  color: var(--admin-accent);
 }
 
 .tabActive:hover {
-  color: #3e8efc;
+  color: var(--admin-accent);
 }
 
 .tabActive::after {
@@ -395,7 +395,7 @@
   bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: #3e8efc;
+  background: var(--admin-accent);
 }
 
 /* ============ 基本信息 ============ */
@@ -408,13 +408,13 @@
 .infoLabel {
   margin-bottom: 6px;
   font-size: var(--font-size-xs, 12px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 .infoValue {
   font-size: var(--font-size-md, 14px);
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 /* ============ 记录 tab ============ */
@@ -445,9 +445,9 @@
 }
 
 .subTableWrap {
-  border: 1px solid #262626;
+  border: 1px solid var(--admin-border);
   border-radius: 10px;
-  background: #161616;
+  background: var(--admin-surface-sunken);
   overflow-x: auto;
 }
 
@@ -461,7 +461,7 @@
   padding: 12px 14px;
   font-size: var(--font-size-xs, 12px);
   font-weight: 500;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   text-align: left;
   white-space: nowrap;
 }
@@ -470,21 +470,21 @@
   padding: 14px;
   border-top: 1px solid #242424;
   font-size: 13px;
-  color: #e6e6e6;
+  color: var(--admin-text);
   white-space: nowrap;
 }
 
 .emptyCell {
   text-align: center;
   padding: 36px 14px !important;
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 /* ============ 表单标签 ============ */
 .label {
   margin: 20px 0 10px;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .modalBody > .summaryBox + .label,
@@ -493,7 +493,7 @@
 }
 
 .required {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 .mono {
@@ -511,18 +511,18 @@
   gap: 24px;
   padding: 14px 18px;
   border-radius: 10px;
-  background: #262626;
+  background: #f3f4f6;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .summaryText b,
 .summarySub b {
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .summarySub {
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
 }
 
 /* ============ 警告提示框 ============ */
@@ -531,7 +531,7 @@
   border: 1px solid rgba(245, 158, 11, 0.35);
   border-radius: 10px;
   background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
+  color: var(--admin-warning);
   font-size: var(--font-size-md, 14px);
   line-height: 1.7;
 }
@@ -545,7 +545,7 @@
   border: 1px solid rgba(34, 197, 94, 0.35);
   border-radius: 10px;
   background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  color: var(--admin-success);
   font-size: var(--font-size-md, 14px);
   line-height: 1.7;
 }
@@ -557,23 +557,23 @@
 /* ============ 底部按钮 ============ */
 .cancelBtn {
   padding: 11px 22px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
 }
 
 .cancelBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 .confirmRed {
   padding: 11px 26px;
   border: none;
   border-radius: 8px;
-  background: #ef4444;
+  background: var(--admin-danger);
   color: #fff;
   font-size: var(--font-size-md, 14px);
   font-weight: 500;
@@ -586,7 +586,7 @@
 
 .confirmRed:disabled {
   background: #5c2626;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   cursor: not-allowed;
 }
 
@@ -607,7 +607,7 @@
 
 .confirmAmber:disabled {
   background: #4a3520;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   cursor: not-allowed;
 }
 
@@ -623,12 +623,12 @@
 }
 
 .confirmGreen:hover {
-  background: #22c55e;
+  background: var(--admin-success);
 }
 
 .confirmGreen:disabled {
   background: #1e3a2a;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   cursor: not-allowed;
 }
 

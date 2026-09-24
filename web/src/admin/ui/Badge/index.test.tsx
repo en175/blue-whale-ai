@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import Badge from './index';
+import Badge, { type BadgeTone } from './index';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -21,7 +21,7 @@ afterEach(async () => {
   mountNode.remove();
 });
 
-async function render(props: Record<string, unknown>): Promise<HTMLElement> {
+async function render(props: { children: string; tone?: BadgeTone; dot?: boolean }): Promise<HTMLElement> {
   await act(async () => {
     root.render(createElement(Badge, props));
   });

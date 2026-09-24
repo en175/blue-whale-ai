@@ -19,13 +19,13 @@
   margin: 0;
   font-size: 24px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .subtitle {
   margin: 8px 0 0;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* 操作错误条 */
@@ -34,14 +34,14 @@
   border: 1px solid rgba(239, 68, 68, 0.4);
   border-radius: 8px;
   background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-sm, 13px);
 }
 
 /* 表格加载/错误/空态行 */
 .tableState {
   padding: 48px 0;
-  color: #888;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md);
   text-align: center;
 }
@@ -49,7 +49,7 @@
 /* 表单保存错误 */
 .formError {
   margin-top: 12px;
-  color: #ef4444;
+  color: var(--admin-danger);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -88,17 +88,17 @@
 
 .tab {
   padding: 10px 20px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
   background: #1c1c1c;
-  color: #e6e6e6;
+  color: var(--admin-text);
   font-size: var(--font-size-sm, 13px);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 
 .tab:hover {
-  background: #262626;
+  background: #f3f4f6;
 }
 
 .tabActive {
@@ -125,15 +125,15 @@
 }
 
 .tabEdit:hover {
-  background: #262626;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 /* ============ 表格 ============ */
 .tableWrap {
-  border: 1px solid #262626;
+  border: 1px solid var(--admin-border);
   border-radius: 12px;
-  background: #161616;
+  background: var(--admin-surface-sunken);
   overflow-x: auto;
 }
 
@@ -147,7 +147,7 @@
   padding: 16px;
   font-size: var(--font-size-sm, 13px);
   font-weight: 500;
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
   text-align: left;
   white-space: nowrap;
 }
@@ -160,18 +160,18 @@
   padding: 22px 16px;
   border-top: 1px solid #242424;
   font-size: var(--font-size-md, 14px);
-  color: #e6e6e6;
+  color: var(--admin-text);
   white-space: nowrap;
 }
 
 .cellTitle {
   font-weight: 600;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .cellSub {
   margin-left: 8px;
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
   font-size: var(--font-size-sm, 13px);
 }
 
@@ -179,17 +179,17 @@
   display: inline-block;
   padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #c9c9c9;
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-xs, 12px);
 }
 
 .cellSort {
-  color: #c9c9c9;
+  color: var(--admin-text-muted);
 }
 
 .dash {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .resGroup {
@@ -202,7 +202,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #c9c9c9;
+  color: var(--admin-text-muted);
 }
 
 .actionGroup {
@@ -222,19 +222,19 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
 .iconBtn:hover {
-  background: #262626;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 .iconDanger:hover {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 /* ============ 弹窗通用 ============ */
@@ -245,7 +245,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgb(17 24 39 / 0.06);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -258,7 +258,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .smallModal {
@@ -267,7 +267,7 @@
   border: 1px solid #2e2e2e;
   border-radius: 14px;
   background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgb(17 24 39 / 0.06);
 }
 
 .modalHead {
@@ -275,14 +275,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 22px 28px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .modalTitle {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: var(--admin-text);
 }
 
 .closeBtn {
@@ -294,13 +294,13 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--admin-text-muted);
   cursor: pointer;
 }
 
 .closeBtn:hover {
-  background: #2a2a2a;
-  color: #f5f5f5;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
 .modalBody {
@@ -318,7 +318,7 @@
 .label {
   margin: 0 0 10px;
   font-size: var(--font-size-md, 14px);
-  color: #d6d6d6;
+  color: var(--admin-text-muted);
 }
 
 .modalBody > .label:not(:first-child) {
@@ -326,17 +326,17 @@
 }
 
 .required {
-  color: #ef4444;
+  color: var(--admin-danger);
 }
 
 .input {
   width: 100%;
   height: 46px;
   padding: 0 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   color-scheme: dark;
@@ -348,7 +348,7 @@
 
 .input::placeholder,
 .textarea::placeholder {
-  color: #6a6a6a;
+  color: var(--admin-text-faint);
 }
 
 .formRow {
@@ -362,10 +362,10 @@
   width: 100%;
   height: 46px;
   padding: 0 12px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   outline: none;
   cursor: pointer;
@@ -375,10 +375,10 @@
   width: 100%;
   min-height: 130px;
   padding: 12px 14px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #f5f5f5;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text);
   font-size: var(--font-size-md, 14px);
   font-family: inherit;
   line-height: 1.6;
@@ -393,7 +393,7 @@
 .hint {
   margin: 0 0 18px;
   font-size: var(--font-size-sm, 13px);
-  color: #8a8a8a;
+  color: var(--admin-text-muted);
 }
 
 /* ============ 图片列表 ============ */
@@ -417,8 +417,8 @@
   align-items: center;
   padding: 0 14px;
   border-radius: 8px;
-  background: #2c2c2c;
-  color: #c9c9c9;
+  background: #e5e7eb;
+  color: var(--admin-text-muted);
   font-size: var(--font-size-sm, 13px);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -441,32 +441,32 @@
   gap: 7px;
   height: 46px;
   padding: 0 18px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .ghostBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 /* ============ 底部按钮 ============ */
 .cancelBtn {
   padding: 11px 22px;
-  border: 1px solid #333;
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
+  background: var(--admin-surface-sunken);
+  color: var(--admin-text-muted);
   font-size: var(--font-size-md, 14px);
   cursor: pointer;
 }
 
 .cancelBtn:hover {
-  background: #2c2c2c;
+  background: #e5e7eb;
 }
 
 .saveBtn {
@@ -485,8 +485,8 @@
 }
 
 .saveBtn:disabled {
-  background: #2a2a2a;
-  color: #666;
+  background: #f3f4f6;
+  color: var(--admin-text-faint);
   cursor: not-allowed;
 }
 
