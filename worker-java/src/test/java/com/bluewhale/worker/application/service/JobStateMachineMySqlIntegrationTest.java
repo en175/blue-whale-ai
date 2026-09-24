@@ -1242,6 +1242,31 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     @Test
+    @DisplayName("重试收割停止点晚于创建后 122 分钟仍被接手；超出租约接管期不收")
+    void retryHarvestHandoffIsLeaseAwareBeyondCreateDeadline() {
+        long parentId = seedJob(9L, "media_extract", "dock", "failed", 1L,
+                WorkerClock.now().minusMinutes(140));
+        jdbc.update("UPDATE generation_jobs SET provider_task_id='amk-parent' WHERE id=?", parentId);
+        long handoffRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        long missedRetryId = seedJob(9L, "media_extract", "dock", "processing", 1L,
+                WorkerClock.now().minusSeconds(10));
+        // 创建 132 分钟前（超出 gmt_create 创建+130 分钟分支）、租约 5 分钟前到期：
+        // 停止点晚于创建后 122 分钟但落在租约到期+10 分钟接管期内 → 应收
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
+                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 5 MINUTE) WHERE id=?", parentId, handoffRetryId);
+        // 创建 132 分钟前、租约 20 分钟前到期：超出租约到期+10 分钟接管期 → 不收
+        jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
+                + "gmt_create=DATE_SUB(NOW(), INTERVAL 132 MINUTE), "
+                + "lease_expires_at=DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE id=?", parentId, missedRetryId);
+
+        List<Long> due = jobMapper.listDueMediaExtractJobIds(100, 120);
+        assertThat(due).contains(handoffRetryId);
+        assertThat(due).doesNotContain(missedRetryId);
+    }
+
+    @Test
     @DisplayName("audio_mix 退避期间恢复扫描不提前重投，DB 与 MQ 使用同一延迟")
     void audioMixRecoveryRespectsPersistedPollBackoff() {
         long jobId = seedClaimedJob(9L, "audio_mix", "dock", "mix-worker", 5L);
@@ -1289,6 +1314,42 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "new-worker", 5L)).isFalse();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?", jobId);
         assertThat(service.reserveParentReuseSubmit(String.valueOf(jobId), "old-worker", 5L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("media_extract 旧候选快照不能接管已续租任务；孤儿租约过期仍可接管")
+    void mediaExtractStaleCandidateCannotTakeOverRenewedLease() {
+        // 场景一（应拒绝）：领取（fence=F）→ 租约过期 → 读到旧候选快照 → 无守卫续租到未来 →
+        // 旧快照参数 CAS 必须拒绝。该竞态无法从正常通道构造（心跳是死代码、reserve 有过期守卫），
+        // 直接用 SQL 预置租约状态钉不变量。
+        long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        var claimed = service.claimMediaExtract(String.valueOf(renewedId), "worker-old");
+        assertThat(claimed).isPresent();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
+                renewedId);
+        GenerationJobEntity stale = jobMapper.findMediaExtractCandidate(renewedId);
+        assertThat(stale).isNotNull();
+        // 模拟无守卫续租通道（updateMediaExtractProgress 复活形态）把租约推到未来
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_ADD(NOW(), INTERVAL 7 MINUTE) WHERE id=?",
+                renewedId);
+        assertThat(jobMapper.claimMediaExtractCas(renewedId, "new-worker",
+                WorkerClock.now().plusSeconds(420),
+                stale.getFencingToken(), stale.getStatus())).isZero();
+        assertThat(readJob(renewedId).getLeaseOwner()).isEqualTo("worker-old");
+
+        // 场景二（对照，孤儿接管语义保持）：领取 → 租约过期 → 读候选快照 → 不续租 → 同参数 CAS 成功
+        long orphanId = seedJob(9L, "media_extract", "dock", "queued", 0L,
+                WorkerClock.now().minusSeconds(10));
+        assertThat(service.claimMediaExtract(String.valueOf(orphanId), "worker-old")).isPresent();
+        jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
+                orphanId);
+        GenerationJobEntity orphanSnap = jobMapper.findMediaExtractCandidate(orphanId);
+        assertThat(orphanSnap).isNotNull();
+        assertThat(jobMapper.claimMediaExtractCas(orphanId, "new-worker",
+                WorkerClock.now().plusSeconds(420),
+                orphanSnap.getFencingToken(), orphanSnap.getStatus())).isOne();
+        assertThat(readJob(orphanId).getLeaseOwner()).isEqualTo("new-worker");
     }
 
     @Test
