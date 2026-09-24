@@ -224,6 +224,7 @@ worker/
     - cancel-before-dispatch：cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch
     - submit 阶段：buildSubmitRequest → submit → markProviderSubmitted → scheduleNext(5s)
     - IKEA26 parent-reuse 防双扣：retry job 先查父 task → SUCCESS → publish without submit
+    - IKICD3 失租边界：收割发布守卫（CAS）未命中 = 失去执行权 → 停止（不 submit / 不记 provider_task_id / 不排轮询 / 不写迟到 Finalize），新 Worker 接手沿同路径收割；回退重新提交仅限父任务失败 / 不存在 / 查询失败 / 结果缺失（与八家族「守卫未命中回退提交」定版口径刻意不同）
     - poll 阶段：transient → rescheduleProviderPoll(5s); ≥720 → provider_timeout
     - succeeded+URL → relay → publishVideoResult
     - 参考校验：video-reference-validation.ts 完整移植（Seedance 2.0 约束）
