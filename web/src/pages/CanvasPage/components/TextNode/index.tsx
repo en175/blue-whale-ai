@@ -686,27 +686,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     };
   }, [chipMenu]);
 
-  const removeMenuChip = useCallback((event: React.SyntheticEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const editor = editorRef.current;
-    if (!chipMenu || !editor) return;
-    const chip = resolveLiveMentionChip(editor, chipMenu.chip, chipMenu.occurrence);
-    setChipMenu(null);
-    if (!chip) return;
-    const offset = domTextOffsetOfChipStart(editor, chip);
-    const sourceId = chipSourceNodeId(chip);
-    const deletedPrompt = Boolean(chip.dataset.promptIndex);
-    chip.remove();
-    if (sourceId) {
-      const twinSelector = deletedPrompt
-        ? `[data-media-node="${CSS.escape(sourceId)}"]`
-        : `[data-prompt-mirror-node="${CSS.escape(sourceId)}"]`;
-      for (const twin of editor.querySelectorAll<HTMLElement>(twinSelector)) twin.remove();
-    }
-    commitMediaEdit({ added: [], removed: [] }, { kind: 'caret', offset });
-  }, [chipMenu, commitMediaEdit]);
-
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
     editorRef.current?.focus();
