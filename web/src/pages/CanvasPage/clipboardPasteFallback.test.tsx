@@ -30,8 +30,11 @@ vi.mock('@/utils/upload', async (importOriginal) => ({
   uploadAssetFile: uploadMock.uploadAssetFile,
 }));
 
+const upsertAssets = vi.fn();
+
 /** 验收画布：t1 文本卡一张（供 C 快照优先级用例），无连线 */
 function seedFallbackDoc() {
+  upsertAssets.mockReset();
   canvasDocMock.current = {
     doc: {
       id: 11,
@@ -49,6 +52,7 @@ function seedFallbackDoc() {
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   };
+  Object.assign(canvasDocMock.current, { upsertAssets });
 }
 
 /** 打桩系统剪贴板（clipboardPaste.ts 读取接缝）：图片 items 与纯文本可分别控制，读取亦可抛错 */
@@ -120,6 +124,57 @@ describe('IKGBPB 系统剪贴板含图片', () => {
       ids: [card.id],
       ts: expect.any(Number),
     });
+  });
+
+  it('上传返回 material_status Active：节点标 Seedance 校验通过并回写快照', async () => {
+    uploadMock.uploadAssetFile.mockResolvedValue({
+      asset_id: '526',
+      url: 'http://img/clip.png',
+      mime: 'image/png',
+      width: 8,
+      height: 8,
+      size: 4,
+      material_id: 'asset-20260820153209-6c9z8',
+      material_status: 'Active',
+    });
+    stubSystemClipboard({ items: [pngClipboardItem()] });
+    await renderPage();
+
+    await pasteClipboard();
+
+    const card = mediaCopies()[0];
+    const data = card.data as Record<string, unknown>;
+    expect(data.compliancePassed).toBe(true);
+    expect(data.complianceFailed).toBe(false);
+    expect(data.materialId).toBe('asset-20260820153209-6c9z8');
+    expect(upsertAssets).toHaveBeenCalledWith([
+      expect.objectContaining({
+        asset_id: 526,
+        material_id: 'asset-20260820153209-6c9z8',
+        material_status: 'Active',
+      }),
+    ]);
+  });
+
+  it('上传返回 material_status null：不标合规通过', async () => {
+    uploadMock.uploadAssetFile.mockResolvedValue({
+      asset_id: '526',
+      url: 'http://img/clip.png',
+      mime: 'image/png',
+      width: 8,
+      height: 8,
+      size: 4,
+      material_id: null,
+      material_status: null,
+    });
+    stubSystemClipboard({ items: [pngClipboardItem()] });
+    await renderPage();
+
+    await pasteClipboard();
+
+    const data = mediaCopies()[0].data as Record<string, unknown>;
+    expect(data.compliancePassed).toBeUndefined();
+    expect(data.materialId).toBeUndefined();
   });
 });
 

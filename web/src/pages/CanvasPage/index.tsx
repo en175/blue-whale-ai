@@ -50,7 +50,7 @@ import { AssetImageRefLimitProvider, videoRefCapsOfModel } from './modelCaps';
 import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { refOverflowToast } from '@/utils/ref-overflow';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus, isUnapprovedVideoMaterialStatus } from '@/lib/video-reference-compliance';
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
@@ -5597,6 +5597,11 @@ export default function CanvasPage() {
     }
     return uploadAssetFile(file, { projectId: currentId || undefined })
       .then((done) => {
+        const compliancePatch = compliancePatchFromMaterialStatus(
+          mediaType,
+          done.material_id,
+          done.material_status,
+        );
         setMediaNodes((prev) =>
           prev.map((n) => {
             if (n.id !== nodeId) return n;
@@ -5613,10 +5618,22 @@ export default function CanvasPage() {
                 height: done.height,
                 duration: done.duration ?? undefined,
                 size: done.size,
+                ...compliancePatch,
               },
             };
           }),
         );
+        if (done.asset_id && done.url && typeof upsertAssets === 'function') {
+          upsertAssets([{
+            asset_id: Number(done.asset_id),
+            type: mediaType,
+            access_url: done.url,
+            width: typeof done.width === 'number' ? done.width : null,
+            height: typeof done.height === 'number' ? done.height : null,
+            material_id: done.material_id ?? null,
+            material_status: done.material_status ?? null,
+          }]);
+        }
         return { asset_id: done.asset_id, url: done.url, nodeId };
       })
       .catch((err) => {

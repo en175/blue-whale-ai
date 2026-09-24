@@ -260,6 +260,10 @@ export interface UploadCompleteData {
   duration: number | null;
   mime: string;
   size: number;
+  /** 资产绑定的素材库 id；未绑定为 null。dedup / complete 恒带回。 */
+  material_id?: string | null;
+  /** 素材审核镜像：Active 表示已过 Seedance 校验；未绑定或无状态行为 null。 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
 }
 
 /** 上传第三步：确认上传完成，后端校验并创建资产记录。
