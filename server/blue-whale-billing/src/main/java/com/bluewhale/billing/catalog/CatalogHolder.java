@@ -84,6 +84,22 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
     }
 
     /**
+     * 当前生效目录的折扣策略（叠加方式 + 底线）。
+     *
+     * <p>折扣规则本身在两张独立 live 表；这里只取「怎么叠加」这个策略——
+     * 它属于定价域（变更频率低），所以跟 catalog 走，不跟折扣表走。
+     *
+     * <p>无生效目录时返回全默认：{@code multiply} + 底线 3000。宁可按默认叠加，也不静默变成「不打折」。
+     */
+    public CatalogDocument.DiscountPolicy currentDiscountPolicy() {
+        var loaded = current.get();
+        if (loaded == null || loaded.document().discountPolicy() == null) {
+            return new CatalogDocument.DiscountPolicy(null, null);
+        }
+        return loaded.document().discountPolicy();
+    }
+
+    /**
      * 引擎入口：按 (model, task) 取规则。
      *
      * @return 没有配规则时返回 null —— 引擎会抛 {@code RuleNotFoundException}
