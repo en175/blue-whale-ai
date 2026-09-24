@@ -43,9 +43,6 @@ const HOVER_BRIDGE_CLEAR_MS = 120;
 const TEXT_BODY_DOUBLE_PRESS_MS = 350;
 const lastTextBodyPressAt = new Map<string, number>();
 
-/** 悬停预览估算高度：与 .chipPreview 的缩略图 max-height 200 + 名称行/内边距联动，CSS 改尺寸须同步 */
-const CHIP_PREVIEW_EST_HEIGHT = 250;
-
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
 
@@ -89,6 +86,34 @@ function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: 'before
   }
   const key = chip.dataset.promptIndex ?? '';
   return { kind: 'prompt', key, occurrence: chipsOfKey(editor, 'prompt', key).indexOf(chip) + 1, placement };
+}
+
+/** 菜单里保存的 chip 可能已被正文重放换掉：按身份 + 第几张在当前 DOM 找回。 */
+function resolveLiveMentionChip(editor: HTMLElement, chip: HTMLElement, occurrence = 1): HTMLElement | null {
+  if (chip.isConnected && editor.contains(chip)) return chip;
+  const kind = chip.dataset.mediaNode ? 'media' : 'prompt';
+  const key = chip.dataset.mediaNode || chip.dataset.promptIndex || '';
+  if (!key) return null;
+  const chips = chipsOfKey(editor, kind, key);
+  return chips[occurrence - 1] ?? chips[0] ?? null;
+}
+
+/** 正文里可点的引用标签：media chip 或方案 #N 胶囊 */
+const MENTION_CHIP_SELECTOR = '[data-media-node], [data-prompt-index]';
+
+/** 定位/替换用的来源节点：media chip 用自身身份，方案胶囊用 apply 挂上的镜像 */
+function chipSourceNodeId(chip: HTMLElement): string {
+  return chip.dataset.mediaNode || chip.dataset.promptMirrorNode || '';
+}
+
+/** 悬停预览用的类型/地址/名称；方案胶囊回落镜像字段或缩略图 DOM */
+function chipPreviewFields(chip: HTMLElement): { mediaType: string; url: string; name: string } {
+  const media = chip.querySelector<HTMLImageElement | HTMLVideoElement>('img, video');
+  const mediaType = chip.dataset.mediaType || chip.dataset.promptMirrorType
+    || (media instanceof HTMLVideoElement ? 'video' : media instanceof HTMLImageElement ? 'image' : 'audio');
+  const url = chip.dataset.mediaUrl || chip.dataset.promptMirrorUrl || media?.getAttribute('src') || '';
+  const name = chip.dataset.mediaName || chip.dataset.promptMirrorName || chip.dataset.promptLabel || '';
+  return { mediaType, url, name };
 }
 
 /** 被删 chip 在编辑器 DOM 文本流中的起点偏移（不计 chip 内部文本）。
@@ -244,15 +269,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const draftMaterialsRef = useRef(data.promptMaterials);
   useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
 
-  const [selectedMention, setSelectedMention] = useState<number | null>(null);
   const showSoloToolbar = useSoloNodeSelected(selected);
-  /** 点击选中的那张素材标签（替换/删除的光标锚点定位用；编号相同的多张取点击的那张） */
-  const [selectedMentionChip, setSelectedMentionChip] = useState<HTMLElement | null>(null);
   const canvasNodes = useStore(state => state.nodes);
-  const materialChoices = [...new Map(canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
-    && ['image', 'video', 'audio'].includes(String(node.data.mediaType))).map(node => [String(node.data.assetId), {
-      assetId: String(node.data.assetId), mediaType: node.data.mediaType as PromptMaterial['mediaType'], url: String(node.data.src ?? ''), name: String(node.data.fileName || node.data.assetId),
-    }])).values()];
 
   /* IKFM3Q 正文媒体索引（契约 §3/§5）：有效性由（来源节点存在 + textIndex 关系线存在）派生 */
   const canvasEdges = useStore(state => state.edges);
@@ -279,13 +297,17 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [mentionMenu, setMentionMenu] = useState<{ mode: 'insert' | 'rebind'; rebindNodeId?: string; rebindChip?: HTMLElement; x: number; y: number } | null>(null);
   const mentionAnchorRef = useRef<HTMLSpanElement>(null);
   /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
-  const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number } | null>(null);
+  const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number; occurrence: number } | null>(null);
   /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；below=标签贴近屏幕顶部时翻到下方 */
   const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number; below: boolean } | null>(null);
   const previewTimerRef = useRef<number | null>(null);
   /** 最近一次已同步的 media 索引（序列化 diff 的基线）：diff 只删线不补线（契约 §4） */
   const mediaIndexRef = useRef<{ mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }>({ mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] });
   useEffect(() => { mediaIndexRef.current = { mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] }; }, [data.mediaMentions, data.mediaRefs]);
+  /** 刚提交的正文快照：父级 props 尚未跟上时禁止用旧数据重放，否则删掉的标签会立刻回来 */
+  const committedReplayRef = useRef<{ text: string; prompt: string; media: string } | null>(null);
+  /** 同一手势 pointerdown+click 只删一次，避免误删下一张同身份标签 */
+  const removingChipRef = useRef(false);
 
   const zoom = useStore((state) => state.transform[2]);
 
@@ -311,11 +333,21 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   // 非编辑态：权威正文变化时按 Markdown 渲染重放（编辑中的 DOM 是权威，不覆盖）；
   // mediaValidity 随节点/连线变化，失效态与编号随派生翻转（契约 §3）
+  // 菜单打开时不重放：否则 chip 被换掉，删除/替换打在已卸节点上等于没反应
   useEffect(() => {
+    if (chipMenu) return;
     if (!editing && !contentError && editorRef.current && typeof data.text === 'string') {
+      const committed = committedReplayRef.current;
+      if (committed) {
+        const propsCaughtUp = data.text === committed.text
+          && JSON.stringify(data.promptMentions ?? []) === committed.prompt
+          && JSON.stringify(data.mediaMentions ?? []) === committed.media;
+        if (!propsCaughtUp) return;
+        committedReplayRef.current = null;
+      }
       renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? [], data.mediaMentions ?? [], data.mediaRefs ?? [], mediaValidity);
     }
-  }, [editing, contentError, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
+  }, [editing, contentError, chipMenu, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
 
   // 编辑中连线/来源变化：就地翻转 chip 失效态与编号（不重建 DOM，保住光标）
   useEffect(() => {
@@ -471,11 +503,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const validity = (nodeId: string) => delta.added.includes(nodeId) || mediaValidity(nodeId);
     const content = readPromptMentions(editor, validity);
     renderPromptMentions(editor, content.text, content.mentions, draftMaterialsRef.current ?? [], content.mediaMentions, content.mediaRefs, validity);
+    committedReplayRef.current = {
+      text: content.text,
+      prompt: JSON.stringify(content.mentions),
+      media: JSON.stringify(content.mediaMentions),
+    };
     restoreChipAnchor(anchor);
     savedAnchorRef.current = anchor ?? null;
     setChipMenu(null);
     if (content.text.length > MAX_TEXT_LENGTH) {
-      // 草稿超限仅就地提示：正文与索引都不同步（与 editMaterial 口径一致）
+      // 草稿超限仅就地提示：正文与索引都不同步
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error);
       data.onDraftError?.(id, error);
@@ -487,6 +524,31 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     else data.onTextChange?.(id, content.text);
     notifyMediaIndex(content, delta);
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex, restoreChipAnchor]);
+
+  /** 按下即删：等 click 会偶发被外点关闭或焦点抢走，看起来要点两次 */
+  const removeActiveChip = useCallback((event: React.SyntheticEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (removingChipRef.current) return;
+    const editor = editorRef.current;
+    if (!chipMenu || !editor) return;
+    removingChipRef.current = true;
+    window.setTimeout(() => { removingChipRef.current = false; }, 0);
+    const chip = resolveLiveMentionChip(editor, chipMenu.chip, chipMenu.occurrence);
+    setChipMenu(null);
+    if (!chip) return;
+    const offset = domTextOffsetOfChipStart(editor, chip);
+    const sourceId = chipSourceNodeId(chip);
+    const deletedPrompt = Boolean(chip.dataset.promptIndex);
+    chip.remove();
+    if (sourceId) {
+      const twinSelector = deletedPrompt
+        ? `[data-media-node="${CSS.escape(sourceId)}"]`
+        : `[data-prompt-mirror-node="${CSS.escape(sourceId)}"]`;
+      for (const twin of editor.querySelectorAll<HTMLElement>(twinSelector)) twin.remove();
+    }
+    commitMediaEdit({ added: [], removed: [] }, { kind: 'caret', offset });
+  }, [chipMenu, commitMediaEdit]);
 
   /** 逐键输入 @ 打开素材菜单（契约 §5：正文任意位置触发——@ 前是汉字/标点/字母/
    *  数字均弹出，与底部面板编辑器同一口径；粘贴不触发，IKFUTI） */
@@ -518,19 +580,26 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const menu = mentionMenu;
     setMentionMenu(null);
     editor.focus();
-    if (menu?.mode === 'rebind' && menu.rebindNodeId) {
-      const oldNodeId = menu.rebindNodeId;
-      if (oldNodeId === identity.nodeId) { setChipMenu(null); return; }
+    if (menu?.mode === 'rebind') {
+      const oldNodeId = menu.rebindNodeId ?? '';
+      if (oldNodeId && oldNodeId === identity.nodeId) { setChipMenu(null); return; }
       // 重绑定以身份为单位：该身份全部失效标签一并指向新来源（契约 §3）
+      // 方案胶囊与 media chip 同路径：替换后写成 media 标签，与左侧工具栏文本节点一致
       let clickedNext: HTMLElement | null = null;
-      for (const chip of editor.querySelectorAll<HTMLElement>(`[data-media-node="${CSS.escape(oldNodeId)}"]`)) {
+      const replaceChip = (chip: HTMLElement) => {
         const next = createMediaMentionChip(identity, identity.name, false);
         chip.replaceWith(next);
         if (chip === menu.rebindChip) clickedNext = next;
+      };
+      if (oldNodeId) {
+        for (const chip of editor.querySelectorAll<HTMLElement>(`[data-media-node="${CSS.escape(oldNodeId)}"]`)) replaceChip(chip);
+        for (const chip of editor.querySelectorAll<HTMLElement>(`[data-prompt-mirror-node="${CSS.escape(oldNodeId)}"]`)) replaceChip(chip);
       }
+      if (menu.rebindChip?.isConnected && menu.rebindChip.dataset.promptIndex) replaceChip(menu.rebindChip);
       const alreadyKnown = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
+      const removed = oldNodeId && oldNodeId !== identity.nodeId ? [oldNodeId] : [];
       // 光标落触发重绑定的那张替换后的新标签后（契约 §5 替换落点）
-      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed: [oldNodeId] },
+      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed },
         clickedNext ? chipAnchorOf(editor, clickedNext, 'after') : undefined);
       return;
     }
@@ -570,102 +639,73 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, [canvasNodes, rf, zoom]);
 
-  /** 点击 media 标签弹出操作层 */
-  const openChipMenu = useCallback((chip: HTMLElement) => {
+  /** 点击引用标签弹出操作层：锚在鼠标位置，菜单整体在指针上方 */
+  const openChipMenu = useCallback((chip: HTMLElement, pointer?: { x: number; y: number }) => {
+    const editor = editorRef.current;
+    const kind = chip.dataset.mediaNode ? 'media' : 'prompt';
+    const key = chip.dataset.mediaNode || chip.dataset.promptIndex || '';
+    const occurrence = editor && key ? chipsOfKey(editor, kind, key).indexOf(chip) + 1 : 1;
     const rect = chip.getBoundingClientRect();
-    setChipMenu({ chip, x: rect.left, y: rect.bottom + 6 });
+    setChipMenu({
+      chip,
+      x: pointer?.x ?? rect.left,
+      y: pointer?.y ?? rect.top,
+      occurrence: occurrence > 0 ? occurrence : 1,
+    });
   }, []);
 
-  /** 悬停 media 标签：有效标签 150ms 后出素材预览；失效标签不预览（契约 §5）。
-   *  预览默认在标签上方，标签贴近屏幕顶部放不下时翻到下方（IKFR6A）。 */
+  /** 悬停有效标签 150ms 后出素材预览，固定在图片下方 */
   const handleEditorMouseOver = useCallback((event: React.MouseEvent) => {
-    const chip = (event.target as HTMLElement).closest?.('[data-media-node]') as HTMLElement | null;
+    const chip = (event.target as HTMLElement).closest?.(MENTION_CHIP_SELECTOR) as HTMLElement | null;
     if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     if (!chip || chip.dataset.mediaInvalid === '1') { setChipPreview(null); return; }
     previewTimerRef.current = window.setTimeout(() => {
       const rect = chip.getBoundingClientRect();
-      const below = rect.top < CHIP_PREVIEW_EST_HEIGHT + 8;
-      setChipPreview({ chip, x: rect.left, y: below ? rect.bottom + 8 : rect.top, below });
+      setChipPreview({ chip, x: rect.left, y: rect.bottom + 8, below: true });
     }, 150);
   }, []);
 
   const handleEditorMouseOut = useCallback((event: React.MouseEvent) => {
-    const chip = (event.target as HTMLElement).closest?.('[data-media-node]') as HTMLElement | null;
+    const chip = (event.target as HTMLElement).closest?.(MENTION_CHIP_SELECTOR) as HTMLElement | null;
     if (!chip || chip.contains(event.relatedTarget as Node)) return;
     if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     setChipPreview(null);
   }, []);
 
-  // 点击其他区域关闭标签操作层（菜单内部点击除外）
+  // 点菜单外关闭。推迟到下一轮再听：打开菜单的那次 pointer 还在冒泡，立刻监听会把菜单马上关掉。
   useEffect(() => {
     if (!chipMenu) return;
     const close = (event: Event) => {
       if ((event.target as HTMLElement | null)?.closest?.(`.${styles.chipMenu}`)) return;
       setChipMenu(null);
     };
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    const timer = window.setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', close, true);
+    };
   }, [chipMenu]);
 
-  /** 素材标签 DOM 变更（新增/替换/删除）→ 全量重放 → 同步父级。
-   *  与 media 标签同病同修（IKFXDB，契约 §5）：重放销毁旧 DOM，按锚点在新 DOM 恢复光标——
-   *  新增/替换落标签后，删除落被删标签原位置（相邻锚定，序号按删除后 DOM 计）。 */
-  const editMaterial = (assetId: string, replaceIndex: number | null) => {
+  const removeMenuChip = useCallback((event: React.SyntheticEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
     const editor = editorRef.current;
-    const material = materialChoices.find(item => item.assetId === assetId);
-    if (!editor || (assetId && !material)) return;
-    const materials = [...(draftMaterialsRef.current ?? [])];
-    if (material && !materials.some(item => item.assetId === material.assetId)) materials.push({ assetId: material.assetId, mediaType: material.mediaType, url: material.url });
-    let anchor: ChipAnchor | undefined;
-    // 点击选中的那张同编号 chip（未选中/失配回退第一张）
-    const chipOfIndex = () => [...editor.querySelectorAll<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`)]
-      .find(chip => chip === selectedMentionChip) ?? editor.querySelector<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`);
-    if (replaceIndex !== null && !material) {
-      // 删除：光标落被删标签原位置（契约 §5）——按删除前 DOM 文本流中被删 chip 的起点偏移落位
-      const clicked = chipOfIndex();
-      const offset = clicked ? domTextOffsetOfChipStart(editor, clicked) : undefined;
-      for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
-        if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
-        chip.remove();
-      }
-      anchor = offset === undefined ? undefined : { kind: 'caret', offset };
-    } else if (replaceIndex !== null && material) {
-      for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
-        if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
-        chip.dataset.promptAsset = material.assetId;
-      }
-      const clicked = chipOfIndex();
-      if (clicked) anchor = chipAnchorOf(editor, clicked, 'after');
-    } else if (material) {
-      editor.focus();
-      const range = savedRangeRef.current?.cloneRange() ?? document.createRange();
-      if (!editor.contains(range.commonAncestorContainer)) { range.selectNodeContents(editor); range.collapse(false); }
-      const current = readPromptMentions(editor);
-      const index = Math.max(0, ...current.mentions.map(m => m.index)) + 1;
-      const label = `素材#${index}`;
-      const fragment = document.createElement('div');
-      renderPromptMentions(fragment, label, [{ start: 0, end: label.length, assetId, index }], materials);
-      range.deleteContents();
-      const chip = fragment.querySelector<HTMLElement>('[data-prompt-asset]')!;
-      range.insertNode(chip);
-      range.setStartAfter(chip); range.collapse(true);
-      savedRangeRef.current = range;
-      anchor = chipAnchorOf(editor, chip, 'after');
+    if (!chipMenu || !editor) return;
+    const chip = resolveLiveMentionChip(editor, chipMenu.chip, chipMenu.occurrence);
+    setChipMenu(null);
+    if (!chip) return;
+    const offset = domTextOffsetOfChipStart(editor, chip);
+    const sourceId = chipSourceNodeId(chip);
+    const deletedPrompt = Boolean(chip.dataset.promptIndex);
+    chip.remove();
+    if (sourceId) {
+      const twinSelector = deletedPrompt
+        ? `[data-media-node="${CSS.escape(sourceId)}"]`
+        : `[data-prompt-mirror-node="${CSS.escape(sourceId)}"]`;
+      for (const twin of editor.querySelectorAll<HTMLElement>(twinSelector)) twin.remove();
     }
-    draftMaterialsRef.current = materials;
-    const prompt = readPromptMentions(editor);
-    renderPromptMentions(editor, prompt.text, prompt.mentions, materials);
-    restoreChipAnchor(anchor);
-    savedAnchorRef.current = anchor ?? null;
-    setSelectedMention(null);
-    setSelectedMentionChip(null);
-    if (prompt.text.length > MAX_TEXT_LENGTH) {
-      const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
-      setContentError(error); data.onDraftError?.(id, error); return;
-    }
-    setContentError(''); data.onDraftError?.(id, '');
-    data.onPromptChange?.(id, prompt.text, prompt.mentions, materials);
-  };
+    commitMediaEdit({ added: [], removed: [] }, { kind: 'caret', offset });
+  }, [chipMenu, commitMediaEdit]);
 
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
@@ -866,18 +906,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           </div>
         ) : (
           <div className={`${styles.nodeBar} nodrag nopan`}>
-            {hasPromptBindings && <>
-              {!data.promptSource && (
-                <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
-                  className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
-                  onMouseDown={() => saveSelection()}
-                  onChange={event => editMaterial(event.target.value, selectedMention)}>
-                  <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
-                  {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
-                </select>
-              )}
-              {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
-            </>}
             <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
               <AtSign size={14} strokeWidth={2} />
               <span>添加到对话</span>
@@ -965,20 +993,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onInput={handleEditorInput}
           onClick={event => {
-            const mediaChip = (event.target as HTMLElement).closest<HTMLElement>('[data-media-node]');
-            if (mediaChip) {
-              const nodeId = mediaChip.dataset.mediaNode ?? '';
-              const invalid = mediaChip.dataset.mediaInvalid === '1';
-              setSelectedMention(null);
-              // 非编辑态点击有效标签直接定位来源；其余（编辑态/失效）弹出操作层（契约 §5）
-              if (!editing && !invalid) { locateSource(nodeId); return; }
-              openChipMenu(mediaChip);
-              return;
-            }
-            if (!hasPromptBindings) return;
-            const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');
-            setSelectedMention(chip ? Number(chip.dataset.promptIndex) : null);
-            setSelectedMentionChip(chip);
+            const chip = (event.target as HTMLElement).closest<HTMLElement>(MENTION_CHIP_SELECTOR);
+            if (!chip) return;
+            // 生成卡图片有时是方案胶囊、有时是 media 标签（同区间去重偶发未盖住）。
+            // 一律弹层，定位只走菜单项，避免偶发直接飞到原节点。
+            openChipMenu(chip, { x: event.clientX, y: event.clientY });
+            setChipPreview(null);
           }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
@@ -1018,35 +1038,35 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         />
       )}
 
-      {/* media 标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签（契约 §3/§5）；IKFR6A portal 到 body 钉在屏幕上 */}
+      {/* 引用标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签；方案胶囊与 media 标签共用 */}
       {chipMenu && createPortal(
-        <div className={`${styles.chipMenu} nodrag nopan`} style={{ left: chipMenu.x, top: chipMenu.y }} data-testid="media-chip-menu">
-          {chipMenu.chip.dataset.mediaInvalid !== '1' && (
-            <button type="button" className={styles.chipMenuBtn} onClick={() => { locateSource(chipMenu.chip.dataset.mediaNode ?? ''); setChipMenu(null); }}>
+        <div
+          className={`${styles.chipMenu} nodrag nopan`}
+          style={{ left: chipMenu.x, top: chipMenu.y }}
+          data-testid="media-chip-menu"
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => event.stopPropagation()}
+        >
+          {chipMenu.chip.dataset.mediaInvalid !== '1' && chipSourceNodeId(chipMenu.chip) && (
+            <button type="button" className={styles.chipMenuBtn} onPointerDown={event => { event.preventDefault(); event.stopPropagation(); locateSource(chipSourceNodeId(chipMenu.chip)); setChipMenu(null); }}>
               <Crosshair size={13} strokeWidth={2} /><span>定位来源</span>
             </button>
           )}
-          <button type="button" className={styles.chipMenuBtn} onClick={() => {
-            const nodeId = chipMenu.chip.dataset.mediaNode ?? '';
-            const rect = chipMenu.chip.getBoundingClientRect();
-            // 重绑定菜单打开前同样记录光标：取消关闭后恢复到打开时位置（契约 §5）
+          <button type="button" className={styles.chipMenuBtn} onPointerDown={event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const editor = editorRef.current;
+            const chip = editor ? resolveLiveMentionChip(editor, chipMenu.chip, chipMenu.occurrence) : chipMenu.chip;
+            if (!chip) { setChipMenu(null); return; }
+            const nodeId = chipSourceNodeId(chip);
+            const rect = chip.getBoundingClientRect();
             saveSelection();
             setChipMenu(null);
-            setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, rebindChip: chipMenu.chip, x: rect.left, y: rect.bottom });
+            setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, rebindChip: chip, x: rect.left, y: rect.bottom });
           }}>
             <RefreshCw size={13} strokeWidth={2} /><span>{chipMenu.chip.dataset.mediaInvalid === '1' ? '重新绑定' : '替换来源'}</span>
           </button>
-          <button type="button" className={`${styles.chipMenuBtn} ${styles.chipMenuDanger}`} onClick={() => {
-            const chip = chipMenu.chip;
-            const editor = editorRef.current;
-            setChipMenu(null);
-            // 光标落被删标签原位置（契约 §5 删除落点）：重放只移除该 chip，被删起点前的
-            // 文本流不变，按删除前的 DOM 文本偏移落位——不依赖相邻标签，唯一标签同样精确
-            const offset = editor && chip.isConnected ? domTextOffsetOfChipStart(editor, chip) : undefined;
-            chip.remove();
-            const anchor: ChipAnchor | undefined = offset === undefined ? undefined : { kind: 'caret', offset };
-            commitMediaEdit({ added: [], removed: [] }, anchor);
-          }}>
+          <button type="button" className={`${styles.chipMenuBtn} ${styles.chipMenuDanger}`} onPointerDown={removeActiveChip} onClick={removeActiveChip}>
             <Trash2 size={13} strokeWidth={2} /><span>删除标签</span>
           </button>
         </div>,
@@ -1055,15 +1075,17 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
       {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
           IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
-      {chipPreview && createPortal(
+      {chipPreview && createPortal((() => {
+        const preview = chipPreviewFields(chipPreview.chip);
+        return (
         <div className={`${chipStyles.chipPreview} ${chipPreview.below ? chipStyles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
-          {chipPreview.chip.dataset.mediaType === 'image' && <img src={resolveMediaSrc(chipPreview.chip.dataset.mediaUrl)} crossOrigin={remoteImageCrossOrigin(chipPreview.chip.dataset.mediaUrl)} alt="" />}
-          {chipPreview.chip.dataset.mediaType === 'video' && <video src={resolveMediaSrc(chipPreview.chip.dataset.mediaUrl)} muted autoPlay loop playsInline />}
-          {chipPreview.chip.dataset.mediaType === 'audio' && <div className={chipStyles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
-          <div className={chipStyles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
-        </div>,
-        document.body,
-      )}
+          {preview.mediaType === 'image' && <img src={resolveMediaSrc(preview.url)} crossOrigin={remoteImageCrossOrigin(preview.url)} alt="" />}
+          {preview.mediaType === 'video' && <video src={resolveMediaSrc(preview.url)} muted autoPlay loop playsInline />}
+          {preview.mediaType === 'audio' && <div className={chipStyles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
+          <div className={chipStyles.chipPreviewName}>{preview.name}</div>
+        </div>
+        );
+      })(), document.body)}
 
       {contextMenu && (
         <CanvasContextMenu

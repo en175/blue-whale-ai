@@ -493,6 +493,12 @@ function cropBoundsOf(node: Node): CropRect {
   };
 }
 
+/** 当前方案绑定是否已被边上的确认记录覆盖：只少不少（删标签）视为已同步。 */
+function planBindingsCoveredBy(current: PromptBinding[], confirmed: PromptBinding[]): boolean {
+  const confirmedKeys = new Set(confirmed.map(binding => `${binding.index}\0${binding.assetId}`));
+  return current.every(binding => confirmedKeys.has(`${binding.index}\0${binding.assetId}`));
+}
+
 /** 裁切坐标空间（显示尺寸 × 源图自然分辨率）：自然分辨率缺失（存量图未实测）时为 null。 */
 function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
   const d = (node.data ?? {}) as Record<string, unknown>;
@@ -975,6 +981,26 @@ export default function CanvasPage() {
         ? { ...edge, data: { ...edge.data, ...marker } }
         : edge
     ));
+    edgesRef.current = next;
+    setEdges(next);
+  };
+  /** 方案卡删标签后：当前绑定仍被边上已确认记录覆盖时，把 promptReference 收到新清单。
+   *  新增/换绑不是收缩，留给「同步素材到目标」；收缩不必再点一次。 */
+  const syncPlanEdgeBindingsOnShrink = (planNodeId: string, mentions: import('@lib/contracts/prompt-preview').PromptMention[]) => {
+    const nextBindings = promptBindingList(mentions);
+    let changed = false;
+    const next = edgesRef.current.map((edge) => {
+      if (edge.source !== planNodeId) return edge;
+      const confirmed = promptBindingsSchema.safeParse(
+        (edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings,
+      );
+      if (!confirmed.success) return edge;
+      if (JSON.stringify(confirmed.data) === JSON.stringify(nextBindings)) return edge;
+      if (!planBindingsCoveredBy(nextBindings, confirmed.data)) return edge;
+      changed = true;
+      return { ...edge, data: { ...edge.data, promptReference: { bindings: nextBindings } } };
+    });
+    if (!changed) return;
     edgesRef.current = next;
     setEdges(next);
   };
@@ -2234,7 +2260,11 @@ export default function CanvasPage() {
           onTitleChange: (id: string, title: string) => actionsRef.current.renameCard(id, title),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
+          onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => {
+            setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n));
+            // 删标签只收缩已确认绑定：边上 promptReference 跟随，避免 Dock 误亮「同步素材到目标」
+            syncPlanEdgeBindingsOnShrink(id, promptMentions);
+          },
           onMediaIndexChange: handleMediaIndexChange,
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -8343,7 +8373,7 @@ export default function CanvasPage() {
         const bindings = promptBindingList(mentions.data);
         const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
         const label = (confirmed.success ? confirmed.data : bindings).map(b => `#${b.index}`).join('、');
-        if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(bindings)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
+        if (!confirmed.success || !planBindingsCoveredBy(bindings, confirmed.data)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
         const missing = bindings.filter(b => !availableIds.includes(b.assetId));
         if (missing.length) return `方案索引 ${missing.map(b => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
       }
@@ -8378,7 +8408,7 @@ export default function CanvasPage() {
     if (!mentions.success || !validPromptMentions(extractTextNodeText(node.data), mentions.data)) return [];
     const bindings = promptBindingList(mentions.data);
     const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length ? undefined : []));
-    return confirmed.success && JSON.stringify(confirmed.data) === JSON.stringify(bindings) ? [] : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
+    return confirmed.success && planBindingsCoveredBy(bindings, confirmed.data) ? [] : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
   });
   const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
     const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
