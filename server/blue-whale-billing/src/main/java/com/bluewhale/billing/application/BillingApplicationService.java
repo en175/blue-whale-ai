@@ -4,6 +4,7 @@ import com.bluewhale.billing.catalog.CatalogHolder;
 import com.bluewhale.billing.ledger.Account;
 import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
+import com.bluewhale.billing.ledger.CreditSource;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
 import com.bluewhale.billing.pricing.PricingEngine;
@@ -13,6 +14,8 @@ import com.bluewhale.billing.pricing.Usage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
+import java.time.Instant;
 
 /**
  * 计费的应用层 —— **传输层唯一该调的东西**。
@@ -29,8 +32,17 @@ public class BillingApplicationService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingApplicationService.class);
 
-    /** 临期提醒的时间窗。太短用户来不及用，太长就成了天天见的噪音。 */
-    private static final int EXPIRING_WINDOW_DAYS = 30;
+    /**
+     * 临期提醒的时间窗。
+     *
+     * <p>⚠️ <b>必须严格大于 {@link GrantPolicy#DEFAULT_GIFT_DAYS}</b>，不能相等：
+     * 相等时，刚按默认策略发出的那批积分恰好压在窗口边界上——DATETIME 列会把小数秒
+     * 四舍五入，而查询用的是执行那一刻的 {@code NOW()}，两者先后不定。
+     * 结果就是同一批积分时而出现在「即将过期」里、时而消失。
+     * 多留一天，边界就不再落在任何正常发放的批次上。
+     */
+    private static final int EXPIRING_WINDOW_DAYS = GrantPolicy.DEFAULT_GIFT_DAYS + 1;
+
     /** 最多提示几条。 */
     private static final int EXPIRING_LIMIT = 5;
 
@@ -39,17 +51,38 @@ public class BillingApplicationService {
     private final CreditLotRepository lots;
     private final LedgerRepository ledger;
     private final CatalogHolder catalog;
+    private final GrantPolicy grantPolicy;
 
     public BillingApplicationService(PricingEngine pricing,
                                      CreditService credits,
                                      CreditLotRepository lots,
                                      LedgerRepository ledger,
-                                     CatalogHolder catalog) {
+                                     CatalogHolder catalog,
+                                     GrantPolicy grantPolicy) {
         this.pricing = pricing;
         this.credits = credits;
         this.lots = lots;
         this.ledger = ledger;
         this.catalog = catalog;
+        this.grantPolicy = grantPolicy;
+    }
+
+    /**
+     * 发放积分（运营 / 系统触发）。
+     *
+     * <p>有效期由 {@link GrantPolicy} 按来源决定——入口只传「发什么、发多少」。
+     * 让每个入口各自决定有效期，就是同一来源在不同入口有不同有效期的开始。
+     *
+     * @param expiresAt 显式覆盖；null = 按来源的默认策略
+     * @return 新建批次的 id
+     * @throws org.springframework.dao.DuplicateKeyException 同一 grantKey 已发放过
+     */
+    public long grant(long userId, CreditSource source, long amount,
+                      String bizType, String bizId, String grantKey, Instant expiresAt) {
+        Instant effectiveExpiry = expiresAt != null
+                ? expiresAt
+                : grantPolicy.expiryFor(source, Instant.now());
+        return credits.grant(userId, source, amount, effectiveExpiry, bizType, bizId, grantKey);
     }
 
     /**

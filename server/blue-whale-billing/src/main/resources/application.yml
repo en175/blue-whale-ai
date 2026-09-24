@@ -82,4 +82,12 @@ billing:
     enabled: true
     port: ${BILLING_GRPC_PORT:4004}
 
+  # ── 管理端接口（/admin/**，发布定价目录、发放积分） ──
+  #
+  # ⚠️ **没有鉴权**。它与 gRPC 的差别在于：Hold 受用户余额约束，而管理端能**凭空生积分**。
+  #    这个端口只在内网、只由运维与后台调用；管理端鉴权落地前**禁止对外暴露**。
+  #    要临时关掉：BILLING_ADMIN_ENABLED=false。
+  admin:
+    enabled: ${BILLING_ADMIN_ENABLED:true}
+
 # ⚠️ MQ / 账本 / 账户尚未接入：按 ADR-0113 的 P2–P4 落地时按真实形状加。

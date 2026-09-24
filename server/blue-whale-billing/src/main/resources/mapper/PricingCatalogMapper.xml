@@ -23,4 +23,13 @@
     LIMIT 1
   </select>
 
+  <!--
+    当前最大版本号；空表返回 0（COALESCE 兜住 MAX 的 NULL）。
+
+    聚合表达式，Wrapper 的 select 表达不了，所以写在 XML。
+  -->
+  <select id="selectMaxVersion" resultType="int">
+    SELECT COALESCE(MAX(catalog_version), 0) FROM billing_pricing_catalogs
+  </select>
+
 </mapper>
