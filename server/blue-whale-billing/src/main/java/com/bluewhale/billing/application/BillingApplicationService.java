@@ -122,6 +122,30 @@ public class BillingApplicationService {
                 priced.credits(), catalogVersion, priced.discount().factorBp());
     }
 
+    /** 当前生效的目录版本；影子对账与价格预览要按它复现。 */
+    public int catalogVersion() {
+        return catalog.currentVersion();
+    }
+
+    /**
+     * 计价 —— **只算不扣**（影子模式与价格预览）。
+     *
+     * <p>与 {@link #hold} 的差别只在「碰不碰钱」：同样进计价引擎、同样算折扣，
+     * 但不校验余额、不冻结、不写账本、不建预留。**纯函数式的读取**。
+     *
+     * <p>⚠️ 刻意复用 {@link #hold} 的计价那一段而不是另写一份：影子模式的全部意义是
+     * 「用同一套逻辑算一遍，看它和上游扣的对不对」。若 Quote 走另一条实现，
+     * 对上了只能说明两条实现恰好一致，对不上则不知道信谁。
+     *
+     * @throws PricingEngine.RuleNotFoundException 该组合未配规则——影子期这条异常
+     *         就是**切换前要修掉的漏配清单**
+     */
+    public PricingResult quote(QuoteQuery query) {
+        PricingRequest request = new PricingRequest(
+                query.userId(), query.modelId(), query.taskType(), query.specs(), query.tier());
+        return pricing.compute(request, query.usage(), query.pricedAt());
+    }
+
     /** 余额与临期批次（用户可见）。 */
     public BalanceView balance(long userId) {
         // 冻结总额取自账本账户，而不是再扫一遍批次表：

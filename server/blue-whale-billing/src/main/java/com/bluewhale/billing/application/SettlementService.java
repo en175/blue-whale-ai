@@ -99,7 +99,7 @@ public class SettlementService {
         } else {
             actualCredits = 0;
             for (JobEventPayload.UsageLine line : event.usage()) {
-                Usage usage = toUsage(line);
+                Usage usage = line.toUsage();
                 PricingRequest request = new PricingRequest(
                         event.userId(), line.modelId(), line.taskType(), line.specs(),
                         // tier 只在解析折扣时用，而折扣已冻结 —— 这里传什么都不影响结果
@@ -148,12 +148,5 @@ public class SettlementService {
         return new PricingEngine(
                 (modelId, taskType) -> catalog.index().get(CatalogCompiler.indexKey(modelId, taskType)),
                 new MediaPricingCalculator(frozen));
-    }
-
-    /** wire 的 quantities key → 封闭枚举。未知 key 由 {@link UsageDim#of} 直接拒绝。 */
-    private static Usage toUsage(JobEventPayload.UsageLine line) {
-        Map<UsageDim, Long> quantities = new LinkedHashMap<>();
-        line.quantities().forEach((key, value) -> quantities.put(UsageDim.of(key), value));
-        return new Usage(line.modelId(), line.taskType(), quantities);
     }
 }

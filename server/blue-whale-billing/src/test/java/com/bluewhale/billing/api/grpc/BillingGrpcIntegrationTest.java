@@ -8,6 +8,8 @@ import com.bluewhale.contracts.billing.v1.HoldRequest;
 import com.bluewhale.contracts.billing.v1.HoldResponse;
 import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
+import com.bluewhale.contracts.billing.v1.QuoteRequest;
+import com.bluewhale.contracts.billing.v1.QuoteResponse;
 import com.bluewhale.contracts.common.v1.SpecAttrs;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -205,6 +207,125 @@ class BillingGrpcIntegrationTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Quote：只算不扣（切换前影子模式的入口）
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void 报价_算出价钱但不碰钱() {
+        int lotsBefore = countLots();
+        int entriesBefore = countLedgerEntries();
+        long availableBefore = availableCredits();
+
+        QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
+                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
+                .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
+                .setTier("free")
+                .build());
+
+        assertThat(quote.getCredits()).isEqualTo(100);
+        assertThat(quote.getCatalogVersion()).isEqualTo(1);
+        assertThat(quote.getDiscountBp()).isEqualTo(10_000);
+
+        // ★ 这一条是 Quote 存在的全部理由：影子模式每天算成千上万次，
+        //   每次冻一笔再退一笔既没必要，也会把账本与对账搅浑。
+        assertThat(countLots()).isEqualTo(lotsBefore);
+        assertThat(countLedgerEntries()).isEqualTo(entriesBefore);
+        assertThat(availableCredits()).isEqualTo(availableBefore);
+        // 也不该建预留——预留是「钱已经冻住了」的凭据，报价没有冻任何东西
+        assertThat(countReservations()).isZero();
+    }
+
+    @Test
+    void 报价_余额为零也能算() {
+        // 报价回答的是「这个组合多少钱」，与用户有多少钱无关。
+        // 若它顺手校验了余额，影子模式就会漏掉所有余额不足的用户——而那正是
+        // 「我们的算价」与「上游扣费」最可能对不上的那批人。
+        jdbc.update("DELETE FROM billing_credit_lots WHERE user_id = ?", USER);
+        jdbc.update("DELETE FROM billing_ledger_entries WHERE user_id = ?", USER);
+
+        QuoteResponse quote = stub.quote(quoteRequest("free"));
+
+        assertThat(quote.getCredits()).isEqualTo(100);
+    }
+
+    @Test
+    void 报价_折扣照算() {
+        jdbc.update("INSERT INTO billing_member_discounts "
+                + "(tier, model_pattern, task_pattern, discount_bp, status) "
+                + "VALUES ('pro', '*', '*', 7000, 'enabled')");
+
+        QuoteResponse quote = stub.quote(quoteRequest("pro"));
+
+        assertThat(quote.getCredits()).isEqualTo(70);
+        assertThat(quote.getDiscountBp()).isEqualTo(7_000);
+        assertThat(quote.getAppliedList()).hasSize(1);
+        assertThat(quote.getApplied(0).getSource()).isEqualTo("member");
+        // 报价同样不碰钱
+        assertThat(countLedgerEntries()).isEqualTo(2);   // 只有 setUp 里那笔发放
+    }
+
+    @Test
+    void 报价_带用量时按用量算() {
+        // 契约用量为空、真实用量带一条：两者走的是同一段计价逻辑，
+        // 差别只在于 quantity 从哪来。
+        QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
+                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
+                .setTier("free")
+                .addUsage(com.bluewhale.contracts.billing.v1.UsageLine.newBuilder()
+                        .setModelId(MODEL).setTaskType(TASK)
+                        .putQuantities("usage.seconds", 10)
+                        .build())
+                .build());
+
+        // 规则是 constant:1，用量不参与基准量，所以仍是 100——这条测的是
+        // 「多行用量被接受并联通到计价」，不是数值随用量变化（那需要另一条规则）
+        assertThat(quote.getCredits()).isEqualTo(100);
+    }
+
+    @Test
+    void 报价_未配规则时报UNPRICEABLE() {
+        // 影子期跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单
+        assertThatThrownBy(() -> stub.quote(QuoteRequest.newBuilder()
+                .setUserId(USER).setModelId("从未配置过的模型").setTaskType(TASK)
+                .setSpecs(SpecAttrs.newBuilder().build())
+                .setTier("free")
+                .build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> {
+                    Status status = ((StatusRuntimeException) thrown).getStatus();
+                    assertThat(status.getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
+                    assertThat(status.getDescription()).contains("UNPRICEABLE");
+                });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+
+    private QuoteRequest quoteRequest(String tier) {
+        return QuoteRequest.newBuilder()
+                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
+                .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
+                .setTier(tier)
+                .build();
+    }
+
+    private int countLots() {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_credit_lots WHERE user_id = ?", Integer.class, USER);
+        return n == null ? 0 : n;
+    }
+
+    private int countLedgerEntries() {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_ledger_entries WHERE user_id = ?", Integer.class, USER);
+        return n == null ? 0 : n;
+    }
+
+    private int countReservations() {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_cost_reservations WHERE user_id = ?",
+                Integer.class, USER);
+        return n == null ? 0 : n;
+    }
 
     private HoldRequest hold(String commandId, long jobId, String tier) {
         return HoldRequest.newBuilder()

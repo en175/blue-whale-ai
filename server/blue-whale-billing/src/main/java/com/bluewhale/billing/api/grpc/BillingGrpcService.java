@@ -3,11 +3,15 @@ package com.bluewhale.billing.api.grpc;
 import com.bluewhale.billing.application.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.HoldCommand;
+import com.bluewhale.billing.application.QuoteQuery;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.InsufficientCreditsException;
 import com.bluewhale.billing.pricing.BasePriceResolver;
 import com.bluewhale.billing.pricing.PricingEngine;
+import com.bluewhale.billing.pricing.PricingResult;
+import com.bluewhale.billing.pricing.Usage;
+import com.bluewhale.contracts.billing.v1.AppliedDiscount;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
 import com.bluewhale.contracts.billing.v1.ExpiringLot;
 import com.bluewhale.contracts.billing.v1.HoldRequest;
@@ -16,6 +20,8 @@ import com.bluewhale.contracts.billing.v1.ListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.ListTransactionsResponse;
 import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
+import com.bluewhale.contracts.billing.v1.QuoteRequest;
+import com.bluewhale.contracts.billing.v1.QuoteResponse;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -24,6 +30,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -117,6 +124,67 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         observer.onError(Status.UNIMPLEMENTED
                 .withDescription("ListTransactions 尚未实现：用户可见流水表与其投影未落地")
                 .asRuntimeException());
+    }
+
+    /**
+     * 报价 —— **只算不扣**。
+     *
+     * <p>成本上它比 {@code Hold} 轻得多（不锁批次、不写库），所以影子模式可以放心按
+     * 每个任务调一次。反过来说：**这里任何一处误写成 Hold，影子期每天都在真冻钱**，
+     * 而且冻的钱要到很晚才会被发现（影子期恰恰没人盯着余额）。
+     * {@code QuoteIntegrationTest} 里有一条「报价后余额与预留都不变」钉住这点。
+     */
+    @Override
+    public void quote(QuoteRequest request, StreamObserver<QuoteResponse> observer) {
+        try {
+            Instant pricedAt = Instant.now();
+            List<com.bluewhale.contracts.billing.v1.UsageLine> lines = request.getUsageList();
+
+            PricingResult priced;
+            long credits;
+            if (lines.isEmpty()) {
+                // 提交前预览：还不知道真实用量，按契约用量（specs 里那些）算
+                priced = billing.quote(new QuoteQuery(
+                        request.getUserId(), request.getModelId(), request.getTaskType(),
+                        Map.copyOf(request.getSpecs().getAttrsMap()), request.getTier(),
+                        Usage.empty(), pricedAt));
+                credits = priced.credits();
+            } else {
+                // 结算 / 影子对账：按真实用量逐条算再求和
+                long total = 0;
+                PricingResult first = null;
+                for (var line : lines) {
+                    PricingResult one = billing.quote(new QuoteQuery(
+                            request.getUserId(), line.getModelId(), line.getTaskType(),
+                            Map.copyOf(line.getSpecs().getAttrsMap()), request.getTier(),
+                            toUsage(line), pricedAt));
+                    if (first == null) first = one;
+                    total += one.credits();
+                }
+                priced = first;
+                credits = total;
+            }
+
+            QuoteResponse.Builder response = QuoteResponse.newBuilder()
+                    .setCredits(credits)
+                    .setCatalogVersion(billing.catalogVersion())
+                    .setDiscountBp(priced.discount().factorBp());
+            for (var applied : priced.appliedDiscounts()) {
+                response.addApplied(AppliedDiscount.newBuilder()
+                        .setSource(applied.source())
+                        .setCode(applied.code() == null ? "" : applied.code())
+                        .setFactorBp((int) applied.factorBp())
+                        .build());
+            }
+            observer.onNext(response.build());
+            observer.onCompleted();
+        } catch (RuntimeException e) {
+            observer.onError(toStatus(e).asRuntimeException());
+        }
+    }
+
+    private static Usage toUsage(com.bluewhale.contracts.billing.v1.UsageLine line) {
+        return Usage.ofKeys(line.getModelId(), line.getTaskType(), line.getQuantitiesMap());
     }
 
     /**

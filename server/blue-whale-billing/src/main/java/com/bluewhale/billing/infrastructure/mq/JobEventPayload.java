@@ -54,6 +54,21 @@ public final class JobEventPayload {
             quantities = quantities == null ? Map.of() : Map.copyOf(quantities);
             specs = specs == null ? Map.of() : Map.copyOf(specs);
         }
+
+        /**
+         * wire → 领域对象。
+         *
+         * <p>放在这里而不是某个 service 里：这是**这份 wire 格式的转换**，
+         * 谁解析它谁就需要它（MQ 消费者、gRPC 的 Quote）。
+         * 放在 service 侧就会出现两份略有差异的复制品。
+         *
+         * @throws com.bluewhale.billing.pricing.UsageDim.UnknownUsageDimException
+         *         出现封闭枚举之外的维度键——**拒绝，不忽略**：
+         *         忽略一个维度就是少算一笔钱，而且没有任何信号
+         */
+        public com.bluewhale.billing.pricing.Usage toUsage() {
+            return com.bluewhale.billing.pricing.Usage.ofKeys(modelId, taskType, quantities);
+        }
     }
 
     /** {@code generation.job.failed} 的载荷 —— 触发**全额返还**。 */

@@ -11,6 +11,7 @@ syntax = "proto3";
 package billing.v1;
 
 import "common/v1/types.proto";
+import "billing/v1/usage.proto";
 
 option java_package = "com.bluewhale.contracts.billing.v1";
 option java_multiple_files = true;
@@ -32,6 +33,20 @@ service BillingService {
 
   // 用户可见流水（**一个业务动作一行**，见《计费逻辑详细设计》§2.3）。
   rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
+
+  // 计价 —— **只算不扣**。切换前的影子模式与前端价格预览用。
+  //
+  // ⚠️ **不复用 Hold**：Hold 会真的冻结积分。影子模式每天要算成千上万次，
+  //    每次都冻一笔再退一笔，既不必要，也会把账本与对账搅浑——
+  //    影子期的意义正是「不碰钱也能知道算得对不对」（runbook §3.2）。
+  //
+  // 与 Hold 的另外两点差别：
+  //   · 不校验余额：报价是「这个组合多少钱」，与用户有多少钱无关
+  //   · 允许带真实用量报价（结算/影子场景），留空则按契约用量（提交前预览）
+  //
+  // 失败语义与 Hold 一致（算不出价 → INVALID_ARGUMENT / UNPRICEABLE）：
+  // 影子模式跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单。
+  rpc Quote(QuoteRequest) returns (QuoteResponse);
 }
 
 message HoldRequest {
@@ -64,6 +79,33 @@ message HoldResponse {
   //   结算时按它复现定价——改价不影响已提交任务。
   int32 catalog_version  = 2;
   bool  duplicated       = 3; // 幂等命中
+}
+
+message QuoteRequest {
+  int64  user_id           = 1;
+  string model_id          = 2;
+  string task_type         = 3;
+  common.v1.SpecAttrs specs = 4;
+  // 用户等级：free | basic | pro | max（空 = free）。折扣解析用。
+  // 与 Hold 同理：由调用方传，避免在最热的路径上多一跳 RPC。
+  string tier              = 5;
+  // 用量。留空 = 按契约用量报价（提交前预览）；
+  // 带上 = 按真实用量报价（结算、影子对账）。
+  repeated UsageLine usage = 6;
+}
+
+message QuoteResponse {
+  int64 credits          = 1; // **整数积分** —— 用户看到的与账本记的是同一个数
+  int32 catalog_version  = 2; // 报了哪个版本；影子对账时按它复现
+  // 命中的折扣系数（万分比，10000 = 原价）与明细，供「为什么这个价」追溯
+  int32 discount_bp                = 3;
+  repeated AppliedDiscount applied = 4;
+}
+
+message AppliedDiscount {
+  string source    = 1; // member | promotion | frozen
+  string code      = 2; // 营销活动的业务码；会员折扣为空
+  int32  factor_bp = 3; // 该条规则自身的系数
 }
 
 message QueryBalanceRequest {
