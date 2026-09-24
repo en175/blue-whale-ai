@@ -180,7 +180,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
      * 续排轮询。
      */
     private void submitPhase(ClaimedMediaExtractJobDto claim, String providerToken) {
-        // 0. IKI89P（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89P（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(MediaExtractContract.TAG, claim, providerToken,
@@ -298,7 +299,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
      * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
      * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
      * <p>
-     * 返回发布守卫结果（IKI89P：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI89P：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedMediaExtractJobDto claim,
                                   ExtractAudioTaskObservation observation) {

@@ -421,8 +421,8 @@ class VideoEnhanceJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-guard")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -434,14 +434,16 @@ class VideoEnhanceJobProcessorTest {
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(false);
-        when(enhanceVideoClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(enhanceVideoClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq("1080p"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：当前 worker 已无执行权，回退提交只会
+        // 先白付一次上游 submit 再被 markProviderSubmitted 守卫丢弃（孤儿上游任务）；任务
+        // 保持 processing，由新 worker 重新领取后重新检查父任务继续收割
+        verify(enhanceVideoClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========
