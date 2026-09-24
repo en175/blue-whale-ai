@@ -17,11 +17,11 @@ plugins:
 
   # ── Java（billing-svc / worker-java 消费）
   #
-  # ⚠️ **暂未启用** —— 输出目录 `java/libs/` 还不存在（ADR-0114 的聚合目录尚未落地）。
+  # ⚠️ **暂未启用** —— 输出目录 `server/blue-whale-common/` 还不存在（ADR-0114 的聚合目录尚未落地）。
   #    `java/` 建好后取消注释即可，buf 会自动生成到 Maven 的 generated-sources 约定位置。
   #
   # - remote: buf.build/protocolbuffers/java:v29.3
-  #   out: ../java/libs/target/generated-sources/proto
+  #   out: ../server/blue-whale-common/target/generated-sources/proto
 
 # 关闭 managed mode：java_package / java_multiple_files 已在各 .proto 里**显式声明**，
 # 让配置可见比让工具隐式覆盖更好排查。

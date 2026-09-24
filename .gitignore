@@ -115,4 +115,4 @@ dist/
 # 为什么不入仓：TS 与 Java 两端各生成一份，入库会漂移；
 # 构建时生成保证「同一份 .proto 产出两端一致的代码」。见 contracts/README.md。
 backend/libs/contracts/gen/
-java/libs/target/generated-sources/proto/
+server/libs/target/generated-sources/proto/

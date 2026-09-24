@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    Java 模块聚合根（ADR-0114）。
+
+    ⚠️ 这是 **aggregation（聚合）**，不是 inheritance（继承）——刻意不设 <parent>：
+    各模块保留自己的 parent（worker / billing 用 spring-boot-starter-parent），
+    聚合 pom 只负责「一次构建全部模块 + 统一 module 列表」。
+    用继承会把 Spring Boot 的依赖管理强加到 blue-whale-common 上，
+    而它是被依赖方、不该被框架反向锁版本。
+
+    构建（⚠️ 单模块也要从聚合根跑，见下）：
+      mvn -f server/pom.xml test                                # 全部模块
+      mvn -f server/pom.xml -pl blue-whale-worker -am -q test   # 只跑 worker 及其依赖
+
+    ⚠️ **不能直接对子模块跑** `mvn -f server/blue-whale-worker/pom.xml test`：
+    worker / billing 都依赖 blue-whale-common，脱离聚合根会解析不到模块内依赖
+    （Could not find artifact com.bluewhale:blue-whale-common）。
+    `-am`（also-make）让 Maven 先构建上游模块。
+
+    ⚠️ 火山流水线的构建配置**不在本仓**：Java 模块聚合后，镜像构建的
+    **构建上下文要从子模块目录抬到 `java/`**（Docker 不能 COPY 上下文外的文件），
+    需运维同步修改，否则镜像构建会失败。
+    -->
+  <groupId>com.bluewhale</groupId>
+  <artifactId>blue-whale-java</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>blue-whale-java</name>
+  <description>Blue-Whale Java 模块聚合根：blue-whale-common（共享基础设施）+ worker（执行面）+ billing（控制面）。</description>
+
+  <modules>
+    <!-- 共享基础设施在前：worker / billing 都依赖它，构建顺序由 Maven 按依赖自动定。 -->
+    <module>blue-whale-common</module>
+    <module>blue-whale-worker</module>
+    <module>blue-whale-billing</module>
+  </modules>
+</project>

@@ -1,0 +1,20 @@
+# billing-svc 配置（骨架，ADR-0113 / ADR-0114）
+#
+# 端口约定：worker=4002，billing=4003（同段 4xxx，容器内网）
+server:
+  port: ${BILLING_PORT:4003}
+
+spring:
+  application:
+    name: billing-java          # ⚠️ 服务名，与目录名解耦。改它 = 改监控标识与未来的 MQ 消费组。
+  threads:
+    virtual:
+      enabled: true             # Java 21 虚拟线程：计费是 I/O 密集（DB + gRPC），线程不是瓶颈
+
+logging:
+  level:
+    com.bluewhale: INFO
+
+# ⚠️ 骨架阶段刻意**不配** DB / MQ / catalog：
+#    定价目录、账本、账户要等 ADR-0113 的 P2–P3 落地时按真实形状加；
+#    现在配上去只会是猜的，还会带出未使用的连接池与探活噪音。

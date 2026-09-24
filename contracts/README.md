@@ -10,7 +10,7 @@
 
 > **注**：早期设计文档里写的是 `packages/contracts/`，但本仓**没有 `packages/`**，
 > `pnpm-workspace.yaml` 只有 `backend` 一个成员。故落在顶层 `contracts/`，
-> 与现有平铺结构（`backend/` · `web/` · `java/worker/`）一致，且不用动 workspace。
+> 与现有平铺结构（`backend/` · `web/` · `server/blue-whale-worker/`）一致，且不用动 workspace。
 
 ## 结构
 
@@ -65,7 +65,7 @@ buf generate          # 需先装 buf：brew install bufbuild/buf/buf
 | 端 | 输出 |
 |---|---|
 | TypeScript | `backend/libs/contracts/gen/` |
-| Java | `java/libs/target/generated-sources/proto/`（**待 `java/` 落地后启用**） |
+| Java | `server/blue-whale-common/target/generated-sources/proto/`（**待 `java/` 落地后启用**） |
 
 ## 变更规则
 

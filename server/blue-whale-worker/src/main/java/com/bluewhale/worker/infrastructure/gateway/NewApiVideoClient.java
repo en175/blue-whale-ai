@@ -1,0 +1,468 @@
+package com.bluewhale.worker.infrastructure.gateway;
+import com.bluewhale.common.http.NewApiHttpSupport;
+
+import com.bluewhale.worker.domain.error.GenerationError;
+import com.bluewhale.worker.domain.error.VideoProviderError;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.SocketTimeoutException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * new-api 视频生成客户端（new-api-generation-ops.ts:243-327 + new-api-video-task-provider.ts 逐字移植）。
+ * <p>
+ * 端点：
+ * <ul>
+ *   <li>submit：POST /v1/video/generations（30s 超时，视频上游慢 :50-51）</li>
+ *   <li>poll：GET /v1/video/generations/{taskId}（10s 超时，默认值）</li>
+ * </ul>
+ * <p>
+ * 请求头（契约 §5 / ADR-0080）：
+ * Authorization: Bearer per-job 解封凭证、X-Trace-Id、X-Client-System: bluewhale。
+ * <p>
+ * 响应形状：
+ * <ul>
+ *   <li>submit：{data:{task_id,status}} 或顶层 {task_id,status}（:250-266）</li>
+ *   <li>poll：{data:{task_id,status,url,result_url,quota,error}} 或顶层（:269-327）</li>
+ * </ul>
+ * <p>
+ * 状态映射（new-api-video-task-provider.ts:16-17）：
+ * <ul>
+ *   <li>SUCCESS_STATUSES = {success, succeeded, completed} → "succeeded"</li>
+ *   <li>FAILED_STATUSES = {failed, failure, error, cancelled, canceled} → "failed"</li>
+ *   <li>queued → "queued"，其余 → "processing"</li>
+ * </ul>
+ * <p>
+ * 错误分类（new-api-video-task-provider.ts:22-37 toVideoProviderError）：
+ * content > quota > provider_failed（§5 IKDAJN 优先级）。
+ * <p>
+ * <b>修正一</b>：quota 字段透传但不参与结算（actual_amount_fen 删除，video-job-runner.ts:317-339
+ * 偏差告警段整体省略）；observation.quota 保留供将来恢复。
+ */
+public class NewApiVideoClient {
+
+    private static final Logger log = LoggerFactory.getLogger(NewApiVideoClient.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final MediaType JSON_TYPE = MediaType.get("application/json");
+
+    /** submit 超时 30s（new-api-video-task-provider.ts:50-51）。 */
+    private static final int SUBMIT_TIMEOUT_MS = 30_000;
+    /** poll 超时 10s（默认）。 */
+    private static final int POLL_TIMEOUT_MS = 10_000;
+
+    /** TEMP FIX（2026-09-22）：doubao-seedance-2-5 系模型名前缀，仅用于下面的线上临时兜底。 */
+    static final String SEEDANCE_25_MODEL_PREFIX = "doubao-seedance-2-5";
+
+    private static final Map<String, Boolean> SUCCESS_STATUSES = Map.of(
+            "success", true, "succeeded", true, "completed", true);
+    private static final Map<String, Boolean> FAILED_STATUSES = Map.of(
+            "failed", true, "failure", true, "error", true,
+            "cancelled", true, "canceled", true);
+
+    private final OkHttpClient submitClient;
+    private final OkHttpClient pollClient;
+    private final String baseUrl;
+
+    public NewApiVideoClient(String baseUrl) {
+        this(baseUrl, null);
+    }
+
+    /** 测试用构造器：注入共享 httpClient（null = 自建）。 */
+    NewApiVideoClient(String baseUrl, OkHttpClient sharedClient) {
+        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+        if (sharedClient != null) {
+            this.submitClient = sharedClient;
+            this.pollClient = sharedClient;
+        } else {
+            this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
+            this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
+        }
+    }
+
+    /**
+     * 提交视频生成任务（new-api-generation-ops.ts:242-267）。
+     * <p>
+     * POST /v1/video/generations，body 含 metadata.content 数组（首尾帧 + 参考）。
+     *
+     * @return {taskId, status}
+     * @throws VideoProviderError 分类后错误码
+     */
+    public SubmitResult submit(String token, VideoSubmitInput input) {
+        String traceId = UUID.randomUUID().toString();
+
+        // 构建 metadata.content（new-api-generation-ops.ts:184-227）
+        ArrayNode content = JSON.createArrayNode();
+        if (input.firstFrameImage() != null) {
+            content.add(buildContentItem("image_url", input.firstFrameImage(), "first_frame"));
+        }
+        if (input.lastFrameImage() != null) {
+            content.add(buildContentItem("image_url", input.lastFrameImage(), "last_frame"));
+        }
+        for (VideoReference ref : input.references()) {
+            String typeKey = switch (ref.type()) {
+                case "image" -> "image_url";
+                case "audio" -> "audio_url";
+                default -> "video_url";
+            };
+            // IKDJNZ：单数组 references 的帧条目自带 first_frame/last_frame；普通参考无 role，按 type 推导。
+            String role = ref.role() != null ? ref.role() : switch (ref.type()) {
+                case "image" -> "reference_image";
+                case "audio" -> "reference_audio";
+                default -> "reference_video";
+            };
+            content.add(buildContentItem(typeKey, ref.url(), role));
+        }
+
+        // ===== TEMP FIX 线上临时兜底（2026-09-22，待正式方案落地后删除）=====
+        // 现象：doubao-seedance-2-5 系带参考视频时，上游按提示词把任务判为「视频编辑」，
+        // 出参比例/时长须跟随被编辑的输入视频，故强制要求 ratio=adaptive、duration=-1，
+        // 否则回 provider_failed（"`ratio` must be `adaptive` / `duration` must be -1"）。
+        // 上游按提示词分类，我们按关键词分类（resolveVideoTaskType），两者必然有错位；
+        // 这里对上游分类结果做事后追认。**正式方案**应在接纳侧冻结快照前按 taskType 决定
+        // 并落到能力行字段，届时删除本块。
+        boolean seedance25VideoEdit = input.model().startsWith(SEEDANCE_25_MODEL_PREFIX)
+                && hasVideoReference(input.references());
+        double effectiveDuration = seedance25VideoEdit ? -1 : input.duration();
+        String effectiveRatio = seedance25VideoEdit ? "adaptive" : input.ratio();
+
+        // 构建 body（new-api-generation-ops.ts:229-240）
+        ObjectNode metadata = JSON.createObjectNode();
+        metadata.put("duration", effectiveDuration);
+        if (input.resolution() != null) metadata.put("resolution", input.resolution());
+        if (effectiveRatio != null) metadata.put("ratio", effectiveRatio);
+        // IKG0LP：用户选的「是否带音频」，缺省 true；仅能力位允许时接纳侧才会冻结进快照。
+        // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
+        if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
+        metadata.set("content", content);
+
+        ObjectNode body = JSON.createObjectNode();
+        body.put("model", input.model());
+        body.put("prompt", input.prompt());
+        body.put("duration", effectiveDuration);
+        body.put("response_format", "url");
+        body.set("metadata", metadata);
+
+        String bodyJson;
+        try {
+            bodyJson = JSON.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "请求序列化失败");
+        }
+
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(baseUrl + "/v1/video/generations")
+                .post(RequestBody.create(bodyJson, JSON_TYPE))
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
+
+        Response response;
+        try {
+            response = submitClient.newCall(request).execute();
+        } catch (SocketTimeoutException e) {
+            // submit 超时 → provider_failed（runner catch 归类，video-job-runner.ts:357-375）
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频提交超时");
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频提交失败: " + e.getMessage());
+        }
+
+        try (response) {
+            ResponseBody respBody = response.body();
+            String rawText = respBody != null ? respBody.string() : "";
+
+            if (!response.isSuccessful()) {
+                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
+                throw new VideoProviderError(code,
+                        "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated);
+            }
+
+            JsonNode parsed;
+            try {
+                parsed = JSON.readTree(rawText);
+            } catch (Exception e) {
+                // invalid_json_response → 持久错误（isTransientPollError 排除项，但 submit 阶段直接 fail）
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "new-api 视频提交响应非 JSON");
+            }
+
+            // data 解包（new-api-generation-ops.ts:250-253）
+            JsonNode data = parsed.has("data") && parsed.get("data").isObject()
+                    ? parsed.get("data") : parsed;
+
+            // task_id 或 id（:254）
+            String taskId = textOrNull(data, "task_id");
+            if (taskId == null) taskId = textOrNull(data, "id");
+            if (taskId == null || taskId.isEmpty()) {
+                // invalid_video_response（:256-262）
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "new-api 视频提交响应缺少 task_id");
+            }
+
+            String status = textOrNull(data, "status");
+            return new SubmitResult(taskId, status != null ? status : "queued");
+        } catch (VideoProviderError e) {
+            throw e;
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频提交解析失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 轮询视频任务状态（new-api-generation-ops.ts:269-327 getVideoTask）。
+     * <p>
+     * GET /v1/video/generations/{taskId}
+     *
+     * @return 观测结果（status + progress + url + quota + error）
+     * @throws VideoProviderError 网络/解析错误
+     */
+    public VideoTaskObservation poll(String token, String taskId) {
+        String traceId = UUID.randomUUID().toString();
+
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(baseUrl + "/v1/video/generations/" + encodePath(taskId))
+                .get();
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
+
+        Response response;
+        try {
+            response = pollClient.newCall(request).execute();
+        } catch (SocketTimeoutException e) {
+            // 网络超时 → 上抛让 runner 判断 isTransientPollError
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                    "new-api 视频轮询超时");
+        } catch (java.net.ConnectException e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频轮询网络不可达");
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频轮询失败: " + e.getMessage());
+        }
+
+        try (response) {
+            ResponseBody respBody = response.body();
+            String rawText = respBody != null ? respBody.string() : "";
+
+            if (!response.isSuccessful()) {
+                // HTTP 错误码 → runner isTransientPollError 判定
+                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
+                throw new VideoProviderError(code,
+                        "new-api 视频轮询失败: HTTP " + response.code() + " body=" + truncated,
+                        new HttpStatusException(response.code()));
+            }
+
+            JsonNode parsed;
+            try {
+                parsed = JSON.readTree(rawText);
+            } catch (Exception e) {
+                // invalid_json_response → 持久错误（isTransientPollError 排除项）
+                throw new VideoProviderError("invalid_json_response",
+                        "new-api 视频任务响应非 JSON");
+            }
+
+            // data 解包（:278-280）
+            JsonNode data = parsed.has("data") && parsed.get("data").isObject()
+                    ? parsed.get("data") : parsed;
+
+            String responseTaskId = textOrNull(data, "task_id");
+            if (responseTaskId == null) responseTaskId = textOrNull(data, "id");
+            String status = textOrNull(data, "status");
+
+            if (responseTaskId == null || status == null) {
+                // invalid_video_response（:284-292）→ 持久错误
+                throw new VideoProviderError("invalid_video_response",
+                        "new-api 视频任务响应无效");
+            }
+
+            // error 解析（:294-310）。
+            // IKFL53：兼容两层信封——旧 new-api 在顶层带 fail_reason（tasks 表 FAILURE 的终端错误），
+            // 新响应把 error 对象放 data.error。两处都读、取非空合并，避免因 error 放哪层而丢分类信号。
+            JsonNode rawError = data.has("error") && data.get("error").isObject() ? data.get("error") : null;
+            if (rawError == null && parsed.has("error") && parsed.get("error").isObject()) {
+                rawError = parsed.get("error");
+            }
+            TaskError taskError = null;
+            if (rawError != null) {
+                String errCode = nodeTextOrNull(rawError, "code");
+                String errMsg = nodeTextOrNull(rawError, "message");
+                taskError = new TaskError(errCode, errMsg != null ? errMsg : "视频生成失败");
+            }
+            // fail_reason（顶层优先，IKFL53）：new-api tasks 表 FAILURE 状态把终端错误放这。
+            String failReason = firstTextOrNull(parsed, data, "fail_reason");
+
+            // quota（:312，IK7G9X）
+            Double quota = data.has("quota") && data.get("quota").isNumber()
+                    ? data.get("quota").asDouble() : null;
+
+            // url / result_url（:316-321）
+            String url = textOrNull(data, "url");
+            if (url == null) url = textOrNull(data, "result_url");
+
+            // 状态映射（new-api-video-task-provider.ts:74-115）
+            String normalizedStatus = status.toLowerCase();
+
+            if (SUCCESS_STATUSES.containsKey(normalizedStatus)) {
+                return new VideoTaskObservation("succeeded", 100, url, quota, null);
+            }
+            if (FAILED_STATUSES.containsKey(normalizedStatus)) {
+                // 错误码分类（new-api-video-task-provider.ts:91-97）。
+                // IKFL53：信号源 = data.error（code+message）+ fail_reason 全文，缺一补一。
+                String upstreamCode = taskError != null ? taskError.code() : null;
+                String message = taskError != null && taskError.message() != null
+                        ? taskError.message() : (failReason != null ? failReason : "视频生成失败");
+                String upstreamText = (upstreamCode != null ? upstreamCode : "") + " "
+                        + (failReason != null ? failReason : "") + " "
+                        + (taskError != null && taskError.message() != null ? taskError.message() : "");
+                String code;
+                if (NewApiErrorClassifier.isCopyrightSignal(upstreamText)) {
+                    // IKFL53：版权拒绝 → 1038「参考内容可能涉及版权限制」（先于输出/敏感判定）。
+                    code = GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
+                } else if (NewApiErrorClassifier.isContentPolicySignal(upstreamText)) {
+                    code = GenerationError.ERROR_CONTENT_REJECTED;
+                } else if (NewApiErrorClassifier.isQuotaSignal(upstreamText)) {
+                    code = GenerationError.ERROR_QUOTA_EXHAUSTED;
+                } else {
+                    code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;
+                }
+                return new VideoTaskObservation("failed", 100, null, quota,
+                        new TaskError(code, message));
+            }
+
+            // queued / processing（:109-115）
+            String obsStatus = "queued".equals(normalizedStatus) ? "queued" : "processing";
+            return new VideoTaskObservation(obsStatus, 0, null, quota, null);
+        } catch (VideoProviderError e) {
+            throw e;
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频轮询解析失败: " + e.getMessage());
+        }
+    }
+
+    // ========== 工具方法 ==========
+
+    /** TEMP FIX（2026-09-22）：references 中是否存在「参考视频」（首尾帧为 image，type 不混淆）。 */
+    private static boolean hasVideoReference(List<VideoReference> references) {
+        for (VideoReference ref : references) {
+            if ("video".equals(ref.type())) return true;
+        }
+        return false;
+    }
+
+    private ObjectNode buildContentItem(String typeKey, String url, String role) {
+        ObjectNode item = JSON.createObjectNode();
+        item.put("type", typeKey);
+        ObjectNode urlObj = JSON.createObjectNode();
+        urlObj.put("url", url);
+        urlObj.put("role", role);
+        item.set(typeKey, urlObj);
+        item.put("role", role);
+        return item;
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return (v != null && v.isTextual()) ? v.asText() : null;
+    }
+
+    /** 节点内字段取文本（textual/数值都可读，IKFL53 防 code 解析失败丢信号）。 */
+    private static String nodeTextOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null) return null;
+        if (v.isTextual()) return v.asText();
+        if (v.isNumber()) return v.asText();
+        return null;
+    }
+
+    /** 从多个节点中按序取第一个文本字段（fail_reason 顶层优先，IKFL53）。 */
+    private static String firstTextOrNull(JsonNode primary, JsonNode secondary, String field) {
+        String v = textOrNull(primary, field);
+        return v != null ? v : textOrNull(secondary, field);
+    }
+
+    private static String encodePath(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 提取 HTTP status 用于 isTransientPollError 判定。
+     * VideoProviderError 携带 cause → runner 读 HttpStatusException.status。
+     */
+    public static class HttpStatusException extends Exception {
+        private final int status;
+        public HttpStatusException(int status) { super("HTTP " + status); this.status = status; }
+        public int getStatus() { return status; }
+    }
+
+    /** 提交结果（new-api-generation-ops.ts:263-266）。 */
+    public record SubmitResult(String taskId, String status) {}
+
+    /**
+     * 轮询观测（video-job-runner.ts:96-103 VideoTaskObservation 逐字移植）。
+     * status: queued | processing | succeeded | failed
+     */
+    public record VideoTaskObservation(
+            String status,
+            int progress,
+            String url,
+            Double quota,
+            TaskError error
+    ) {}
+
+    /** 任务错误（new-api-generation-ops.ts:294-310）。 */
+    public record TaskError(String code, String message) {}
+
+    /**
+     * 视频提交输入（new-api-generation-ops.ts:176-240 body 字段）。
+     * 由 VideoJobProcessor.buildSubmitRequest 组装。
+     */
+    public record VideoSubmitInput(
+            String model,
+            String prompt,
+            double duration,
+            String resolution,
+            String ratio,
+            String firstFrameImage,
+            String lastFrameImage,
+            List<VideoReference> references,
+            /** IKG0LP：视频是否带音频。null = 不下发该字段（能力位不允许或旧快照），维持上游默认。 */
+            Boolean generateAudio
+    ) {}
+
+    /**
+     * 视频参考素材（video-job-runner.ts:81-87 VideoReference 逐字移植）。
+     * type: image | video | audio
+     * <p>
+     * role：单数组 references 语义下帧条目带 first_frame/last_frame（IKDJNZ）；普通参考为 null，
+     * 提交时按 type 推导 reference_image/reference_video/reference_audio。
+     */
+    public record VideoReference(String type, String url, String role) {
+
+        /** 无显式 role 的普通参考：提交时按 type 推导默认角色。 */
+        public VideoReference(String type, String url) {
+            this(type, url, null);
+        }
+    }
+}
