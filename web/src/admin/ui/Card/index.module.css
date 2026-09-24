@@ -1,0 +1,34 @@
+.card {
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  /* 极轻：作用是把白卡片从冷灰底上「托」起来，不是做立体感 */
+  box-shadow: var(--admin-shadow-card);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--admin-surface-sunken);
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--admin-text);
+}
+
+.extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.body {
+  padding: 16px;
+}

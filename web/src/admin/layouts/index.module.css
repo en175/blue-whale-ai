@@ -1,35 +1,37 @@
 /* ============================================
- * AdminLayout 后台布局样式
+ * AdminLayout 后台布局样式（浅色）
  *
- * 全部走 token（--admin-* 是 admin.css 里映射到全局设计 token 的别名）。
- * 这里不再出现 # 字面量——之前这个文件自己定了一套底、边、灰、蓝，
- * 与产品主题无关，改主题它不跟。
+ * 全部走 --admin-* token（见 styles/admin.css）。这里不出现任何字面量色值。
  * ============================================ */
+
+/* ⚠️ 校验态是**独立渲染**的（那时 .adminRoot 还没挂上），所以这里必须自带背景：
+ *    全局 body 是产品前台的深色，不设背景会变成浅灰字悬在纯黑上——看不见。 */
 .guardLoading {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  color: var(--admin-text-faint, var(--color-text-tertiary));
-  font-size: var(--font-size-md);
+  background: #f7f8fa;
+  color: #6b7280;
+  font-size: 13px;
 }
 
 .layout {
   display: flex;
   width: 100%;
   height: 100vh;
-  background-color: var(--color-bg-primary);
+  background-color: var(--admin-bg);
 }
 
 /* ---- 侧边栏 ----
- * 比页面底亮一档（secondary），靠描边与内容区脱开，不用投影——
- * 侧栏是固定结构，给它投影只会让「窗口里还浮着一块」的错觉。 */
+ * 白底 + 一条描边，与冷灰的页面底分开。深处：白卡片浮在潜灰上，
+ * 靠的是明度差，不是投影——侧栏是固定结构，给它投影会让「窗口里还浮着一块」。 */
 .sidebar {
-  width: 248px;
+  width: 224px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background-color: var(--admin-surface-raised);
+  background-color: var(--admin-surface);
   border-right: 1px solid var(--admin-border);
 }
 
@@ -37,21 +39,21 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-xl);
+  padding: var(--spacing-xl) var(--spacing-lg);
   border-bottom: 1px solid var(--admin-border);
 }
 
-/* 品牌图标：**柔和底 + 强调色描边**，不是实心色块。
-   实心大色块是最容易显廉价的元素——它把强调色的用量堆到了最大。 */
+/* 品牌图标：**柔和底 + 描边**，不是实心色块。
+   实心大色块是最容易显廉价的元素——它把强调色用量堆到了最大。 */
 .brandIcon {
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--admin-accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--admin-accent) 32%, transparent);
+  background: var(--admin-accent-soft);
+  border: 1px solid var(--admin-accent-border);
   border-radius: var(--radius-md);
   color: var(--admin-accent);
 }
@@ -66,7 +68,7 @@
 .brandSub {
   color: var(--admin-text-faint);
   font-size: var(--font-size-xs);
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 /* ---- 菜单 ---- */
@@ -74,17 +76,16 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   padding: var(--spacing-md) var(--spacing-sm);
   overflow-y: auto;
 }
 
 .navItem {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-sm);
   border-radius: var(--radius-md);
   color: var(--admin-text-muted);
   font-size: var(--font-size-md);
@@ -95,7 +96,7 @@
 }
 
 .navItem:hover {
-  background-color: var(--admin-row-hover);
+  background: #f3f4f6;
   color: var(--admin-text);
 }
 
@@ -104,25 +105,14 @@
   box-shadow: var(--admin-focus);
 }
 
-/* 选中态：**柔和底 + 左侧 2px 指示条**。
-   不用整块实心强调色——那样一屏里最抢眼的是导航，而不是内容。 */
+/* 选中：淡靛蓝底 + 靛蓝字。
+   浅色下这对比已经够了，**不加左侧指示条**——那在深色里是用来补救
+   「一块亮色浮在黑底上很突兀」的，浅色里再加就是多余的装饰。 */
 .navActive,
 .navActive:hover {
-  background-color: var(--color-accent-agent-soft, rgba(76, 110, 245, 0.12));
+  background: var(--admin-accent-soft);
   color: var(--admin-accent);
   font-weight: 500;
-}
-
-.navActive::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 2px;
-  height: 16px;
-  border-radius: var(--radius-full);
-  background-color: var(--admin-accent);
 }
 
 /* ---- 底部管理员 ---- */
@@ -130,18 +120,18 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-lg) var(--spacing-xl);
+  padding: var(--spacing-md) var(--spacing-lg);
   border-top: 1px solid var(--admin-border);
 }
 
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--admin-accent) 18%, transparent);
+  background: var(--admin-accent-soft);
   border-radius: var(--radius-full);
   color: var(--admin-accent);
   font-size: var(--font-size-sm);
@@ -160,14 +150,17 @@
 .footerMail {
   color: var(--admin-text-faint);
   font-size: var(--font-size-xs);
-  margin-top: 2px;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ---- 内容区 ---- */
+/* ---- 内容区 ----
+ * padding 只在这里设一次：页面级再设就是双重内边距，
+ * 而两边不一致时表现为「这个页面比那个窄一截」，很难看出根因。 */
 .content {
   flex: 1;
   overflow-y: auto;
+  padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-2xl);
 }

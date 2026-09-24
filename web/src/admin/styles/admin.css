@@ -1,264 +1,56 @@
 /* ============================================
- * 管理端基元（primitives）
+ * 管理端设计 token（浅色）
  *
- * 为什么需要这一层：管理端此前是**游离在产品之外的第三主题**——
- * 13 个 CSS 文件、4683 行里有 745 处硬编码颜色，只引用了 35 次设计 token（0.5%）。
- * 它自己定了一套主蓝（#3e8efc，而产品是 #4c6ef5）、一套红绿（#ef4444/#22c55e，
- * 产品是 #fa5252/#40c057）、一套灰阶。结果是：改主题它不跟、和产品对不上、
- * 每个页面各写各的表格与按钮。
+ * 为什么管理端自带一套颜色，而不是直接用全局 token：
+ * 全局那套是**产品前台**的深色（--color-bg-primary: #000000 …）。管理端是浅色，
+ * 两边的明度体系整个反着来，硬套只会得到「深色变量拼出的浅色界面」。
+ * 所以这里单列一套，但遵守同样的纪律——**页面里不许再出现字面量色值**。
  *
- * 这一层做两件事：
- *   ① 把管理端要用的东西**映射回全局 token**（下面的 --admin-* 全是别名，不是新颜色）
- *   ② 给出表格 / 卡片 / 按钮 / 标签 / 输入框 / 空态的**唯一写法**，页面不再各写一份
- *
- * ⚠️ 这里**不定义任何新色值**。看到 # 开头的字面量就该警觉——那意味着又开了一套。
+ * ⚠️ 改这里的任何一个值之前先想清楚它影响多少地方：这是管理端唯一的口径。
  * ============================================ */
 
 .adminRoot {
-  /* —— 表面层次。三级足够：页面底 / 卡片 / 浮起（弹层、表头吸附） —— */
-  --admin-surface: var(--color-bg-secondary);
-  --admin-surface-raised: var(--color-bg-card);
-  --admin-surface-overlay: var(--color-bg-overlay);
-  /* 行悬停与选中：比卡片亮一档，不能太跳 */
-  --admin-row-hover: var(--color-bg-hover);
-  --admin-row-selected: var(--color-bg-active);
+  /* —— 表面。三级：页面底 / 卡片 / 凹陷（表头、代码块） ——
+   * 浅色靠**明度差**分层，不像深色靠「提亮」。所以页面底不是纯白而是很淡的冷灰。 */
+  --admin-bg: #f7f8fa;
+  --admin-surface: #ffffff;
+  --admin-surface-sunken: #fafbfc;
 
-  /* —— 描边。两级：卡片外框 vs 表内分隔线（后者更淡，避免网格感太重） —— */
-  --admin-border: var(--color-border-primary);
-  --admin-divider: #1c1c1c;
+  /* —— 描边。两级：卡片外框 vs 表内分隔线（后者更淡，避免网格感） —— */
+  --admin-border: #e5e7eb;
+  --admin-border-strong: #d1d5db;
+  --admin-divider: #f1f3f5;
 
-  /* —— 文字。四级与全局一致，禁止再出现 #8a8a8a / #9a9a9a 这类自造灰 —— */
-  --admin-text: var(--color-text-primary);
-  --admin-text-muted: var(--color-text-secondary);
-  --admin-text-faint: var(--color-text-tertiary);
+  /* —— 文字。正文用近黑而不是灰，只有次要信息才降灰 ——
+   * 浅色界面最容易「糊」：灰配灰一多就脏。 */
+  --admin-text: #111827;
+  --admin-text-muted: #6b7280;
+  --admin-text-faint: #9ca3af;
+  --admin-text-disabled: #d1d5db;
 
-  /* —— 语义色。全部走全局，不自己定红绿 —— */
-  --admin-accent: var(--color-accent-primary);
-  --admin-accent-hover: var(--color-accent-hover);
-  --admin-success: var(--color-success);
-  --admin-warning: var(--color-warning);
-  --admin-danger: var(--color-error);
+  /* —— 强调色。靛蓝而非亮蓝：低饱和在浅底上更稳重，也不容易像「默认主题色」 —— */
+  --admin-accent: #4f46e5;
+  --admin-accent-hover: #4338ca;
+  --admin-accent-soft: #eef2ff;
+  --admin-accent-border: #e0e7ff;
+  --admin-accent-ring: rgb(79 70 229 / 0.1);
 
-  /* —— 聚焦环。键盘可达性的最低要求，此前完全没有 —— */
-  --admin-focus: 0 0 0 2px var(--color-bg-primary), 0 0 0 4px var(--color-accent-primary);
-}
+  /* —— 语义色。每档一对：实色用于文字/图标，柔和底用于标签 —— */
+  --admin-success: #059669;
+  --admin-success-soft: #ecfdf5;
+  --admin-warning: #b45309;
+  --admin-warning-soft: #fffbeb;
+  --admin-danger: #dc2626;
+  --admin-danger-soft: #fef2f2;
 
-/* ── 页面骨架 ─────────────────────────────────────────────── */
+  /* —— 交互 —— */
+  --admin-row-hover: #fafbfc;
 
-/* ⚠️ 这里**不设 padding**：内容区的 padding 由壳（.content）提供。
-   两边都设就是双重内边距，而页面级 padding 一改、壳的 padding 没改时，
-   表现是「这个页面比那个页面窄一截」——很难看出根因。 */
-.bwPage {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xl);
-  max-width: 1440px;
-  margin: 0 auto;
-}
+  /* —— 投影。浅色下投影是有用的（把白卡片从冷灰底上托起来），
+   *    但必须极轻——重一点立刻显廉价。 */
+  --admin-shadow-card: 0 1px 2px rgb(16 24 40 / 0.04);
+  --admin-shadow-pop: 0 4px 12px rgb(16 24 40 / 0.08);
 
-.bwPageHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--spacing-lg);
-}
-
-.bwPageTitle {
-  margin: 0;
-  font-size: var(--font-size-2xl);
-  font-weight: 600;
-  letter-spacing: -0.01em; /* 大字号加一点负字距，是「贵」的第一来源 */
-  color: var(--admin-text);
-}
-
-.bwPageSubtitle {
-  margin: var(--spacing-xs) 0 0;
-  font-size: var(--font-size-md);
-  color: var(--admin-text-faint);
-}
-
-/* ── 卡片。层次靠「描边 + 极轻投影」，不是靠亮一块色 ───────── */
-
-.bwCard {
-  background: var(--admin-surface-raised);
-  border: 1px solid var(--admin-border);
-  border-radius: var(--radius-lg);
-  /* 极轻：深色底上的投影几乎不可见，它的作用是让卡片与页面底**脱开**，
-     不是做「立体感」。数值大了立刻变廉价。 */
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-}
-
-.bwCardPad {
-  padding: var(--spacing-xl);
-}
-
-/* ── 表格。管理端最高频的载体，写法必须只有一种 ───────────── */
-
-.bwTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-md);
-}
-
-.bwTable th {
-  padding: var(--spacing-md) var(--spacing-lg);
-  text-align: left;
-  font-weight: 500;
-  font-size: var(--font-size-sm);
-  /* 表头比正文**更淡**：它是标注，不是内容 */
-  color: var(--admin-text-faint);
-  background: var(--admin-surface);
-  border-bottom: 1px solid var(--admin-border);
-  white-space: nowrap;
-}
-
-.bwTable td {
-  padding: var(--spacing-md) var(--spacing-lg);
-  color: var(--admin-text);
-  border-bottom: 1px solid var(--admin-divider);
-}
-
-.bwTable tbody tr {
-  transition: background-color var(--transition-fast);
-}
-
-.bwTable tbody tr:hover {
-  background: var(--admin-row-hover);
-}
-
-.bwTable tbody tr:last-child td {
-  border-bottom: none;
-}
-
-/* 数值列：等宽数字。金额 / 积分 / 时间对不齐是「不专业」最直观的来源 */
-.bwNum {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* ── 按钮。三种就够：主 / 次 / 危险 ──────────────────────── */
-
-.bwBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-lg);
-  border: 1px solid var(--admin-border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--admin-text);
-  font-size: var(--font-size-md);
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast),
-    color var(--transition-fast);
-}
-
-.bwBtn:hover:not(:disabled) {
-  background: var(--admin-row-hover);
-  border-color: var(--color-border-hover);
-}
-
-.bwBtn:focus-visible {
-  outline: none;
-  box-shadow: var(--admin-focus);
-}
-
-.bwBtn:disabled {
-  color: var(--color-text-disabled);
-  cursor: not-allowed;
-}
-
-.bwBtnPrimary {
-  background: var(--admin-accent);
-  border-color: var(--admin-accent);
-  color: var(--color-accent-text);
-}
-
-.bwBtnPrimary:hover:not(:disabled) {
-  background: var(--admin-accent-hover);
-  border-color: var(--admin-accent-hover);
-}
-
-.bwBtnDanger {
-  color: var(--admin-danger);
-  border-color: color-mix(in srgb, var(--admin-danger) 40%, var(--admin-border));
-}
-
-.bwBtnDanger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--admin-danger) 12%, transparent);
-}
-
-/* ── 状态标签。底用半透明语义色，不用实心 —— 实心标签一多，页面就花 ── */
-
-.bwBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px var(--spacing-sm);
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
-  white-space: nowrap;
-}
-
-.bwBadgeNeutral {
-  background: var(--admin-row-hover);
-  color: var(--admin-text-muted);
-}
-
-.bwBadgeSuccess {
-  background: color-mix(in srgb, var(--admin-success) 16%, transparent);
-  color: var(--admin-success);
-}
-
-.bwBadgeWarning {
-  background: color-mix(in srgb, var(--admin-warning) 16%, transparent);
-  color: var(--admin-warning);
-}
-
-.bwBadgeDanger {
-  background: color-mix(in srgb, var(--admin-danger) 16%, transparent);
-  color: var(--admin-danger);
-}
-
-.bwBadgeAccent {
-  background: color-mix(in srgb, var(--admin-accent) 16%, transparent);
-  color: var(--admin-accent);
-}
-
-/* ── 输入 / 下拉。高度与圆角统一，否则一排筛选器高低不齐 ──── */
-
-.bwInput,
-.bwSelect {
-  height: 34px;
-  padding: 0 var(--spacing-md);
-  background: var(--admin-surface);
-  border: 1px solid var(--admin-border);
-  border-radius: var(--radius-md);
-  color: var(--admin-text);
-  font-size: var(--font-size-md);
-  font-family: inherit;
-  transition: border-color var(--transition-fast);
-}
-
-.bwInput::placeholder {
-  color: var(--admin-text-faint);
-}
-
-.bwInput:focus,
-.bwSelect:focus {
-  outline: none;
-  border-color: var(--admin-accent);
-  box-shadow: var(--admin-focus);
-}
-
-/* ── 空态。没有数据时给一句话，不要留一片空白 ─────────────── */
-
-.bwEmpty {
-  padding: var(--spacing-2xl) var(--spacing-xl);
-  text-align: center;
-  color: var(--admin-text-faint);
-  font-size: var(--font-size-md);
+  /* —— 聚焦环。键盘可达性的最低要求 —— */
+  --admin-focus: 0 0 0 3px var(--admin-accent-ring);
 }
