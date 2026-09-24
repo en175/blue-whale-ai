@@ -284,10 +284,10 @@ public class VideoJobProcessor implements JobProcessor {
         if (claim.providerTaskId() == null) {
             // ========== submit 阶段（video-job-runner.ts:226-243）==========
 
-            // IKEA26：parent-reuse 防双扣（:232-235）
+            // IKEA26：parent-reuse 防双扣（:232-235）；true = 收割路径已终局（已发布或失租停止，IKICD3）
             if (claim.parentProviderTaskId() != null) {
-                boolean reused = tryReuseParentResult(claim, providerToken);
-                if (reused) return;
+                boolean settled = tryReuseParentResult(claim, providerToken);
+                if (settled) return;
             }
 
             // buildSubmitRequest（:236）
@@ -379,10 +379,19 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * IKEA26：parent-reuse 防双扣（video-job-runner.ts:424-453 tryReuseParentResult）。
+     * IKEA26：parent-reuse 防双扣（video-job-runner.ts:424-453 tryReuseParentResult）；
+     * IKICD3：失租后停止重复提交。
      * <p>
      * 父 job 的 provider_task_id 对应的上游 task SUCCESS → 复用其结果 URL 走 publishVideoResult。
-     * FAILED / 不存在 / 查询失败 → 返回 false（走现有 submit 逻辑重新生成）。
+     * FAILED / 不存在 / 查询失败 / 结果 URL 缺失 → 返回 false（走现有 submit 逻辑重新生成）。
+     * <p>
+     * IKICD3 边界：已取得旧结果但发布守卫（publishVideoGuard CAS：status=processing +
+     * lease_owner + fencing_token）未命中，说明当前 Worker 已失去该 GenerationJob 的执行权
+     * （新 Worker 接管租约或 job 已终态），此时返回 true 终止本路径：不调用上游 submit、
+     * 不记录新 provider_task_id、不安排本轮询、不写迟到 Finalize；新 Worker 领取后沿同一路径
+     * 继续收割。回退重新提交只发生在「旧结果不可用」形态，与「失去执行权而停止」以日志区分。
+     * 与八家族共享骨架（ParentResultReuse）「守卫未命中回退提交」的定版口径刻意不同——
+     * 视频为计费家族，失租后重复提交产生无主上游费用，先行修正（ADR-0114）。
      */
     private boolean tryReuseParentResult(ClaimedVideoJobDto claim, String providerToken) {
         VideoTaskObservation observation;
@@ -396,15 +405,19 @@ public class VideoJobProcessor implements JobProcessor {
         }
 
         if (!"succeeded".equals(observation.status()) || observation.url() == null) {
+            log.info("[video] 重试收割未命中(旧结果不可用) jobId={} parentTask={} status={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId(), observation.status());
             return false;
         }
 
         // 复用结果 → publishVideo（:448-452）
         boolean published = publishVideo(claim, observation);
         if (!published) {
-            log.warn("video job 复用结果 publish 但状态未迁移 jobId={}（fencing 竞态？）", claim.id());
+            // IKICD3：守卫未命中 = 租约丢失或已终态，当前 Worker 不再代表该 job，停止而非回退提交
+            log.warn("[video] 重试收割失去执行权 jobId={} parentTask={}（发布守卫未命中：stale/租约失效/已终态），停止不再重新提交（IKICD3）",
+                    claim.id(), claim.parentProviderTaskId());
         }
-        return published;
+        return true;
     }
 
     /**

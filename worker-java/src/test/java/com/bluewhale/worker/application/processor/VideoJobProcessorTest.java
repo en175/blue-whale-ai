@@ -281,6 +281,71 @@ class VideoJobProcessorTest {
         verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
     }
 
+    @Test
+    @DisplayName("IKICD3: parent-reuse 查询异常 → 按不存在回退重新提交（D6 保持）")
+    void parentReusePollError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("116", false, null, 0, 0, "parent-task-err");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("116"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError("provider_failed", "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("parent-task-err"));
+        doReturn(new SubmitResult("new-task-err", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("116"), anyString(), eq(1L), eq("new-task-err"));
+
+        processor.handle("116");
+
+        verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 发布守卫未命中 → 失去执行权停止：零 submit、零 providerTaskId、零轮询、零迟到 Finalize")
+    void parentReusePublishGuardMissed_stopWithoutResubmit() {
+        ClaimedVideoJobDto claim = videoClaim("114", false, null, 0, 0, "parent-task-stale");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("114"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-stale.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-stale"));
+        doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).when(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+
+        processor.handle("114");
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKICD3: 失租停止后新 Worker 接手 → 同一收割路径完成发布（不重新提交）")
+    void parentReuseGuardMissedThenNewWorkerCompletesHarvest() {
+        ClaimedVideoJobDto staleWorker = videoClaim("115", false, null, 0, 0, "parent-task-tko");
+        ClaimedVideoJobDto newWorker = videoClaim("115", false, null, 0, 0, "parent-task-tko");
+        doReturn(Optional.of(staleWorker)).doReturn(Optional.of(newWorker))
+                .when(stateMachine).claimVideoJobById(eq("115"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-tko.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-tko"));
+        doReturn(new StoredVideo("http://tos/tko.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).doReturn(true).when(stateMachine)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+
+        processor.handle("115");   // 旧 Worker：守卫未命中 → 失去执行权，静默停止
+        processor.handle("115");   // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        verify(stateMachine, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+    }
+
     // ========== poll 路径 ==========
 
     @Test
