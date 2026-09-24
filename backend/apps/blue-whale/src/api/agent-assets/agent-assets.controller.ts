@@ -56,7 +56,8 @@ export class AgentAssetsController {
   }
 
   /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。
-   *  IKGQWR：带 `materialId` 时先过素材闸，命中后写 `material_id` / `material_group_id`。 */
+   *  IKGQWR：带 `materialId` 时先过素材闸，命中后写 `material_id` / `material_group_id`。
+   *  IKI65H：命中时响应额外带 `material_id` / `material_status`（资产绑的素材与它的审核状态）。 */
   @Post("uploads/dedup")
   @RateLimit({
     buckets: [{ scope: "asset-dedup", key: "user", limit: 30, windowMs: 60_000 }],
@@ -70,6 +71,7 @@ export class AgentAssetsController {
       projects: this.projects,
       uploads: this.assets,
       materialGate: this.material.uploadMaterialGate(authorization),
+      materialStatus: this.material.materialStatusReader(),
     });
   }
 
@@ -87,6 +89,7 @@ export class AgentAssetsController {
       uploads: this.assets,
       storage: this.storage.uploads,
       materialGate: this.material.uploadMaterialGate(authorization),
+      materialStatus: this.material.materialStatusReader(),
     });
   }
 

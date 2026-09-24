@@ -1,7 +1,11 @@
 # 上传 md5 去重 API 对接文档（前端）
 
 > 需求：IKCNLS 上传 md5 去重（后端）。目的：同一用户上传内容相同的文件时，按 md5 去重，命中则复用已有素材，跳过 TOS 重复上传，**省流量省存储**。
-> 版本：**v2（2026-09-18）**——v2 新增 §6：带素材库 id 上传时的自动关联与状态闸（IKGQWR / ADR-0093）。v1（2026-09-02）：md5 去重。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 为成功，前端 `apiRequest` 已解包 `data`。
+> 版本：**v4（2026-09-23）**——v4 新增 §8：`asset` 带回素材关联与审核状态
+> （`material_id` / `material_status`，IKI65H）。v3（2026-09-18）见 §7：`assets.md5` 不再只由上传写入
+> （IKGS73）。v2（2026-09-18）见 §6：带素材库 id 上传时的自动关联与状态闸（IKGQWR / ADR-0093）。
+> v1（2026-09-02）：md5 去重。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，
+> `code===200` 为成功，前端 `apiRequest` 已解包 `data`。
 
 ---
 
@@ -242,3 +246,78 @@ async function fileMd5(file: File): Promise<string> {
 而且不会报错、不会让任何测试变红。所以：
 - worker-java 侧两个 TOS 出口共用**同一份** `ContentDigest`，不要各写一遍；
 - `ContentDigestTest` 用 RFC 1321 公开向量把算法钉死，`TosMediaStorageTest` 钉住三处出口真的调了它。
+
+---
+
+## 8. v4（2026-09-23，IKI65H）：`asset` 带回素材关联与审核状态
+
+> 背景：ADR-0093 决策 6 末句要求「前端去掉 `toLocalAssetRecord` 里硬编码的
+> `material_status: 'Active'`，**改由服务端返回值决定**」——但服务端没返回过这个值。
+> 本版把它补上：`dedup` 与 `complete` 的 `data.asset` 各多两个字段。
+
+### 8.1 新增字段
+
+`data.asset` 新增两字段，命名与语义对齐资产列表 `GET /api/assets` 的返回项：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `material_id` | `string \| null` | 这条资产绑定的素材库素材 id（`asset-...`）。**未绑定为 `null`** |
+| `material_status` | `string \| null` | 该素材在本地镜像表里的状态：`Active` / `Processing` / `Failed`，**原样返回**。资产未绑素材、或本地没有这条素材的状态行时为 `null` |
+
+命中时的 `data`：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "dedup": true,
+    "asset": {
+      "asset_id": "526",
+      "status": "ready",
+      "type": "video",
+      "url": "https://...",
+      "width": 854,
+      "height": 480,
+      "duration": null,
+      "mime": "video/mp4",
+      "size": 100,
+      "material_id": "asset-20260820153209-6c9z8",
+      "material_status": "Active"
+    }
+  },
+  "msg": null
+}
+```
+
+**两个字段恒在**——没有可给的值时是 `null`，不是不出现。调用方不必写「有没有这个 key」的分支。
+
+### 8.2 四处口径
+
+1. **只在有资产时才有**。`dedup` 未命中仍是 `{dedup:false}`，**不带**这两个字段（没有资产可依附）。
+   `complete` 三个成功分支都带。
+2. **`material_id` 是「这条资产此刻绑的那个」**，不是请求里传的 `materialId`。两者在
+   「没传 `materialId`、但 md5 命中一条已绑素材的旧资产」时分叉——这时给的是那条旧资产身上的真实绑定。
+3. **`material_status` 不保证是 `Active`。** 闸不过时接口回 400，所以「带 `materialId` 且刚过闸」那条路上
+   它通常就是 `Active`。但下面三种情况不是：
+
+   | 情况 | 值 | 为什么 |
+   | --- | --- | --- |
+   | `complete` 幂等重放（那条路**不重新过闸**，理由见 §6.4） | `Failed` / `Processing` | 资产可能挂着一个**后来**被判 `Failed` 的素材，而接口照回 200 |
+   | `dedup` 命中一条已绑素材的旧资产、且请求**没带** `materialId` | `Failed` / `Processing` | 这条路压根没过闸（通用上传路径 `uploadAssetFile` 就是这条），回的是镜像原值 |
+   | 闸放行了，但本地这条素材**没有状态行**、上游又没给 `GroupId`（闸此时不补行，见 ADR-0093 决策 3） | `null` | 拿不到任何状态 |
+
+   ⚠️ **`null` 不等于「未通过」**，它的语义是「拿不到本地状态行」。判断素材可用性请认
+   `material_status === 'Active'`，**不要**把 `null` 当成 `Failed` ——把两者混为一谈会让一张服务端
+   刚刚判定通过并放行的素材，在消费端被当成未校验。
+4. **这个值取自本地镜像，可能陈旧**。它不等于生成门的实时判定（生成采纳处会按需实时查上游）。
+   镜像的新鲜度同理：不随每次响应刷新。
+
+### 8.3 `dedup` 与 `complete` 的形状仍然完全一致
+
+§1.2 那句「`data.asset` 形状与 `complete` 的响应 data 完全一致」**依然成立**：两个接口共用同一个
+响应构造，两个接口这次一起改了。前端复用同一套解析仍然有效。
+
+### 8.4 本期不动前端
+
+前端侧「去掉 `toLocalAssetRecord` 硬编码 `material_status: 'Active'`」是独立工单；本版只产出后端契约。
+在那边落地之前，这两个字段**在响应里存在但无人消费**。

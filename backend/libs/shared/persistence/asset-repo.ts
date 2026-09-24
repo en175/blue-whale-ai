@@ -98,6 +98,9 @@ export interface PendingUploadAsset {
   width: number | null;
   height: number | null;
   duration: number | null;
+  /** IKI65H：这一行绑的素材库素材 id（未绑为 null）。上传接口要在响应里回显它，
+   *  于是四条上传查询都把它选出来了。 */
+  material_id: string | null;
 }
 
 export interface AssetRepo {
@@ -226,6 +229,10 @@ const uploadAssetSelect = {
   width: true,
   height: true,
   duration_ms: true,
+  // IKI65H：上传接口要回显资产绑了哪个素材。四条上传查询（findCommittedUpload /
+  // findOwnedByMd5 / findOwnedByMaterialId / createUploadedAsset）共用这一份 select，
+  // 在这里加一次，四条路一起带上。
+  material_id: true,
 } as const;
 
 /** E 层合并后 assets 只剩 duration_ms（毫秒）一列：对外统一以秒暴露，缺省保持 null。 */
@@ -266,6 +273,7 @@ function toUploadAsset(row: {
   width: number | null;
   height: number | null;
   duration_ms: number | null;
+  material_id: string | null;
 }): PendingUploadAsset | null {
   if (!row.storage_key) return null;
   const { duration_ms: durationMs, ...asset } = row;
@@ -697,17 +705,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           status: "uploading",
           is_delete: false,
         },
-        select: {
-          id: true,
-          type: true,
-          storage_key: true,
-          url: true,
-          mime: true,
-          size: true,
-          width: true,
-          height: true,
-          duration_ms: true,
-        },
+        // IKI65H：这一份与 `uploadAssetSelect` 逐列相同，直接复用——留着副本的话，下次往
+        // 共用 select 加列（本次加 `material_id` 时就得手改两处）必然漏掉这一处。
+        select: uploadAssetSelect,
       });
       if (!row?.storage_key) return null;
       return {
