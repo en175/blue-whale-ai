@@ -210,6 +210,8 @@ describe('IKIHPM 提交：载荷契约、占位卡与面板关闭', () => {
     // 面板关闭、工具条恢复
     expect(panel()).toBeNull();
     expect(toolbarHiddenIds()).toEqual([]);
+    // IKIHMX 审查修复 1：源音频卡工具条「音视频合成」保留高亮（在途注入标记）
+    expect(dataOf('a1').audioVideoMuxInFlight).toBe(true);
   });
 
   it('参数两档三档全组合随载荷冻结（替换原声 + 裁到音频长）', async () => {
@@ -317,6 +319,8 @@ describe('IKIHPM 终态回填：原地变视频成品卡', () => {
     expect(html).toContain('mediaVideoPoster');
     // 来源线保留（成品卡不重画、不新增）
     expect(edges().filter((e) => e.target === 'm1')).toHaveLength(2);
+    // IKIHMX 审查修复 1：终态回填清身份后，源卡「音视频合成」高亮随之消失
+    expect(dataOf('a1').audioVideoMuxInFlight).toBeUndefined();
   });
 
   it('供应商时长/分辨率缺失时回落源视频资产（产物类型仍翻 mediaType）', async () => {

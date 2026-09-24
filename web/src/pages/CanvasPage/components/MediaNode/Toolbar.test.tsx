@@ -306,6 +306,22 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音�
     expect(onComposeAudioVideo).not.toHaveBeenCalled();
   });
 
+  /* IKIHMX 审查修复 1：源卡有在途合成任务（CanvasPage 渲染期注入 audioVideoMuxInFlight）
+     时「音视频合成」按钮保留高亮（toolBtnActive + aria-pressed，规格：发送后面板关闭、
+     工具条恢复且高亮保留）；无标记时为普通态。 */
+  it('在途合成（audioVideoMuxInFlight）按钮保留高亮：toolBtnActive + aria-pressed；无标记为普通态', async () => {
+    await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', audioVideoMuxInFlight: true } });
+    const active = audioTool('compose');
+    expect(active.classList.contains(styles.toolBtnActive)).toBe(true);
+    expect(active.getAttribute('aria-pressed')).toBe('true');
+    expect(active.getAttribute('aria-disabled')).toBeNull();
+
+    await renderToolbar('audio', { id: 'plain-node', data: { src: 'https://example.test/a.mp3' } });
+    const plain = audioTool('compose');
+    expect(plain.classList.contains(styles.toolBtnActive)).toBe(false);
+    expect(plain.getAttribute('aria-pressed')).toBeNull();
+  });
+
   it('非成品卡（草稿/生成中/失败）：整条工具条不渲染（数据门先拦）；门槛函数级覆盖见 audioVideoMux.test.ts', async () => {
     for (const genStatus of ['draft', 'generating', 'failed']) {
       await renderToolbar('audio', { id: 'gate-node', genStatus: genStatus as never });

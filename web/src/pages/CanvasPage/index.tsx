@@ -12539,6 +12539,20 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId, doc]);
 
+  /** 源音频卡有在途音视频合成任务（IKIHMX 审查修复 1）：画布上 genStatus=generating 且带
+   *  audioVideoMux 身份的卡（正常发送原地转生成中 + 刷新恢复补的占位卡同源）→ 其固定音频源
+   *  卡工具条「音视频合成」按钮保留高亮（规格：发送后面板关闭、工具条恢复且高亮保留；
+   *  终态回填清身份、失败卡不高亮失败即可重试）。渲染期注入 audioVideoMuxInFlight 标记，
+   *  不持久化（口径同 soloToolbarHidden）。 */
+  const audioVideoMuxInFlightSourceIds = new Set(
+    mediaNodes
+      .filter((n) => {
+        if ((n.data as Record<string, unknown>).genStatus !== 'generating') return false;
+        return audioVideoMuxIdentityOf(n) !== undefined;
+      })
+      .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
+  );
+
   return (
     <div className={styles.canvasPage}>
       {/* 顶部工具栏 */}
@@ -12613,6 +12627,7 @@ export default function CanvasPage() {
               || audioTrimTargetNodeId || audioSpeedTargetNodeId
               || vocalSplitTargetNodeId || sceneSplitTargetNodeId
               || smartMattingTargetNodeId || audioVideoMuxDraftId != null
+              || audioVideoMuxInFlightSourceIds.size > 0
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     n.id === eraseTargetNodeId
@@ -12632,6 +12647,7 @@ export default function CanvasPage() {
                     && n.id !== audioTrimTargetNodeId
                     && n.id !== audioSpeedTargetNodeId
                     && !hideToolbar
+                    && !audioVideoMuxInFlightSourceIds.has(n.id)
                   ) return n;
                   const data: Record<string, unknown> = { ...n.data };
                   if (n.id === eraseTargetNodeId) {
@@ -12682,6 +12698,9 @@ export default function CanvasPage() {
                   if (n.id === smartMattingTargetNodeId) data.splitEditing = true;
                   if (n.id === submittingNodeId) data.submitting = true;
                   if (n.id === cropTargetNodeId) data.cropEditing = true;
+                  // 在途合成源卡（IKIHMX 审查修复 1）：工具条「音视频合成」按钮保留高亮的
+                  //  观测标记（MediaNodeToolbar 消费）
+                  if (audioVideoMuxInFlightSourceIds.has(n.id)) data.audioVideoMuxInFlight = true;
                   if (hideToolbar) data.soloToolbarHidden = true;
                   return { ...n, data };
                 })
@@ -12708,7 +12727,17 @@ export default function CanvasPage() {
                     && enhancePanelToolbarNode.id === soloMediaToolbarNode.id
                   }
                 >
-                  <MediaNodeToolbar id={soloMediaToolbarNode.id} data={soloMediaToolbarNode.data as MediaNodeData} />
+                  <MediaNodeToolbar
+                    id={soloMediaToolbarNode.id}
+                    data={{
+                      ...soloMediaToolbarNode.data,
+                      // 在途合成源卡（IKIHMX 审查修复 1）：工具条数据取自 state，此处合并
+                      // 渲染期标记让「音视频合成」按钮保留高亮（不持久化）
+                      ...(audioVideoMuxInFlightSourceIds.has(soloMediaToolbarNode.id)
+                        ? { audioVideoMuxInFlight: true }
+                        : {}),
+                    } as MediaNodeData}
+                  />
                 </NodeFollowToolbar>
               ) : null}
               {/* IKGYYF：资产卡顶部操作条迁入钉屏幕层（同容器 + AssetCardToolbar 内容）；
@@ -13349,8 +13378,8 @@ export default function CanvasPage() {
             视频槽三态（未绑定引导/绑定中跟手/已绑定信息条）+ 原声处理两档 + 时长对齐三档
             + ⚡0 本期免费 + 圆形发送钮（未绑定置灰提示「先选择视频」）；参数与绑定写卡随
             草稿卡持久化（重开恢复），素材库浮层选中即绑定不拉线；四退出（X/Esc/点其他卡/
-            点空白）由本页承担，未发送退出草稿卡与两条语义边保留（可手动删除）；发送的真实
-            提交与占位回填归 IKIHP M（本票 onSend 为空实现，不建任务不改卡态） */}
+            点空白）由本页承担，未发送退出草稿卡与两条语义边保留（可手动删除）；发送经
+            onSend={handleAudioVideoMuxSend} 真实提交并原地回填生成中占位（IKIHP M 已接线） */}
         {audioVideoMuxDraftNode && (
           <AudioVideoMuxPanel
             identity={audioVideoMuxIdentityOf(audioVideoMuxDraftNode)!}

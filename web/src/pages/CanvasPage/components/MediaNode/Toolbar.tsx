@@ -150,6 +150,10 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  缺失置灰，时长/分辨率元数据缺失不拦） */
   const handleComposeAudioVideo = useCallback(() => data.onComposeAudioVideo?.(id), [data, id]);
   const audioVideoMuxDisabledReason = audioVideoMuxSourceError(data as unknown as Record<string, unknown>);
+  /** 在途合成高亮（IKIHMX 审查修复 1）：源卡有生成中的音视频合成任务时按钮保留高亮
+   *  （CanvasPage 渲染期注入 audioVideoMuxInFlight，不持久化；规格：发送后面板关闭、
+   *  工具条恢复且『音视频合成』保留高亮），aria-pressed 表达开关型激活态 */
+  const audioVideoMuxInFlight = (data as unknown as Record<string, unknown>).audioVideoMuxInFlight === true;
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
    *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
   const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
@@ -430,11 +434,14 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
       {/* 音频卡「音视频合成」入口（IKIHPK）：第四钮自占位点亮——形态与置灰口径同
           「截取」「调速」先例（aria-disabled 置灰保持渲染、置灰 title 悬停原因、
           可用态无默认悬停文案）；点击守卫后派发 onComposeAudioVideo，草稿卡会话与
-          拖线绑定归本票，提交回填归 IKIHP M */}
+          拖线绑定归本票，提交回填归 IKIHP M。IKIHMX 审查修复 1：源卡有在途合成任务时
+          （audioVideoMuxInFlight）按钮保留高亮（toolBtnActive + aria-pressed） */}
       {toolbar.audioTools && (
-        <button type="button" className={styles.toolBtn}
+        <button type="button"
+          className={`${styles.toolBtn} ${audioVideoMuxInFlight ? styles.toolBtnActive : ''}`}
           title={audioVideoMuxDisabledReason ?? undefined}
           aria-disabled={audioVideoMuxDisabledReason !== null || undefined}
+          aria-pressed={audioVideoMuxInFlight || undefined}
           data-testid="audio-tool-compose"
           onClick={() => { if (audioVideoMuxDisabledReason === null) handleComposeAudioVideo(); }}>
           <Clapperboard size={14} strokeWidth={2} />
