@@ -43,8 +43,20 @@ cd <worktree>/backend && npm run build   # prisma generate && tsc -b && tsc-alia
 形态 A：本地库（默认）
 
 ```bash
-cd backend && PORT=3100 nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
+cd backend && PORT=3100 NEW_API_UPSTREAM_KEY='<统一 key，取自测试站网关>' \
+  nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
+
+⚠️ **`NEW_API_UPSTREAM_KEY` 现在是登录的硬依赖**。new-api 已从「我们的用户体系」变成
+「带一把统一 key 的上游供应商」，登录成功后会话里存的不再是该用户自己的 `sk-`，
+而是这把项目级 key。**缺它时 `/auth/login` 直接 503**（`UpstreamCredentialMissingError`），
+而不是等到用户点生成才炸。
+
+为什么不给默认值 / 不降级成空串：空串会让下游拿 `Bearer ` 去打 new-api 然后收到 401，
+报错点离原因很远。宁可在登录处当场说清楚缺哪个变量。
+
+取值来源：与其它 new-api 变量一样，从测试站 backend 容器的 `docker inspect` 提取
+（见下方「形态 B」的连接串获取），只走进程环境变量注入，**不落任何入库文件或日志**（ADR-0064）。
 
 形态 B：远程测试站库（用测试站账号登录、读测试站素材）
 
@@ -54,11 +66,12 @@ set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务三件套；缺�
 nohup env \
   DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale' \
   NEW_API_BASE_URL='http://14.103.43.52:3006' \
+  NEW_API_UPSTREAM_KEY='<统一 key，从同一容器 inspect 取>' \
   REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_DB=0 \
   PORT=3100 node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
-- 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/api-gateway.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
+- 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/weitian.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
 - Agent 三件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN` + `NEW_API_AGENT_BILLING_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这三项：右侧边栏 Agent 会话 502、模型网关 503。
 - Redis 三个变量必须显式传。`REDIS_CONN_STRING` 不带 `/0` 库号会被解析成 db=NaN，启动即崩（`ReplyError: SELECT NaN`）。
 - 风险先告知用户：此形态下写操作真实落测试站库（同事可见），生成任务与 Agent 对话消耗测试站真实积分。
