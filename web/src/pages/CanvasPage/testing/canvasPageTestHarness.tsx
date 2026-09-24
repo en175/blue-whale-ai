@@ -87,6 +87,10 @@ vi.mock('@/api/auth', () => ({
   fetchQuota: apiMocks.fetchQuota,
   toSessionUser: apiMocks.toSessionUser,
 }));
+/** 素材库分页记录（IKIHPK 音视频合成素材库浮层等新消费方）：默认空列表，用例按需注入
+ *  （assetPageQueryOptions 的 queryFn 在查询发起时读取，beforeEach 设置即可生效） */
+export const assetLibraryRecords: { current: Array<Record<string, unknown>> } = { current: [] };
+
 vi.mock('@/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
   fetchUploadPresign: vi.fn(),
@@ -95,6 +99,17 @@ vi.mock('@/api/assets', () => ({
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
   linkAssetToProject: vi.fn(),
+  assetPageQueryOptions: (type: string, size = 30) => ({
+    queryKey: ['assets', 'pages', type, size],
+    initialPageParam: 1,
+    queryFn: async () => ({
+      records: assetLibraryRecords.current,
+      total: assetLibraryRecords.current.length,
+      size,
+      current: 1,
+    }),
+    getNextPageParam: () => undefined,
+  }),
 }));
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,

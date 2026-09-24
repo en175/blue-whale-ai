@@ -11,6 +11,7 @@ import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { AUDIO_SPEED_EDGE_ORIGIN } from './audioSpeed';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
+import { AUDIO_VIDEO_MUX_EDGE_ORIGIN } from './audioVideoMux';
 
 /* IKFDFZ 音频参考连线：来源有效性校验、「连线 → 媒体参考」推导与统一添加校验。
    面板展示与提交输入共用同一推导，保证所见即实际输入。 */
@@ -169,6 +170,21 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     const result = audioMediaRefsOf('speeded', sourceEdges, [...nodes, gone]);
     expect(result.refs).toEqual([]);
     expect(result.invalid).toEqual([]);
+  });
+
+  it('音视频合成来源边（origin=audio-video-mux）跳过：固定音频源与视频绑定均不占参考位、不进 @ 编号（IKIHPK）', () => {
+    const video = mediaNode('v1', { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '视v1', assetId: 'v-1' });
+    const sourceEdges = [
+      { id: 'audio', source: 'u1', target: 'muxed', data: { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN } },
+      { id: 'bind', source: 'v1', target: 'muxed', data: { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN } },
+      { id: 'e2', source: 'u2', target: 'muxed' },
+    ] as Edge[];
+    const result = audioMediaRefsOf('muxed', sourceEdges, [...nodes, video]);
+    // 视频绑定边若不跳过会进 invalid（视频非法参考）并阻塞合成成品卡再生成
+    expect(result.invalid).toEqual([]);
+    expect(result.refs).toEqual([
+      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },
+    ]);
   });
 });
 

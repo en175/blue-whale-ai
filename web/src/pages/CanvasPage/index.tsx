@@ -21,7 +21,7 @@ import {
   FOLLOW_PAD,
   type VideoFollowMode,
 } from './followDialog';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
+import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError, cardNameOfNode } from './mediaRefs';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from './planApplyEdges';
 import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, mergedAudioRefsWithTextIndex, audioTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioRefItemMediaTypeOf, audioRefMediaTypeOf, audioRefSourceError, audioMergedRefsError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
@@ -112,6 +112,21 @@ import {
 } from './audioSpeed';
 import { buildAudioSpeedInput, type AudioSpeedInput } from '@lib/contracts/audio-speed';
 import AudioSpeedBar from './components/AudioSpeedBar';
+import {
+  AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,
+  AUDIO_VIDEO_MUX_EDGE_ORIGIN,
+  AUDIO_VIDEO_MUX_TITLE,
+  audioVideoMuxIdentityOf,
+  audioVideoMuxSourceError,
+  audioVideoMuxVideoError,
+  buildAudioVideoMuxIdentity,
+  isAudioVideoMuxAudioEdge,
+  isAudioVideoMuxBindEdge,
+  isAudioVideoMuxDraftNode,
+  type AudioVideoMuxBoundVideo,
+  type AudioVideoMuxSync,
+} from './audioVideoMux';
+import AudioVideoMuxPanel from './components/AudioVideoMuxPanel';
 import {
   VOCAL_SPLIT_DEFAULT_FORMAT,
   VOCAL_SPLIT_DEFAULT_SESSION_SCENE,
@@ -757,6 +772,15 @@ export default function CanvasPage() {
   const [audioSpeedSpeed, setAudioSpeedSpeed] = useState(1);
   /** 调速发送中（创建请求飞行期防重复提交，口径同 audioTrimSubmitting） */
   const [audioSpeedSubmitting, setAudioSpeedSubmitting] = useState(false);
+  /** 音视频合成会话（IKIHPK，父规格 IKIHMX / ADR-0115）：处于会话的合成草稿卡 node id，
+   *  null=未进入。点工具条「音视频合成」即建卡进入（草稿卡从创建起即视频型并标注
+   *  「音视频合成」，与源音频卡默认连 origin=audio-video-mux 音频输入线），面板跟随
+   *  草稿卡下方；四路退出（X/Esc/点其他卡/点画布空白）未发送不建任务，草稿卡与两条
+   *  语义边保留（HD/插帧草稿卡口径：草稿卡是持久工作对象，不自动清理）。 */
+  const [audioVideoMuxDraftId, setAudioVideoMuxDraftId] = useState<string | null>(null);
+  /** 拖线手势进行中（视频成品卡加号拖出且合成会话打开）：面板视频槽「绑定中跟手」态，
+   *  松手（onConnectEnd）即复位；落草稿卡成绑定，落空白/其他卡自然回到未绑定引导。 */
+  const [audioVideoMuxWireDragging, setAudioVideoMuxWireDragging] = useState(false);
   /* IKI61O 会话纪元（机制单源在 toolSessionCoordinator，本页以 ref 持有一份实例）：
    *  进/出会话推进、发送捕获、迟到响应 settle 比对——纪元不同即「当前会话已不是
    *  发起时的会话（或已关闭）」，只做任务收尾（建卡/连线/轮询等），不关闭用户当前
@@ -1193,6 +1217,10 @@ export default function CanvasPage() {
     const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
+    // IKIHPK 拖线落点分流（ADR-0115）：目标是未绑定/绑定中的音视频合成草稿卡时转绑定动作
+    // （写卡上视频身份 + 建 origin=audio-video-mux 绑定边），不落普通参考线；非视频源
+    // 在此被明确拒绝并提示，同样不落普通线。其余落点行为完全保持现状不动。
+    if (isAudioVideoMuxDraftNode(targetNode)) return bindAudioVideoMuxOnWire(sourceNode, targetNode);
     const imageRefOk = genKindOf(targetNode) === 'image' && sourceNode.type === 'mediaNode'
       && imageRefSourceError(sourceNode) === null;
     if (!imageRefOk && !isConnectableSource(sourceNode)) return false;
@@ -1322,9 +1350,24 @@ export default function CanvasPage() {
     const allowed = changes.filter((c) => {
       if (c.type !== 'remove') return true;
       const edge = edgesRef.current.find((e) => e.id === c.id);
-      return edge ? !isGeneratingNode(edge.target) : true;
+      if (!edge) return true;
+      if (isGeneratingNode(edge.target)) return false;
+      // IKIHPK：合成草稿卡的固定音频输入线不可单独删（只有删除草稿卡才解除）；
+      // 视频绑定线可删（删除即解绑重选，同步见下方放行处理）
+      const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
+      if (isAudioVideoMuxAudioEdge(edge, muxDraft)) return false;
+      return true;
     });
-    if (allowed.length < changes.length) showToast('warn', '生成中，输入连线只读');
+    if (allowed.length < changes.length) {
+      const blockedMuxAudioEdge = changes.some((c) => {
+        if (c.type !== 'remove') return false;
+        const edge = edgesRef.current.find((e) => e.id === c.id);
+        if (!edge) return false;
+        const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
+        return isAudioVideoMuxAudioEdge(edge, muxDraft);
+      });
+      showToast('warn', blockedMuxAudioEdge ? AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON : '生成中，输入连线只读');
+    }
     // 删边登记撤销（放行部分）
     const removedEdges: Edge[] = [];
     for (const c of allowed) {
@@ -1333,6 +1376,15 @@ export default function CanvasPage() {
       if (edge) removedEdges.push(edge);
     }
     if (removedEdges.length > 0) removeTargetInputs(removedEdges.map(edge => edge.id));
+    // IKIHPK：绑定线删除即解绑（清卡上视频身份，面板槽回未绑定引导，可重新绑定）
+    for (const edge of removedEdges) {
+      const muxDraft = mediaNodesRef.current.find((n) => n.id === edge.target);
+      const identity = audioVideoMuxIdentityOf(muxDraft);
+      if (!muxDraft || !identity || !isAudioVideoMuxBindEdge(edge, muxDraft)) continue;
+      const nextIdentity = { ...identity };
+      delete nextIdentity.video;
+      patchMediaNode(muxDraft.id, { audioVideoMux: nextIdentity });
+    }
     const otherChanges = allowed.filter(change => change.type !== 'remove');
     if (otherChanges.length > 0) onEdgesChange(otherChanges);
   };
@@ -1817,6 +1869,23 @@ export default function CanvasPage() {
       top: Math.round(screenTop + box.height * zoom + FOLLOW_GAP),
     };
   })();
+  /** 音视频合成会话的草稿卡节点与面板跟随锚（IKIHPK）：面板（320 宽）跟随草稿卡下方，
+   *  走通用锚口径（computeFollowAnchor，dialogWidth 320，同插帧/HD 面板）。 */
+  const audioVideoMuxDraftNode = audioVideoMuxDraftId
+    ? mediaNodes.find((n) => n.id === audioVideoMuxDraftId) ?? null
+    : null;
+  const audioVideoMuxPanelAnchor = audioVideoMuxDraftNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: audioVideoMuxDraftNode.position.x,
+        nodeY: audioVideoMuxDraftNode.position.y,
+        nodeWidth: nodeBoxOf(audioVideoMuxDraftNode).width,
+        nodeHeight: nodeBoxOf(audioVideoMuxDraftNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 320,
+      })
+    : null;
   /** 去字幕框坐标系（显示尺寸，与 MediaNode 内容区同源 mediaContentBox）：框图元记录
    *  显示坐标，发送时按显示尺寸换算归一化四键（subtitleEraseBoxes.displayBoxToNormalized）；
    *  宽高缺失时回退 280×280（mediaContentBox 缺省，归一化换算按实际渲染尺寸归一）。 */
@@ -2318,6 +2387,7 @@ export default function CanvasPage() {
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+          onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
           onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -3365,6 +3435,10 @@ export default function CanvasPage() {
      *  按钮派发）；首帧渲染前经由 actionsRef.current.trimAudio 分派到 handleNodeTrimAudio */
     trimAudio: (_id: string) => {},
     mixAudio: (_id: string) => {},
+    /** 音视频合成（IKIHPK 通道 / 接线）：音频卡工具条第四钮「音视频合成」派发——从源
+     *  音频卡拉出合成草稿卡并进入草稿卡会话；首帧渲染前经由
+     *  actionsRef.current.composeAudioVideo 分派到 handleNodeComposeAudioVideo */
+    composeAudioVideo: (_id: string) => {},
     /** 音频调速（IKHW5C 通道/接线，父单 IKHVYO）：进入调速编辑态骨架（音频卡工具条
      *  第二钮「调速」派发，编辑态本体归 IKHW5S）；首帧渲染前经由
      *  actionsRef.current.audioSpeed 分派到 handleNodeAudioSpeed */
@@ -3782,6 +3856,9 @@ export default function CanvasPage() {
       } else if (node.type === 'mediaNode' && data.frameInterpolation) {
         // 插帧草稿卡（IKHLKR）：点卡开插帧面板（不进视频生成面板；身份卡优先口径同 HD）
         openFrameInterpolationDraftDialog(node.id);
+      } else if (node.type === 'mediaNode' && data.audioVideoMux) {
+        // 音视频合成草稿卡（IKIHPK）：点卡开合成面板（不进视频生成面板；身份卡优先口径同 HD）
+        openAudioVideoMuxPanel(node.id);
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
         openImageDraftDialog(node.id);
       } else if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
@@ -4004,6 +4081,7 @@ export default function CanvasPage() {
       vocalSplit: vocalSplitTargetNodeId,
       sceneSplit: sceneSplitTargetNodeId,
       smartMatting: smartMattingTargetNodeId,
+      audioVideoMux: audioVideoMuxDraftId,
     },
     exits: {
       erase: exitEraseEditing,
@@ -4018,6 +4096,7 @@ export default function CanvasPage() {
       vocalSplit: exitVocalSplitEditing,
       sceneSplit: exitSceneSplitEditing,
       smartMatting: exitSmartMattingEditing,
+      audioVideoMux: exitAudioVideoMuxEditing,
     },
     dismissGenPanels: dismissAllGenPanels,
     selectNode: (nodeId) => setSelectRequest({ id: nodeId, ts: Date.now() }),
@@ -4033,13 +4112,13 @@ export default function CanvasPage() {
   };
 
   /** 编辑会话激活（IKGZ5O 派生布尔，不新增状态机）：抠图/扩图/裁切/擦除/去字幕/音视频分离/
-   *  音频截取/音频调速/场景切分任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求
-   *  先退会话再放行，见 exitEditSessionForGenPanel），源卡悬浮工具条隐藏（mediaNodes 渲染期注入）。 */
+   *  音频截取/音频调速/场景切分/音视频合成任一会话进行中——界面处于「工具状态」：Dock 六面板不可开（打开请求
+   *  先退会话再放行，见 exitEditSessionForGenPanel），媒体卡悬浮工具条整条不渲染（show 门）。 */
   const editSessionActive =
     eraseTargetNodeId != null || cutoutNodeId != null || cropTargetNodeId != null || outpaintNodeId != null
     || subtitleEraseTargetNodeId != null || audioVideoSplitTargetNodeId != null
     || audioTrimTargetNodeId != null || audioMixSourceNodeId != null || audioSpeedTargetNodeId != null || vocalSplitTargetNodeId != null || sceneSplitTargetNodeId != null
-    || smartMattingTargetNodeId != null;
+    || smartMattingTargetNodeId != null || audioVideoMuxDraftId != null;
   /** IKGZ5O 会话期打开生成面板的统一前置（IKH3ZJ 收口经协调 module）：退出全部活跃
    *  编辑会话（四路退出口径，未发送参数全部丢弃），面板随后放行打开；无会话时为幂等
    *  空操作。「哪些会话活跃、逐个怎么退」的判断只在 toolSessionCoordinator。 */
@@ -4105,7 +4184,9 @@ export default function CanvasPage() {
     if (soloId && !editSessionActive) {
       const mediaNode = mediaNodesRef.current.find((n) => n.id === soloId);
       const mediaData = (mediaNode?.data ?? {}) as Record<string, unknown>;
-      if (mediaNode && (
+      // IKIHPK：合成草稿卡不落本路径（面板由身份卡优先链与建卡入口打开，
+      // 不能落到视频生成面板；会话内选中变化由上方 editSessionActive 门挡住）
+      if (mediaNode && !mediaData.audioVideoMux && (
         mediaData.draft === true
         || hasGenerationRecord(mediaNode)
         || Boolean(mediaData.imageEnhance)
@@ -4261,7 +4342,7 @@ export default function CanvasPage() {
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, audioMixSourceNodeId, audioSpeedTargetNodeId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, smartMattingTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, cutoutNodeId, eraseTargetNodeId, cropTargetNodeId, subtitleEraseTargetNodeId, audioVideoSplitTargetNodeId, audioTrimTargetNodeId, audioMixSourceNodeId, audioSpeedTargetNodeId, audioVideoMuxDraftId, vocalSplitTargetNodeId, sceneSplitTargetNodeId, smartMattingTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** IKGXMT：Esc 退出抠图会话（镜像扩图 IKGOQX 专属 handler；输入框/编辑器内的 Esc 保持原语义）。
    *  会话独立于五面板（anyGenPanelOpen 不含它），故不进公共 Esc 链、由本专属 handler 承担，
@@ -4743,6 +4824,14 @@ export default function CanvasPage() {
     // exitAudioSpeedEditing 仅引用稳定的 setState，不随渲染变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioSpeedTargetNodeId, mediaNodes]);
+  /** 合成会话绑定清理（IKIHPK）：合成草稿卡被删除时退出会话（面板关闭；草稿卡是本会话
+   *  的载体，删除即解除固定音频输入线，口径同截取/调速绑定清理） */
+  useEffect(() => {
+    if (!audioVideoMuxDraftId) return;
+    if (!mediaNodes.some((n) => n.id === audioVideoMuxDraftId)) exitAudioVideoMuxEditing();
+    // exitAudioVideoMuxEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioVideoMuxDraftId, mediaNodes]);
   /** 人声背景分离编辑态绑定清理（IKHA2W）：目标源视频卡被删除时退出编辑态，防浮条悬挂
    *  （口径同音视频分离绑定清理） */
   useEffect(() => {
@@ -4960,6 +5049,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
         onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -5012,6 +5102,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
         onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -5076,6 +5167,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
         onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -5269,6 +5361,8 @@ export default function CanvasPage() {
   ) => {
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
+    // IKIHPK：拖线手势结束即复位面板「绑定中跟手」态（落草稿卡成绑定、落空白/其他卡回引导）
+    setAudioVideoMuxWireDragging(false);
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
     if (!from) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
@@ -5308,6 +5402,9 @@ export default function CanvasPage() {
     const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
+    // IKIHPK：目标为合成草稿卡时按「视频成品卡可绑定」预览 hover 合法性
+    // （不落入生成能力集/角色判定；与 connectPair 的落点分流同一识别口径）
+    if (isAudioVideoMuxDraftNode(targetNode)) return audioVideoMuxVideoError(sourceNode) === null;
     if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
     const kind = genKindOf(targetNode);
     // 图片草稿：以参考校验为准，避免能力集把合法图片素材预览成「无法连接」
@@ -5580,6 +5677,7 @@ export default function CanvasPage() {
       onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
       onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
       onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+      onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
       onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
       onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
       onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -5992,6 +6090,7 @@ export default function CanvasPage() {
           onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
           onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
           onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+          onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
           onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
           onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
           onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -7005,6 +7104,7 @@ export default function CanvasPage() {
         onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
         onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
         onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+        onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
         onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
         onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
         onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -9273,6 +9373,15 @@ export default function CanvasPage() {
     setAudioSpeedSpeed(1);
     setAudioSpeedSubmitting(false);
   };
+  /** 退出音视频合成会话（IKIHPK 四退出共用：面板 X/Esc 公共链/点其他卡/点画布空白）：
+   *  未发送的草稿卡与两条语义边保留（HD/插帧草稿卡口径——草稿卡是持久工作对象，
+   *  不自动清理，可手动删除）；已绑定视频与两组参数随卡持久化，重开面板即恢复。
+   *  IKI61O：退出即推进纪元。 */
+  const exitAudioVideoMuxEditing = () => {
+    toolSessionEpochRef.current.exit('audioVideoMux');
+    setAudioVideoMuxDraftId(null);
+    setAudioVideoMuxWireDragging(false);
+  };
 
   /** 退出人声背景分离编辑态（IKHA2W 四退出共用）：会话参数（场景/格式）与发送中复位——
    *  参数不跨会话记忆，未发送退出无卡无边无任务；播放控制随 splitEditing 标记移除
@@ -9441,6 +9550,119 @@ export default function CanvasPage() {
       setAudioSpeedSpeed(1);
       setAudioSpeedTargetNodeId(id);
     });
+  };
+
+  /* ============ 音视频合成（IKIHPK，父规格 IKIHMX / ADR-0115） ============
+   * 草稿卡会话 + 拖线绑定：点工具条第四钮从源音频卡拉出视频型草稿卡（默认音频输入线
+   * origin=audio-video-mux），拖线落点按目标卡身份分流为绑定动作；参数面板跟随草稿卡
+   * 下方，素材库浮层选中即绑定（不拉线）。发送的真实提交与占位回填归 IKIHP M。 */
+
+  /** 会话入口（工具条「音视频合成」派发）：建草稿卡 + 默认音频输入线 + 进入会话。
+   *  门槛（已完成音频成品卡 + 仅源音频 URL 缺失）已在工具条置灰层预检，此处兜底复核；
+   *  互斥退出与生成面板关闭经 toolSessionCoordinator（第 13 种会话）、不动视角；
+   *  草稿卡优先放源音频卡右侧就近空位（findAudioMixPosition 逐行避让，不覆盖已有卡）；
+   *  进入不创建任务、资产或来源边（默认线随卡持久化），未发送草稿卡可手动删除。 */
+  const handleNodeComposeAudioVideo = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const gate = audioVideoMuxSourceError(data);
+    if (gate) {
+      showToast('warn', gate);
+      return;
+    }
+    runToolSessionEntry('audioVideoMux', () => {
+      setAudioVideoMuxWireDragging(false);
+      const draftId = createVideoDraftCard(undefined, findAudioMixPosition(node, mediaNodesRef.current), {
+        fileName: AUDIO_VIDEO_MUX_TITLE,
+        data: { audioVideoMux: buildAudioVideoMuxIdentity(id, readAssetId(data)) },
+      });
+      addCanvasEdge(id, draftId, undefined, { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
+      setAudioVideoMuxDraftId(draftId);
+    });
+  };
+
+  /** 点合成草稿卡重开面板（身份卡优先口径同 HD/插帧：不进视频生成面板）；
+   *  走 runToolSessionEntry 保证与其他工具会话互斥、生成面板关闭。 */
+  const openAudioVideoMuxPanel = (draftId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === draftId);
+    if (!isAudioVideoMuxDraftNode(node)) return;
+    runToolSessionEntry('audioVideoMux', () => {
+      setAudioVideoMuxWireDragging(false);
+      setAudioVideoMuxDraftId(draftId);
+    });
+  };
+
+  /** 拖线落点分流（ADR-0115）：目标是未绑定/绑定中的合成草稿卡时转绑定动作——
+   *  视频成品卡写卡上视频身份 + 建 origin=audio-video-mux 绑定边（重绑即替换旧绑定边）；
+   *  非视频源/非成品视频卡明确拒绝并提示，不落普通参考线。返回 true 表示本次落点已按
+   *  绑定路径消费（connectPair 据此不再走普通参考线收口）。 */
+  const bindAudioVideoMuxOnWire = (sourceNode: Node, targetNode: Node): boolean => {
+    const identity = audioVideoMuxIdentityOf(targetNode);
+    if (!identity) return false;
+    const reason = audioVideoMuxVideoError(sourceNode);
+    if (reason) {
+      showToast('warn', reason);
+      return false;
+    }
+    const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
+    const assetId = readAssetId(sourceData);
+    if (assetId === undefined) return false;
+    const nextVideo: AudioVideoMuxBoundVideo = {
+      assetId,
+      nodeId: sourceNode.id,
+      name: cardNameOfNode(sourceNode) ?? sourceNode.id,
+      duration: typeof sourceData.duration === 'number' ? sourceData.duration : null,
+    };
+    // 同一视频重复拖到同一草稿卡：幂等（不重复建边、不重复写卡）
+    const current = identity.video;
+    if (current && current.nodeId === nextVideo.nodeId && current.assetId === nextVideo.assetId) return true;
+    const staleBindEdges = edgesRef.current.filter((edge) => isAudioVideoMuxBindEdge(edge, targetNode));
+    if (staleBindEdges.length > 0) removeTargetInputs(staleBindEdges.map((edge) => edge.id));
+    patchMediaNode(targetNode.id, { audioVideoMux: { ...identity, video: nextVideo } });
+    addCanvasEdge(sourceNode.id, targetNode.id, undefined, { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
+    return true;
+  };
+
+  /** 素材库选中即绑定（次级入口，不拉线）：只写卡上视频身份；原为画布拖线绑定的先解绑旧边。 */
+  const bindAudioVideoMuxLibraryVideo = (draftId: string, video: AudioVideoMuxBoundVideo) => {
+    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
+    const identity = audioVideoMuxIdentityOf(draft);
+    if (!draft || !identity) return;
+    const staleBindEdges = edgesRef.current.filter((edge) => isAudioVideoMuxBindEdge(edge, draft));
+    if (staleBindEdges.length > 0) removeTargetInputs(staleBindEdges.map((edge) => edge.id));
+    patchMediaNode(draftId, { audioVideoMux: { ...identity, video } });
+  };
+
+  /** × 移除绑定（可拖线或素材库重选）：清卡上视频身份并删绑定边；固定音频输入线不动
+   *  （只有删除草稿卡才解除）。 */
+  const unbindAudioVideoMuxVideo = (draftId: string) => {
+    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
+    const identity = audioVideoMuxIdentityOf(draft);
+    if (!draft || !identity) return;
+    const bindEdges = edgesRef.current.filter((edge) => isAudioVideoMuxBindEdge(edge, draft));
+    if (bindEdges.length > 0) removeTargetInputs(bindEdges.map((edge) => edge.id));
+    const nextIdentity = { ...identity };
+    delete nextIdentity.video;
+    patchMediaNode(draftId, { audioVideoMux: nextIdentity });
+  };
+
+  /** 面板参数切档写卡（原声处理两档 / 时长对齐三档）：随草稿卡持久化，关闭重开与刷新恢复同源。 */
+  const handleAudioVideoMuxParamsChange = (
+    draftId: string,
+    patch: { reserveAudio?: boolean; sync?: AudioVideoMuxSync },
+  ) => {
+    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
+    const identity = audioVideoMuxIdentityOf(draft);
+    if (!draft || !identity) return;
+    patchMediaNode(draftId, { audioVideoMux: { ...identity, ...patch } });
+  };
+
+  /** 发送（IKIHP M 接线点）：本票只做 UI 态（未绑定置灰、⚡0 本期免费、圆形 ↑），
+   *  此处刻意不产生任何副作用——不建任务、不改卡态、不建线（连点不重复建任务，
+   *  真实提交与占位回填在后续前端票接入）。 */
+  const handleAudioVideoMuxSend = () => {
+    /* IKIHP M：createAudioVideoMux + 草稿卡转生成中占位 + 关面板在此接线。 */
   };
 
   /** 人声背景分离（IKHA2W 入口）：把目标视频卡置为人声背景分离编辑态（「音视频分离 ▾」
@@ -10588,6 +10810,7 @@ export default function CanvasPage() {
   actionsRef.current.audioVideoSplit = handleNodeAudioVideoSplit;
   actionsRef.current.trimAudio = handleNodeTrimAudio;
   actionsRef.current.mixAudio = handleNodeMixAudio;
+  actionsRef.current.composeAudioVideo = handleNodeComposeAudioVideo;
   actionsRef.current.audioSpeed = handleNodeAudioSpeed;
   actionsRef.current.vocalBackgroundSplit = handleNodeVocalBackgroundSplit;
   actionsRef.current.sceneSplit = handleNodeSceneSplit;
@@ -11249,6 +11472,7 @@ export default function CanvasPage() {
               onAudioVideoSplit: (id: string) => actionsRef.current.audioVideoSplit(id),
               onTrimAudio: (id: string) => actionsRef.current.trimAudio(id),
               onMixAudio: (id: string) => actionsRef.current.mixAudio(id),
+              onComposeAudioVideo: (id: string) => actionsRef.current.composeAudioVideo(id),
               onAudioSpeed: (id: string) => actionsRef.current.audioSpeed(id),
               onVocalBackgroundSplit: (id: string) => actionsRef.current.vocalBackgroundSplit(id),
               onSceneSplit: (id: string) => actionsRef.current.sceneSplit(id),
@@ -12200,22 +12424,23 @@ export default function CanvasPage() {
             // 提交中（IKGUVG）：提交窗口内 genStatus 可能仍是 draft，按 isGeneratingNode 口径
             // 给目标节点注入 submitting 标记，连线剪刀据此判定生成中、不出现
             // 工具状态模态（IKGZ5O）：编辑会话源卡（擦除/裁切/抠图/扩图/去字幕/音视频分离/音频截取/音频调速）
-            //  或插帧面板打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记
+            //  或插帧面板、音视频合成会话（IKIHPK）打开期间注入 soloToolbarHidden——工具条迁出（IKGYYD）后该标记
             //  不再控制渲染，退为集成测试可观测标记；模态显隐由 followToolbarLayer 的 show 门承担。
             //  高清/HD 参数面板不在此列（IKHFUF：与普通生成面板相同，打开期间不藏上方操作条，
             //  成品高清卡仍可用去字幕/分离等工具）；插帧面板按其规格（ADR-0113「面板打开期间
-            //  悬浮工具条整条不渲染，同 HD 面板全局会话门口径」）保留模态——两条口径并存是
-            //  合流时的有意取舍，插帧面板是否改为并存口径待需求方拍板。
+            //  悬浮工具条整条不渲染，同 HD 面板全局会话门口径」）保留模态，音视频合成面板
+            //  同口径（规格：会话期间媒体卡悬浮工具条整条不渲染）。
             eraseTargetNodeId || submittingNodeId || cropTargetNodeId
               || cutoutNodeId || outpaintNodeId || showFrameInterpolationDialog
               || subtitleEraseTargetNodeId || audioVideoSplitTargetNodeId
               || audioTrimTargetNodeId || audioSpeedTargetNodeId
               || vocalSplitTargetNodeId || sceneSplitTargetNodeId
-              || smartMattingTargetNodeId
+              || smartMattingTargetNodeId || audioVideoMuxDraftId != null
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     n.id === eraseTargetNodeId
                     || showFrameInterpolationDialog
+                    || audioVideoMuxDraftId != null
                     || n.id === cropTargetNodeId
                     || n.id === cutoutNodeId
                     || n.id === outpaintNodeId
@@ -12348,7 +12573,14 @@ export default function CanvasPage() {
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
-          onConnectStart={(nodeId) => { connectingSourceRef.current = nodeId; }}
+          onConnectStart={(nodeId) => {
+            connectingSourceRef.current = nodeId;
+            // IKIHPK：合成会话期内从视频成品卡拖线 → 面板视频槽进「绑定中跟手」态
+            setAudioVideoMuxWireDragging(
+              audioVideoMuxDraftId != null && nodeId != null
+                && audioVideoMuxVideoError(findCanvasNode(nodeId)) === null,
+            );
+          }}
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidCanvasConnection}
           viewport={focusViewport ?? doc?.viewport}
@@ -12933,6 +13165,26 @@ export default function CanvasPage() {
             onSend={handleAudioSpeedSend}
             submitting={audioSpeedSubmitting}
             anchor={audioSpeedSendBarAnchor}
+          />
+        )}
+
+        {/* 音视频合成参数面板（IKIHPK，父规格 IKIHMX / ADR-0115）：跟随合成草稿卡下方——
+            视频槽三态（未绑定引导/绑定中跟手/已绑定信息条）+ 原声处理两档 + 时长对齐三档
+            + ⚡0 本期免费 + 圆形发送钮（未绑定置灰提示「先选择视频」）；参数与绑定写卡随
+            草稿卡持久化（重开恢复），素材库浮层选中即绑定不拉线；四退出（X/Esc/点其他卡/
+            点空白）由本页承担，未发送退出草稿卡与两条语义边保留（可手动删除）；发送的真实
+            提交与占位回填归 IKIHP M（本票 onSend 为空实现，不建任务不改卡态） */}
+        {audioVideoMuxDraftNode && (
+          <AudioVideoMuxPanel
+            identity={audioVideoMuxIdentityOf(audioVideoMuxDraftNode)!}
+            onClose={exitAudioVideoMuxEditing}
+            onReserveChange={(reserveAudio) => handleAudioVideoMuxParamsChange(audioVideoMuxDraftNode.id, { reserveAudio })}
+            onSyncChange={(sync) => handleAudioVideoMuxParamsChange(audioVideoMuxDraftNode.id, { sync })}
+            onBindLibraryVideo={(video) => bindAudioVideoMuxLibraryVideo(audioVideoMuxDraftNode.id, video)}
+            onUnbind={() => unbindAudioVideoMuxVideo(audioVideoMuxDraftNode.id)}
+            wireBinding={audioVideoMuxWireDragging}
+            onSend={handleAudioVideoMuxSend}
+            followAnchor={audioVideoMuxPanelAnchor}
           />
         )}
 

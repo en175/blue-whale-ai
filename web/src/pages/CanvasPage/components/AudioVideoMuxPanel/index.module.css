@@ -1,0 +1,372 @@
+/* ============================================
+ * AudioVideoMuxPanel 音视频合成参数面板样式（IKIHPK）
+ * 深色浮层令牌全部取自 variables.css（--color-bg-overlay / --color-border-overlay /
+ * --shadow-overlay / --color-accent-primary 系），禁黄色主按钮（规格）：主按钮为
+ * 蓝色 accent 圆形 ↑（统一 Dock 主发送钮样式），置灰态灰底灰字。
+ * 跟随定位同插帧/HD 面板（dialogWrapFollow：绝对定位到草稿卡下方）。
+ * ============================================ */
+
+.dialogWrap {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  max-width: 90%;
+  z-index: 20;
+  animation: audioVideoMuxFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: audioVideoMuxFadeInFollow 0.2s ease;
+}
+
+@keyframes audioVideoMuxFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes audioVideoMuxFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* ---- 标题行 ---- */
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 字段区 ---- */
+.fieldWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* ---- 视频槽：未绑定引导（虚线框 + 素材库次级链接） ---- */
+.slotWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.slotGuide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+  border: 1px dashed var(--color-border-hover);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.subLink {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent-hover);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.subLink:hover {
+  text-decoration: underline;
+}
+
+/* ---- 视频槽：绑定中（拖线手势跟手） ---- */
+.slotBinding {
+  border: 1px dashed var(--color-accent-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--color-accent-hover);
+  line-height: 1.5;
+}
+
+/* ---- 视频槽：已绑定信息条（缩略图 + 文件名 + 时长/来源 + × 移除） ---- */
+.boundBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-secondary);
+  padding: 8px 10px;
+}
+
+.boundThumb {
+  width: 56px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: linear-gradient(135deg, #22335f, #101a33);
+}
+
+.boundMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.boundName {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.boundDur {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.boundRemove {
+  margin-left: auto;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.boundRemove:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* ---- 素材库浮层（单列表视频资产，无页签无上传；字段区内向上展开） ---- */
+.libraryPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 280px;
+  max-width: 100%;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  padding: 6px;
+  z-index: 30;
+}
+
+.libraryTitle {
+  padding: 4px 8px 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.libraryList {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.libraryRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.libraryRow:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.libraryRow:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.libraryThumb {
+  width: 48px;
+  height: 27px;
+  border-radius: var(--radius-sm);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: linear-gradient(135deg, #22335f, #101a33);
+}
+
+.libraryRowName {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.libraryRowDur {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  flex: none;
+}
+
+.libraryHint {
+  padding: 6px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 分段钮（两档/三档同款：井底 + 选中蓝） ---- */
+.segGroup {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  border-radius: var(--radius-md);
+}
+
+.segBtn {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.segBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.segBtnActive {
+  background-color: var(--color-accent-primary);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+.segBtnActive:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* ---- 底部行：免费徽标 + 发送提示 + 圆形发送钮 ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.freeHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  user-select: none;
+}
+
+.sendHint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.sendBtn {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: var(--color-accent-primary);
+  color: var(--color-accent-text);
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.sendBtnActive:active {
+  transform: scale(0.94);
+}
