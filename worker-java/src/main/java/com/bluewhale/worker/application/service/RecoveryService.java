@@ -22,7 +22,8 @@ import java.util.List;
  * <p>
  * 扫描条件（mapper 内 SQL 逐字移植 claim-ops.ts:134-230）：
  * {@code is_delete=false} + 创建在 {@code RECOVERY_MAX_AGE_MINUTES}（默认 120 分钟）内
- * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。
+ * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。processing 的手动
+ * 重试 job 可在额外 10 分钟内接手，默认最晚创建后 130 分钟前；其余任务仍按原窗口扫描。
  * <p>
  * 重投覆盖全部 tag（每类一个 recovery producer bean 无条件装配，ADR-0084 修正六），
  * 因此正常情况下每类的 {@code getIfAvailable()} 都拿得到生产者；{@code reenqueue} 仍保留
