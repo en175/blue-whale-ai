@@ -27,7 +27,7 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJo
 describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runtime acceptance", () => {
   it("freezes inputs through HTTP, survives worker failure/restart and double-click retry, then publishes durable audio", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
-    const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+    const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
     const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
     const guardToken = randomBytes(16).toString("hex");
     const temp = mkdtempSync(join(tmpdir(), "iki68n-cross-runtime-"));

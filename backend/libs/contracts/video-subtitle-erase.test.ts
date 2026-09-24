@@ -33,14 +33,14 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/VideoSubtitleEraseContract.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/VideoSubtitleEraseContract.java",
     import.meta.url,
   ),
   "utf8",
@@ -48,7 +48,7 @@ const contractJava = readFileSync(
 // tag 字面量已上移到 GenerationMqRoute（VideoSubtitleEraseContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",

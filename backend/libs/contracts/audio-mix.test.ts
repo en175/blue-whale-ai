@@ -11,8 +11,8 @@ import {
   audioMixCreateSchema,
 } from "./audio-mix.js";
 
-const javaContract = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioMixContract.java", import.meta.url), "utf8");
-const javaRoute = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java", import.meta.url), "utf8");
+const javaContract = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/AudioMixContract.java", import.meta.url), "utf8");
+const javaRoute = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java", import.meta.url), "utf8");
 
 describe("audio_mix 跨进程契约", () => {
   it("keeps task type, queue tag, routes and default format aligned with Java", () => {

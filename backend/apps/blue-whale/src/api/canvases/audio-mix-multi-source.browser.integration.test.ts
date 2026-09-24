@@ -79,7 +79,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       execFileSync(ffmpegPath, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
         "-codec:a", "libmp3lame", "-q:a", "9", join(temp, "result.mp3")]);
       expectedOutput = readFileSync(join(temp, "result.mp3"));
-      const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+      const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
       mysqlId = execFileSync("docker", ["run", "-d", "--rm", "-e", "MYSQL_ROOT_PASSWORD=root",
         "-e", `MYSQL_DATABASE=${databaseName}`, "-e", "MYSQL_USER=test", "-e", "MYSQL_PASSWORD=test",
         "-p", "127.0.0.1::3306", "-v", `${schema}:/docker-entrypoint-initdb.d/init.sql:ro`, "mysql:8.0"],

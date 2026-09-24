@@ -116,7 +116,7 @@ const RULINGS: Record<string, Ruling> = {
       "handle-list-models 把它从消费端剥除（出站调用值不下发浏览器）",
     fallback: "null（不分流，出站用目录 id 本身）",
     configWinsTest:
-      "worker-java/src/test/java/com/bluewhale/worker/application/processor/ImageJobProcessorI2iAliasTest.java",
+      "server/blue-whale-worker/src/test/java/com/bluewhale/worker/application/processor/ImageJobProcessorI2iAliasTest.java",
   },
   max_prompt_length: {
     consumer:

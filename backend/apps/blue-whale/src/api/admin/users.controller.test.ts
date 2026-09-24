@@ -14,7 +14,11 @@ function createController(overrides: {
   const account = { manageAdminUser: overrides.manageAdminUser ?? vi.fn().mockResolvedValue(undefined) };
   const operationLog = { create: overrides.operationLogCreate ?? vi.fn().mockResolvedValue(undefined) };
   const sessions = { revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0) };
+  // ⚠️ 第一个参数是 identity（用户列表已改读我们自己的库）；
+  //    这个测试只考 manage（冻结/解冻/调积分），给个空壳即可。
+  const identity = { listAdminUsers: vi.fn().mockResolvedValue({ items: [], total: 0 }) };
   const controller = new AdminUsersController(
+    identity as never,
     account as never,
     operationLog as never,
     sessions as never,

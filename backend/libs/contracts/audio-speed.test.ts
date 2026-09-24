@@ -44,28 +44,28 @@ import {
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根；IKHW5A 已落地）。
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioSpeedContract.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/AudioSpeedContract.java",
     import.meta.url,
   ),
   "utf8",
 );
 const audioSpeedErrorJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/error/AudioSpeedError.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/error/AudioSpeedError.java",
     import.meta.url,
   ),
   "utf8",
 );
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
