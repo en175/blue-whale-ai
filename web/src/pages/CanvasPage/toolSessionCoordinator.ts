@@ -28,25 +28,10 @@
    target 装配快照传入；纪元实例同样由页面以 ref 持有（createToolSessionEpoch 工厂
    每次新建），module 只提供机制。纯 in-process 依赖，无网络接口。 */
 
-/** 编辑会话身份 */
-export type ToolSessionKind =
-  | 'erase'
-  | 'cutout'
-  | 'crop'
-  | 'outpaint'
-  | 'subtitleErase'
-  | 'audioVideoSplit'
-  | 'audioTrim'
-  | 'audioMix'
-  | 'audioSpeed'
-  | 'sceneSplit'
-  | 'vocalSplit'
-  | 'smartMatting';
-
 /** 会话统一遍历顺序（互斥退出的固定顺序）。各 exit 只清各自 state、相互独立，
- *  顺序不影响结果，固定只为确定性。IKI8KZ 审查修订后导出：纪元机制单测的 ALL_KINDS
- *  自本数组派生——新增种类（或集合漏列）直接反映进测试遍历，不再手抄副本漏检。 */
-export const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
+ *  顺序不影响结果，固定只为确定性。编辑会话类型和纪元测试均从本数组派生，
+ *  新增工具时不会让类型联合与遍历集合分离。 */
+export const TOOL_SESSION_KINDS = [
   'erase',
   'cutout',
   'crop',
@@ -59,7 +44,10 @@ export const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'sceneSplit',
   'vocalSplit',
   'smartMatting',
-];
+] as const;
+
+/** 编辑会话身份 */
+export type ToolSessionKind = (typeof TOOL_SESSION_KINDS)[number];
 
 /** 全会话活跃快照（IKH3ZH 收口时为八会话，IKHW5C 增至十一）：各会话 target node id
  *  （null=未进入）。由页面每次交互时从现有会话 state 装配最新值传入，module 不保存。 */
@@ -211,7 +199,7 @@ export function exitToolSessionOnEsc(deps: ToolSessionDeps): boolean {
  *  使用口径（全部异步发送型家族同规）：
  *  - 进入会话经 enter 推进——同工具换卡重进不触发出，靠本推进区分前后两次会话身份；
  *  - 退出会话（四路退出/互斥/绑定清理/发送成功 settle 共用的完整退出函数）经 exit 推进；
- *  - 项目切换经 advanceAll 推进——旧身份在新项目不再代表任何当前会话；
+ *  - 项目切换或进入任一新会话经 advanceAll 推进——旧身份不再代表当前会话；
  *  - 发送时 capture 捕获当前纪元；settle 时 isCurrent 比对——false 即迟到响应，
  *    只做任务收尾（建卡/连线/轮询/落盘），不退当前会话、不复位其提交锁、不弹旧错误。 */
 export interface ToolSessionEpoch {
@@ -219,7 +207,7 @@ export interface ToolSessionEpoch {
   enter(kind: ToolSessionKind): void;
   /** 退出会话：推进该会话纪元（在途响应随之失效） */
   exit(kind: ToolSessionKind): void;
-  /** 项目切换：推进全部会话纪元 */
+  /** 项目切换或进入任一新会话：推进全部会话纪元 */
   advanceAll(): void;
   /** 发送时捕获该会话当前纪元 */
   capture(kind: ToolSessionKind): number;
