@@ -4017,9 +4017,10 @@ export default function CanvasPage() {
   });
 
   /** 进入工具会话的统一包装（IKH3ZH 互斥收口 + IKI61O 纪元推进）：每次进入都是新会话
-   *  身份——同工具换卡重进不触发出，靠 enter 推进区分；互斥退出其余会话与关面板由
-   *  enterToolSession 承担，其余会话的纪元在各自完整退出函数里推进。 */
+   *  身份，先使此前各工具的发送失效，再推进本工具纪元；互斥退出与关面板由
+   *  enterToolSession 承担。发送即退出的工具也需在打开其他工具后停止显示旧错误。 */
   const runToolSessionEntry = (kind: ToolSessionKind, init: () => void) => {
+    toolSessionEpochRef.current.advanceAll();
     toolSessionEpochRef.current.enter(kind);
     enterToolSession(kind, buildToolSessionDeps(), init);
   };
@@ -10072,7 +10073,9 @@ export default function CanvasPage() {
         const created = await createAudioMixMutation.mutateAsync({ projectId, payload });
         if (activeProjectRef.current !== projectId) return;
         // 只退出本次发送的会话；迟到成功仍建自己的任务卡收尾，不触碰后来开启的会话
-        if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) exitAudioMixEditing();
+        const sessionCurrent = toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch);
+        if (sessionCurrent) exitAudioMixEditing();
+        const saveFeedbackEpoch = sessionCurrent ? toolSessionEpochRef.current.capture('audioMix') : null;
         const nodeId = audioMixNodeId(created.job_id);
         const occupied = [
           ...mediaNodesRef.current,
@@ -10098,15 +10101,15 @@ export default function CanvasPage() {
         audioMixFirstSaveRef.current.set(nodeId, firstSave);
         try {
           if (!(await firstSave)) {
-            // 首保存失败提示归发送时的会话；簿记清理是任务收尾，无条件执行
-            if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+            // 正常发送退出后若没有后来会话，仍提示保存失败；簿记清理不受影响
+            if (saveFeedbackEpoch !== null && toolSessionEpochRef.current.isCurrent('audioMix', saveFeedbackEpoch)) {
               showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
             }
           } else {
             audioMixUnpersistedCardsRef.current.delete(nodeId);
           }
         } catch {
-          if (toolSessionEpochRef.current.isCurrent('audioMix', sessionEpoch)) {
+          if (saveFeedbackEpoch !== null && toolSessionEpochRef.current.isCurrent('audioMix', saveFeedbackEpoch)) {
             showToast('error', '混合任务已创建，但画布保存失败，请重试保存');
           }
         } finally {

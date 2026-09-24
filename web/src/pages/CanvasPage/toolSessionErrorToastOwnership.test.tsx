@@ -501,4 +501,23 @@ describe('IKI8L4 发送即同步退出（场景切分真实链）：失败提示
     const failed = mediaNodes().find((n) => ((n.data ?? {}) as Record<string, unknown>).genStatus === 'failed');
     expect(failed).toBeTruthy();
   });
+
+  it('场景切分发送后打开截取：旧失败不向新工具会话提示，占位卡仍记录失败', async () => {
+    let settleOld!: (value: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { settleOld = resolve; }));
+    await renderPage();
+    await enterSceneSplit('v1');
+    await clickSend(sceneSendBtn());
+    await enterTrim('a1');
+    expect(trimSendBar()).not.toBeNull();
+
+    await act(async () => { settleOld(jsonFail('旧场景切分失败')); });
+    await flush();
+
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('旧场景切分失败');
+    expect(trimSendBar()).not.toBeNull();
+    const failed = mediaNodes().find((node) => ((node.data ?? {}) as Record<string, unknown>).genStatus === 'failed');
+    expect(String((failed?.data ?? {}).errorText)).toContain('旧场景切分失败');
+  });
 });

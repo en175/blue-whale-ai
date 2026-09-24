@@ -274,6 +274,44 @@ afterEach(async () => {
 });
 
 describe('IKI8L8 音频混合会话纪元：Esc 在途退出重开后旧响应不打扰新会话', () => {
+  it('当前混合任务创建成功但首保存失败：提示用户重试保存，任务仍建卡轮询', async () => {
+    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    await renderPage();
+    await enterMix();
+    await armSession('mp3');
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new Error('save failed'));
+
+    await sendMix();
+    await flush();
+
+    expect(nodeById('audio-mix-j1')).toBeTruthy();
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    expect(document.body.textContent).toContain('混合任务已创建，但画布保存失败，请重试保存');
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
+  });
+
+  it('首保存在途时重开混合：旧保存失败不向新会话提示，WAV 参数保留', async () => {
+    let rejectSave!: (error: Error) => void;
+    apiMocks.createAudioMix.mockResolvedValue({ job_id: 'j1', status: 'queued' });
+    await renderPage();
+    await enterMix();
+    await armSession('mp3');
+    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+
+    await sendMix();
+    expect(sendBar()).toBeNull();
+    await enterMix();
+    await armSession('wav');
+    await act(async () => { rejectSave(new Error('旧画布保存失败')); });
+    await flush();
+
+    expect(document.body.textContent).not.toContain('混合任务已创建，但画布保存失败，请重试保存');
+    expect(sendBar()).not.toBeNull();
+    expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('wav');
+    expect(nodeById('audio-mix-j1')).toBeTruthy();
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('j1');
+  });
+
   it('旧成功迟到：新会话仍开、WAV 保留；旧任务照常建卡连线首保存轮询；锁释放后可再发送', async () => {
     let resolveOld!: (value: { job_id: string; status: string }) => void;
     apiMocks.createAudioMix.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
