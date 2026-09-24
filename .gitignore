@@ -110,3 +110,9 @@ dist/
 
 # 本地启动凭据（含密钥，勿提交）
 .env.local
+
+# 跨进程契约生成物（**不入仓**，构建时 `cd contracts && buf generate` 产出）
+# 为什么不入仓：TS 与 Java 两端各生成一份，入库会漂移；
+# 构建时生成保证「同一份 .proto 产出两端一致的代码」。见 contracts/README.md。
+backend/libs/contracts/gen/
+java/libs/target/generated-sources/proto/
