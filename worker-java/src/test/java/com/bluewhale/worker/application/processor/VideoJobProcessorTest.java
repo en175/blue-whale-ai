@@ -22,6 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -279,6 +282,146 @@ class VideoJobProcessorTest {
         processor.handle("105");
 
         verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", " \t "})
+    @DisplayName("IKIDEP: parent-reuse 成功但结果 URL 缺失时重新提交，不转存旧结果")
+    void parentReuseBlankUrl_fallThroughToSubmit(String resultUrl) {
+        ClaimedVideoJobDto claim = videoClaim("117", false, null, 0, 0, "parent-task-blank");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("117"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, resultUrl, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-blank"));
+        doReturn(new SubmitResult("new-task-blank", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("117"), eq("video-worker"), eq(1L), eq("new-task-blank"));
+
+        processor.handle("117");
+
+        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+        verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
+        verify(stateMachine).markProviderSubmitted("117", "video-worker", 1L, "new-task-blank");
+        verify(producer).enqueue("117", 5000L);
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 查询异常 → 按不存在回退重新提交（D6 保持）")
+    void parentReusePollError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("116", false, null, 0, 0, "parent-task-err");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("116"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError("provider_failed", "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("parent-task-err"));
+        doReturn(new SubmitResult("new-task-err", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("116"), anyString(), eq(1L), eq("new-task-err"));
+
+        processor.handle("116");
+
+        verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
+    }
+
+    @Test
+    @DisplayName("PR !854 审查修订: parent-reuse 转存/发布异常 → 按旧结果不可用回退重新提交（不写终态失败）")
+    void parentReusePublishError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("118", false, null, 0, 0, "parent-task-expired");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("118"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-expired.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-expired"));
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载失败: HTTP 404"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new SubmitResult("new-task-expired", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("118"), anyString(), eq(1L), eq("new-task-expired"));
+
+        processor.handle("118");
+
+        verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
+        verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 发布守卫未命中 → 失去执行权停止：零 submit、零 providerTaskId、零轮询、零迟到 Finalize")
+    void parentReusePublishGuardMissed_stopWithoutResubmit() {
+        ClaimedVideoJobDto claim = videoClaim("114", false, null, 0, 0, "parent-task-stale");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("114"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-stale.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-stale"));
+        doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).when(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+
+        processor.handle("114");
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKICD3: 失租停止后新 Worker 接手 → 同一收割路径完成发布（不重新提交）")
+    void parentReuseGuardMissedThenNewWorkerCompletesHarvest() {
+        ClaimedVideoJobDto staleWorker = new ClaimedVideoJobDto(
+                "115", "1", "42", baseInput(), null, false,
+                "video-worker-old", 1L, 0, 0, "parent-task-tko");
+        ClaimedVideoJobDto newWorker = new ClaimedVideoJobDto(
+                "115", "1", "42", baseInput(), null, false,
+                "video-worker-new", 2L, 0, 0, "parent-task-tko");
+        VideoJobProcessor staleProcessor = new VideoJobProcessor(
+                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-worker-old");
+        VideoJobProcessor newProcessor = new VideoJobProcessor(
+                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-worker-new");
+        doReturn(Optional.of(staleWorker)).when(stateMachine)
+                .claimVideoJobById("115", "video-worker-old");
+        doReturn(Optional.of(newWorker)).when(stateMachine)
+                .claimVideoJobById("115", "video-worker-new");
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-tko.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-tko"));
+        doReturn(new StoredVideo("http://tos/tko.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).doReturn(true).when(stateMachine)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+
+        staleProcessor.handle("115");   // 旧 Worker：守卫未命中 → 失去执行权，静默停止
+        newProcessor.handle("115");     // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        var publishOrder = inOrder(stateMachine);
+        publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-old");
+        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+                eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(),
+                any(), anyString(), anyInt(), anyInt(), anyDouble());
+        publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-new");
+        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+                eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(),
+                any(), anyString(), anyInt(), anyInt(), anyDouble());
+        verify(stateMachine, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     // ========== poll 路径 ==========
