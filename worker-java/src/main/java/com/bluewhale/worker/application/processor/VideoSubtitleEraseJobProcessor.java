@@ -178,6 +178,17 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSubtitleEraseJobDto claim, String providerToken) {
+        // 0. IKI89U（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
+        if (claim.parentProviderTaskId() != null) {
+            if (ParentResultReuse.tryReuseParentResult(VideoSubtitleEraseContract.TAG, claim, providerToken,
+                    subtitleEraseClient::poll,
+                    ParentResultReuse.singleUrlIncomplete(SubtitleEraseTaskObservation::videoUrl),
+                    this::publishResult)) {
+                return;
+            }
+        }
+
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（§17.2 四键恒在；此处为 worker 兜底防御，权威复核在 Z80。
@@ -289,9 +300,11 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     /**
      * 结果发布：立即下载转存（火山 URL 仅 24h 有效，官方明确「请及时下载保存」）→
      * 建 Asset（type=video / source='generated' / generation_job_id）→ 终态 succeeded。
+     * <p>
+     * 返回发布守卫结果（IKI89U：重试收割据此判定复用是否成立，false 回退正常重新提交）。
      */
-    private void publishResult(ClaimedVideoSubtitleEraseJobDto claim,
-                               SubtitleEraseTaskObservation observation) {
+    private boolean publishResult(ClaimedVideoSubtitleEraseJobDto claim,
+                                  SubtitleEraseTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（对齐 image_erase 的强依赖口径）
         if (mediaRelay == null) {
             throw new VideoSubtitleEraseError(
@@ -346,6 +359,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             log.warn("[video_subtitle_erase] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
         }
+        return published;
     }
 
     // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========

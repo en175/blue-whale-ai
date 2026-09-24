@@ -189,6 +189,17 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 单处映射）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
+        // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
+        if (claim.parentProviderTaskId() != null) {
+            if (ParentResultReuse.tryReuseParentResult(VideoSceneSplitContract.TAG, claim, providerToken,
+                    segmentScenesClient::poll,
+                    this::sceneSplitResultIncomplete,
+                    this::publishResult)) {
+                return;
+            }
+        }
+
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（IKH8BH 契约两键恒在、值恒为合法枚举，创建时定死；
@@ -229,6 +240,16 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         if (updated) {
             scheduleNext(claim.id(), SCENE_SPLIT_POLL_INTERVAL_MS);
         }
+    }
+
+    /**
+     * 收割齐全判定（IKI8GN 家族差异参数）：切片数组非空，对齐轮询相 completed 成功判据。
+     * 返回 null=齐全；非空=未齐原因短句（嵌进共享骨架「未命中(父任务{})」日志）。
+     */
+    private String sceneSplitResultIncomplete(ClaimedVideoSceneSplitJobDto claim,
+                                              SceneSplitTaskObservation observation) {
+        return observation.segments() == null || observation.segments().isEmpty()
+                ? "切片数组为空" : null;
     }
 
     // ========== poll 相 ==========
@@ -302,9 +323,14 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 整体失败——异常上抛由 handle 归并 1046，此前已转存的段无 Asset 行、不留半成品资产
      * 悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
      * + 契约 result 回传（段序 / 起止秒 / 段资产引用 / 总时长）→ 终态 succeeded。
+     * <p>
+     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存）、终态发布守卫未命中。poll 相
+     * 调用方忽略返回值（静默退出）；重试收割调用方据此回退正常重新提交——续租/发布/提交
+     * 三守卫 WHERE 同构，回退后 markProviderSubmitted 必同样未命中，无 DB 双写，代价为一份
+     * 无人轮询的孤儿上游任务。
      */
-    private void publishResult(ClaimedVideoSceneSplitJobDto claim,
-                               SceneSplitTaskObservation observation) {
+    private boolean publishResult(ClaimedVideoSceneSplitJobDto claim,
+                                  SceneSplitTaskObservation observation) {
         // TOS 强依赖：切片链接 24h 失效，不允许降级直存（去字幕家族口径）
         if (mediaRelay == null) {
             throw new VideoSceneSplitError(
@@ -345,7 +371,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         List<PublishVideoSceneSplitDto.Segment> segments = new ArrayList<>(observed.size());
         for (int i = 0; i < observed.size(); i++) {
             if (!renewLeaseForSegmentTransfer(claim, i, observed.size())) {
-                return;
+                return false;
             }
             SegmentObservation segment = observed.get(i);
             TosVideoMediaRelay.StoredVideo stored;
@@ -389,6 +415,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             log.warn("[video_scene_split] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
         }
+        return published;
     }
 
     /**

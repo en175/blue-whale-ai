@@ -183,6 +183,17 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVocalSplitJobDto claim, String providerToken) {
+        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
+        if (claim.parentProviderTaskId() != null) {
+            if (ParentResultReuse.tryReuseParentResult(VocalSplitContract.TAG, claim, providerToken,
+                    separateVoiceClient::poll,
+                    this::vocalSplitResultIncomplete,
+                    this::publishResult)) {
+                return;
+            }
+        }
+
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（三键恒在、值恒为合法枚举，创建时定死；此处为
@@ -233,6 +244,23 @@ public class VocalSplitJobProcessor implements JobProcessor {
         if (updated) {
             scheduleNext(claim.id(), VOCAL_SPLIT_POLL_INTERVAL_MS);
         }
+    }
+
+    /**
+     * 收割齐全判定（IKI8GN 家族差异参数）：轨数组齐全口径对齐轮询相成功判据——scene 轨序内
+     * 每轨 URL 都在（客户端只装非空 URL，containsKey 即齐全；缺任一轨 = 不齐全，不部分复用）。
+     * 返回 null=齐全；非空=未齐原因短句（嵌进共享骨架「未命中(父任务{})」日志）。
+     */
+    private String vocalSplitResultIncomplete(ClaimedVocalSplitJobDto claim,
+                                              SeparateVoiceTaskObservation observation) {
+        Map<String, String> trackUrls = observation.trackUrls() != null
+                ? observation.trackUrls() : Map.of();
+        for (String trackType : resolveTrackOrder(claim)) {
+            if (!trackUrls.containsKey(trackType)) {
+                return "轨数组不齐，缺" + trackType + "轨";
+            }
+        }
+        return null;
     }
 
     // ========== poll 相 ==========
@@ -299,9 +327,11 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * <p>
      * 缺任一轨 URL / 任一轨转存失败 → 整单失败（契约口径：无部分成功；已转存的 TOS 对象
      * 随失败留弃，与家族单轨转存失败的孤儿口径一致）。
+     * <p>
+     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立，false 回退正常重新提交）。
      */
-    private void publishResult(ClaimedVocalSplitJobDto claim,
-                               SeparateVoiceTaskObservation observation) {
+    private boolean publishResult(ClaimedVocalSplitJobDto claim,
+                                  SeparateVoiceTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（家族强依赖口径）
         if (mediaRelay == null) {
             throw new VocalSplitError(
@@ -352,6 +382,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
             log.warn("[vocal_split] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
         }
+        return published;
     }
 
     // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========

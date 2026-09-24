@@ -102,8 +102,14 @@ class VideoSubtitleEraseJobProcessorTest {
 
     private ClaimedVideoSubtitleEraseJobDto makeClaim(Map<String, Object> input, String providerTaskId,
                                                       int pollCount) {
+        return makeClaim(input, providerTaskId, pollCount, null);
+    }
+
+    private ClaimedVideoSubtitleEraseJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+                                                      int pollCount, String parentProviderTaskId) {
         return new ClaimedVideoSubtitleEraseJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0);
+                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
+                parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
@@ -363,6 +369,174 @@ class VideoSubtitleEraseJobProcessorTest {
 
         assertFailCode(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED);
         verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    // ========== parent-reuse 重试收割（IKI89U / ADR-0114；平移 VideoJobProcessorTest 先例）==========
+
+    @Test
+    @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
+    void parentReuseSuccess_publishesWithoutSubmit() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-1")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-1"))
+                .thenReturn(new SubtitleEraseTaskObservation("succeeded",
+                        "https://volc/old-out.mp4?auth_key=...", 65.5, null, null));
+        stubSourceAsset();
+        when(mediaRelay.persist("https://volc/old-out.mp4?auth_key=...", "9"))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.mp4", "generated/9/video/abc.mp4",
+                        "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishVideoSubtitleEraseResult(any())).thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient, never()).submit(anyString(), anyString(), anyString(), any());
+        verify(mediaRelay).persist("https://volc/old-out.mp4?auth_key=...", "9");
+        ArgumentCaptor<PublishVideoSubtitleEraseDto> captor =
+                ArgumentCaptor.forClass(PublishVideoSubtitleEraseDto.class);
+        verify(stateMachine).publishVideoSubtitleEraseResult(captor.capture());
+        PublishVideoSubtitleEraseDto published = captor.getValue();
+        assertThat(published.url()).isEqualTo("https://tos/out.mp4");
+        assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
+        assertThat(published.mime()).isEqualTo("video/mp4");
+        assertThat(published.size()).isEqualTo(123_456L);
+        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+        // 源 1920x1080 近似回填 + 官方 duration 秒优先，与正常完成路径同型
+        assertThat(published.width()).isEqualTo(1920);
+        assertThat(published.height()).isEqualTo(1080);
+        assertThat(published.durationSec()).isEqualTo(65.5);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
+    void parentReuseFailed_fallThrough() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-fail")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-fail"))
+                .thenReturn(new SubtitleEraseTaskObservation("failed", null, null,
+                        "VideoParseFailed", "输入视频解析失败，请更换素材后重试"));
+        stubSourceAsset();
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
+    void parentReusePollError_fallThrough() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-gone")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-gone"))
+                .thenThrow(new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "MediaKit 去字幕任务查询失败: HTTP 404"));
+        stubSourceAsset();
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("非重试 job（parentProviderTaskId=null）→ 不查父任务，执行路径与现状完全一致")
+    void nonRetryJob_skipsParentQuery() {
+        stubSubmitClaim(input("subtitle_smart", List.of()));
+        stubSourceAsset();
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-1");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-1")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient, never()).poll(anyString(), anyString());
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
+    void parentReuseIncompleteResult_fallThrough() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-empty")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-empty"))
+                .thenReturn(new SubtitleEraseTaskObservation("succeeded", null, null, null, null));
+        stubSourceAsset();
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+        verify(mediaRelay, never()).persist(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
+    void parentReusePublishFails_fallThrough() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-stale")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-stale"))
+                .thenReturn(new SubtitleEraseTaskObservation("succeeded",
+                        "https://volc/expired-out.mp4", 65.5, null, null));
+        when(mediaRelay.persist(anyString(), eq("9")))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+        stubSourceAsset();
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
+    void parentReusePublishGuardMissed_fallThrough() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-guard")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-guard"))
+                .thenReturn(new SubtitleEraseTaskObservation("succeeded",
+                        "https://volc/old-out.mp4", 65.5, null, null));
+        stubSourceAsset();
+        when(mediaRelay.persist(anyString(), eq("9")))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.mp4", "generated/9/video/abc.mp4",
+                        "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
+        when(stateMachine.publishVideoSubtitleEraseResult(any())).thenReturn(false);
+        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
+                .thenReturn("amk-task-new");
+        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
+                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
     }
 
     // ========== poll 相：状态机 ==========

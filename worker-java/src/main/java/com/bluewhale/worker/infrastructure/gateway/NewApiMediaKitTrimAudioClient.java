@@ -3,6 +3,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.error.AudioTrimError;
 import com.bluewhale.worker.domain.error.GenerationError;
+import com.bluewhale.worker.domain.dto.ParentTaskObservation;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 
@@ -178,5 +179,5 @@ public class NewApiMediaKitTrimAudioClient extends NewApiMediaKitAsyncTaskClient
             String upstreamCode,
             /** failed 时的上游可读原因（error.message / 顶层 message，可 null）。 */
             String upstreamMessage
-    ) {}
+    ) implements ParentTaskObservation {}
 }

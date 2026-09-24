@@ -178,6 +178,17 @@ public class AudioTrimJobProcessor implements JobProcessor {
      * 可选）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedAudioTrimJobDto claim, String providerToken) {
+        // 0. IKI89Q（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
+        if (claim.parentProviderTaskId() != null) {
+            if (ParentResultReuse.tryReuseParentResult(AudioTrimContract.TAG, claim, providerToken,
+                    trimAudioClient::poll,
+                    ParentResultReuse.singleUrlIncomplete(TrimAudioTaskObservation::audioUrl),
+                    this::publishResult)) {
+                return;
+            }
+        }
+
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（source_asset_id / output_format 恒在、值恒为合法枚举，
@@ -298,9 +309,11 @@ public class AudioTrimJobProcessor implements JobProcessor {
     /**
      * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
      * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
+     * <p>
+     * 返回发布守卫结果（IKI89Q：重试收割据此判定复用是否成立，false 回退正常重新提交）。
      */
-    private void publishResult(ClaimedAudioTrimJobDto claim,
-                               TrimAudioTaskObservation observation) {
+    private boolean publishResult(ClaimedAudioTrimJobDto claim,
+                                  TrimAudioTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（家族强依赖口径）
         if (mediaRelay == null) {
             throw new AudioTrimError(
@@ -333,6 +346,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
             log.warn("[audio_trim] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
         }
+        return published;
     }
 
     // ========== 瞬时轮询错误判定（视频骨架 isTransientPollError 同语义） ==========

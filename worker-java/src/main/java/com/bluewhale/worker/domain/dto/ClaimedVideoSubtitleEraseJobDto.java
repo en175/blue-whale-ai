@@ -9,9 +9,12 @@ import java.util.Map;
  * <ul>
  *   <li>无 cancelRequested：去字幕无取消入口（官方无取消端点，家族「发出不取消」口径，
  *       规格 Out of Scope）</li>
- *   <li>无 parentProviderTaskId：手动重试是沿用冻结 input 的新 job（image_erase 家族口径，
- *       无视频 parent-reuse 防双扣需求——免费工具无二次扣费面）</li>
  * </ul>
+ * <p>
+ * parentProviderTaskId（IKI89U / ADR-0114）：手动重试 job 收割父任务上游结果的入口投影。
+ * 旧口径「无此字段属刻意：重试 = 沿用冻结 input 的新 job，免费工具无二次扣费面」只算了
+ * 用户计费面，漏了上游成本面——超窗重试整轮重复消耗上游费用；本字段随收割机制
+ * （视频 IKEA26 先例推广）落地，语义见 claim 投影与处理器 submit 相。
  * <p>
  * <b>snake_case 字段</b>（user_id / project_id 与 ClaimedVideoJobDto 逐字一致）。
  */
@@ -33,5 +36,11 @@ public record ClaimedVideoSubtitleEraseJobDto(
         /** 已轮询次数（rescheduleProviderPoll 累计，轮询上限判定用） */
         int pollCount,
         /** 轮询进度（瞬时错误重排时保持不倒退） */
-        int progress
-) {}
+        int progress,
+        /**
+         * IKI89U（ADR-0114）：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
+         * 重试收割：submit 相先查父任务上游，成功且结果 URL 齐全则复用旧结果发布，
+         * 防重复上游费用（非重试 job 恒 null，不查父任务）。
+         */
+        String parentProviderTaskId
+) implements ParentReuseClaim {}
