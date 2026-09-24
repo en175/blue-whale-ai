@@ -126,9 +126,10 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
     expect(data).toMatchObject({ job_id: expect.any(String), status: "queued", enqueue_required: true });
     expect(vi.mocked(enqueueAudioVideoMuxJob).mock.calls).toEqual([[data.job_id]]);
     const job = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(data.job_id) } });
+    // 冻结 URL 是 inspectObject 桩返回的 publicUrl（域名 + storage_key），不是 assets 行的原始 url。
     expect(job.input).toMatchObject({
-      audio: { assetId: String(audioId), nodeId: "node-audio", url: "https://audio-video-mux.test/source.mp3" },
-      video: { assetId: String(videoId), nodeId: "node-video", url: "https://audio-video-mux.test/source.mp4" },
+      audio: { assetId: String(audioId), nodeId: "node-audio", url: "https://audio-video-mux.test/uploads/9/audio/source.mp3" },
+      video: { assetId: String(videoId), nodeId: "node-video", url: "https://audio-video-mux.test/uploads/9/video/source.mp4" },
       is_audio_reserve: true,
       sync: "video",
       estimated_duration_ms: 33_000,
