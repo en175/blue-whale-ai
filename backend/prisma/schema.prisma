@@ -553,9 +553,12 @@ model creative_skill_version {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model users {
+/// 账号主体（自建用户体系）。改到 identity_ 前缀、username 唯一、phone 可空，
+/// 理由与 pre-flight 见 migration 20260924180000。
+/// ⚠️ `username` 是**登录凭据**；`phone` 只是「多一种登录方式」，存量用户没有它。
+model identity_users {
   id           BigInt   @id @default(autoincrement())
-  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
@@ -564,9 +567,12 @@ model users {
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
   password     String?  @db.VarChar(63)
+
+  @@unique([username], map: "uk_identity_users__username")
 }
 
-model verification_codes {
+/// 短信验证码。手机号登录是**后续**能力（发码已通、登录未接，`loginWithCode` 零调用者）。
+model identity_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
   code       String   @db.VarChar(6)
