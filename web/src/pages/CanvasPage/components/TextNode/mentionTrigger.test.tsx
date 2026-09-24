@@ -427,6 +427,15 @@ it('同身份插入第二张标签后光标落第二张后', async () => {
   expect(caretAtChip(chipByNode(editor, 'm1', 2)!, 'after')).toBe(true);
 });
 
+it('标签操作层标为画布浮层，避免点重新绑定穿透到添加到对话', async () => {
+  const { editor } = await renderNode();
+  await enterEditing(editor);
+  const chip = chipByNode(editor, 'm1', 1)!;
+  await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const menu = document.querySelector('[data-testid="media-chip-menu"]');
+  expect(menu?.hasAttribute('data-canvas-overlay')).toBe(true);
+});
+
 it('替换来源后光标落替换后新标签后', async () => {
   const { editor } = await renderNode();
   await enterEditing(editor);
@@ -503,6 +512,53 @@ it('失效多张标签重新绑定后光标落触发那张替换后的新标签�
     expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(0);
     expect(editor.querySelectorAll('[data-media-node="m2"]').length).toBe(2);
     expect(caretAtChip(chipByNode(editor, 'm2', 1)!, 'after')).toBe(true);
+    expect(onMediaIndexChange!.mock.calls.at(-1)![3]).toEqual({ added: ['m2'], removed: ['m1'] });
+  } finally {
+    storeState.edges = [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }];
+  }
+});
+
+it('剪线后失效标签重新绑定同一来源：补线 delta 含原身份，标签恢复有效', async () => {
+  storeState.edges = [];
+  try {
+    const { editor } = await renderNode();
+    await enterEditing(editor);
+    const chip = chipByNode(editor, 'm1', 1)!;
+    expect(chip.dataset.mediaInvalid).toBe('1');
+    await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await pressChipMenuButton('重新绑定');
+    expect(menuOpen()).toBe(true);
+    await selectMenuItem('素材图一');
+    expect(menuOpen()).toBe(false);
+    expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(1);
+    const restored = chipByNode(editor, 'm1', 1)!;
+    expect(restored.dataset.mediaInvalid).toBeUndefined();
+    expect(caretAtChip(restored, 'after')).toBe(true);
+    expect(onMediaIndexChange!.mock.calls.at(-1)![3]).toEqual({ added: ['m1'], removed: [] });
+  } finally {
+    storeState.edges = [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }];
+  }
+});
+
+it('剪线后再次 @ 同一来源：插入路径也传 added 以便补线', async () => {
+  storeState.edges = [];
+  try {
+    const { editor } = await renderNode();
+    await enterEditing(editor);
+    const first = chipByNode(editor, 'm1', 1)!;
+    const at = document.createTextNode('@');
+    first.after(at);
+    const range = document.createRange();
+    range.setStart(at, 1);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await dispatchInput(editor, 'insertText', '@');
+    expect(menuOpen()).toBe(true);
+    await selectMenuItem('素材图一');
+    expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(2);
+    expect(onMediaIndexChange!.mock.calls.at(-1)![3]).toEqual({ added: ['m1'], removed: [] });
   } finally {
     storeState.edges = [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }];
   }

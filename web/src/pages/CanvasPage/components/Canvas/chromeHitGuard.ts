@@ -1,5 +1,7 @@
 /** 画布上层控件（工具栏 / 小地图 / 缩放条 / 节点跟随条）命中标记 */
 export const CANVAS_CHROME_SELECTOR = '[data-canvas-chrome], .react-flow__minimap';
+/** 盖在 chrome 之上的浮层（标签操作层 / @ 菜单 / 预览）：命中它们不得转发给底下的工具条 */
+export const CANVAS_OVERLAY_SELECTOR = '[data-canvas-overlay]';
 
 const CHROME_INTERACTIVE = 'button, a, [role="button"], input';
 const registeredChrome = new Set<Element>();
@@ -44,11 +46,31 @@ export function canvasChromeAtPoint(clientX: number, clientY: number): Element |
   return null;
 }
 
+/** 浮层在 pointerdown 卸掉后，同一次手势的 click 仍落在底下 chrome 上，需吞掉转发 */
+let overlayGestureUntil = 0;
+
+function markOverlayGesture(): void {
+  overlayGestureUntil = performance.now() + 400;
+}
+
+function overlayGestureActive(): boolean {
+  return performance.now() < overlayGestureUntil;
+}
+
+function isCanvasOverlayTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(CANVAS_OVERLAY_SELECTOR) != null;
+}
+
 export function isStolenCanvasChromeHit(event: Event): boolean {
   if (!('clientX' in event) || !('clientY' in event)) return false;
   const target = event.target;
   if (!(target instanceof Element)) return false;
   if (target.closest(CANVAS_CHROME_SELECTOR)) return false;
+  if (isCanvasOverlayTarget(target)) {
+    if (event.type === 'pointerdown' || event.type === 'mousedown') markOverlayGesture();
+    return false;
+  }
+  if (overlayGestureActive()) return false;
   const { clientX, clientY } = event as PointerEvent;
   return canvasChromeAtPoint(clientX, clientY) != null;
 }
