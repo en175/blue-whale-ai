@@ -60,6 +60,19 @@ export default function AdminLayout() {
       return next;
     });
 
+  // ⚠️ 把根元素的 color-scheme 也设成 light。
+  //    只写 .adminRoot 上的 CSS 变量不够：原生控件（下拉候选框、复选框、滚动条）
+  //    的渲染由**该元素生效的 color-scheme** 决定，而 portal 到 document.body 的浮层
+  //    压根不在 .adminRoot 子树里。设到根上最稳，且不影响前台——离开管理端时还原。
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.colorScheme;
+    root.style.colorScheme = 'light';
+    return () => {
+      root.style.colorScheme = previous;
+    };
+  }, []);
+
   // 布局加载时实时校验管理员身份：非管理员置 isAdmin=false 由 RequireAdmin 守卫跳回首页
   // 401 时 http 层已清空会话，守卫同样会拦截
   useEffect(() => {
