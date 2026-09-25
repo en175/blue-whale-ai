@@ -41,6 +41,7 @@ import static org.mockito.Mockito.mock;
  * <ul>
  *   <li>缺 {@code ROCKETMQ_ENDPOINTS} → 启动中止且失败信息点名该变量；</li>
  *   <li>缺 {@code DATABASE_URL} → 启动中止且失败信息点名该变量；</li>
+ *   <li>缺 {@code NEW_API_UPSTREAM_KEY}（项目级统一 key，ADR-0114）→ 启动中止且失败信息点名该变量；</li>
  *   <li>视频 tag 在「消费侧订阅值 / 处理器声明值 / 路由表」三处一致；</li>
  *   <li>{@link GenerationMqRouteEnum} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
  *   <li>退役的 {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 残留属性被忽略（不报错、不生效）。</li>
@@ -111,6 +112,31 @@ class StartupContractTest {
                     assertThat(failure).as("缺 DATABASE_URL 必须中止启动").isNotNull();
                     assertThat(chainContains(failure, "DATABASE_URL environment variable is required"))
                             .as("失败信息必须为既定的 DATABASE_URL 缺失文案，实际：%s", failure)
+                            .isTrue();
+                });
+    }
+
+    /**
+     * 上游统一 key 经 {@code System.getenv} 读取，只有未设置时才能复现缺失路径。
+     * <p>
+     * 缺它为什么必须中止启动：素材状态定时跟进每 5s 一轮，拿空 key 会一直以
+     * {@code Bearer } 打网关收 401——报错点离原因很远，且表现为「静默什么都不做」。
+     */
+    @Test
+    @DisplayName("NEW_API_UPSTREAM_KEY 缺失 → 启动中止，失败信息点名 NEW_API_UPSTREAM_KEY")
+    void missingUpstreamKeyAbortsStartup() {
+        Assumptions.assumeTrue(
+                System.getenv(NewApiUpstreamConfig.ENV_UPSTREAM_KEY) == null
+                        || System.getenv(NewApiUpstreamConfig.ENV_UPSTREAM_KEY).isBlank(),
+                "本机已设 NEW_API_UPSTREAM_KEY，缺失路径不可复现");
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(NewApiUpstreamConfig.class)
+                .run(ctx -> {
+                    Throwable failure = ctx.getStartupFailure();
+                    assertThat(failure).as("缺 NEW_API_UPSTREAM_KEY 必须中止启动").isNotNull();
+                    assertThat(chainContains(failure, NewApiUpstreamConfig.ENV_UPSTREAM_KEY))
+                            .as("失败信息必须点名 NEW_API_UPSTREAM_KEY，实际：%s", failure)
                             .isTrue();
                 });
     }

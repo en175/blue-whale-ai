@@ -77,7 +77,8 @@ public class NewApiMaterialClient {
     /**
      * 查单条素材的上游状态。
      *
-     * @param token      该用户的 sk-（从 user_info 取回）
+     * @param token      上游调用凭证（项目级统一 key {@code NEW_API_UPSTREAM_KEY}，由
+     *                   {@link com.bluewhale.worker.config.NewApiUpstreamConfig} 装配注入）
      * @param materialId 素材库素材 id（asset-...）
      * @return 解析出的状态；查不到的情形**一律返回 null**（网络失败 / 非 2xx / 信封不合预期）——
      *         调用方按「本轮未知，保持 Processing」处理，不误判为可用也不误判为失败。

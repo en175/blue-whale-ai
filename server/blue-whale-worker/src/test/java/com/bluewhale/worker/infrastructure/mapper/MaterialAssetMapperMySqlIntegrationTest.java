@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 这里跑真 MySQL，把 DDL 与 SQL 一起钉住。
  * <p>
  * 接线沿用 {@code JobStateMachineMySqlIntegrationTest}：手动 ApplicationContext，
- * 只注册本测试需要的两个 Mapper（不扫 autoconfig / 不起 MQ / 不起 @Scheduled）。
+ * 只注册本测试需要的 Mapper（不扫 autoconfig / 不起 MQ / 不起 @Scheduled）。
  */
 @Testcontainers(disabledWithoutDocker = true)
 @DisplayName("素材状态跟进 SQL 真库集成测试（MySQL Testcontainers）")
@@ -60,7 +60,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
     static AnnotationConfigApplicationContext ctx;
     static JdbcTemplate jdbc;
     static MaterialAssetMapper assetMapper;
-    static UserInfoMapper userInfoMapper;
 
     @Configuration
     static class TestConfig {
@@ -91,11 +90,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
             return factory(MaterialAssetMapper.class, sf).getObject();
         }
 
-        @Bean
-        UserInfoMapper userInfoMapper(SqlSessionFactory sf) throws Exception {
-            return factory(UserInfoMapper.class, sf).getObject();
-        }
-
         @SuppressWarnings({"unchecked", "rawtypes"})
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
                 throws Exception {
@@ -111,7 +105,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
         assetMapper = ctx.getBean(MaterialAssetMapper.class);
-        userInfoMapper = ctx.getBean(UserInfoMapper.class);
     }
 
     @AfterAll
@@ -123,7 +116,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
     void cleanup() {
         jdbc.execute("DELETE FROM material_assets");
         jdbc.execute("DELETE FROM assets WHERE id IN (880001, 880002)");
-        jdbc.execute("DELETE FROM user_info");
     }
 
     /** 直接插一行，可控 gmt_create（跟随窗口的判据就是它）。 */
@@ -214,15 +206,6 @@ class MaterialAssetMapperMySqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM material_assets", Integer.class)).isZero();
     }
 
-    @Test
-    @DisplayName("user_info 凭证按 user_id 取；无行返回 null")
-    void findCredentialByUserId() {
-        jdbc.update("INSERT INTO user_info (user_id, provider_credential) VALUES (?, ?)",
-                9L, "sk-user9");
-
-        assertThat(userInfoMapper.findCredential(9L)).isEqualTo("sk-user9");
-        assertThat(userInfoMapper.findCredential(77L)).isNull();
-    }
     // 评审补强：Failed 是吸收态。拦截点信任本地 Active 就不再查上游，所以一次陈旧的
     // ListAssets 镜像若能把它翻回 Active，整条闸门就被过期响应打开了。真库验这条 SQL。
     @Test

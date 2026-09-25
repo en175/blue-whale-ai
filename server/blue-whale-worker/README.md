@@ -18,7 +18,7 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 **服务启动即消费全部 6 个 tag**：`video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（契约 §1 / §16）。不存在按 tag 的启停开关，也不存在「空配置只探活」形态：
 
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
-- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL`（上游网关）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）。
+- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL` / `NEW_API_UPSTREAM_KEY`（上游网关地址与调用凭证）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关单列的理由：5 个网关客户端（audio / image / image_enhance / image_erase / video）全部无条件装配，其构造器统一经 `NewApiHttpSupport.normalizeBaseUrl`，baseUrl 空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」）；同组另一项是项目级统一 key `NEW_API_UPSTREAM_KEY`（ADR-0114），由 `NewApiUpstreamConfig` 在装配期守卫——job 之内的调用用冻结在 `job.input.provider_credential` 的凭证，只有素材状态定时跟进（无 job 可借）需要这把部署注入的 key。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
 - **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/generation-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
 - `GET /ready` 只返回 `{"status":"ready"}`。
@@ -67,6 +67,7 @@ curl localhost:4002/ready
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
 | `NEW_API_BASE_URL` | 是 | new-api 网关地址 | — |
+| `NEW_API_UPSTREAM_KEY` | 是 | 上游调用凭证：项目级统一 key（ADR-0114）。素材状态定时跟进没有 job 凭证可借，用它代打网关 | — |
 | `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 | `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
@@ -79,7 +80,7 @@ curl localhost:4002/ready
 ### 启动行为
 
 - **无条件启动全部 6 个 tag 的消费者**（修正六：无按 tag 开关；`WORKER_ENABLED_TAGS` 已删除）。
-- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
+- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `NEW_API_UPSTREAM_KEY` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
 
 ### Docker 部署
@@ -90,6 +91,7 @@ docker build -t worker-java .
 docker run -e DATABASE_URL=mysql://... \
            -e ROCKETMQ_ENDPOINTS=... \
            -e NEW_API_BASE_URL=... \
+           -e NEW_API_UPSTREAM_KEY=... \
            -e VOLC_ACCESS_KEY_ID=... \
            -e VOLC_SECRET_ACCESS_KEY=... \
            -e VOLC_TOS_ENDPOINT=... \

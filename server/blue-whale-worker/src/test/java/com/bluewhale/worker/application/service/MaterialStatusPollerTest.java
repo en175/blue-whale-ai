@@ -1,10 +1,10 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
 import com.bluewhale.worker.infrastructure.mapper.MaterialAssetMapper;
-import com.bluewhale.worker.infrastructure.mapper.UserInfoMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,18 +22,23 @@ import static org.mockito.Mockito.*;
 /**
  * 素材状态定时跟进测试（ADR-0087 决策 4）。
  * <p>
- * 覆盖：窗口内 Processing 行逐条实时查并回写、无凭证跳过、上游未知不写库（保持 Processing）、
+ * 覆盖：窗口内 Processing 行逐条实时查并回写、上游未知不写库（保持 Processing）、
  * 认不出的状态收敛成 Processing、单条失败不中断本轮、扫描参数透传、
  * 回写落空（行被删）不视为错误。
+ * <p>
+ * 凭证口径（ADR-0114 之后的形态）：跟进用的是**项目级统一 key**，与行归属哪个用户无关。
+ * 本类钉住这一点——任何人把它改回「按 userId 查凭证」，构造签名与
+ * {@link #unifiedKeyIsUsedRegardlessOfRowUserId()} 会同时红。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class MaterialStatusPollerTest {
 
     private static final int MAX_AGE_MINUTES = 10;
+    /** 部署注入的项目级统一 key（不是任何用户的 sk-）。 */
+    private static final String UNIFIED_KEY = "sk-unified-upstream";
 
     @Mock private MaterialAssetMapper assetMapper;
-    @Mock private UserInfoMapper userInfoMapper;
     @Mock private NewApiMaterialClient client;
 
     private MaterialStatusPoller poller;
@@ -49,17 +54,16 @@ class MaterialStatusPollerTest {
     @BeforeEach
     void setUp() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt())).thenReturn(List.of());
-        poller = new MaterialStatusPoller(assetMapper, userInfoMapper, client,
+        poller = new MaterialStatusPoller(assetMapper, new UpstreamCredential(UNIFIED_KEY), client,
                 MAX_AGE_MINUTES);
     }
 
     @Test
-    @DisplayName("窗口内 Processing 行：取凭证 → 查上游 → 回写 Active")
+    @DisplayName("窗口内 Processing 行：取统一 key → 查上游 → 回写 Active")
     void mirrorsActiveStatus() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-abc"))
+        when(client.getAsset(UNIFIED_KEY, "asset-abc"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
 
         poller.poll();
@@ -67,13 +71,32 @@ class MaterialStatusPollerTest {
         verify(assetMapper).mirrorStatus(9L, "asset-abc", "Active", null, null);
     }
 
+    /**
+     * 钉住 ADR-0114 之后的凭证口径：跟进只认部署注入的统一 key，**不按素材归属用户换 key**——
+     * new-api 那边已经没有我们的用户，逐用户密钥既取不到、也不该存在。
+     */
+    @Test
+    @DisplayName("统一 key 与行归属用户无关：不同 userId 的行都用同一把 key 查上游")
+    void unifiedKeyIsUsedRegardlessOfRowUserId() {
+        when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
+                .thenReturn(List.of(row(9L, "asset-a"), row(77L, "asset-b")));
+        when(client.getAsset(eq(UNIFIED_KEY), anyString()))
+                .thenReturn(new MaterialStatusResult("Active", null, null));
+
+        poller.poll();
+
+        verify(client).getAsset(UNIFIED_KEY, "asset-a");
+        verify(client).getAsset(UNIFIED_KEY, "asset-b");
+        // 只认这一把：没有第二条别的凭证路径。
+        verify(client, times(2)).getAsset(eq(UNIFIED_KEY), anyString());
+    }
+
     @Test
     @DisplayName("上游 Failed：状态与失败原文一起回写（原文留痕，不解释）")
     void mirrorsFailedWithRawError() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-abc"))
+        when(client.getAsset(UNIFIED_KEY, "asset-abc"))
                 .thenReturn(new MaterialStatusResult("Failed", "InvalidParameter", "素材不合规"));
 
         poller.poll();
@@ -86,15 +109,14 @@ class MaterialStatusPollerTest {
     void failedTriggersCleanup() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-bad")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-bad"))
+        when(client.getAsset(UNIFIED_KEY, "asset-bad"))
                 .thenReturn(new MaterialStatusResult("Failed", "Sensitive", "命中审核"));
 
         poller.poll();
 
         verify(assetMapper).mirrorStatus(9L, "asset-bad", "Failed", "Sensitive", "命中审核");
         verify(assetMapper).clearMaterialLink(9L, "asset-bad");
-        verify(client).deleteAsset("sk-user9", "asset-bad");
+        verify(client).deleteAsset(UNIFIED_KEY, "asset-bad");
     }
 
     @Test
@@ -102,8 +124,7 @@ class MaterialStatusPollerTest {
     void activeTriggersNoCleanup() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-ok")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-ok"))
+        when(client.getAsset(UNIFIED_KEY, "asset-ok"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
 
         poller.poll();
@@ -117,12 +138,11 @@ class MaterialStatusPollerTest {
     void cleanupFailureDoesNotAbortRound() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-bad"), row(9L, "asset-ok2")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-bad"))
+        when(client.getAsset(UNIFIED_KEY, "asset-bad"))
                 .thenReturn(new MaterialStatusResult("Failed", null, null));
         when(assetMapper.clearMaterialLink(9L, "asset-bad"))
                 .thenThrow(new RuntimeException("db down"));
-        when(client.getAsset("sk-user9", "asset-ok2"))
+        when(client.getAsset(UNIFIED_KEY, "asset-ok2"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
 
         poller.poll(); // 不抛
@@ -135,8 +155,7 @@ class MaterialStatusPollerTest {
     void normalizesUnknownStatusToProcessing() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-abc"))
+        when(client.getAsset(UNIFIED_KEY, "asset-abc"))
                 .thenReturn(new MaterialStatusResult("Pending", null, null));
 
         poller.poll();
@@ -145,25 +164,11 @@ class MaterialStatusPollerTest {
     }
 
     @Test
-    @DisplayName("user_info 无凭证 → 跳过该行：不查上游也不写库（保持 Processing 等下轮）")
-    void skipsWhenNoCredential() {
-        when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
-                .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn(null);
-
-        poller.poll();
-
-        verify(client, never()).getAsset(anyString(), anyString());
-        verify(assetMapper, never()).mirrorStatus(anyLong(), anyString(), anyString(), any(), any());
-    }
-
-    @Test
     @DisplayName("上游查不到（网络/信封异常）→ 不写库，状态保持 Processing")
     void keepsProcessingWhenUpstreamUnknown() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-abc")).thenReturn(null);
+        when(client.getAsset(UNIFIED_KEY, "asset-abc")).thenReturn(null);
 
         poller.poll();
 
@@ -175,10 +180,9 @@ class MaterialStatusPollerTest {
     void singleRowFailureDoesNotAbortRound() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-aaa"), row(9L, "asset-bbb")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-aaa"))
+        when(client.getAsset(UNIFIED_KEY, "asset-aaa"))
                 .thenThrow(new RuntimeException("gateway down"));
-        when(client.getAsset("sk-user9", "asset-bbb"))
+        when(client.getAsset(UNIFIED_KEY, "asset-bbb"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
 
         poller.poll();
@@ -191,8 +195,7 @@ class MaterialStatusPollerTest {
     void zeroAffectedRowsIsNotAnError() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
                 .thenReturn(List.of(row(9L, "asset-abc")));
-        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
-        when(client.getAsset("sk-user9", "asset-abc"))
+        when(client.getAsset(UNIFIED_KEY, "asset-abc"))
                 .thenReturn(new MaterialStatusResult("Active", null, null));
         when(assetMapper.mirrorStatus(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(0);
@@ -218,6 +221,6 @@ class MaterialStatusPollerTest {
 
         poller.poll(); // 不抛
 
-        verifyNoInteractions(userInfoMapper);
+        verifyNoInteractions(client);
     }
 }

@@ -4,10 +4,14 @@
 --   prisma/schema.prisma > /tmp/schema-diff.prisma && \
 --   DATABASE_URL=... npx prisma@6.5.0 migrate diff --from-empty --to-schema-datamodel /tmp/schema-diff.prisma --script
 -- 生成日期：2026-09-12
--- 2026-09-15（IKFYHJ）手工追加 material_assets / user_info 两表——追加内容逐字取自
+-- 2026-09-15（IKFYHJ）手工追加 material_assets 表——追加内容逐字取自
 --   backend/prisma/migrations/20260915170000_ikfyhj_material_compliance/migration.sql
 --   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
---   按上面命令全量再生成时，这两表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
+--   按上面命令全量再生成时，该表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
+-- 2026-09-25（ADR-0114）：同批追加的**用户凭证表**已从本夹具删除——worker 侧不再按 userId 取
+--   上游凭证（改走部署注入的项目级统一 key NEW_API_UPSTREAM_KEY），本夹具只服务 worker 测试，
+--   没有 worker 代码访问的表不必留。该表在生产库仍由 backend/prisma 持有（登录时写入），
+--   故全量再生成时它会照原样回来——回来也不必管，与 worker 无关。
 -- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -844,18 +848,5 @@ CREATE TABLE `material_assets` (
     INDEX `idx_material_assets_poll`(`status`, `gmt_create`),
     INDEX `idx_material_assets_group`(`material_group_id`),
     UNIQUE INDEX `uk_material_assets_material`(`material_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `user_info` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `user_id` BIGINT NOT NULL,
-    `provider_credential` VARCHAR(128) NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_user_info_user`(`user_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

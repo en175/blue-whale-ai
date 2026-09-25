@@ -1,10 +1,10 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
 import com.bluewhale.worker.infrastructure.mapper.MaterialAssetMapper;
-import com.bluewhale.worker.infrastructure.mapper.UserInfoMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,8 +26,10 @@ import java.util.List;
  * 超窗仍 {@code Processing} 的行不再跟进，也不改写状态——本表不引入第四种状态。这类素材若被
  * 拿来生成，拦截点（backend 创建期/重试期）会自己实时查一次上游，正确性不打折。
  * <p>
- * 凭据来源：网关 {@code /api/material/*} 只认用户 sk-，没有服务级通道，而定时跟进发生在任何
- * 请求之外，没有会话可借。登录时 backend 把 sk- 落 {@code user_info}，这里按 user_id 取回。
+ * 凭据来源：项目级统一 key（{@code NEW_API_UPSTREAM_KEY}，见
+ * {@link com.bluewhale.worker.config.NewApiUpstreamConfig}）。new-api 降级为上游供应商后
+ * （ADR-0114），调用它的凭证是**部署配置**而不是某个用户的 sk-——所以这里不再按 userId
+ * 去库里取凭证，也不需要会话。
  * <p>
  * 与 {@link RecoveryService} 同一套调度约定：启动即扫一次，整轮异常兜底不逃逸。
  */
@@ -45,18 +47,18 @@ public class MaterialStatusPoller {
     private static final String STATUS_PROCESSING = "Processing";
 
     private final MaterialAssetMapper assetMapper;
-    private final UserInfoMapper userInfoMapper;
+    private final UpstreamCredential credential;
     private final NewApiMaterialClient client;
     private final int maxAgeMinutes;
 
     public MaterialStatusPoller(
             MaterialAssetMapper assetMapper,
-            UserInfoMapper userInfoMapper,
+            UpstreamCredential credential,
             NewApiMaterialClient client,
             @Value("${MATERIAL_STATUS_POLL_MAX_AGE_MINUTES:10}") int maxAgeMinutes
     ) {
         this.assetMapper = assetMapper;
-        this.userInfoMapper = userInfoMapper;
+        this.credential = credential;
         this.client = client;
         this.maxAgeMinutes = maxAgeMinutes;
     }
@@ -83,18 +85,11 @@ public class MaterialStatusPoller {
         }
     }
 
-    /** 单行跟进：取凭证 → 查上游 → 回写。任何一步未知就保持 Processing，下轮再试。 */
+    /** 单行跟进：取统一 key → 查上游 → 回写。任何一步未知就保持 Processing，下轮再试。 */
     private void followUp(MaterialAssetEntity row) {
         String materialId = row.getMaterialId();
         try {
-            String token = userInfoMapper.findCredential(row.getUserId());
-            if (token == null || token.isBlank()) {
-                // 用户从未在本栈登录（或登录发生在 user_info 上线之前）→ 没有凭证可查。
-                // 不删行、不改状态：拦截点仍会实时查，用户下次登录起本行就能被跟进。
-                log.warn("素材状态跟进跳过：user_info 无凭证 userId={} materialId={}",
-                        row.getUserId(), materialId);
-                return;
-            }
+            String token = credential.key();
 
             MaterialStatusResult upstream = client.getAsset(token, materialId);
             if (upstream == null) {
