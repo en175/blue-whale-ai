@@ -6,8 +6,8 @@
  *
  * ── 这一面要同时说清三件事 ────────────────────────────────────────────────────
  *
- * 1. **单位是 mc**（1 积分 = 1000 mc），旁边实时给出「N 积分 ≈ ¥X.XX」——理由见 index.tsx
- *    文件头「单位：为什么界面上是 mc」；
+ * 1. **单价按「元」填**（官方价目表的单位：元 / 百万 token、元 / 张、元 / 次），
+ *    写回目录的是 mc —— 换算在 `catalogDraft` 里，理由见那边的文件头第 2 条；
  * 2. **不编辑的字段原样带回去**（`usageSemantic` / `by` 等，见 `ruleFromForm` 的入参 `original`）；
  * 3. **「单价待配」（unset）是显式的空位**，不是「先不收费」——弹窗要把它说清楚，
  *    因为它是运营最可能误判的一处（详见下面那段 Alert 的文案）。
@@ -17,8 +17,10 @@ import { Plus, Trash2 } from 'lucide-react';
 import {
   BASE_UNIT_OPTIONS,
   describePriceInHuman,
+  priceUnitLabel,
   ruleFormError,
   ruleFromForm,
+  yuanToMc,
   type CatalogRuleView,
   type KeyValueRow,
   type RuleForm,
@@ -63,19 +65,29 @@ export default function RuleEditorModal({
     ? BASE_UNIT_OPTIONS
     : [...BASE_UNIT_OPTIONS, { value: form.baseUnit, label: `${form.baseUnit}（目录里的现值）` }];
 
-  const priceValue = Number(form.priceValue.trim());
-  const humanPrice = Number.isFinite(priceValue)
-    ? describePriceInHuman(priceValue, creditsPerYuan)
-    : '';
+  /** 单价栏的量纲（「百万 token」/「次」/「张」）：表单里还没保存，直接从当前编辑值推 */
+  const unitLabel = priceUnitLabel({
+    baseUnit: form.baseUnit,
+    unitDenominator: Number(form.unitDenominator.trim() || '1'),
+  });
+
+  const priceYuan = form.priceValue.value.trim();
+  const priceMc = priceYuan === '' ? null : yuanToMc(Number(priceYuan), creditsPerYuan);
+  const humanPrice =
+    priceMc === null ? '' : describePriceInHuman(priceMc, creditsPerYuan, unitLabel);
 
   const submit = () => {
-    const message = ruleFormError(form);
+    const message = ruleFormError(form, creditsPerYuan);
     if (message !== null) {
       setError(message);
       return;
     }
     try {
-      onSave(ruleFromForm(form, state.original), form.modelId.trim(), form.taskType.trim());
+      onSave(
+        ruleFromForm(form, state.original, creditsPerYuan),
+        form.modelId.trim(),
+        form.taskType.trim(),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : '规则不合法');
     }
@@ -147,7 +159,7 @@ export default function RuleEditorModal({
               patch({
                 priceKind: kind,
                 ...(kind === 'table' && form.priceTable.length === 0
-                  ? { priceTable: [{ key: '', value: '' }] }
+                  ? { priceTable: [{ key: '', value: '', originalMc: null }] }
                   : {}),
               });
             }}
@@ -158,26 +170,29 @@ export default function RuleEditorModal({
       <div style={{ marginTop: 16 }}>
         {form.priceKind === 'const' ? (
           <Field
-            label="基准单价（mc）"
-            hint={humanPrice ? `当前 = ${humanPrice}` : '1 积分 = 1000 mc'}
+            label={`基准单价（元 / ${unitLabel}）`}
+            hint={humanPrice ? `当前 = ${humanPrice}` : '按目录里的换算率折成 mc 写回'}
           >
             <Input
               aria-label="基准单价"
-              value={form.priceValue}
-              placeholder="例如 100000（= 100 积分）"
-              onChange={(e) => patch({ priceValue: e.target.value })}
+              value={form.priceValue.value}
+              placeholder="例如 70"
+              onChange={(e) =>
+                patch({ priceValue: { ...form.priceValue, value: e.target.value } })
+              }
             />
           </Field>
         ) : form.priceKind === 'table' ? (
           <Field
-            label="价格表（规格键 → 单价 mc）"
-            hint="规格键与提交时的规格一致（例如 video=0 / video=1 / size=2k）；键不区分大小写，等价键重复会被拒绝"
+            label={`价格表（规格键 → 单价，元 / ${unitLabel}）`}
+            hint="规格键与提交时的规格一致（例如 resolution=1080p|video=1 / video=0 / size=2k）；键不区分大小写，等价键重复会被拒绝。没配到的档位组合提交会被拒绝（不会按 0 免费）"
           >
             <KeyValueEditor
               rows={form.priceTable}
               ariaPrefix="价格表"
-              keyPlaceholder="video=0"
-              valuePlaceholder="100000"
+              keyPlaceholder="resolution=720p|video=1"
+              valuePlaceholder="70"
+              makeRow={() => ({ key: '', value: '', originalMc: null })}
               onChange={(priceTable) => patch({ priceTable })}
             />
           </Field>
@@ -299,6 +314,7 @@ export default function RuleEditorModal({
                 ariaPrefix="token 尺寸表"
                 keyPlaceholder="resolution=720p|aspect_ratio=16:9"
                 valuePlaceholder="1248x704"
+                makeRow={() => ({ key: '', value: '' })}
                 onChange={(tokenDimensions) => patch({ tokenDimensions })}
               />
             </Field>
@@ -315,6 +331,7 @@ export default function RuleEditorModal({
             ariaPrefix="附加维度"
             keyPlaceholder="usage.referenceCount"
             valuePlaceholder="4000"
+            makeRow={() => ({ key: '', value: '' })}
             onChange={(dims) => patch({ dims })}
           />
         </Field>
@@ -324,6 +341,7 @@ export default function RuleEditorModal({
             ariaPrefix="整单倍率"
             keyPlaceholder="usage.referenceCount"
             valuePlaceholder="12000"
+            makeRow={() => ({ key: '', value: '' })}
             onChange={(multipliers) => patch({ multipliers })}
           />
         </Field>
@@ -331,28 +349,38 @@ export default function RuleEditorModal({
 
       <div style={{ marginTop: 16 }}>
         <Alert tone="info">
-          单位是 mc（1 积分 = 1000 mc）。界面按 mc 编辑而不是按元：元 ↔ mc 几乎永远是长小数，
-          而换算着编辑会让没被改动的字段在保存时被挪动几个 mc。
+          单价按**元**填（官方价目表就是这个单位），保存时按目录里的换算率
+          <b> 1 元 = {creditsPerYuan ?? '—'} 积分 </b>
+          折成 mc 写回 —— 引擎与账本用的始终是 mc。
+          <br />
+          被改过的栏才重新换算：没动过的价**原值写回**，所以「打开看一眼、点保存」不会
+          把价格挪动哪怕 1 mc。
         </Alert>
       </div>
     </Modal>
   );
 }
 
-/* ============ 键值对编辑器（dims / multipliers / 价格表共用） ============ */
-
-function KeyValueEditor({
+/* ============ 键值对编辑器（dims / multipliers / 尺寸表 / 价格表共用） ============
+ *
+ * 泛型是为了价格表：它每行还要多带一个 `originalMc`（未改动时原值写回，见
+ * `MoneyField`），而 dims / 倍率 / 尺寸表不需要。`makeRow` 让「添加一行」知道该造哪种行。
+ */
+function KeyValueEditor<T extends KeyValueRow>({
   rows,
   onChange,
   ariaPrefix,
   keyPlaceholder,
   valuePlaceholder,
+  makeRow,
 }: {
-  rows: KeyValueRow[];
-  onChange: (rows: KeyValueRow[]) => void;
+  rows: T[];
+  onChange: (rows: T[]) => void;
   ariaPrefix: string;
   keyPlaceholder: string;
   valuePlaceholder: string;
+  /** 造一行空行 —— 必须由调用方给：价格表要多带 originalMc */
+  makeRow: () => T;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -395,7 +423,7 @@ function KeyValueEditor({
           // ⚠️ 一页上有好几组键值表（价格表 / 尺寸表 / 附加维度 / 整单倍率），
           //    每组的「添加一行」长得一模一样 —— 不带 aria-label 时读屏与自动化都分不出点的是哪一组
           aria-label={`给${ariaPrefix}添加一行`}
-          onClick={() => onChange([...rows, { key: '', value: '' }])}
+          onClick={() => onChange([...rows, makeRow()])}
         >
           添加一行
         </Button>

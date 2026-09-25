@@ -16,13 +16,17 @@
  *   3. **没有改动就不发版**：比对解析后的对象（不是读回来的文本 —— 那是 MySQL 规范化过的
  *      形态），否则点一次保存就多出一个内容相同的版本，历史里再也看不出「这版是谁改的」。
  *
- * ── 单位：为什么界面上是 mc ───────────────────────────────────────────────────
+ * ── 单位：界面按「元」，目录里存 mc ──────────────────────────────────────────
  *
- * 基准单价在目录里是 **mc**（1 积分 = 1000 mc），本页就按 mc 编辑，旁边实时给出
- * 「N 积分 ≈ ¥X.XX」。不改成「让用户填元」是因为 mc ↔ 元的换算几乎永远不是整数：
- * creditsPerYuan=15 时 100000 mc = ¥6.666666666666667 —— 界面只能是长小数或四舍五入，
- * 而**没被改动的字段也会被写回**，一次改 A 的保存会顺手把 B 的价格挪动几 mc。
- * 改的是钱，且没人看得见。mc 是这里唯一「齐整」的单位。
+ * 运营手上的是官方价目表上的元（「70 元 / 百万 token」「0.12 元 / 张」），
+ * 让他对着 1050000 这种内部数字填，既认不出自己配的是哪一档、也没法照着文档抄。
+ * 所以**编辑与展示都用元**（旁边标出量纲：元 / 百万 token、元 / 张、元 / 次），
+ * 写回目录的仍然是 mc —— 引擎与账本的单位不动。
+ *
+ * ⚠️ 换算的那一次舍入有个坑：**没被改动的字段也会被写回**，老老实实「渲染成元 → 解析 → 换回 mc」
+ * 会让一次改 A 的保存顺手把 B 的价挪动几个 mc（改的是钱，且没人看得见）。
+ * 所以每个价格栏都带着打开表单时读到的原 mc，**文本没动就原值写回** ——
+ * 见 `catalogDraft` 的 `MoneyField` 与文件头第 2 条。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,6 +45,7 @@ import {
   bpToMultiple,
   describeBasePrice,
   describePriceInHuman,
+  priceUnitLabel,
   describeSpecKey,
   emptyRuleForm,
   formFromRule,
@@ -357,7 +362,7 @@ export default function ModelBilling() {
                     icon={<Pencil size={15} strokeWidth={2} />}
                     onClick={() =>
                       setEditor({
-                        initial: formFromRule(row.modelId, row.taskType, row.rule),
+                        initial: formFromRule(row.modelId, row.taskType, row.rule, creditsPerYuan),
                         original: row.rule,
                         isNew: false,
                       })
@@ -502,11 +507,12 @@ function BasePriceCell({
     const table = price.table ?? {};
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <div>{describeBasePrice(rule)}</div>
+        <div>{describeBasePrice(rule, creditsPerYuan)}</div>
         {Object.entries(table).map(([key, value]) =>
           typeof value === 'number' ? (
             <div key={key} style={{ fontSize: 12 }}>
-              {describeSpecKey(key)} → {describePriceInHuman(value, creditsPerYuan)}
+              {describeSpecKey(key)} →{' '}
+              {describePriceInHuman(value, creditsPerYuan, priceUnitLabel(rule))}
             </div>
           ) : null,
         )}
@@ -516,8 +522,10 @@ function BasePriceCell({
   if (typeof price.value !== 'number') return <span>—</span>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <div>{describeBasePrice(rule)}</div>
-      <div style={{ fontSize: 12 }}>{describePriceInHuman(price.value, creditsPerYuan)}</div>
+      <div>{describeBasePrice(rule, creditsPerYuan)}</div>
+      <div style={{ fontSize: 12 }}>
+        {describePriceInHuman(price.value, creditsPerYuan, priceUnitLabel(rule))}
+      </div>
     </div>
   );
 }

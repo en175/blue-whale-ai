@@ -11,12 +11,19 @@
  *    要改的那几个键」（`withRule` / `withCreditsPerYuan` 等），绝不用一个自己拼的新对象覆盖原对象 ——
  *    后者会在一次「只改单价」的保存里把别人的字段悄悄删掉。
  *
- * 2. **编辑单位 = 存储单位（不换算）**。基准单价在目录里是 **mc**（1 积分 = 1000 mc），
- *    界面就按 mc 编辑，旁边实时给出「≈ N 积分 / ¥X.XX 一次」的换算提示。
- *    理由：换算着编辑意味着「显示 → 写回」要经过一次取整，而**没被改动的字段也会被写回** ——
- *    一次改 A 的保存会顺手把 B 的价格挪动几个 mc。那是最坏的失败模式：改的是钱，且没人看得见。
- *    实测一下就知道 mc 才是那个「齐整」的单位：creditsPerYuan=15 时 100000 mc = 100 积分
- *    = ¥6.666666666666667，反过来编辑元几乎永远是长小数。
+ * 2. **编辑单位是「元」，存储单位是 mc**（1 元 = creditsPerYuan 积分 = creditsPerYuan × 1000 mc）。
+ *    运营手上的是官方价目表上的元（「70 元 / 百万 token」「0.12 元 / 张」），
+ *    让他对着 1050000 这种内部数字填，既认不出自己配的是哪一档、也没法照着文档抄 ——
+ *    所以**换算只发生在界面这一层**，写回目录的仍然是 mc（引擎单位不动）。
+ *
+ *    ⚠️ 换算必然经过一次舍入，而**没被改动的字段也会被写回**：若老老实实「渲染成元 → 解析 → 换回 mc」，
+ *    一次改 A 的保存就会顺手把 B 的价挪动几个 mc（改的是钱，且没人看得见）。
+ *    所以每个价格栏都带着**打开表单时读到的原 mc**（`MoneyField` / `PriceRow.originalMc`）：
+ *    文本与「原值渲染出来的文本」逐字相同 ⇒ **原值写回**，换算只落在真正被改过的那一栏。
+ *
+ *    ⚠️ 反转过来看：以前那条「必须按 mc 编辑，否则精度丢失」的理由**只对按次成立**
+ *    （creditsPerYuan=15 时 100000 mc = ¥6.666666666666667，除不尽）。
+ *    「元 / 百万 token」是整数报价（70 / 42 / 77 / 46），换回 mc 是精确的 —— 那条理由在这里不成立。
  *
  * 3. **序列化只发生一次**（`serializeCatalog`），发出去的就是它。
  * ============================================ */
@@ -227,17 +234,70 @@ export function withoutRule(
   return next;
 }
 
-/* ---------- 单位换算（只用于展示，写回一律按 mc 原值） ---------- */
+/* ---------- 单位换算 ---------- */
 
 /** mc → 整数积分。与 billing 的 `RoundingPolicy.HalfUp` 同口径（四舍五入）。 */
 export function mcToCredits(mc: number): number {
   return Math.round(mc / 1000);
 }
 
-/** mc → 元（浮点，仅供展示；不要拿它反推 mc）。 */
+/** mc → 元（浮点，仅供展示与「渲染成编辑文本」；不要拿它当存储值反推）。 */
 export function mcToYuan(mc: number, creditsPerYuan: number | null): number | null {
   if (!creditsPerYuan || creditsPerYuan <= 0) return null;
   return mc / 1000 / creditsPerYuan;
+}
+
+/**
+ * 元 → mc。**单价与「元」是同一口径**（都按 `unitDenominator` 那一份量报），
+ * 所以这里不出现 `unitDenominator` —— 它只决定这一栏该叫「每百万 token」还是「每张 / 每次」。
+ *
+ * <p>对账关系（billing 侧 `AbstractPricingCalculator`）：
+ * <pre>
+ *   积分 = 用量 × basePrice ÷ unitDenominator ÷ 1000
+ *   ⇒  售价（元） = basePrice ÷ unitDenominator ÷ creditsPerYuan
+ *   ⇒  basePrice = 元 × creditsPerYuan × 1000          （本函数）
+ * </pre>
+ * 即「70 元 / 百万 token」配上 `unitDenominator=1000000` 就是 1050000 mc；
+ * 「0.12 元 / 张」配上 `unitDenominator=1` 就是 1800 mc。
+ *
+ * @returns 整数 mc；换算率读不出来（没有生效目录）时返回 **null，不猜默认值**
+ */
+export function yuanToMc(yuan: number, creditsPerYuan: number | null): number | null {
+  if (creditsPerYuan === null || !Number.isFinite(creditsPerYuan) || creditsPerYuan <= 0) return null;
+  if (!Number.isFinite(yuan)) return null;
+  return Math.round(yuan * creditsPerYuan * 1000);
+}
+
+/**
+ * mc → 元的**编辑文本**（价格栏里显示与编辑用的就是它）。
+ *
+ * <p>它必须满足一条硬不变式：`yuanToMc(Number(mcToYuanText(mc, cpy)), cpy) === mc`。
+ * 小数位数由 {@link yuanDecimals} 按换算率推出来 —— 位数不够时「显示 → 解析 → 回写」
+ * 会让没改过的价自己挪动（见文件头第 2 条）。尾随 0 去掉，让整数元显示成 `70` 而不是 `70.000000`。
+ *
+ * @returns 换算率读不出来时返回空串（**不拿 mc 冒充元**）
+ */
+export function mcToYuanText(mc: number, creditsPerYuan: number | null): string {
+  const yuan = mcToYuan(mc, creditsPerYuan);
+  if (yuan === null) return '';
+  return trimTrailingZeros(yuan.toFixed(yuanDecimals(creditsPerYuan)));
+}
+
+/**
+ * 展示元时需要的小数位数。
+ *
+ * <p>推导：`toFixed(d)` 的截断误差 ≤ 0.5 × 10⁻ᵈ 元，换算回 mc 会被放大
+ * `creditsPerYuan × 1000` 倍，要让它不足半个 mc（否则 `Math.round` 就会挪走一个 mc）：
+ * `0.5 × 10⁻ᵈ × creditsPerYuan × 1000 < 0.5` ⇒ `d > log₁₀(creditsPerYuan) + 3`。
+ * 上界 12 位只是防病态配置把界面撑爆。
+ */
+export function yuanDecimals(creditsPerYuan: number | null): number {
+  if (creditsPerYuan === null || !Number.isFinite(creditsPerYuan) || creditsPerYuan <= 0) return 6;
+  return Math.min(12, Math.ceil(Math.log10(creditsPerYuan)) + 4);
+}
+
+function trimTrailingZeros(text: string): string {
+  return text.includes('.') ? text.replace(/0+$/, '').replace(/\.$/, '') : text;
 }
 
 /** 万分比 → 倍数（4000 → 4）。 */
@@ -250,11 +310,29 @@ export function bpToMultiple(bp: number): number {
 /** 基准单价的三种形态之一。 */
 export type PriceKind = 'const' | 'table' | 'unset';
 
-/** 一对可增删的键值行（dims / multipliers / 价格表共用）。 */
+/** 一对可增删的键值行（dims / multipliers / token 尺寸表共用）。 */
 export interface KeyValueRow {
   key: string;
   value: string;
 }
+
+/**
+ * 一个**价格**栏：界面显示与编辑的是**元**文本，写回目录的是**mc**。
+ *
+ * <p>为什么还要带着 `originalMc`：`元 → mc` 必然经过一次舍入，而表单里没被改动的栏也会被写回。
+ * 只按文本换算的话，「打开看一眼、点保存」就会把价格挪动几个 mc（改的是钱，且没人看得见）。
+ * 所以把**打开表单时读到的原值**一路带下来：文本与「原值渲染出来的文本」逐字相同 ⇒ 用原值。
+ * 判据是**文本**而不是「换算结果相等」——后者在换个换算率后可能碰巧相等，语义上却是「改过」。
+ */
+export interface MoneyField {
+  /** 界面文本（元），如 `70` / `0.12` */
+  value: string;
+  /** 目录里的原值（mc）；null = 新建的栏，没有原值可依 */
+  originalMc: number | null;
+}
+
+/** 价格表的一行 = 规格键 + 一个价格栏。 */
+export interface PriceRow extends KeyValueRow, MoneyField {}
 
 /** 编辑弹窗的表单状态。数值一律用字符串存：输入过程中「-」「1.」都是合法中间态。 */
 export interface RuleForm {
@@ -262,10 +340,10 @@ export interface RuleForm {
   taskType: string;
   baseUnit: string;
   priceKind: PriceKind;
-  /** 整数 mc */
-  priceValue: string;
-  /** 键 → 整数 mc */
-  priceTable: KeyValueRow[];
+  /** 常数单价：界面是**元**（见 {@link MoneyField}） */
+  priceValue: MoneyField;
+  /** 价格表：规格键 → 单价（界面是**元**） */
+  priceTable: PriceRow[];
   /** 维度 → 万分比 */
   dims: KeyValueRow[];
   /** 维度 → 万分比 */
@@ -298,11 +376,19 @@ export const BASE_UNIT_OPTIONS = [
 ];
 
 const WHOLE_NUMBER = /^\d+$/;
+/** 价格栏的文本：十进制数（**整数报价与小数报价都要收**：70 元/百万 token 与 0.12 元/张） */
+const MONEY = /^\d+(\.\d+)?$/;
 
 /** 整数 mc / 万分比 / 积分：允许前后空格，其余一律整数。 */
 function parseWhole(raw: string): number | null {
   const trimmed = raw.trim();
   return WHOLE_NUMBER.test(trimmed) ? Number(trimmed) : null;
+}
+
+/** 价格栏文本（元）→ 数；非数返回 null。 */
+function parseMoney(raw: string): number | null {
+  const trimmed = raw.trim();
+  return MONEY.test(trimmed) ? Number(trimmed) : null;
 }
 
 /** 一组键值行的第一处问题（`field` 只出现在文案里，好让人知道改哪一栏）。 */
@@ -315,27 +401,49 @@ function rowsError(rows: KeyValueRow[], field: string): string | null {
   return null;
 }
 
+/** 价格表的完整性（键 + 以**元**报的价）。 */
+function priceRowsError(rows: PriceRow[], field: string): string | null {
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) return `${field}的键不能为空`;
+    if (parseMoney(row.value) === null) {
+      return `${field}「${key}」的单价必须是一个数（单位：元 / 每 unitDenominator 个单位，如 70 或 0.12）`;
+    }
+  }
+  return null;
+}
+
 /**
  * 表单完整性检查。
  *
  * <p>⚠️ **这不是第二份编译器**：目录能不能用由 billing 编译时说了算（那是唯一的校验时机，
  * 且它的报错指得出哪条规则配错了）。这里只拦「表单根本表达不出来」的东西 ——
- * 模型 / 任务类型空着、该填的数字没填或填的不是整数。多写一条规则校验，就会多一处
+ * 模型 / 任务类型空着、该填的数字没填或填的不是数。多写一条规则校验，就会多一处
  * 「两边不一致」的地方。
+ *
+ * <p>价格栏的文本是**元**：填的不合法、或读不到换算率（没有生效目录）时，这里就拦下 ——
+ * 换算不出来的话，写回目录的 mc 只能是错的或编的。
  *
  * @returns 一句中文错误；合法时返回 null
  */
-export function ruleFormError(form: RuleForm): string | null {
+export function ruleFormError(form: RuleForm, creditsPerYuan: number | null): string | null {
   if (!form.modelId.trim()) return '模型 ID 必填';
   if (!form.taskType.trim()) return '任务类型必填';
   if (!form.baseUnit.trim()) return '基准维度必填';
 
+  const needsMoney = form.priceKind === 'const' || form.priceKind === 'table';
+  if (needsMoney && (creditsPerYuan === null || !Number.isFinite(creditsPerYuan) || creditsPerYuan <= 0)) {
+    return '读不到换算率（1 元 = 多少积分）—— 单价按元填、写回目录要换成 mc，先在上面把换算率配好';
+  }
+
   if (form.priceKind === 'const') {
-    if (parseWhole(form.priceValue) === null) return '基准单价必填，且是整数 mc';
+    if (parseMoney(form.priceValue.value) === null) {
+      return '基准单价必填，且是一个数（单位：元 / 每 unitDenominator 个单位，如 70）';
+    }
   } else if (form.priceKind === 'table') {
     // 查表才看价格表 —— 常数方式与「待配」下那一栏是收起来的，里面的空行不该拦住保存
-    if (form.priceTable.length === 0) return '价格表至少要有一行（规格键 → 单价 mc）';
-    const priceError = rowsError(form.priceTable, '价格表');
+    if (form.priceTable.length === 0) return '价格表至少要有一行（规格键 → 单价）';
+    const priceError = priceRowsError(form.priceTable, '价格表');
     if (priceError !== null) return priceError;
   }
   // unset（单价待配）不需要填任何价 —— 那正是这个形态存在的意义：**留空发布**，
@@ -379,6 +487,36 @@ function rowsToRecord(rows: KeyValueRow[]): Record<string, number> {
   return out;
 }
 
+/**
+ * 一个价格栏 → 写回目录的 **mc**。
+ *
+ * <p>判据见 {@link MoneyField}：文本与「原值渲染出来的文本」**逐字相同** ⇒ 原值写回。
+ * 这条分支让「打开看一眼、点保存」对没改过的价是**恒等**的，与换算率、小数位数都无关。
+ */
+function moneyToMc(field: MoneyField, creditsPerYuan: number | null): number {
+  if (
+    field.originalMc !== null &&
+    field.value.trim() === mcToYuanText(field.originalMc, creditsPerYuan)
+  ) {
+    return field.originalMc;
+  }
+  const yuan = parseMoney(field.value);
+  if (yuan === null) return field.originalMc ?? 0;
+  return yuanToMc(yuan, creditsPerYuan) ?? field.originalMc ?? 0;
+}
+
+/** 价格表行 → `规格键 → 单价 mc`；键重复时**报错而不是悄悄覆盖**。 */
+function priceRowsToRecord(rows: PriceRow[], creditsPerYuan: number | null): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (key in out) throw new Error(`键重复：${key}`);
+    out[key] = moneyToMc(row, creditsPerYuan);
+  }
+  return out;
+}
+
 /** 键值行 → 对象，值保持**文本**（token 尺寸表的值是 `1248x704`，不是数）。 */
 function rowsToTextRecord(rows: KeyValueRow[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -401,21 +539,22 @@ function rowsToTextRecord(rows: KeyValueRow[]): Record<string, string> {
  */
 export function ruleFromForm(
   form: RuleForm,
-  original: CatalogRuleView = {},
+  original: CatalogRuleView,
+  creditsPerYuan: number | null,
 ): CatalogRuleView {
   let basePrice: CatalogRuleView['basePrice'];
   if (form.priceKind === 'const') {
     basePrice = {
       ...(original.basePrice ?? {}),
       kind: 'const',
-      value: parseWhole(form.priceValue) ?? 0,
+      value: moneyToMc(form.priceValue, creditsPerYuan),
     };
   } else if (form.priceKind === 'table') {
     basePrice = {
       ...(original.basePrice ?? {}),
       kind: 'table',
       value: null,
-      table: rowsToRecord(form.priceTable),
+      table: priceRowsToRecord(form.priceTable, creditsPerYuan),
     };
   } else {
     // 单价待配的空位：**只保留定价轴声明**（`by` 是文档），把 value / table 清掉 ——
@@ -468,11 +607,12 @@ export function ruleFromForm(
   return rule;
 }
 
-/** 目录里的 rule → 表单（编辑已有规则时用）。 */
+/** 目录里的 rule → 表单（编辑已有规则时用）。价格栏一律渲染成**元**文本（见文件头第 2 条）。 */
 export function formFromRule(
   modelId: string,
   taskType: string,
   rule: CatalogRuleView,
+  creditsPerYuan: number | null,
 ): RuleForm {
   const price = rule.basePrice ?? {};
   const kind: PriceKind =
@@ -480,6 +620,11 @@ export function formFromRule(
   const table = price.table !== undefined && price.table !== null ? price.table : {};
   const asText = (v: unknown): string =>
     typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+  /** 一个价格栏：显示成元，同时把原 mc 带上（未改动时原样写回，见 MoneyField）。 */
+  const asMoney = (v: unknown): MoneyField => {
+    const mc = typeof v === 'number' && Number.isFinite(v) ? v : null;
+    return { value: mc === null ? '' : mcToYuanText(mc, creditsPerYuan), originalMc: mc };
+  };
   const token = rule.tokenEstimate;
 
   return {
@@ -487,8 +632,11 @@ export function formFromRule(
     taskType,
     baseUnit: typeof rule.baseUnit === 'string' ? rule.baseUnit : '',
     priceKind: kind,
-    priceValue: asText(price.value),
-    priceTable: Object.entries(table).map(([key, value]) => ({ key, value: asText(value) })),
+    priceValue: asMoney(price.value),
+    priceTable: Object.entries(table).map(([key, value]) => ({
+      key,
+      ...asMoney(value),
+    })),
     dims: recordToRows(rule.dims),
     multipliers: recordToRows(rule.multipliers),
     unitDenominator: asText(rule.unitDenominator ?? 1),
@@ -512,8 +660,8 @@ export function emptyRuleForm(): RuleForm {
     taskType: '',
     baseUnit: 'constant:1',
     priceKind: 'const',
-    priceValue: '',
-    priceTable: [{ key: '', value: '' }],
+    priceValue: { value: '', originalMc: null },
+    priceTable: [{ key: '', value: '', originalMc: null }],
     dims: [],
     multipliers: [],
     unitDenominator: '1',
@@ -547,16 +695,42 @@ function recordToRows(record: Record<string, unknown> | undefined): KeyValueRow[
 
 /* ---------- 表格里的一行怎么显示 ---------- */
 
-/** 基准单价的展示文本（mc 原文；人类可读的换算由 `describePriceInHuman` 补在旁边）。 */
-export function describeBasePrice(rule: CatalogRuleView): string {
+/** 基准单价的展示文本（**元**为主，人类可读；换算不出来时退回 mc 原文）。 */
+export function describeBasePrice(rule: CatalogRuleView, creditsPerYuan: number | null): string {
   const price = rule.basePrice ?? {};
   if (price.kind === 'unset') return '单价未配（提交会被拒绝）';
   if (price.kind === 'table') {
     const count = price.table ? Object.keys(price.table).length : 0;
     return `价格表（${count} 档）`;
   }
-  if (typeof price.value === 'number') return `${price.value} mc`;
+  if (typeof price.value === 'number') {
+    const yuan = mcToYuanText(price.value, creditsPerYuan);
+    return yuan ? `${yuan} 元 / ${priceUnitLabel(rule)}` : `${price.value} mc`;
+  }
   return '—';
+}
+
+/**
+ * 单价的量纲：**「这份单价是每多少个什么单位收的」**。
+ *
+ * <p>它由 `unitDenominator`（每多少个单位）与 `baseUnit`（哪个单位）一起决定 ——
+ * 运营填的数只有配上这句才认得出是什么价：「70」是 70 元**每百万 token**，
+ * 而「0.12」是 0.12 元**每张**。两者在目录里都是整数 mc，靠单位分母才分得开。
+ *
+ * <p>⚠️ 只用于展示。写进目录的仍是 `unitDenominator` 这个数，不是这句话。
+ */
+export function priceUnitLabel(rule: CatalogRuleView): string {
+  const denom = typeof rule.unitDenominator === 'number' && rule.unitDenominator > 0
+    ? rule.unitDenominator
+    : 1;
+  const unit = typeof rule.baseUnit === 'string' ? rule.baseUnit : '';
+  if (unit === 'usage.c') return denom === 1_000_000 ? '百万 token' : `${denom} token`;
+  if (unit === 'constant:1') return '次';
+  if (unit === 'usage.seconds') return '秒';
+  if (unit === 'usage.succeededSlots') return '张';
+  if (unit === 'usage.characters') return '字符';
+  if (unit === 'usage.referenceCount') return '参考素材';
+  return `${denom} 个单位`;
 }
 
 /**
@@ -575,17 +749,27 @@ const SPEC_KEY_LABELS: Record<string, string> = {
 };
 
 export function describeSpecKey(key: string): string {
-  return SPEC_KEY_LABELS[key] ?? key;
+  const unlabeled = key
+    .split('|')
+    .map((part) => SPEC_KEY_LABELS[part.trim()] ?? part.trim())
+    .join(' | ');
+  return unlabeled;
 }
 
-/** 单价的人话：`每 1 个单位 ≈ 100 积分 ≈ ¥6.67`；换算不出来（没生效目录）时返回空串。 */
+/**
+ * 单价的人话：`70 元 / 百万 token（1050 积分）`。
+ *
+ * <p>**元在前**：运营认的是元（官方价目表就是元），积分是内部单位，放括号里够用。
+ * 换算不出来（没有生效目录）时返回空串 —— 不拿 mc 冒充元。
+ */
 export function describePriceInHuman(
   mc: number,
   creditsPerYuan: number | null,
+  unitLabel = '',
 ): string {
-  const yuan = mcToYuan(mc, creditsPerYuan);
-  if (yuan === null) return `${mcToCredits(mc)} 积分`;
-  return `${mcToCredits(mc)} 积分 ≈ ¥${yuan.toFixed(2)}`;
+  const yuan = mcToYuanText(mc, creditsPerYuan);
+  if (!yuan) return `${mcToCredits(mc)} 积分`;
+  return `${yuan} 元${unitLabel ? ` / ${unitLabel}` : ''}（${mcToCredits(mc)} 积分）`;
 }
 
 /** 深拷贝。入参一定来自 `JSON.parse`，所以 JSON 往返是**无损**的（见文件头第 1 条）。 */

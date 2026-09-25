@@ -159,9 +159,9 @@ describe('ModelBilling 模型计费', () => {
     expect(document.body.textContent).toContain('abcdef01');
     expect(document.body.textContent).toContain('doubao-seedance-2-5-260628');
     expect(document.body.textContent).toContain('text2video');
-    // 20000 mc = 20 积分 ≈ ¥1.33（1 元 = 15 积分）
-    expect(document.body.textContent).toContain('20000 mc');
-    expect(document.body.textContent).toContain('20 积分 ≈ ¥1.33');
+    // 单价按**元**显示（官方价目表的单位）；20000 mc = ¥1.333333 = 20 积分
+    expect(document.body.textContent).toContain('1.333333 元 / 秒');
+    expect(document.body.textContent).toContain('1.333333 元 / 秒（20 积分）');
   });
 
   it('★ 没有改动时「保存并发布」是禁用的（点一次不产生一个内容相同的新版本）', async () => {
@@ -257,18 +257,27 @@ describe('ModelBilling 模型计费', () => {
     expect(document.body.textContent).not.toContain('有未发布的改动');
   });
 
-  it('新增规则：填好模型/任务/单价后写进草稿（等发布）', async () => {
+  it('新增规则：填好模型/任务/单价（**元**）后写进草稿（等发布）', async () => {
     await renderPage();
 
     await click(button('新增规则'));
     await type(inputByLabel('模型 ID'), 'doubao-seedream-4-0');
     await type(inputByLabel('任务类型'), 'text2image');
-    await type(inputByLabel('基准单价'), '50000');
+    // 填的是元：2 元 / 次 ⇒ 目录里写 30000 mc（creditsPerYuan=15）
+    await type(inputByLabel('基准单价'), '2');
     await click(button('确定'));
 
     expect(document.body.textContent).toContain('doubao-seedream-4-0');
-    expect(document.body.textContent).toContain('50000 mc');
+    expect(document.body.textContent).toContain('2 元 / 次');
     expect(document.body.textContent).toContain('有未发布的改动');
+
+    await click(button('保存并发布'));
+    await click(button('确认发布'));
+    const payload = api.publishBillingCatalog.mock.calls[0]?.[0] as { document: string };
+    const published = JSON.parse(payload.document) as {
+      models: Record<string, Record<string, { basePrice: { value: number } }>>;
+    };
+    expect(published.models['doubao-seedream-4-0']?.text2image?.basePrice.value).toBe(30000);
   });
 
   it('编辑已有规则：改成的新单价进草稿，模型/任务类型这两个键不可改', async () => {
@@ -280,11 +289,12 @@ describe('ModelBilling 模型计费', () => {
     expect(inputByLabel('模型 ID').disabled).toBe(true);
     expect(inputByLabel('任务类型').disabled).toBe(true);
 
-    await type(inputByLabel('基准单价'), '30000');
+    // 改成 51 元 / 秒（creditsPerYuan=15 ⇒ 目录里是 765000 mc）
+    await type(inputByLabel('基准单价'), '51');
     await click(button('确定'));
 
-    expect(document.body.textContent).toContain('30000 mc');
-    expect(document.body.textContent).toContain('30 积分 ≈ ¥2.00');
+    expect(document.body.textContent).toContain('51 元 / 秒');
+    expect(document.body.textContent).toContain('51 元 / 秒（765 积分）');
     expect(document.body.textContent).toContain('有未发布的改动');
 
     await click(button('保存并发布'));
@@ -293,7 +303,7 @@ describe('ModelBilling 模型计费', () => {
     const published = JSON.parse(payload.document) as {
       models: Record<string, Record<string, { basePrice: { value: number } }>>;
     };
-    expect(published.models['doubao-seedance-2-5-260628']?.text2video?.basePrice.value).toBe(30000);
+    expect(published.models['doubao-seedance-2-5-260628']?.text2video?.basePrice.value).toBe(765000);
   });
 
   it('没有任何生效目录时给出「将发布第 1 版」而不是报错', async () => {    api.fetchBillingCatalog.mockResolvedValue({
@@ -407,15 +417,15 @@ describe('ModelBilling 视频 token 计价的规则', () => {
     expect(document.body.textContent).toContain('单价还没填 —— 这个模型的提交会被拒绝');
     expect(document.body.textContent).toContain('不会按 0 免费生成');
 
-    // 切成「按规格查表」，把 video 两档的单价填上
+    // 切成「按规格查表」，填一档价（填的是**元**：70 元 / 百万 token ⇒ 1050000 mc）
     await choose('计价方式', '按规格查表');
     await type(inputByLabel('价格表键'), 'video=0');
-    await type(inputByLabel('价格表值'), '1234000');
+    await type(inputByLabel('价格表值'), '70');
     await click(button('确定'));
 
-    // 表格里不再是「待配」，且带上人类可读的换算（1234000 mc = 1234 积分 ≈ ¥82.27）
+    // 表格里不再是「待配」，且按元显示并标出量纲
     expect(document.body.textContent).not.toContain('单价未配（提交会被拒绝）');
-    expect(document.body.textContent).toContain('1234 积分 ≈ ¥82.27');
+    expect(document.body.textContent).toContain('70 元 / 百万 token（1050 积分）');
     expect(document.body.textContent).toContain('有未发布的改动');
   });
 
