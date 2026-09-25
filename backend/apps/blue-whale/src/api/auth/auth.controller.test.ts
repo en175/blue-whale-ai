@@ -345,3 +345,26 @@ describe("AuthController 登录日志", () => {
     expect(res.cookie).toHaveBeenCalled();
   });
 });
+
+describe("AuthController 上游凭证缺失", () => {
+  it("★ 缺 NEW_API_UPSTREAM_KEY 时报出**变量名**，而不是被兜底文案吃掉", async () => {
+    // toAuthError 会把所有 503 压成「账户服务暂不可用」。那句文案对「凭证没配」
+    // 毫无帮助——运维看到它只会去查上游健康，而真正原因是少了一个环境变量。
+    const saved = process.env[UPSTREAM_KEY_ENV];
+    delete process.env[UPSTREAM_KEY_ENV];
+
+    try {
+      const { controller, identity, res } = setup();
+      identity.login.mockResolvedValue(loginResult());
+
+      await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
+        status: 503,
+        code: "upstream_credential_missing",
+      });
+      // 变量名必须在文案里，否则这条错误和「上游挂了」在运维眼里没有区别
+      await expect(controller.login(LOGIN_BODY, res)).rejects.toThrow(UPSTREAM_KEY_ENV);
+    } finally {
+      if (saved !== undefined) process.env[UPSTREAM_KEY_ENV] = saved;
+    }
+  });
+});

@@ -23,7 +23,10 @@ import {
   InvalidCredentialsError,
   type LocalLoginResult,
 } from "@lib/shared/identity/identity.service.js";
-import { resolveUpstreamCredential } from "@lib/shared/account/upstream-credential.js";
+import {
+  resolveUpstreamCredential,
+  UpstreamCredentialMissingError,
+} from "@lib/shared/account/upstream-credential.js";
 import { UsernameTakenError } from "@lib/shared/persistence/identity-user-repo.js";
 import { PasswordPolicyError } from "@lib/shared/identity/password.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
@@ -45,6 +48,19 @@ function loginData(result: LocalLoginResult, isNewUser: boolean) {
     is_new_user: isNewUser,
     has_password: true,
   };
+}
+
+/**
+ * 把登录/注册链路上的异常翻成 HTTP 错误。
+ *
+ * <p>⚠️ **配置类错误必须原样透传**：`toAuthError` 会把所有 503 压成「账户服务暂不可用」，
+ * 而那句通用文案对「上游凭证没配」毫无帮助——运维看到它只会去查上游健康，
+ * 而真正原因是少了一个环境变量。这类错误当初特地把变量名写进 message，
+ * 就是为了在这一刻说出来，不能被兜底文案吃掉。
+ */
+function toAuthFailure(error: unknown): NewApiError {
+  if (error instanceof UpstreamCredentialMissingError) return error;
+  return toAuthError(error);
 }
 
 /** IKDR4J：IP 20 次/分拦单机批量撞库；账号 5 次/分拦多 IP 分散撞单账号。 */
@@ -209,7 +225,7 @@ export class AuthController {
         await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw projected;
       }
-      throw toAuthError(error);
+      throw toAuthFailure(error);
     }
   }
 
@@ -279,7 +295,7 @@ export class AuthController {
       if (error instanceof UsernameTakenError || error instanceof PasswordPolicyError) {
         throw new NewApiError(error.message, 400, FAILURE_CODE);
       }
-      throw toAuthError(error);
+      throw toAuthFailure(error);
     }
   }
 
