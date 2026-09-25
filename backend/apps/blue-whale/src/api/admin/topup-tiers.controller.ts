@@ -33,7 +33,19 @@ export class AdminTopupTiersController {
   async list() {
     try {
       const tiers = await this.topupTier.listAll();
-      return { success: true, data: tiers };
+      // ⚠️ **读的时候重新派生，不信库里那一列**：`topup_tiers.amount` 的存量行是
+      // new-api 记账时代写进去的 quota（原价 × 500_000），即 ¥100 档存着 5,000,000，
+      // 而用户端卡片现在显示 1,500。只在写入时改成新公式的话，**老数据永远是错的**——
+      // 管理员看到一个数、用户看到另一个数，正是这次要消掉的那种不一致。
+      // 派生是幂等的，与写入侧用的是同一个 deriveCredits（同一条公式、同一处来源）。
+      const creditsPerYuan = await fetchCreditsPerYuan();
+      return {
+        success: true,
+        data: tiers.map((t) => ({
+          ...t,
+          amount: deriveCredits(t.originalPrice, creditsPerYuan),
+        })),
+      };
     } catch (error) {
       throw toAdminError(error);
     }
