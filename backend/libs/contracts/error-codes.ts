@@ -514,6 +514,7 @@ export const ERROR_CODES: Record<number, string> = {
   100406: "版本冲突，请刷新后重试",
   100407: "覆盖目标已变化，请生成新计划",
   100408: "空参数卡片不可保存，请补全参考图或描述",
+  100409: "幂等键冲突：同键异载荷",
   100410: "共享资产类型不支持",
 };
 
@@ -592,6 +593,8 @@ export const PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE = 100405;
 export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406;
 export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407;
 export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
+/** 同一把 Idempotency-Key 配了不同的载荷：建任务与重试共用同一个处置（拒绝，不取首次结果）。 */
+export const IDEMPOTENCY_CONFLICT_CODE = 100409;
 export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
 
 // ═══════════════════════════════════════════════════════════════
@@ -610,6 +613,10 @@ const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   [PARAM_MISSING_CODE]: 400,
   [RESOURCE_NOT_FOUND_CODE]: 404,
   [ASSET_UNAVAILABLE_CODE]: 503,
+  // 同键异载荷是**冲突**（同一把钥匙配了不同载荷），不是参数写错：409 让客户端一眼分辨
+  // 「重试没带上原样的载荷」与「载荷本身不合法」。走这条投影的是建任务端点
+  // （重试端点目前不抛 DomainError，不经过这里）。
+  [IDEMPOTENCY_CONFLICT_CODE]: 409,
 };
 
 const SPEC_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(

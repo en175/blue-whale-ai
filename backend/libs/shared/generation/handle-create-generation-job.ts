@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 
 import {
   resolvePromptMaxLength,
+  IDEMPOTENCY_CONFLICT_CODE,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
@@ -54,8 +55,11 @@ import {
 } from "@lib/core";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
+  CREATE_GENERATION_JOB_OPERATION,
   type CanvasRepo,
+  type CreateJobIdempotency,
   type CreateJobInput,
+  type CreateJobResult,
   type GenerationCommandRepo,
   type JobBilling,
   type ModelCapabilityRepo,
@@ -1301,21 +1305,25 @@ interface GenerationDeps {
    * <p>实现抛出的异常（余额不足 / billing 不可用）会原样冒泡，由上层翻成对用户的响应
    * （fail closed —— 扣不动就不要开始干活）。
    *
-   * <p>⚠️ **同一 Idempotency-Key 重复提交会不会重复 Hold**：会各冻一笔（两个 job 两笔），
-   * 但不会出现「冻了钱却没有 job」，也不会出现「一个 job 冻两次」。两层理由：
+   * <p>⚠️ **同一 Idempotency-Key 重复提交不会重复 Hold**：第二次提交在第 2 步的幂等查询就
+   * 重放首次结果并返回，根本走不到这里。并发同键由唯一索引只放一个事务进，输家整体回滚
+   * （含它那笔预扣，由下面的补偿退掉），回读赢家结果——两个请求同一个 job、同一笔预扣。
+   * <p>两点不要弄反：
    * <ul>
-   *   <li>建任务路径刻意没有幂等表（本函数的简化模型）：两次提交就是两个 job，各自随自己的
-   *       job 结算/返还。`actionIdentity`（commandId 的来源）里带 `Date.now()`，每次提交
-   *       本就不同 —— 这不是疏漏，见下条。</li>
-   *   <li>⚠️ **不能**把 commandId 改成「同一 Idempotency-Key 恒定」：billing 的幂等记录是
-   *       **永久**的（`hold:{commandId}` 进账本），而它的重放分支按 **job_id** 找预留
-   *       （CreditService.hold → `reservations.findByJobId(jobId)`）。重试必然拿到新的 job_id
-   *       ⇒ 重放找不到那笔预留 ⇒ 抛 IllegalStateException，用户此后**永远**提交不了这个 key。</li>
+   *   <li>`actionIdentity`（commandId 的来源）里**必须**带 `Date.now()`，即同一把 key 的
+   *       两次提交本就不同。⚠️ **不能**把它改成「同键恒定」：billing 的幂等记录是**永久**的
+   *       （`hold:{commandId}` 进账本），而它的重放分支按 **job_id** 找预留
+   *       （CreditService.hold → `reservations.findByJobId(jobId)`）。在「预扣成功、事务
+   *       随后回滚（已被补偿退掉）」这条路径上，事务连同幂等行一起没了，重试会建一个新
+   *       job；此时若 commandId 恒定，billing 命中永久幂等记录却找不到新 job 的预留 ⇒ 抛
+   *       IllegalStateException，那把 key 此后**永远**提交不了。</li>
+   *   <li>「重试不重复扣」这条保证落在**幂等表 + 补偿**上，不落在 commandId 的稳定性上：
+   *       命中幂等的那次不扣钱（走不到这里），交易失败的那次由 release 退钱。</li>
    * </ul>
-   * <p>所以「重试不重复扣」这条保证落在**补偿**上，而不是幂等键上：失败那次的钱被 release
-   * 退掉，重试是一次全新动作、冻它自己那一笔，净额正确。要真正做成「同一个 key 只冻一次」，
-   * 前提是建任务路径自己也有幂等表并且**复用同一个 job 行**（job_id 不变才谈得上重放）——
-   * 那是另一件事，不在本次范围内。
+   * <p>⚠️ billing 契约里 `HoldRequest.command_id` 那条注释（「客户端生成的幂等键，让 Hold 能
+   * 发生在写 job 之前」）在本仓落不了地：billing 的预留与结算都以 job_id 为准，而 job id 只有
+   * 行插进去之后才存在（见 job-billing 的说明）。本仓走的是另一条等价的路——幂等表复用同一个
+   * job 行，重放不发生新的预扣。
    */
   billing?: {
     hold: BillingHold;
@@ -1350,11 +1358,65 @@ function videoRefItemsOf(v: unknown): VideoRefItem[] {
     : [];
 }
 
+/** Idempotency-Key 长度上限，对齐 `command_idempotency.idempotency_key` 的列宽 VarChar(128)：
+ *  超长在这里明确拒（400），而不是拖到落库那一刻以 MySQL 截断/报错的形式变成 500。
+ *  截断尤其不能接受——它会把两把不同的钥匙并成一把。 */
+const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+
+/** 摘要用的规范化 JSON：对象**按键名排序**递归展开。
+ *
+ *  ⚠️ 不能直接用 `JSON.stringify(body)`：那保留客户端序列化时的键序，于是「同一份载荷、
+ *  两次发送时键序不同」会被摘要判成**同键异载荷**，把一个正常的重试拒成冲突。
+ *  要的是「摘要只取决于请求语义」——键序是传输细节，不是语义。与先例同一条口径
+ *  （video-scene-splits 的 requestHashOf「显式定序拼接、规避 JSON 键序漂移」、
+ *  scene-cards.controller 的 method:path:content）；那边键少可以逐个拼，建任务的载荷是
+ *  一整个生成参数对象、键还随类型变，所以这里用「排序后序列化」达到同一效果。
+ *  （重试端点摘要的是**原始 body 字符串**，天然没这个问题；建任务拿到的是已解析对象。） */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      // undefined 属性在 JSON.stringify 里会被丢掉，这里同口径，免得两者摘要分叉。
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** 建任务请求摘要（method + operation + 资源路径 + 规范化 body），sha256 hex 定长 64。
+ *  与 {@link generationRetryRequestHash} 同形同源：两个入口的「同键异载荷」判定必须一套口径。 */
+export function generationCreateRequestHash(
+  projectId: string,
+  body: CreateGenerationJobBody,
+): string {
+  return createHash("sha256")
+    .update(
+      `POST:${CREATE_GENERATION_JOB_OPERATION}:/projects/${projectId}/generation-jobs:${canonicalJson(body)}`,
+    )
+    .digest("hex");
+}
+
+/** 建任务结果 → 响应信封。
+ *
+ *  「同键异载荷」（同一把钥匙配了不同的载荷）判**冲突并报错**，不静默返回首次结果：
+ *  静默重放会把「用户改了参数再提交」悄悄变成「又拿到那个旧任务」——他以为提交的是新参数，
+ *  拿到的却是另一个任务，这比报错难查得多。同键同载荷的重放走 `ok(result)`，
+ *  响应体与第一次完全一致（含 `generation_job_id`）。与重试端点同码同文案。 */
+function createJobEnvelope(result: CreateJobResult) {
+  return "kind" in result
+    ? fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷")
+    : ok(result);
+}
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
- *  简化模型：无幂等表、单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
- *  IKDZI1：流水线化——项目校验 → 类型校验（策略分派）→ 模型白名单 → 参考图语义统一 →
- *  画布目标快照 → 组装 input（策略分派）→ 预留点数 → 建任务。 */
+ *  单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
+ *  幂等（`command_idempotency`，operation=generation.create）：同键同载荷重放首次结果，
+ *  同键异载荷判冲突——见下面第 2 步与 {@link createJobEnvelope}。
+ *  IKDZI1：流水线化——项目校验 → **幂等重放** → 类型校验（策略分派）→ 模型白名单 →
+ *  参考图语义统一 → 画布目标快照 → 组装 input（策略分派）→ 预留点数 → 建任务。 */
 export async function handleCreateGenerationJob(
   userId: string,
   projectId: string,
@@ -1367,7 +1429,34 @@ export async function handleCreateGenerationJob(
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-  // 2. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
+  // 2. 幂等（command_idempotency，operation=generation.create）。
+  //
+  // ⚠️ 位置在**任何依赖当前状态的校验之前**：模型白名单、素材状态门、画布目标快照都可能
+  // 在两次提交之间变了，而重放的是**既有结果**，不该被此刻的状态改写——「同一个请求被重试」
+  // 这件事的答案在第一次提交时就已经定了。与 retryJob 的 `guardInput` 位置约定同源。
+  //
+  // 客户端没带（或只发了空白）Idempotency-Key → 完全不接幂等，行为与加幂等表之前一致：
+  // 每次提交都是新任务，不强制要求这个头（老客户端不受影响）。
+  const normalizedKey = (idempotencyKey ?? "").trim();
+  if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    return fail(400, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
+  }
+  const idempotency: CreateJobIdempotency | null =
+    normalizedKey === ""
+      ? null
+      : {
+          key: normalizedKey,
+          requestHash: generationCreateRequestHash(projectId, body),
+        };
+  if (idempotency) {
+    const replayed = await deps.command.lookupCreateIdempotency(
+      projectId,
+      idempotency,
+    );
+    if (replayed) return createJobEnvelope(replayed);
+  }
+
+  // 3. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
   //    以旧默认值运行，白名单解析后以 capability.features 重跑一次）
   const type = body.type as GenerationType;
   const strategy = strategies[type];
@@ -1378,7 +1467,7 @@ export async function handleCreateGenerationJob(
   const validateErr = strategy.validate(body);
   if (validateErr) return fail(400, validateErr.message, { code: validateErr.code });
 
-  // 3. 模型白名单（别名解析 + 能力目录命中）
+  // 4. 模型白名单（别名解析 + 能力目录命中）
   const params = body.parameters as GenerationParameters;
   const expectedOutputCount = Number(body.expected_output_count);
   let promptText = isStr(params.prompt) ? params.prompt : "";
@@ -1390,7 +1479,7 @@ export async function handleCreateGenerationJob(
     });
   }
 
-  // 4. 参考图语义统一 + image 上限（IKA72G）
+  // 5. 参考图语义统一 + image 上限（IKA72G）
   // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在）；
   // 图片/视频链路的缺省是 DEFAULT_IMAGE_REFERENCE_MAX = 10（音频链路的 1 是另一个常量）。
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
@@ -1618,7 +1707,7 @@ export async function handleCreateGenerationJob(
     ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))
     : videoRefItemsOf(effectiveBody.references);
   promptText = transferReferenceMarkers(promptText, buildReferenceMarkerLabels(markerItems));
-  // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
+  // 6. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
     ...(textIndexRefs.value.canvas ? { canvas: textIndexRefs.value.canvas } : {}),
     type,
@@ -1643,7 +1732,7 @@ export async function handleCreateGenerationJob(
         inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : referenceAssetIds.map(String), prompt: promptText, attachments: target.value.textAttachments,
         model: capability, userId, projectId, assets: deps.assets }) : undefined;
 
-  // 6. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
+  // 7. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
   const input = strategy.composeInput({
     body: effectiveBody,
     params,
@@ -1668,8 +1757,17 @@ export async function handleCreateGenerationJob(
   }
   if (planSnapshot) input.prompt_plan_snapshot = planSnapshot;
 
-  // 7. 幂等派生 actionIdentity + 事件类型
-  const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;
+  // 8. actionIdentity 派生 + 事件类型
+  //
+  // ⚠️ 这里**必须**带 Date.now()，即同一把 Idempotency-Key 的两次提交本就得到不同的
+  // actionIdentity。理由在 billing 那边：它拿它当预扣的幂等键（`hold:{commandId}`），而那条
+  // 幂等记录是**永久**的、重放时按 job_id 找那笔预留（CreditService.hold）。若把它改成
+  // 「同键恒定」，那么在「预扣成功但事务随后回滚（已被补偿退掉）」这条路径上，重试会带着
+  // 同一把 commandId 去冻一笔新 job，billing 命中永久幂等记录却找不到新 job 的预留，
+  // 直接抛 IllegalStateException —— 那把 key 从此**永久**提交不了。
+  // 「同一个请求被重试不重复扣钱」这条保证落在**幂等表 + 补偿**上（见第 2 步与 billing 说明），
+  // 不落在 commandId 的稳定性上。
+  const actionSeed = `${projectId}\0${normalizedKey}\0${Date.now()}`;
   // 须 ≤ correlation_id VarChar(64);勿再加前缀(曾用 `bottom-dock:` 撑到 76 触发 Prisma P2000 → 生成任务 500)。
   // 来源由 event_type/aggregate_type 记录,前缀无代码消费。
   const actionIdentity = createHash("sha256").update(actionSeed).digest("hex");
@@ -1694,7 +1792,7 @@ export async function handleCreateGenerationJob(
     }
   }
 
-  // 8. 建任务（含预留点数）
+  // 9. 建任务（含预留点数）
   const cmdInput: CreateJobInput = {
     projectId,
     userId,
@@ -1723,9 +1821,12 @@ export async function handleCreateGenerationJob(
           billingDep.release({ userId: String(userId), jobId, reason }),
       }
     : undefined;
-  const created = await deps.command.createJob(
-    cmdInput,
-    billing ? { billing } : {},
-  );
-  return ok(created);
+  const created = await deps.command.createJob(cmdInput, {
+    ...(billing ? { billing } : {}),
+    ...(idempotency ? { idempotency } : {}),
+  });
+  // 并发同键（两个请求同时过了第 2 步的快路径）：唯一索引只放一个事务进，我们这侧的事务
+  // 连同那笔预扣已整体回滚（billing 补偿已把钱退掉），repo 回读到赢家那一行就交回这里。
+  // 于是两个请求拿到**同一个** generation_job_id，只留一笔预扣。
+  return createJobEnvelope(created);
 }

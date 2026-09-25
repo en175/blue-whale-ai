@@ -1,16 +1,18 @@
 import { NewApiError } from "@lib/core";
 import { promptPlanSnapshotSchema } from "@lib/contracts";
-import {
-  findPlacement,
-  SCENE_CARD_FALLBACK_HEIGHT,
-  SCENE_CARD_WIDTH,
-  type Rect,
-} from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 import { assertPureJobInput } from "./job-input-purity.js";
 import { withBillingCompensation, type JobBilling } from "./job-billing.js";
+import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
+import {
+  readCreateIdempotency,
+  runWithCreateIdempotency,
+  writeCreateIdempotency,
+  type CreateJobIdempotency,
+  type CreateJobResult,
+} from "./generation-job-idempotency.js";
 import {
   resolveLogicalSlots,
   type OutputSlotStatus,
@@ -48,10 +50,14 @@ export interface CreateJobInput {
 export interface CreateJobOptions {
   /** 复用调用方事务（如 plan apply 同 tx 建 job 行）；缺省自起 `$transaction`。
    *  ⚠️ 与 billing 同用时补偿只覆盖本方法内的失败：调用方事务在本方法返回**之后**才回滚
-   *  的话，那笔预扣得由调用方自己退（当前没有这样的调用方——计划应用那条路不接计费）。 */
+   *  的话，那笔预扣得由调用方自己退（当前没有这样的调用方——计划应用那条路不接计费）。
+   *  ⚠️ 与 idempotency 同用时本方法**不做并发回读**：那侧事务归调用方，本方法不知道它的
+   *  回滚意味着什么（当前没有这样的调用方——建任务路径自起事务）。 */
   callerTx?: Prisma.TransactionClient;
   /** ★ 新计费依赖（端口与补偿语义见 job-billing）。缺省不接 → 行为与改造前一致。 */
   billing?: JobBilling;
+  /** 建任务幂等凭据（见 generation-job-idempotency）。缺省不接 → 行为与加幂等之前一致。 */
+  idempotency?: CreateJobIdempotency;
 }
 
 export interface CreatedJob {
@@ -62,11 +68,24 @@ export interface CreatedJob {
 export interface GenerationCommandRepo {
   /** 创建任务。`options.callerTx` 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
    *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。
-   *  事务失败而预扣已成功时，会先把它**补偿返还**再抛错（见实现）。 */
+   *  事务失败而预扣已成功时，会先把它**补偿返还**再抛错（见实现）。
+   *
+   *  `options.idempotency` 非空时接幂等：同键同摘要重放首次结果（不建行、不预扣），同键异
+   *  摘要返回冲突；并发同键由唯一索引兜底。语义与并发细则见 generation-job-idempotency。
+   *  缺省（客户端没带 Idempotency-Key）→ 完全不接，行为与加幂等表之前一致。 */
   createJob(
     input: CreateJobInput,
     options?: CreateJobOptions,
-  ): Promise<CreatedJob>;
+  ): Promise<CreateJobResult>;
+  /** 建任务的幂等重放查询：同键同摘要 → 首次结果；同键异摘要 → 冲突；无行 → null。
+   *
+   *  ⚠️ 必须在**任何依赖当前状态的校验之前**调用（模型白名单、素材状态门、画布目标快照…
+   *  都在它之后）：重放的是**既有结果**，不该被此刻的状态改写——与 retryJob 的
+   *  `guardInput` 位置约定同源（见那里的说明）。 */
+  lookupCreateIdempotency(
+    projectId: string,
+    idempotency: CreateJobIdempotency,
+  ): Promise<CreateJobResult | null>;
   /** 图片取消原子收敛并撤销写入权；其他媒体登记软取消，由 worker 确认终态。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
   /** 重试失败/缺失输出槽（IK67HE/T14，spec §4.4）：复用原参数快照，只补 failed/missing 槽，
@@ -117,151 +136,6 @@ export interface GenerationCommandRepo {
 
 const SOURCE_BOTTOM_DOCK = "bottom_dock";
 
-function validAnchor(value: unknown): value is {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const anchor = value as Record<string, unknown>;
-  return (
-    typeof anchor.x === "number" &&
-    typeof anchor.y === "number" &&
-    typeof anchor.width === "number" &&
-    typeof anchor.height === "number"
-  );
-}
-
-async function freezePlacementAnchor(
-  tx: Prisma.TransactionClient,
-  input: CreateJobInput,
-): Promise<Record<string, unknown>> {
-  if (validAnchor(input.input.placement_anchor)) return input.input;
-  const ports = tx as unknown as {
-    canvas?: {
-      findFirst(args: unknown): Promise<{
-        viewport_json: unknown;
-        nodes_json: unknown;
-      } | null>;
-    };
-  };
-  if (!ports.canvas?.findFirst) return input.input;
-
-  const canvas = await ports.canvas.findFirst({
-    where: { project_id: BigInt(input.projectId) },
-    select: { viewport_json: true, nodes_json: true },
-  });
-  const viewport =
-    canvas?.viewport_json &&
-    typeof canvas.viewport_json === "object" &&
-    !Array.isArray(canvas.viewport_json)
-      ? (canvas.viewport_json as Record<string, unknown>)
-      : {};
-  const zoom =
-    typeof viewport.zoom === "number" && viewport.zoom > 0 ? viewport.zoom : 1;
-  let anchor = {
-    x: -(typeof viewport.x === "number" ? viewport.x : 0) / zoom,
-    y: -(typeof viewport.y === "number" ? viewport.y : 0) / zoom,
-    width: 0,
-    height: 0,
-  };
-
-  if (input.sceneCardId) {
-    const nodes = Array.isArray(canvas?.nodes_json) ? canvas.nodes_json : [];
-    const sceneCardNode = nodes.find((node) => {
-      if (!node || typeof node !== "object" || Array.isArray(node)) {
-        return false;
-      }
-      const candidate = node as Record<string, unknown>;
-      const data =
-        candidate.data &&
-        typeof candidate.data === "object" &&
-        !Array.isArray(candidate.data)
-          ? (candidate.data as Record<string, unknown>)
-          : {};
-      return (
-        candidate.type === "scene_card" &&
-        String(candidate.scene_card_id ?? data.sceneCardId) ===
-          input.sceneCardId
-      );
-    });
-    let hasActualAnchor = false;
-    if (sceneCardNode && typeof sceneCardNode === "object") {
-      const node = sceneCardNode as Record<string, unknown>;
-      const position = node.position;
-      if (
-        position &&
-        typeof position === "object" &&
-        !Array.isArray(position)
-      ) {
-        const point = position as Record<string, unknown>;
-        if (typeof point.x === "number" && typeof point.y === "number") {
-          anchor = {
-            x: point.x,
-            y: point.y,
-            width:
-              typeof node.width === "number" ? node.width : SCENE_CARD_WIDTH,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : SCENE_CARD_FALLBACK_HEIGHT,
-          };
-          hasActualAnchor = true;
-        }
-      }
-    }
-    if (!hasActualAnchor) {
-      const existing: Rect[] = nodes.flatMap((candidate) => {
-        if (
-          !candidate ||
-          typeof candidate !== "object" ||
-          Array.isArray(candidate)
-        ) {
-          return [];
-        }
-        const node = candidate as Record<string, unknown>;
-        const isSceneCard = node.type === "scene_card";
-        const position =
-          node.position &&
-          typeof node.position === "object" &&
-          !Array.isArray(node.position)
-            ? (node.position as Record<string, unknown>)
-            : {};
-        return [
-          {
-            x: typeof position.x === "number" ? position.x : 0,
-            y: typeof position.y === "number" ? position.y : 0,
-            width:
-              typeof node.width === "number"
-                ? node.width
-                : isSceneCard
-                  ? SCENE_CARD_WIDTH
-                  : 200,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : isSceneCard
-                  ? SCENE_CARD_FALLBACK_HEIGHT
-                  : 200,
-          },
-        ];
-      });
-      const position = findPlacement({
-        existing,
-        anchor,
-        nodeWidth: SCENE_CARD_WIDTH,
-        nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
-      });
-      anchor = {
-        ...position,
-        width: SCENE_CARD_WIDTH,
-        height: SCENE_CARD_FALLBACK_HEIGHT,
-      };
-    }
-  }
-  return { ...input.input, placement_anchor: anchor };
-}
 
 /** cost_reservations 的行值：只有**重试**会从原 job 的行里原样搬运一次，其余一律兜底。
  *
@@ -307,11 +181,13 @@ function costReservationCreateData(
  *  IK67HE/T14：同时固定 expectedOutputCount 个输出槽（status=pending），槽身份与顺序稳定。
  *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提 + 增加槽位固定。
  *  预扣走 {@link JobBilling}（行为不进数据），其失败补偿由 createJob 统一兜——本函数只负责
- *  在正确的时点调用它。禁止行为进数据这道闸见 job-input-purity。 */
+ *  在正确的时点调用它。禁止行为进数据这道闸见 job-input-purity。
+ *  幂等行走 {@link CreateJobIdempotency}（同样是行为、同样是每调一次的东西，不进 input）。 */
 export async function createJobWithinTx(
   tx: Prisma.TransactionClient,
   input: CreateJobInput,
   billing?: JobBilling,
+  idempotency?: CreateJobIdempotency,
 ): Promise<CreatedJob> {
   assertPureJobInput(input);
   if (input.input.prompt_plan_snapshot !== undefined) {
@@ -424,6 +300,13 @@ export async function createJobWithinTx(
       output_asset_ids: [],
     },
   });
+  // 幂等行与 job 行**同一个事务**（要不要写、写成什么见 generation-job-idempotency）。
+  // 放在最后是因为它要存的是上面那条事件的游标——写在前面的行就没有游标可存。
+  await writeCreateIdempotency(
+    tx,
+    { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
+    idempotency,
+  );
   return {
     generation_job_id: job.id.toString(),
     cursor: Number(event.cursor),
@@ -435,17 +318,28 @@ export function createGenerationCommandRepo(
 ): GenerationCommandRepo {
   return {
     async createJob(input, options) {
+      const idempotency = options?.idempotency;
       // callerTx 非空：复用调用方事务（plan apply 同 tx 建 job 行）；否则自起事务。
       // ★ 预扣与「事务失败就把它退掉」的补偿由 withBillingCompensation 兜住
       //   ——billing 是外部服务，不跟我们的回滚走（见 job-billing 的说明）。
-      return withBillingCompensation(options?.billing, (billing) =>
-        options?.callerTx
-          ? createJobWithinTx(options.callerTx, input, billing)
-          : prisma.$transaction(
-              (tx) => createJobWithinTx(tx, input, billing),
-              { maxWait: 10_000, timeout: 30_000 },
-            ),
-      );
+      const run = () =>
+        withBillingCompensation(options?.billing, (billing) =>
+          options?.callerTx
+            ? createJobWithinTx(options.callerTx, input, billing, idempotency)
+            : prisma.$transaction(
+                (tx) => createJobWithinTx(tx, input, billing, idempotency),
+                { maxWait: 10_000, timeout: 30_000 },
+              ),
+        );
+      // 幂等外壳（快路径重放 + 并发回读）只接在自起事务这条路上：callerTx 那侧的事务归
+      // 调用方，本方法不知道它会不会回滚（见 options 说明）。
+      return options?.callerTx
+        ? run()
+        : runWithCreateIdempotency(prisma, input.projectId, idempotency, run);
+    },
+
+    lookupCreateIdempotency(projectId, idempotency) {
+      return readCreateIdempotency(prisma, projectId, idempotency);
     },
 
     async requestCancel(jobId, userId) {
