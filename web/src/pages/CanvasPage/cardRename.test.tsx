@@ -579,8 +579,8 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await act(async () => {
       (mediaNode('fail-custom').data.onRetryJob as (id: string) => void)('fail-custom');
     });
-    // 重试沿用失败任务快照发起：旧 jobId 作为重试入参
-    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-fail'));
+    // 重试沿用失败任务快照发起：旧 jobId 作为重试入参，并带调用方持有的幂等键
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-fail', expect.any(String)));
     // 重试进入生成中：名称保持
     await vi.waitFor(() => expect(mediaNode('fail-custom').data.genStatus).toBe('generating'));
     expect(mediaNode('fail-custom').data.fileName).toBe('我的草稿');

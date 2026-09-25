@@ -129,6 +129,9 @@ const jobMocks = vi.hoisted(() => ({
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
 }));
+vi.mock('@/api/idempotencyKey', () => ({
+  newIdempotencyKey: jobMocks.newIdempotencyKey,
+}));
 vi.mock('@/api/jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/jobs')>();
   return {
@@ -136,7 +139,6 @@ vi.mock('@/api/jobs', async (importOriginal) => {
     // 页面水合/轮询/幂等键走 mock，避免真实 fetch 干扰受控用例
     fetchJobs: jobMocks.fetchJobs,
     fetchJobStatus: jobMocks.fetchJobStatus,
-    newIdempotencyKey: jobMocks.newIdempotencyKey,
     cancelGenerationJob: jobMocks.cancelGenerationJob,
     createGenerationJob: vi.fn(),
     retryGenerationJob: vi.fn(),

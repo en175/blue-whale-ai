@@ -8,7 +8,7 @@ import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
 import { ApiError, apiRequest, isApiError } from './http';
-import { newIdempotencyKey } from './jobs';
+import { newIdempotencyKey } from './idempotencyKey';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { handleUnauthorized } from '@/utils/auth';
 

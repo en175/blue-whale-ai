@@ -109,12 +109,14 @@ vi.mock('@/api/canvas', () => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: e.data }))),
   ),
 }));
+vi.mock('@/api/idempotencyKey', () => ({
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
+}));
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: vi.fn(),
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   retryAudioMix: apiMocks.retryAudioMix,
-  newIdempotencyKey: apiMocks.newIdempotencyKey,
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: vi.fn(),
   createFrameInterpolation: apiMocks.createFrameInterpolation,

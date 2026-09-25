@@ -351,17 +351,19 @@ import {
   createVocalSplit,
   createVideoSceneSplit,
   createVideoMatting,
-  newIdempotencyKey,
   readJobFailText,
   type CreateVideoMattingPayload,
   type CreateFrameInterpolationPayload,
   type CreateAudioSpeedPayload,
+  type CreateJobPayload,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
   type GenerationRefItem,
 } from '@/api/jobs';
 import { removeCancelledGenerationNode, stopJobPolling } from './generationPolling';
+import { createSubmitIntentKeys } from './submitIntentKeys';
+import { newIdempotencyKey } from '@/api/idempotencyKey';
 import {
   saveSharedAsset,
   type SaveSharedAssetRequest,
@@ -740,6 +742,12 @@ export default function CanvasPage() {
   const audioMixInFlightRef = useRef(false);
   const audioMixRetryInFlightRef = useRef(new Set<string>());
   const audioMixRetryKeysRef = useRef(new Map<string, string>());
+  /** 建任务的幂等键台账（见 submitIntentKeys）：scope 是提交位——原位重跑取目标卡 id，
+   *  自由生成（无目标卡）取空串这一个共享位；签名是本次载荷，载荷变了即换新钥匙。 */
+  const jobSubmitKeysRef = useRef(createSubmitIntentKeys());
+  /** 失败重试（retry 接口）的幂等键台账：scope 取卡片 id，签名取被重试的那个任务 id——
+   *  同一张失败卡上「响应丢了再点一次」复用同一把；受理成功后换新任务 id，天然另起一把。 */
+  const jobRetryKeysRef = useRef(createSubmitIntentKeys());
   /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
   const audioMixUnpersistedCardsRef = useRef(new Set<string>());
   const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
@@ -6976,7 +6984,7 @@ export default function CanvasPage() {
     const sendAttachments = targetNodeId ? textAttachmentsForSend(targetNodeId) : undefined;
     const jobPrompt = composeImageSendPrompt(sendAttachments, sendPrompt, promptDoc);
     try {
-      createGenerationJob(currentId, {
+      const payload: CreateJobPayload = {
         type,
         expected_output_count: 1,
         parameters: {
@@ -7001,8 +7009,19 @@ export default function CanvasPage() {
                   : undefined,
               }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
-      })
+      };
+      /** 幂等键：本次提交的**当前速度**取一把，双击/401 续跑/失败后原样重发都拿到它；
+       *  载荷一改（用户改了参数再点）就是新意图，换新钥匙——复用会撞服务端同键异载荷 409。 */
+      const submitScope = targetNodeId ?? '';
+      const submitSignature = JSON.stringify(payload);
+      createGenerationJob(
+        currentId,
+        payload,
+        jobSubmitKeysRef.current.keyFor(submitScope, submitSignature),
+      )
         .then((created) => {
+          // 任务已受理：这次意图到此为止，之后再提交要另起一把钥匙（否则重放旧任务，拿不到新作品）
+          jobSubmitKeysRef.current.settle(submitScope);
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
           pollJob(nodeId, created.generation_job_id);
@@ -8264,8 +8283,15 @@ export default function CanvasPage() {
     // 登记发起重试时的任务为核对基准：retry 返回前若被新任务接管（面板重新提交），放弃本次结果不覆盖
     activeJobByNodeRef.current.set(nodeId, String(jobId));
     try {
-      retryGenerationJob(currentId, jobId)
+      // 幂等键按「这张卡 × 被重试的这个任务」持有：响应丢了再点重试、401 登录后续跑都复用
+      // 同一把（服务端重放，不会多建一个 job 多扣一笔）；受理成功后钥匙作废。
+      retryGenerationJob(
+        currentId,
+        jobId,
+        jobRetryKeysRef.current.keyFor(nodeId, String(jobId)),
+      )
         .then((created) => {
+          jobRetryKeysRef.current.settle(nodeId);
           if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
           pollJob(nodeId, created.generation_job_id);

@@ -134,9 +134,9 @@ vi.mock('@/api/jobs', () => ({
   createVideoSubtitleErase: apiMocks.createVideoSubtitleErase,
   createVideoSceneSplit: apiMocks.createVideoSceneSplit,
   createVideoMatting: apiMocks.createVideoMatting,
-  newIdempotencyKey: apiMocks.newIdempotencyKey,
   readJobFailText: apiMocks.readJobFailText,
 }));
+vi.mock('@/api/idempotencyKey', () => ({ newIdempotencyKey: apiMocks.newIdempotencyKey }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 vi.mock('@/utils/upload', () => ({ uploadAssetFile: apiMocks.uploadAssetFile }));

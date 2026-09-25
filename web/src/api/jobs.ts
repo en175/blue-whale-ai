@@ -1,6 +1,7 @@
 /* ============================================
  * jobs 接口：生成任务创建/取消/重试/轮询/列表
- * 创建与重试需 Idempotency-Key（UUID）幂等头
+ * 创建与重试需 Idempotency-Key（UUID）幂等头，**钥匙由调用方持有**（`./idempotencyKey` 铸造）：
+ * 一次用户意图一把，重试复用同一把——否则服务端那套幂等（同键重放、只扣一次钱）形同虚设
  * ============================================ */
 import { apiRequest, isApiError, silentInit, type ApiError } from './http';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
@@ -295,32 +296,19 @@ export interface JobListData {
   current: number;
 }
 
-/** 生成幂等键（每次新任务一个 UUID）。
- *  crypto.randomUUID() 仅在安全上下文（HTTPS/localhost）可用；
- *  测试站 HTTP 下不存在，降级为 getRandomValues 手动拼 v4 UUID。 */
-export function newIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  // RFC 4122 v4 UUID fallback
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** 创建生成任务（Idempotency-Key 幂等头防重复创建） */
+/** 创建生成任务。`idempotencyKey` 由**调用方**在发起那一刻造好并持有（`./idempotencyKey`）：
+ *  同一次用户意图（双击、响应丢了原样重发、401 登录后续跑）必须复用同一把，服务端才
+ *  会重放首次结果——只建一个 job、只扣一次钱；同键异载荷服务端判 409。 */
 export function createGenerationJob(
   projectId: string,
   payload: CreateJobPayload,
+  idempotencyKey: string,
 ): Promise<JobCreatedData> {
   return apiRequest<JobCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/generation-jobs`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(payload),
     },
   );
@@ -730,16 +718,19 @@ export function cancelGenerationJob(projectId: string, jobId: number | string) {
   );
 }
 
-/** 重试终态失败任务：为缺失/失败输出创建新任务 */
+/** 重试终态失败任务：为缺失/失败输出创建新任务。
+ *  `idempotencyKey` 由调用方持有，口径同 {@link createGenerationJob}——「重试」是同一张卡
+ *  上的同一次意图（响应丢了再点一次不该变成两笔钱），受理成功后才作废这把钥匙。 */
 export function retryGenerationJob(
   projectId: string,
   jobId: number | string,
+  idempotencyKey: string,
 ): Promise<JobCreatedData> {
   return apiRequest<JobCreatedData>(
     `/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${jobId}/retry`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      headers: { 'Idempotency-Key': idempotencyKey },
     },
   );
 }
