@@ -1,10 +1,18 @@
-export const NEW_PASSWORD_MIN_LENGTH = 8;
-export const NEW_PASSWORD_MAX_LENGTH = 20;
-export const NEW_PASSWORD_PLACEHOLDER = '8-20 位';
+import { isPasswordSettable, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
-/** 新密码长度对齐网关/BFF 契约（IKBRCK）：8–20，不以工单初稿 9–20 为准。 */
+export { isPasswordSettable };
+
+/** 新密码长度下限（文案里要单独用到）。 */
+export const NEW_PASSWORD_MIN_LENGTH = PASSWORD_MIN_LENGTH;
+export const NEW_PASSWORD_PLACEHOLDER = '8 位以上';
+
+/**
+ * 新密码是否合规。
+ *
+ * ⚠️ 规则本体在 `@/lib/password`（与后端 `hashPassword` 同口径：至少 8 位、至多 72 **字节**）。
+ */
 export function isNewPasswordLengthValid(password: string): boolean {
-  return password.length >= NEW_PASSWORD_MIN_LENGTH && password.length <= NEW_PASSWORD_MAX_LENGTH;
+  return isPasswordSettable(password);
 }
 
 export function canSubmitPasswordChange(input: {

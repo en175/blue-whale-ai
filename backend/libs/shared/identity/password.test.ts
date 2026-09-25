@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BCRYPT_COST,
   MAX_PASSWORD_BYTES,
+  MIN_PASSWORD_LENGTH,
   PasswordPolicyError,
   burnVerificationTime,
   hashPassword,
@@ -33,6 +34,15 @@ describe("hashPassword", () => {
     await expect(hashPassword(tooLong)).rejects.toThrow(PasswordPolicyError);
   });
 
+  it(`★ 短于 ${MIN_PASSWORD_LENGTH} 位被拒绝 —— 下限只作用于设置，不作用于校验`, async () => {
+    // 与前端「密码长度需为 8-20 个字符」对齐：两边不一致时，
+    // 通过 API 注册的短口令用户会在登录页被前端自己拦住。
+    await expect(hashPassword("a".repeat(MIN_PASSWORD_LENGTH - 1))).rejects.toThrow(
+      PasswordPolicyError,
+    );
+    await expect(hashPassword("a".repeat(MIN_PASSWORD_LENGTH))).resolves.toBeTruthy();
+  });
+
   it("按**字节**而不是字符算长度：24 个汉字 = 72 字节，放行；25 个超限", async () => {
     // 一个汉字 3 字节。按字符数判会把这两者都当成「很短」
     expect(Buffer.byteLength("汉".repeat(24), "utf8")).toBe(MAX_PASSWORD_BYTES);
@@ -43,10 +53,10 @@ describe("hashPassword", () => {
 
 describe("verifyPassword", () => {
   it("正确口令通过，错误口令不通过", async () => {
-    const hash = await hashPassword("s3cret");
+    const hash = await hashPassword("s3cret-pass");
 
-    await expect(verifyPassword("s3cret", hash)).resolves.toBe(true);
-    await expect(verifyPassword("s3cre", hash)).resolves.toBe(false);
+    await expect(verifyPassword("s3cret-pass", hash)).resolves.toBe(true);
+    await expect(verifyPassword("s3cret-pas", hash)).resolves.toBe(false);
     await expect(verifyPassword("", hash)).resolves.toBe(false);
   });
 
@@ -73,6 +83,13 @@ describe("verifyPassword", () => {
     // 列被截断、写进了明文、从别处搬来的非 bcrypt 串，都会走到这里
     await expect(verifyPassword("x", "not-a-bcrypt-hash")).resolves.toBe(false);
     await expect(verifyPassword("x", "$2b$garbage")).resolves.toBe(false);
+  });
+
+  it("★ 短口令照常校验（下限只约束设置）—— 老账号可能是 6 位的", async () => {
+    // MIN_PASSWORD_LENGTH 是**设置时**的规则。加到校验上会把历史账号锁在门外，
+    // 而他们没做错任何事——是当时的实现允许了短口令。
+    const hash = await hashPassword("abcdefgh");
+    await expect(verifyPassword("abcdefgh", hash)).resolves.toBe(true);
   });
 
   it("★ 超长口令照常校验（不拒绝）—— 历史实现允许过，拦下来等于锁人", async () => {

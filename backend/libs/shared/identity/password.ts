@@ -30,7 +30,17 @@ export const BCRYPT_COST = 10;
  */
 export const MAX_PASSWORD_BYTES = 72;
 
-/** 口令不合规（超长）。**只用于设置口令**，不用于校验——见 {@link verifyPassword}。 */
+/**
+ * 口令长度下限（**只用于设置口令**）。
+ *
+ * <p>这**不是**复杂度规则。大小写/符号要求把用户推向 `Passw0rd!` 这类可预测的口令，
+ * 收益远不如长度；而长度是唯一一条既有真实防护力、用户又能直觉遵守的规则。
+ * 8 位是对齐前端既有提示（「密码长度需为 8-20 个字符」）的结果——两边不一致时，
+ * 通过 API 注册的短口令用户会在登录页被前端自己拦住。
+ */
+export const MIN_PASSWORD_LENGTH = 8;
+
+/** 口令不合规（过短 / 过长）。**只用于设置口令**，不用于校验——见 {@link verifyPassword}。 */
 export class PasswordPolicyError extends Error {
   constructor(message: string) {
     super(message);
@@ -46,11 +56,17 @@ function byteLength(value: string): number {
 /**
  * 生成口令哈希（注册 / 修改密码用）。
  *
- * @throws PasswordPolicyError 超过 72 字节——**拒绝，而不是截断**。
+ * @throws PasswordPolicyError 短于 {@link MIN_PASSWORD_LENGTH} 位、或超过
+ *         {@link MAX_PASSWORD_BYTES} 字节——**拒绝，而不是截断**。
  *         截断意味着用户以为设了 80 位密码，实际只有 72 位有效，
  *         而且他永远不会知道。宁可让他当场换一个短的。
  */
 export async function hashPassword(plain: string): Promise<string> {
+  // 长度按**字符**数算下限、按**字节**数算上限，这不是笔误：
+  // bcrypt 截断发生在字节层，而「密码太短」是给人看的判断——没人会说「你的密码不到 8 字节」。
+  if (plain.length < MIN_PASSWORD_LENGTH) {
+    throw new PasswordPolicyError(`密码至少 ${MIN_PASSWORD_LENGTH} 位`);
+  }
   if (byteLength(plain) > MAX_PASSWORD_BYTES) {
     throw new PasswordPolicyError(
       `密码过长（${MAX_PASSWORD_BYTES} 字节上限，一个汉字算 3 字节）`,

@@ -73,13 +73,13 @@ describe('LoginModal shell', () => {
     expect(document.body.textContent).toContain('创建账号');
     expect(document.body.textContent).toContain('已有账号？返回登录');
     expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="密码（8-20位）"]')).not.toBeNull();
+    expect(document.body.querySelector('input[placeholder="密码（8 位以上）"]')).not.toBeNull();
   });
 
   it('注册密码与确认密码可用眼睛图标切换显示隐藏', async () => {
     await renderLoginModal({ initialMode: 'register' });
 
-    const password = document.body.querySelector<HTMLInputElement>('input[placeholder="密码（8-20位）"]');
+    const password = document.body.querySelector<HTMLInputElement>('input[placeholder="密码（8 位以上）"]');
     const confirm = document.body.querySelector<HTMLInputElement>('input[placeholder="确认密码"]');
     const passwordToggle = password?.parentElement?.querySelector<HTMLButtonElement>('button');
     const confirmToggle = confirm?.parentElement?.querySelector<HTMLButtonElement>('button');

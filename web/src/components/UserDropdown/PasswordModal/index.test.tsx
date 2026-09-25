@@ -67,7 +67,7 @@ describe('PasswordModal', () => {
     expect(document.body.textContent).toContain('修改密码');
   });
 
-  it('不渲染短信验证码，新密码占位为 8-20 位', async () => {
+  it('不渲染短信验证码，新密码占位为 8 位以上', async () => {
     await renderPasswordModal();
 
     expect(document.body.textContent).not.toContain('短信验证码');
