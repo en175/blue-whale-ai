@@ -2660,3 +2660,130 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
     expect(generationCreateRequestHash("p1", body)).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+// 视频按 token 计费：含视频输入时官方公式要把**输入时长**算进 token，
+// 而时长只能从参考素材上拿 —— 本地素材查 assets.duration，其余靠调用方带。
+describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）", () => {
+  it("本地视频参考：时长取自 assets.duration 并冻结进 input.references", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: 7.5,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12", duration: 7.5 },
+    ]);
+  });
+
+  it("调用方已带的时长不被资产值覆盖（素材库引用只能靠它）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: 99,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video", duration: 5 }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12", duration: 5 },
+    ]);
+  });
+
+  it("资产拿不到时长 → 不写这个字段（宁可让 billing 拒绝，也不按 0 估）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: null,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12" },
+    ]);
+  });
+
+  it("图片参考不写时长（它不进 token 公式的输入时长那一项）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "image", asset_id: "12" },
+    ]);
+  });
+});

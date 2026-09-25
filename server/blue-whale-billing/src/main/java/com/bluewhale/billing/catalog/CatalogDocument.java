@@ -78,33 +78,57 @@ public record CatalogDocument(
     /**
      * token 估算参数（火山方舟官方 token 计费公式的系数）。
      *
-     * <p>为什么它必须在目录里而不是代码里：{@code divisor}、{@code fps} 与
-     * 「档位 + 比例 → 宽高」三样都是**运营可能改的数**——火山改口径、开新档位、
-     * 某档位换帧率，都只该是一次目录发布，而不是改代码发版。
+     * <p>为什么它必须在目录里而不是代码里：{@code divisor}、{@code fps}、
+     * 「档位 + 比例 → 宽高」与「输入时长的规格键」都是**运营可能改的数**——火山改口径、
+     * 开新档位、某档位换帧率、补上输入时长那一项，都只该是一次目录发布，而不是改代码发版。
      * 代码只固定公式的形状（见 {@code TokenEstimator}）。
      *
      * <p>⚠️ 它**只服务预扣**。结算按 worker 上报的**上游真实 token** 计价。
      *
-     * @param divisor    除数字：token ≈ 宽 × 高 × 帧率 × 时长 ÷ divisor（官方 1024）
+     * <p>⚠️ <b>为什么同一个公式要有两条规则（2.0 与 2.5）而不是一条</b>：单价不同，
+     * 而单价是 {@code basePrice} —— 它是规则自己的字段。所以「计费方式相同、单价不同」
+     * 在目录里天然就是两条规则，无需另造机制；2.5 的单价火山尚未给出时，
+     * 它的 {@code basePrice.kind} 写 {@code unset}（空位），提交即拒绝，**不按 0 免费**。
+     *
+     * @param divisor    除数字：token ≈ 宽 × 高 × 帧率 × (输出时长 + 输入时长) ÷ divisor（官方 1024）
      * @param fps        帧率（官方对照表是 24；生成任务的参数里没有帧率这个轴，
      *                   上游返回的 {@code framespersecond} 也是 24，故取官方默认）
      * @param dimensions 档位 + 比例 → 输出宽高，值写成 {@code "1248x704"}；
      *                   键的语法与 {@link BasePrice#table} 完全一致
-     *                   （如 {@code "resolution=720p|aspect_ratio=16:9"}）
+     *                   （如 {@code "resolution=720p|aspect_ratio=16:9"}），
+     *                   因而**同一套键语法、同一个管理端编辑器**——运营不必记两套写法
+     * @param inputSecondsKey 输入视频**时长（秒）**在规格快照里的键，默认
+     *                   {@code video_input_seconds}。配了它，公式就含「输入时长」那一项
+     *                   （火山官方：含视频输入时 {@code (输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024}）；
+     *                   不配 = 不含那一项（含视频输入的任务预扣偏低，缺口上界 = 输入时长那一项）。
+     *
+     *                   <p>⚠️ 它的值是**规格提取侧**折算出来的：参考素材的时长在建任务时
+     *                   冻结进 job input 的 {@code references} 里，再由 {@code billing-specs.ts}
+     *                   （预扣侧）与 {@code SettlementUsageLines}（结算侧）折算成这一个标量键。
+     *                   所以「某个模型的参考视频能不能算进预扣」是**这条规则的一个开关**，
+     *                   而「时长从哪来」是接纳侧的事——两者分开，改一边不动另一边。
+     *
+     *                   <p>⚠️ 配了它之后，{@code video=1}（含视频输入）而该键取不到时估算**返回取不到**
+     *                   （走上限冻结或拒绝），不按 0 估——见 {@code TokenEstimator} 的说明。
      */
     public record TokenEstimate(
             Integer divisor,
             Integer fps,
-            Map<String, String> dimensions
+            Map<String, String> dimensions,
+            String inputSecondsKey
     ) {}
 
     /**
-     * 基准单价的两种形态。
+     * 基准单价的三种形态。
      *
-     * @param kind  {@code const} | {@code table}
+     * @param kind  {@code const} | {@code table} | {@code unset}
      * @param value {@code const} 时的单价（mc）
-     * @param by    {@code table} 时声明的定价轴（仅供校验与文档，查表靠 table 的键）
+     * @param by    {@code table} / {@code unset} 时声明的定价轴（仅供校验与文档，查表靠 table 的键）
      * @param table {@code table} 时的价格表：规格键 → 单价（mc）
+     *
+     * <p>⚠️ {@code unset} = **单价待配的空位**：规则其余部分（基准维度、token 估算参数、
+     * 单位分母）都配好了，只差运营填单价。它编译得过（目录能发布），但计价必拒——
+     * 「还没定价」不能等价于「免费」，见 {@code BasePriceResolver.Unset}。
      */
     public record BasePrice(
             String kind,

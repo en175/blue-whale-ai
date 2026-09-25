@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BASE_UNIT_OPTIONS,
   bpToMultiple,
+  describeBasePrice,
   describePriceInHuman,
+  describeSpecKey,
   emptyCatalog,
   formFromRule,
   isCatalogDirty,
@@ -358,5 +361,132 @@ describe('emptyCatalog', () => {
   it('克隆出来的是新对象（页面拿它当草稿，不该与常量共享引用）', () => {
     const a = clone(DOC);
     expect(withCreditsPerYuan(a, 20)).not.toBe(a);
+  });
+});
+
+/* ── token 计费（视频按 token）与「单价待配」空位 ───────────────────────────
+ * 这一组钉的是「用户要的那个地方」：单价、token 估算参数、尺寸表都能在管理端改，
+ * 而「还没填」是一个**显式的空位**（unset），不是「按 0 免费」。 */
+describe('token 计价的规则编辑', () => {
+  /** 一条视频按 token 计价的规则（2.0 的形态：查表单价 + token 估算参数）。 */
+  const TOKEN_RULE = {
+    baseUnit: 'usage.c',
+    basePrice: { kind: 'table', by: ['video'], table: { 'video=0': 555000, 'video=1': 330000 } },
+    unitDenominator: 1000000,
+    minCredits: 1,
+    maxCredits: null,
+    rounding: 'halfUp',
+    tokenEstimate: {
+      divisor: 1024,
+      fps: 24,
+      inputSecondsKey: 'video_input_seconds',
+      dimensions: { 'resolution=720p|aspect_ratio=16:9': '1248x704' },
+    },
+  };
+
+  it('★ 读出来再写回去，tokenEstimate 与「单价待配」都原样保留（往返无损）', () => {
+    // 查表规则：`value: null` 是本页既有的显式写法（见「查表：table 与 kind 一起换」那条），
+    // 所以这里按字段断言，不拿整份对象逐字比
+    const tableBack = ruleFromForm(formFromRule('seedance-2.0', 'video', TOKEN_RULE), TOKEN_RULE);
+    expect(tableBack).toMatchObject(TOKEN_RULE);
+    expect(tableBack.tokenEstimate).toEqual(TOKEN_RULE.tokenEstimate);
+
+    // 待配规则不带任何价 —— 往返必须**逐字**相同（它是要长期挂在目录里的那个空位）
+    const unsetRule = { ...TOKEN_RULE, basePrice: { kind: 'unset', by: ['video'] } };
+    expect(ruleFromForm(formFromRule('seedance-2.5', 'video', unsetRule), unsetRule)).toEqual(
+      unsetRule,
+    );
+  });
+
+  it('★ 计价方式选「单价待配」→ 写入 kind=unset，且**不带任何价**', () => {
+    const form = { ...emptyRuleForm(), modelId: 'seedance-2.5', taskType: 'video', priceKind: 'unset' as const };
+    const rule = ruleFromForm(form, TOKEN_RULE);
+
+    expect(rule.basePrice).toEqual({ kind: 'unset', by: ['video'] });
+    // ⚠️ 上一版的 table 必须清掉：留着会让人以为「价还在，只是待配」，而 billing 那边是必拒的
+    expect(rule.basePrice).not.toHaveProperty('table');
+    expect(rule.basePrice).not.toHaveProperty('value');
+  });
+
+  it('★ 待配状态不校验价格栏（空位就是「没填」这个状态本身）', () => {
+    const form = {
+      ...emptyRuleForm(),
+      modelId: 'm',
+      taskType: 'video',
+      priceKind: 'unset' as const,
+      priceTable: [],
+    };
+
+    expect(ruleFormError(form)).toBeNull();
+  });
+
+  it('★ 勾了 token 估算就必须把除数 / 帧率 / 尺寸表配全（半配会发布失败）', () => {
+    const base: RuleForm = {
+      ...emptyRuleForm(),
+      modelId: 'm',
+      taskType: 'video',
+      baseUnit: 'usage.c',
+      priceKind: 'table',
+      priceTable: [{ key: 'video=0', value: '555000' }],
+      tokenEstimateEnabled: true,
+      tokenDimensions: [{ key: 'resolution=720p|aspect_ratio=16:9', value: '1248x704' }],
+    };
+
+    expect(ruleFormError(base)).toBeNull();
+    expect(ruleFormError({ ...base, tokenDivisor: '' })).toContain('除数');
+    expect(ruleFormError({ ...base, tokenFps: '0' })).toContain('帧率');
+    expect(ruleFormError({ ...base, tokenDimensions: [] })).toContain('尺寸表');
+    expect(
+      ruleFormError({ ...base, tokenDimensions: [{ key: '', value: '1248x704' }] }),
+    ).toContain('规格键');
+    expect(
+      ruleFormError({ ...base, tokenDimensions: [{ key: 'resolution=720p', value: '' }] }),
+    ).toContain('宽高');
+  });
+
+  it('★ 取消勾选 → tokenEstimate 整块删掉（不留半配的残骸，那会发布失败）', () => {
+    const form = { ...formFromRule('m', 'video', TOKEN_RULE), tokenEstimateEnabled: false };
+    const rule = ruleFromForm(form, TOKEN_RULE);
+
+    expect(rule).not.toHaveProperty('tokenEstimate');
+  });
+
+  it('★ 清空输入时长键 → 明确不要那一项（不能因为原文档里有就留着）', () => {
+    const form = { ...formFromRule('m', 'video', TOKEN_RULE), tokenInputSecondsKey: '  ' };
+    const rule = ruleFromForm(form, TOKEN_RULE);
+
+    expect(rule.tokenEstimate).not.toHaveProperty('inputSecondsKey');
+    expect(rule.tokenEstimate?.divisor).toBe(1024);
+  });
+
+  it('尺寸表的值是文本（1248x704），不是数字 —— 不能被数字校验拦下', () => {
+    const form = {
+      ...emptyRuleForm(),
+      modelId: 'm',
+      taskType: 'video',
+      // 单价另说：这条只验尺寸表的值形态，所以把价格留成空位
+      priceKind: 'unset' as const,
+      tokenEstimateEnabled: true,
+      tokenDimensions: [{ key: 'resolution=1080p|aspect_ratio=16:9', value: '1920x1088' }],
+    };
+
+    expect(ruleFormError(form)).toBeNull();
+    expect(ruleFromForm(form).tokenEstimate?.dimensions).toEqual({
+      'resolution=1080p|aspect_ratio=16:9': '1920x1088',
+    });
+  });
+
+  it('基准维度候选里有 usage.c（否则界面根本选不出「按 token 计价」）', () => {
+    expect(BASE_UNIT_OPTIONS.map((o) => o.value)).toContain('usage.c');
+  });
+
+  it('规格键的人话只加解释、不改键名', () => {
+    expect(describeSpecKey('video=0')).toBe('video=0（不含视频输入 video0）');
+    expect(describeSpecKey('video=1')).toBe('video=1（含视频输入 video1）');
+    expect(describeSpecKey('size=2k')).toBe('size=2k');
+  });
+
+  it('单价待配在表格里显示为「提交会被拒绝」，不是「0 或 —」', () => {
+    expect(describeBasePrice({ basePrice: { kind: 'unset' } })).toBe('单价未配（提交会被拒绝）');
   });
 });

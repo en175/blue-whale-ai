@@ -43,7 +43,7 @@ describe('createBillingQuote', () => {
       size: '2k',
       duration: '5',
       reference_count: '1',
-      has_video_input: 'false',
+      video: '0',
     });
   });
 

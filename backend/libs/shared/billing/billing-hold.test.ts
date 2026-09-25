@@ -54,7 +54,7 @@ describe('createBillingHold', () => {
       size: '2k',
       duration: '5',
       reference_count: '1',
-      has_video_input: 'false',
+      video: '0',
     });
     // 数组与 null 不是规格——混进去会让 catalog 的规格表查不到，变成 UNPRICEABLE
     expect(specs).not.toHaveProperty('references');

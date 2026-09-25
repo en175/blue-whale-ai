@@ -161,8 +161,8 @@ class TokenEstimatorTest {
                       "video": {
                         "baseUnit": "usage.c",
                         "basePrice": { "kind": "table", "table": {
-                            "has_video_input=false": 555000,
-                            "has_video_input=true": 330000
+                            "video=0": 555000,
+                            "video=1": 330000
                         } },
                         "unitDenominator": 1000000,
                         "minCredits": 1,
@@ -192,7 +192,7 @@ class TokenEstimatorTest {
             Usage contract = Usage.contractFrom(rule(), Map.of(
                     "resolution", "720p", "aspect_ratio", "16:9",
                     "duration", "5", "expected_output_count", "1",
-                    "has_video_input", "false"));
+                    "video", "0"));
 
             assertThat(contract.quantityOf(UsageDim.COMPLETION_TOKENS)).isEqualTo(102_960L);
         }
@@ -204,7 +204,7 @@ class TokenEstimatorTest {
                     "doubao-seedance-2-0-fast-260128", "video",
                     Map.of("resolution", "720p", "aspect_ratio", "16:9",
                             "duration", "5", "expected_output_count", "1",
-                            "has_video_input", "false"),
+                            "video", "0"),
                     "free");
             PricingEngine engine = PricingEngine.forMedia((modelId, taskType) -> rule(), DiscountResolver.NONE);
 
@@ -219,7 +219,7 @@ class TokenEstimatorTest {
             PricingRequest request = new PricingRequest(1L,
                     "doubao-seedance-2-0-fast-260128", "video",
                     Map.of("resolution", "720p", "aspect_ratio", "16:9",
-                            "has_video_input", "false"),
+                            "video", "0"),
                     "free");
             PricingEngine engine = PricingEngine.forMedia((modelId, taskType) -> rule(), DiscountResolver.NONE);
 
@@ -238,7 +238,7 @@ class TokenEstimatorTest {
             PricingRequest request = new PricingRequest(1L,
                     "doubao-seedance-2-0-fast-260128", "video",
                     Map.of("resolution", "720p", "aspect_ratio", "16:9",
-                            "has_video_input", "true"),
+                            "video", "1"),
                     "free");
             PricingEngine engine = PricingEngine.forMedia((modelId, taskType) -> rule(), DiscountResolver.NONE);
 
@@ -292,6 +292,49 @@ class TokenEstimatorTest {
                     .hasMessageContaining("等价键");
         }
 
+        @Test
+        @DisplayName("inputSecondsKey 是空白串 → 拒绝（配了个查不到的键，比不配更坏）")
+        void 输入时长键空白拒绝() {
+            assertThatThrownBy(() -> compileWith("\"tokenEstimate\": {\"divisor\": 1024, \"fps\": 24, "
+                    + "\"dimensions\": {\"resolution=480p\": \"864x480\"}, \"inputSecondsKey\": \"  \"}}"))
+                    .hasMessageContaining("inputSecondsKey");
+        }
+
+        @Test
+        @DisplayName("★ 单价待配（kind=unset）**编译得过** —— 它是空位，不是非法配置")
+        void 单价待配编译得过() {
+            // 关键区别：空位允许**整份目录发布**（否则运营连别处都改不了），
+            // 拒绝发生在计价那一刻（见下面「单价待配」那组用例）。
+            CompiledRule rule = CatalogCompiler.compile(parse("""
+                    {
+                      "schemaVersion": 1, "currency": "CNY", "creditsPerYuan": 15,
+                      "models": { "m": { "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "unset", "by": ["video"] },
+                        "unitDenominator": 1000000
+                      } } }
+                    }
+                    """)).get("m/video");
+
+            assertThat(rule.basePrice()).isInstanceOf(BasePriceResolver.Unset.class);
+        }
+
+        @Test
+        @DisplayName("未知 basePrice.kind → 拒绝（错误信息列出合法值）")
+        void 未知kind拒绝() {
+            assertThatThrownBy(() -> CatalogCompiler.compile(parse("""
+                    {
+                      "schemaVersion": 1, "currency": "CNY", "creditsPerYuan": 15,
+                      "models": { "m": { "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "free" },
+                        "unitDenominator": 1000000
+                      } } }
+                    }
+                    """)))
+                    .hasMessageContaining("合法值：const | table | unset");
+        }
+
         private static CompiledRule compileWith(String tokenEstimateJson) {
             String doc = """
                     {
@@ -305,6 +348,164 @@ class TokenEstimatorTest {
                     }
                     """.formatted(tokenEstimateJson);
             return CatalogCompiler.compile(parse(doc)).get("m/video");
+        }
+    }
+
+    @Nested
+    @DisplayName("含视频输入的输入时长、单价待配（unset）、以及 2.5 与 2.0 同公式不同单价")
+    class 视频输入与单价空位 {
+
+        /**
+         * 2.0 与 2.5 两条规则：**同一套 tokenEstimate**（同一个公式、同一张官方尺寸表），
+         * 只有单价不同 —— 「计费方式相同、单价不同」在目录里天然就是两条规则，不必另造机制。
+         *
+         * <p>⚠️ 2.5 的单价火山**没有给**，所以这里写的是 {@code unset}（待运营填的空位）——
+         * 下面那条 1,234,000 只出现在**测试夹具**里，用来证明「同一张表换个单价就换出另一个价」，
+         * **不是**我们给 2.5 定的价（目录里它是空位，提交即拒）。
+         */
+        private static final String DOC = """
+                {
+                  "schemaVersion": 1,
+                  "currency": "CNY",
+                  "creditsPerYuan": 15,
+                  "models": {
+                    "seedance-2.0": {
+                      "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "table", "table": {
+                            "video=0": 555000,
+                            "video=1": 330000
+                        } },
+                        "unitDenominator": 1000000,
+                        "minCredits": 1,
+                        "tokenEstimate": {
+                          "divisor": 1024,
+                          "fps": 24,
+                          "inputSecondsKey": "video_input_seconds",
+                          "dimensions": {
+                            "resolution=720p|aspect_ratio=16:9": "1248x704"
+                          }
+                        }
+                      }
+                    },
+                    "seedance-2.5": {
+                      "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "unset", "by": ["video"] },
+                        "unitDenominator": 1000000,
+                        "minCredits": 1,
+                        "tokenEstimate": {
+                          "divisor": 1024,
+                          "fps": 24,
+                          "inputSecondsKey": "video_input_seconds",
+                          "dimensions": {
+                            "resolution=720p|aspect_ratio=16:9": "1248x704"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """;
+
+        private static Map<String, CompiledRule> catalog() {
+            return CatalogCompiler.compile(parse(DOC));
+        }
+
+        @Test
+        @DisplayName("★ 含视频输入：输入时长加进公式（5s 输出 + 5s 输入 = 10s 的量）")
+        void 输入时长进公式() {
+            CompiledRule rule = catalog().get("seedance-2.0/video");
+
+            // 官方口径：无视频输入时输入时长按 0 计，所以 video=0 那档仍是 102,960
+            assertThat(rule.tokenEstimator().estimateVideoTokens(
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9", "video", "0"), 5L, 1))
+                    .isEqualTo(102_960L);
+            // 含视频输入：输入 5s + 输出 5s = 10s 的量 = 205,920
+            assertThat(rule.tokenEstimator().estimateVideoTokens(
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9",
+                            "video", "1", "video_input_seconds", "5"), 5L, 1))
+                    .isEqualTo(205_920L);
+        }
+
+        @Test
+        @DisplayName("★ 含视频输入却量不到输入时长 → 取不到（不按 0 估、不静默少冻）")
+        void 量不到输入时长不按零估() {
+            CompiledRule rule = catalog().get("seedance-2.0/video");
+
+            assertThat(rule.tokenEstimator().estimateVideoTokens(
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9", "video", "1"), 5L, 1))
+                    .isNull();
+            // 走完整链路：契约量取不到 → 拒绝（该规则没配 maxCredits，没有上限可依）
+            assertThatThrownBy(() -> Usage.contractFrom(rule, Map.of(
+                    "resolution", "720p", "aspect_ratio", "16:9",
+                    "video", "1", "duration", "5", "expected_output_count", "1")))
+                    .isInstanceOf(Usage.ContractQuantityUnavailableException.class);
+        }
+
+        @Test
+        @DisplayName("★ 没配 inputSecondsKey 的规则不受影响（那一项压根不加，也不会因此被拒）")
+        void 未配输入时长项则不加() {
+            // 向后兼容：老目录没写 inputSecondsKey，含视频输入的任务照旧估得出来（只是偏低）
+            CompiledRule legacy = CatalogCompiler.compile(parse("""
+                    {
+                      "schemaVersion": 1, "currency": "CNY", "creditsPerYuan": 15,
+                      "models": { "m": { "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "const", "value": 555000 },
+                        "unitDenominator": 1000000,
+                        "tokenEstimate": {
+                          "divisor": 1024, "fps": 24,
+                          "dimensions": { "resolution=720p|aspect_ratio=16:9": "1248x704" }
+                        }
+                      } } }
+                    }
+                    """)).get("m/video");
+
+            assertThat(legacy.tokenEstimator().estimateVideoTokens(
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9", "video", "1"), 5L, 1))
+                    .isEqualTo(102_960L);
+        }
+
+        @Test
+        @DisplayName("★ 单价待配（unset）：规则在目录里、token 也估得出，但**计价必拒**（不是按 0 免费）")
+        void 单价待配拒绝计价() {
+            CompiledRule rule = catalog().get("seedance-2.5/video");
+
+            // 估算本身是好的（2.5 与 2.0 用的是同一张官方尺寸表）
+            assertThat(rule.tokenEstimator().estimateVideoTokens(
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9", "video", "0"), 5L, 1))
+                    .isEqualTo(102_960L);
+
+            PricingRequest request = new PricingRequest(1L, "seedance-2.5", "video",
+                    Map.of("resolution", "720p", "aspect_ratio", "16:9",
+                            "duration", "5", "expected_output_count", "1", "video", "0"),
+                    "free");
+            PricingEngine engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
+            Usage contract = Usage.contractFrom(rule, request.specs());
+
+            assertThatThrownBy(() -> engine.compute(request, contract, java.time.Instant.now()))
+                    .isInstanceOf(BasePriceResolver.UnpriceableSpecException.class)
+                    .hasMessageContaining("单价");
+        }
+
+        @Test
+        @DisplayName("★ 同一张尺寸表、不同单价 → 同一个 token 数换出不同的价（2.5 要的「单价可设」）")
+        void 同公式不同单价() {
+            Map<String, String> specs = Map.of("resolution", "720p", "aspect_ratio", "16:9",
+                    "duration", "5", "expected_output_count", "1", "video", "0");
+            PricingRequest request = new PricingRequest(1L, "m", "video", specs, "free");
+
+            // 夹具：2.5 的规则把单价换成 1,234,000（**只是夹具**，目录里 2.5 是 unset 空位）
+            CompiledRule priced = CatalogCompiler.compile(parse(DOC
+                    .replace("\"kind\": \"unset\", \"by\": [\"video\"]",
+                            "\"kind\": \"table\", \"table\": { \"video=0\": 1234000 }")))
+                    .get("seedance-2.5/video");
+            PricingEngine engine = PricingEngine.forMedia((m, t) -> priced, DiscountResolver.NONE);
+
+            // 102,960 × 1,234,000 / 1,000,000 = 127,052.64 mc → 127 积分
+            assertThat(engine.compute(request, Usage.contractFrom(priced, specs),
+                    java.time.Instant.now()).credits()).isEqualTo(127L);
         }
     }
 

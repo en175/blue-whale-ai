@@ -35,11 +35,13 @@ import {
 } from '@/api/adminBillingCatalog';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
+import NumberField from './NumberField';
+import RuleEditorModal, { type RuleEditorState } from './RuleEditorModal';
 import {
-  BASE_UNIT_OPTIONS,
   bpToMultiple,
   describeBasePrice,
   describePriceInHuman,
+  describeSpecKey,
   emptyRuleForm,
   formFromRule,
   isCatalogDirty,
@@ -47,8 +49,6 @@ import {
   parseCatalog,
   readCreditsPerYuan,
   readDiscountPolicy,
-  ruleFormError,
-  ruleFromForm,
   serializeCatalog,
   withCreditsPerYuan,
   withDiscountPolicy,
@@ -56,11 +56,10 @@ import {
   withoutRule,
   type CatalogDocumentJson,
   type CatalogRuleView,
-  type KeyValueRow,
-  type RuleForm,
 } from './catalogDraft';
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Empty,
@@ -73,25 +72,11 @@ import {
   Table,
 } from '../../ui';
 
-const ROUNDING_OPTIONS = [
-  { value: 'halfUp', label: 'halfUp（四舍五入，默认）' },
-  { value: 'ceil', label: 'ceil（向上取整，偏向平台）' },
-  { value: 'floor', label: 'floor（向下取整，偏向用户）' },
-];
-
 const STACK_MODE_OPTIONS = [
   { value: 'multiply', label: 'multiply（会员再享活动）' },
   { value: 'best', label: 'best（两者取优）' },
 ];
 
-/** 编辑弹窗要用的初始状态。 */
-interface RuleEditorState {
-  initial: RuleForm;
-  /** 改动前的那条规则：本页不编辑的字段（usageSemantic / by）从它原样带过去 */
-  original: CatalogRuleView;
-  /** 已有规则不能改键：模型 / 任务类型是 models 映射的键，改键等于挪位置 */
-  isNew: boolean;
-}
 
 export default function ModelBilling() {
   const queryClient = useQueryClient();
@@ -508,6 +493,11 @@ function BasePriceCell({
   creditsPerYuan: number | null;
 }) {
   const price = rule.basePrice ?? {};
+  if (price.kind === 'unset') {
+    // ⚠️ 这一格的措辞必须说清「不是免费」：运营看到「未配」时最容易的误判是
+    //    「还没配=先不收费」，而实际是提交直接失败。
+    return <Badge tone="warning">单价未配（提交会被拒绝）</Badge>;
+  }
   if (price.kind === 'table') {
     const table = price.table ?? {};
     return (
@@ -516,7 +506,7 @@ function BasePriceCell({
         {Object.entries(table).map(([key, value]) =>
           typeof value === 'number' ? (
             <div key={key} style={{ fontSize: 12 }}>
-              {key} → {describePriceInHuman(value, creditsPerYuan)}
+              {describeSpecKey(key)} → {describePriceInHuman(value, creditsPerYuan)}
             </div>
           ) : null,
         )}
@@ -542,6 +532,16 @@ function WeightsCell({ rule }: { rule: CatalogRuleView }) {
       ([key, value]) => `倍率 ${key}=${String(value)}（${bpToMultiple(Number(value))} 倍）`,
     ),
   ];
+  // token 估算参数单列一行摘要 —— 它是「预扣算不算得出」的开关，藏在编辑弹窗里会让人
+  // 只看到「单价配了」，却不知道这个模型提交时会不会因为推不出 token 而被拒。
+  if (rule.tokenEstimate !== undefined && rule.tokenEstimate !== null) {
+    const token = rule.tokenEstimate;
+    const dims = token.dimensions ?? {};
+    lines.push(
+      `token 估算 ${String(token.divisor ?? '—')} / ${String(token.fps ?? '—')}fps` +
+        `（${Object.keys(dims).length} 档${token.inputSecondsKey ? '，含输入时长' : ''}）`,
+    );
+  }
   if (lines.length === 0) return <span>—</span>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -550,332 +550,6 @@ function WeightsCell({ rule }: { rule: CatalogRuleView }) {
           {line}
         </div>
       ))}
-    </div>
-  );
-}
-
-/* ============ 整数输入框 ============ */
-
-/**
- * 整数输入：内部存**文字**，只在能解析成整数时往外抛。
- *
- * <p>为什么不能直接用 `value={String(数字)}` 的受控输入：那样用户永远清不空这个框
- * （清空 = 非法 = 立刻被写成原值弹回来），而「全选删掉再输」是最常见的改数方式。
- * 所以文字留在本组件里，外面拿到的永远是合法整数。
- *
- * @param allowNull 允许「空」这个状态（清空时往外抛 null）。用于换算率这种**必须填**的字段：
- *                  空着就是空着，交给 billing 的编译期报错说清楚，而不是在这里悄悄补一个数。
- */
-function NumberField({
-  label,
-  ariaLabel,
-  hint,
-  value,
-  onChange,
-  allowNull = false,
-}: {
-  label: string;
-  ariaLabel: string;
-  hint: string;
-  value: number | null;
-  onChange: (value: number | null) => void;
-  allowNull?: boolean;
-}) {
-  const [text, setText] = useState(value === null ? '' : String(value));
-
-  // 外部值变了（重新加载 / 换成另一份目录）才回写文字；用户自己敲的空串不会被这里弹回去
-  useEffect(() => {
-    setText(value === null ? '' : String(value));
-  }, [value]);
-
-  return (
-    <Field label={label} hint={hint}>
-      <Input
-        aria-label={ariaLabel}
-        value={text}
-        onChange={(e) => {
-          const raw = e.target.value.trim();
-          setText(e.target.value);
-          if (raw === '') {
-            if (allowNull) onChange(null);
-            return;
-          }
-          if (!/^\d+$/.test(raw)) return;
-          onChange(Number(raw));
-        }}
-      />
-    </Field>
-  );
-}
-
-/* ============ 规则编辑弹窗 ============ */
-
-function RuleEditorModal({
-  state,
-  creditsPerYuan,
-  onClose,
-  onSave,
-}: {
-  state: RuleEditorState;
-  creditsPerYuan: number | null;
-  onClose: () => void;
-  /** 回传组装好的规则，以及它在目录里的两个键（模型 / 任务类型） */
-  onSave: (rule: CatalogRuleView, modelId: string, taskType: string) => void;
-}) {
-  const [form, setForm] = useState<RuleForm>(state.initial);
-  const [error, setError] = useState('');
-  const patch = (next: Partial<RuleForm>) => setForm((f) => ({ ...f, ...next }));
-
-  /** 基准维度可能是目录里的老值（新维度、文本类维度）：不在候选里就补一条，别显示成空白 */
-  const baseUnitOptions = BASE_UNIT_OPTIONS.some((o) => o.value === form.baseUnit)
-    ? BASE_UNIT_OPTIONS
-    : [...BASE_UNIT_OPTIONS, { value: form.baseUnit, label: `${form.baseUnit}（目录里的现值）` }];
-
-  const priceValue = Number(form.priceValue.trim());
-  const humanPrice = Number.isFinite(priceValue)
-    ? describePriceInHuman(priceValue, creditsPerYuan)
-    : '';
-
-  const submit = () => {
-    const message = ruleFormError(form);
-    if (message !== null) {
-      setError(message);
-      return;
-    }
-    try {
-      onSave(ruleFromForm(form, state.original), form.modelId.trim(), form.taskType.trim());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '规则不合法');
-    }
-  };
-
-  return (
-    <Modal
-      open
-      title={state.isNew ? '新增计价规则' : `编辑 ${form.modelId} / ${form.taskType}`}
-      width={780}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" onClick={submit}>
-            确定
-          </Button>
-        </>
-      }
-    >
-      {error && <Alert tone="danger">{error}</Alert>}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px' }}>
-        <Field
-          label="模型 ID"
-          hint={
-            state.isNew
-              ? '能力表里的 model_id，例如 doubao-seedance-2-5-260628'
-              : '已有规则的键不可改；要换模型请新增一条再删掉旧的'
-          }
-        >
-          <Input
-            aria-label="模型 ID"
-            value={form.modelId}
-            disabled={!state.isNew}
-            onChange={(e) => patch({ modelId: e.target.value })}
-          />
-        </Field>
-        <Field label="任务类型" hint="提交任务时的 type，例如 text2video / text2image">
-          <Input
-            aria-label="任务类型"
-            value={form.taskType}
-            disabled={!state.isNew}
-            onChange={(e) => patch({ taskType: e.target.value })}
-          />
-        </Field>
-        <Field label="基准维度" hint="按哪个用量维度计费；constant:1 = 按次">
-          <Select
-            aria-label="基准维度"
-            options={baseUnitOptions}
-            value={form.baseUnit}
-            onChange={(baseUnit) => patch({ baseUnit })}
-          />
-        </Field>
-        <Field label="计价方式" hint="常数单价，或按规格查表（例如按分辨率定价）">
-          <Select
-            aria-label="计价方式"
-            options={[
-              { value: 'const', label: 'const（常数单价）' },
-              { value: 'table', label: 'table（按规格查表）' },
-            ]}
-            value={form.priceKind}
-            onChange={(v) => patch({ priceKind: v === 'table' ? 'table' : 'const' })}
-          />
-        </Field>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        {form.priceKind === 'const' ? (
-          <Field
-            label="基准单价（mc）"
-            hint={humanPrice ? `当前 = ${humanPrice}` : '1 积分 = 1000 mc'}
-          >
-            <Input
-              aria-label="基准单价"
-              value={form.priceValue}
-              placeholder="例如 100000（= 100 积分）"
-              onChange={(e) => patch({ priceValue: e.target.value })}
-            />
-          </Field>
-        ) : (
-          <Field
-            label="价格表（规格键 → 单价 mc）"
-            hint="规格键与提交时的规格一致（例如 size=2k）；键不区分大小写，等价键重复会被拒绝"
-          >
-            <KeyValueEditor
-              rows={form.priceTable}
-              ariaPrefix="价格表"
-              keyPlaceholder="size=2k"
-              valuePlaceholder="100000"
-              onChange={(priceTable) => patch({ priceTable })}
-            />
-          </Field>
-        )}
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: '16px 24px',
-          marginTop: 16,
-        }}
-      >
-        <Field label="单位分母" hint="每多少个单位收这份单价：1 = 每秒/每张，1000000 = 每百万 token">
-          <Input
-            aria-label="单位分母"
-            value={form.unitDenominator}
-            onChange={(e) => patch({ unitDenominator: e.target.value })}
-          />
-        </Field>
-        <Field label="积分下限" hint="算出来不足这个数就按下限收（整数积分）">
-          <Input
-            aria-label="积分下限"
-            value={form.minCredits}
-            onChange={(e) => patch({ minCredits: e.target.value })}
-          />
-        </Field>
-        <Field label="积分上限" hint="留空 = 不封顶">
-          <Input
-            aria-label="积分上限"
-            value={form.maxCredits}
-            onChange={(e) => patch({ maxCredits: e.target.value })}
-          />
-        </Field>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <Field
-          label="舍入方式"
-          hint="mc 换算成整数积分时怎么取整：ceil 时折扣要 ≥ 1 积分才看得出来"
-        >
-          <Select
-            aria-label="舍入方式"
-            options={ROUNDING_OPTIONS}
-            value={form.rounding}
-            onChange={(rounding) => patch({ rounding })}
-          />
-        </Field>
-      </div>
-
-      <div
-        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px', marginTop: 16 }}
-      >
-        <Field label="附加维度（万分比）" hint="按用量加权：10000 = 1 倍，4000 = 0.4 倍。留空表示不加权">
-          <KeyValueEditor
-            rows={form.dims}
-            ariaPrefix="附加维度"
-            keyPlaceholder="usage.referenceCount"
-            valuePlaceholder="4000"
-            onChange={(dims) => patch({ dims })}
-          />
-        </Field>
-        <Field label="整单倍率（万分比）" hint="整单连乘：12000 = 1.2 倍">
-          <KeyValueEditor
-            rows={form.multipliers}
-            ariaPrefix="整单倍率"
-            keyPlaceholder="usage.referenceCount"
-            valuePlaceholder="12000"
-            onChange={(multipliers) => patch({ multipliers })}
-          />
-        </Field>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <Alert tone="info">
-          单位是 mc（1 积分 = 1000 mc）。界面按 mc 编辑而不是按元：元 ↔ mc 几乎永远是长小数，
-          而换算着编辑会让没被改动的字段在保存时被挪动几个 mc。
-        </Alert>
-      </div>
-    </Modal>
-  );
-}
-
-/* ============ 键值对编辑器（dims / multipliers / 价格表共用） ============ */
-
-function KeyValueEditor({
-  rows,
-  onChange,
-  ariaPrefix,
-  keyPlaceholder,
-  valuePlaceholder,
-}: {
-  rows: KeyValueRow[];
-  onChange: (rows: KeyValueRow[]) => void;
-  ariaPrefix: string;
-  keyPlaceholder: string;
-  valuePlaceholder: string;
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {rows.map((row, index) => (
-        // 行没有稳定 id（键就是内容本身，可以改），所以按序号做 key ——
-        // 这不是可排序列表，序号在编辑过程中是稳定的
-        <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Input
-            aria-label={`${ariaPrefix}键`}
-            placeholder={keyPlaceholder}
-            value={row.key}
-            onChange={(e) =>
-              onChange(rows.map((r, i) => (i === index ? { ...r, key: e.target.value } : r)))
-            }
-            style={{ flex: 1 }}
-          />
-          <Input
-            aria-label={`${ariaPrefix}值`}
-            placeholder={valuePlaceholder}
-            value={row.value}
-            onChange={(e) =>
-              onChange(rows.map((r, i) => (i === index ? { ...r, value: e.target.value } : r)))
-            }
-            style={{ width: 120 }}
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            title="删掉这一行"
-            aria-label={`删掉${ariaPrefix}第 ${index + 1} 行`}
-            icon={<Trash2 size={15} strokeWidth={2} />}
-            onClick={() => onChange(rows.filter((_, i) => i !== index))}
-          />
-        </div>
-      ))}
-      <div>
-        <Button
-          size="sm"
-          icon={<Plus size={15} strokeWidth={2} />}
-          onClick={() => onChange([...rows, { key: '', value: '' }])}
-        >
-          添加一行
-        </Button>
-      </div>
     </div>
   );
 }

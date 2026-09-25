@@ -40,6 +40,15 @@ export interface CatalogRuleView {
   minCredits?: unknown;
   maxCredits?: unknown;
   rounding?: unknown;
+  /** 视频按 token 计价的**预扣估算参数**（服务端 `TokenEstimate` 的 JSON 形态）。 */
+  tokenEstimate?: {
+    divisor?: unknown;
+    fps?: unknown;
+    /** 「档位 + 比例」→ 「宽x高」，与价格表同一套键语法 */
+    dimensions?: Record<string, unknown>;
+    /** 输入视频时长的规格键；不写 = 公式不含输入时长那一项 */
+    inputSecondsKey?: unknown;
+  };
 }
 
 /** 表格里的一行 = 一个 (模型, 任务类型) 的规则。 */
@@ -238,8 +247,8 @@ export function bpToMultiple(bp: number): number {
 
 /* ---------- 表单 ↔ 规则 ---------- */
 
-/** 基准单价的两种形态之一。 */
-export type PriceKind = 'const' | 'table';
+/** 基准单价的三种形态之一。 */
+export type PriceKind = 'const' | 'table' | 'unset';
 
 /** 一对可增删的键值行（dims / multipliers / 价格表共用）。 */
 export interface KeyValueRow {
@@ -266,6 +275,16 @@ export interface RuleForm {
   /** 空 = 不封顶 */
   maxCredits: string;
   rounding: string;
+  /** 本规则要不要配 token 预扣估算参数（不配 = 该规则不做估算） */
+  tokenEstimateEnabled: boolean;
+  /** token 公式的除数字（mc 无关，官方 1024） */
+  tokenDivisor: string;
+  /** token 公式的帧率（官方对照表 24） */
+  tokenFps: string;
+  /** 规格键（档位 + 比例）→ 「宽x高」 */
+  tokenDimensions: KeyValueRow[];
+  /** 输入视频时长的规格键；空 = 公式不含输入时长那一项 */
+  tokenInputSecondsKey: string;
 }
 
 /** 与 billing 的 `UsageDim` 注册表逐字一致（新增维度要两处一起改）。 */
@@ -275,6 +294,7 @@ export const BASE_UNIT_OPTIONS = [
   { value: 'usage.seconds', label: 'usage.seconds（秒）' },
   { value: 'usage.characters', label: 'usage.characters（字符）' },
   { value: 'usage.referenceCount', label: 'usage.referenceCount（参考素材数）' },
+  { value: 'usage.c', label: 'usage.c（输出 token，视频按 token 计费用）' },
 ];
 
 const WHOLE_NUMBER = /^\d+$/;
@@ -312,15 +332,32 @@ export function ruleFormError(form: RuleForm): string | null {
 
   if (form.priceKind === 'const') {
     if (parseWhole(form.priceValue) === null) return '基准单价必填，且是整数 mc';
-  } else {
-    // 查表才看价格表 —— 常数方式下那一栏是收起来的，里面的空行不该拦住保存
+  } else if (form.priceKind === 'table') {
+    // 查表才看价格表 —— 常数方式与「待配」下那一栏是收起来的，里面的空行不该拦住保存
     if (form.priceTable.length === 0) return '价格表至少要有一行（规格键 → 单价 mc）';
     const priceError = rowsError(form.priceTable, '价格表');
     if (priceError !== null) return priceError;
   }
+  // unset（单价待配）不需要填任何价 —— 那正是这个形态存在的意义：**留空发布**，
+  // 提交时被 billing 拒绝（不是按 0 免费）。所以这里不校验价格栏。
 
   const weightsError = rowsError([...form.dims, ...form.multipliers], '维度表');
   if (weightsError !== null) return weightsError;
+
+  if (form.tokenEstimateEnabled) {
+    const divisor = parseWhole(form.tokenDivisor);
+    if (divisor === null || divisor <= 0) return 'token 估算的除数必须是正整数（官方 1024）';
+    const fps = parseWhole(form.tokenFps);
+    if (fps === null || fps <= 0) return 'token 估算的帧率必须是正整数（官方对照表 24）';
+    if (form.tokenDimensions.length === 0) {
+      return 'token 估算的尺寸表至少要有一行（规格键 → 宽x高）';
+    }
+    for (const row of form.tokenDimensions) {
+      if (!row.key.trim()) return 'token 尺寸表的规格键不能为空';
+      // 值只校验「非空」：`1248x704` 这种形态由 billing 编译期说了算（它是唯一的校验时机）
+      if (!row.value.trim()) return `token 尺寸表「${row.key.trim()}」的宽高不能为空（写成 1248x704）`;
+    }
+  }
 
   if (form.unitDenominator.trim() && parseWhole(form.unitDenominator) === null) {
     return '单位分母必须是整数（1 = 每秒/每张，1000000 = 每百万 token）';
@@ -342,6 +379,18 @@ function rowsToRecord(rows: KeyValueRow[]): Record<string, number> {
   return out;
 }
 
+/** 键值行 → 对象，值保持**文本**（token 尺寸表的值是 `1248x704`，不是数）。 */
+function rowsToTextRecord(rows: KeyValueRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (key in out) throw new Error(`键重复：${key}`);
+    out[key] = row.value.trim();
+  }
+  return out;
+}
+
 /**
  * 表单 → 目录里的 rule 对象。
  *
@@ -354,19 +403,28 @@ export function ruleFromForm(
   form: RuleForm,
   original: CatalogRuleView = {},
 ): CatalogRuleView {
-  const basePrice =
-    form.priceKind === 'const'
-      ? {
-          ...(original.basePrice ?? {}),
-          kind: 'const',
-          value: parseWhole(form.priceValue) ?? 0,
-        }
-      : {
-          ...(original.basePrice ?? {}),
-          kind: 'table',
-          value: null,
-          table: rowsToRecord(form.priceTable),
-        };
+  let basePrice: CatalogRuleView['basePrice'];
+  if (form.priceKind === 'const') {
+    basePrice = {
+      ...(original.basePrice ?? {}),
+      kind: 'const',
+      value: parseWhole(form.priceValue) ?? 0,
+    };
+  } else if (form.priceKind === 'table') {
+    basePrice = {
+      ...(original.basePrice ?? {}),
+      kind: 'table',
+      value: null,
+      table: rowsToRecord(form.priceTable),
+    };
+  } else {
+    // 单价待配的空位：**只保留定价轴声明**（`by` 是文档），把 value / table 清掉 ——
+    // 留着上一版的价会让人以为「价还在，只是待配」，而 billing 那边是必拒的。
+    basePrice = {
+      ...(Array.isArray(original.basePrice?.by) ? { by: original.basePrice.by } : {}),
+      kind: 'unset',
+    };
+  }
 
   const rule: CatalogRuleView = {
     ...original,
@@ -385,6 +443,24 @@ export function ruleFromForm(
   if (Object.keys(multipliers).length > 0) rule.multipliers = multipliers;
   else delete rule.multipliers;
 
+  // token 估算参数：整块写或整块删。**不整块删就一定会留下半配的残骸**
+  // （用户取消勾选后 divisor 还在），而半配的估算服务端编译期会拒——那是发布失败，
+  // 不是「这条规则不估算」。
+  if (form.tokenEstimateEnabled) {
+    const token: NonNullable<CatalogRuleView['tokenEstimate']> = {
+      ...(original.tokenEstimate ?? {}),
+      divisor: parseWhole(form.tokenDivisor) ?? 0,
+      fps: parseWhole(form.tokenFps) ?? 0,
+      dimensions: rowsToTextRecord(form.tokenDimensions),
+    };
+    // 清空输入框 = **明确不要那一项**，不能因为原文档里有就留着（那会让「我删了」变成没删）
+    if (form.tokenInputSecondsKey.trim()) token.inputSecondsKey = form.tokenInputSecondsKey.trim();
+    else delete token.inputSecondsKey;
+    rule.tokenEstimate = token;
+  } else {
+    delete rule.tokenEstimate;
+  }
+
   // 不封顶就写 null（显式表达「没有上限」），而不是省略 —— 省略与 null 同义，
   // 但显式 null 在文档里一眼能看出「这条规则想过这件事」
   rule.maxCredits = form.maxCredits.trim() ? parseWhole(form.maxCredits) : null;
@@ -399,10 +475,12 @@ export function formFromRule(
   rule: CatalogRuleView,
 ): RuleForm {
   const price = rule.basePrice ?? {};
-  const kind: PriceKind = price.kind === 'table' ? 'table' : 'const';
+  const kind: PriceKind =
+    price.kind === 'table' ? 'table' : price.kind === 'unset' ? 'unset' : 'const';
   const table = price.table !== undefined && price.table !== null ? price.table : {};
   const asText = (v: unknown): string =>
     typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+  const token = rule.tokenEstimate;
 
   return {
     modelId,
@@ -417,6 +495,13 @@ export function formFromRule(
     minCredits: asText(rule.minCredits ?? 1),
     maxCredits: asText(rule.maxCredits),
     rounding: typeof rule.rounding === 'string' && rule.rounding ? rule.rounding : 'halfUp',
+    // 「有没有 tokenEstimate」本身就是那个开关：文档里没有它 = 这条规则不做估算
+    tokenEstimateEnabled: token !== undefined && token !== null,
+    tokenDivisor: asText(token?.divisor ?? DEFAULT_TOKEN_DIVISOR),
+    tokenFps: asText(token?.fps ?? DEFAULT_TOKEN_FPS),
+    tokenDimensions: recordToRows(token?.dimensions),
+    tokenInputSecondsKey:
+      typeof token?.inputSecondsKey === 'string' ? token.inputSecondsKey : '',
   };
 }
 
@@ -435,8 +520,22 @@ export function emptyRuleForm(): RuleForm {
     minCredits: '1',
     maxCredits: '',
     rounding: 'halfUp',
+    tokenEstimateEnabled: false,
+    tokenDivisor: String(DEFAULT_TOKEN_DIVISOR),
+    tokenFps: String(DEFAULT_TOKEN_FPS),
+    tokenDimensions: [{ key: '', value: '' }],
+    tokenInputSecondsKey: '',
   };
 }
+
+/**
+ * token 估算参数的默认值 —— **只是新建表单的初值**，生效值一律以目录里写的为准。
+ *
+ * <p>它们是火山官方对照表的除数字与帧率（此前一单从官方表逐格反推出来的），
+ * 放在这里只为让新建时不必手敲；写不写进目录由「有没有勾选启用」决定。
+ */
+export const DEFAULT_TOKEN_DIVISOR = 1024;
+export const DEFAULT_TOKEN_FPS = 24;
 
 function recordToRows(record: Record<string, unknown> | undefined): KeyValueRow[] {
   if (!record || typeof record !== 'object') return [];
@@ -451,12 +550,32 @@ function recordToRows(record: Record<string, unknown> | undefined): KeyValueRow[
 /** 基准单价的展示文本（mc 原文；人类可读的换算由 `describePriceInHuman` 补在旁边）。 */
 export function describeBasePrice(rule: CatalogRuleView): string {
   const price = rule.basePrice ?? {};
+  if (price.kind === 'unset') return '单价未配（提交会被拒绝）';
   if (price.kind === 'table') {
     const count = price.table ? Object.keys(price.table).length : 0;
     return `价格表（${count} 档）`;
   }
   if (typeof price.value === 'number') return `${price.value} mc`;
   return '—';
+}
+
+/**
+ * 规格键的人话（**只用于展示**，存储与键名一律用火山那一套）。
+ *
+ * <p>火山的计费档按场景命名：一个模型的一个任务类型下，「输入不含视频 / 输入包含视频」
+ * 两档写作 {@code video0} / {@code video1}。我们的规格键语法是「轴=值」，
+ * 所以存的是 {@code video=0} / {@code video=1} —— 这里补一句中文，让人一眼看懂哪档是哪档。
+ *
+ * <p>⚠️ 只加解释、**不改写键名**：改写过一次，界面上看到的与目录里存的就不是一个东西了，
+ * 而这两个值会出现在账、在价、在回滚历史里。
+ */
+const SPEC_KEY_LABELS: Record<string, string> = {
+  'video=0': 'video=0（不含视频输入 video0）',
+  'video=1': 'video=1（含视频输入 video1）',
+};
+
+export function describeSpecKey(key: string): string {
+  return SPEC_KEY_LABELS[key] ?? key;
 }
 
 /** 单价的人话：`每 1 个单位 ≈ 100 积分 ≈ ¥6.67`；换算不出来（没生效目录）时返回空串。 */

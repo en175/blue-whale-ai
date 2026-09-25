@@ -117,6 +117,11 @@ public final class CatalogCompiler {
      * 配了就必须整块配全：缺 divisor / fps / 空尺寸表都当场拒绝，
      * 因为半配的估算会算出一个「像那么回事」的数，而它是钱。
      *
+     * <p>{@code inputSecondsKey} 是**可选的**：不配 = 公式不含输入时长那一项。
+     * 它不像 divisor / fps 那样「缺了就估不出」——缺了只是对含视频输入的任务估得偏低，
+     * 结算按真值兜住。所以这里不强制，但配了就必须是个非空的键名
+     * （空白串等于「配了个查不到的键」，那是最坏的一种：看起来配了、实际永远取不到）。
+     *
      * <p>⚠️ 校验放在编译期（与 {@link #normalizeTable} 同一个立场）：
      * 尺寸表写错一个档位，运行时表现是「某个档位查不到 → 预扣推不出 → 拒绝提交」，
      * 那时用户已经在等了；这里拒绝则发布当场失败。
@@ -135,8 +140,13 @@ public final class CatalogCompiler {
             throw new CompileException("tokenEstimate.dimensions 必填且非空"
                     + "（「档位 + 比例 → 宽高」是火山的知识，不配就估不出 token）");
         }
+        if (estimate.inputSecondsKey() != null && estimate.inputSecondsKey().isBlank()) {
+            throw new CompileException("tokenEstimate.inputSecondsKey 不能是空白串"
+                    + "（留空等于配了个查不到的键；要「不加输入时长那一项」就整个别写这个字段）");
+        }
         try {
-            return TokenEstimator.from(estimate.divisor(), estimate.fps(), estimate.dimensions());
+            return TokenEstimator.from(estimate.divisor(), estimate.fps(),
+                    estimate.dimensions(), estimate.inputSecondsKey());
         } catch (IllegalArgumentException e) {
             throw new CompileException("tokenEstimate 不合法：" + e.getMessage(), e);
         }
@@ -156,12 +166,16 @@ public final class CatalogCompiler {
             }
             case "table" -> {
                 if (price.table() == null || price.table().isEmpty()) {
-                    throw new CompileException("basePrice.kind=table 时必须给非空 table");
+                    throw new CompileException("basePrice.kind=table 时必须给非空 table"
+                            + "（「单价还没定」请显式写 kind=unset，见 CatalogDocument.BasePrice 的说明）");
                 }
                 yield new BasePriceResolver.Table(normalizeTable(price.table()));
             }
+            // 单价待配：目录里显式留的空位。**编译期合法**（能发布、能整份回滚），
+            // 但计价时拒绝——见 BasePriceResolver.Unset 的注释（按 0 等于免费，比拒绝更坏）。
+            case "unset" -> new BasePriceResolver.Unset();
             default -> throw new CompileException(
-                    "未知的 basePrice.kind=" + kind + "（合法值：const | table）");
+                    "未知的 basePrice.kind=" + kind + "（合法值：const | table | unset）");
         };
     }
 

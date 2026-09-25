@@ -1605,7 +1605,10 @@ export async function handleCreateGenerationJob(
   const referenceAssetIds = textIndexRefs.value.merged;
   // IKFM3W §10 / IKFM41 §11：视频/音频目标以合并后的 references 供 composeInput 与正文标签
   // 复核统一消费（文本带入追加项已含；references 缺失且画布有文本带入时为新建的单数组）。
-  const effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
+  // ⚠️ let 而非 const：视频参考的时长在下方的素材复核段被补进 references（见 IKARVx 段），
+  //    那里替换的是整个 references 数组而不是原地改元素（`body` 可能是调用方传进来的对象，
+  //    原地改会连带改到调用方）。
+  let effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
     ? { ...body, references: textIndexRefs.value.videoReferences }
     : body;
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
@@ -1677,6 +1680,30 @@ export async function handleCreateGenerationJob(
         return fail(400, "参考素材类型与声明不符", {
           code: ERROR_INVALID_REFERENCE_TYPE,
         });
+      }
+      // ⚠️ 输入视频的**时长**冻结进快照 —— 火山按 token 计价的公式在含视频输入时要把
+      //    「输入时长」加进 token 估算（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），
+      //    而时长是 references **元素上**的标量、数组本身进不了规格。所以在这里写进元素，
+      //    由 billing 侧（billing-specs.ts 预扣 / SettlementUsageLines 结算）折算成标量键。
+      //
+      //    来源优先级：调用方带的 duration → 本地素材的 assets.duration（**权威**，
+      //    由 resolveInputAssets 一并查出，省一次查询）。两者都没有就**不写这个字段**——
+      //    宁可让 billing 判「含视频输入却量不到输入时长」而拒绝，也不按 0 估（少冻＝平台垫钱）。
+      //    素材库引用（material_id，本地零表）只能靠调用方带；画布提交时会带。
+      if (type === "video" && parsedTextRefs.kind === "ok") {
+        const secondsByAssetId = new Map(
+          localIds.map((id, i) => [id, resolvedRefs[i]!.duration]),
+        );
+        effectiveBody = {
+          ...effectiveBody,
+          references: textRefItems.map((item) => {
+            if (item.type !== "video" || item.duration !== undefined || item.asset_id === undefined) {
+              return item;
+            }
+            const seconds = secondsByAssetId.get(String(item.asset_id));
+            return typeof seconds === "number" && seconds > 0 ? { ...item, duration: seconds } : item;
+          }),
+        };
       }
     }
   }

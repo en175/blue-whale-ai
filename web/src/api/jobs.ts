@@ -150,6 +150,15 @@ export interface GenerationRefItem {
   type: 'image' | 'video' | 'audio';
   asset_id?: string;
   material_id?: string;
+  /**
+   * 来源素材的时长（秒，可选，ADR-0086）。
+   *
+   * ⚠️ 视频参考带上它**才划算得到价**：视频按 token 计费，而火山官方公式在「含视频输入」时
+   * 要把**输入时长**加进 token 估算（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024）。
+   * 服务端对本地素材会自己查 assets.duration 兜底；**素材库引用（material_id，本地零表）
+   * 只能靠这里带**——不带就会因「含视频输入却量不到输入时长」被拒绝提交（不是按 0 估）。
+   */
+  duration?: number;
 }
 
 /** 创建/重试任务返回 */

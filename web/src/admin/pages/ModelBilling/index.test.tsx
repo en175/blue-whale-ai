@@ -98,6 +98,18 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+/** 选下拉项：Select 不是原生控件（见 ui/Select），点开触发器再点 role=option。 */
+async function choose(label: string, optionIncludes: string) {
+  const trigger = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  if (!trigger) throw new Error(`没有找到下拉框：${label}`);
+  await click(trigger as unknown as HTMLButtonElement);
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) =>
+    o.textContent?.includes(optionIncludes),
+  );
+  if (!option) throw new Error(`没有找到选项：${optionIncludes}`);
+  await click(option as unknown as HTMLButtonElement);
+}
+
 async function click(el: HTMLButtonElement) {
   await act(async () => el.click());
   await settle();
@@ -308,5 +320,148 @@ describe('ModelBilling 模型计费', () => {
     expect(document.body.textContent).toContain('billing 管理端不可用');
     expect(document.body.textContent).not.toContain('还没有任何计价规则');
     expect(button('重试')).toBeTruthy();
+  });
+});
+
+/* ── 视频按 token 计价：单价待配的空位、单价表、token 估算参数 ────────────────
+ * 用户要的是「一个改单价的地方」：2.5 的单价火山没给，所以它在目录里是**空位**，
+ * 运营在管理端填上就好 —— 界面必须让人看得出「这里是待配、提交会被拒绝」，而不是「免费」。 */
+describe('ModelBilling 视频 token 计价的规则', () => {
+  const TOKEN_DOCUMENT = JSON.stringify({
+    schemaVersion: 1,
+    currency: 'CNY',
+    creditsPerYuan: 15,
+    models: {
+      'doubao-seedance-2-0-fast-260128': {
+        video: {
+          baseUnit: 'usage.c',
+          basePrice: { kind: 'table', by: ['video'], table: { 'video=0': 555000, 'video=1': 330000 } },
+          unitDenominator: 1000000,
+          minCredits: 1,
+          maxCredits: null,
+          rounding: 'halfUp',
+          tokenEstimate: {
+            divisor: 1024,
+            fps: 24,
+            inputSecondsKey: 'video_input_seconds',
+            dimensions: { 'resolution=720p|aspect_ratio=16:9': '1248x704' },
+          },
+        },
+      },
+      'doubao-seedance-2-5-260628': {
+        video: {
+          baseUnit: 'usage.c',
+          basePrice: { kind: 'unset', by: ['video'] },
+          unitDenominator: 1000000,
+          minCredits: 1,
+          maxCredits: null,
+          rounding: 'halfUp',
+          tokenEstimate: {
+            divisor: 1024,
+            fps: 24,
+            inputSecondsKey: 'video_input_seconds',
+            dimensions: { 'resolution=720p|aspect_ratio=16:9': '1248x704' },
+          },
+        },
+      },
+    },
+    discountPolicy: { stackMode: 'multiply', floorFactorBp: 3000 },
+  });
+
+  beforeEach(() => {
+    api.fetchBillingCatalog.mockResolvedValue({
+      catalogVersion: 5,
+      documentHash: 'ffffffff',
+      ruleCount: 2,
+      creditsPerYuan: 15,
+      document: TOKEN_DOCUMENT,
+    });
+  });
+
+  async function openEditorFor(modelId: string) {
+    const row = [...document.body.querySelectorAll('tr')].find((tr) =>
+      tr.textContent?.includes(modelId),
+    );
+    const edit = row?.querySelector<HTMLButtonElement>('button[aria-label="编辑"]');
+    if (!edit) throw new Error(`没有找到 ${modelId} 的编辑按钮`);
+    await click(edit);
+  }
+
+  it('★ 单价待配显示为「提交会被拒绝」，不是 0 也不是空白', async () => {
+    await renderPage();
+
+    expect(document.body.textContent).toContain('单价未配（提交会被拒绝）');
+  });
+
+  it('★ 价格表的 video 档补中文解释（存储仍只认 video=0 / video=1）', async () => {
+    await renderPage();
+
+    expect(document.body.textContent).toContain('video=0（不含视频输入 video0）');
+    expect(document.body.textContent).toContain('video=1（含视频输入 video1）');
+  });
+
+  it('★ 编辑待配的规则：弹窗讲清「不是免费」，且能就地改成按规格查表', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedance-2-5-260628');
+
+    expect(document.body.textContent).toContain('单价还没填 —— 这个模型的提交会被拒绝');
+    expect(document.body.textContent).toContain('不会按 0 免费生成');
+
+    // 切成「按规格查表」，把 video 两档的单价填上
+    await choose('计价方式', '按规格查表');
+    await type(inputByLabel('价格表键'), 'video=0');
+    await type(inputByLabel('价格表值'), '1234000');
+    await click(button('确定'));
+
+    // 表格里不再是「待配」，且带上人类可读的换算（1234000 mc = 1234 积分 ≈ ¥82.27）
+    expect(document.body.textContent).not.toContain('单价未配（提交会被拒绝）');
+    expect(document.body.textContent).toContain('1234 积分 ≈ ¥82.27');
+    expect(document.body.textContent).toContain('有未发布的改动');
+  });
+
+  it('★ token 估算参数在编辑弹窗里可改（除数 / 帧率 / 尺寸表 / 输入时长键）', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedance-2-0-fast-260128');
+
+    // 已有 tokenEstimate → 勾选态，四个字段都带出当前值
+    expect(inputByLabel('token 除数').value).toBe('1024');
+    expect(inputByLabel('token 帧率').value).toBe('24');
+    expect(inputByLabel('输入时长的规格键').value).toBe('video_input_seconds');
+    expect(inputByLabel('token 尺寸表键').value).toBe('resolution=720p|aspect_ratio=16:9');
+    expect(inputByLabel('token 尺寸表值').value).toBe('1248x704');
+
+    // ★ 尺寸表能在管理端改 —— 官方表没给的档位+比例组合由运营补（这里补 1080p 1:1）
+    // ⚠️ 按 aria-label 取那一组的「添加一行」：一页上有四组键值表，文字都是「添加一行」
+    await click(
+      document.body.querySelector<HTMLButtonElement>(
+        'button[aria-label="给token 尺寸表添加一行"]',
+      )!,
+    );
+    const keyInputs = document.body.querySelectorAll<HTMLInputElement>(
+      'input[aria-label="token 尺寸表键"]',
+    );
+    const valueInputs = document.body.querySelectorAll<HTMLInputElement>(
+      'input[aria-label="token 尺寸表值"]',
+    );
+    expect(keyInputs.length).toBe(2);
+    await type(keyInputs[1]!, 'resolution=1080p|aspect_ratio=1:1');
+    await type(valueInputs[1]!, '1080x1080');
+    await click(button('确定'));
+
+    await click(button('保存并发布'));
+    await click(button('确认发布'));
+    const payload = api.publishBillingCatalog.mock.calls[0]?.[0] as { document: string };
+    const published = JSON.parse(payload.document) as {
+      models: Record<
+        string,
+        Record<string, { tokenEstimate: { dimensions: Record<string, string> } }>
+      >;
+    };
+    expect(
+      published.models['doubao-seedance-2-0-fast-260128']?.video?.tokenEstimate.dimensions,
+    ).toEqual({
+      'resolution=720p|aspect_ratio=16:9': '1248x704',
+      'resolution=1080p|aspect_ratio=1:1': '1080x1080',
+    });
   });
 });

@@ -234,35 +234,35 @@ class JobSettlementPublisherTest {
     }
 
     @Test
-    @DisplayName("★ has_video_input 按 references 里的 video 条目折算 —— 决定视频 token 的单价档")
+    @DisplayName("★ 视频输入档（video=0 / video=1）按 references 里的 video 条目折算 —— 决定视频 token 的单价档")
     void 含视频输入折算() throws Exception {
-        // 含视频参考 → true（走火山「含视频输入」那一档更便宜的单价）
+        // 含视频参考 → video=1（走火山「含视频输入」那一档更便宜的单价）
         publisher.publishTerminal(
                 job(113, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
                                 + "{\"role\":\"reference\",\"type\":\"image\",\"asset_id\":\"1\"},"
                                 + "{\"role\":\"reference\",\"type\":\"video\",\"asset_id\":\"2\"}]}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
-        assertThat(body(0).get("usage").get(0).get("specs").get("has_video_input").asText())
-                .isEqualTo("true");
+        assertThat(body(0).get("usage").get(0).get("specs").get("video").asText())
+                .isEqualTo("1");
 
-        // 只有图片参考 → false
+        // 只有图片参考 → video=0
         publisher.publishTerminal(
                 job(114, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
                                 + "{\"role\":\"reference\",\"type\":\"image\",\"asset_id\":\"1\"}]}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
-        assertThat(body(1).get("usage").get(0).get("specs").get("has_video_input").asText())
-                .isEqualTo("false");
+        assertThat(body(1).get("usage").get(0).get("specs").get("video").asText())
+                .isEqualTo("0");
 
-        // 没有 references 键（旧分字段路径）→ false。与 reference_count 同一条边界：
+        // 没有 references 键（旧分字段路径）→ video=0。与 reference_count 同一条边界：
         // 旧路径的参考素材不进这套口径，两侧都不进 ⇒ 预扣与结算取到同一个值
         publisher.publishTerminal(
                 job(115, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"reference_asset_ids\":[\"21\"]}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
-        assertThat(body(2).get("usage").get(0).get("specs").get("has_video_input").asText())
-                .isEqualTo("false");
+        assertThat(body(2).get("usage").get(0).get("specs").get("video").asText())
+                .isEqualTo("0");
     }
 
     @Test

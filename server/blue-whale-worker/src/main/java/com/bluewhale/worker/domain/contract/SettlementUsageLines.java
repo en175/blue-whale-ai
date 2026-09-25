@@ -171,13 +171,13 @@ public final class SettlementUsageLines {
     /**
      * 是否含视频输入 = {@code references} 里有没有 {@code type == "video"} 的条目。
      *
-     * <p>取值口径与预扣侧同源（{@code billing-specs.ts} 的 {@code has_video_input}）：
+     * <p>取值口径与预扣侧同源（{@code billing-specs.ts} 的 {@code video} 档）：
      * 同一个键、同一次判断、同一份 job input 快照。只认 {@link #REFERENCES_KEY} 这一个数组
      * ——旧分字段路径（{@code reference_asset_ids} / {@code reference_materials}）在这条口径下
      * 一律算「不含视频输入」，与 {@link #referenceCount} 的注释说明的边界完全相同。
      *
-     * <p>它决定视频 token 的单价档（火山官方分「无视频输入 / 含视频输入」两档，后者更便宜），
-     * 两边分叉就是「预扣按一档冻、结算按另一档收」。
+     * <p>它决定视频 token 的单价档（火山官方分「输入不含视频 / 输入包含视频」两档，
+     * 后者更便宜），两边分叉就是「预扣按一档冻、结算按另一档收」。
      */
     private static boolean hasVideoInput(Map<String, Object> input) {
         if (!(input.get(REFERENCES_KEY) instanceof List<?> references)) {
@@ -230,16 +230,74 @@ public final class SettlementUsageLines {
             specs.put(key.toLowerCase(), value.toLowerCase());
         }
         // ⚠️ 与 billing-specs.ts 的 extractSpecs 同一处折算：`references` 是数组，进不了规格，
-        // 而「有没有视频参考」决定视频 token 的**单价档**（火山官方分「无视频输入 / 含视频输入」）。
-        // 键名与那边逐字一致（has_video_input），口径也逐条相同——只认 references 里
+        // 而「有没有视频参考」决定视频 token 的**单价档**（火山官方分「输入不含视频 / 输入包含视频」）。
+        // 键名与取值都与那边逐字一致（video=0 / video=1），口径也逐条相同——只认 references 里
         // type == "video" 的条目，旧分字段路径（reference_asset_ids / reference_materials）不计入。
         // 两边分叉的后果是「预扣按含视频输入计价、结算按不含视频输入收」这种对不上的账。
-        specs.put(HAS_VIDEO_INPUT, hasVideoInput(input) ? "true" : "false");
+        specs.put(VIDEO_TIER, hasVideoInput(input) ? VIDEO_TIER_WITH : VIDEO_TIER_WITHOUT);
+        // ⚠️ 输入视频时长（秒）：官方公式在含视频输入时要把输入时长加进 token 估算
+        //    （(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），而时长是 references **元素上**的
+        //    标量、数组本身进不了规格，所以在这里折算成标量键——与 reference_count /
+        //    video 档同源同处，预扣侧（billing-specs.ts）取到同一个数。
+        //    ⚠️ **量不到就整个键不写**（而不是写 0）：键缺失 + video=1 时，
+        //    估算器（TokenEstimator）判为「含视频输入却量不到输入时长」→ 取不到 → 拒绝，
+        //    而不是按 0 估。按 0 估就是明知故犯地少冻，差额由平台垫且账面无信号。
+        Long inputSeconds = videoInputSeconds(input);
+        if (inputSeconds != null) {
+            specs.put(VIDEO_INPUT_SECONDS, String.valueOf(inputSeconds));
+        }
         return specs;
     }
 
-    /** 规格键：是否含视频输入（与 {@code billing-specs.ts} 的 {@code extractSpecs} 逐字一致）。 */
-    private static final String HAS_VIDEO_INPUT = "has_video_input";
+    /**
+     * 规格键：视频输入档（轴名沿用火山的 {@code video}）——与 {@code billing-specs.ts} 的
+     * {@code VIDEO_TIER_KEY}、billing 的 {@code TokenEstimator.VIDEO_TIER_KEY} 逐字一致。
+     *
+     * <p>火山把「输入不含视频 / 输入包含视频」这两档写作 {@code video0} / {@code video1}；
+     * 本仓的规格键语法是「轴=值」，所以取值就是那两个数字。
+     */
+    private static final String VIDEO_TIER = "video";
+
+    private static final String VIDEO_TIER_WITHOUT = "0";
+
+    private static final String VIDEO_TIER_WITH = "1";
+
+    /** 规格键：输入视频总时长（秒，整数）——与 {@code billing-specs.ts} 逐字一致。 */
+    private static final String VIDEO_INPUT_SECONDS = "video_input_seconds";
+
+    /**
+     * 输入视频总时长（秒，各视频参考的 {@code duration} 之和）——**量不到返回 {@code null}**。
+     *
+     * <p>口径与预扣侧（{@code billing-specs.ts}）逐条相同：只认 {@code references} 里
+     * {@code type == "video"} 的条目，只累加它们各自带的 {@code duration}。
+     *
+     * <p>「有没有视频参考」与「量不量得到时长」是两件事：只要有一条视频参考没带时长，
+     * 这次就是量不到（返回 {@code null}），**不把其余几条加起来凑一个偏小的数** ——
+     * 凑出来的数会让估算偏低而看不出来。缺的那一截由结算真值兜住，预扣这一趟按
+     * 「取不到」处理（走上限冻结或拒绝提交），这与 {@code Usage.contractFrom} 的立场一致。
+     *
+     * @return 总秒数（可为 0：有视频参考但时长都是 0 秒）；没有视频参考或任一条缺时长 → {@code null}
+     */
+    private static Long videoInputSeconds(Map<String, Object> input) {
+        if (!(input.get(REFERENCES_KEY) instanceof List<?> references)) {
+            return null;
+        }
+        long total = 0L;
+        boolean any = false;
+        for (Object ref : references) {
+            if (!(ref instanceof Map<?, ?> entry) || !"video".equals(entry.get("type"))) {
+                continue;
+            }
+            any = true;
+            Object raw = entry.get("duration");
+            if (!(raw instanceof Number n) || n.doubleValue() <= 0) {
+                // 含视频输入却拿不到这条的时长 —— 整趟量不到（见方法注释）
+                return null;
+            }
+            total += n.longValue();
+        }
+        return any ? total : null;
+    }
 
     /**
      * 标量 → 字符串；非标量 → null（＝不进规格）。

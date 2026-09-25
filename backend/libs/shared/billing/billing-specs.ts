@@ -44,6 +44,38 @@
 const NON_SPEC_FIELDS = new Set(["prompt", "title", "provider_credential"]);
 
 /**
+ * 规格键：视频输入档（轴名沿用火山的 `video`）。
+ *
+ * <p>⚠️ 键名与取值是**跨进程的规格契约**：预扣侧（本文件）、结算侧
+ * （worker 的 {@code SettlementUsageLines}）与定价引擎（billing 的 {@code TokenEstimator}）
+ * 三处必须逐字一致。任何一处改名，价格表就查不到 → 任务提交被拒（UNPRICEABLE），
+ * 所以它落成常量而不是散在三处的字符串字面量。
+ */
+export const VIDEO_TIER_KEY = 'video';
+
+/**
+ * 视频输入档的两个取值 —— 火山把「输入不含视频 / 输入包含视频」这两档写作
+ * **`video0` / `video1`**（同一模型的同一任务类型下的两个计费档）。
+ *
+ * <p>本仓的规格键语法是「轴=值」（{@code PricingKeys.normalizeKey} 要求键里有 `=`），
+ * 所以它在规格与价格表里落成 `video=0` / `video=1`：**轴名沿用火山的 `video`、
+ * 取值沿用火山的 `0` / `1`**，不另起名字。管理端展示时补中文解释
+ * （「不含视频输入（video0）」/「含视频输入（video1）」），但存储与键名只用这一对。
+ */
+export const VIDEO_TIER_VALUES = { without: '0', with: '1' } as const;
+
+/** 本次参考素材里有没有视频——只看 `references` 这一个数组，口径与 reference_count 相同。 */
+function hasVideoInput(input: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(input.references) &&
+    input.references.some(
+      (ref) =>
+        typeof ref === 'object' && ref !== null && (ref as { type?: unknown }).type === 'video',
+    )
+  );
+}
+
+/**
  * 规格提取。
  *
  * ⚠️ 只取**标量**字段、排除 {@link NON_SPEC_FIELDS}、统一小写键名 —— 定价目录里的规格表
@@ -70,20 +102,46 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
   //    预览价就比实冻价少了加价那部分（也就是「预览一个价、实扣另一个价」）。
   //    只取长度：**数组本身不进规格**（有测试钉住这条，混进去会让 catalog 查不到规格）。
   specs.reference_count = String(Array.isArray(input.references) ? input.references.length : 0);
-  // ⚠️ 是否含视频输入：视频按 token 计价的**单价**分两档（火山官方：无视频输入 / 含视频输入），
+  // ⚠️ 视频输入档：视频按 token 计价的**单价**分两档（火山官方：输入不含视频 / 输入包含视频），
   //    而「有没有视频参考」是 `references` 数组里的**元素类型**，同样进不了规格。
   //    与 reference_count 同一处、同一套理由折算成标量键，两个调用点取到同一个值。
   //    口径与 reference_count **逐条相同**：只认 `input.references` 里 type === 'video' 的条目，
   //    旧分字段路径（`reference_asset_ids` / `reference_materials`）不计入——两边口径必须一致，
   //    否则会出现「预扣按含视频输入计价、结算按不含视频输入收」这种对不上的账。
-  specs.has_video_input = String(
-    Array.isArray(input.references) &&
-      input.references.some(
-        (ref) =>
-          typeof ref === 'object' &&
-          ref !== null &&
-          (ref as { type?: unknown }).type === 'video',
-      ),
-  );
+  specs[VIDEO_TIER_KEY] = hasVideoInput(input) ? VIDEO_TIER_VALUES.with : VIDEO_TIER_VALUES.without;
+  // ⚠️ 输入视频时长（秒）：官方公式在含视频输入时要把输入时长加进 token 估算
+  //    （(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），而时长是 references **元素上**的标量、
+  //    数组本身进不了规格，所以与上面两个键同一处折算成标量键。
+  //    时长由接纳侧在建任务时冻结进 references（本地素材取 assets.duration，画布提交时前端也会带），
+  //    worker 侧的 SettlementUsageLines 按同一口径折算——预扣与结算取到同一个数。
+  //    ⚠️ **量不到就整个键不写**（而不是写 0）：键缺失 + `video=1` 时，
+  //    billing 的 TokenEstimator 判为「含视频输入却量不到输入时长」→ 取不到 → 拒绝提交，
+  //    而不是按 0 估。按 0 估就是明知故犯地少冻（差额平台垫付、账面无信号）。
+  const videoInputSeconds = sumVideoInputSeconds(input.references);
+  if (videoInputSeconds !== null) specs.video_input_seconds = String(videoInputSeconds);
   return specs;
+}
+
+/**
+ * 输入视频总时长（秒，各视频参考 duration 之和）——**量不到返回 null**。
+ *
+ * 口径与 worker 侧 `SettlementUsageLines.videoInputSeconds` 逐条相同：只认 type === 'video'
+ * 的条目、只累加它们各自带的 duration。只要有一条视频参考没带时长，这次就是量不到
+ * （返回 null），**不把其余几条加起来凑一个偏小的数**——凑出来的数会让预扣偏低而看不出来。
+ * 没有视频参考也返回 null（这一档本来就不加输入时长）。
+ */
+export function sumVideoInputSeconds(references: unknown): number | null {
+  if (!Array.isArray(references)) return null;
+  let total = 0;
+  let any = false;
+  for (const ref of references) {
+    if (typeof ref !== 'object' || ref === null) continue;
+    const entry = ref as { type?: unknown; duration?: unknown };
+    if (entry.type !== 'video') continue;
+    any = true;
+    const seconds = entry.duration;
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null;
+    total += Math.floor(seconds);
+  }
+  return any ? total : null;
 }
