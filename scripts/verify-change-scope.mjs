@@ -72,6 +72,19 @@ function documentationOnlyFiles(files, base, head) {
   });
 }
 
+function pythonForVerification() {
+  const candidates = process.platform === "win32"
+    ? [["py", "-3.12"], ["py", "-3.11"], ["python3"], ["python"]]
+    : [["python3.12"], ["python3.11"], ["python3"], ["python"]];
+  for (const command of candidates) {
+    const result = spawnSync(command[0], [
+      ...command.slice(1), "-c", "import sys, tomllib; print(sys.version.split()[0])",
+    ], { encoding: "utf8" });
+    if (result.status === 0) return { command, version: result.stdout.trim() };
+  }
+  throw new Error("脚本验证需要 Python 3.11+；请安装后重试。");
+}
+
 function currentScope({ baseRef, risk, stage }) {
   const head = git("rev-parse", "HEAD");
   const metadata = taskBaseline();
@@ -97,8 +110,15 @@ function currentScope({ baseRef, risk, stage }) {
     stage,
     documentationOnlyFiles: documentationOnlyFiles(changedFiles, base, head),
   });
-  const commands = buildVerificationPlan(classification, { base });
-  const environment = verificationEnvironment();
+  const plannedCommands = buildVerificationPlan(classification, { base });
+  const python = plannedCommands.some((command) => command[0] === "python3")
+    ? pythonForVerification()
+    : null;
+  const commands = buildVerificationPlan(classification, {
+    base,
+    pythonCommand: python?.command,
+  });
+  const environment = verificationEnvironment(python);
   const inputHash = createHash("sha256")
     .update(JSON.stringify(environment))
     .digest("hex");
@@ -112,16 +132,18 @@ function currentScope({ baseRef, risk, stage }) {
     changedFilesHash,
     classification,
     commands,
+    pythonCommand: python?.command,
     environment,
     inputHash,
   };
 }
 
-function verificationEnvironment() {
+function verificationEnvironment(python) {
   return {
     node: process.version,
     platform: process.platform,
     arch: arch(),
+    ...(python ? { python: python.version } : {}),
   };
 }
 

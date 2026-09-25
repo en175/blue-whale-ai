@@ -274,14 +274,16 @@ function appendAreaCommands(commands, areas, base) {
   }
 }
 
-export function buildVerificationPlan(classification, { base }) {
+export function buildVerificationPlan(classification, { base, pythonCommand = ["python3"] }) {
   const commands = [["git", "diff", "--check", `${base}...HEAD`]];
   const areas = classification.tier === "docs" ? ["docs"] : classification.areas ?? [];
   appendAreaCommands(commands, areas, base);
   if (classification.tier === "full") {
     commands.push(["pnpm", "verify"]);
   }
-  return commands;
+  return commands.map((command) => command[0] === "python3"
+    ? [...pythonCommand, ...command.slice(1)]
+    : command);
 }
 
 function classificationCovers(receipt, current) {
@@ -332,7 +334,10 @@ export function validateReceipt(receipt, current) {
     return { valid: false, reason: "verification tier does not cover current risk" };
   }
   if (current.commands) {
-    const expectedPlan = buildVerificationPlan(receipt.classification, { base: current.base });
+    const expectedPlan = buildVerificationPlan(receipt.classification, {
+      base: current.base,
+      pythonCommand: current.pythonCommand,
+    });
     if (!commandsMatch(receipt.commands, expectedPlan)) {
       return { valid: false, reason: "verification plan does not match its classification" };
     }

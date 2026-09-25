@@ -963,6 +963,35 @@ test("rejects a receipt whose plan or passing results are inconsistent", async (
   );
 });
 
+test("checks the selected Python interpreter against the verification receipt", async () => {
+  const { buildVerificationPlan, validateReceipt } = await import(
+    "../scripts/verification-policy.mjs"
+  );
+  const classification = { tier: "scoped", areas: ["control-plane"] };
+  const pythonCommand = ["python3.12"];
+  const commands = buildVerificationPlan(classification, {
+    base: "def456", pythonCommand,
+  });
+  const binding = {
+    head: "abc123", base: "def456", changedFilesHash: "scope-hash",
+  };
+  const current = { ...binding, classification, commands, pythonCommand };
+  const receipt = {
+    version: 1, status: "passed", ...binding, classification, commands,
+    results: commands.map((command) => ({
+      command, exitCode: 0, attempts: [{ exitCode: 0 }],
+    })),
+  };
+
+  assert.deepEqual(validateReceipt(receipt, current), { valid: true });
+  assert.deepEqual(
+    validateReceipt({ ...receipt, commands: buildVerificationPlan(classification, {
+      base: "def456",
+    }) }, current),
+    { valid: false, reason: "verification plan does not match its classification" },
+  );
+});
+
 test("rejects a receipt when verification input conditions change", async () => {
   const { validateReceipt } = await import("../scripts/verification-policy.mjs");
   const binding = {

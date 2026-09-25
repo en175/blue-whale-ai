@@ -63,6 +63,14 @@ class ReleaseLineFixture:
             run("git", "checkout", "master", cwd=self.repo)
         run("git", "push", "origin", name, cwd=self.repo)
 
+    def activate_earlier_release(self):
+        branch = f"release/{dt.date.today() - dt.timedelta(days=14):%Y.%m.%d}_旧版发布验证"
+        self.release(branch)
+        activated = self.command("activate", "--branch", branch, "--user-authorized")
+        if activated.returncode:
+            raise AssertionError(activated.stderr)
+        return branch
+
     def snapshot(self, pulls=None):
         path = self.root / "pulls.json"
         path.write_text(json.dumps({
@@ -102,6 +110,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         task_start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
         run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
             "--target-branch", old, "--start-sha", task_start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending old task", cwd=task)
         self.release(new)
         blocked = self.command("current", "--json")
         self.assertNotEqual(0, blocked.returncode)
@@ -136,7 +145,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertIn(task_branch, unresolved_task.stderr)
         self.assertIn("开放 PR：无", unresolved_task.stderr)
         run("git", "worktree", "remove", task, cwd=self.repo)
-        run("git", "branch", "-d", task_branch, cwd=self.repo)
+        run("git", "branch", "-D", task_branch, cwd=self.repo)
         changed = self.command("activate", "--branch", new, "--user-authorized",
                                "--pr-snapshot", snapshot, "--json")
         self.assertEqual(0, changed.returncode, changed.stderr)
@@ -186,6 +195,155 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertNotEqual(0, refused.returncode)
         self.assertIn("候选不唯一", refused.stderr)
 
+    def test_older_branch_is_history_and_newer_branch_still_needs_activation(self):
+        active = "release/2026.09.29_当前发布验证"
+        older = "release/2026.09.15_历史发布验证"
+        newer = "release/2026.10.13_下期发布验证"
+        self.release(active)
+        adopted = self.command("activate", "--branch", active, "--user-authorized", "--json")
+        self.assertEqual(0, adopted.returncode, adopted.stderr)
+        self.release(older)
+
+        current = self.command("current", "--json")
+        self.assertEqual(0, current.returncode, current.stderr)
+        self.assertEqual([], json.loads(current.stdout)["candidates"])
+        self.assertIn(older, json.loads(current.stdout)["legacy"])
+
+        self.release(newer)
+        blocked = self.command("current", "--json")
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn(newer, blocked.stderr)
+        activated = self.command("activate", "--branch", newer, "--user-authorized",
+                                 "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        self.assertEqual({older, active}, set(json.loads(activated.stdout)["legacy"]))
+
+    def test_uncomparable_branch_requires_owner_classification(self):
+        active = "release/2026.09.29_当前发布验证"
+        same_day = "release/2026.09.29_另一个发布验证"
+        undated = "release/prod"
+        self.release(active)
+        self.assertEqual(0, self.command("activate", "--branch", active,
+                                         "--user-authorized").returncode)
+        self.release(same_day)
+        self.release(undated)
+
+        blocked = self.command("current", "--json")
+        self.assertNotEqual(0, blocked.returncode)
+        listing = self.command("list", "--json")
+        self.assertEqual(0, listing.returncode, listing.stderr)
+        self.assertEqual({same_day, undated},
+                         set(json.loads(listing.stdout)["unclassified"]))
+
+        classified = self.command("activate", "--branch", active, "--adopt-legacy",
+                                  "--user-authorized", "--json")
+        self.assertEqual(0, classified.returncode, classified.stderr)
+        self.assertEqual({same_day, undated}, set(json.loads(classified.stdout)["legacy"]))
+        self.assertEqual(0, self.command("current", "--json").returncode)
+
+    def test_owner_can_activate_same_day_branch_after_closeout(self):
+        active = "release/2026.09.29_当前发布验证"
+        replacement = "release/2026.09.29_同日接任验证"
+        self.release(active)
+        self.assertEqual(0, self.command("activate", "--branch", active,
+                                         "--user-authorized").returncode)
+        self.release(replacement)
+
+        rejected = self.command("activate", "--branch", replacement,
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("无法按日期归类", rejected.stderr)
+        switched = self.command("activate", "--branch", replacement, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, switched.returncode, switched.stderr)
+        self.assertEqual(active, json.loads(switched.stdout)["legacy"][0])
+        self.assertEqual(replacement, json.loads(self.command("current", "--json").stdout)["branch"])
+
+    def test_first_activation_rejects_older_target_without_bootstrap(self):
+        older = "release/2026.09.15_历史发布验证"
+        newer = "release/2026.09.29_当前发布验证"
+        self.release(older)
+        self.release(newer)
+
+        rejected = self.command("activate", "--branch", older, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("日期最新", rejected.stderr)
+
+    def test_first_activation_requires_names_for_ambiguous_history(self):
+        active = "release/2026.09.29_当前发布验证"
+        same_day = "release/2026.09.29_同日发布验证"
+        undated = "release/prod"
+        for branch in (active, same_day, undated):
+            self.release(branch)
+        listed = self.command("list", "--json")
+        self.assertEqual(0, listed.returncode, listed.stderr)
+        self.assertEqual({active, same_day, undated},
+                         set(json.loads(listed.stdout)["unclassified"]))
+
+        rejected = self.command("activate", "--branch", active, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(same_day, rejected.stderr)
+        self.assertIn(undated, rejected.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
+        adopted = self.command("activate", "--branch", active, "--adopt-legacy",
+                               "--classify-legacy", same_day, "--classify-legacy", undated,
+                               "--user-authorized", "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, adopted.returncode, adopted.stderr)
+        self.assertEqual({same_day, undated}, set(json.loads(adopted.stdout)["legacy"]))
+
+    def test_clean_merged_task_worktree_does_not_block_switch(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.assertEqual(0, self.command("activate", "--branch", old,
+                                         "--user-authorized").returncode)
+        task = self.root / "merged-task-worktree"
+        branch = "chore/IKITEST-已合入工作树"
+        run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: delivered task", cwd=task)
+        run("git", "switch", old, cwd=self.repo)
+        run("git", "merge", "--no-ff", "--no-edit", branch, cwd=self.repo)
+        run("git", "push", "origin", old, cwd=self.repo)
+        run("git", "switch", "master", cwd=self.repo)
+        run("git", "merge", "--no-ff", "--no-edit", old, cwd=self.repo)
+        run("git", "push", "origin", "master", cwd=self.repo)
+        self.release(new)
+
+        switched = self.command("activate", "--branch", new, "--user-authorized",
+                                "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, switched.returncode, switched.stderr)
+        self.assertTrue(task.exists())
+
+    def test_historical_task_worktree_does_not_block_next_switch(self):
+        historical = "release/2026.09.15_历史发布验证"
+        active = "release/2026.09.29_当前发布验证"
+        newer = "release/2026.10.13_下期发布验证"
+        self.release(historical)
+        self.release(active)
+        adopted = self.command("activate", "--branch", active, "--adopt-legacy",
+                               "--user-authorized", "--pr-snapshot", self.snapshot())
+        self.assertEqual(0, adopted.returncode, adopted.stderr)
+        task = self.root / "historical-task"
+        branch = "chore/IKITEST-历史任务"
+        run("git", "worktree", "add", "-b", branch, task, historical, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", historical, "--start-sha", start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: historical follow-up", cwd=task)
+        self.release(newer)
+
+        switched = self.command("activate", "--branch", newer, "--user-authorized",
+                                "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, switched.returncode, switched.stderr)
+        self.assertTrue(task.exists())
+
     def test_initial_adoption_rejects_legacy_task_worktree(self):
         old = "release/2026.09.24_旧版发布验证"
         new = "release/2026.09.29_新版发布验证"
@@ -197,6 +355,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
         run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
             "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending legacy task", cwd=task)
 
         rejected = self.command("activate", "--branch", new, "--adopt-legacy",
                                 "--user-authorized", "--pr-snapshot", self.snapshot())
@@ -225,6 +384,161 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertFalse(run("git", "ls-remote", "--heads", "origin",
                              "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
 
+    def test_bootstrap_existing_preserves_legacy_tasks_branches_and_prs(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        task = self.root / "legacy-task"
+        task_branch = "chore/IKITEST-旧发布线任务"
+        run("git", "worktree", "add", "-b", task_branch, task, old, cwd=self.repo)
+        start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
+            "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending legacy task", cwd=task)
+        orphan = "chore/IKITEST-遗留未合任务"
+        run("git", "branch", orphan, old, cwd=self.repo)
+        run("git", "worktree", "add", self.root / "orphan", orphan, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending legacy work",
+            cwd=self.root / "orphan")
+        run("git", "worktree", "remove", self.root / "orphan", cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+        snapshot = self.snapshot([{"number": 58, "target_branch": old, "state": "opened"}])
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", snapshot, "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        data = json.loads(activated.stdout)
+        self.assertEqual(new, data["branch"])
+        self.assertEqual([old], data["legacy"])
+        self.assertEqual(task_branch, data["legacy_inventory"]["task_worktrees"][0]["branch"])
+        self.assertIn(orphan, data["legacy_inventory"]["unmerged_task_branches"])
+        self.assertEqual(58, data["legacy_inventory"]["open_prs"][0]["number"])
+        self.assertTrue(task.exists())
+        self.assertTrue(run("git", "show-ref", "--verify", f"refs/heads/{orphan}",
+                            cwd=self.repo).stdout)
+        self.assertEqual(new, json.loads(self.command("current", "--json").stdout)["branch"])
+
+    def test_bootstrap_existing_records_unshared_legacy_release_work(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: local legacy commit",
+            cwd=old_worktree)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        item = json.loads(activated.stdout)["legacy_inventory"]["release_branches"][0]
+        self.assertEqual(old, item["branch"])
+        self.assertTrue(item["remote_exists"])
+        self.assertEqual(1, item["local_commit_count"])
+        self.assertTrue(run("git", "show-ref", "--verify", f"refs/heads/{old}",
+                            cwd=self.repo).stdout)
+
+    def test_bootstrap_existing_preserves_local_only_archived_release_with_unsaved_file(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        (old_worktree / "draft.txt").write_text("keep me\n", encoding="utf-8")
+        run("git", "push", "origin", "--delete", old, cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        data = json.loads(activated.stdout)
+        self.assertIn(old, data["legacy"])
+        item = data["legacy_inventory"]["release_branches"][0]
+        self.assertFalse(item["remote_exists"])
+        self.assertIn("draft.txt", item["worktree_changes"][0]["status"])
+        self.assertEqual("keep me\n", (old_worktree / "draft.txt").read_text(encoding="utf-8"))
+        self.assertEqual(new, json.loads(self.command("current", "--json").stdout)["branch"])
+
+    def test_bootstrap_existing_does_not_count_commit_shared_by_another_release(self):
+        old = "release/2026.09.15_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        old_worktree = self.root / "old-release"
+        run("git", "worktree", "add", old_worktree, old, cwd=self.repo)
+        run("git", "commit", "--allow-empty", "-m", "chore: shared history",
+            cwd=old_worktree)
+        run("git", "push", "origin", f"{old}:{new}", cwd=self.repo)
+        run("git", "push", "origin", "--delete", old, cwd=self.repo)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            new, cwd=self.repo)
+
+        activated = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                        "--branch", new, "--adopt-legacy", "--bootstrap-existing",
+                        "--user-authorized", "--pr-snapshot", self.snapshot(), "--json",
+                        cwd=bootstrap, check=False)
+
+        self.assertEqual(0, activated.returncode, activated.stderr)
+        item = json.loads(activated.stdout)["legacy_inventory"]["release_branches"][0]
+        self.assertFalse(item["remote_exists"])
+        self.assertEqual(0, item["local_commit_count"])
+        self.assertEqual(1, int(run("git", "rev-list", "--count", "origin/master.." + old,
+                                    cwd=self.repo).stdout.strip()))
+
+    def test_bootstrap_existing_requires_latest_dated_release(self):
+        old = "release/2026.09.24_旧版发布验证"
+        new = "release/2026.09.29_新版发布验证"
+        self.release(old)
+        self.release(new)
+        bootstrap = self.root / "bootstrap"
+        run("git", "worktree", "add", "-b", "chore/IKITEST-首次接管", bootstrap,
+            old, cwd=self.repo)
+
+        rejected = run(BASH, bootstrap / "scripts/manage-release-branch.sh", "activate",
+                       "--branch", old, "--adopt-legacy", "--bootstrap-existing",
+                       "--user-authorized", "--pr-snapshot", self.snapshot(),
+                       cwd=bootstrap, check=False)
+
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("日期最新", rejected.stderr)
+
+    def test_bootstrap_existing_requires_isolated_task_worktree(self):
+        target = "release/2026.09.29_新版发布验证"
+        self.release(target)
+        args = ("activate", "--branch", target, "--bootstrap-existing",
+                "--user-authorized", "--pr-snapshot", self.snapshot())
+
+        main = self.command(*args)
+        self.assertNotEqual(0, main.returncode)
+        self.assertIn("隔离任务工作树", main.stderr)
+        release_worktree = self.root / "release"
+        run("git", "worktree", "add", release_worktree, target, cwd=self.repo)
+        direct = run(BASH, release_worktree / "scripts/manage-release-branch.sh", *args,
+                     cwd=release_worktree, check=False)
+        self.assertNotEqual(0, direct.returncode)
+        self.assertIn("隔离任务工作树", direct.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
     def test_create_rejects_unchecked_task_branch_without_worktree(self):
         first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
         self.assertEqual(0, first.returncode, first.stderr)
@@ -245,9 +559,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertIn(branch, inventory["unmerged_task_branches"])
 
     def test_create_allows_retained_task_branch_already_merged_to_release(self):
-        first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
-        self.assertEqual(0, first.returncode, first.stderr)
-        old = json.loads(first.stdout)["branch"]
+        old = self.activate_earlier_release()
         task = self.root / "merged-task"
         branch = "chore/IKITEST-已合入任务"
         run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
@@ -327,6 +639,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
         run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
             "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+        run("git", "commit", "--allow-empty", "-m", "chore: pending old task", cwd=task)
         snapshot = self.snapshot([{"number": 91, "target_branch": old, "state": "opened"}])
         rejected = self.command("create", "--summary", "下期发布验证", "--user-authorized",
                                 "--pr-snapshot", snapshot)
@@ -337,9 +650,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
                                     "release/*", cwd=self.repo).stdout.splitlines()))
 
     def test_create_rejects_unattributed_legacy_task_worktree(self):
-        first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
-        self.assertEqual(0, first.returncode, first.stderr)
-        old = json.loads(first.stdout)["branch"]
+        old = self.activate_earlier_release()
         task = self.root / "task-without-metadata"
         branch = "chore/IKITEST-归属待核对"
         run("git", "worktree", "add", "-b", branch, task, old, cwd=self.repo)
@@ -361,9 +672,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertEqual(0, created.returncode, created.stderr)
 
     def test_create_waits_for_task_creation_before_switching_line(self):
-        first = self.command("create", "--summary", "旧版发布验证", "--user-authorized", "--json")
-        self.assertEqual(0, first.returncode, first.stderr)
-        old = json.loads(first.stdout)["branch"]
+        old = self.activate_earlier_release()
         snapshot = self.snapshot()
         with release_line_lock(self.repo):
             process = subprocess.Popen(
@@ -383,6 +692,7 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
                 start = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
                 run("python3", task / "scripts/lib/task_metadata.py", "repair", "--worktree", task,
                     "--target-branch", old, "--start-sha", start, "--user-authorized", cwd=task)
+                run("git", "commit", "--allow-empty", "-m", "chore: task started during switch", cwd=task)
         _, stderr = process.communicate(timeout=15)
 
         self.assertTrue(waited, "换期入口未等待正在创建任务的发布线锁")
@@ -390,18 +700,20 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertIn(branch, stderr)
         self.assertEqual(old, json.loads(self.command("list", "--json").stdout)["branch"])
 
-    def test_create_after_closeout_retains_old_branch_and_uses_suffix(self):
-        first = self.command("create", "--summary", "发布流程验证", "--user-authorized", "--json")
-        self.assertEqual(0, first.returncode, first.stderr)
-        old = json.loads(first.stdout)["branch"]
+    def test_create_after_closeout_retains_old_branch_and_rejects_same_day_duplicate(self):
+        old = self.activate_earlier_release()
         second = self.command("create", "--summary", "发布流程验证", "--user-authorized",
                               "--pr-snapshot", self.snapshot(), "--json")
         self.assertEqual(0, second.returncode, second.stderr)
         new = json.loads(second.stdout)["branch"]
-        self.assertEqual(old + "_2", new)
+        self.assertNotEqual(old, new)
         self.assertIn(old, json.loads(self.command("current", "--json").stdout)["legacy"])
         self.assertTrue(run("git", "ls-remote", "--heads", "origin", old,
                             cwd=self.repo).stdout)
+        duplicate = self.command("create", "--summary", "另一批次验证", "--user-authorized",
+                                 "--pr-snapshot", self.snapshot())
+        self.assertNotEqual(0, duplicate.returncode)
+        self.assertIn("日期须晚于当前发布线", duplicate.stderr)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 import argparse
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,16 @@ def releases():
     return sorted(filter(None, output.splitlines()))
 
 
+def release_date(branch):
+    match = re.fullmatch(r"release/(\d{4})\.(\d{1,2})\.(\d{1,2})(?:_.+)?", branch)
+    if not match:
+        return None
+    try:
+        return dt.date(*(int(part) for part in match.groups()))
+    except ValueError:
+        return None
+
+
 def recent_releases(count):
     output = git("for-each-ref", f"--count={count}", "--sort=-creatordate",
                  "--format=%(refname:lstrip=3)",
@@ -76,15 +87,40 @@ def read_state():
     return sha, state
 
 
-def candidates(state, branches):
+def classify_releases(state, branches):
     if state is None:
-        return branches
+        dated = [(branch, release_date(branch)) for branch in branches]
+        newest = max((day for _, day in dated if day is not None), default=None)
+        latest_count = sum(day == newest for _, day in dated) if newest else 0
+        unclassified = [branch for branch, day in dated
+                        if day is None or (day == newest and latest_count > 1)]
+        return branches, [], unclassified
     active = state["active"]
     if not active.startswith("release/") or active not in branches:
         raise ReleaseError(f"已启用的 {active} 在远端不存在，状态不一致。")
     if any(not x.startswith("release/") for x in state["legacy"]):
         raise ReleaseError("共享状态包含非法历史分支。")
-    return [x for x in branches if x != active and x not in state["legacy"]]
+    active_date = release_date(active)
+    if active_date is None:
+        raise ReleaseError(f"已启用的 {active} 无法按日期识别，请负责人核对共享状态。")
+    pending, historical, unclassified = [], list(state["legacy"]), []
+    for branch in branches:
+        if branch == active or branch in historical:
+            continue
+        day = release_date(branch)
+        if day is None or day == active_date:
+            unclassified.append(branch)
+        elif day < active_date:
+            historical.append(branch)
+        else:
+            pending.append(branch)
+    return pending, historical, unclassified
+
+
+def require_classified(unclassified):
+    if unclassified:
+        raise ReleaseError("新出现的发布线无法按日期归类，请负责人确认或撤回："
+                           + ", ".join(unclassified))
 
 
 def worktrees():
@@ -133,21 +169,23 @@ def current(args):
     sha, state = read_state()
     if state is None:
         raise ReleaseError("团队尚未启用当前发布线；请由负责人清点并执行 activate。")
-    pending = candidates(state, branches)
+    pending, historical, unclassified = classify_releases(state, branches)
+    require_classified(unclassified)
     if pending:
         raise ReleaseError("发现未经授权的候选，停止自动选择：" + ", ".join(pending))
     emit({"branch": state["active"], "state_sha": sha, "candidates": pending,
-          "legacy": state["legacy"]}, args.json, f"当前发布线：{state['active']}（状态 {sha}）")
+          "legacy": historical}, args.json, f"当前发布线：{state['active']}（状态 {sha}）")
 
 
 def listing(args):
     refresh()
     branches = releases()
     sha, state = read_state()
-    pending = candidates(state, branches)
+    pending, historical, unclassified = classify_releases(state, branches)
     inventory_rows = worktrees()
     data = {"branch": state["active"] if state else None, "state_sha": sha,
-            "candidates": pending, "legacy": state["legacy"] if state else [],
+            "candidates": pending, "legacy": historical,
+            "unclassified": unclassified,
             "recent": recent_releases(args.count),
             "task_worktrees": inventory_rows,
             "unmerged_task_branches": unmerged_task_branches(inventory_rows)}
@@ -163,7 +201,8 @@ def listing(args):
     for branch in data["recent"]:
         print(f"  {branch}")
     print("待授权候选：" + (", ".join(pending) or "无"))
-    print("历史分支：" + (", ".join(data["legacy"]) or "无"))
+    print("历史分支：" + (", ".join(historical) or "无"))
+    print("待归类分支：" + (", ".join(unclassified) or "无"))
     print("任务 worktree：")
     for item in data["task_worktrees"]:
         target = item.get("target_branch", item.get("metadata_error", "非任务分支"))
@@ -223,30 +262,57 @@ def pr_snapshot(path, targets):
             and p["state"].lower() in ("open", "opened", "progressing")]
 
 
-def assert_closed(old, snapshot, require_merged=True):
+def assert_closed(old, snapshot, require_merged=True, allow_pending=False,
+                  allow_release_changes=False):
     old_branches = [old] if isinstance(old, str) else old
     if require_merged and git("rev-parse", "--verify", "origin/master", check=False).returncode:
         raise ReleaseError("origin/master 不可用，无法核实旧批次。")
     inventory_rows = worktrees()
-    old_tasks = [item for item in inventory_rows if item.get("target_branch") in old_branches]
+    old_tasks = []
+    for item in inventory_rows:
+        target = item.get("target_branch")
+        if target not in old_branches:
+            continue
+        head = git("-C", item["path"], "rev-parse", "HEAD").stdout.strip()
+        changes = git("-C", item["path"], "status", "--porcelain",
+                      "--untracked-files=all").stdout.strip()
+        if changes or git("merge-base", "--is-ancestor", head, f"origin/{target}",
+                          check=False).returncode:
+            old_tasks.append(item)
     unassigned = [item for item in inventory_rows if "metadata_error" in item]
     unmerged_branches = unmerged_task_branches(inventory_rows)
     tasks = ", ".join(item["branch"] for item in old_tasks) or "无"
     unknown = ", ".join(item["branch"] for item in unassigned) or "无"
     local_commits = []
     dirty = []
+    release_inventory = []
     for branch in old_branches:
         local_ref = f"refs/heads/{branch}"
+        remote_ref = f"refs/remotes/origin/{branch}"
+        remote_exists = not git("show-ref", "--verify", "--quiet", remote_ref,
+                                check=False).returncode
+        entry = {"branch": branch, "remote_exists": remote_exists}
         if not git("show-ref", "--verify", "--quiet", local_ref, check=False).returncode:
-            ahead = git("log", "--format=%h %s", f"origin/{branch}..{local_ref}").stdout.strip()
+            entry["local_head"] = git("rev-parse", local_ref).stdout.strip()
+            if remote_exists:
+                ahead = git("log", "--format=%h %s", f"{remote_ref}..{local_ref}").stdout.strip()
+            else:
+                ahead = git("log", "--format=%h %s", local_ref,
+                            "--not", "--remotes=origin").stdout.strip()
+            entry["local_commit_count"] = int(git(
+                "rev-list", "--count", local_ref, "--not", "--remotes=origin"
+            ).stdout.strip())
             if ahead:
                 local_commits.append(f"{branch}: {ahead}")
+        entry["worktree_changes"] = []
         for item in inventory_rows:
             if item["branch"] == branch:
                 changes = git("-C", item["path"], "status", "--porcelain",
                               "--untracked-files=all").stdout.strip()
                 if changes:
+                    entry["worktree_changes"].append({"path": item["path"], "status": changes})
                     dirty.append(f"{branch}: {changes}")
+        release_inventory.append(entry)
     if snapshot:
         open_pulls = pr_snapshot(snapshot, old_branches)
         pulls = ", ".join(f"!{p.get('number', p.get('id', '?'))} ({p['target_branch']})"
@@ -265,8 +331,13 @@ def assert_closed(old, snapshot, require_merged=True):
                 raise ReleaseError(f"旧活动发布线 {branch} 尚未进入 origin/master，拒绝换期；{inventory}。")
     if not snapshot:
         raise ReleaseError(f"换期需 --pr-snapshot <JSON>；{inventory}。")
-    if old_tasks or unassigned or unmerged_branches or local_commits or dirty or open_pulls:
+    if ((not allow_release_changes and (local_commits or dirty)) or
+            (not allow_pending and
+             (old_tasks or unassigned or unmerged_branches or open_pulls))):
         raise ReleaseError(f"旧发布线仍有待处理事项，拒绝换期；{inventory}；请负责人决定去向。")
+    return {"release_branches": release_inventory,
+            "task_worktrees": old_tasks, "unassigned_task_worktrees": unassigned,
+            "unmerged_task_branches": unmerged_branches, "open_prs": open_pulls}
 
 
 def write_state(previous, active, legacy):
@@ -287,7 +358,20 @@ def write_state(previous, active, legacy):
 def activate(args):
     if not args.user_authorized:
         raise ReleaseError("启用发布线需负责人授权并传 --user-authorized。")
-    assert_main()
+    if args.bootstrap_existing:
+        git_dir = Path(git("rev-parse", "--absolute-git-dir").stdout.strip()).resolve()
+        common = Path(git("rev-parse", "--path-format=absolute",
+                          "--git-common-dir").stdout.strip()).resolve()
+        branch = git("symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
+        if git_dir == common or not branch.startswith(TASK_PREFIXES):
+            raise ReleaseError("首次接管仅可从隔离任务工作树执行。")
+        if git("merge-base", "--is-ancestor", f"refs/heads/{args.branch}", "HEAD",
+               check=False).returncode:
+            raise ReleaseError("首次接管工作树未基于目标本地发布线。")
+        if git("status", "--porcelain", "--untracked-files=all").stdout.strip():
+            raise ReleaseError("首次接管工作树有未提交文件，请先收口。")
+    else:
+        assert_main()
     with release_line_lock(ROOT):
         activate_locked(args)
 
@@ -299,29 +383,80 @@ def activate_locked(args):
     previous, state = read_state()
     if args.branch not in branches:
         raise ReleaseError(f"目标发布线 {args.branch} 在远端不存在。")
+    if args.bootstrap_existing and state is not None:
+        raise ReleaseError("--bootstrap-existing 仅适用于首次启用。")
+    if state is not None and args.classify_legacy:
+        raise ReleaseError("--classify-legacy 仅适用于首次启用。")
+    legacy_inventory = None
     if state is None:
-        others = [x for x in branches if x != args.branch]
+        local_releases = set(git("for-each-ref", "--format=%(refname:lstrip=2)",
+                                 "refs/heads/release/*").stdout.splitlines())
+        local_only = sorted(local_releases - set(branches))
+        if local_only and not args.bootstrap_existing:
+            dirty = []
+            for item in worktrees():
+                if item["branch"] in local_only:
+                    changes = git("-C", item["path"], "status", "--porcelain",
+                                  "--untracked-files=all").stdout.strip()
+                    if changes:
+                        dirty.append(f"{item['branch']}: {changes}")
+            raise ReleaseError("本地旧发布线无同名远端，拒绝首次启用：" + ", ".join(local_only)
+                               + "；未保存文件：" + ("; ".join(dirty) or "无")
+                               + "；请负责人决定去向。")
+        all_releases = set(branches) | local_releases
+        target_date = release_date(args.branch)
+        if target_date is None or any(
+                day is not None and day > target_date
+                for day in (release_date(name) for name in all_releases)):
+            raise ReleaseError("首次启用目标须为日期最新的 release 分支。")
+        others = sorted(x for x in all_releases if x != args.branch)
         if others and not args.adopt_legacy:
             raise ReleaseError("首次启用发现多条分支，请清点后显式传 --adopt-legacy：" + ", ".join(others))
+        unclassified = [name for name in others if release_date(name) in (None, target_date)]
+        if sorted(args.classify_legacy) != unclassified:
+            raise ReleaseError("首次启用有待归类分支：" + (", ".join(unclassified) or "无")
+                               + "；确认其为历史后逐个传 --classify-legacy <分支名>，或撤回分支。")
         if others:
-            assert_closed(others, args.pr_snapshot, require_merged=False)
+            legacy_inventory = assert_closed(others, args.pr_snapshot,
+                                             require_merged=False,
+                                             allow_pending=args.bootstrap_existing,
+                                             allow_release_changes=args.bootstrap_existing)
         legacy = others
     else:
-        pending = candidates(state, branches)
+        pending, historical, unclassified = classify_releases(state, branches)
         if args.branch == state["active"]:
+            if args.adopt_legacy and unclassified:
+                legacy = historical + unclassified
+                sha = write_state(previous, args.branch, legacy)
+                emit({"branch": args.branch, "state_sha": sha,
+                      "candidates": pending, "legacy": legacy,
+                      "unclassified": []}, args.json,
+                     "已将待归类分支登记为历史：" + ", ".join(unclassified))
+                return
+            require_classified(unclassified)
             if pending:
                 raise ReleaseError("还有待授权候选：" + ", ".join(pending))
             emit({"branch": args.branch, "state_sha": previous, "candidates": [],
-                  "legacy": state["legacy"]}, args.json, f"当前已启用：{args.branch}")
+                  "legacy": historical}, args.json, f"当前已启用：{args.branch}")
             return
-        if len(pending) != 1 or pending[0] != args.branch:
-            raise ReleaseError("候选不唯一或目标并非唯一候选：" + ", ".join(pending))
-        assert_closed(state["active"], args.pr_snapshot)
-        legacy = state["legacy"] + [state["active"]]
+        if args.branch in unclassified and args.adopt_legacy:
+            if pending:
+                raise ReleaseError("还有日期更新的待授权候选：" + ", ".join(pending))
+            assert_closed(state["active"], args.pr_snapshot)
+            legacy = historical + [state["active"]] + [
+                branch for branch in unclassified if branch != args.branch]
+        else:
+            require_classified(unclassified)
+            if len(pending) != 1 or pending[0] != args.branch:
+                raise ReleaseError("候选不唯一或目标并非唯一候选：" + ", ".join(pending))
+            assert_closed(state["active"], args.pr_snapshot)
+            legacy = historical + [state["active"]]
     sha = write_state(previous, args.branch, legacy)
-    emit({"branch": args.branch, "state_sha": sha, "candidates": [],
-          "legacy": legacy, "task_worktrees": worktrees()},
-         args.json, f"已启用发布线：{args.branch}（状态 {sha}）")
+    result = {"branch": args.branch, "state_sha": sha, "candidates": [],
+              "legacy": legacy, "task_worktrees": worktrees()}
+    if legacy_inventory is not None:
+        result["legacy_inventory"] = legacy_inventory
+    emit(result, args.json, f"已启用发布线：{args.branch}（状态 {sha}）")
 
 
 def create(args):
@@ -340,16 +475,19 @@ def create_locked(args):
     branches = releases()
     previous, state = read_state()
     if state:
-        pending = candidates(state, branches)
+        pending, historical, unclassified = classify_releases(state, branches)
+        require_classified(unclassified)
         if pending:
             raise ReleaseError("已有待授权候选，不能继续创建：" + ", ".join(pending))
         assert_closed(state["active"], args.pr_snapshot)
-        legacy = state["legacy"] + [state["active"]]
+        legacy = historical + [state["active"]]
     elif branches:
         raise ReleaseError("已有远端 release 分支但尚未启用当前线，请先清点并 activate：" + ", ".join(branches))
     else:
         legacy = []
     branch = "release/" + dt.datetime.now().strftime("%Y.%m.%d")
+    if state and release_date(branch) <= release_date(state["active"]):
+        raise ReleaseError("新批次日期须晚于当前发布线；请核对日期后再创建。")
     if args.summary:
         branch += "_" + args.summary
     base_name = branch
@@ -384,7 +522,11 @@ def main():
     parser.add_argument("--user-authorized", action="store_true")
     parser.add_argument("--pr-snapshot")
     parser.add_argument("--adopt-legacy", action="store_true")
+    parser.add_argument("--classify-legacy", action="append", default=[])
+    parser.add_argument("--bootstrap-existing", action="store_true")
     args = parser.parse_args()
+    if args.classify_legacy and args.action != "activate":
+        raise ReleaseError("--classify-legacy 仅适用于 activate。")
     if args.count < 1:
         raise ReleaseError("--count 必须为正整数。")
     if args.action == "list":
