@@ -251,7 +251,20 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     if (!selectRequest || selectRequest.ts === selectReqTsRef.current) return;
     if (chromeSelectionLockIds()) return;
     selectReqTsRef.current = selectRequest.ts;
-    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
+    /* IKIJ62 等值守卫：目标选中集合与当前一致（仅 selectRequest.id 选中、其余未选中）时
+     *  返回原数组，不重建节点对象——等值选中请求不再放大渲染（选中循环的放大器兜底，
+     *  同上方 revertLockedSelection 的 changed ? next : prev 先例；undefined 与 false
+     *  同为未选中，React Flow 侧 selected ?? false 同口径）。 */
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        const shouldSelect = n.id === selectRequest.id;
+        if (Boolean(n.selected) === shouldSelect) return n;
+        changed = true;
+        return { ...n, selected: shouldSelect };
+      });
+      return changed ? next : prev;
+    });
   }, [selectRequest, setNodes]);
 
   /** 父层显式多选请求（IKGBPA 粘贴自动选中）：机制同 selectRequest，一次选中多个目标并取消其余。 */
