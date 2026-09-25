@@ -187,6 +187,9 @@ model generation_jobs {
   @@index([status, next_poll_at], map: "idx_status_next_poll")
   @@index([user_id], map: "idx_user_id")
   @@index([next_action_at], map: "idx_generation_next_action")
+  /// 仪表盘区间统计：WHERE is_delete = 0 AND gmt_create ∈ [from, to)。
+  /// `is_delete` 在前做等值前缀、`gmt_create` 走区间 —— 反过来放会让等值条件退化成过滤。
+  @@index([is_delete, gmt_create], map: "idx_generation_jobs__is_delete_gmt_create")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
