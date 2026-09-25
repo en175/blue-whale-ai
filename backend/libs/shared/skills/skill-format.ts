@@ -1,6 +1,7 @@
 import { createControlledChatClient } from "./controlled-chat-client.js";
 import { ok, skillError } from "@lib/contracts";
 import { parseSkillMd } from "@lib/core";
+import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
 
 export type SkillFormatChatClient = {
   complete(input: { rules: string; draft: string }): Promise<string>;
@@ -40,10 +41,16 @@ export function loadSkillFormatRules(
 export function createSkillFormatDeps():
   | { ai: SkillFormatChatClient; rules: string }
   | null {
-  const baseUrl = process.env.NEW_API_BASE_URL;
+  // 地址从上游唯一出口取（不再自己读 NEW_API_BASE_URL）
   const token = process.env.NEW_API_ROOT_ACCESS_TOKEN;
   const model = process.env.SKILL_FORMAT_MODEL;
-  if (!baseUrl || !token || !model) return null;
+  if (!token || !model) return null;
+  let baseUrl: string;
+  try {
+    baseUrl = newApiBaseUrl();
+  } catch {
+    return null;
+  }
   return {
     ai: createSkillFormatChatClient({ baseUrl, token, model }),
     rules: loadSkillFormatRules(),

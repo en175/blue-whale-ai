@@ -26,6 +26,7 @@ import {
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
 import { createUploadMaterialGate } from "./material-upload-gate.js";
 
 /**
@@ -70,8 +71,11 @@ export class MaterialService {
 
   private get client(): MaterialLibraryClient {
     if (!this.clientInstance) {
-      const baseUrl = process.env.NEW_API_BASE_URL;
-      if (!baseUrl) {
+      let baseUrl: string;
+      try {
+        // 地址从上游唯一出口取（不再自己读 NEW_API_BASE_URL）
+        baseUrl = newApiBaseUrl();
+      } catch {
         throw new NewApiError(
           "素材库服务未配置",
           503,
