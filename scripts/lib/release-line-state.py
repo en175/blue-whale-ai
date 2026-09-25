@@ -87,15 +87,35 @@ def read_state():
     return sha, state
 
 
-def candidates(state, branches):
+def classify_releases(state, branches):
     if state is None:
-        return branches
+        return branches, [], []
     active = state["active"]
     if not active.startswith("release/") or active not in branches:
         raise ReleaseError(f"已启用的 {active} 在远端不存在，状态不一致。")
     if any(not x.startswith("release/") for x in state["legacy"]):
         raise ReleaseError("共享状态包含非法历史分支。")
-    return [x for x in branches if x != active and x not in state["legacy"]]
+    active_date = release_date(active)
+    if active_date is None:
+        raise ReleaseError(f"已启用的 {active} 无法按日期识别，请负责人核对共享状态。")
+    pending, historical, unclassified = [], list(state["legacy"]), []
+    for branch in branches:
+        if branch == active or branch in historical:
+            continue
+        day = release_date(branch)
+        if day is None or day == active_date:
+            unclassified.append(branch)
+        elif day < active_date:
+            historical.append(branch)
+        else:
+            pending.append(branch)
+    return pending, historical, unclassified
+
+
+def require_classified(unclassified):
+    if unclassified:
+        raise ReleaseError("新出现的发布线无法按日期归类，请负责人确认或撤回："
+                           + ", ".join(unclassified))
 
 
 def worktrees():
@@ -144,21 +164,23 @@ def current(args):
     sha, state = read_state()
     if state is None:
         raise ReleaseError("团队尚未启用当前发布线；请由负责人清点并执行 activate。")
-    pending = candidates(state, branches)
+    pending, historical, unclassified = classify_releases(state, branches)
+    require_classified(unclassified)
     if pending:
         raise ReleaseError("发现未经授权的候选，停止自动选择：" + ", ".join(pending))
     emit({"branch": state["active"], "state_sha": sha, "candidates": pending,
-          "legacy": state["legacy"]}, args.json, f"当前发布线：{state['active']}（状态 {sha}）")
+          "legacy": historical}, args.json, f"当前发布线：{state['active']}（状态 {sha}）")
 
 
 def listing(args):
     refresh()
     branches = releases()
     sha, state = read_state()
-    pending = candidates(state, branches)
+    pending, historical, unclassified = classify_releases(state, branches)
     inventory_rows = worktrees()
     data = {"branch": state["active"] if state else None, "state_sha": sha,
-            "candidates": pending, "legacy": state["legacy"] if state else [],
+            "candidates": pending, "legacy": historical,
+            "unclassified": unclassified,
             "recent": recent_releases(args.count),
             "task_worktrees": inventory_rows,
             "unmerged_task_branches": unmerged_task_branches(inventory_rows)}
@@ -174,7 +196,8 @@ def listing(args):
     for branch in data["recent"]:
         print(f"  {branch}")
     print("待授权候选：" + (", ".join(pending) or "无"))
-    print("历史分支：" + (", ".join(data["legacy"]) or "无"))
+    print("历史分支：" + (", ".join(historical) or "无"))
+    print("待归类分支：" + (", ".join(unclassified) or "无"))
     print("任务 worktree：")
     for item in data["task_worktrees"]:
         target = item.get("target_branch", item.get("metadata_error", "非任务分支"))
@@ -240,7 +263,17 @@ def assert_closed(old, snapshot, require_merged=True, allow_pending=False,
     if require_merged and git("rev-parse", "--verify", "origin/master", check=False).returncode:
         raise ReleaseError("origin/master 不可用，无法核实旧批次。")
     inventory_rows = worktrees()
-    old_tasks = [item for item in inventory_rows if item.get("target_branch") in old_branches]
+    old_tasks = []
+    for item in inventory_rows:
+        target = item.get("target_branch")
+        if target not in old_branches:
+            continue
+        head = git("-C", item["path"], "rev-parse", "HEAD").stdout.strip()
+        changes = git("-C", item["path"], "status", "--porcelain",
+                      "--untracked-files=all").stdout.strip()
+        if changes or git("merge-base", "--is-ancestor", head, f"origin/{target}",
+                          check=False).returncode:
+            old_tasks.append(item)
     unassigned = [item for item in inventory_rows if "metadata_error" in item]
     unmerged_branches = unmerged_task_branches(inventory_rows)
     tasks = ", ".join(item["branch"] for item in old_tasks) or "无"
@@ -365,10 +398,10 @@ def activate_locked(args):
                                + "；请负责人决定去向。")
         all_releases = set(branches) | local_releases
         target_date = release_date(args.branch)
-        if args.bootstrap_existing and (target_date is None or any(
+        if target_date is None or any(
                 day is not None and day > target_date
-                for day in (release_date(name) for name in all_releases))):
-            raise ReleaseError("首次接管目标须为日期最新的 release 分支。")
+                for day in (release_date(name) for name in all_releases)):
+            raise ReleaseError("首次启用目标须为日期最新的 release 分支。")
         others = sorted(x for x in all_releases if x != args.branch)
         if others and not args.adopt_legacy:
             raise ReleaseError("首次启用发现多条分支，请清点后显式传 --adopt-legacy：" + ", ".join(others))
@@ -379,17 +412,34 @@ def activate_locked(args):
                                              allow_release_changes=args.bootstrap_existing)
         legacy = others
     else:
-        pending = candidates(state, branches)
+        pending, historical, unclassified = classify_releases(state, branches)
         if args.branch == state["active"]:
+            if args.adopt_legacy and unclassified:
+                legacy = historical + unclassified
+                sha = write_state(previous, args.branch, legacy)
+                emit({"branch": args.branch, "state_sha": sha,
+                      "candidates": pending, "legacy": legacy,
+                      "unclassified": []}, args.json,
+                     "已将待归类分支登记为历史：" + ", ".join(unclassified))
+                return
+            require_classified(unclassified)
             if pending:
                 raise ReleaseError("还有待授权候选：" + ", ".join(pending))
             emit({"branch": args.branch, "state_sha": previous, "candidates": [],
-                  "legacy": state["legacy"]}, args.json, f"当前已启用：{args.branch}")
+                  "legacy": historical}, args.json, f"当前已启用：{args.branch}")
             return
-        if len(pending) != 1 or pending[0] != args.branch:
-            raise ReleaseError("候选不唯一或目标并非唯一候选：" + ", ".join(pending))
-        assert_closed(state["active"], args.pr_snapshot)
-        legacy = state["legacy"] + [state["active"]]
+        if args.branch in unclassified and args.adopt_legacy:
+            if pending:
+                raise ReleaseError("还有日期更新的待授权候选：" + ", ".join(pending))
+            assert_closed(state["active"], args.pr_snapshot)
+            legacy = historical + [state["active"]] + [
+                branch for branch in unclassified if branch != args.branch]
+        else:
+            require_classified(unclassified)
+            if len(pending) != 1 or pending[0] != args.branch:
+                raise ReleaseError("候选不唯一或目标并非唯一候选：" + ", ".join(pending))
+            assert_closed(state["active"], args.pr_snapshot)
+            legacy = historical + [state["active"]]
     sha = write_state(previous, args.branch, legacy)
     result = {"branch": args.branch, "state_sha": sha, "candidates": [],
               "legacy": legacy, "task_worktrees": worktrees()}
@@ -414,16 +464,19 @@ def create_locked(args):
     branches = releases()
     previous, state = read_state()
     if state:
-        pending = candidates(state, branches)
+        pending, historical, unclassified = classify_releases(state, branches)
+        require_classified(unclassified)
         if pending:
             raise ReleaseError("已有待授权候选，不能继续创建：" + ", ".join(pending))
         assert_closed(state["active"], args.pr_snapshot)
-        legacy = state["legacy"] + [state["active"]]
+        legacy = historical + [state["active"]]
     elif branches:
         raise ReleaseError("已有远端 release 分支但尚未启用当前线，请先清点并 activate：" + ", ".join(branches))
     else:
         legacy = []
     branch = "release/" + dt.datetime.now().strftime("%Y.%m.%d")
+    if state and release_date(branch) <= release_date(state["active"]):
+        raise ReleaseError("新批次日期须晚于当前发布线；请核对日期后再创建。")
     if args.summary:
         branch += "_" + args.summary
     base_name = branch

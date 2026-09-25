@@ -6,7 +6,9 @@
 
 本地 `master` 与 `origin/master` 代表生产版本。日常 feature、fix、docs、chore 均基于团队唯一正在开发的 `release/*`，PR 指向任务元数据记录的同一发布线。旧批次合入 master 后可以保留历史 release 分支，供后续修复使用；它们不计入正在开发的发布线数量。发布负责人在 staging 验证该批次后，将 release 经 Gitee PR 合入 master，再打 tag 并部署。
 
-发布线状态由 `scripts/manage-release-branch.sh current --json` 读取。新候选批次不能只按日期自动启用；发布负责人先核对旧批次任务、PR、本地领先提交和未保存文件，明确授权 `activate --branch <release/*> --user-authorized --pr-snapshot <JSON>`。创建新批次用 `create --summary <中文简述> --user-authorized`，旧批次仍有待处理事项时入口拒绝换期。换期与任务开工使用同一把本地锁，避免换期后新任务落到旧线。`list` 用于查看候选，不是每张任务 PR 的目标选择器。旧任务与 PR 不自动迁移。
+发布线状态由 `scripts/manage-release-branch.sh current --json` 读取。日期早于当前线的新见 release 分支按历史分支处理。日期更晚的分支是待启用候选；负责人启用前暂停新任务。同日不同名或无法识别日期的分支会暂停新任务，负责人须先归类或撤回。`list --json` 列出 `candidates` 和 `unclassified`。若确认待归类分支应保留为历史，可在主 checkout 的 `master` 上执行 `activate --branch <当前发布线> --adopt-legacy --user-authorized`；若同日分支应接任，执行 `activate --branch <同日分支> --adopt-legacy --user-authorized --pr-snapshot <JSON>`，旧线清点仍须通过。
+
+新候选批次不能只按日期自动启用。发布负责人核对旧活动线的任务、PR、本地领先提交和未保存文件后，明确授权 `activate --branch <release/*> --user-authorized --pr-snapshot <JSON>`。创建新批次用 `create --summary <中文简述> --user-authorized`，新批次日期必须晚于当前线。换期只将旧活动线中有未合入提交或未保存文件的任务工作树视为待处理；干净且任务提交已进入远端目标 release 的工作树可以保留。归属不明的任务、未合入的本地任务分支、仍开放且目标为旧活动线的 PR，以及旧发布线本地未共享更改仍阻断换期。负责人须先确定这些事项的去向。换期与任务开工使用同一把本地锁。`list` 用于查看候选，旧任务与 PR 不自动迁移。
 
 首次启用已有多条发布线且保留旧任务时，负责人清点并明确授权后，可在基于目标本地发布线的干净任务工作树执行 `activate --branch <release/*> --adopt-legacy --bootstrap-existing --user-authorized --pr-snapshot <JSON> --json`。目标必须是日期最新的发布线。入口将更早的远端及本地 release 分支记为历史分支，回传其本地独有提交数、未保存文件、旧任务工作树、未合入本地分支和旧目标开放 PR。它不删除或改写这些历史内容。日期只用于核对明确指定的目标，不能代替负责人授权；Git 祖先关系也不能单独判定历史批次是否已经归档。`--bootstrap-existing` 只适用于共享状态尚不存在的首次启用，后续换期继续使用普通门禁。
 
