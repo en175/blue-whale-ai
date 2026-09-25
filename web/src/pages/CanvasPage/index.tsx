@@ -4184,6 +4184,18 @@ export default function CanvasPage() {
     if (showMusicDialog && (soloId || candidates.length > 1)) setShowMusicDialog(false);
   };
 
+  /** IKIJ60：下传 FlowCanvas 的选中处理函数同步稳定化——页面每轮渲染重建
+   *  handleSelectionChange 会连带容器每轮渲染重建传给 ReactFlow 的包裹，使
+   *  SelectionListener 的等值通报无限再生（草稿面板切换滚成 Maximum update depth
+   *  exceeded）。ref 每轮赋值保证始终调最新闭包，处理逻辑本身不动（禁 useCallback+
+   *  依赖数组重构：上方函数闭包捕获态过多，stale 闭包风险），对外只暴露空依赖稳定壳。 */
+  const handleSelectionChangeRef = useRef(handleSelectionChange);
+  handleSelectionChangeRef.current = handleSelectionChange;
+  const handleSelectionChangeStable = useCallback(
+    (params: OnSelectionChangeParams) => handleSelectionChangeRef.current(params),
+    [],
+  );
+
   /** IKFYH6 画布外 UI 点击关闭：document 捕获阶段 click——捕获先于 React 事件处理器执行，
    *  同一次点击先到此（面板尚未因该点击打开），「刚打开的面板」不会被误关。
    *  豁免：「面板领土」（五面板根 + @菜单/资产弹窗等 portal 浮层，data-gen-panel-territory 标记）、
@@ -12328,7 +12340,7 @@ export default function CanvasPage() {
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
-          onSelectionChange={handleSelectionChange}
+          onSelectionChange={handleSelectionChangeStable}
           refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || outpaintSessionActive}
           outpaintFrame={
             outpaintSessionActive && outpaintRect

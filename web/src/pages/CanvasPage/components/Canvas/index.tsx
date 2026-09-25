@@ -279,6 +279,17 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onViewportChangeRef.current = onViewportChange;
   const onViewportLiveRef = useRef(onViewportLive);
   onViewportLiveRef.current = onViewportLive;
+  /** IKIJ60：传给 ReactFlow 的选中变化回调必须引用稳定——@xyflow/react 12.11.2 的
+   *  SelectionListener 把回调自身列入 effect 依赖且不检查选中是否真的变化，回调引用一变
+   *  就把当前选中等值再通报一次；内联包裹每轮渲染重建会让等值通报无限再生（草稿面板切换
+   *  时滚成 Maximum update depth exceeded）。ref 每轮同步 + 空依赖稳定壳（同上方
+   *  onViewportChangeRef 先例），始终调最新闭包。 */
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  const handleFlowSelectionChange = useCallback((params: OnSelectionChangeParams) => {
+    if (isChromeGestureActive()) return;
+    onSelectionChangeRef.current?.(params);
+  }, []);
 
   /** 波点缩放补偿：屏幕点半径 = size × zoom，取 size = 1/zoom 使屏幕点径恒定约 2px，
    * 缩小视图（如 58%）时波点依然清晰可见 */
@@ -890,14 +901,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             : undefined
         }
         onPaneClick={onPaneClick}
-        onSelectionChange={
-          frameDragMemberIds.size > 0
-            ? undefined
-            : (params) => {
-                if (isChromeGestureActive()) return;
-                onSelectionChange?.(params);
-              }
-        }
+        onSelectionChange={frameDragMemberIds.size > 0 ? undefined : handleFlowSelectionChange}
         onMove={(_e, v) => onViewportLiveRef.current?.(v)}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}
