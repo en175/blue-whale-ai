@@ -12,6 +12,7 @@ import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { TierAuditService } from "@lib/shared/topup-tier/tier-audit.service.js";
 import {
+  displayTierName,
   parseTierDiscount,
   parseTierOriginalPrice,
 } from "@lib/shared/topup-tier/constants.js";
@@ -41,10 +42,10 @@ export class AdminTopupTiersController {
       const creditsPerYuan = await fetchCreditsPerYuan();
       return {
         success: true,
-        data: tiers.map((t) => ({
-          ...t,
-          amount: deriveCredits(t.originalPrice, creditsPerYuan),
-        })),
+        data: tiers.map((t) => {
+          const amount = deriveCredits(t.originalPrice, creditsPerYuan);
+          return { ...t, amount, name: displayTierName(t.name, amount) };
+        }),
       };
     } catch (error) {
       throw toAdminError(error);

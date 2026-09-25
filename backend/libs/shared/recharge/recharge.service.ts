@@ -58,6 +58,7 @@ import {
 } from "@lib/shared/pay-server/index.js";
 import { SystemSettingsConfigError } from "@lib/shared/system-settings/credentials-crypto.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/system-settings.service.js";
+import { displayTierName } from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 
 /** 银行统一收银台令牌有效期 30 分钟（实测 `tokenBegin`~`tokenEnd`）。 */
@@ -146,16 +147,19 @@ export class RechargeService {
     const rows = await this.topupTier.listActive();
     return {
       creditsPerYuan,
-      tiers: rows.map((t) => ({
-        id: t.id,
-        name: t.name,
-        amount: deriveCredits(t.originalPrice, creditsPerYuan),
-        price: t.price,
-        originalPrice: t.originalPrice,
-        discount: t.discount,
-        isRecommended: t.isRecommended,
-        sortOrder: t.sortOrder,
-      })),
+      tiers: rows.map((t) => {
+        const amount = deriveCredits(t.originalPrice, creditsPerYuan);
+        return {
+          id: t.id,
+          name: displayTierName(t.name, amount),
+          amount,
+          price: t.price,
+          originalPrice: t.originalPrice,
+          discount: t.discount,
+          isRecommended: t.isRecommended,
+          sortOrder: t.sortOrder,
+        };
+      }),
     };
   }
 
