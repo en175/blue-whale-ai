@@ -38,7 +38,7 @@ import {
 } from '@/api/agentSessions';
 import { cardsFromRevision, cardsOfRevision, taskLabelsOf } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
-import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
+import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 import { collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
@@ -549,7 +549,7 @@ export function useAgentSession(projectId: string, agentModel?: string) {
         // 让状态行继续读秒会显得还在跑，报终局又不属实，因此这一段交给那条提示独占。
         clearTurn();
         setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
-        blockIfQuotaInsufficient();
+        blockIfCreditsInsufficient();
         return;
       }
 
@@ -895,7 +895,7 @@ export function useAgentSession(projectId: string, agentModel?: string) {
       // 纯附件消息是合法的：上传一张图、一个字不打就发，是用户对附件做的第一个动作（IKAL46）。
       if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
-      if (blockIfQuotaInsufficient()) return false;
+      if (blockIfCreditsInsufficient()) return false;
       // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
       let sid = sessionIdRef.current;
       if (!sid) {
@@ -961,7 +961,7 @@ export function useAgentSession(projectId: string, agentModel?: string) {
             setPaymentRequiredMessage(
               run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
             );
-            blockIfQuotaInsufficient();
+            blockIfCreditsInsufficient();
           } else if (isTerminalStatus(run.status)) {
             streamingRef.current = false;
             setStreaming(false);
@@ -1006,7 +1006,7 @@ export function useAgentSession(projectId: string, agentModel?: string) {
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
         } else if (isApiError(e) && (e.status === 402 || e.code === 'payment_required')) {
-          openRechargeForQuotaError(e);
+          openRechargeForCreditsError(e);
           setSendError('余额不足，请充值后重试；输入内容已保留。');
         } else {
           setSendError(`消息发送失败：${e instanceof Error ? e.message : '请稍后重试'}；输入内容已保留。`);
@@ -1040,7 +1040,7 @@ export function useAgentSession(projectId: string, agentModel?: string) {
     const sid = sessionIdRef.current;
     const failedRunId = sessionRef.current.failedRunId;
     if (!projectId || !sid || failedRunId === null) return;
-    if (blockIfQuotaInsufficient()) return;
+    if (blockIfCreditsInsufficient()) return;
     api.retrySessionRun(projectId, failedRunId)
       .then(() => {
         commit((prev) => ({ ...prev, failedRunId: null }));

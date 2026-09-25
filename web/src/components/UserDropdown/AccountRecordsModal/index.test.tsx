@@ -6,7 +6,6 @@ import AccountRecordsModal from './index';
 
 const accountApi = vi.hoisted(() => ({
   fetchConsumptions: vi.fn(),
-  fetchTopups: vi.fn(),
 }));
 
 vi.mock('@/api/account', () => accountApi);
@@ -26,43 +25,45 @@ async function renderModal() {
   });
 }
 
+/** 切到「消费记录」页签（账户流水）。 */
+async function openConsumeTab() {
+  await act(async () => {
+    [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('消费记录'))
+      ?.click();
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
-  accountApi.fetchTopups.mockResolvedValue({
-    items: [
-      {
-        trade_no: 'T20260829001',
-        credits: 100,
-        amount_cny: 10,
-        payment_method: '微信',
-        status: 'success',
-        created_at: 1_700_000_000,
-      },
-    ],
-    total: 1,
-  });
   accountApi.fetchConsumptions.mockResolvedValue({
     items: [
       {
-        id: 7,
-        kind: 'consume',
+        id: 'res:7',
+        type: 'consume',
+        direction: 'out',
+        title: '视频生成 · seedance-2.5 1080p 5s',
         credits: 5,
-        summary: '生成视频',
-        model: 'doubao-seedance-2-0',
-        created_at: 1_700_000_100,
+        status: 'done',
+        created_at: '2026-09-25T10:00:00+08:00',
+        settled_at: '2026-09-25T10:01:00+08:00',
       },
       {
-        // IKGCWU：退款与消耗同列，方向只看 kind——backend 给的 credits 一律是正幅度。
-        id: 8,
-        kind: 'refund',
+        // 进账（退款）与出账（消费）同列，方向只看 direction——billing 给的 credits
+        // 一律是正幅度，按数值正负猜符号会把退回的积分显示成又扣了一笔。
+        id: 'led:8',
+        type: 'refund',
+        direction: 'in',
+        title: '退款（视频生成）',
         credits: 6,
-        summary: '退款（生成视频）',
-        model: 'doubao-seedance-2-0',
-        created_at: 1_700_000_200,
+        status: 'done',
+        created_at: '2026-09-25T10:02:00+08:00',
+        settled_at: '2026-09-25T10:02:10+08:00',
       },
     ],
-    total: 2,
+    next_page_token: '',
   });
 });
 
@@ -73,41 +74,53 @@ afterEach(async () => {
 });
 
 describe('AccountRecordsModal', () => {
-  it('充值记录展示单号和支付方式', async () => {
+  it('充值记录页签保留入口，但只说明充值暂未开放（不打已删除的接口）', async () => {
     await renderModal();
 
-    expect(document.body.textContent).toContain('单号 T20260829001');
-    expect(document.body.textContent).toContain('微信');
-    expect(document.body.textContent).toContain('¥10.00');
+    expect(document.body.textContent).toContain('充值记录');
+    expect(document.body.textContent).toContain('充值功能暂未开放');
+    expect(accountApi.fetchConsumptions).not.toHaveBeenCalled();
   });
 
-  it('消费记录展示模型名', async () => {
+  it('消费记录写死 type=consume，只取消费流水', async () => {
     await renderModal();
+    await openConsumeTab();
 
-    await act(async () => {
-      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('消费记录'))
-        ?.click();
-      await Promise.resolve();
-    });
-
-    expect(accountApi.fetchConsumptions).toHaveBeenCalled();
-    expect(document.body.textContent).toContain('生成视频 · doubao-seedance-2-0');
+    // 后端默认（不传 type）= 全部流水，会把充值/赠送混进来；标签叫消费就必须只查消费
+    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith('', 20, 'consume');
+    expect(document.body.textContent).toContain('视频生成 · seedance-2.5 1080p 5s');
   });
 
-  it('退款按 kind 出 + 号与退款摘要（IKGCWU）', async () => {
+  it('按 direction 出符号：出账带 -、进账带 +', async () => {
     await renderModal();
+    await openConsumeTab();
 
-    await act(async () => {
-      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('消费记录'))
-        ?.click();
-      await Promise.resolve();
-    });
-
-    // 后端的两类都带正的 credits；符号只能来自 kind，不能来自数值正负。
     expect(document.body.textContent).toContain('-5 积分');
     expect(document.body.textContent).toContain('+6 积分');
-    expect(document.body.textContent).toContain('退款（生成视频）');
+    expect(document.body.textContent).toContain('退款（视频生成）');
+  });
+
+  it('未结算的行标出「处理中」——它给的金额是预计消耗，不是实际扣费', async () => {
+    accountApi.fetchConsumptions.mockResolvedValue({
+      items: [
+        {
+          id: 'res:9',
+          type: 'consume',
+          direction: 'out',
+          title: '视频生成 · seedance-2.5 1080p 5s',
+          credits: 30,
+          status: 'pending',
+          created_at: '2026-09-25T10:03:00+08:00',
+          settled_at: '',
+        },
+      ],
+      next_page_token: 'cursor-next',
+    });
+
+    await renderModal();
+    await openConsumeTab();
+
+    expect(document.body.textContent).toContain('-30 积分');
+    expect(document.body.textContent).toContain('处理中');
   });
 });

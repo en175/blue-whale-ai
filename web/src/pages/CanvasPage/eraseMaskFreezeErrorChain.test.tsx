@@ -69,7 +69,7 @@ const projectMocks = vi.hoisted(() => ({
 }));
 const authMocks = vi.hoisted(() => ({
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
 }));
 const canvasMocks = vi.hoisted(() => ({
@@ -87,7 +87,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: authMocks.fetchMe,
-  fetchQuota: authMocks.fetchQuota,
+  fetchCredits: authMocks.fetchCredits,
   toSessionUser: authMocks.toSessionUser,
 }));
 vi.mock('@/api/canvas', () => ({
@@ -355,7 +355,7 @@ afterEach(async () => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   useAuthPromptStore.getState().reset();
-  useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+  useAuthStore.setState({ user: null, isNewUser: false, credits: null });
 });
 
 describe('IKI8L7 擦除（真实 API/HTTP 链）：迟到失败全链路静默', () => {

@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { $createRangeSelection, $getRoot, $getSelection, $isRangeSelection, $isTextNode, $nodesOfType, $setSelection, KEY_ARROW_LEFT_COMMAND, KEY_ARROW_RIGHT_COMMAND, KEY_BACKSPACE_COMMAND, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -74,21 +75,25 @@ async function renderDialog(props: {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend,
-        initialText: props.initialText,
-        initialDoc: props.initialDoc ?? null,
-        mediaRefs: props.mediaRefs,
-        mentionItems: props.mentionItems,
-        onMentionCanvas: props.onMentionCanvas,
-        attachments: props.attachments,
-        onRemoveAttachment: props.onRemoveAttachment,
-        draftBinding: (props.mediaRefs || props.attachments)
-          ? { onParamsChange, status: props.draftStatus }
-          : undefined,
-        onRemoveMediaRef: props.onRemoveMediaRef,
-      } as Parameters<typeof ImageDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend,
+          initialText: props.initialText,
+          initialDoc: props.initialDoc ?? null,
+          mediaRefs: props.mediaRefs,
+          mentionItems: props.mentionItems,
+          onMentionCanvas: props.onMentionCanvas,
+          attachments: props.attachments,
+          onRemoveAttachment: props.onRemoveAttachment,
+          draftBinding: (props.mediaRefs || props.attachments)
+            ? { onParamsChange, status: props.draftStatus }
+            : undefined,
+          onRemoveMediaRef: props.onRemoveMediaRef,
+        } as Parameters<typeof ImageDialog>[0])
+      ),
     );
   });
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -98,12 +103,16 @@ async function renderDialog(props: {
 async function rerender(mediaRefs: ImageMediaRef[], onParamsChange?: ReturnType<typeof vi.fn>) {
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        mediaRefs,
-        draftBinding: { onParamsChange: onParamsChange ?? vi.fn() },
-      } as Parameters<typeof ImageDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          mediaRefs,
+          draftBinding: { onParamsChange: onParamsChange ?? vi.fn() },
+        } as Parameters<typeof ImageDialog>[0])
+      ),
     );
   });
 }

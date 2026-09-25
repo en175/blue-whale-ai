@@ -34,13 +34,16 @@ export interface MeData {
   is_admin?: boolean;
 }
 
-/** GET /api/usage/token 返回 */
+/**
+ * GET /api/usage/token 返回。
+ *
+ * ⚠️ 路径里的 `token` 是 new-api 时期的命名，**值已经换成 billing 账本里的整数积分**。
+ * 看到 `quota` 这个词时一律按「可用余额」理解，不要再按 new-api 的 quota 单位去除以 50,000。
+ */
 export interface UsageTokenData {
-  quota: number;
+  /** 可用余额，**整数积分** —— billing 账本里那个数，与后端记的完全一致 */
+  credits: number;
 }
-
-/** 配额 → 展示积分（产品口径：1 元 = 10 积分 = 1 美元 = 500,000 quota → quota / 50000，千分位格式化） */
-export const quotaToPoints = (quota: number) => (quota / 50000).toLocaleString();
 
 /** /api/me 结构转本地会话用户 */
 export const toSessionUser = (m: MeData): SessionUser => ({
@@ -78,8 +81,8 @@ export function fetchMe() {
   return apiRequest<MeData>('/api/me', { silent: true });
 }
 
-/** 获取积分配额。fresh 时带时间戳，避免与在途 GET 去重/缓存命中支付前的 0。 */
-export function fetchQuota(options?: { fresh?: boolean }) {
+/** 获取可用余额。fresh 时带时间戳，避免与在途 GET 去重/缓存命中支付前的 0。 */
+export function fetchCredits(options?: { fresh?: boolean }) {
   const path = options?.fresh ? `/api/usage/token?_=${Date.now()}` : '/api/usage/token';
   return apiRequest<UsageTokenData>(path);
 }

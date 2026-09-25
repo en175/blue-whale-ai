@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -51,18 +52,22 @@ async function renderDialog(opts: DialogOptions = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        initialFiles: opts.initialFiles,
-        mediaRefs: opts.mediaRefs,
-        attachments: opts.attachments,
-        onReorderMediaRefs: opts.onReorderMediaRefs,
-        onReorderAttachments: opts.onReorderAttachments,
-        draftBinding: opts.submitting
-          ? { submitting: true, onParamsChange: () => {} }
-          : undefined,
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          initialFiles: opts.initialFiles,
+          mediaRefs: opts.mediaRefs,
+          attachments: opts.attachments,
+          onReorderMediaRefs: opts.onReorderMediaRefs,
+          onReorderAttachments: opts.onReorderAttachments,
+          draftBinding: opts.submitting
+            ? { submitting: true, onParamsChange: () => {} }
+            : undefined,
+        })
+      ),
     );
   });
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));

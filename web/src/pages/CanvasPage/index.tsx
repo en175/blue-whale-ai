@@ -312,7 +312,7 @@ import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
 import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
-import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
+import { fetchMe, fetchCredits, toSessionUser } from '@/api/auth';
 import {
   fetchProjects,
   createProject,
@@ -329,7 +329,7 @@ import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { referencePromptPlan, applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, readCanvasConflictVersion, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
-import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
+import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
   createGenerationJob,
@@ -2104,7 +2104,7 @@ export default function CanvasPage() {
     ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
   }, []);
   const updateUser = useAuthStore((s) => s.updateUser);
-  const setQuota = useAuthStore((s) => s.setQuota);
+  const setCredits = useAuthStore((s) => s.setCredits);
   /** 新建商品节点序号（商品 1、商品 2…） */
   const productSeq = useRef(0);
 
@@ -2115,20 +2115,20 @@ export default function CanvasPage() {
       .catch(() => undefined);
   }, [updateUser]);
 
-  // IKBN0G：画布顶栏不再挂 UserDropdown，配额改由本页拉取，供生成前余额拦截
+  // IKBN0G：画布顶栏不再挂 UserDropdown，余额改由本页拉取，供生成前余额拦截
   useEffect(() => {
     let alive = true;
-    fetchQuota()
+    fetchCredits()
       .then((d) => {
-        if (alive) setQuota(d.quota);
+        if (alive) setCredits(d.credits);
       })
       .catch(() => {
-        if (alive) setQuota(null);
+        if (alive) setCredits(null);
       });
     return () => {
       alive = false;
     };
-  }, [setQuota]);
+  }, [setCredits]);
 
   // 加载项目列表；落点三级规则（IKH1YK）：?project= 合法值 > 上次打开 > 首项；无项目自动创建
   useEffect(() => {
@@ -6878,7 +6878,7 @@ export default function CanvasPage() {
       return false;
     }
     if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return false;
-    if (blockIfQuotaInsufficient()) return false;
+    if (blockIfCreditsInsufficient()) return false;
     // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变
     const inPlaceNode = targetNodeId
       ? mediaNodesRef.current.find((n) => n.id === targetNodeId && isInPlaceRegenTarget(n))
@@ -7025,7 +7025,7 @@ export default function CanvasPage() {
             }
           };
           const takenOver = () => activeJobByNodeRef.current.get(nodeId) !== activeAtCreate;
-          if (openRechargeForQuotaError(e)) {
+          if (openRechargeForCreditsError(e)) {
             if (takenOver()) return; // 已被其他提交接管：回退不得覆盖新任务状态
             if (inPlaceNodeId) rollbackInPlace();
             else {
@@ -8259,7 +8259,7 @@ export default function CanvasPage() {
     if (!currentId || !jobId) return;
     // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
     if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
-    if (blockIfQuotaInsufficient()) return;
+    if (blockIfCreditsInsufficient()) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
     // 登记发起重试时的任务为核对基准：retry 返回前若被新任务接管（面板重新提交），放弃本次结果不覆盖
     activeJobByNodeRef.current.set(nodeId, String(jobId));
@@ -8272,7 +8272,7 @@ export default function CanvasPage() {
         })
         .catch((e) => {
           if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
-          if (openRechargeForQuotaError(e)) {
+          if (openRechargeForCreditsError(e)) {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: isApiError(e) ? e.message : '余额不足',
@@ -12489,6 +12489,7 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
         {showBottomDialog && (
           <BottomDialog
+            {...(currentId ? { projectId: currentId } : {})}
             stripOrder={refStripOrderOf(videoDraftId)}
             onStripOrderChange={videoDraftId ? keys => handleRefStripOrderChange(videoDraftId, keys) : undefined}
             onRemoveAttachment={id => removeTextAttachment(setVideoSeed, videoDraftId ?? videoSeed?.targetNodeId, id)}
@@ -12554,6 +12555,7 @@ export default function CanvasPage() {
         {/* 底部图片对话框 */}
         {showImageDialog && (
           <ImageDialog
+            {...(currentId ? { projectId: currentId } : {})}
             stripOrder={refStripOrderOf(imageDraftId)}
             onStripOrderChange={imageDraftId ? keys => handleRefStripOrderChange(imageDraftId, keys) : undefined}
             key={imageSeed?.ts ?? 0}
@@ -12945,6 +12947,7 @@ export default function CanvasPage() {
         {/* 底部音频对话框 */}
         {showAudioDialog && (
           <AudioDialog
+            {...(currentId ? { projectId: currentId } : {})}
             stripOrder={refStripOrderOf(audioDraftId)}
             onStripOrderChange={audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined}
             key={audioSeed?.ts ?? 0}

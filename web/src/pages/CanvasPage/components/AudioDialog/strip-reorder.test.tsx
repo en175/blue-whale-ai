@@ -3,6 +3,7 @@
    参考音频换位重排本地 refs、文本按新相对序回传 onReorderAttachments；生成中只读禁拖 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -52,18 +53,22 @@ async function renderDialog(props: MountProps = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(AudioDialog, {
-        onClose: () => {},
-        onSend: () => {},
-        canvasMedia: [],
-        externalPick: { ts: 1, item: REF },
-        attachments: props.attachments,
-        onRemoveAttachment: vi.fn(),
-        onReorderAttachments: props.onReorderAttachments,
-        draftBinding: props.readOnly
-          ? { status: 'generating', onParamsChange: () => {} }
-          : undefined,
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, {
+          onClose: () => {},
+          onSend: () => {},
+          canvasMedia: [],
+          externalPick: { ts: 1, item: REF },
+          attachments: props.attachments,
+          onRemoveAttachment: vi.fn(),
+          onReorderAttachments: props.onReorderAttachments,
+          draftBinding: props.readOnly
+            ? { status: 'generating', onParamsChange: () => {} }
+            : undefined,
+        })
+      ),
     );
   });
 }

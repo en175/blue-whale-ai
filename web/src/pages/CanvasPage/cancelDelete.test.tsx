@@ -45,7 +45,7 @@ vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => nu
 const apiMocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async (_projectId: string, _body: Record<string, unknown>) => ({ generation_job_id: 'j8', cursor: 1 })),
@@ -88,7 +88,7 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 

@@ -234,16 +234,6 @@
   gap: var(--spacing-md);
 }
 
-.costText {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: #777;
-  user-select: none;
-}
-
 /* 发送按钮 */
 .sendBtn {
   width: 28.8px;

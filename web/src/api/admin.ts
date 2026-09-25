@@ -681,69 +681,6 @@ export function createOperationLog(params: CreateOperationLogParams) {
   });
 }
 
-/** 充值订单记录（topups） */
-export interface AdminOrderRow {
-  /** 交易号，唯一标识 */
-  tradeNo: string;
-  userId: number;
-  nickname: string;
-  phone: string;
-  /** 充值档位名称 */
-  tierName: string;
-  /** 充值积分数（档位原始 amount） */
-  amount: number;
-  /** 支付金额（元） */
-  price: number;
-  /** 到账积分 */
-  points: number;
-  /** 赠送积分 */
-  bonus: number;
-  /** 订单状态：pending 待支付 / success 已到账 / expired 已过期 / failed 支付失败 */
-  status: 'pending' | 'success' | 'expired' | 'failed';
-  /** 支付方式：wechat 微信 / alipay 支付宝 */
-  paymentMethod: string;
-  /** 支付平台流水号，未支付时为 null */
-  platformRefNo: string | null;
-  /** 支付IP */
-  ip: string;
-  /** 创建时间（ISO） */
-  createdAt: string;
-  /** 支付时间（ISO），未支付时为 null */
-  paidAt: string | null;
-  /** 到账时间（ISO），未到账时为 null */
-  arrivedAt: string | null;
-}
-
-export interface AdminOrderListData {
-  list: AdminOrderRow[];
-  /** 总记录数（new-api 原始 total，未扣除 status 过滤） */
-  total: number;
-}
-
-/** GET /api/admin/orders 充值订单列表（keyword 匹配交易号/昵称/手机号；status 为 BFF 层过滤；pageSize 最大 100）；请求头 New-Api-User 携带当前管理员 userId */
-export function fetchAdminOrders(
-  params: { keyword?: string; status?: string; page?: number; pageSize?: number } = {}
-) {
-  const qs = new URLSearchParams();
-  if (params.keyword) qs.set('keyword', params.keyword);
-  if (params.status) qs.set('status', params.status);
-  qs.set('page', String(params.page ?? 1));
-  qs.set('pageSize', String(params.pageSize ?? 20));
-  const adminUserId = useAuthStore.getState().user?.userId;
-  return apiRequest<AdminOrderListData>(`/api/admin/orders?${qs.toString()}`, {
-    method: 'GET',
-    headers: adminUserId !== undefined ? { 'New-Api-User': String(adminUserId) } : {},
-  });
-}
-
-/** POST /api/admin/orders/:tradeNo/complete 手动补单确认（仅 pending 可确认，确认后积分立即到账；reason 必填），服务端自动写审计日志 */
-export function completeAdminOrder(tradeNo: string, reason: string) {
-  return apiRequest<null>(`/api/admin/orders/${tradeNo}/complete`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  });
-}
-
 /** 支付凭证（GET 回显为脱敏值） */
 export interface SystemCredentials {
   /** 微信商户号 */

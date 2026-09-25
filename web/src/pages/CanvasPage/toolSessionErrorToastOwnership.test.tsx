@@ -70,7 +70,7 @@ const projectMocks = vi.hoisted(() => ({
 }));
 const authMocks = vi.hoisted(() => ({
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
 }));
 const canvasMocks = vi.hoisted(() => ({
@@ -88,7 +88,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: authMocks.fetchMe,
-  fetchQuota: authMocks.fetchQuota,
+  fetchCredits: authMocks.fetchCredits,
   toSessionUser: authMocks.toSessionUser,
 }));
 vi.mock('@/api/assets', () => ({
@@ -336,7 +336,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   useAuthPromptStore.getState().reset();
-  useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+  useAuthStore.setState({ user: null, isNewUser: false, credits: null });
 });
 
 describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时会话', () => {

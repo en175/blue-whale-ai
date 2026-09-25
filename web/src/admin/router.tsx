@@ -1,5 +1,5 @@
 /* ============================================
- * admin 子路由表：后台 9 页，页面按需懒加载
+ * admin 子路由表：后台页面，按需懒加载
  * ============================================ */
 import { lazy, Suspense } from 'react';
 import { Navigate } from 'react-router-dom';
@@ -12,7 +12,6 @@ const TemplateManage = lazy(() => import('./pages/TemplateManage'));
 const SkillManage = lazy(() => import('./pages/SkillManage'));
 const ModelList = lazy(() => import('./pages/ModelList'));
 const UserManage = lazy(() => import('./pages/UserManage'));
-const OrderManage = lazy(() => import('./pages/OrderManage'));
 const OperationLog = lazy(() => import('./pages/OperationLog'));
 const SystemConfig = lazy(() => import('./pages/SystemConfig'));
 const SiteConfig = lazy(() => import('./pages/SiteConfig'));
@@ -37,7 +36,6 @@ export const adminRoutes = {
     { path: 'skills', element: <L><SkillManage /></L> },
     { path: 'models', element: <L><ModelList /></L> },
     { path: 'users', element: <L><UserManage /></L> },
-    { path: 'orders', element: <L><OrderManage /></L> },
     { path: 'logs', element: <L><OperationLog /></L> },
     { path: 'site-config', element: <L><SiteConfig /></L> },
     { path: 'settings', element: <L><SystemConfig /></L> },

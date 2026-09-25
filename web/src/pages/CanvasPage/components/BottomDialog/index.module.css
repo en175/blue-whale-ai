@@ -335,17 +335,6 @@
   gap: var(--spacing-md);
 }
 
-/* 消耗提示（与图片对话框统一） */
-.costText {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: #777;
-  user-select: none;
-}
-
 /* 发送按钮（与图片对话框统一） */
 .sendBtn {
   width: 28.8px;

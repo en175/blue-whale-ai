@@ -2,6 +2,7 @@
 /* IKFA1O：BottomDialog 生视频正文素材标签——多媒体索引/首尾帧角色/模式失效/发送携带 prompt_doc */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { $getSelection, $isRangeSelection } from 'lexical';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
@@ -68,15 +69,19 @@ async function renderDialog(opts: RenderOpts = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose: vi.fn(),
-        onSend,
-        initialDoc: opts.initialDoc ?? null,
-        initialParams: opts.initialParams ?? { mode: 'all' },
-        enabledModes: opts.enabledModes as never,
-        videoDraftBinding: { onParamsChange },
-        videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
-      } as Parameters<typeof BottomDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          onSend,
+          initialDoc: opts.initialDoc ?? null,
+          initialParams: opts.initialParams ?? { mode: 'all' },
+          enabledModes: opts.enabledModes as never,
+          videoDraftBinding: { onParamsChange },
+          videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
+        } as Parameters<typeof BottomDialog>[0])
+      ),
     );
   });
   await vi.waitFor(() => expect(container.textContent).toContain('测试生视频模型'));
@@ -86,14 +91,18 @@ async function renderDialog(opts: RenderOpts = {}) {
 async function rerender(opts: RenderOpts = {}) {
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        initialDoc: opts.initialDoc ?? null,
-        enabledModes: opts.enabledModes as never,
-        videoDraftBinding: { onParamsChange: opts.onParamsChange ?? vi.fn() },
-        videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
-      } as Parameters<typeof BottomDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          initialDoc: opts.initialDoc ?? null,
+          enabledModes: opts.enabledModes as never,
+          videoDraftBinding: { onParamsChange: opts.onParamsChange ?? vi.fn() },
+          videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },
+        } as Parameters<typeof BottomDialog>[0])
+      ),
     );
   });
 }

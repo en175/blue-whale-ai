@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
@@ -64,12 +65,16 @@ async function renderDialog(onClose = vi.fn()) {
   root = createRoot(mountNode);
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose,
-        onSend: vi.fn(),
-        videoMediaRefs: { reference: [] },
-        videoDraftBinding: { onParamsChange: vi.fn() },
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose,
+          onSend: vi.fn(),
+          videoMediaRefs: { reference: [] },
+          videoDraftBinding: { onParamsChange: vi.fn() },
+        })
+      ),
     );
   });
   await act(async () => {
