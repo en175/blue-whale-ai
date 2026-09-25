@@ -89,7 +89,12 @@ def read_state():
 
 def classify_releases(state, branches):
     if state is None:
-        return branches, [], []
+        dated = [(branch, release_date(branch)) for branch in branches]
+        newest = max((day for _, day in dated if day is not None), default=None)
+        latest_count = sum(day == newest for _, day in dated) if newest else 0
+        unclassified = [branch for branch, day in dated
+                        if day is None or (day == newest and latest_count > 1)]
+        return branches, [], unclassified
     active = state["active"]
     if not active.startswith("release/") or active not in branches:
         raise ReleaseError(f"已启用的 {active} 在远端不存在，状态不一致。")
@@ -380,6 +385,8 @@ def activate_locked(args):
         raise ReleaseError(f"目标发布线 {args.branch} 在远端不存在。")
     if args.bootstrap_existing and state is not None:
         raise ReleaseError("--bootstrap-existing 仅适用于首次启用。")
+    if state is not None and args.classify_legacy:
+        raise ReleaseError("--classify-legacy 仅适用于首次启用。")
     legacy_inventory = None
     if state is None:
         local_releases = set(git("for-each-ref", "--format=%(refname:lstrip=2)",
@@ -405,6 +412,10 @@ def activate_locked(args):
         others = sorted(x for x in all_releases if x != args.branch)
         if others and not args.adopt_legacy:
             raise ReleaseError("首次启用发现多条分支，请清点后显式传 --adopt-legacy：" + ", ".join(others))
+        unclassified = [name for name in others if release_date(name) in (None, target_date)]
+        if sorted(args.classify_legacy) != unclassified:
+            raise ReleaseError("首次启用有待归类分支：" + (", ".join(unclassified) or "无")
+                               + "；确认其为历史后逐个传 --classify-legacy <分支名>，或撤回分支。")
         if others:
             legacy_inventory = assert_closed(others, args.pr_snapshot,
                                              require_merged=False,
@@ -511,8 +522,11 @@ def main():
     parser.add_argument("--user-authorized", action="store_true")
     parser.add_argument("--pr-snapshot")
     parser.add_argument("--adopt-legacy", action="store_true")
+    parser.add_argument("--classify-legacy", action="append", default=[])
     parser.add_argument("--bootstrap-existing", action="store_true")
     args = parser.parse_args()
+    if args.classify_legacy and args.action != "activate":
+        raise ReleaseError("--classify-legacy 仅适用于 activate。")
     if args.count < 1:
         raise ReleaseError("--count 必须为正整数。")
     if args.action == "list":

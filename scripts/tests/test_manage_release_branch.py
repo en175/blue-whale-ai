@@ -270,6 +270,31 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertNotEqual(0, rejected.returncode)
         self.assertIn("日期最新", rejected.stderr)
 
+    def test_first_activation_requires_names_for_ambiguous_history(self):
+        active = "release/2026.09.29_当前发布验证"
+        same_day = "release/2026.09.29_同日发布验证"
+        undated = "release/prod"
+        for branch in (active, same_day, undated):
+            self.release(branch)
+        listed = self.command("list", "--json")
+        self.assertEqual(0, listed.returncode, listed.stderr)
+        self.assertEqual({active, same_day, undated},
+                         set(json.loads(listed.stdout)["unclassified"]))
+
+        rejected = self.command("activate", "--branch", active, "--adopt-legacy",
+                                "--user-authorized", "--pr-snapshot", self.snapshot())
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn(same_day, rejected.stderr)
+        self.assertIn(undated, rejected.stderr)
+        self.assertFalse(run("git", "ls-remote", "--heads", "origin",
+                             "refs/heads/chore/发布线状态记录", cwd=self.repo).stdout)
+
+        adopted = self.command("activate", "--branch", active, "--adopt-legacy",
+                               "--classify-legacy", same_day, "--classify-legacy", undated,
+                               "--user-authorized", "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, adopted.returncode, adopted.stderr)
+        self.assertEqual({same_day, undated}, set(json.loads(adopted.stdout)["legacy"]))
+
     def test_clean_merged_task_worktree_does_not_block_switch(self):
         old = "release/2026.09.24_旧版发布验证"
         new = "release/2026.09.29_新版发布验证"

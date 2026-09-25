@@ -334,10 +334,10 @@ export function validateReceipt(receipt, current) {
     return { valid: false, reason: "verification tier does not cover current risk" };
   }
   if (current.commands) {
-      const expectedPlan = buildVerificationPlan(receipt.classification, {
-        base: current.base,
-        pythonCommand: current.pythonCommand,
-      });
+    const expectedPlan = buildVerificationPlan(receipt.classification, {
+      base: current.base,
+      pythonCommand: current.pythonCommand,
+    });
     if (!commandsMatch(receipt.commands, expectedPlan)) {
       return { valid: false, reason: "verification plan does not match its classification" };
     }
