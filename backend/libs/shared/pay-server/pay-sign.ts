@@ -21,7 +21,31 @@
  * ============================================ */
 import { createHash } from "node:crypto";
 
-/** Java `String.CASE_INSENSITIVE_ORDER` 的等价实现（ASCII 足够——键值都是数字与标识符）。 */
+/**
+ * Java `String.CASE_INSENSITIVE_ORDER` 的等价实现（ASCII 足够——键值都是数字与标识符）。
+ *
+ * ⚠️ **必须逐字照抄 JDK 的分支结构，不能只抄「大意」**。JDK 的
+ * `String.CaseInsensitiveComparator.compare` 在内层是：
+ *
+ * ```java
+ * if (c1 != c2) {
+ *   c1 = toUpperCase(c1); c2 = toUpperCase(c2);
+ *   if (c1 != c2) {                       // ← 这里**不返回**
+ *     c1 = toLowerCase(c1); c2 = toLowerCase(c2);
+ *     if (c1 != c2) return c1 - c2;       // ← 返回的是**转小写之后**的差值
+ *   }
+ * }
+ * ```
+ *
+ * 曾经的实现在「大写不同」那一步就 `return` 了，于是返回的是**大写差值**。
+ * 两者在字母之间、以及在小于 `A` 的字符之间**结果相同**，但在
+ * 「非字母（`[ \ ] ^ _ \``，码位 91–96）对上字母」时**符号相反**——
+ * 因为转小写会把 65–90 的字母推到 97–122，跨过了那些非字母。
+ *
+ * <p>它今天没暴露：实际报文里的键全是 camelCase（`appId` / `amount` / `mchOrderNo`），
+ * 两种算法在这些键上给出同样的顺序。**一旦将来出现下划线与 camelCase 混排的键，
+ * 签名就会翻转**，而症状是一句无从下手的「验签失败」。有测试钉住这一点。
+ */
 function javaCaseInsensitiveCompare(a: string, b: string): number {
   const min = Math.min(a.length, b.length);
   for (let i = 0; i < min; i += 1) {
@@ -30,10 +54,11 @@ function javaCaseInsensitiveCompare(a: string, b: string): number {
     if (c1 === c2) continue;
     c1 = toUpperAscii(c1);
     c2 = toUpperAscii(c2);
-    if (c1 !== c2) return c1 - c2;
-    c1 = toLowerAscii(c1);
-    c2 = toLowerAscii(c2);
-    if (c1 !== c2) return c1 - c2;
+    if (c1 !== c2) {
+      c1 = toLowerAscii(c1);
+      c2 = toLowerAscii(c2);
+      if (c1 !== c2) return c1 - c2;
+    }
   }
   return a.length - b.length;
 }
