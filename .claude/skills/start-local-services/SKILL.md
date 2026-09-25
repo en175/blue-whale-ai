@@ -49,6 +49,28 @@ nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>
   DB 门控集成测试**（`BILLING_DB_PASSWORD` 一设它们就会跑）——`AdminApiIntegrationTest`
   的 `@BeforeEach` 会 `DELETE FROM billing_pricing_catalogs`，把这份目录清掉
 
+## ⚠️ 部署前必须做：预建 billing 的两个 MQ topic
+
+billing 的消费者订阅 `generation-job-completed` / `generation-job-failed`。
+**RocketMQ 的消费者不会自动建 topic** —— 订阅一个不存在的 topic 会以
+`No topic route info in name server` 失败，消费者 bean 造不出来，**整个 billing 起不来**。
+（生产者的发送会触发 autoCreate，但消费者先启动时等不到那一次发送。）
+
+**2026-09-25 实测 52 的 broker**：只有 `generation-task` / `generation-video`（worker 队列）
+与 pay 的 `QUEUE_PAY_ORDER_MCH_NOTIFY`，**这两个都没有**。也就是说 billing 一部署就会起不来。
+
+部署前建一次（一次性、幂等）：
+
+```bash
+ssh root@14.103.43.52
+docker exec rmq-broker /home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
+  -n 127.0.0.1:9876 -c DefaultCluster -t generation-job-completed
+docker exec rmq-broker /home/rocketmq/rocketmq-5.3.1/bin/mqadmin updateTopic \
+  -n 127.0.0.1:9876 -c DefaultCluster -t generation-job-failed
+```
+
+（topic 名的字符集限制见上面「计费服务」一节：**只能字母数字下划线连字符**，带点号会让服务直接起不来。）
+
 ## 后端 3100
 
 构建（必须完整跑完三段）：
