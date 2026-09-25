@@ -5,7 +5,6 @@ import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
 import { createAuthRepo, createUserInfoRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
 import {
@@ -90,7 +89,6 @@ export class AuthController {
   private smsInstance?: SmsProvider;
 
   constructor(
-    private readonly account: AccountService,
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
     private readonly limiter: RateLimiter,
@@ -317,15 +315,14 @@ export class AuthController {
   @Public()
   @Get("capabilities")
   async capabilities() {
-    try {
-      const capabilities = await this.account.getAccountCapabilities();
-      return ok({
-        password_login: capabilities.passwordLogin,
-        password_register: capabilities.passwordRegister,
-        email_verification: capabilities.emailVerification,
-      });
-    } catch (error) {
-      throw toAuthError(error);
-    }
+    // ★ 本地常量，不再探测 new-api 的 /api/status 开关。
+    //   口令登录与口令注册现在都由我们自己的库承载（identity_users + bcrypt），
+    //   能力不该再取决于上游配置：上游挂了也不该让登录入口从页面上消失。
+    //   email_verification（邮箱验证码注册）我们尚未实现，恒为 false。
+    return ok({
+      password_login: true,
+      password_register: true,
+      email_verification: false,
+    });
   }
 }

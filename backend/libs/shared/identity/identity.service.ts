@@ -13,7 +13,11 @@ import { createIdentityLoginLogRepo } from "@lib/shared/persistence/identity-log
 import { createAdminUserQuery, type AdminUserListOptions } from "@lib/shared/persistence/admin-user-query.js";
 import { createIdentityMembershipRepo } from "@lib/shared/persistence/identity-membership-repo.js";
 import { createIdentityRoleRepo } from "@lib/shared/persistence/identity-role-repo.js";
-import { createIdentityUserRepo } from "@lib/shared/persistence/identity-user-repo.js";
+import {
+  createIdentityUserRepo,
+  USER_STATUS_NORMAL,
+  type IdentityUserStatus,
+} from "@lib/shared/persistence/identity-user-repo.js";
 import {
   burnVerificationTime,
   hashPassword,
@@ -24,8 +28,8 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 /**
  * 本地登录的结果，形状对齐会话 payload（role/status 是数值）。
  *
- * <p>⚠️ 这里**没有令牌字段**。老的 `NewApiLoginResult.token` 是那个用户的 new-api
- * sk-，而 new-api 独立成上游之后，我们手上只有一把项目级的统一 key——
+ * <p>⚠️ 这里**没有令牌字段**。老的登录结果是「那个用户自己的 new-api sk-」，
+ * 而 new-api 独立成上游之后，我们手上只有一把项目级的统一 key——
  * 它属于部署配置，不属于某个人的登录结果。会话凭证由
  * {@code SessionService} 自己签发（`sess_` 不透明令牌）。
  */
@@ -184,6 +188,35 @@ export class IdentityService {
   }
 
   /**
+   * 修改口令 —— 校验原密码后写**我们自己的库**（`identity_users.password`）。
+   *
+   * <h2>为什么不再转发 new-api</h2>
+   *
+   * 原先这条走网关的 `PUT /api/user/self`，而会话里能回注的只有那把**项目级统一
+   * key**——等于拿一把跟这个用户无关的凭证去校验「原密码」。new-api 独立之后
+   * 那边更没有我们的用户，这条链路整个消失。
+   *
+   * <p>两处刻意：**先验原密码、再判新口令策略**（原密码就不对时，不该顺带告诉
+   * 调用方新口令合不合规）；以及原密码错误只报 {@link InvalidCredentialsError}——
+   * 与 {@link login} 同口径，不区分「账号没设过口令」和「密码错」。
+   *
+   * @throws InvalidCredentialsError 用户不存在 / 账号没有口令 / 原密码不匹配
+   * @throws PasswordPolicyError 新口令超过 bcrypt 的 72 字节上限
+   */
+  async changePassword(
+    userId: string | number,
+    input: { oldPassword: string; newPassword: string },
+  ): Promise<void> {
+    const user = await this.users.findById(String(userId));
+    if (!user || !(await verifyPassword(input.oldPassword, user.password))) {
+      throw new InvalidCredentialsError();
+    }
+    // hashPassword 内部做策略判定（超长即拒，不截断），失败时一个字节都不会落库。
+    const passwordHash = await hashPassword(input.newPassword);
+    await this.users.updatePassword(String(userId), passwordHash);
+  }
+
+  /**
    * 管理端用户列表 —— 读我们自己的库。
    *
    * <p>原先这条转发给 new-api，导致「管理员」有两个概念：进不进得了管理端看我们的角色表，
@@ -191,6 +224,22 @@ export class IdentityService {
    */
   async listAdminUsers(options: AdminUserListOptions) {
     return this.adminUsers.listAdminUsers(options);
+  }
+
+  /**
+   * 冻结 / 解冻账号 —— 写 `identity_users.status`。
+   *
+   * <p>原先这条和「加扣余额」挤在 new-api 的同一个 manage 接口里。new-api 独立后
+   * 这两件事必须分开：**状态是我们自己的账号属性，余额是计费域的事**——
+   * 所以这里只做前者，也不再需要一个上游凭证。
+   *
+   * @returns 目标用户不存在时 false（调用方应回 404，而不是静默成功）
+   */
+  async setUserStatus(
+    userId: string | number,
+    status: IdentityUserStatus,
+  ): Promise<boolean> {
+    return this.users.updateStatus(String(userId), status);
   }
 
   /** 该用户持有的角色 code（已排除软删的角色行）。 */
@@ -201,6 +250,32 @@ export class IdentityService {
   /** 是否具备管理员权限（持有 admin / super_admin 中任意一个）。 */
   async isAdmin(userId: string | number): Promise<boolean> {
     return this.roles.isAdmin(String(userId));
+  }
+
+  /**
+   * 会话复核用的授权状态快照：角色档位（`roleRank`）+ 账号状态（1 启用 / 0 停用）。
+   *
+   * <h2>为什么不直接用会话里那份</h2>
+   *
+   * 会话里的 role/status 是**登录那一刻**的快照。停用一个账号、或撤掉一个人的管理员角色，
+   * 不能让对方一直用到会话自然过期（最长 7 天），所以超时后要回源权威表复核。
+   *
+   * <p>⚠️ **判据只能是我们自己的库**。曾经的实现是拿会话里的 key 去问 new-api
+   * 「这把 key 的属主是谁」。那把 key 现在是**项目级统一 key**，返回的是统一 key 属主
+   * 一个人的 role/status——所有用户会塌缩成同一个账号的值，那位属主被禁用就是全站 403。
+   *
+   * <p>用户不存在（或已软删）时返回「停用 + 普通角色」而不是抛错：抛错会被调用方
+   * 当作「身份库不可达」而沿用缓存里的旧状态，于是一个已被删除的账号反而能继续用。
+   */
+  async resolveAccessState(
+    userId: string | number,
+  ): Promise<{ role: number; status: number }> {
+    const user = await this.users.findById(String(userId));
+    if (!user) return { role: roleRank([]), status: 0 };
+    return {
+      role: roleRank(await this.roles.listRoleCodes(user.id)),
+      status: user.status === USER_STATUS_NORMAL ? 1 : 0,
+    };
   }
 
   /** 授予角色。角色 code 不存在时由 repo 抛 {@link UnknownRoleError}。 */

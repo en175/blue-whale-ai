@@ -22,7 +22,7 @@ function makeContext(cookieValue?: string) {
 function makeGuard(opts: {
   isPublic?: boolean;
   resolveSession?: (token: string) => Promise<unknown>;
-  resolveIdentity?: () => Promise<unknown>;
+  resolveAccessState?: () => Promise<unknown>;
 } = {}) {
   const reflector = {
     getAllAndOverride: () => opts.isPublic ?? false,
@@ -31,10 +31,11 @@ function makeGuard(opts: {
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
   };
-  const account = {
-    resolveTokenIdentity: opts.resolveIdentity ?? (async () => ({ role: 1, status: 1 })),
+  const identity = {
+    resolveAccessState:
+      opts.resolveAccessState ?? (async () => ({ role: 1, status: 1 })),
   };
-  return new AuthGuard(reflector as never, sessions as never, account as never);
+  return new AuthGuard(reflector as never, sessions as never, identity as never);
 }
 
 const VALID_SESSION = {
@@ -101,7 +102,7 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     });
   });
 
-  it("needsRecheck=true 时回源 new-api 复核并回写，禁用立即 403", async () => {
+  it("needsRecheck=true 时回源身份库复核并回写，冻结立即 403", async () => {
     const update = vi.fn();
     const reflector = { getAllAndOverride: () => false };
     const sessions = {
@@ -112,14 +113,14 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
       }),
       updateSessionIdentity: update,
     };
-    const account = {
-      // 上游已禁用该账户
-      resolveTokenIdentity: async () => ({ role: 10, status: 0 }),
+    const identity = {
+      // 库里该账号已被冻结
+      resolveAccessState: async () => ({ role: 10, status: 0 }),
     };
     const guard = new AuthGuard(
       reflector as never,
       sessions as never,
-      account as never,
+      identity as never,
     );
     const { context } = makeContext("sess_abc");
     await expect(guard.canActivate(context as never)).rejects.toMatchObject({
@@ -128,11 +129,23 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     expect(update).toHaveBeenCalledWith("sess_abc", { role: 10, status: 0 });
   });
 
-  it("needsRecheck=true 但上游不可达 → 沿用缓存身份放行", async () => {
+  it("复核查的是会话里的 userId（统一 key 下 sk- 不再代表任何一个人）", async () => {
+    const resolveAccessState = vi.fn(async () => ({ role: 1, status: 1 }));
     const guard = makeGuard({
       resolveSession: async () => ({ ...VALID_SESSION, needsRecheck: true }),
-      resolveIdentity: async () => {
-        throw new Error("upstream down");
+      resolveAccessState,
+    });
+    const { context } = makeContext("sess_abc");
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveAccessState).toHaveBeenCalledWith(8);
+    expect(resolveAccessState).not.toHaveBeenCalledWith("sk-real");
+  });
+
+  it("needsRecheck=true 但身份库不可达 → 沿用缓存身份放行", async () => {
+    const guard = makeGuard({
+      resolveSession: async () => ({ ...VALID_SESSION, needsRecheck: true }),
+      resolveAccessState: async () => {
+        throw new Error("db down");
       },
     });
     const { context } = makeContext("sess_abc");

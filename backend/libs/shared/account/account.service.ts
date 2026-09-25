@@ -2,18 +2,19 @@ import { Injectable } from "@nestjs/common";
 import {
   createNewApiClient,
   NewApiError,
-  type NewApiAccountCapabilities,
-  type NewApiAccountIdentity,
-  type NewApiChangePasswordInput,
-  type NewApiLoginInput,
-  type NewApiLoginResult,
-  type NewApiRegisterInput,
   type NewApiUsage,
 } from "@lib/core";
 
 type NewApiClient = ReturnType<typeof createNewApiClient>;
 
-/** new-api 账户/充值出站 client 封装（懒加载，未配置 NEW_API_BASE_URL 时首次调用才抛）。 */
+/**
+ * new-api 出站 client 封装（懒加载，未配置 NEW_API_BASE_URL 时首次调用才抛）。
+ *
+ * <p>⚠️ 这里**只有账单与上游管理面**。用户身份（登录/注册/改密/身份复核/角色）与
+ * 账号状态全部走我们自己的库（`IdentityService`）：new-api 已经降级成「带一把统一
+ * key 的上游供应商」，它那边不再有我们的用户，任何以「这把 key 的属主」为前提的
+ * 读写在统一 key 下都只会得到同一个人的答案。
+ */
 @Injectable()
 export class AccountService {
   private clientInstance?: NewApiClient;
@@ -33,46 +34,10 @@ export class AccountService {
     return this.clientInstance;
   }
 
-  // —— 账户/鉴权 ——
-
-  /**
-   * @deprecated **零调用者**：登录已切到我们自己的库（`IdentityService.login`，
-   * bcrypt 校验 `identity_users.password`）。
-   *
-   * <p>new-api 从「我们的用户体系」变成「上游供应商」之后，它那边不再有我们的用户，
-   * 这个方法连不上了。留着是为了让「还有没有别处在用」有个明确答案——
-   * 而不是让它在某次 grep 里重新冒出来。
-   *
-   * <p>连同 `NewApiLoginResult` 一起删除的时机：确认新登录路径在测试站跑通之后。
-   */
-  login(input: NewApiLoginInput): Promise<NewApiLoginResult> {
-    return this.client.login(input);
-  }
-
-  /**
-   * @deprecated **零调用者**：注册已切到 `IdentityService.register`。
-   * 只切登录不切注册会让新用户注册进 new-api、登录查 identity_users——
-   * **注册完立刻登不上**，报的还是「用户名或密码错误」。
-   */
-  register(input: NewApiRegisterInput): Promise<NewApiLoginResult> {
-    return this.client.register(input);
-  }
-
-  resolveTokenIdentity(token: string): Promise<NewApiAccountIdentity> {
-    return this.client.resolveTokenIdentity(token);
-  }
-
-  getAccountCapabilities(): Promise<NewApiAccountCapabilities> {
-    return this.client.getAccountCapabilities();
-  }
+  // —— 账单：用量 / 消费流水 ——
 
   getTokenUsage(token: string): Promise<NewApiUsage> {
     return this.client.getTokenUsage(token);
-  }
-
-  /** 修改密码（IKBRCK）：校验原密码后写入新密码，透传网关 PUT /api/user/self。 */
-  changePassword(input: NewApiChangePasswordInput, token: string): Promise<void> {
-    return this.client.changePassword(input, token);
   }
 
   // —— 充值/消费记录 ——
@@ -167,18 +132,5 @@ export class AccountService {
 
   completeAdminTopUp(token: string, userId: number, tradeNo: string) {
     return this.client.completeAdminTopUp(token, userId, tradeNo);
-  }
-
-  manageAdminUser(
-    token: string,
-    userId: number,
-    input: {
-      id: number;
-      action: "disable" | "enable" | "add_quota";
-      value?: number;
-      mode?: "add" | "subtract";
-    },
-  ) {
-    return this.client.manageAdminUser(token, userId, input);
   }
 }

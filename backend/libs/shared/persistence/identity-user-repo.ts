@@ -24,6 +24,21 @@ export interface IdentityUserRow {
   password: string | null;
 }
 
+/**
+ * `identity_users.status` 的写入取值。
+ *
+ * <p>写成字面量联合而不是 `string`：冻结/解冻是**权限开关**，写错一个字母
+ * （比如 `"DISABLE"`）在库里会变成第三种状态，而判定处既不认它是启用、
+ * 也不认它是禁用——这种错编译期就该拦住。
+ *
+ * <p>读取侧仍按 `string` 处理（见 {@link IdentityUserRow.status}）：库里的存量行
+ * 可能来自迁移，把不认识的值一律按「非 NORMAL」对待是安全的默认。
+ */
+export type IdentityUserStatus = "NORMAL" | "DISABLED";
+
+export const USER_STATUS_NORMAL: IdentityUserStatus = "NORMAL";
+export const USER_STATUS_DISABLED: IdentityUserStatus = "DISABLED";
+
 export interface IdentityUserRepo {
   /**
    * 按登录名查（用户名或邮箱）。
@@ -49,6 +64,13 @@ export interface IdentityUserRepo {
   }): Promise<IdentityUserRow>;
   /** 写入口令哈希（注册 / 改密）。 */
   updatePassword(id: string, passwordHash: string): Promise<void>;
+  /**
+   * 写账号状态（管理端冻结 / 解冻）。
+   *
+   * @returns 目标行不存在时 false —— 让调用方能回 404，
+   *          而不是把「没这个用户」报成 500。
+   */
+  updateStatus(id: string, status: IdentityUserStatus): Promise<boolean>;
 }
 
 /** 用户名已被占用。 */
@@ -133,17 +155,41 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
         data: { password: passwordHash, gmt_modified: new Date() },
       });
     },
+
+    async updateStatus(id, status) {
+      try {
+        await prisma.identity_users.update({
+          where: { id: BigInt(id) },
+          data: { status, gmt_modified: new Date() },
+        });
+        return true;
+      } catch (error) {
+        if (isRecordNotFound(error)) return false;
+        throw error;
+      }
+    },
   };
 }
 
 /** Prisma 的唯一约束冲突码。 */
 const UNIQUE_VIOLATION = "P2002";
 
+/** Prisma 的「目标行不存在」码（update/delete 找不到 where 命中的行）。 */
+const RECORD_NOT_FOUND = "P2025";
+
 function isUniqueViolation(error: unknown): boolean {
+  return hasPrismaCode(error, UNIQUE_VIOLATION);
+}
+
+function isRecordNotFound(error: unknown): boolean {
+  return hasPrismaCode(error, RECORD_NOT_FOUND);
+}
+
+function hasPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: unknown }).code === UNIQUE_VIOLATION
+    (error as { code?: unknown }).code === code
   );
 }

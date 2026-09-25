@@ -1,12 +1,14 @@
 import { Body, Controller, Get, Headers, OnModuleInit, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { ok } from "@lib/contracts";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import { toUpstreamError } from "@lib/shared/errors/upstream-error.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { readCollectToken, warnIfCollectTokenMissing } from "./collect-token.js";
 
 const WAY_CODE_BY_METHOD: Record<string, string> = {
@@ -73,6 +75,7 @@ export class RechargeController implements OnModuleInit {
   @Post("order")
   async order(
     @Body() body: { tier_id?: unknown; payment_method?: unknown },
+    @CurrentUser() user: AuthenticatedUser,
     @Headers("authorization") authorization?: string,
   ) {
     const token = parseBearerToken(authorization);
@@ -120,10 +123,12 @@ export class RechargeController implements OnModuleInit {
     }
 
     try {
-      const identity = await this.account.resolveTokenIdentity(token);
+      // ⚠️ 下单归属的 userId 取自**本地会话**。原先这里拿会话里的 sk- 去问
+      //    new-api「这把 key 属主是谁」，而 sk- 现在是项目级统一 key——
+      //    问出来的永远是同一个属主，等于所有人的充值都记在那一个账号名下。
       const order = await this.account.createCollectTopUp({
         collectToken,
-        userId: identity.userId,
+        userId: Number(user.userId),
         money: tier.price,
         amount,
         wayCode,

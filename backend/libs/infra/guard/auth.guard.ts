@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NewApiError } from "@lib/core";
 import type { Request, Response } from "express";
-import { AccountService } from "@lib/shared/account/account.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -22,14 +22,14 @@ type RequestWithUser = Request & { user: AuthenticatedUser };
  * （`bw_session`），BFF 本地校验会话后把真实 `sk-...` 回注请求头，下游业务接口
  * 继续以 `Bearer sk-...` 自解析、代打 new-api，无需逐处改动。
  * - 每次鉴权刷新 cookie maxAge，与 Redis 7 天滑动 TTL 对齐（活跃用户不踢）
- * - role/status 超 ROLE_STATUS_RECHECK_MS 回源 new-api 复核，账户禁用/降权近实时生效
+ * - role/status 超 ROLE_STATUS_RECHECK_MS 回源**我们自己的身份库**复核，冻结/降权近实时生效
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionService,
-    private readonly account: AccountService,
+    private readonly identity: IdentityService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -57,22 +57,23 @@ export class AuthGuard implements CanActivate {
       throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
     }
 
-    // role/status 定期复核（账户禁用/降权近实时生效；new-api 不可达时沿用缓存身份，不阻断请求）
+    // role/status 定期复核（冻结/降权近实时生效；我方身份库不可达时沿用缓存身份，不阻断请求）
     if (session.needsRecheck) {
       try {
-        const identity = await this.account.resolveTokenIdentity(session.sk);
+        // ⚠️ 复核的是**会话里的 userId**，不是会话里的 sk——那把 key 是项目级统一
+        //    key，拿它去问上游只会问出统一 key 属主一个人的 role/status。
+        const { role, status } = await this.identity.resolveAccessState(
+          session.userId,
+        );
         session = {
           ...session,
-          role: identity.role,
-          status: identity.status,
+          role,
+          status,
           needsRecheck: false,
         };
-        await this.sessions.updateSessionIdentity(token, {
-          role: identity.role,
-          status: identity.status,
-        });
+        await this.sessions.updateSessionIdentity(token, { role, status });
       } catch {
-        // 上游不可达：沿用缓存 role/status
+        // 身份库不可达：沿用缓存 role/status
       }
     }
     if (session.status !== ENABLED_STATUS) {

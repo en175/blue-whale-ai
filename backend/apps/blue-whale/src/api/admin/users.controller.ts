@@ -12,9 +12,7 @@ import { NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
 import {
-  mapAdminUser,
   parsePageParam,
   parsePageSizeParam,
 } from "@lib/shared/account/admin-mapper.js";
@@ -22,18 +20,18 @@ import { OperationLogService } from "@lib/shared/operation-log/operation-log.ser
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import {
+  USER_STATUS_DISABLED,
+  USER_STATUS_NORMAL,
+} from "@lib/shared/persistence/identity-user-repo.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 const USER_MANAGE_ACTIONS = new Set(["freeze", "unfreeze", "adjustBalance"]);
 
-/** IK9VZ0：管理端「调整积分」输入按积分（展示口径统一），转 Go add_quota 前换算 quota：1 积分 = 50,000 quota。 */
-const CREDITS_TO_QUOTA_MULTIPLIER = 50_000;
-
 const ACTION_LOG_MAP: Record<string, string> = {
   freeze: "user.freeze",
   unfreeze: "user.unfreeze",
-  adjustBalance: "user.adjust_balance",
 };
 
 @Controller("admin/users")
@@ -43,7 +41,6 @@ export class AdminUsersController {
 
   constructor(
     private readonly identity: IdentityService,
-    private readonly account: AccountService,
     private readonly operationLog: OperationLogService,
     private readonly sessions: SessionService,
   ) {}
@@ -114,11 +111,15 @@ export class AdminUsersController {
 
     try {
       if (action === "freeze") {
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "disable",
-        });
-        // 上游 disable 成功后再踢会话（禁用先行，最小化并发登录窗口）。
+        // ★ 冻结 = 写我们自己的库（identity_users.status）。
+        //   原先转发 new-api 的 manage 接口，而 new-api 独立后那边不再有我们的用户；
+        //   而且那条链路要求「调用者在 new-api 那边也是管理员」——查得到列表却冻不了人。
+        const found = await this.identity.setUserStatus(
+          userId,
+          USER_STATUS_DISABLED,
+        );
+        if (!found) throw new AdminException(404, "用户不存在");
+        // 状态落库成功后再踢会话（禁用先行，最小化并发登录窗口）。
         try {
           revokedSessions = await this.sessions.revokeAllForUser(userId);
         } catch (error) {
@@ -126,32 +127,24 @@ export class AdminUsersController {
           this.logger.error(
             `freeze user=${userId} session revoke failed: ${revokeError}`,
           );
-          // best-effort：上游 disable 已保证禁登录/禁继续用（≤5min 复核兜底），
+          // best-effort：状态禁用已保证禁登录/禁继续用（≤5min 复核兜底），
           // 会话清除失败不阻断冻结，落在审计里可见。
         }
       } else if (action === "unfreeze") {
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "enable",
-        });
-      } else {
-        // IK9VZ0：value 语义为积分（管理员输入，与展示口径一致）→ 换算 quota 后调 Go add_quota。
-        const valueCredits = Number(body.value);
-        if (!Number.isFinite(valueCredits) || valueCredits === 0) {
-          throw new AdminException(400, "value 须为非零数值（单位：积分）");
-        }
-        const valueQuota = Math.abs(
-          Math.round(valueCredits * CREDITS_TO_QUOTA_MULTIPLIER),
+        const found = await this.identity.setUserStatus(
+          userId,
+          USER_STATUS_NORMAL,
         );
-        if (valueQuota === 0) {
-          throw new AdminException(400, "value 换算后为 0，请确认输入");
-        }
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "add_quota",
-          value: valueQuota,
-          mode: valueCredits > 0 ? "add" : "subtract",
-        });
+        if (!found) throw new AdminException(404, "用户不存在");
+      } else {
+        // ⚠️ adjustBalance（加扣余额）**尚未实现**：它属于计费域，等 billing 接过
+        //    用户维度的余额账本后由那边提供。这里显式报错而不是：
+        //    - 转发 new-api（它已经不认识我们的用户，转发只会 404/乱扣）；
+        //    - 静默返回成功（管理员会以为钱已经加上去了——这是最坏的一种）。
+        throw new AdminException(
+          501,
+          "调整积分尚未开放：计费域接入后提供",
+        );
       }
     } catch (error) {
       if (error instanceof AdminException) throw error;
@@ -166,7 +159,6 @@ export class AdminUsersController {
         targetUserId: String(userId),
         detail: JSON.stringify({
           reason,
-          ...(action === "adjustBalance" ? { value: Number(body.value) } : {}),
           ...(action === "freeze"
             ? { revokedSessions, ...(revokeError ? { revokeError } : {}) }
             : {}),
@@ -179,7 +171,7 @@ export class AdminUsersController {
       // best-effort 审计，失败不阻断
     }
 
-    // freeze 额外返回吊销会话数，供前端展示（其余 action 维持 data: null）。
+    // freeze 额外返回吊销会话数，供前端展示（unfreeze 维持 data: null）。
     return {
       success: true,
       data: action === "freeze" ? { revokedSessions } : null,

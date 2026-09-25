@@ -278,7 +278,7 @@ describe("new-api client —— X-Trace-Id 出站透传（IK6KQQ）", () => {
         return jsonResponse({ success: true, data: {} });
       },
     });
-    await client.getAccountCapabilities();
+    await client.getTokenLogs("sk-x");
     expect(captured).not.toBeNull();
     return captured!;
   }
@@ -310,7 +310,7 @@ describe("new-api client —— traceIdProvider（IK73EV）", () => {
         return jsonResponse({ success: true, data: {} });
       },
     });
-    await runWithTraceId("trace-ctx", () => client.getAccountCapabilities());
+    await runWithTraceId("trace-ctx", () => client.getTokenLogs("sk-x"));
     expect(captured!.get("X-Trace-Id")).toBe("trace-from-bff");
   });
 
@@ -325,7 +325,7 @@ describe("new-api client —— traceIdProvider（IK73EV）", () => {
         return jsonResponse({ success: true, data: {} });
       },
     });
-    await runWithTraceId("trace-ctx-fallback", () => client.getAccountCapabilities());
+    await runWithTraceId("trace-ctx-fallback", () => client.getTokenLogs("sk-x"));
     expect(captured!.get("X-Trace-Id")).toBe("trace-ctx-fallback");
   });
 
@@ -339,7 +339,7 @@ describe("new-api client —— traceIdProvider（IK73EV）", () => {
         return jsonResponse({ success: true, data: {} });
       },
     });
-    await client.getAccountCapabilities();
+    await client.getTokenLogs("sk-x");
     expect(captured!.get("X-Trace-Id")).toMatch(/^[0-9]+-[0-9a-f]{16}$/);
   });
 });

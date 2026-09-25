@@ -5,7 +5,7 @@ import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.
 
 /** 会话 7 天滑动过期（Redis TTL）。 */
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
-/** role/status 距上次复核超过该时长则回源 new-api 复核（账户禁用/降权近实时生效）。 */
+/** role/status 距上次复核超过该时长则由 AuthGuard 回源**我们自己的身份库**复核（冻结/降权近实时生效）。 */
 const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
 
 export interface ResolvedSession {
@@ -16,7 +16,7 @@ export interface ResolvedSession {
   email: string | null;
   /** 上游执行凭证（sk-，修正四：明文），AuthGuard 回注请求头代打 new-api。 */
   sk: string;
-  /** role/status 是否已过期、需要回源 new-api 复核。 */
+  /** role/status 是否已过期、需要回源**我们自己的身份库**复核。 */
   needsRecheck: boolean;
 }
 
@@ -28,7 +28,7 @@ type SessionPayload = {
   email: string | null;
   /** 上游 sk-（修正四：明文存 Redis，不再 AES 密封）。 */
   sk: string;
-  /** role/status 最近一次回源 new-api 复核的时间戳（ms）。 */
+  /** role/status 最近一次回源复核的时间戳（ms）。 */
   verifiedAt: number;
 };
 

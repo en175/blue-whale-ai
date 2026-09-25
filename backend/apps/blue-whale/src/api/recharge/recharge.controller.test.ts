@@ -22,13 +22,6 @@ const TIER = {
 
 function createController() {
   const account = {
-    resolveTokenIdentity: vi.fn().mockResolvedValue({
-      userId: 42,
-      username: "alice",
-      email: null,
-      status: 1,
-      role: 1,
-    }),
     createCollectTopUp: vi.fn().mockResolvedValue({
       tradeNo: "BWP9",
       payData: "weixin://pay/qr",
@@ -42,6 +35,9 @@ function createController() {
   const controller = new RechargeController(account as never, topupTier as never);
   return { controller, account, topupTier };
 }
+
+/** 下单归属的用户取自本地会话（统一 key 下 sk- 不再代表任何一个人）。 */
+const USER = { userId: "42", username: "alice" } as never;
 
 describe("RechargeController.order（IKBXLN 代收）", () => {
   beforeEach(() => {
@@ -58,7 +54,7 @@ describe("RechargeController.order（IKBXLN 代收）", () => {
   it("没有 Bearer 令牌就 401，不调代收", async () => {
     const { controller, account } = createController();
     await expect(
-      controller.order({ tier_id: "tier-1", payment_method: "wechat" }),
+      controller.order({ tier_id: "tier-1", payment_method: "wechat" }, USER),
     ).rejects.toMatchObject({ status: 401 });
     expect(account.createCollectTopUp).not.toHaveBeenCalled();
   });
@@ -69,13 +65,13 @@ describe("RechargeController.order（IKBXLN 代收）", () => {
     await expect(
       controller.order(
         { tier_id: "tier-1", payment_method: "wechat" },
+        USER,
         "Bearer sk-user",
       ),
     ).rejects.toMatchObject({
       status: 503,
       message: "下单服务不可用",
     });
-    expect(account.resolveTokenIdentity).not.toHaveBeenCalled();
     expect(account.createCollectTopUp).not.toHaveBeenCalled();
     expect(account.requestTopUpAmount).not.toHaveBeenCalled();
   });
@@ -84,9 +80,9 @@ describe("RechargeController.order（IKBXLN 代收）", () => {
     const { controller, account } = createController();
     const result = await controller.order(
       { tier_id: "tier-1", payment_method: "wechat" },
+      USER,
       "Bearer sk-user",
     );
-    expect(account.resolveTokenIdentity).toHaveBeenCalledWith("sk-user");
     expect(account.createCollectTopUp).toHaveBeenCalledWith({
       collectToken: "secret-collect",
       userId: 42,
@@ -117,6 +113,7 @@ describe("RechargeController.order（IKBXLN 代收）", () => {
     await expect(
       controller.order(
         { tier_id: "tier-1", payment_method: "alipay" },
+        USER,
         "Bearer sk-user",
       ),
     ).rejects.toMatchObject({

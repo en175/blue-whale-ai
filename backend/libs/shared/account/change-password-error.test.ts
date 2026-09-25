@@ -1,10 +1,24 @@
 // IKBQEE / ADR-0078：账号域错误投影单测——网关英文/中文 message 归一为账号域数值码 + 中文。
+// 改密本地化后，同一张投影表还要接住本地口令策略错误（类型判定，文案用它自己的口径）。
 import { describe, expect, it } from "vitest";
 
 import { NewApiError } from "@lib/core";
+import { PasswordPolicyError } from "@lib/shared/identity/password.js";
 import { projectAccountError } from "./change-password-error.js";
 
 describe("projectAccountError", () => {
+  it("本地口令超长（PasswordPolicyError）→ 1102，文案是 bcrypt 的 72 字节口径", () => {
+    const out = projectAccountError(
+      new PasswordPolicyError("密码过长（72 字节上限，一个汉字算 3 字节）"),
+      "修改密码失败",
+    );
+    // 不复用网关那句「新密码需为 8-20 位」——我们已经不是那个规则了。
+    expect(out).toEqual({
+      code: 1102,
+      message: "密码过长（72 字节上限，一个汉字算 3 字节）",
+    });
+  });
+
   it("网关英文原密码错误 → 1101 原密码错误，请重试", () => {
     const out = projectAccountError(
       new NewApiError("Original password is incorrect", 400),

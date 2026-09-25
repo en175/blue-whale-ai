@@ -59,7 +59,6 @@ import { NewApiError } from "@lib/core";
 import { afterEach, beforeEach } from "vitest";
 import { ACCOUNT_LOCKED } from "@lib/contracts";
 import type { Response } from "express";
-import type { AccountService } from "@lib/shared/account/account.service.js";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
@@ -105,7 +104,6 @@ afterEach(() => {
 function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
-  const account = { login: vi.fn(), register: vi.fn() };
   const sessions = { createSession: vi.fn(async () => "session-token") };
   // IKF YHJ：登录成功后写 user_info（执行凭证）；缺 mock 时旁路抛错被吞，不影响登录。
   const prisma = { client: { user_info: { upsert: vi.fn(async () => ({})) } } };
@@ -118,7 +116,6 @@ function setup() {
     register: vi.fn(),
   };
   const controller = new AuthController(
-    account as unknown as AccountService,
     prisma as unknown as PrismaService,
     sessions as unknown as SessionService,
     limiter,
@@ -343,6 +340,22 @@ describe("AuthController 登录日志", () => {
 
     await expect(controller.login(LOGIN_BODY, res)).resolves.toMatchObject({ data: expect.anything() });
     expect(res.cookie).toHaveBeenCalled();
+  });
+});
+
+describe("AuthController capabilities（本地常量）", () => {
+  it("口令登录/注册恒支持、邮箱验证恒不支持——不再探测上游开关", async () => {
+    // 这两种能力现在都由我们自己的库承载，上游挂了也不该让登录入口从页面消失。
+    const { controller } = setup();
+    await expect(controller.capabilities()).resolves.toEqual({
+      code: 200,
+      msg: null,
+      data: {
+        password_login: true,
+        password_register: true,
+        email_verification: false,
+      },
+    });
   });
 });
 

@@ -9,6 +9,7 @@ import {
   accountErrorToNumeric,
   accountMessageFor,
 } from "@lib/contracts";
+import { PasswordPolicyError } from "@lib/shared/identity/password.js";
 
 export interface ProjectedAccountError {
   code: number;
@@ -16,8 +17,11 @@ export interface ProjectedAccountError {
 }
 
 /**
- * 上游错误 → 账号域 {code, message}。
- * - 按网关英文/中文关键词归类到账号域错误码（每错一码）；
+ * 账号自助链路上的错误 → 账号域 {code, message}。
+ * - 本地口令策略错误（超长）按**类型**归类：它的中文 message 里没有 invalid/length
+ *   这类关键词，靠正则归类会掉进 1100 兜底；文案用错误自己的（口径是 bcrypt 的
+ *   72 字节上限，不是网关那句「8–20 位」）。
+ * - 其余按关键词归类到账号域错误码（每错一码）；
  * - 无法归类的未知错误兜底 1100 + 调用方 fallback 中文。
  * 归类顺序：密码格式（invalid/length/format）先于原密码错误（incorrect），
  * 避免 "New password length is incorrect" 这类同时含两词的消息被误判成原密码错误。
@@ -27,6 +31,12 @@ export function projectAccountError(
   error: unknown,
   fallbackMessage: string,
 ): ProjectedAccountError {
+  if (error instanceof PasswordPolicyError) {
+    return {
+      code: accountErrorToNumeric(ACCOUNT_ERROR_PASSWORD_INVALID),
+      message: error.message,
+    };
+  }
   const text =
     error instanceof Error ? error.message : String(error ?? "");
   const pick = (code: string) => ({

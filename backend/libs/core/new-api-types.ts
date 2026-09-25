@@ -10,51 +10,6 @@ export interface NewApiClientOptions {
   traceIdProvider?: () => string | null | Promise<string | null>;
 }
 
-export interface NewApiLoginInput {
-  username: string;
-  password: string;
-}
-
-export interface NewApiRegisterInput {
-  username: string;
-  password: string;
-  email?: string;
-  verificationCode?: string;
-}
-
-/** PUT /api/user/self 改密入参（IKBRCK）。网关侧为多用途更新接口：
- *  只改密码必须同时传 original_password + password，否则被当作其他字段更新而静默不生效。
- *  originalPassword = 原密码；newPassword = 新密码（8–20 位，网关事实源）。 */
-export interface NewApiChangePasswordInput {
-  originalPassword: string;
-  newPassword: string;
-}
-
-export interface NewApiLoginResult {
-  token: string;
-  userId: number | null;
-  username: string | null;
-  email?: string | null;
-  /** new-api 用户角色（≥10 管理员）；缺省按普通用户 1 处理。 */
-  role: number;
-  /** new-api 用户状态（1 启用）；缺省按启用处理。 */
-  status: number;
-}
-
-export interface NewApiAccountCapabilities {
-  passwordLogin: boolean;
-  passwordRegister: boolean;
-  emailVerification: boolean;
-}
-
-export interface NewApiAccountIdentity {
-  userId: number;
-  username: string;
-  email: string | null;
-  status: number;
-  role: number;
-}
-
 export interface NewApiUsage {
   userQuota: number;
   raw: unknown;
