@@ -114,9 +114,10 @@ function currentScope({ baseRef, risk, stage }) {
   const python = plannedCommands.some((command) => command[0] === "python3")
     ? pythonForVerification()
     : null;
-  const commands = plannedCommands.map((command) => command[0] === "python3"
-    ? [...python.command, ...command.slice(1)]
-    : command);
+  const commands = buildVerificationPlan(classification, {
+    base,
+    pythonCommand: python?.command,
+  });
   const environment = verificationEnvironment(python);
   const inputHash = createHash("sha256")
     .update(JSON.stringify(environment))
@@ -131,6 +132,7 @@ function currentScope({ baseRef, risk, stage }) {
     changedFilesHash,
     classification,
     commands,
+    pythonCommand: python?.command,
     environment,
     inputHash,
   };
