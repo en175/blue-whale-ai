@@ -77,7 +77,7 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 
 ## Task Worktree
 
-- 只读任务不要求 Work Tree；可写任务在任何写入前必须从主 checkout 运行（散文文档例外见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）：
+- 只读任务不要求 Work Tree；可写任务在任何写入前必须从主 checkout 运行（散文文档同此，见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）：
   `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。
 - 入口要求本地 `master` 干净，fetch 后融合本地与远程历史，再从同步后的精确 SHA 创建 Work Tree，固定在 `../blue-whale-worktrees/`。
 - 本地领先时保留本地提交；远程领先时 fast-forward；分叉时普通 merge；冲突自动 abort 且不创建 Work Tree。
@@ -85,7 +85,7 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 - 子 issue 完成即直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review；用户确认环节在提 PR 前。
 - 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后直接 `scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/*]`（推送工单分支 + 创建 PR）。**PR 审合前不合入 master——本地集成区同理，不提前吃未审代码**；本地 `master` 在 Gitee 服务端合并后由开工入口同步自动获得。旧「先合本地 master 再提 PR」步骤废止，`merge-task-to-local-master.sh` 降为 legacy 入口（彻底下线另见治理工单）。
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
-- **散文文档例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑根 `CONTEXT.md` + `docs/**/*.md` 时，AI 可在本地 master 直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘，不需 Work Tree；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须 Work Tree。
+- **散文文档（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）**：根 `CONTEXT.md` + `docs/**/*.md` 曾可在本地 master 直改并由 `commit-spec-on-master.sh` 落盘；该直提通道 **2026-09-10 已废止**（与上条「本地集成区不提前吃未审内容」冲突），散文文档现与代码同路：`--type docs --no-issue` Work Tree → `commit-task-for-review.sh` → 授权后 `publish-review-package.sh --user-authorized --create-pr`（工程面 docs/chore 直进 master，见「发布分支（Release）流程」节）。规则源（`.claude/`）、代码、`docs/**/*.json` 契约一如此路。
 - **本地个人配置例外（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）**：仅根 `CLAUDE.local.md` 与 `.codex/config.toml` 在 `git check-ignore` 确认已忽略时可由 Agent 在本地 master 直改；不得暂存、提交或输出其中凭证。其他 ignored 文件不在例外内。
 
 ## 同族工单串行与契约先行

@@ -5,7 +5,7 @@
 ## 定位
 
 - 与 `docs/projects/`（需求/验收）、`docs/specs/`（规格契约）、`docs/adr/`（决策）并列的产品文档归档区
-- 属于散文文档（ADR-0025 例外区）：产品侧可直接在 master 直改，落盘走 `scripts/commit-spec-on-master.sh`
+- 属于散文文档：与代码同路——走 `--type docs` task worktree 分支落盘，不得在本地 master 直改（原 ADR-0025 直提通道 2026-09-10 已废止，见该 ADR 修正一）
 - 非代码：不含可执行代码、构建产物；技能内容仅定义与素材
 
 ## 目录约定
