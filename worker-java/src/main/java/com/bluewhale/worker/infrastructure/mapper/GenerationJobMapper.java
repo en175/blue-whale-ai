@@ -178,6 +178,15 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * SET status='succeeded', progress=100, next_action_at=null, next_poll_at=null,
      *     lease_owner=null, lease_expires_at=null, version=version+1
      * WHERE id = ? AND status = 'processing' AND lease_owner = ? AND fencing_token = ?
+     * <p>
+     * <b>取消登记与结果发布的并发口径（IKIHGR，audio_mix 复审补记；与 video 家族同口径）</b>：
+     * 取消登记（backend {@code requestCancel} 仅 queued/processing 可登记，置
+     * {@code cancel_requested_at}）与本发布在最后窗口并发时，先生效的终态获胜——本 CAS
+     * 先落 succeeded，取消登记即因任务已终态而落空，任务保持成功（succeeded 优先）；
+     * 产物已真实生成，属已接受取舍而非丢取消缺陷，同款表述见
+     * {@link #cancelVideoAfterDispatch}。用户删卡触发取消时若任务已抢先成功，前端
+     * CanvasPage {@code deleteGeneratingNode} 有「任务已完成，已停止删除」兜底提示
+     * （{@code stopWithCompleted}）。
      */
     @Update("""
             UPDATE generation_jobs
