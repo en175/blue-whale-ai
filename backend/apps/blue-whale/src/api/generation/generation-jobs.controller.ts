@@ -1,4 +1,4 @@
-import { billingEndpoint, createBillingClient, enforceHold } from "@lib/shared/billing/billing-client.js";
+import { billingEndpoint, createBillingClient } from "@lib/shared/billing/billing-client.js";
 import { createBillingHold } from "@lib/shared/billing/billing-hold.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
@@ -48,26 +48,24 @@ export class GenerationJobsController {
   /**
    * 预扣依赖（懒建一次）。
    *
-   * <p>两种情况下**不接线**：`BILLING_GRPC_URL` 未配置、或 `BILLING_ENFORCE_HOLD` 未开。
-   * 后者是默认 —— 切换前 billing 一旦真扣，new-api 那边还在扣，用户会被扣两遍
-   * （《迁移与切换 runbook》§3.1）。等断 sk- 链的同一个发布窗口再打开。
+   * <p>⚠️ **必接，没有「不接线」的分支**。曾经有两种情况会跳过接线：`BILLING_GRPC_URL`
+   * 未配置、或 `BILLING_ENFORCE_HOLD` 未开——那都是 new-api 还在替我们扣钱时期的产物。
+   * new-api 已被切断，跳过接线就等于**白送一次生成**，而且没有任何报错。
+   *
+   * <p>地址缺失由 {@link billingEndpoint} 当场抛（并已在启动期拦过一道），
+   * 所以这里不需要判空。
    */
-  private billingHoldDep?: ReturnType<typeof createBillingHold> | null;
+  private billingHoldDep?: ReturnType<typeof createBillingHold>;
 
   private billingHold() {
     if (this.billingHoldDep === undefined) {
-      const endpoint = billingEndpoint();
-      this.billingHoldDep =
-        endpoint && enforceHold()
-          ? createBillingHold({
-              client: createBillingClient(endpoint),
-              resolveTier: (userId) => this.identity.resolveTier(userId),
-              enforce: true,
-              logger,
-            })
-          : null;
+      this.billingHoldDep = createBillingHold({
+        client: createBillingClient(billingEndpoint()),
+        resolveTier: (userId) => this.identity.resolveTier(userId),
+        logger,
+      });
     }
-    return this.billingHoldDep ?? undefined;
+    return this.billingHoldDep;
   }
 
   /** IKF YHJ：造素材校验状态门（ADR-0087）。生产判定逻辑在 `material-gate-wiring.ts`，
@@ -144,9 +142,8 @@ export class GenerationJobsController {
         assets: this.command.assets,
         materialGate: this.buildMaterialGate(user.userId, authorization),
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
-        // ⚠️ 先取到局部变量再条件展开：exactOptionalPropertyTypes 下
-        //    直接写 `...(f() ? { k: f() } : {})` 会得到 `k: T | undefined`，不被接受
-        ...(holdDep ? { billingHold: holdDep } : {}),
+        // 预扣必然存在（见 billingHold 的说明），不再做条件展开
+        billingHold: holdDep,
       },
       internal,
     );

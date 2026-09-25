@@ -21,8 +21,6 @@ export interface BillingHoldDeps {
   client: BillingClient;
   /** 用户等级（identity 域）。取不到时返回 free —— 保守方向：不打折，不会多让利 */
   resolveTier: (userId: string) => Promise<string>;
-  /** 是否真的预扣。false 时整条路径是空操作（见 billing-client 的 DEFAULT_ENFORCE） */
-  enforce: boolean;
   logger?: { warn: (message: string) => void };
 }
 
@@ -51,11 +49,6 @@ export function createBillingHold(
   deps: BillingHoldDeps,
 ): (ctx: BillingHoldContext) => Promise<void> {
   return async (ctx) => {
-    if (!deps.enforce) {
-      // 切换前：路径接好了但**不扣钱**。一旦真扣，new-api 那边还在扣 → 用户被扣两遍。
-      return;
-    }
-
     let tier = 'free';
     try {
       tier = await deps.resolveTier(ctx.userId);
@@ -71,6 +64,9 @@ export function createBillingHold(
 
     // 抛出的异常原样冒泡：余额不足 → 提交被拒；billing 不可用 → 提交被拒（fail closed）。
     // 在事务里抛 = 整体回滚，不会留下「建了 job 但没冻钱」。
+    //
+    // ⚠️ **这条路径没有「跳过预扣」的分支**，也不该有：new-api 已被切断，我们不再有第二个
+    //    扣费方。任何让这里变成空操作的开关都等于一条静默的免费通道。
     await deps.client.hold({
       userId: Number(ctx.userId),
       commandId: ctx.commandId,

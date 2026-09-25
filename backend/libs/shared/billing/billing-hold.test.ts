@@ -19,25 +19,11 @@ const CTX: BillingHoldContext = {
 };
 
 describe('createBillingHold', () => {
-  it('★ enforce=false 时完全不调 billing —— 切换前不能扣，否则和 new-api 一起扣两遍', async () => {
+  it('★ 按上下文调 hold —— 没有「跳过预扣」的分支', async () => {
     const { client, hold } = fakeClient();
     const dep = createBillingHold({
       client,
       resolveTier: vi.fn().mockResolvedValue('pro'),
-      enforce: false,
-    });
-
-    await dep(CTX);
-
-    expect(hold).not.toHaveBeenCalled();
-  });
-
-  it('enforce=true 时按上下文调 hold', async () => {
-    const { client, hold } = fakeClient();
-    const dep = createBillingHold({
-      client,
-      resolveTier: vi.fn().mockResolvedValue('pro'),
-      enforce: true,
     });
 
     await dep(CTX);
@@ -56,7 +42,7 @@ describe('createBillingHold', () => {
 
   it('规格只取标量、键统一小写（对象/数组/空值不进规格）', async () => {
     const { client, hold } = fakeClient();
-    const dep = createBillingHold({ client, resolveTier: vi.fn(), enforce: true });
+    const dep = createBillingHold({ client, resolveTier: vi.fn() });
 
     await dep(CTX);
 
@@ -73,7 +59,6 @@ describe('createBillingHold', () => {
     const dep = createBillingHold({
       client,
       resolveTier: vi.fn().mockRejectedValue(new Error('identity 挂了')),
-      enforce: true,
       logger: { warn },
     });
 
@@ -88,7 +73,7 @@ describe('createBillingHold', () => {
     const { client } = fakeClient({
       hold: vi.fn().mockRejectedValue(new Error('INSUFFICIENT_CREDITS')),
     } as never);
-    const dep = createBillingHold({ client, resolveTier: vi.fn(), enforce: true });
+    const dep = createBillingHold({ client, resolveTier: vi.fn() });
 
     await expect(dep(CTX)).rejects.toThrow('INSUFFICIENT_CREDITS');
   });
@@ -100,7 +85,6 @@ describe('createBillingHold', () => {
     const dep = createBillingHold({
       client,
       resolveTier: vi.fn().mockRejectedValue(new Error('identity 挂了')),
-      enforce: true,
       logger: { warn: vi.fn() },
     });
 
