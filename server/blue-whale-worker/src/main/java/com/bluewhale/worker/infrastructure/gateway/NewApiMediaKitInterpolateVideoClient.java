@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
@@ -58,12 +59,7 @@ public class NewApiMediaKitInterpolateVideoClient extends NewApiMediaKitAsyncTas
      */
     static final String MODEL = "mediakit-video-frame-interpolation";
 
-    public NewApiMediaKitInterpolateVideoClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitInterpolateVideoClient(String baseUrl) {
+    public NewApiMediaKitInterpolateVideoClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

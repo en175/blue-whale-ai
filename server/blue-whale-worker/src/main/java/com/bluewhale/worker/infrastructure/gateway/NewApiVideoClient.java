@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -79,20 +80,10 @@ public class NewApiVideoClient {
     private final OkHttpClient pollClient;
     private final String baseUrl;
 
-    public NewApiVideoClient(String baseUrl) {
-        this(baseUrl, null);
-    }
-
-    /** 测试用构造器：注入共享 httpClient（null = 自建）。 */
-    NewApiVideoClient(String baseUrl, OkHttpClient sharedClient) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
-        if (sharedClient != null) {
-            this.submitClient = sharedClient;
-            this.pollClient = sharedClient;
-        } else {
-            this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
-            this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
-        }
+    public NewApiVideoClient(UpstreamBaseUrl baseUrl) {
+        this.baseUrl = baseUrl.normalized();
+        this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
+        this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
     }
 
     /**

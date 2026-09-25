@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.error.AudioTrimError;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -58,12 +59,7 @@ public class NewApiMediaKitTrimAudioClient extends NewApiMediaKitAsyncTaskClient
      */
     static final String MODEL = "mediakit-trim-audio";
 
-    public NewApiMediaKitTrimAudioClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitTrimAudioClient(String baseUrl) {
+    public NewApiMediaKitTrimAudioClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

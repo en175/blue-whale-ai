@@ -10,6 +10,7 @@ import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.contract.JobTypeEnum;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -31,6 +32,7 @@ import java.lang.reflect.RecordComponent;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.mock;
  * <ul>
  *   <li>缺 {@code ROCKETMQ_ENDPOINTS} → 启动中止且失败信息点名该变量；</li>
  *   <li>缺 {@code DATABASE_URL} → 启动中止且失败信息点名该变量；</li>
+ *   <li>缺 {@code NEW_API_BASE_URL} → 装配期失败且失败信息点名该变量；</li>
  *   <li>缺 {@code NEW_API_UPSTREAM_KEY}（项目级统一 key，ADR-0114）→ 启动中止且失败信息点名该变量；</li>
  *   <li>视频 tag 在「消费侧订阅值 / 处理器声明值 / 路由表」三处一致；</li>
  *   <li>{@link GenerationMqRouteEnum} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
@@ -53,15 +56,14 @@ class StartupContractTest {
      * 装配 RocketMqConfig 所需的全部 processor 假体。
      * 本测试只关心配置校验路径，processor 行为无关。
      * <p>
-     * 本 runner 的上下文里只有 {@link RocketMqConfig}：另外 5 个网关客户端
-     * （audio / image / image_enhance / image_erase / image_cutout）是 {@code @Component}，不在此 runner 中扫描，
-     * 且它们各自读 {@code System.getenv}——Spring 属性喂不到它们。这里需要 baseUrl 的只有
-     * {@link RocketMqConfig} 自己声明的 {@code newApiVideoClient} 这一个客户端，
-     * 故 {@code NEW_API_BASE_URL} 置哑值只为让它的构造期校验先通过，使 MQ 校验成为唯一失败点。
+     * 本 runner 的上下文里只有 {@link RocketMqConfig} 与 {@link NewApiUpstreamConfig}：
+     * 其余网关客户端是 {@code @Component}，不在此 runner 中扫描；它们需要的地址由
+     * {@link NewApiUpstreamConfig#newApiBaseUrl} 这一个 bean 提供，故 {@code NEW_API_BASE_URL}
+     * 置哑值只为让它先装配成功，使 MQ 校验成为唯一失败点。
      * 往本 runner 添新客户端时须同步补它的启动期依赖，否则失败点会前移。
      */
     private final ApplicationContextRunner mqRunner = new ApplicationContextRunner()
-            .withUserConfiguration(RocketMqConfig.class)
+            .withUserConfiguration(RocketMqConfig.class, NewApiUpstreamConfig.class)
             .withBean(MediaExtractJobProcessor.class, () -> mock(MediaExtractJobProcessor.class))
             .withBean(AudioJobProcessor.class, () -> mock(AudioJobProcessor.class))
             .withBean(ImageJobProcessor.class, () -> mock(ImageJobProcessor.class))
@@ -121,6 +123,9 @@ class StartupContractTest {
      * <p>
      * 缺它为什么必须中止启动：素材状态定时跟进每 5s 一轮，拿空 key 会一直以
      * {@code Bearer } 打网关收 401——报错点离原因很远，且表现为「静默什么都不做」。
+     * <p>
+     * 地址显式喂进去：同一配置类里的地址守卫（{@link NewApiUpstreamConfig#newApiBaseUrl}）
+     * 装配在先，不喂它就会抢先把失败点顶掉，让本用例验不到 key。
      */
     @Test
     @DisplayName("NEW_API_UPSTREAM_KEY 缺失 → 启动中止，失败信息点名 NEW_API_UPSTREAM_KEY")
@@ -132,6 +137,7 @@ class StartupContractTest {
 
         new ApplicationContextRunner()
                 .withUserConfiguration(NewApiUpstreamConfig.class)
+                .withPropertyValues(NewApiUpstreamConfig.ENV_BASE_URL + "=http://new-api.invalid")
                 .run(ctx -> {
                     Throwable failure = ctx.getStartupFailure();
                     assertThat(failure).as("缺 NEW_API_UPSTREAM_KEY 必须中止启动").isNotNull();
@@ -139,6 +145,55 @@ class StartupContractTest {
                             .as("失败信息必须点名 NEW_API_UPSTREAM_KEY，实际：%s", failure)
                             .isTrue();
                 });
+    }
+
+    /**
+     * 上游地址的非空守卫：**类型自己的不变式**（{@link UpstreamBaseUrl} 构造器），不靠装配处自觉。
+     * <p>
+     * 为什么必须在装配期就失败：地址是这个进程唯一的上游入口（ADR-0114 决策 7），拿空串继续跑
+     * 只会让每次调用拼出 {@code /v1/...} 这样没有 host 的 URL——报错点离原因很远。
+     * 与 MQ / DB / 统一 key 同属硬门槛（ADR-0084 决策 2 四套配置齐备才允许启动）。
+     * <p>
+     * 直调 bean 方法而非起 runner：{@code NewApiUpstreamConfig} 里的统一 key 走
+     * {@code System.getenv}，runner 里无法注入，装配顺序会让失败点漂到 key 守卫上；
+     * 这里用属性源替身把地址守卫单独钉死。
+     */
+    @Test
+    @DisplayName("NEW_API_BASE_URL 缺失/空白 → 装配期抛 IllegalStateException 且点名该变量")
+    void missingBaseUrlAbortsStartup() {
+        // 不变式在载体上：任何路径拿到地址都过这道关（含直接构造，不经装配）
+        assertThatThrownBy(() -> new UpstreamBaseUrl(null))
+                .as("空值必须被拒")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(NewApiUpstreamConfig.ENV_BASE_URL);
+        assertThatThrownBy(() -> new UpstreamBaseUrl("   "))
+                .as("纯空白同样必须被拒")
+                .isInstanceOf(IllegalStateException.class);
+
+        // 装配路径：属性源里是空串 / 空白 → bean 装配期即失败（进而不启动）
+        assertThatThrownBy(() -> new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("")))
+                .as("空串必须被拒（不返回空串继续跑）")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(NewApiUpstreamConfig.ENV_BASE_URL);
+        assertThatThrownBy(() -> new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("   ")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("NEW_API_BASE_URL 齐备 → 地址 bean 装配成功，拼路径前去尾斜杠（口径不变）")
+    void baseUrlPresentAssemblesBean() {
+        assertThat(new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("http://new-api.invalid/"))
+                .normalized())
+                .as("尾斜杠必须剥掉，否则拼出 //v1")
+                .isEqualTo("http://new-api.invalid");
+    }
+
+    /** 地址 bean 的属性源替身（MapPropertySource 优先级高于 systemEnvironment，与跑测试的 shell 无关）。 */
+    private static StandardEnvironment baseUrlEnv(String baseUrl) {
+        StandardEnvironment env = new StandardEnvironment();
+        env.getPropertySources().addFirst(new MapPropertySource("test",
+                Map.of(NewApiUpstreamConfig.ENV_BASE_URL, baseUrl)));
+        return env;
     }
 
     @Test

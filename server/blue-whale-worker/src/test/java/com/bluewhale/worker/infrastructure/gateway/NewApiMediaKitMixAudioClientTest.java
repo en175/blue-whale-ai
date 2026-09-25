@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -42,7 +43,7 @@ class NewApiMediaKitMixAudioClientTest {
 
     @Test
     void submitsOrderedAudioUrlsWithExplicitFormat() {
-        var client = new NewApiMediaKitMixAudioClient(baseUrl);
+        var client = new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl));
         String taskId = client.submit("sk-token", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3");
         assertThat(taskId).isEqualTo("task-9");
         assertThat(requestPath.get()).isEqualTo(AudioMixContract.SUBMIT_PATH);
@@ -54,7 +55,7 @@ class NewApiMediaKitMixAudioClientTest {
     @Test
     void pollsTaskResultWithDurationInSeconds() {
         response.set("{\"status\":\"completed\",\"result\":{\"audio_url\":\"https://temporary/out.mp3\",\"duration\":12.5}}");
-        var observation = new NewApiMediaKitMixAudioClient(baseUrl).poll("sk-token", "task-9");
+        var observation = new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "task-9");
         assertThat(requestPath.get()).isEqualTo(AudioMixContract.POLL_PATH_PREFIX + "task-9");
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl()).isEqualTo("https://temporary/out.mp3");
@@ -66,7 +67,7 @@ class NewApiMediaKitMixAudioClientTest {
         status.set(400);
         response.set("{\"success\":false,\"request_id\":\"req-mix-77\",\"error\":{\"code\":\"InvalidParameter\",\"message\":\"bad audio_urls\"}}");
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                new NewApiMediaKitMixAudioClient(baseUrl).submit("sk-token",
+                new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).submit("sk-token",
                         List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .hasMessageContaining("bad audio_urls")
                 .hasMessageContaining("req-mix-77");
@@ -76,7 +77,7 @@ class NewApiMediaKitMixAudioClientTest {
     void submitWithoutTaskIdStillRetainsRequestId() {
         response.set("{\"success\":false,\"task_id\":null,\"request_id\":\"req-mix-no-task\"}");
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                new NewApiMediaKitMixAudioClient(baseUrl).submit("sk-token",
+                new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).submit("sk-token",
                         List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .hasMessageContaining("缺少 task_id")
                 .hasMessageContaining("req-mix-no-task");
@@ -85,7 +86,7 @@ class NewApiMediaKitMixAudioClientTest {
     @Test
     void completedResponseKeepsRequestIdEvenWithoutAudioResult() {
         response.set("{\"status\":\"completed\",\"request_id\":\"req-mix-88\",\"result\":{}}");
-        var observation = new NewApiMediaKitMixAudioClient(baseUrl).poll("sk-token", "task-9");
+        var observation = new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "task-9");
         assertThat(observation.requestId()).isEqualTo("req-mix-88");
         assertThat(observation.audioUrl()).isNull();
     }
@@ -94,7 +95,7 @@ class NewApiMediaKitMixAudioClientTest {
     void malformedQueryResponseRetainsRequestId() {
         response.set("{\"request_id\":\"req-mix-no-status\",\"result\":{}}");
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                new NewApiMediaKitMixAudioClient(baseUrl).poll("sk-token", "task-9"))
+                new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "task-9"))
                 .hasMessageContaining("缺少 status")
                 .hasMessageContaining("req-mix-no-status");
     }

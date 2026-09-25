@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioSpeedContract;
 import com.bluewhale.worker.domain.error.AudioSpeedError;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -57,12 +58,7 @@ public class NewApiMediaKitAdjustAudioSpeedClient extends NewApiMediaKitAsyncTas
      */
     static final String MODEL = "mediakit-adjust-audio-speed";
 
-    public NewApiMediaKitAdjustAudioSpeedClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitAdjustAudioSpeedClient(String baseUrl) {
+    public NewApiMediaKitAdjustAudioSpeedClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

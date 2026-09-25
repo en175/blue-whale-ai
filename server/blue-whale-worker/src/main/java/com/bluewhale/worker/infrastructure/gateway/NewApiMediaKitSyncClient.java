@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.fasterxml.jackson.databind.JsonNode;
 import okhttp3.OkHttpClient;
@@ -35,16 +36,19 @@ import static com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitJsonSupp
  * </ul>
  * <p>
  * 超时是族变化轴（env 名与默认值各族不同），由子类解析后经构造器传入——基类不塌缩
- * （刀③ NewApiHttpSupport 同款口径）。鉴权头 / baseUrl / OkHttp 装配复用
- * {@link NewApiHttpSupport}，无类型 JSON 工具复用 {@link NewApiMediaKitJsonSupport}。
+ * （刀③ NewApiHttpSupport 同款口径）。baseUrl 与 OkHttp 实例同样由子类传入：地址的唯一
+ * 读取点是 {@link UpstreamBaseUrl}（装配在 {@code NewApiUpstreamConfig}），
+ * OkHttp 实例经 {@link NewApiHttpSupport#buildClient} 从全进程共享原型派生
+ * （连接池 / 线程池复用，只有超时是本实例的）。鉴权头复用 {@link NewApiHttpSupport}，
+ * 无类型 JSON 工具复用 {@link NewApiMediaKitJsonSupport}。
  */
 abstract class NewApiMediaKitSyncClient {
 
     protected final String baseUrl;
     private final OkHttpClient httpClient;
 
-    protected NewApiMediaKitSyncClient(String baseUrl, int timeoutMs) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+    protected NewApiMediaKitSyncClient(UpstreamBaseUrl baseUrl, int timeoutMs) {
+        this.baseUrl = baseUrl.normalized();
         this.httpClient = NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
     }
 

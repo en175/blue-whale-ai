@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
@@ -1239,7 +1240,7 @@ class JobStateMachineMySqlIntegrationTest {
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
             var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(),
-                    new NewApiMediaKitMixAudioClient(base.get()), relay, producer);
+                    new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
 
             processor.handle(String.valueOf(jobId));
             assertThat(readJob(jobId).getProviderTaskId()).isEqualTo("mix-task-1");

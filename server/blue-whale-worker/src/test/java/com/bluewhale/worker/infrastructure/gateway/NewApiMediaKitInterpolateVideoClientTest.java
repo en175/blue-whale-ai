@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
@@ -77,7 +78,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
     }
 
     private String callSubmit(int fps) {
-        return new NewApiMediaKitInterpolateVideoClient(baseUrl).submit(
+        return new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/src.mp4", fps);
     }
 
@@ -217,7 +218,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         InterpolateVideoTaskObservation observation =
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -238,7 +239,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         InterpolateVideoTaskObservation observation =
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.videoUrl()).isNull();
@@ -253,7 +254,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 + "\"message\":\"The 'fps' parameter is out of range [15, 120]\"}}");
 
         InterpolateVideoTaskObservation observation =
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("InvalidParameter");
@@ -268,7 +269,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 + "\"resolution\":\"2k\",\"fps\":120}}}");
 
         InterpolateVideoTaskObservation observation =
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.videoUrl()).isEqualTo("https://volc/out.mp4");
@@ -284,7 +285,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(thrown).isInstanceOf(VideoFrameInterpolationError.class);
         VideoFrameInterpolationError error = (VideoFrameInterpolationError) thrown;
@@ -299,7 +300,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-task-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(((VideoFrameInterpolationError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);
@@ -312,7 +313,7 @@ class NewApiMediaKitInterpolateVideoClientTest {
                 + "\"result\":{\"duration\":12.0,\"resolution\":\"1080p\",\"fps\":60}}");
 
         InterpolateVideoTaskObservation observation =
-                new NewApiMediaKitInterpolateVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitInterpolateVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.videoUrl()).isNull();

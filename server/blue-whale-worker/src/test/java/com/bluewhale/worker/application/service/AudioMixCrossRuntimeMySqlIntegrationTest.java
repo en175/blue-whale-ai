@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.processor.AudioMixJobProcessor;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -164,7 +165,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
             var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(),
-                    new NewApiMediaKitMixAudioClient(base.get()), relay, producer);
+                    new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
             processor.handle(jobId);
             assertThat(readJob(Long.parseLong(jobId)).getProviderTaskId()).isEqualTo("cross-task-1");
             var json = new com.fasterxml.jackson.databind.ObjectMapper();

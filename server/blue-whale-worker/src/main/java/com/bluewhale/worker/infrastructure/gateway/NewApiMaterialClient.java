@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
@@ -27,8 +28,9 @@ import java.util.UUID;
  * 请求头：标准三元组走 {@link NewApiHttpSupport}（Authorization: Bearer + X-Trace-Id +
  * X-Client-System: bluewhale）。
  * <p>
- * 与图片/视频/音频客户端的差异：本类<b>不在构造期校验 baseUrl</b>。定时跟进不是 tag 消费，
- * 缺配置时每轮跳过 + 首次告警一次，不阻断跟进循环。
+ * 地址口径与图片/视频/音频客户端**一致**：{@link UpstreamBaseUrl} 自校验非空，缺配置在装配期
+ * 就起不来（ADR-0084 决策 2），本类不再有「缺配置每轮跳过」的形态——那个分支在 prod 里早已
+ * 不可达（地址 bean 装配在先），留着只会让人以为「缺地址是被允许的」。
  */
 @Component
 public class NewApiMaterialClient {
@@ -43,18 +45,10 @@ public class NewApiMaterialClient {
 
     private final String baseUrl;
     private final OkHttpClient httpClient;
-    /** 缺配置只告警一次（每 5s 一轮，避免刷屏）。 */
-    private boolean missingBaseUrlLogged;
 
-    public NewApiMaterialClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL（null/空 = 未配置形态）。 */
-    public NewApiMaterialClient(String baseUrl) {
-        this.baseUrl = baseUrl == null || baseUrl.isBlank()
-                ? null
-                : baseUrl.replaceAll("/+$", "");
+    /** 注入上游地址（唯一读取点：{@code NewApiUpstreamConfig#newApiBaseUrl}）。 */
+    public NewApiMaterialClient(UpstreamBaseUrl baseUrl) {
+        this.baseUrl = baseUrl.normalized();
         this.httpClient = NewApiHttpSupport.buildClient(
                 CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS, READ_TIMEOUT_MS);
     }
@@ -87,13 +81,6 @@ public class NewApiMaterialClient {
      * @throws IllegalArgumentException token 或 materialId 为空（调用方 bug，不该静默）
      */
     public MaterialStatusResult getAsset(String token, String materialId) {
-        if (baseUrl == null) {
-            if (!missingBaseUrlLogged) {
-                missingBaseUrlLogged = true;
-                log.warn("素材状态跟进跳过：NEW_API_BASE_URL 未配置");
-            }
-            return null;
-        }
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("token 不能为空");
         }
@@ -168,20 +155,11 @@ public class NewApiMaterialClient {
     /**
      * 删除上游素材（IKFYHJ：上游判定失败时的清理动作）。
      * <p>
-     * 与 {@link #getAsset} 同样的「缺配置不抛」口径——本类不是 tag 消费；缺 baseUrl 时按
-     * 返回值处理，不外抛。区别是这里把失败**当返回值**（false）而不是 null：调用方要决定是否记日志，
-     * 但都不能因此中断跟进循环。
+     * 失败**当返回值**（false）而不是抛：调用方要决定是否记日志，但不能因此中断跟进循环。
      *
      * @return true = 上游确认删除成功（2xx）
      */
     public boolean deleteAsset(String token, String materialId) {
-        if (baseUrl == null) {
-            if (!missingBaseUrlLogged) {
-                missingBaseUrlLogged = true;
-                log.warn("素材清理跳过：NEW_API_BASE_URL 未配置");
-            }
-            return false;
-        }
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("token 不能为空");
         }

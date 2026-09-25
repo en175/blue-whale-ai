@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoSubmitInput;
@@ -79,7 +80,7 @@ class NewApiVideoClientEndpointTest {
                         new VideoReference("audio", "asset://asset-audio-1", null)),
                 null);
 
-        SubmitResult result = new NewApiVideoClient(baseUrl).submit("t", input);
+        SubmitResult result = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
         assertThat(result.taskId()).isEqualTo("task-1");
         assertThat(lastPath.get()).isEqualTo("/v1/video/generations");
@@ -106,20 +107,20 @@ class NewApiVideoClientEndpointTest {
     @Test
     @DisplayName("IKG0LP：generateAudio true/false 下发 metadata.generate_audio；null 则完全不下发")
     void generateAudioDispatchedOnlyWhenPresent() throws Exception {
-        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
                 null, null, List.of(), Boolean.TRUE));
         assertThat(JSON.readTree(lastBody.get()).get("metadata").get("generate_audio").asBoolean())
                 .isTrue();
 
-        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
                 null, null, List.of(), Boolean.FALSE));
         assertThat(JSON.readTree(lastBody.get()).get("metadata").get("generate_audio").asBoolean())
                 .isFalse();
 
         // 能力位不允许（或旧快照）→ null → 字段缺席，维持上游默认
-        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
                 null, null, List.of(), null));
         assertThat(JSON.readTree(lastBody.get()).get("metadata").has("generate_audio")).isFalse();
@@ -133,7 +134,7 @@ class NewApiVideoClientEndpointTest {
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
                 null);
 
-        new NewApiVideoClient(baseUrl).submit("t", input);
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
         JsonNode body = JSON.readTree(lastBody.get());
         assertThat(body.get("duration").asDouble()).isEqualTo(-1.0);
@@ -148,7 +149,7 @@ class NewApiVideoClientEndpointTest {
     @DisplayName("TEMP FIX 边界：无参考视频的 seedance-2-5、或其他模型带参考视频 → 原值不动")
     void seedance25OverrideOnlyWhenVideoReferencePresent() throws Exception {
         // 只有图片参考（含首尾帧）→ 不触发
-        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("image", "https://tos.test/a.png", null)),
                 null));
@@ -157,7 +158,7 @@ class NewApiVideoClientEndpointTest {
         assertThat(imageOnly.get("metadata").get("ratio").asText()).isEqualTo("16:9");
 
         // 其他 model id 带参考视频 → 不触发
-        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
                 "doubao-seedance-2-0-260128", "把杯子换成红色", 5.0, "720p", "16:9", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
                 null));
@@ -175,7 +176,7 @@ class NewApiVideoClientEndpointTest {
                 List.of(new VideoReference("image", "https://tos.test/ref.png", null)),
                 null);
 
-        new NewApiVideoClient(baseUrl).submit("t", input);
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input);
 
         JsonNode content = JSON.readTree(lastBody.get()).get("metadata").get("content");
         assertThat(content).hasSize(3);
@@ -201,7 +202,7 @@ class NewApiVideoClientEndpointTest {
         });
 
         VideoTaskObservation observation =
-                new NewApiVideoClient(baseUrl).poll("t", "task-2048");
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-2048");
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.error()).isNotNull();
         assertThat(observation.error().code()).isEqualTo("content_rejected_reference");
@@ -224,7 +225,7 @@ class NewApiVideoClientEndpointTest {
         });
 
         VideoTaskObservation observation =
-                new NewApiVideoClient(baseUrl).poll("t", "task-sensitive");
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-sensitive");
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.error()).isNotNull();
         assertThat(observation.error().code()).isEqualTo("content_rejected");
@@ -246,7 +247,7 @@ class NewApiVideoClientEndpointTest {
         });
 
         VideoTaskObservation observation =
-                new NewApiVideoClient(baseUrl).poll("t", "task-merge");
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-merge");
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.error()).isNotNull();
         // 合并信号里 copyright 优先于 quota → 1038

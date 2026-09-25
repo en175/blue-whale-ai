@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -70,7 +71,7 @@ class NewApiMaterialClientTest {
     @Test
     @DisplayName("请求形状：路径 + body + 标准头三元组；Status 透传")
     void sendsExpectedRequestAndParsesStatus() {
-        MaterialStatusResult result = new NewApiMaterialClient(baseUrl)
+        MaterialStatusResult result = new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl))
                 .getAsset("sk-user9", "asset-abc");
 
         assertThat(lastPath.get()).isEqualTo("/api/material/GetAsset");
@@ -90,7 +91,7 @@ class NewApiMaterialClientTest {
                 {"Result":{"Id":"asset-abc","Status":"Failed",
                  "Error":{"Code":"InvalidParameter","Message":"人脸不清晰"}}}""");
 
-        MaterialStatusResult result = new NewApiMaterialClient(baseUrl)
+        MaterialStatusResult result = new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl))
                 .getAsset("sk-user9", "asset-abc");
 
         assertThat(result).isNotNull();
@@ -105,7 +106,7 @@ class NewApiMaterialClientTest {
         responseCode.set(502);
         responseBody.set("{\"ResponseError\":{\"Code\":\"BadGateway\"}}");
 
-        assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-abc")).isNull();
+        assertThat(new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl)).getAsset("sk-user9", "asset-abc")).isNull();
     }
 
     @Test
@@ -113,7 +114,7 @@ class NewApiMaterialClientTest {
     void responseErrorEnvelopeReturnsNull() {
         responseBody.set("{\"ResponseError\":{\"Code\":\"InvalidAction\",\"Message\":\"素材不存在\"}}");
 
-        assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-abc")).isNull();
+        assertThat(new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl)).getAsset("sk-user9", "asset-abc")).isNull();
     }
 
     @Test
@@ -121,7 +122,7 @@ class NewApiMaterialClientTest {
     void nonJsonReturnsNull() {
         responseBody.set("<html>502</html>");
 
-        assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-abc")).isNull();
+        assertThat(new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl)).getAsset("sk-user9", "asset-abc")).isNull();
     }
 
     @Test
@@ -129,20 +130,13 @@ class NewApiMaterialClientTest {
     void missingStatusReturnsNull() {
         responseBody.set("{\"Result\":{\"Id\":\"asset-abc\"}}");
 
-        assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-abc")).isNull();
-    }
-
-    @Test
-    @DisplayName("NEW_API_BASE_URL 未配置 → null 而非抛错（安全拉起形态不能被跟进打挂）")
-    void missingBaseUrlReturnsNull() {
-        assertThat(new NewApiMaterialClient((String) null).getAsset("sk-user9", "asset-abc")).isNull();
-        assertThat(new NewApiMaterialClient("  ").getAsset("sk-user9", "asset-abc")).isNull();
+        assertThat(new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl)).getAsset("sk-user9", "asset-abc")).isNull();
     }
 
     @Test
     @DisplayName("token/materialId 为空是调用方 bug，直接抛（不静默成「本轮未知」）")
     void blankArgumentsThrow() {
-        NewApiMaterialClient client = new NewApiMaterialClient(baseUrl);
+        NewApiMaterialClient client = new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl));
 
         assertThatThrownBy(() -> client.getAsset("", "asset-abc"))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -160,7 +154,7 @@ class NewApiMaterialClientTest {
                 {"ResponseError":{"Code":"NotFound.asset_id",
                  "Message":"The specified asset asset-x is not found."}}""");
 
-        MaterialStatusResult result = new NewApiMaterialClient(baseUrl)
+        MaterialStatusResult result = new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl))
                 .getAsset("sk-user9", "asset-x");
 
         assertThat(result).isNotNull();
@@ -181,7 +175,7 @@ class NewApiMaterialClientTest {
         }) {
             responseCode.set(401);
             responseBody.set(body);
-            assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-x"))
+            assertThat(new NewApiMaterialClient(new UpstreamBaseUrl(baseUrl)).getAsset("sk-user9", "asset-x"))
                     .as("body=%s", body)
                     .isNull();
         }

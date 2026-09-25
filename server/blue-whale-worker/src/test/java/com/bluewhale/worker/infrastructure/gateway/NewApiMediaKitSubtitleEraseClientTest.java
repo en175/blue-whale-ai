@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
@@ -88,7 +89,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
     }
 
     private String callSubmit(String detectMode, List<Map<String, Object>> boxes) {
-        return new NewApiMediaKitSubtitleEraseClient(baseUrl).submit(
+        return new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/src.mp4", detectMode, boxes);
     }
 
@@ -242,7 +243,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 + "\"finished_at\":1777291851,\"request_id\":\"req-4\"}");
 
         SubtitleEraseTaskObservation observation =
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get()).isEqualTo("/v1/mediakit/tasks/amk-task-1");
@@ -260,7 +261,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         SubtitleEraseTaskObservation observation =
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.videoUrl()).isNull();
@@ -273,7 +274,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 + "\"error\":{\"code\":\"VideoParseFailed\",\"message\":\"输入视频解析失败\"}}");
 
         SubtitleEraseTaskObservation observation =
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("VideoParseFailed");
@@ -287,7 +288,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
                 + "\"result\":{\"video_url\":\"https://volc/out.mp4\",\"duration\":12.0}}}");
 
         SubtitleEraseTaskObservation observation =
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.videoUrl()).isEqualTo("https://volc/out.mp4");
@@ -300,7 +301,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(thrown).isInstanceOf(VideoSubtitleEraseError.class);
         VideoSubtitleEraseError error = (VideoSubtitleEraseError) thrown;
@@ -315,7 +316,7 @@ class NewApiMediaKitSubtitleEraseClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-task-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitSubtitleEraseClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitSubtitleEraseClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(((VideoSubtitleEraseError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);

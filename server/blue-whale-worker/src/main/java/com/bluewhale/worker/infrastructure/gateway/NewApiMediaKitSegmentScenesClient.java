@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
@@ -69,12 +70,7 @@ public class NewApiMediaKitSegmentScenesClient extends NewApiMediaKitAsyncTaskCl
     /** 对客模型名（契约常量单源：网关渠道路由 + model_price 配 0 免费口径）。 */
     static final String MODEL = VideoSceneSplitContract.MODEL_NAME;
 
-    public NewApiMediaKitSegmentScenesClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitSegmentScenesClient(String baseUrl) {
+    public NewApiMediaKitSegmentScenesClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

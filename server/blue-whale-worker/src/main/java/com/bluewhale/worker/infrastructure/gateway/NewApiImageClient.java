@@ -1,6 +1,8 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +16,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -76,18 +79,21 @@ public class NewApiImageClient {
     private final OkHttpClient sourceImageClient;
     private final String baseUrl;
 
-    public NewApiImageClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL，超时走 env/默认。 */
-    NewApiImageClient(String baseUrl) {
+    /**
+     * 装配用构造器：地址来自唯一出口（{@code NewApiUpstreamConfig#newApiBaseUrl}）。
+     * <p>
+     * ⚠️ 必须显式 {@code @Autowired}：本类另有一个包内可见的超时注入构造器，Spring 对「多个
+     * 构造器且都未注解」的类会退回默认构造器——本类没有，于是装配期直接
+     * {@code No default constructor found}（{@code NewApiUpstreamWiringTest} 钉住）。
+     */
+    @Autowired
+    public NewApiImageClient(UpstreamBaseUrl baseUrl) {
         this(baseUrl, loadTimeoutMs());
     }
 
-    /** 测试用构造器：注入读/写超时（毫秒）。 */
-    NewApiImageClient(String baseUrl, int timeoutMs) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+    /** 注入读/写超时（毫秒）：测试用（毫秒级窗口验超时语义）。 */
+    NewApiImageClient(UpstreamBaseUrl baseUrl, int timeoutMs) {
+        this.baseUrl = baseUrl.normalized();
 
         this.httpClient = NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
         this.sourceImageClient = NewApiHttpSupport.buildClient(10_000, SOURCE_IMAGE_TIMEOUT_MS, SOURCE_IMAGE_TIMEOUT_MS);
@@ -420,16 +426,7 @@ public class NewApiImageClient {
     }
 
     private static int loadTimeoutMs() {
-        String raw = System.getenv("NEW_API_IMAGE_TIMEOUT_MS");
-        if (raw != null) {
-            try {
-                int n = Integer.parseInt(raw);
-                if (n > 0) return n;
-            } catch (NumberFormatException e) {
-                log.debug("NEW_API_IMAGE_TIMEOUT_MS 解析失败，使用默认值: {}", e.getMessage());
-            }
-        }
-        return DEFAULT_TIMEOUT_MS;
+        return NewApiUpstreamConfig.timeoutMs("NEW_API_IMAGE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     }
 
     /** 下载好的参考图（字节 + 类型 + multipart 文件名）。 */

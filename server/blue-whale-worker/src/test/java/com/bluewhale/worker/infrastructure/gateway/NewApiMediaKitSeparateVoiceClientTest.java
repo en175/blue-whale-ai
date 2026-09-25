@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
@@ -79,7 +80,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
     }
 
     private String callSubmit(String scene, String outputFormat) {
-        return new NewApiMediaKitSeparateVoiceClient(baseUrl).submit(
+        return new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/source_video.mp4", true, scene, outputFormat);
     }
 
@@ -112,7 +113,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
     @Test
     @DisplayName("纯音频源 → 出站 audio_url（官方双协议输入二选一），不发 video_url")
     void submitAudioSourceUsesAudioUrl() {
-        new NewApiMediaKitSeparateVoiceClient(baseUrl).submit(
+        new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/source_audio.mp3", false, "music", "mp3");
 
         assertThat(lastBody.get()).contains("\"audio_url\":\"https://example.com/source_audio.mp3\"");
@@ -230,7 +231,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"request_id\":\"20260417110100F1G2H3I4J5K6L7M8N9\"}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -257,7 +258,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"duration\":95.0}}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-8");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-8");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.trackUrls()).hasSize(3);
@@ -275,7 +276,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.trackUrls()).isNull();
@@ -288,7 +289,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"error\":{\"code\":\"AudioParseFailed\",\"message\":\"输入音频解析失败\"}}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("AudioParseFailed");
@@ -303,7 +304,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"background_audio_url\":\"https://volc/b.aac\",\"duration\":12.0}}}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.trackUrls()).hasSize(2);
@@ -317,7 +318,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
                 + "\"error\":{\"code\":\"AudioParseFailed\",\"message\":\"输入音频解析失败\"}}}");
 
         SeparateVoiceTaskObservation observation =
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("AudioParseFailed");
@@ -331,7 +332,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(thrown).isInstanceOf(VocalSplitError.class);
         VocalSplitError error = (VocalSplitError) thrown;
@@ -346,7 +347,7 @@ class NewApiMediaKitSeparateVoiceClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitSeparateVoiceClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitSeparateVoiceClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(((VocalSplitError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);

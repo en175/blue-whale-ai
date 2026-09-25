@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioSpeedContract;
 import com.bluewhale.worker.domain.error.AudioSpeedError;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -80,7 +81,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
     }
 
     private String callSubmit(Double speed) {
-        return new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).submit(
+        return new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/full_podcast.mp3", speed);
     }
 
@@ -208,7 +209,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         AudioSpeedTaskObservation observation =
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -234,7 +235,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         AudioSpeedTaskObservation observation =
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl())
@@ -249,7 +250,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         AudioSpeedTaskObservation observation =
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.audioUrl()).isNull();
@@ -262,7 +263,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
                 + "\"error\":{\"code\":\"AudioParseFailed\",\"message\":\"输入音频解析失败\"}}");
 
         AudioSpeedTaskObservation observation =
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("AudioParseFailed");
@@ -276,7 +277,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
                 + "\"result\":{\"audio_url\":\"https://volc/out.m4a\",\"duration\":24.0}}}");
 
         AudioSpeedTaskObservation observation =
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl()).isEqualTo("https://volc/out.m4a");
@@ -289,7 +290,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(thrown).isInstanceOf(AudioSpeedError.class);
         AudioSpeedError error = (AudioSpeedError) thrown;
@@ -304,7 +305,7 @@ class NewApiMediaKitAdjustAudioSpeedClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitAdjustAudioSpeedClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitAdjustAudioSpeedClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(((AudioSpeedError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);

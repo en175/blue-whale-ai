@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
@@ -56,12 +57,7 @@ public class NewApiMediaKitExtractAudioClient extends NewApiMediaKitAsyncTaskCli
      */
     static final String MODEL = "mediakit-extract-audio";
 
-    public NewApiMediaKitExtractAudioClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitExtractAudioClient(String baseUrl) {
+    public NewApiMediaKitExtractAudioClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

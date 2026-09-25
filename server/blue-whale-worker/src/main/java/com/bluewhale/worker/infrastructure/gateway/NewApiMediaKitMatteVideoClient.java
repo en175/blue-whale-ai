@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoMattingError;
@@ -61,12 +62,7 @@ public class NewApiMediaKitMatteVideoClient {
     /** 模式 → 单端点客户端（模式集合直接取契约 SUBMIT_PATHS 的键：端点即模式，无第二份枚举）。 */
     private final Map<String, EndpointClient> endpoints;
 
-    public NewApiMediaKitMatteVideoClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitMatteVideoClient(String baseUrl) {
+    public NewApiMediaKitMatteVideoClient(UpstreamBaseUrl baseUrl) {
         Map<String, EndpointClient> clients = new LinkedHashMap<>();
         for (String mode : VideoMattingContract.SUBMIT_PATHS.keySet()) {
             clients.put(mode, new EndpointClient(baseUrl, mode));
@@ -124,7 +120,7 @@ public class NewApiMediaKitMatteVideoClient {
         /** 本端点对应的抠像模式（契约 MODE_* 常量，用于取路径与模型名）。 */
         private final String mode;
 
-        EndpointClient(String baseUrl, String mode) {
+        EndpointClient(UpstreamBaseUrl baseUrl, String mode) {
             super(baseUrl);
             this.mode = mode;
         }

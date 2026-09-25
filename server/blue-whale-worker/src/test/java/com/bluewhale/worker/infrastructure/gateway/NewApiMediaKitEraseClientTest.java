@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEraseError;
@@ -72,7 +73,7 @@ class NewApiMediaKitEraseClientTest {
     }
 
     private NewApiMediaKitEraseClient.EraseResult callTextScene() {
-        return new NewApiMediaKitEraseClient(baseUrl).erase(
+        return new NewApiMediaKitEraseClient(new UpstreamBaseUrl(baseUrl)).erase(
                 "sk-token", "https://example.com/src.png",
                 "full_screen_text_erase", null);
     }
@@ -101,7 +102,7 @@ class NewApiMediaKitEraseClientTest {
     @Test
     @DisplayName("selected_area_erase：只传 mask_url（遮罩公网地址），不传 selected_area 矩形")
     void areaSceneSendsMaskUrlOnly() {
-        new NewApiMediaKitEraseClient(baseUrl).erase(
+        new NewApiMediaKitEraseClient(new UpstreamBaseUrl(baseUrl)).erase(
                 "sk-token", "https://example.com/src.png",
                 "selected_area_erase", "https://example.com/mask.png");
 

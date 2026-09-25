@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
@@ -15,8 +16,7 @@ import java.util.Map;
 public class NewApiMediaKitMixAudioClient extends NewApiMediaKitAsyncTaskClient {
     static final String MODEL = "mediakit-mix-audio";
 
-    public NewApiMediaKitMixAudioClient() { this(System.getenv("NEW_API_BASE_URL")); }
-    public NewApiMediaKitMixAudioClient(String baseUrl) { super(baseUrl); }
+    public NewApiMediaKitMixAudioClient(UpstreamBaseUrl baseUrl) { super(baseUrl); }
 
     @Override protected String submitPath() { return AudioMixContract.SUBMIT_PATH; }
     @Override protected String pollPathPrefix() { return AudioMixContract.POLL_PATH_PREFIX; }

@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
@@ -70,7 +71,7 @@ class NewApiMediaKitClientTest {
     }
 
     private NewApiMediaKitClient.EnhanceResult callMax() {
-        return new NewApiMediaKitClient(baseUrl).enhance(
+        return new NewApiMediaKitClient(new UpstreamBaseUrl(baseUrl)).enhance(
                 "sk-token", "https://example.com/src.png", "max", 4,
                 "fidelity_first", false);
     }
@@ -105,7 +106,7 @@ class NewApiMediaKitClientTest {
     @Test
     @DisplayName("lite 档出站裁剪：tool_version=standard 且不发 generative_enhance_mode / enable_correct_color")
     void liteTierOmitsUnsupportedKeys() {
-        new NewApiMediaKitClient(baseUrl).enhance(
+        new NewApiMediaKitClient(new UpstreamBaseUrl(baseUrl)).enhance(
                 "sk-token", "https://example.com/src.png", "standard", 2, null, null);
 
         String body = lastBody.get();
@@ -117,7 +118,7 @@ class NewApiMediaKitClientTest {
     @Test
     @DisplayName("pro 档出站裁剪：tool_version=professional，发策略、不发色彩校正")
     void proTierSendsModeOnly() {
-        new NewApiMediaKitClient(baseUrl).enhance(
+        new NewApiMediaKitClient(new UpstreamBaseUrl(baseUrl)).enhance(
                 "sk-token", "https://example.com/src.png", "professional", 6,
                 "generative_first", null);
 

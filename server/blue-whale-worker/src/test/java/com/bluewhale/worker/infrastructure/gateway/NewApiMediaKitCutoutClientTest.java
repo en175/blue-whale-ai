@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.ImageCutoutContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageCutoutError;
@@ -74,7 +75,7 @@ class NewApiMediaKitCutoutClientTest {
     }
 
     private NewApiMediaKitCutoutClient.CutoutResult callGeneralScene() {
-        return new NewApiMediaKitCutoutClient(baseUrl).cutout(
+        return new NewApiMediaKitCutoutClient(new UpstreamBaseUrl(baseUrl)).cutout(
                 "sk-token", "https://example.com/src.png", "general",
                 null, null, null, null);
     }
@@ -104,7 +105,7 @@ class NewApiMediaKitCutoutClientTest {
     @Test
     @DisplayName("human：增强四键成组携带（need_contour/contour_color/contour_size/need_crop_background）")
     void humanSceneSendsEnhancementKeys() {
-        new NewApiMediaKitCutoutClient(baseUrl).cutout(
+        new NewApiMediaKitCutoutClient(new UpstreamBaseUrl(baseUrl)).cutout(
                 "sk-token", "https://example.com/src.png", "human",
                 true, "#FFFFFF", 10, true);
 
@@ -121,7 +122,7 @@ class NewApiMediaKitCutoutClientTest {
     @Test
     @DisplayName("product：仅透明裁剪（need_contour=false 时四键仍恒随请求携带）")
     void productSceneCarriesAllFourKeys() {
-        new NewApiMediaKitCutoutClient(baseUrl).cutout(
+        new NewApiMediaKitCutoutClient(new UpstreamBaseUrl(baseUrl)).cutout(
                 "sk-token", "https://example.com/src.png", "product",
                 false, "#FFFFFF", 10, true);
 

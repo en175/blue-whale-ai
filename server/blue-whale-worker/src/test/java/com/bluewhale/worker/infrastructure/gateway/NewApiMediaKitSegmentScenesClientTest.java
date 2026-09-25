@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
@@ -80,7 +81,7 @@ class NewApiMediaKitSegmentScenesClientTest {
     }
 
     private String callSubmit(String granularity) {
-        return new NewApiMediaKitSegmentScenesClient(baseUrl).submit(
+        return new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/source_video.mp4", granularity);
     }
 
@@ -209,7 +210,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "{\"start_time\":31.2,\"end_time\":64.8,\"segment_video_url\":\"https://volc/seg2.mp4\"},"
                 + "{\"start_time\":64.8,\"end_time\":95.5,\"segment_video_url\":\"https://volc/seg3.mp4\"}]}}");
 
-        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(baseUrl)
+        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(lastPath.get())
@@ -231,7 +232,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "\"result\":{\"duration\":95.0,\"segments\":["
                 + "{\"start_time\":0.0,\"end_time\":95.0,\"segment_video_url\":\"https://volc/whole.mp4\"}]}}");
 
-        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(baseUrl)
+        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.segments()).hasSize(1);
@@ -246,7 +247,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "{\"start_time\":31.2,\"end_time\":64.8}]}}");
 
         VideoSceneSplitError error = catchThrowableOfType(
-                () -> new NewApiMediaKitSegmentScenesClient(baseUrl).poll("sk-token", "amk-task-1"),
+                () -> new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"),
                 VideoSceneSplitError.class);
 
         assertThat(error.getCode())
@@ -262,7 +263,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "{\"start_time\":\"0.0\",\"end_time\":31.2,\"segment_video_url\":\"https://volc/seg1.mp4\"}]}}");
 
         VideoSceneSplitError error = catchThrowableOfType(
-                () -> new NewApiMediaKitSegmentScenesClient(baseUrl).poll("sk-token", "amk-task-1"),
+                () -> new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"),
                 VideoSceneSplitError.class);
 
         assertThat(error.getCode())
@@ -275,7 +276,7 @@ class NewApiMediaKitSegmentScenesClientTest {
     void pollRunning_processing() {
         responseJson.set("{\"task_id\":\"amk-task-1\",\"status\":\"running\"}");
 
-        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(baseUrl)
+        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("processing");
@@ -290,7 +291,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "\"error\":{\"code\":\"VideoParseFailed\",\"message\":\"输入视频解析失败\","
                 + "\"param\":\"\",\"type\":\"TaskError\"}}");
 
-        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(baseUrl)
+        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("failed");
@@ -305,7 +306,7 @@ class NewApiMediaKitSegmentScenesClientTest {
                 + "\"result\":{\"duration\":12.0,\"segments\":["
                 + "{\"start_time\":0.0,\"end_time\":12.0,\"segment_video_url\":\"https://volc/s.mp4\"}]}}}");
 
-        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(baseUrl)
+        SceneSplitTaskObservation observation = new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
@@ -318,7 +319,7 @@ class NewApiMediaKitSegmentScenesClientTest {
         lastStatus.set(500);
         responseJson.set("{\"error\":{\"message\":\"upstream down\"}}");
 
-        Throwable thrown = catchThrowable(() -> new NewApiMediaKitSegmentScenesClient(baseUrl)
+        Throwable thrown = catchThrowable(() -> new NewApiMediaKitSegmentScenesClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1"));
 
         assertThat(((VideoSceneSplitError) thrown).getCode())

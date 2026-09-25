@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.fasterxml.jackson.databind.JsonNode;
 import okhttp3.OkHttpClient;
@@ -43,8 +44,10 @@ import static com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitJsonSupp
  * cause 携带状态（{@link NewApiVideoClient.HttpStatusException} 复用），供 processor
  * 按 isTransientPollError 语义判定瞬时重排；status 中间态枚举官方未逐字冻结，
  * 小写归一（completed→completed、failed→failed、其余由子类归 processing）。
- * 鉴权头 / baseUrl / OkHttp 装配复用 {@link NewApiHttpSupport}，无类型 JSON 工具
- * 复用 {@link NewApiMediaKitJsonSupport}。
+ * 鉴权头复用 {@link NewApiHttpSupport}；baseUrl 与 OkHttp 实例由子类传入：地址的唯一读取点
+ * 是 {@link UpstreamBaseUrl}（装配在 {@code NewApiUpstreamConfig}），OkHttp 实例经
+ * {@link NewApiHttpSupport#buildClient} 从全进程共享原型派生（连接池 / 线程池复用，
+ * 只有超时是本实例的）。无类型 JSON 工具复用 {@link NewApiMediaKitJsonSupport}。
  */
 abstract class NewApiMediaKitAsyncTaskClient {
 
@@ -58,8 +61,8 @@ abstract class NewApiMediaKitAsyncTaskClient {
     private final OkHttpClient submitClient;
     private final OkHttpClient pollClient;
 
-    protected NewApiMediaKitAsyncTaskClient(String baseUrl) {
-        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+    protected NewApiMediaKitAsyncTaskClient(UpstreamBaseUrl baseUrl) {
+        this.baseUrl = baseUrl.normalized();
         this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
         this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
     }

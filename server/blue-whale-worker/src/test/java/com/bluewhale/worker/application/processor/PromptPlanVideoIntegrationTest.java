@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -67,7 +68,7 @@ class PromptPlanVideoIntegrationTest {
             };
             var processor = new VideoJobProcessor(context.getBean(JobStateMachineService.class),
                     context.getBean(AssetSourceService.class), new GenerationCredentialService(),
-                    new NewApiVideoClient(System.getenv("IKETSX_PROVIDER_URL")), relay, queue);
+                    new NewApiVideoClient(new UpstreamBaseUrl(System.getenv("IKETSX_PROVIDER_URL"))), relay, queue);
             processor.handle(System.getenv("IKETSX_JOB_ID"));
             Thread.sleep(5500);
             processor.handle(System.getenv("IKETSX_JOB_ID"));

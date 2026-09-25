@@ -1,9 +1,9 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.ImageEraseContract;
 import com.bluewhale.worker.domain.error.ImageEraseError;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -42,8 +42,6 @@ import java.util.Map;
 @Component
 public class NewApiMediaKitEraseClient extends NewApiMediaKitSyncClient {
 
-    private static final Logger log = LoggerFactory.getLogger(NewApiMediaKitEraseClient.class);
-
     /** 网关同步路由路径（blue-whale-api 网关侧 MediaKit 渠道）。 */
     static final String ERASE_PATH = "/v1/mediakit/sync/erase-image";
 
@@ -57,18 +55,8 @@ public class NewApiMediaKitEraseClient extends NewApiMediaKitSyncClient {
      */
     private static final int DEFAULT_TIMEOUT_MS = 300_000;
 
-    public NewApiMediaKitEraseClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL，超时走 env/默认。 */
-    NewApiMediaKitEraseClient(String baseUrl) {
-        this(baseUrl, loadTimeoutMs());
-    }
-
-    /** 测试用构造器：注入读/写超时（毫秒）。 */
-    NewApiMediaKitEraseClient(String baseUrl, int timeoutMs) {
-        super(baseUrl, timeoutMs);
+    public NewApiMediaKitEraseClient(UpstreamBaseUrl baseUrl) {
+        super(baseUrl, loadTimeoutMs());
     }
 
     @Override
@@ -116,16 +104,7 @@ public class NewApiMediaKitEraseClient extends NewApiMediaKitSyncClient {
     }
 
     private static int loadTimeoutMs() {
-        String raw = System.getenv("NEW_API_IMAGE_ERASE_TIMEOUT_MS");
-        if (raw != null) {
-            try {
-                int n = Integer.parseInt(raw);
-                if (n > 0) return n;
-            } catch (NumberFormatException e) {
-                log.debug("NEW_API_IMAGE_ERASE_TIMEOUT_MS 解析失败，使用默认值: {}", e.getMessage());
-            }
-        }
-        return DEFAULT_TIMEOUT_MS;
+        return NewApiUpstreamConfig.timeoutMs("NEW_API_IMAGE_ERASE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     }
 
     /**

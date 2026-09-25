@@ -1,5 +1,7 @@
 package com.bluewhale.worker.infrastructure.audio;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
@@ -11,8 +13,6 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.Base64;
@@ -40,7 +40,6 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class NewApiAudioClient {
 
-    private static final Logger log = LoggerFactory.getLogger(NewApiAudioClient.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
@@ -50,13 +49,8 @@ public class NewApiAudioClient {
     private final OkHttpClient httpClient;
     private final String baseUrl;
 
-    public NewApiAudioClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiAudioClient(String baseUrl) {
-        this.baseUrl = com.bluewhale.common.http.NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+    public NewApiAudioClient(UpstreamBaseUrl baseUrl) {
+        this.baseUrl = baseUrl.normalized();
 
         int timeoutMs = loadTimeoutMs();
         this.httpClient = com.bluewhale.common.http.NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
@@ -186,16 +180,7 @@ public class NewApiAudioClient {
     }
 
     private int loadTimeoutMs() {
-        String raw = System.getenv("NEW_API_AUDIO_TIMEOUT_MS");
-        if (raw != null) {
-            try {
-                int n = Integer.parseInt(raw);
-                if (n > 0) return n;
-            } catch (NumberFormatException e) {
-                log.debug("NEW_API_AUDIO_TIMEOUT_MS 解析失败，使用默认值: {}", e.getMessage());
-            }
-        }
-        return DEFAULT_TIMEOUT_MS;
+        return NewApiUpstreamConfig.timeoutMs("NEW_API_AUDIO_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     }
 
     /**

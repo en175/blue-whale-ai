@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
@@ -56,12 +57,7 @@ public class NewApiMediaKitEnhanceVideoClient extends NewApiMediaKitAsyncTaskCli
      */
     static final String MODEL = "mediakit-enhance-video-generative";
 
-    public NewApiMediaKitEnhanceVideoClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitEnhanceVideoClient(String baseUrl) {
+    public NewApiMediaKitEnhanceVideoClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

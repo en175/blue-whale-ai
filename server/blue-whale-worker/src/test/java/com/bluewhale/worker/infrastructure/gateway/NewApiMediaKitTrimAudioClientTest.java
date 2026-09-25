@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.error.AudioTrimError;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -78,7 +79,7 @@ class NewApiMediaKitTrimAudioClientTest {
     }
 
     private String callSubmit(Double startTime, Double endTime, String outputFormat) {
-        return new NewApiMediaKitTrimAudioClient(baseUrl).submit(
+        return new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/full_podcast.mp3", startTime, endTime, outputFormat);
     }
 
@@ -217,7 +218,7 @@ class NewApiMediaKitTrimAudioClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         TrimAudioTaskObservation observation =
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -243,7 +244,7 @@ class NewApiMediaKitTrimAudioClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         TrimAudioTaskObservation observation =
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-trim-audio-1399300");
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-trim-audio-1399300");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl())
@@ -258,7 +259,7 @@ class NewApiMediaKitTrimAudioClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         TrimAudioTaskObservation observation =
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.audioUrl()).isNull();
@@ -271,7 +272,7 @@ class NewApiMediaKitTrimAudioClientTest {
                 + "\"error\":{\"code\":\"AudioParseFailed\",\"message\":\"输入音频解析失败\"}}");
 
         TrimAudioTaskObservation observation =
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("AudioParseFailed");
@@ -285,7 +286,7 @@ class NewApiMediaKitTrimAudioClientTest {
                 + "\"result\":{\"audio_url\":\"https://volc/out.m4a\",\"duration\":12.0}}}");
 
         TrimAudioTaskObservation observation =
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl()).isEqualTo("https://volc/out.m4a");
@@ -298,7 +299,7 @@ class NewApiMediaKitTrimAudioClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(thrown).isInstanceOf(AudioTrimError.class);
         AudioTrimError error = (AudioTrimError) thrown;
@@ -313,7 +314,7 @@ class NewApiMediaKitTrimAudioClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitTrimAudioClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitTrimAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(((AudioTrimError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);

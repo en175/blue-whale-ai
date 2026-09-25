@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
@@ -76,7 +77,7 @@ class NewApiMediaKitExtractAudioClientTest {
     }
 
     private String callSubmit(String outputFormat) {
-        return new NewApiMediaKitExtractAudioClient(baseUrl).submit(
+        return new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/source_video.mp4", outputFormat);
     }
 
@@ -208,7 +209,7 @@ class NewApiMediaKitExtractAudioClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         ExtractAudioTaskObservation observation =
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -227,7 +228,7 @@ class NewApiMediaKitExtractAudioClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         ExtractAudioTaskObservation observation =
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.audioUrl()).isNull();
@@ -240,7 +241,7 @@ class NewApiMediaKitExtractAudioClientTest {
                 + "\"error\":{\"code\":\"VideoParseFailed\",\"message\":\"输入视频解析失败\"}}");
 
         ExtractAudioTaskObservation observation =
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("VideoParseFailed");
@@ -254,7 +255,7 @@ class NewApiMediaKitExtractAudioClientTest {
                 + "\"result\":{\"audio_url\":\"https://volc/out.m4a\",\"duration\":12.0}}}");
 
         ExtractAudioTaskObservation observation =
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1");
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.audioUrl()).isEqualTo("https://volc/out.m4a");
@@ -267,7 +268,7 @@ class NewApiMediaKitExtractAudioClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(thrown).isInstanceOf(MediaExtractError.class);
         MediaExtractError error = (MediaExtractError) thrown;
@@ -282,7 +283,7 @@ class NewApiMediaKitExtractAudioClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-tool-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitExtractAudioClient(baseUrl).poll("sk-token", "amk-tool-1"));
+                new NewApiMediaKitExtractAudioClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-tool-1"));
 
         assertThat(((MediaExtractError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);

@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
@@ -72,12 +73,7 @@ public class NewApiMediaKitSeparateVoiceClient extends NewApiMediaKitAsyncTaskCl
             "music", "music_audio_url",
             "sfx", "sfx_audio_url");
 
-    public NewApiMediaKitSeparateVoiceClient() {
-        this(System.getenv("NEW_API_BASE_URL"));
-    }
-
-    /** 测试用构造器：注入 base URL。 */
-    NewApiMediaKitSeparateVoiceClient(String baseUrl) {
+    public NewApiMediaKitSeparateVoiceClient(UpstreamBaseUrl baseUrl) {
         super(baseUrl);
     }
 

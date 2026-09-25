@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
@@ -110,7 +111,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("官方协议·无参考图 → generations JSON，只发官方字段（不含 response_format/stream/tools）")
     void openAiNoRefsUsesGenerationsWithOfficialFieldsOnly() {
-        new NewApiImageClient(baseUrl).generate("t", ImageProtocol.OPENAI_IMAGES,
+        new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
                 "gpt-image-2", "猫", 1, "2048x2048", null, false, false, List.of());
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/generations");
@@ -135,7 +136,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("官方协议·有参考图 → edits multipart，参考图作文件字节上传，模型名不换")
     void openAiWithRefsUsesEditsMultipart() {
-        new NewApiImageClient(baseUrl).generate("t", ImageProtocol.OPENAI_IMAGES,
+        new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
                 "gpt-image-2", "改成蓝色调", 1, "1024x1024", null, false, false,
                 List.of(baseUrl + "/ref.png"));
 
@@ -155,7 +156,7 @@ class NewApiImageClientEndpointTest {
     void openAiRefDownloadFailureIsTransient() {
         ImageProviderError error = null;
         try {
-            new NewApiImageClient(baseUrl).generate("t", ImageProtocol.OPENAI_IMAGES,
+            new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
                     "gpt-image-2", "猫", 1, null, null, false, false,
                     List.of(baseUrl + "/missing.png"));
         } catch (ImageProviderError e) {
@@ -171,7 +172,7 @@ class NewApiImageClientEndpointTest {
         responseJson.set("{\"data\":[{\"b64_json\":\""
                 + Base64.getEncoder().encodeToString(PNG_MAGIC) + "\"}]}");
 
-        List<GeneratedImage> images = new NewApiImageClient(baseUrl).generate("t",
+        List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
                 List.of());
 
@@ -187,7 +188,7 @@ class NewApiImageClientEndpointTest {
         responseJson.set("{\"data\":[{\"b64_json\":\"不是base64!!\"},"
                 + "{\"b64_json\":\"" + Base64.getEncoder().encodeToString(PNG_MAGIC) + "\"}]}");
 
-        List<GeneratedImage> images = new NewApiImageClient(baseUrl).generate("t",
+        List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
                 List.of());
 
@@ -200,7 +201,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("inline 形态·无参考图 → generations，body 无 image 字段")
     void inlineNoRefsUsesGenerationsWithoutImage() {
-        List<GeneratedImage> images = new NewApiImageClient(baseUrl)
+        List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl))
                 .generate("t", ImageProtocol.INLINE_IMAGE, "gpt-image-2", "猫", 1,
                         "1024x1024", null, false, false, List.of());
 
@@ -212,7 +213,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("inline 形态·单张参考图 → 仍 generations，image=URL 字符串（非 multipart）")
     void inlineSingleRefKeepsGenerationsWithStringImage() {
-        new NewApiImageClient(baseUrl).generate("t", ImageProtocol.INLINE_IMAGE,
+        new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.INLINE_IMAGE,
                 "nano-banana-2-i2i", "猫", 1,
                 "1024x1024", null, false, false, List.of("https://a/1.png"));
 
@@ -223,7 +224,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("inline 形态·多张参考图 → image=数组；字段序 image 在 quality 之后 n 之前（TS 逐字）")
     void inlineMultiRefsUseArrayImage() {
-        new NewApiImageClient(baseUrl).generate("t", ImageProtocol.INLINE_IMAGE,
+        new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.INLINE_IMAGE,
                 "nano-banana-2-i2i", "猫", 1,
                 null, "hd", false, false, List.of("https://a/1.png", "https://a/2.png"));
 
@@ -239,7 +240,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("读超时 → provider_timeout 终态不重试（2026-09-11 政策：重试=双扣风险）")
     void readTimeoutIsTerminalProviderTimeout() {
-        NewApiImageClient client = new NewApiImageClient(baseUrl, 300);
+        NewApiImageClient client = new NewApiImageClient(new UpstreamBaseUrl(baseUrl), 300);
         ImageProviderError error = null;
         try {
             client.generate("t", ImageProtocol.INLINE_IMAGE, "nano-banana-2-i2i",
@@ -255,7 +256,7 @@ class NewApiImageClientEndpointTest {
     @DisplayName("连接失败（请求未达上游，零扣费风险）→ provider_failed 瞬态可重试")
     void connectFailureIsTransientProviderFailed() {
         // 端口 1 无监听 → ConnectException（非 SocketTimeout）→ 通用 IO 分支归瞬态。
-        NewApiImageClient client = new NewApiImageClient("http://127.0.0.1:1", 300);
+        NewApiImageClient client = new NewApiImageClient(new UpstreamBaseUrl("http://127.0.0.1:1"), 300);
         ImageProviderError error = null;
         try {
             client.generate("t", ImageProtocol.INLINE_IMAGE, "nano-banana-2-i2i", "猫", 1,

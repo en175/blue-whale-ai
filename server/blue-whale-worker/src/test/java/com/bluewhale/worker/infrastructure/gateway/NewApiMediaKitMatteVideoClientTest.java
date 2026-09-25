@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoMattingError;
@@ -81,7 +82,7 @@ class NewApiMediaKitMatteVideoClientTest {
     }
 
     private String callSubmit(String mode, String format, String backgroundColor) {
-        return new NewApiMediaKitMatteVideoClient(baseUrl).submit(
+        return new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/your_portrait_video.mp4",
                 mode, format, backgroundColor);
     }
@@ -242,7 +243,7 @@ class NewApiMediaKitMatteVideoClientTest {
                 + "\"video_url\":\"https://example.volcvideo.com/matted_output.webm?auth_key=...\","
                 + "\"resolution\":\"1080p\",\"duration\":15.5}}");
 
-        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(baseUrl)
+        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-tool-matte-portrait-video-123456789");
 
         assertThat(lastPath.get())
@@ -262,7 +263,7 @@ class NewApiMediaKitMatteVideoClientTest {
                 + "\"error\":{\"code\":\"VideoQualityTooLow\",\"message\":\"视频画质过低\","
                 + "\"param\":\"\",\"type\":\"TaskError\"}}");
 
-        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(baseUrl)
+        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("failed");
@@ -275,7 +276,7 @@ class NewApiMediaKitMatteVideoClientTest {
     void pollRunning_normalizesToProcessing() {
         responseJson.set("{\"task_id\":\"amk-task-1\",\"status\":\"RUNNING\"}");
 
-        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(baseUrl)
+        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("processing");
@@ -288,7 +289,7 @@ class NewApiMediaKitMatteVideoClientTest {
         responseJson.set("{\"task_id\":\"amk-task-1\",\"status\":\"completed\","
                 + "\"result\":{\"resolution\":\"1080p\",\"duration\":15.5}}");
 
-        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(baseUrl)
+        MatteVideoTaskObservation observation = new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl))
                 .poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
@@ -303,7 +304,7 @@ class NewApiMediaKitMatteVideoClientTest {
         responseJson.set("{\"error\":{\"message\":\"task not found\"}}");
 
         VideoMattingError error = (VideoMattingError) catchThrowable(
-                () -> new NewApiMediaKitMatteVideoClient(baseUrl).poll("sk-token", "amk-gone"));
+                () -> new NewApiMediaKitMatteVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-gone"));
 
         assertThat(error.getCause()).isInstanceOf(NewApiVideoClient.HttpStatusException.class);
         assertThat(((NewApiVideoClient.HttpStatusException) error.getCause()).getStatus())

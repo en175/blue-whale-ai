@@ -780,11 +780,12 @@ public class RocketMqConfig {
 
     /**
      * new-api 视频客户端。
+     * <p>
+     * 地址来自 {@link NewApiUpstreamConfig#newApiBaseUrl}（上游地址的唯一读取点）——
+     * 本类不再自己读 {@code NEW_API_BASE_URL}。
      */
     @Bean
-    public NewApiVideoClient newApiVideoClient(Environment env) {
-        String baseUrl = env.getProperty("NEW_API_BASE_URL",
-                env.getProperty("new-api.base-url", ""));
+    public NewApiVideoClient newApiVideoClient(NewApiUpstreamConfig.UpstreamBaseUrl baseUrl) {
         return new NewApiVideoClient(baseUrl);
     }
 

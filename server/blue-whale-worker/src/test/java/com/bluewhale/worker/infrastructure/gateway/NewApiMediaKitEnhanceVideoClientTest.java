@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.gateway;
 
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
@@ -76,7 +77,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
     }
 
     private String callSubmit(String resolution) {
-        return new NewApiMediaKitEnhanceVideoClient(baseUrl).submit(
+        return new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).submit(
                 "sk-token", "https://example.com/src.mp4", resolution);
     }
 
@@ -213,7 +214,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 + "\"expires_at\":1777464650,\"created_at\":1777291767,\"finished_at\":1777291851}");
 
         EnhanceVideoTaskObservation observation =
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(lastMethod.get()).isEqualTo("GET");
         assertThat(lastPath.get())
@@ -234,7 +235,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 + "\"request_id\":\"req-5\"}");
 
         EnhanceVideoTaskObservation observation =
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("processing");
         assertThat(observation.videoUrl()).isNull();
@@ -248,7 +249,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 + "\"error\":{\"code\":\"VideoNotSupported\",\"message\":\"仅支持 SDR 视频\"}}");
 
         EnhanceVideoTaskObservation observation =
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.upstreamCode()).isEqualTo("VideoNotSupported");
@@ -263,7 +264,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
                 + "\"resolution\":\"2k\",\"fps\":24}}}");
 
         EnhanceVideoTaskObservation observation =
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1");
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1");
 
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.videoUrl()).isEqualTo("https://volc/out.mp4");
@@ -277,7 +278,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
         responseJson.set("{\"message\":\"upstream busy\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(thrown).isInstanceOf(VideoEnhanceError.class);
         VideoEnhanceError error = (VideoEnhanceError) thrown;
@@ -292,7 +293,7 @@ class NewApiMediaKitEnhanceVideoClientTest {
         responseJson.set("{\"success\":true,\"task_id\":\"amk-task-1\"}");
 
         Throwable thrown = catchThrowable(() ->
-                new NewApiMediaKitEnhanceVideoClient(baseUrl).poll("sk-token", "amk-task-1"));
+                new NewApiMediaKitEnhanceVideoClient(new UpstreamBaseUrl(baseUrl)).poll("sk-token", "amk-task-1"));
 
         assertThat(((VideoEnhanceError) thrown).getCode())
                 .isEqualTo(GenerationError.ERROR_PROVIDER_FAILED);
