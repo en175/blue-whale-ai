@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
+import com.bluewhale.worker.domain.contract.SettlementUsageLines;
 import com.bluewhale.worker.infrastructure.mq.BillingEventPublisher;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -132,22 +133,32 @@ public class JobSettlementPublisher {
     /**
      * {@code generation-job-completed} 的载荷。
      *
-     * <p>{@code usage} 发**空数组**：worker 侧尚未按用量维度上报。billing 的
-     * {@code SettlementService} 对空用量按**预扣额**结算——这正是媒介类任务
-     * （视频/图片按次计费，用量即契约量）的正确取值，不是降级。
-     * 这同时被 {@code SettlementService} 的测试钉住。
+     * <p>{@code usage} 带一条用量行（{@link SettlementUsageLines}）：成功槽数是**实际**写下的
+     * 产物数，billing 拿它去冻结目录里计价——这就是 {@code events.proto} 那句
+     * 「{@code succeeded_slots} 决定 actualCredits（按成功的 slot 计费，不是按 job）」的落点。
      *
-     * <p>⚠️ 残留缺口：{@code partially_succeeded} 且未报用量时会按全额结算，
-     * billing 侧对此打 WARN。要让部分成功按实际槽位收费，得先在这里填上 usage。
+     * <p>报不出用量时发**空数组**（job.input 里没有 model_id，见 {@link SettlementUsageLines#forJob}）：
+     * 那不是「没有用量」，billing 会退回按**预扣额**结算。对 {@code succeeded} 而言这个取值
+     * 通常就是对的（契约用量即实际用量），对 {@code partially_succeeded} 则偏平台——
+     * 所以打 WARN 让它可观测，而不是默默多收。
      */
     private String completedBody(GenerationJobEntity job, String status, Map<String, Object> payload) {
+        int succeededSlots = succeededSlots(payload);
+        List<Map<String, Object>> usage = SettlementUsageLines.forJob(job, succeededSlots);
+        if (usage.isEmpty()) {
+            // 只有一种情形会走到这里：job.input 缺 model_id（或不是合法 JSON），billing 无法查目录。
+            // 宁可退回预扣额结算并留一条 WARN，也不要猜一个 modelId —— 猜错就是按别人的价扣钱。
+            log.warn("结算事件报不出用量（job.input 取不到 model_id），将退回按预扣额结算："
+                    + "jobId={} type={} 成功槽={}", job.getId(), job.getType(), succeededSlots);
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("jobId", job.getId());
         body.put("userId", job.getUserId());
         body.put("status", status);
         body.put("catalogVersion", 0);
-        body.put("succeededSlots", succeededSlots(payload));
-        body.put("usage", List.of());
+        body.put("succeededSlots", succeededSlots);
+        body.put("usage", usage);
         return toJson(body);
     }
 
@@ -170,6 +181,10 @@ public class JobSettlementPublisher {
      *
      * <p>取 {@code output_asset_ids} 的长度而非重查 DB：这就是这次终态**实际写下**的
      * 结果，重查会读到后续重试产生的新行，把两个时点混在一起。
+     *
+     * <p>同一个数走两条路出去：事件里的 {@code succeededSlots}（人看 / 对账）与用量行的
+     * {@code usage.succeededSlots}（billing 计价）。**只算一次**——两处各自数一遍就会出现
+     * 「事件说的成功槽与结算看到的不是一个数」，而那是钱。
      */
     private static int succeededSlots(Map<String, Object> payload) {
         return payload.get("output_asset_ids") instanceof List<?> assetIds ? assetIds.size() : 0;

@@ -123,7 +123,8 @@ class SettlementIntegrationTest {
         hold("cmd-3", 9_403L, "free");
         settlement.settle(completed(9_403L));
 
-        // 媒介类的常态：契约用量就是实际用量，差额为 0
+        // 用量为空的降级路径：worker 报不出 model_id 时才会走到（见 SettlementService#settle）。
+        // 此时按预扣额结算——目录本身就是按次计价（constant:1），差额为 0
         assertThat(lots.availableOf(lot)).isEqualTo(900);
         assertThat(remainingFrozen(lot)).isZero();
         assertInvariant();
@@ -177,7 +178,7 @@ class SettlementIntegrationTest {
                 tier, "视频生成 · 测试", Instant.now()));
     }
 
-    /** 完成事件；usage 为空 = worker 没有上报额外用量（媒介类的常态）。 */
+    /** 完成事件；usage 为空 = worker 报不出用量（降级路径，见 SettlementService#settle）。 */
     private JobEventPayload.JobCompleted completed(long jobId) {
         return new JobEventPayload.JobCompleted(jobId, USER, "succeeded", 1, 1, List.of());
     }

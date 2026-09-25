@@ -43,6 +43,15 @@ class JobSettlementPublisherTest {
         return job;
     }
 
+    /** 建任务时冻结了 input 的 job —— 用量行要靠 job.input 里的 model_id 与规格。 */
+    private static GenerationJobEntity job(long id, long userId, String status,
+                                           String type, String inputJson) {
+        GenerationJobEntity job = job(id, userId, status);
+        job.setType(type);
+        job.setInput(inputJson);
+        return job;
+    }
+
     private JsonNode body(int index) throws Exception {
         return JSON.readTree(sent.get(index)[1]);
     }
@@ -50,9 +59,11 @@ class JobSettlementPublisherTest {
     // ========== 成功 → 结算 ==========
 
     @Test
-    @DisplayName("★ succeeded 发到 completed topic，成功槽数 = 产物数，usage 为空数组")
+    @DisplayName("★ succeeded 发到 completed topic，成功槽数 = 产物数，并带上按槽用量")
     void succeeded发结算事件() throws Exception {
-        publisher.publishTerminal(job(101, 42, "succeeded"),
+        publisher.publishTerminal(
+                job(101, 42, "succeeded", "video",
+                        "{\"prompt\":\"一只猫\",\"model_id\":\"doubao-seedance-2-5-260628\",\"duration\":5}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("7", "8", "9")));
 
         assertThat(sent).hasSize(1);
@@ -62,18 +73,68 @@ class JobSettlementPublisherTest {
         assertThat(json.get("userId").asLong()).isEqualTo(42);
         assertThat(json.get("status").asText()).isEqualTo("succeeded");
         assertThat(json.get("succeededSlots").asInt()).isEqualTo(3);
-        // ★ 空用量不是漏报：billing 按预扣额结算，这正是媒介类任务的正确取值
-        assertThat(json.get("usage")).isEmpty();
+
+        // ★ 用量行：billing 拿它去**冻结目录**里计价（worker 只报原始量，不报积分）
+        assertThat(json.get("usage")).hasSize(1);
+        JsonNode line = json.get("usage").get(0);
+        assertThat(line.get("modelId").asText()).isEqualTo("doubao-seedance-2-5-260628");
+        assertThat(line.get("taskType").asText()).isEqualTo("video");
+        assertThat(line.get("quantities").get("usage.succeededSlots").asLong()).isEqualTo(3);
+        // 规格与 Hold 侧同源：prompt 是内容字段不进规格，model_id / duration 进
+        assertThat(line.get("specs").get("prompt")).isNull();
+        assertThat(line.get("specs").get("model_id").asText())
+                .isEqualTo("doubao-seedance-2-5-260628");
+        assertThat(line.get("specs").get("duration").asText()).isEqualTo("5");
     }
 
     @Test
-    @DisplayName("★ partially_succeeded 走结算而不是返还 —— 部分成功也要收钱")
+    @DisplayName("★ partially_succeeded 走结算而不是返还 —— 部分成功按实际成功槽收费")
     void 部分成功走结算() throws Exception {
-        publisher.publishTerminal(job(102, 42, "partially_succeeded"),
+        publisher.publishTerminal(
+                job(102, 42, "partially_succeeded", "image",
+                        "{\"model_id\":\"seedream-4.0\",\"size\":\"2K\"}"),
                 Map.of("status", "partially_succeeded", "output_asset_ids", List.of("7")));
 
         assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
-        assertThat(body(0).get("status").asText()).isEqualTo("partially_succeeded");
+        JsonNode json = body(0);
+        assertThat(json.get("status").asText()).isEqualTo("partially_succeeded");
+        assertThat(json.get("succeededSlots").asInt()).isEqualTo(1);
+        // ★ 报的是**实际成功的槽数**（1），不是这张单本来要出几张 ——
+        //   这个数就是 billing 算 actualCredits 的基数，报错了就是收错钱
+        assertThat(json.get("usage").get(0).get("quantities").get("usage.succeededSlots").asLong())
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★ 规格键值统一小写、只取标量 —— 与 billing-specs.ts 的 extractSpecs 逐条一致")
+    void 规格归一与Hold侧同源() throws Exception {
+        publisher.publishTerminal(
+                job(104, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"RESOLUTION\":\"1080P\",\"duration\":5.0,"
+                                + "\"generate_audio\":true,\"references\":[{\"a\":1}],"
+                                + "\"target_node_id\":null,\"title\":\"标题\"}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        JsonNode specs = body(0).get("usage").get(0).get("specs");
+        assertThat(specs.get("resolution").asText()).isEqualTo("1080p");
+        // 5.0 经 MySQL JSON 列往返回来仍是 5.0，而 TS 侧 String(5.0) === "5" —— 必须对齐
+        assertThat(specs.get("duration").asText()).isEqualTo("5");
+        assertThat(specs.get("generate_audio").asText()).isEqualTo("true");
+        // 数组不是标量、null 不是标量、title 是内容字段 —— 三者都不进规格
+        assertThat(specs.has("references")).isFalse();
+        assertThat(specs.has("target_node_id")).isFalse();
+        assertThat(specs.has("title")).isFalse();
+    }
+
+    @Test
+    @DisplayName("报不出 model_id 时 usage 发空数组，billing 退回按预扣额结算")
+    void 报不出用量时发空数组() throws Exception {
+        // 没有 input（历史 job / input 损坏）→ 不敢猜一个模型去计价
+        publisher.publishTerminal(job(105, 42, "succeeded", "video", null),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        assertThat(body(0).get("usage")).isEmpty();
+        // 槽数照发：标量本身不依赖模型
         assertThat(body(0).get("succeededSlots").asInt()).isEqualTo(1);
     }
 
