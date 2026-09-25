@@ -604,15 +604,25 @@ export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
 
 
 /**
- * Java SystemCode 系那几个码该用哪个 HTTP 状态。
+ * 数值码该用哪个 HTTP 状态（Java SystemCode 系为主，另有生成域的余额不足）。
  *
  * **只列本仓真的会经过统一投影的那些**，不做一张假装完备的大表——没走投影的调用点写在
  * 这里也不会生效，那种表只会让人以为已经对齐了。
+ *
+ * 生成域的 `quota_exhausted`（1001）此前只出现在**失败任务投影**的信封里（`errorCodeToNumeric`
+ * 算出来的 code，不是抛出来的 DomainError），所以一直没进这张表；现在提交口的计费预扣被拒也用
+ * 它了（billing 契约：余额不足 → FAILED_PRECONDITION / INSUFFICIENT_CREDITS），于是它也走投影。
  */
 const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   [PARAM_MISSING_CODE]: 400,
   [RESOURCE_NOT_FOUND_CODE]: 404,
   [ASSET_UNAVAILABLE_CODE]: 503,
+  // 余额不足回 **402**（Payment Required），不是默认的 400：前端的余额门正是按
+  // `status === 402` 决定「弹充值框」（web/src/utils/creditsGate.ts），而 400 只会被
+  // 当成一次普通的参数错误 toast 出去——用户不会知道该去充值。
+  // 键写数值字面量：本文件里这个码有两处（name→数值在 GENERATION_ERROR_NUMERIC_CODES，
+  // 这里是数值→状态），而按名字取会受 noUncheckedIndexedAccess 影响。域内改码时两处一起改。
+  [1001]: 402,
   // 同键异载荷是**冲突**（同一把钥匙配了不同载荷），不是参数写错：409 让客户端一眼分辨
   // 「重试没带上原样的载荷」与「载荷本身不合法」。走这条投影的是建任务端点
   // （重试端点目前不抛 DomainError，不经过这里）。

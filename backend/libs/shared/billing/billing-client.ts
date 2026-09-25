@@ -20,6 +20,12 @@ import { Code, ConnectError, createClient, type Client } from '@connectrpc/conne
 import { createGrpcTransport } from '@connectrpc/connect-node';
 import { NewApiError } from '@lib/core';
 import {
+  DomainError,
+  ERROR_MODEL_UNAVAILABLE,
+  ERROR_QUOTA_EXHAUSTED,
+  errorCodeToNumeric,
+} from '@lib/contracts';
+import {
   BillingService,
   ListTransactionsRequestSchema,
   QueryBalanceRequestSchema,
@@ -337,4 +343,63 @@ export function toBillingError(error: unknown, fallbackMessage: string): NewApiE
     );
   }
   return new NewApiError(fallbackMessage, 502, 'billing_error');
+}
+
+/**
+ * billing 把失败原因词拼在 gRPC status description 的**前缀**上（`<REASON>: <中文说明>`），
+ * 服务端那侧见 `BillingGrpcService` 的异常映射；这两个词是契约里逐字写下的。
+ */
+const REASON_INSUFFICIENT_CREDITS = 'INSUFFICIENT_CREDITS';
+const REASON_UNPRICEABLE = 'UNPRICEABLE';
+
+/** billing 不可用时对外说的那句话。原始文案（含内部原因词）只进日志，不进响应。 */
+const BILLING_UNAVAILABLE_MESSAGE = '计费服务暂不可用，请稍后重试';
+
+/**
+ * 预扣（Hold）被拒 → 对外错误；**认不出的返回 null**，调用点照原样抛。
+ *
+ * <p>契约（contracts/proto/billing/v1/billing.proto）把 Hold 的失败分成三条语义：
+ *
+ * <pre>
+ *   - 余额不足        → FAILED_PRECONDITION / INSUFFICIENT_CREDITS
+ *   - 该组合算不出价  → INVALID_ARGUMENT / UNPRICEABLE（说明**定价漏配**）
+ *   - billing 不可用  → UNAVAILABLE
+ * </pre>
+ *
+ * <p>⚠️ **三条都仍然是拒绝**（fail closed 不变，见 billing-hold.ts）：变的只是
+ * 「**以什么状态、什么话**被拒」。此前它们原样冒泡到异常过滤器，一律落进「未处理异常」兜底
+ * 500 —— 用户看到的是一句「服务器内部错误」，像是我们挂了；而真相是「这个模型没配价，
+ * 换一个就行」，运营该去补价。两种人都需要一句能读的话。
+ *
+ * <p>⚠️ **原因词不外泄**：`UNPRICEABLE` / `INSUFFICIENT_CREDITS` 是给我们看的（日志里原样
+ * 留着，漏配清单就是从这批日志里攒出来的），响应里只出现码表那句中文。
+ *
+ * <p>Quote 不走这里：它的失败是**降级**（不阻断提交），且它的日志正是漏配清单的来源，
+ * 映射掉就丢了原文（见 billing-quote.ts）。
+ */
+export function toBillingHoldError(error: unknown): DomainError | NewApiError | null {
+  // 这个客户端只抛 ConnectError。别的东西（比如我们自己的转换错误）是**我们自己的 bug**，
+  // 伪装成「上游故障」只会让排查方向跑偏 —— 认不出就返回 null，让它照旧是 500。
+  if (!(error instanceof ConnectError)) return null;
+
+  // 客户端这侧的原文是 rawMessage：message 还带着 `[invalid_argument] ` 前缀，
+  // 原因词在服务端拼的描述里。
+  const reason = error.rawMessage.toUpperCase();
+
+  // 码与原因词**一起判**：只看 code 会把「参数写错了」那类 INVALID_ARGUMENT 也算成业务语义，
+  // 而那是我方请求本身有问题，不是用户能处理的事（走下面的兜底）。
+  if (error.code === Code.FailedPrecondition && reason.includes(REASON_INSUFFICIENT_CREDITS)) {
+    // 402 + 码表 1001 那句「账户余额不足，请充值后重试」（1001 → 402 的投影见 error-codes.ts）。
+    return new DomainError(errorCodeToNumeric(ERROR_QUOTA_EXHAUSTED));
+  }
+  if (error.code === Code.InvalidArgument && reason.includes(REASON_UNPRICEABLE)) {
+    // 算不出价 = **定价漏配**。对用户是 4xx：「这个模型现在用不了，换一个」是他能自己做的事。
+    // 文案复用码表既有的 model_unavailable（1005）—— 提交口「模型不在启用目录」用的是同码
+    // 同句，对用户而言两种原因的处置是同一个动作。
+    return new DomainError(errorCodeToNumeric(ERROR_MODEL_UNAVAILABLE));
+  }
+
+  // 其余按既有读侧口径：UNAVAILABLE/DeadlineExceeded → 503（重试有意义），
+  // billing 内部错误 → 502。原始文案一律不透传。
+  return toBillingError(error, BILLING_UNAVAILABLE_MESSAGE);
 }

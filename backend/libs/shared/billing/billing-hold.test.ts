@@ -1,3 +1,4 @@
+import { Code, ConnectError } from '@connectrpc/connect';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createBillingHold, type BillingHoldContext } from './billing-hold.js';
@@ -71,15 +72,6 @@ describe('createBillingHold', () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it('★ billing 抛错时原样冒泡 —— fail closed，扣不动就不要开始干活', async () => {
-    const { client } = fakeClient({
-      hold: vi.fn().mockRejectedValue(new Error('INSUFFICIENT_CREDITS')),
-    } as never);
-    const dep = createBillingHold({ client, resolveTier: vi.fn() });
-
-    await expect(dep(CTX)).rejects.toThrow('INSUFFICIENT_CREDITS');
-  });
-
   it('等级解析失败不影响 billing 本身抛出的错', async () => {
     const { client } = fakeClient({
       hold: vi.fn().mockRejectedValue(new Error('UNAVAILABLE')),
@@ -90,6 +82,59 @@ describe('createBillingHold', () => {
       logger: { warn: vi.fn() },
     });
 
+    // 认不出的错误照原样抛（那是我们自己的 bug，不该伪装成上游故障）
     await expect(dep(CTX)).rejects.toThrow('UNAVAILABLE');
+  });
+});
+
+/**
+ * 契约那三条失败语义在这里换掉**对外的身份**（映射本体在 billing-client 的 toBillingHoldError）。
+ *
+ * <p>钉的是**真跑出来**的那个 bug：目录里漏配一个模型，用户拿到 `HTTP 500
+ * {"code":500,"msg":"服务器内部错误"}` —— 像我们挂了；而 billing 其实说了「这个组合算不出价」。
+ *
+ * <p>⚠️ 每条都仍然是**拒绝**（fail closed 不变）：变的只是以什么状态、什么话被拒。
+ */
+describe('createBillingHold：被拒时的对外身份', () => {
+  it('billing 不可用（UNAVAILABLE）→ 503：仍是拒绝，但这次重试有意义', async () => {
+    const { client } = fakeClient({
+      hold: vi.fn().mockRejectedValue(new ConnectError('connection refused', Code.Unavailable)),
+    } as never);
+    const dep = createBillingHold({ client, resolveTier: vi.fn() });
+
+    await expect(dep(CTX)).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('★ 算不出价（UNPRICEABLE）→ 400 + 人话，**不再是 500**；原文只进日志', async () => {
+    const warn = vi.fn();
+    const { client } = fakeClient({
+      hold: vi
+        .fn()
+        .mockRejectedValue(
+          new ConnectError('UNPRICEABLE: 未配置计价规则：seedance-2.5/video', Code.InvalidArgument),
+        ),
+    } as never);
+    const dep = createBillingHold({ client, resolveTier: vi.fn(), logger: { warn } });
+
+    const error = await dep(CTX).catch((e: unknown) => e);
+
+    // 用户能自己改（换一个模型）：给 4xx 和一句人话
+    expect(error).toMatchObject({ code: 1005, status: 400 });
+    expect((error as Error).message).not.toMatch(/UNPRICEABLE|未配置计价规则/);
+    // 运营要的是原文：漏配清单就是从这批日志里攒出来的
+    expect(warn.mock.calls[0]?.[0]).toContain('UNPRICEABLE');
+  });
+
+  it('★ 余额不足（INSUFFICIENT_CREDITS）→ 402：前端正是按 402 弹充值框', async () => {
+    const { client } = fakeClient({
+      hold: vi
+        .fn()
+        .mockRejectedValue(
+          new ConnectError('INSUFFICIENT_CREDITS: 可用余额 0', Code.FailedPrecondition),
+        ),
+    } as never);
+    const dep = createBillingHold({ client, resolveTier: vi.fn() });
+
+    await expect(dep(CTX)).rejects.toMatchObject({ code: 1001, status: 402 });
   });
 });
