@@ -4,6 +4,7 @@ import com.bluewhale.billing.application.BalanceView;
 import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.HoldCommand;
 import com.bluewhale.billing.application.QuoteQuery;
+import com.bluewhale.billing.application.TransactionView;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.InsufficientCreditsException;
@@ -22,6 +23,8 @@ import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.QuoteRequest;
 import com.bluewhale.contracts.billing.v1.QuoteResponse;
+import com.bluewhale.contracts.billing.v1.UserTransaction;
+import com.bluewhale.contracts.common.v1.PageResponse;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -74,6 +77,8 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                     request.getTaskType(),
                     Map.copyOf(request.getSpecs().getAttrsMap()),
                     request.getTier(),
+                    // 展示文案快照：随预留落库，ListTransactions 的消费行直接展示它
+                    request.getTitle(),
                     submittedAt));
 
             observer.onNext(HoldResponse.newBuilder()
@@ -112,18 +117,51 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     }
 
     /**
-     * ⚠️ <b>尚未实现</b>，刻意返回 UNIMPLEMENTED 而不是空列表。
+     * 用户可见流水（**一个业务动作一行**）。
      *
-     * <p>它需要用户可见流水表（{@code billing_user_transactions}）与投影，
-     * 那是独立的一刀。返回空列表会让调用方以为「这个用户没有流水」——
-     * 用户界面于是显示成「暂无记录」，而真实原因是我们还没做。
+     * <p>为什么不是「一条账本分录一行」：账本是复式的，一个动作有多腿（预扣两腿、
+     * 结算三腿），直接暴露分录，用户会看到「同一个操作扣了两次」。
+     * 投影逻辑与「为什么不漏也不重」见 {@code TransactionRepository} 与
+     * {@code TransactionMapper.xml}。
+     *
+     * <p>⚠️ 金额只有一个字段（{@code amount}），刻意不含预扣额：
+     * 落实「任何用户可见界面永远只出现一个金额」。未结算行（{@code status=pending}）
+     * 的 {@code amount} 是预扣时算出的**预计消耗**，结算后同一行变成实际消耗——
+     * 两个数先后占同一个字段，见 {@link TransactionView}。
      */
     @Override
     public void listTransactions(ListTransactionsRequest request,
                                  StreamObserver<ListTransactionsResponse> observer) {
-        observer.onError(Status.UNIMPLEMENTED
-                .withDescription("ListTransactions 尚未实现：用户可见流水表与其投影未落地")
-                .asRuntimeException());
+        try {
+            TransactionView.Page page = billing.listTransactions(
+                    request.getUserId(),
+                    request.getTypeFilter(),
+                    request.getPage().getPageSize(),
+                    request.getPage().getPageToken());
+
+            ListTransactionsResponse.Builder response = ListTransactionsResponse.newBuilder()
+                    .setPage(PageResponse.newBuilder().setNextPageToken(page.nextPageToken()));
+            for (TransactionView item : page.items()) {
+                response.addItems(UserTransaction.newBuilder()
+                        .setId(item.id())
+                        .setType(item.type())
+                        .setDirection(item.direction())
+                        .setTitle(item.title())
+                        .setAmount(item.amount())
+                        .setStatus(item.status())
+                        // RFC3339 带时区，与 QueryBalance 同一口径（库内即北京时间）
+                        .setCreatedAt(RFC3339.format(item.createdAt().atZone(DbTime.ZONE)))
+                        // 契约：仅 done 时非空。未结算没有「结算时刻」这回事
+                        .setSettledAt(item.settledAt() == null
+                                ? ""
+                                : RFC3339.format(item.settledAt().atZone(DbTime.ZONE)))
+                        .build());
+            }
+            observer.onNext(response.build());
+            observer.onCompleted();
+        } catch (RuntimeException e) {
+            observer.onError(toStatus(e).asRuntimeException());
+        }
     }
 
     /**
@@ -212,7 +250,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         }
         // ⚠️ 内部错误**不外泄细节**：栈信息可能带库表名、SQL 片段或金额，
         //    只进日志。调用方拿到统一的一句话，靠 traceId 对回去。
-        log.error("Hold/QueryBalance 内部错误", e);
+        log.error("billing RPC 内部错误", e);
         return Status.INTERNAL.withDescription("billing 内部错误");
     }
 }

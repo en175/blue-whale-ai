@@ -7,6 +7,7 @@ import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.CreditSource;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
+import com.bluewhale.billing.ledger.TransactionRepository;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.PricingRequest;
 import com.bluewhale.billing.pricing.PricingResult;
@@ -46,25 +47,36 @@ public class BillingApplicationService {
     /** 最多提示几条。 */
     private static final int EXPIRING_LIMIT = 5;
 
+    /**
+     * 流水分页大小。缺省 20、上限 100——上限是**服务端**定的：
+     * {@code PageRequest.page_size} 由调用方说，proto 注释也写了「上限由服务端钳制」。
+     * 不钳制的话一次「给我全部」就能把这个读接口变成全表扫描。
+     */
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final PricingEngine pricing;
     private final CreditService credits;
     private final CreditLotRepository lots;
     private final LedgerRepository ledger;
     private final CatalogHolder catalog;
     private final GrantPolicy grantPolicy;
+    private final TransactionRepository transactions;
 
     public BillingApplicationService(PricingEngine pricing,
                                      CreditService credits,
                                      CreditLotRepository lots,
                                      LedgerRepository ledger,
                                      CatalogHolder catalog,
-                                     GrantPolicy grantPolicy) {
+                                     GrantPolicy grantPolicy,
+                                     TransactionRepository transactions) {
         this.pricing = pricing;
         this.credits = credits;
         this.lots = lots;
         this.ledger = ledger;
         this.catalog = catalog;
         this.grantPolicy = grantPolicy;
+        this.transactions = transactions;
     }
 
     /**
@@ -119,7 +131,7 @@ public class BillingApplicationService {
         }
 
         return credits.hold(command.userId(), command.commandId(), command.jobId(),
-                priced.credits(), catalogVersion, priced.discount().factorBp());
+                priced.credits(), catalogVersion, priced.discount().factorBp(), command.title());
     }
 
     /** 当前生效的目录版本；影子对账与价格预览要按它复现。 */
@@ -156,5 +168,31 @@ public class BillingApplicationService {
                         lot.available(), lot.expiresAt(), lot.source().key()))
                 .toList();
         return new BalanceView(lots.availableCredits(userId), frozen, expiring);
+    }
+
+    /**
+     * 用户可见流水（**一个业务动作一行**，见 {@link TransactionView}）。
+     *
+     * <p>只做两件应用层的事，其余在持久化层：
+     * <ol>
+     *   <li><b>钳制页大小</b>——{@code page_size} 缺省 20、上限 100（服务端口径，
+     *       proto 注释写明「上限由服务端钳制」）</li>
+     *   <li><b>校验类型过滤</b>——未知类型当场拒绝。放它过去会返回空列表，
+     *       而空列表与「真的没有」长得一模一样，调用方查的是 {@code "recharg"} 也发现不了</li>
+     * </ol>
+     *
+     * @param typeFilter 空串/null = 全部；否则必须是 {@link TransactionType} 的合法值
+     * @param pageToken  上一页给的游标；空串/null = 首页
+     * @throws IllegalArgumentException 类型过滤非法或游标损坏（gRPC 映射成 INVALID_ARGUMENT）
+     */
+    public TransactionView.Page listTransactions(long userId, String typeFilter,
+                                                 int pageSize, String pageToken) {
+        String filter = typeFilter == null ? "" : typeFilter.trim();
+        if (!filter.isEmpty()) {
+            // 校验并归一：of() 抛异常即未知类型（gRPC 映射成 INVALID_ARGUMENT）
+            filter = TransactionType.of(filter).key();
+        }
+        int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
+        return transactions.listPage(userId, filter, size, pageToken == null ? "" : pageToken);
     }
 }

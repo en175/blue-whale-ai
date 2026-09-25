@@ -100,6 +100,20 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
     }
 
     /**
+     * 当前生效的换算率：**1 元 = 多少积分**。
+     *
+     * <p>它属于定价目录（版本化、可整体回滚），不是硬编码常量——要改口径就发一版新目录。
+     *
+     * <p>无生效目录时返回 -1（与 {@link #currentVersion()} 同口径）：这里**不能**回退成
+     * 某个默认值。默认值一旦不是「真值」，管理员看到的换算率就是编的，
+     * 而它恰恰是用来核对「用户看到的积分对不对」的。
+     */
+    public int currentCreditsPerYuan() {
+        var loaded = current.get();
+        return loaded == null ? -1 : loaded.creditsPerYuan();
+    }
+
+    /**
      * 引擎入口：按 (model, task) 取规则。
      *
      * @return 没有配规则时返回 null —— 引擎会抛 {@code RuleNotFoundException}

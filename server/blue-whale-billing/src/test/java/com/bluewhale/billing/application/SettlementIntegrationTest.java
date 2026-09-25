@@ -174,7 +174,7 @@ class SettlementIntegrationTest {
     private HoldResult hold(String commandId, long jobId, String tier) {
         return billing.hold(new HoldCommand(
                 USER, commandId, jobId, MODEL, TASK, Map.of("resolution", "1080p"),
-                tier, Instant.now()));
+                tier, "视频生成 · 测试", Instant.now()));
     }
 
     /** 完成事件；usage 为空 = worker 没有上报额外用量（媒介类的常态）。 */

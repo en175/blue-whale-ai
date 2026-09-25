@@ -58,6 +58,8 @@ class AdminApiIntegrationTest {
     private static final long USER_HOLD = 9306L;
     private static final String MODEL = "seedance-2.5";
     private static final String TASK = "text2video";
+    /** 展示文案快照。本测试考的是手动结算/返还的资金效果，文案不参与断言。 */
+    private static final String TITLE = "视频生成 · 测试";
 
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbc;
@@ -94,7 +96,9 @@ class AdminApiIntegrationTest {
 
         mvc.perform(get("/admin/catalogs/active"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.catalogVersion").value(1));
+                .andExpect(jsonPath("$.catalogVersion").value(1))
+                // 管理端要能直接确认「现在 1 元 = 多少积分」——它来自目录文档，不是代码常量
+                .andExpect(jsonPath("$.creditsPerYuan").value(15));
     }
 
     @Test
@@ -254,7 +258,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_500L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
-                Map.of(), "free", Instant.now()));
+                Map.of(), "free", TITLE, Instant.now()));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/refund")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -275,7 +279,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_501L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-stuck", jobId, MODEL, TASK,
-                Map.of(), "free", Instant.now()));
+                Map.of(), "free", TITLE, Instant.now()));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/settle")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -88,5 +88,16 @@ public class CatalogRepository {
             CatalogDocument document,
             Map<String, com.bluewhale.billing.pricing.CompiledRule> index,
             Instant publishedAt
-    ) {}
+    ) {
+
+        /**
+         * 本版本声明的换算率：**1 元 = 多少积分**。
+         *
+         * <p>语义化入口，免得调用方为了取一个数去穿三层（{@code loaded.document().creditsPerYuan()}）。
+         * 结算要按 job 冻结的版本复现时，就该从对应版本的 {@code LoadedCatalog} 上读它。
+         */
+        public int creditsPerYuan() {
+            return document.creditsPerYuan();
+        }
+    }
 }

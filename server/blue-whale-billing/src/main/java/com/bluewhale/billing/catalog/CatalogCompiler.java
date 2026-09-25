@@ -33,6 +33,7 @@ public final class CatalogCompiler {
             throw new CompileException("不支持的 schemaVersion=" + doc.schemaVersion()
                     + "（本服务支持 " + CatalogDocument.SUPPORTED_SCHEMA_VERSION + "）");
         }
+        compileCreditsPerYuan(doc.creditsPerYuan());
 
         Map<String, CompiledRule> index = new LinkedHashMap<>();
         for (var modelEntry : doc.models().entrySet()) {
@@ -57,6 +58,29 @@ public final class CatalogCompiler {
     /** 引擎用的索引键。与 {@code DbCatalogLookup} 的查询键必须一致。 */
     public static String indexKey(String modelId, String taskType) {
         return modelId + "/" + taskType;
+    }
+
+    /**
+     * 校验换算率 {@link CatalogDocument#creditsPerYuan()}。
+     *
+     * <p>它是**元 → 积分的换算率**（这个值意味着「1 元等于多少积分」），运营在前端看到的
+     * 余额、以及每次生成扣的积分，都由它换算。写错的后果不是「某个模型算错价」，
+     * 而是**全站口径错**，且会随 job 冻结的版本一直复现——所以放在编译期拒绝，
+     * 与其它配置错误同一个时机、同一个粒度（整份拒绝，不部分加载）。
+     *
+     * <p>合法区间 {@link CatalogDocument#MIN_CREDITS_PER_YUAN} ~
+     * {@link CatalogDocument#MAX_CREDITS_PER_YUAN}；上界的理由是「大到明显不合理」，
+     * 不是算力限制。
+     */
+    private static void compileCreditsPerYuan(int creditsPerYuan) {
+        if (creditsPerYuan < CatalogDocument.MIN_CREDITS_PER_YUAN
+                || creditsPerYuan > CatalogDocument.MAX_CREDITS_PER_YUAN) {
+            throw new CompileException("creditsPerYuan=" + creditsPerYuan
+                    + " 不合法：它表示「1 元等于多少积分」，合法范围 "
+                    + CatalogDocument.MIN_CREDITS_PER_YUAN + " ~ "
+                    + CatalogDocument.MAX_CREDITS_PER_YUAN
+                    + "（超过上界说明多半是多敲了 0）");
+        }
     }
 
     static CompiledRule compileRule(CatalogDocument.TaskRule rule) {

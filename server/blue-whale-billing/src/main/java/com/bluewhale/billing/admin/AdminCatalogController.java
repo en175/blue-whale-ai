@@ -44,7 +44,8 @@ public class AdminCatalogController {
      *      -H 'Content-Type: application/json' --data-binary @catalog.json
      * </pre>
      *
-     * @return 本次生效的版本号
+     * @return 本次生效的版本号，以及本版生效的换算率 {@code creditsPerYuan}（1 元 = 多少积分）——
+     *         发布是改口径的唯一入口，回包里带上它，运营不必再查一次库才知道发对了没有
      */
     @PostMapping
     public Map<String, Object> publish(@RequestBody String documentJson,
@@ -54,15 +55,22 @@ public class AdminCatalogController {
         return Map.of(
                 "catalogVersion", version,
                 "documentHash", holder.currentDocumentHash(),
-                "ruleCount", holder.currentIndex().size());
+                "ruleCount", holder.currentIndex().size(),
+                "creditsPerYuan", holder.currentCreditsPerYuan());
     }
 
-    /** 当前生效版本；没有 active 版本时 version = -1。 */
+    /**
+     * 当前生效版本；没有 active 版本时 version = -1。
+     *
+     * @return 含本版生效的换算率 {@code creditsPerYuan}（1 元 = 多少积分），
+     *         供管理端确认「现在 1 元 = 多少积分」；无生效目录时它与 catalogVersion 同为 -1
+     */
     @GetMapping("/active")
     public Map<String, Object> active() {
         return Map.of(
                 "catalogVersion", holder.currentVersion(),
                 "documentHash", String.valueOf(holder.currentDocumentHash()),
-                "ruleCount", holder.currentIndex().size());
+                "ruleCount", holder.currentIndex().size(),
+                "creditsPerYuan", holder.currentCreditsPerYuan());
     }
 }

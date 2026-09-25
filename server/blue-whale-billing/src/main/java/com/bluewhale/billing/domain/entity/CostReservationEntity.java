@@ -40,6 +40,9 @@ public class CostReservationEntity {
     /** 预扣时的折扣系数（万分比）——结算按它复现，不重新解析（见 V4 迁移）。 */
     private Integer discountBp;
 
+    /** 提交时的展示文案快照（见 V6 迁移）；空串 = 提交方未提供。 */
+    private String title;
+
     /** 释放原因；仅 released 时有值。 */
     private String releaseNote;
 
@@ -67,6 +70,8 @@ public class CostReservationEntity {
     public void setCatalogVersion(Integer catalogVersion) { this.catalogVersion = catalogVersion; }
     public Integer getDiscountBp() { return discountBp; }
     public void setDiscountBp(Integer discountBp) { this.discountBp = discountBp; }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
     public String getReleaseNote() { return releaseNote; }
     public void setReleaseNote(String releaseNote) { this.releaseNote = releaseNote; }
     public LocalDateTime getGmtCreate() { return gmtCreate; }

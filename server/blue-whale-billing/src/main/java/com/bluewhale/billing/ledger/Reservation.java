@@ -16,6 +16,8 @@ import java.util.List;
  * @param discountBp      冻结的折扣系数（万分比）——同理，改折扣也不影响已提交任务。
  *                        与 catalogVersion 是同一件事的两半：一个冻结「用哪套规则算」，
  *                        一个冻结「当时打了多少折」；少任何一半都复现不出预扣时那个价
+ * @param title           提交时的展示文案快照（{@code HoldRequest.title}），用户流水直接展示。
+ *                        存快照而不是引用：模型改名、文案生成规则变化都不该改写历史流水
  * @param releaseNote     释放原因；仅 released 时有值
  */
 public record Reservation(
@@ -28,6 +30,7 @@ public record Reservation(
         List<Allocation> allocations,
         int catalogVersion,
         int discountBp,
+        String title,
         String releaseNote
 ) {
 

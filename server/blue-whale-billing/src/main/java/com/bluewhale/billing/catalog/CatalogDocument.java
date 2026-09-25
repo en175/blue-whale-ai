@@ -16,6 +16,9 @@ import java.util.Map;
 public record CatalogDocument(
         int schemaVersion,
         String currency,
+        /** ★ 1 元 = 多少积分（元 → 积分的换算率）。**这是目录的配置项，不是硬编码常量**：
+         *  与目录一起版本化，改价不影响已提交任务（结算按 job 冻结的版本复现）。
+         *  合法区间见 {@link #MIN_CREDITS_PER_YUAN} ~ {@link #MAX_CREDITS_PER_YUAN}，编译期校验。 */
         int creditsPerYuan,
         /** modelId → taskType → 规则 */
         Map<String, Map<String, TaskRule>> models,
@@ -23,6 +26,17 @@ public record CatalogDocument(
 ) {
 
     public static final int SUPPORTED_SCHEMA_VERSION = 1;
+
+    /**
+     * {@link #creditsPerYuan} 的合法区间（含端点）。
+     *
+     * <p>下界 1：0 或负数意味着「多少元都换不到积分」，整份目录失去换算意义。
+     * 上界 100000：不是算不出来，而是「1 元 = 10 万积分」这种量级几乎必定是运营多敲了几个 0——
+     * 换算率写错的代价是**用户看到的余额与实际扣费对不上**，且会随冻结版本一直复现，
+     * 所以宁可发布时拒绝，也不要放进去之后再靠人发现。
+     */
+    public static final int MIN_CREDITS_PER_YUAN = 1;
+    public static final int MAX_CREDITS_PER_YUAN = 100_000;
 
     public CatalogDocument {
         models = models == null ? Map.of() : Map.copyOf(models);

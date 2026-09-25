@@ -94,6 +94,15 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
   2. **worker 侧 usage 上报为空** —— 目前终态事件带空用量，billing 按预扣额结算；对 `partially_succeeded` 而言这条兜底偏平台（billing 侧打 WARN，见 `SettlementService`）。
   3. **`identity-svc` 尚未独立成进程** —— 当前身份逻辑仍在 `business-api` 内（`libs/shared/identity`），契约里的 `VerifySession` RPC 面已定义但未接线。
   4. **取消（cancelled）状态的返还路径** 目前依赖终态统一出口，尚未覆盖「claim 前取消」这类不走 JobFinalizer 的路径。
-  5. **`creditsPerYuan` 未定档** —— 它是 pricing catalog 的配置字段（不是硬编码），但目前**只有测试夹具**用了 15，而存量展示口径 `docs/specs/billing-units-contract.md` 写死「1 元 = 10 积分」（`QUOTA_TO_CREDITS_DIVISOR = 50_000`）。切换前必须把这两个数对齐并落一个值，否则用户在前端看到的积分与 billing 扣的对不上。该 spec 的「quota 账本唯一权威在网关」条款被本 ADR 取代，**需要同批修订**。
+  5. ~~`creditsPerYuan` 未定档~~ —— **已定档（2026-09-25）**：值 = **15**，且留在定价目录
+     `billing_pricing_catalogs.document` 里（版本化、随 job 冻结、管理端可查），**不进**
+     独立的 key-value 配置表——那样会脱离版本冻结，改一次数就说不清已提交未结算的任务按哪个算。
+     该字段此前声明了却从未被读取（真正的换算在 `RoundingPolicy` 里写死 1000mc=1积分），
+     现已加编译期校验与管理端回显。`docs/specs/billing-units-contract.md` 的同批修订已完成。
   6. **设计文档不在仓内** —— 代码注释引用的《计费逻辑详细设计》《迁移与切换 runbook》没有进仓（本仓只有 `docs/specs/billing-units-contract.md`）。要么把它们落进来，要么把注释改成自包含的说明。
+  7. **TS 侧仍有 new-api 依赖**（切割分批进行中）：用户身份面已全部删除；**账单面**（余额、
+     消费流水、充值记录、管理端 dashboard/orders）与**充值面**（协议、下单、查单）仍在转发，
+     其中后者一旦切断，**用户将完全无法充值**（支付通道尚未接过来）。上游调用面
+     （text-completions / agent 网关 / 素材 / 定价目录）按「上游本职」保留。
+     ⚠️ 若严格执行「只有 worker 能调 new-api」，这三类都要另作安排——需要一个明确决定。
 - 成立前提：切换顺序不可颠倒。**先打开真扣、后断 sk- 链** = 用户被扣两遍；**先断链、后接好计费** = 白嫖。

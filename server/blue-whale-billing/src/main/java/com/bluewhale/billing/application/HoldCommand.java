@@ -13,6 +13,9 @@ import java.util.Map;
  *                    这样重试能发生在写 job 之前：Hold 成功但写 job 失败时重试命中幂等即可，
  *                    不需要跨服务补偿、也不会留下垃圾 job
  * @param tier        用户等级；空 = free。折扣解析用
+ * @param title       展示文案快照（「视频生成 · seedance-2.5 1080p 5s」）。
+ *                    随预扣冻进预留，用户流水直接展示——提交后模型改名或文案规则变化
+ *                    都不该改写历史流水，所以存快照而不是引用
  * @param submittedAt ★ 计价时刻。**必须由调用方在入口取一次**，不能在深处各自取
  *                    {@code Instant.now()}——那会让「同一请求内的时间」出现多个值，
  *                    而它同时决定营销活动是否命中与批次过期判定
@@ -25,6 +28,7 @@ public record HoldCommand(
         String taskType,
         Map<String, String> specs,
         String tier,
+        String title,
         Instant submittedAt
 ) {
 
@@ -37,5 +41,7 @@ public record HoldCommand(
         }
         specs = specs == null ? Map.of() : Map.copyOf(specs);
         tier = tier == null || tier.isBlank() ? "free" : tier;
+        // 文案只是展示，缺了不该拦住一次预扣：统一成空串，库里只有一种「没提供」写法
+        title = title == null ? "" : title;
     }
 }
