@@ -46,9 +46,12 @@ vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null 
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 /** PromptRefEditor 打桩（Lexical 过重）：回填断言所需——textarea 值由 initialDoc/initialText
- *  展平而来（面板打开时种子正文即呈现在值里），onChange 透传结构化文档（先例同 genPanelDismiss）。 */
+ *  展平而来（面板打开时种子正文即呈现在值里），onChange 透传结构化文档（先例同 genPanelDismiss）。
+ *  IKIJ61：打桩另带挂载计数——面板以 key={seed.ts} 重挂载时编辑器随之重挂，计数即 seed
+ *  产生新引用（key 变化）的次数，供「等值重复打开不重挂载」断言。 */
+let editorMountCount = 0;
 vi.mock('./components/PromptRefEditor', async () => {
-  const { forwardRef, useImperativeHandle } = await import('react');
+  const { forwardRef, useEffect, useImperativeHandle } = await import('react');
   type StubDoc = { version: number; segments: Array<{ kind: string; text?: string }> };
   const flatten = (doc: StubDoc | null | undefined, initialText?: string) => {
     if (doc && Array.isArray(doc.segments)) {
@@ -69,6 +72,7 @@ vi.mock('./components/PromptRefEditor', async () => {
       },
       ref: React.Ref<unknown>,
     ) {
+      useEffect(() => { editorMountCount += 1; }, []);
       useImperativeHandle(ref, () => ({
         insertRefAtMention: () => {},
         consumeMentionForPendingInsert: () => {},
@@ -343,7 +347,11 @@ async function clickCard(id: string, x = 120, y = 90) {
     fire('mousemove', window, x + 4, y + 3);
     fire('mousemove', window, x, y);
     fire('mouseup', window, x, y);
-    fire('click', el, x, y);
+    // click 前重查节点元素：手势中段（选中通报驱动的面板开合）可能令 React 重挂节点包裹层，
+    // 浏览器中 click 目标是抬键时指针下的当前元素，故以当下 DOM 为准。注意位移超过 click
+    // 距离时 d3-drag 会在 window 捕获层吞掉紧随 mouseup 的 click（真实浏览器同款语义，
+    // d3 yesdrag 的 click.drag 捕获监听），面板打开由选中通报路径承担（IKIJ61 源码核验）。
+    fire('click', node(id), x, y);
     await new Promise((resolve) => setTimeout(resolve, 5));
   });
 }
@@ -390,6 +398,7 @@ beforeEach(() => {
   Element.prototype.scrollTo = () => {};
   consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   pageRenderCount = 0;
+  editorMountCount = 0;
   seedDoc();
   apiMocks.fetchGenerationModels.mockImplementation(async (type?: string) => {
     if (type === 'audio') return [audioModel];
@@ -481,6 +490,198 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
     await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
     expectNoUpdateDepthLoop();
     expect(node('v1').classList.contains('selected')).toBe(true);
+  });
+});
+
+/* IKIJ61 断燃料层：面板打开链路 seed 等值跳过写入 + 互关清绑定。
+   燃料机制（父单诊断）：open*DraftDialog 每次以 ts: Date.now() 产生新 seed 引用（key 变化
+   重挂载面板）；且互相关闭对方面板时不清对方 draftId 绑定——对方草稿卡的下一轮选中通报
+   经「已打开同一面板」守卫判定（面板已关 → 守卫不命中、绑定还在、无豁免标记）重开对方
+   面板，对方面板打开又关掉本面板，即「图片草稿卡、视频草稿卡、视频草稿卡」三拍互搏。
+   本组用例锁定的外部行为：等值重复打开不重挂载；互关后对方卡纯选中通报（无 click，走
+   selection 路径）不回弹重开；手动点卡重开照常；草稿内容真实变化仍写入新 seed 回填。 */
+describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
+  /** 纯选中手势（无 click）：d3-drag 位移触发 ReactFlow 选中并经 onSelectionChange 通报，
+   *  不派发 click（jsdom 不自动派生，浏览器中 click 只触发 onNodeClick）——复刻「选中变化
+   *  经 React Flow useEffect 到达，早于或代替 onNodeClick」的通报扰动路径。 */
+  async function selectCard(id: string, x = 120, y = 90) {
+    const el = node(id);
+    const fire = (type: 'mousedown' | 'mousemove' | 'mouseup', target: EventTarget, cx: number, cy: number) => {
+      const event = new MouseEvent(type, {
+        bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1,
+        clientX: cx, clientY: cy,
+      });
+      Object.defineProperty(event, 'view', { value: window });
+      target.dispatchEvent(event);
+    };
+    await act(async () => {
+      fire('mousedown', el, x, y);
+      fire('mousemove', window, x + 4, y + 3);
+      fire('mousemove', window, x, y);
+      fire('mouseup', window, x, y);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+  }
+
+  /** 当前打开面板的正文输入框（PromptRefEditor 打桩 textarea） */
+  const panelEditor = (): HTMLTextAreaElement | null =>
+    container.querySelector<HTMLTextAreaElement>('[data-testid="chip-editor"]');
+
+  it('纯选中通报（无 click）可打开草稿面板——锁定 selection 路径存在，互关守卫测试的机制前提', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('v1')).toBeTruthy());
+
+    await selectCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(panelPromptText()).toBe('视频草稿提示词');
+    expectNoUpdateDepthLoop();
+  });
+
+  it('同一图片草稿卡等值重复打开：seed 内容等值跳过写入，面板不重挂载（编辑器只挂载一次）', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+
+    // 单次点卡手势内部即两次等值打开：手势选中通报先经 openMediaDraftDialog 打开面板并写入
+    // seed，紧随的 click 经 onNodeClick → openImageDraftDialog 再次构造同一草稿的 seed。
+    // 草稿 data 未变 → 新旧 seed 内容等值（除 ts）→ 跳过写入：key 不变，面板不重挂载。
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    expect(panelPromptText()).toBe('图片草稿提示词');
+    expect(editorMountCount).toBe(1);
+
+    // 等值重复通报（纯选中通报再次到达，面板已开且绑定在）走 alreadyOpen 守卫，亦不重挂载
+    await selectCard('d1', 120, 90);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(imageOpen()).toBe(true);
+    expect(editorMountCount).toBe(1);
+    expectNoUpdateDepthLoop();
+  });
+
+  it('视频面板打开后图片卡纯选中通报：面板原子切换收敛，无双面板叠加、无循环通报', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+
+    await clickCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(imageOpen()).toBe(false);
+
+    // 图片卡下轮选中通报（用户拖选图片卡，走纯 selection 路径）：原子切换到图片面板——
+    // 视频面板关闭且其草稿绑定同步清理（不留幽灵绑定），开合单调、无双面板叠加。
+    await selectCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    expect(videoOpen()).toBe(false);
+    expectNoUpdateDepthLoop();
+
+    // 再通报视频卡：原子切回视频面板，同样一次到位收敛（不因上轮残留绑定反复开合）
+    await selectCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(imageOpen()).toBe(false);
+    expectNoUpdateDepthLoop();
+  });
+
+  it('互关清绑定后手动点卡重开图片面板照常（豁免标记被打开路径重置）', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await clickCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(imageOpen()).toBe(false);
+
+    // 图片卡下轮选中通报（扰动）：不重开已关面板，选中落在图片卡
+    await selectCard('d1', 120, 90);
+    // 选中切回视频卡（守卫命中：视频面板保持开、绑定在）
+    await selectCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+
+    // 手动点卡（带 click）经 onNodeClick → openImageDraftDialog 重置豁免，照常重开图片面板
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    expect(panelPromptText()).toBe('图片草稿提示词');
+    expect(videoOpen()).toBe(false);
+    expectNoUpdateDepthLoop();
+  });
+
+  it('音频面板打开后视频卡纯选中通报：对称原子切换收敛（视频绑定已清，无叠加无循环）', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('v1')).toBeTruthy());
+
+    await clickCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true));
+
+    await clickCard('au1', 720, 90);
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    expect(videoOpen()).toBe(false);
+
+    // 视频卡下轮选中通报：原子切回视频面板，音频面板关闭、绑定同步清理，一次到位收敛
+    await selectCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(audioOpen()).toBe(false);
+    expectNoUpdateDepthLoop();
+
+    // 音频卡再通报：切回音频面板，同样收敛
+    await selectCard('au1', 720, 90);
+    await vi.waitFor(() => expect(audioOpen()).toBe(true), { timeout: 3000 });
+    expect(videoOpen()).toBe(false);
+    expectNoUpdateDepthLoop();
+  });
+
+  it('草稿内容变化后重开：seed 真实变化仍写入并重挂载回填（等值跳过不误伤真实变化）', async () => {
+    await renderPage();
+    await vi.waitFor(() => expect(node('d1')).toBeTruthy());
+
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    const editorInitial = panelEditor()!;
+
+    // 面板内编辑正文：实时写回草稿 data.prompt/promptDoc（IKDMQQ 草稿绑定链路）
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(editorInitial, '编辑后的草稿提示词');
+      editorInitial.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // 切到视频草稿卡（图片面板关闭）再切回图片草稿卡：
+    // 草稿 data.prompt 已变 → 新旧 seed 不等值 → 写入新 seed，面板重挂载并回填新正文
+    await clickCard('v1', 420, 90);
+    await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
+    expect(imageOpen()).toBe(false);
+
+    await clickCard('d1', 120, 90);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    expect(panelPromptText()).toBe('编辑后的草稿提示词');
+    expect(panelEditor()).not.toBe(editorInitial);
+    expectNoUpdateDepthLoop();
+  });
+});
+
+/* IKIJ61 等值跳过比较函数契约（AC1 直接锁定）：图片/视频/音频 seed 的内容等值语义——
+   ts 排除、targetNodeId 与全部参数字段参与、attachments/refs 数组按内容比较。 */
+describe('IKIJ61 draftSeedEquals 内容等值契约', () => {
+  it('ts 不同其余字段等值 → 等值；targetNodeId / 参数 / attachments 内容差异 → 不等值', async () => {
+    const { draftSeedEquals } = await import('./draftSeed');
+    const seedA = { ts: 1, text: '正文', targetNodeId: 'd1', params: { modelId: 'm1', ratio: '1:1' }, attachments: [{ nodeId: 't1', title: '文本' }] };
+    const seedB = { ts: 2, text: '正文', targetNodeId: 'd1', params: { modelId: 'm1', ratio: '1:1' }, attachments: [{ nodeId: 't1', title: '文本' }] };
+    // 时间戳驱动的新引用在内容等值时不再视为变化（跳过写入，保留旧引用与旧 key）
+    expect(draftSeedEquals(seedA, seedB)).toBe(true);
+    expect(draftSeedEquals(seedB, seedA)).toBe(true);
+    // 同引用短路
+    expect(draftSeedEquals(seedA, seedA)).toBe(true);
+    // 绑定目标不同（切换草稿）
+    expect(draftSeedEquals(seedA, { ...seedB, targetNodeId: 'd2' })).toBe(false);
+    // 参数真实变化（草稿 data 写回后重开）
+    expect(draftSeedEquals(seedA, { ...seedB, params: { modelId: 'm2', ratio: '1:1' } })).toBe(false);
+    expect(draftSeedEquals(seedA, { ...seedB, text: '新正文' })).toBe(false);
+    // 附件按内容比较：顺序/数量/字段变化均为不等值
+    expect(draftSeedEquals(seedA, { ...seedB, attachments: [{ nodeId: 't1', title: '文本' }, { nodeId: 't2', title: '文本2' }] })).toBe(false);
+    expect(draftSeedEquals(seedA, { ...seedB, attachments: [{ nodeId: 't2', title: '文本' }] })).toBe(false);
+    // 空态：null seed（首次打开 / 自由面板清空）不与任何内容等值
+    expect(draftSeedEquals(null, seedB)).toBe(false);
+    expect(draftSeedEquals(undefined, seedB)).toBe(false);
   });
 });
 
