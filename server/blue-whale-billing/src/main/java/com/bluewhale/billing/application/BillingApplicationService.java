@@ -8,6 +8,7 @@ import com.bluewhale.billing.ledger.CreditSource;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
+import com.bluewhale.billing.pricing.CompiledRule;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.PricingRequest;
 import com.bluewhale.billing.pricing.PricingResult;
@@ -100,18 +101,26 @@ public class BillingApplicationService {
     /**
      * 预扣：**先计价，再冻结**。
      *
-     * <h2>为什么用 {@code Usage.empty()} 计价</h2>
+     * <h2>为什么按「契约用量」计价</h2>
      *
-     * 提交时刻只知道**契约用量**（时长、分辨率、张数——它们写在 specs 里，
-     * 由定价规则的规格表取基准单价），真实用量（token、实际帧数）要等 worker 跑完才上报。
+     * 提交时刻还没有真实用量（token、实际帧数要等 worker 跑完才上报），能知道的只有
+     * **契约用量**——它已经在 job 的规格快照里：张数写在 {@code expected_output_count}、
+     * 时长写在 {@code duration}，随 specs 一起送进来（见 {@link Usage#contractFrom}）。
      * 所以这里的价是「按契约应当冻结多少」，不是「最终会花多少」；
      * **结算时按 worker 上报的真实用量重新计价**，差额退回。
      *
      * <p>这正是预扣存在的理由：用上限冻结、按实际扣款。
      *
+     * <p>⚠️ 这里曾经传 {@code Usage.empty()}。它对 {@code constant:1}（按次）的规则没问题
+     * ——该维度恒为 1，不看用量；但**按槽 / 按秒计价的规则会因此只冻到 {@code minCredits}**：
+     * 基准量恒为 0，一路算到下限，而结算侧又把消耗截到预扣额
+     * （{@link CreditService#settle}），差额**平台自己吃**，账面上没有任何异常。
+     *
      * @throws PricingEngine.RuleNotFoundException 该 (model, taskType) 未配规则——**拒绝提交**
      * @throws com.bluewhale.billing.pricing.BasePriceResolver.UnpriceableSpecException
      *         该规格组合查不到价——同样拒绝（漏配不是免费）
+     * @throws Usage.ContractQuantityUnavailableException 基准维度的契约量取不到——
+     *         同样拒绝：冻下限是静默少收（见 {@link Usage#contractFrom}）
      * @throws com.bluewhale.billing.ledger.InsufficientCreditsException 余额不足
      */
     public HoldResult hold(HoldCommand command) {
@@ -119,7 +128,7 @@ public class BillingApplicationService {
                 command.userId(), command.modelId(), command.taskType(),
                 command.specs(), command.tier());
 
-        PricingResult priced = pricing.compute(request, Usage.empty(), command.submittedAt());
+        PricingResult priced = pricing.compute(request, contractUsage(request), command.submittedAt());
         int catalogVersion = catalog.currentVersion();
 
         if (priced.credits() == 0) {
@@ -149,13 +158,31 @@ public class BillingApplicationService {
      * 「用同一套逻辑算一遍，看它和上游扣的对不对」。若 Quote 走另一条实现，
      * 对上了只能说明两条实现恰好一致，对不上则不知道信谁。
      *
+     * <p>用量留空（{@link Usage#empty()}）＝**按契约用量报价**，与 {@link #hold} 走
+     * 同一份 {@link #contractUsage}。这一条是硬的：预览价与实扣价一旦分叉，用户看到的就是
+     * 「预览一个价、实扣另一个价」。
+     *
      * @throws PricingEngine.RuleNotFoundException 该组合未配规则——影子期这条异常
      *         就是**切换前要修掉的漏配清单**
      */
     public PricingResult quote(QuoteQuery query) {
         PricingRequest request = new PricingRequest(
                 query.userId(), query.modelId(), query.taskType(), query.specs(), query.tier());
-        return pricing.compute(request, query.usage(), query.pricedAt());
+        // 留空 = 调用方还没有用量（提交前预览）：契约用量是此刻唯一已知的量。
+        // 带了用量（结算 / 影子对账）就按真实用量算，不替它补契约量。
+        Usage usage = query.usage().quantities().isEmpty() ? contractUsage(request) : query.usage();
+        return pricing.compute(request, usage, query.pricedAt());
+    }
+
+    /**
+     * 这次请求的**契约用量** —— 提交与预览共用的那一份。
+     *
+     * <p>规则缺失时不在这里报错：那是 {@link PricingEngine} 的职责
+     * （抛 {@code RuleNotFoundException}），同一个错误不报第二遍。
+     */
+    private Usage contractUsage(PricingRequest request) {
+        CompiledRule rule = catalog.lookup(request.modelId(), request.taskType());
+        return rule == null ? Usage.empty() : Usage.contractFrom(rule, request.specs());
     }
 
     /** 余额与临期批次（用户可见）。 */

@@ -239,7 +239,8 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                     .withDescription(CODE_INSUFFICIENT_CREDITS + ": " + e.getMessage());
         }
         if (e instanceof PricingEngine.RuleNotFoundException
-                || e instanceof BasePriceResolver.UnpriceableSpecException) {
+                || e instanceof BasePriceResolver.UnpriceableSpecException
+                || e instanceof Usage.ContractQuantityUnavailableException) {
             // 计价配置缺失 = 这次提交算不出价。调用方须**拒绝提交**（fail closed），
             // 不能当作免费放行。对运维是一条明确的「补配置」信号。
             return Status.INVALID_ARGUMENT

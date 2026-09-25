@@ -16,55 +16,85 @@ import java.util.Map;
  *
  * <p>新增维度 = 这里加一行 + proto 注释加一行 + catalog 文档加一行。
  * **不需要动引擎**（见 §4.6.6 的 🔵 档）。
+ *
+ * <h2>契约量从哪来</h2>
+ *
+ * <p>提交时刻还没有真实用量，但**契约用量是已知的**（这次任务最多会产出多少）。
+ * 「哪个规格键带着这个维度的契约量」也在本枚举里登记（{@link #contractSpecKey()}）——
+ * 它和维度键一样是「三方一致」的一部分：配了某个维度做基准，就必须有对应的契约量来源，
+ * 否则预扣只能冻到下限（见 {@code Usage#contractFrom}）。这一列是这个不变式的登记处。
  */
 public enum UsageDim {
 
     /** 恒为 1：按次计费（mediakit / 抠图 / Suno）。 */
-    CONSTANT_ONE("constant:1"),
+    CONSTANT_ONE("constant:1", null),
 
     /** 成功的输出槽数：图片多张 / 视频多段。**按 slot 计费的基数**。 */
-    SUCCEEDED_SLOTS("usage.succeededSlots"),
+    SUCCEEDED_SLOTS("usage.succeededSlots", "expected_output_count"),
 
     /** 时长（秒）：视频 / 音频。 */
-    SECONDS("usage.seconds"),
+    SECONDS("usage.seconds", "duration"),
 
-    /** 字符数：TTS。 */
-    CHARACTERS("usage.characters"),
+    /**
+     * 字符数：TTS。
+     *
+     * <p>⚠️ 没有契约量来源：文本是模型**生成**出来的，提交时刻还不知道会有多少字。
+     */
+    CHARACTERS("usage.characters", null),
 
-    /** 参考素材数。通常出现在 multipliers（整单倍率）而非 dims。 */
-    REFERENCE_COUNT("usage.referenceCount"),
+    /**
+     * 参考素材数。通常出现在 multipliers（整单倍率）而非 dims。
+     *
+     * <p>⚠️ 没有契约量来源：参考素材在 job 的规格快照里是**数组**（{@code references}），
+     * 而送进 billing 的 specs 只带标量——数量在这一层被丢掉了（见 {@code billing-specs.ts}）。
+     * 所以按参考素材加价（multipliers）时，预扣冻的是**不含加价**的价。
+     */
+    REFERENCE_COUNT("usage.referenceCount", null),
 
     // ── 以下为文本 / 多模态维度，**本期不启用**（文本模型不纳入计费），
     //    但契约与注册表先登记：启用时只需配 catalog，不改引擎。
+    //    它们的契约量来源一概为 null：token 数由上游返回，提交时刻无从得知。
 
     /** 输入 token。 */
-    PROMPT_TOKENS("usage.p"),
+    PROMPT_TOKENS("usage.p", null),
     /** 输出 token。 */
-    COMPLETION_TOKENS("usage.c"),
+    COMPLETION_TOKENS("usage.c", null),
     /** 缓存读 token。 */
-    CACHE_READ_TOKENS("usage.cr"),
+    CACHE_READ_TOKENS("usage.cr", null),
     /** 缓存写 token（5 分钟档）。 */
-    CACHE_WRITE_5M_TOKENS("usage.cc5m"),
+    CACHE_WRITE_5M_TOKENS("usage.cc5m", null),
     /** 缓存写 token（1 小时档）。 */
-    CACHE_WRITE_1H_TOKENS("usage.cc1h"),
+    CACHE_WRITE_1H_TOKENS("usage.cc1h", null),
     /** 思考 / 推理 token。 */
-    REASONING_TOKENS("usage.reasoning"),
+    REASONING_TOKENS("usage.reasoning", null),
     /** 图片输入 token。 */
-    IMAGE_INPUT_TOKENS("usage.imgIn"),
+    IMAGE_INPUT_TOKENS("usage.imgIn", null),
     /** 音频输入 token。 */
-    AUDIO_INPUT_TOKENS("usage.audioIn"),
+    AUDIO_INPUT_TOKENS("usage.audioIn", null),
     /** 总输入长度：**仅供 tiers 条件用**，不作为计费项。 */
-    TOTAL_INPUT_LENGTH("usage.len");
+    TOTAL_INPUT_LENGTH("usage.len", null);
 
     private final String key;
+    private final String contractSpecKey;
 
-    UsageDim(String key) {
+    UsageDim(String key, String contractSpecKey) {
         this.key = key;
+        this.contractSpecKey = contractSpecKey;
     }
 
     /** catalog / proto 里使用的字面键。 */
     public String key() {
         return key;
+    }
+
+    /**
+     * 提交时刻带着本维度**契约量**的规格键；{@code null} = 提交时刻取不到。
+     *
+     * <p>值就是 job 规格快照（{@code specs}）里的键名，例如按槽计费的契约张数在
+     * {@code expected_output_count}。它必须是**标量**——数组进不了 specs。
+     */
+    public String contractSpecKey() {
+        return contractSpecKey;
     }
 
     private static final Map<String, UsageDim> BY_KEY =
