@@ -30,6 +30,25 @@ nohup env VITE_API_BASE_URL=http://127.0.0.1:3100 \
 - 起之前确认没有旧 3000 进程占着端口：旧进程可能跑的是别的 worktree 的旧代码（体检脚本显示代码目录），先 kill 再起。
 - 用 `nohup … &` 常驻；会话托管的后台进程在会话结束会被回收（SIGTERM 143）。
 
+## 计费服务 4003/4004（新：起后端前必须先起它）
+
+new-api 已被切断，**预扣改由我们自己的 billing-svc 承担**——它在用户提交生成的等待路径上。
+
+```bash
+cd <worktree>/server
+BILLING_DB_PASSWORD="$(docker inspect bw-mysql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD | cut -d= -f2)" \
+ROCKETMQ_ENDPOINTS=127.0.0.1:8081 \
+nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>&1 &
+```
+
+- HTTP/admin 走 `4003`，**gRPC 走 `4004`**——后端要连的是后者（`BILLING_GRPC_URL=http://127.0.0.1:4004`）
+- 库是 `bw_billing`（billing 自己的库，Flyway 管 schema，**不归 Prisma**）
+- `ROCKETMQ_ENDPOINTS` 指向本地 `bw-rmq-proxy`（8081）。只想验 Hold 不想接 MQ 时用
+  `BILLING_MQ_ENABLED=false`；**但那样跑完的任务不会被结算/返还**，钱会冻着
+- 本地库已有一份 `creditsPerYuan=15` 的 active 定价目录。⚠️ **不要跑 billing 的
+  DB 门控集成测试**（`BILLING_DB_PASSWORD` 一设它们就会跑）——`AdminApiIntegrationTest`
+  的 `@BeforeEach` 会 `DELETE FROM billing_pricing_catalogs`，把这份目录清掉
+
 ## 后端 3100
 
 构建（必须完整跑完三段）：
@@ -38,22 +57,26 @@ nohup env VITE_API_BASE_URL=http://127.0.0.1:3100 \
 cd <worktree>/backend && npm run build   # prisma generate && tsc -b && tsc-alias
 ```
 
-构建中断会留下半成品 dist（`main.js` 里残留 `@lib/` 别名，启动报 `ERR_MODULE_NOT_FOUND`）。`npm start` 的 prestart 检查会拦截并提示重新 build。
+构建中断会留下半成品 dist（`dist/` 里残留 `@lib/` 别名，启动报 `ERR_MODULE_NOT_FOUND`）。
+`npm start` 的 prestart 检查会扫整棵 dist 并**指名道姓列出残留的文件与那一行**。
 
 形态 A：本地库（默认）
 
 ```bash
-cd backend && PORT=3100 NEW_API_UPSTREAM_KEY='<统一 key，取自测试站网关>' \
+cd backend && PORT=3100 \
+  NEW_API_UPSTREAM_KEY='<统一 key，取自测试站网关>' \
+  BILLING_GRPC_URL='http://127.0.0.1:4004' \
   nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
-⚠️ **`NEW_API_UPSTREAM_KEY` 现在是登录的硬依赖**。new-api 已从「我们的用户体系」变成
-「带一把统一 key 的上游供应商」，登录成功后会话里存的不再是该用户自己的 `sk-`，
-而是这把项目级 key。**缺它时 `/auth/login` 直接 503**（`UpstreamCredentialMissingError`），
-而不是等到用户点生成才炸。
+⚠️ **这两个变量现在是启动硬依赖**：缺任意一个，后端**拒绝启动**（listen 之前就
+`process.exit(1)`）。理由：
 
-为什么不给默认值 / 不降级成空串：空串会让下游拿 `Bearer ` 去打 new-api 然后收到 401，
-报错点离原因很远。宁可在登录处当场说清楚缺哪个变量。
+- `BILLING_GRPC_URL` —— 提交生成必须能预扣。曾经「为空 = 跳过预扣」，new-api 被切断后
+  那就是一条**静默的免费通道**：全站生成不扣钱且毫无报错。开关已整条删除。
+- `NEW_API_UPSTREAM_KEY` —— 登录签发会话要用它当上游凭证。
+
+一个扣不了钱的进程不该开始接受请求，所以拦在启动而不是首次请求。
 
 取值来源：与其它 new-api 变量一样，从测试站 backend 容器的 `docker inspect` 提取
 （见下方「形态 B」的连接串获取），只走进程环境变量注入，**不落任何入库文件或日志**（ADR-0064）。
