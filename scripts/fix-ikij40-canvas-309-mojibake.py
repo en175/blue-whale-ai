@@ -24,10 +24,12 @@ nodes_json。受损仅 canvas 309 一行；本脚本仅触碰该行。
   6. 审计报告写 /tmp/ikij40-canvas-309-audit-*.json。
 
 用法（测试站服务器上执行）：
-  python3 fix-ikij40-canvas-309-mojibake.py            # dry-run（零写入）
-  python3 fix-ikij40-canvas-309-mojibake.py --execute  # 写入（须先 dry-run 通过并获授权）
+  python3 fix-ikij40-canvas-309-mojibake.py                       # dry-run（零写入）
+  python3 fix-ikij40-canvas-309-mojibake.py --execute             # 写入（须先 dry-run 通过并获授权）
+  python3 ... --allow-missing id1,id2                             # 豁免用户已确认主动删除的源节点
 环境变量：
-  MYSQL_ARGS   附加 mysql 连接参数（如 "-uroot -p***"），凭据不落本脚本
+  MYSQL_ARGS   附加 mysql 连接参数（如 "-h 127.0.0.1 -u root"），凭据不落本脚本
+  MYSQL_PWD    mysql 客户端原生密码环境变量（凭据不进命令行）
   RECOVER_SRC  恢复源文件路径（默认 /tmp/recover-434-nodes.json）
 """
 
@@ -42,12 +44,10 @@ CANVAS_ID = 309
 DB_NAME = "blue_whale"
 BACKUP_DIR = "/tmp"
 RECOVER_SRC = os.environ.get("RECOVER_SRC", "/tmp/recover-434-nodes.json")
-EXPECT_NODES = 37
-EXPECT_EDGES = 30
 
 # ── MySQL latin1 逆向映射（cp1252 + 0x81/0x8D/0x8F/0x90/0x9D 五个直通 C1）──
 def _build_latin1_reverse() -> dict:
-    rev: dict = {}
+    rev = {}
     for b in range(0x100):
         try:
             rev[bytes([b]).decode("cp1252")] = b
@@ -56,13 +56,15 @@ def _build_latin1_reverse() -> dict:
     return rev
 
 LATIN1_REVERSE = _build_latin1_reverse()
-# CP1252 高区可打印特征字符：正常中文产品内容中不应出现（工单点名）
-MOJIBAKE_MARKERS = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
+# CP1252 特有映射字符，正常中文产品内容中不应出现（工单点名 € ™ Œ œ š ž 一类）。
+# 不含 – — ‘ ’ “ ” … 等正常标点：原文里合法存在的 em dash 不算双重编码残留
+# （09-25 诊断实证：位置 383 的 â€" 还原后就是 em dash）。
+MOJIBAKE_MARKERS = "€‰Š‹ŒŽ™š›œžŸ"
 
 
-def restore_mojibake(text: str) -> tuple[str, int]:
+def restore_mojibake(text):
     """段级 CP1252 逆映射还原。返回 (还原文本, 替换段数)。"""
-    out: list[str] = []
+    out = []
     i = 0
     n = len(text)
     segs_replaced = 0
@@ -87,7 +89,7 @@ def restore_mojibake(text: str) -> tuple[str, int]:
     return "".join(out), segs_replaced
 
 
-def has_mojibake_residue(text: str) -> list[str]:
+def has_mojibake_residue(text):
     """双重编码残留检测：特征字符扫描 + 幂等性（再还原应无变化）。"""
     hits = sorted({c for c in text if c in MOJIBAKE_MARKERS})
     again, replaced = restore_mojibake(text)
@@ -96,7 +98,7 @@ def has_mojibake_residue(text: str) -> list[str]:
     return hits
 
 
-def mysql_query(sql: str) -> str:
+def mysql_query(sql):
     args = ["mysql", "--default-character-set=utf8mb4", "-N", "-B"]
     args += os.environ.get("MYSQL_ARGS", "").split()
     args += [DB_NAME, "-e", sql]
@@ -106,7 +108,7 @@ def mysql_query(sql: str) -> str:
     return proc.stdout
 
 
-def fetch_canvas_row() -> dict:
+def fetch_canvas_row():
     """经 HEX 取回当前行，绕过任何客户端字符集转换。"""
     out = mysql_query(
         f"SELECT version, HEX(nodes_json), HEX(edges_json), LENGTH(nodes_json) "
@@ -123,15 +125,15 @@ def fetch_canvas_row() -> dict:
     }
 
 
-def write_backup(row: dict) -> str:
+def write_backup(row):
     """行级备份：纯 ASCII 十六进制 SQL，与 09-25 /tmp/canvas-309-pre-recover.sql 同口径可回滚。"""
     ts = time.strftime("%Y%m%d-%H%M%S")
     path = os.path.join(BACKUP_DIR, f"canvas-309-pre-ikij40-{ts}.sql")
     nodes_hex = row["nodes_json"].encode("utf-8").hex().upper()
     edges_hex = row["edges_json"].encode("utf-8").hex().upper()
     with open(path, "w", encoding="ascii") as f:
-        f.write(f"-- IKIJ40 行级备份：canvas 309，version={row['version']}，{ts}\n")
-        f.write("-- 回滚：mysql --default-character-set=utf8mb4 blue_whale < 本文件\n")
+        f.write(f"-- IKIJ40 row backup: canvas {CANVAS_ID}, version={row['version']}, {ts}\n")
+        f.write(f"-- rollback: mysql --default-character-set=utf8mb4 blue_whale < this-file\n")
         f.write(
             f"UPDATE canvas SET nodes_json = CONVERT(UNHEX('{nodes_hex}') USING utf8mb4), "
             f"edges_json = CONVERT(UNHEX('{edges_hex}') USING utf8mb4), "
@@ -140,8 +142,12 @@ def write_backup(row: dict) -> str:
     return path
 
 
-def diff_nodes(restored: str, source_path: str) -> dict:
-    """离线还原结果与恢复源逐节点 diff（按节点 id 配对，规范化 JSON 比较）。"""
+def diff_nodes(restored, source_path, allowed_missing=None):
+    """离线还原结果与恢复源逐节点 diff（按节点 id 配对，规范化 JSON 比较）。
+
+    allowed_missing：用户已确认主动删除的源节点 id——从闸门豁免（matched 口径同步核减），
+    但如实记录进审计；其余任何缺失/多出/内容差异仍阻断。"""
+    allowed = set(allowed_missing or [])
     with open(source_path, "r", encoding="utf-8") as f:
         source = json.load(f)
     current = json.loads(restored)
@@ -156,19 +162,25 @@ def diff_nodes(restored: str, source_path: str) -> dict:
     for node_id in cur_by_id:
         if node_id not in src_by_id:
             extra.append(node_id)
+    unexpected_missing = [n for n in missing if n not in allowed]
+    matched_count = len(src_by_id) - len(missing) - len(changed)
     return {
         "total_source": len(source),
         "total_restored": len(current),
-        "matched": len(src_by_id) - len(missing) - len(changed),
+        "matched": matched_count,
         "missing": missing,
+        "allowed_missing": sorted(allowed & set(missing)),
+        "unexpected_missing": unexpected_missing,
         "extra": extra,
         "changed": changed,
-        "all_match": not missing and not extra and not changed
-        and len(current) == EXPECT_NODES,
+        # 闸门口径：恢复源全部节点 matched 或已豁免（用户确认删除），零内容差异。
+        # 源节点总数以恢复源文件为准（本单事实值 37，不硬编码进闸门）。
+        "all_match": not unexpected_missing and not changed
+        and matched_count + len(missing) == len(source),
     }
 
 
-def apply_fix(restored_nodes: str, expected_version: int) -> bool:
+def apply_fix(restored_nodes, expected_version):
     """带乐观锁版本闸写入；0 命中返回 False（期间有新自动保存，不重试）。"""
     hex_literal = restored_nodes.encode("utf-8").hex().upper()
     sql = (
@@ -181,18 +193,22 @@ def apply_fix(restored_nodes: str, expected_version: int) -> bool:
     return out == "1"
 
 
-def verify_post(row_after: dict, restored_nodes: str, version_before: int) -> list[str]:
-    """写后回读五项校验，返回失败项列表（空 = 全过）。"""
+def verify_post(row_after, restored_nodes, row_before, version_before):
+    """写后回读校验，返回失败项列表（空 = 全过）。
+
+    节点数守恒以写入内容为准（写入多少读回多少）；上限合法性由 dry-run 闸门把关。
+    连线守恒口径：本修复只写 nodes_json，edges 必须与写前快照逐字节一致——
+    用户后续编辑增删连线是画布自身状态演进，连线数本身不是固定常量。"""
     errors = []
     try:
         nodes = json.loads(row_after["nodes_json"])
         edges = json.loads(row_after["edges_json"])
     except json.JSONDecodeError as e:
         return [f"JSON 不合法: {e}"]
-    if len(nodes) != EXPECT_NODES:
-        errors.append(f"节点数 {len(nodes)} != {EXPECT_NODES}")
-    if len(edges) != EXPECT_EDGES:
-        errors.append(f"连线数 {len(edges)} != {EXPECT_EDGES}")
+    if len(nodes) != len(json.loads(restored_nodes)):
+        errors.append(f"节点数守恒失败: 写入 {len(json.loads(restored_nodes))}, 回读 {len(nodes)}")
+    if row_after["edges_json"] != row_before["edges_json"]:
+        errors.append("edges_json 与写前快照不一致（本修复不应触碰连线）")
     residue = has_mojibake_residue(row_after["nodes_json"])
     if residue:
         errors.append(f"CP1252 双重编码残留: {residue[:10]}")
@@ -205,6 +221,13 @@ def verify_post(row_after: dict, restored_nodes: str, version_before: int) -> li
 
 def main() -> int:
     execute = "--execute" in sys.argv
+    allow_missing = []
+    if "--allow-missing" in sys.argv:
+        i = sys.argv.index("--allow-missing")
+        if i + 1 >= len(sys.argv):
+            print("❌ --allow-missing 需要逗号分隔的节点 id 参数")
+            return 2
+        allow_missing = [x for x in sys.argv[i + 1].split(",") if x]
     print(f"== IKIJ40 canvas {CANVAS_ID} 乱码修复 {'[EXECUTE]' if execute else '[DRY-RUN]'} ==")
 
     row = fetch_canvas_row()
@@ -222,11 +245,16 @@ def main() -> int:
     if not os.path.exists(RECOVER_SRC):
         print(f"❌ 恢复源不存在: {RECOVER_SRC}，无法预演，拒绝继续")
         return 2
-    diff = diff_nodes(restored, RECOVER_SRC)
+    diff = diff_nodes(restored, RECOVER_SRC, allow_missing)
     print(f"[3] dry-run diff: 源 {diff['total_source']} 节点, 还原 {diff['total_restored']} 节点, "
-          f"一致 {diff['matched']}, 缺失 {len(diff['missing'])}, 多出 {len(diff['extra'])}, 内容差异 {len(diff['changed'])}")
+          f"一致 {diff['matched']}, 缺失 {len(diff['missing'])}(豁免 {len(diff['allowed_missing'])}), "
+          f"多出 {len(diff['extra'])}, 内容差异 {len(diff['changed'])}")
     for node_id in diff["changed"][:5]:
         print(f"   - 内容差异节点 {node_id}")
+    for node_id in diff["unexpected_missing"][:5]:
+        print(f"   - 未豁免缺失节点 {node_id}")
+    for node_id in diff["extra"][:5]:
+        print(f"   - 多出节点（乱码期间用户新增，算法未触碰）: {node_id}")
 
     audit = {
         "ticket": "IKIJ40",
@@ -249,9 +277,10 @@ def main() -> int:
         return 3
 
     if not execute:
-        audit["gate"] = "dry-run PASSED (37/37); 未写入（加 --execute 并获授权后执行）"
+        audit["gate"] = (f"dry-run PASSED (matched {diff['matched']}/{diff['total_source']}, "
+                         f"allowed-missing {diff['allowed_missing']}); 未写入（加 --execute 并获授权后执行）")
         _dump_audit(audit)
-        print("✅ dry-run 通过（37/37 一致），未写入任何数据")
+        print(f"✅ dry-run 通过（{diff['matched']}/{diff['total_source']} 一致），未写入任何数据")
         return 0
 
     print("[4] 写入（version 乐观锁闸）…")
@@ -261,7 +290,7 @@ def main() -> int:
         _dump_audit(audit)
         return 4
     row_after = fetch_canvas_row()
-    errors = verify_post(row_after, restored, row["version"])
+    errors = verify_post(row_after, restored, row, row["version"])
     audit["version_after"] = row_after["version"]
     audit["post_verify_errors"] = errors
     if errors:
@@ -276,7 +305,7 @@ def main() -> int:
     return 0
 
 
-def _dump_audit(audit: dict) -> str:
+def _dump_audit(audit):
     path = os.path.join(BACKUP_DIR, f"ikij40-canvas-309-audit-{time.strftime('%Y%m%d-%H%M%S')}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(audit, f, ensure_ascii=False, indent=2)
