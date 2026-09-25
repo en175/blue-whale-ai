@@ -1,8 +1,10 @@
 /* ============================================
  * AudioVideoMuxPanel 音视频合成参数面板样式（IKIHPK）
  * 深色浮层令牌全部取自 variables.css（--color-bg-overlay / --color-border-overlay /
- * --shadow-overlay / --color-accent-primary 系），禁黄色主按钮（规格）：主按钮为
- * 蓝色 accent 圆形 ↑（统一 Dock 主发送钮样式），置灰态灰底灰字。
+ * --shadow-overlay），禁黄色主按钮（规格）。分段钮与发送钮沿用高清放大
+ * ImageEnhanceDialog 灰系谱系（multipleGroup 灰底选中 / 28.8px 方角 8px 灰 ↑ 钮），
+ * 不采蓝色 accent（参数面板分段形态上蓝是孤例，2026-09-25 Kim 裁决统一灰系）；
+ * 绑定中蓝虚线保留（过程反馈态，与画布连线 accent 呼应）。
  * 跟随定位同插帧/HD 面板（dialogWrapFollow：绝对定位到草稿卡下方）。
  * ============================================ */
 
@@ -293,44 +295,53 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 分段钮（两档/三档同款：井底 + 选中蓝） ---- */
+/* ---- 分段钮（两档/三档同款；视觉模式沿用 ImageEnhanceDialog multipleGroup/multipleBtn 灰系） ---- */
 .segGroup {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid rgba(255, 255, 255, 0.045);
-  border-radius: var(--radius-md);
+  gap: 4px;
+  background-color: #262626;
+  border-radius: 12px;
+  padding: 4px;
 }
 
 .segBtn {
   flex: 1;
-  padding: 6px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  border-radius: 10px;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
-  border: none;
+  color: #999;
   background: transparent;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
+  border: none;
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 
 .segBtn:hover {
-  color: var(--color-text-primary);
+  color: #ddd;
 }
 
 .segBtnActive {
-  background-color: var(--color-accent-primary);
-  color: var(--color-accent-text);
-  font-weight: 600;
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: 700;
 }
 
-.segBtnActive:hover {
-  background-color: var(--color-accent-hover);
+.segBtn:disabled,
+.segBtn[aria-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-/* ---- 底部行：免费徽标 + 发送提示 + 圆形发送钮 ---- */
+.segBtn:disabled:hover,
+.segBtn[aria-disabled='true']:hover {
+  color: #666;
+}
+
+/* ---- 底部行：免费徽标 + 发送提示 + 方形发送钮（沿用 ImageEnhanceDialog sendBtn 灰系） ---- */
 .bottomBar {
   display: flex;
   align-items: center;
@@ -353,29 +364,25 @@
 
 .sendBtn {
   margin-left: auto;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-full);
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
   border: none;
-  background-color: var(--color-bg-active);
-  color: var(--color-text-tertiary);
   cursor: not-allowed;
-  transition: background var(--transition-fast), transform var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 
 .sendBtnActive {
-  background-color: var(--color-accent-primary);
-  color: var(--color-accent-text);
+  background-color: #4a4a4a;
+  color: #fff;
   cursor: pointer;
 }
 
 .sendBtnActive:hover {
-  background-color: var(--color-accent-hover);
-}
-
-.sendBtnActive:active {
-  transform: scale(0.94);
+  background-color: #555;
 }
