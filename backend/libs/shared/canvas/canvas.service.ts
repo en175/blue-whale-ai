@@ -264,6 +264,8 @@ export class CanvasService {
       nodes?: unknown;
       edges?: unknown;
       expectedVersion?: number | null;
+      /** IKIIWN：非空画布 → 空文档的破坏性收缩须显式确认（契约 §9） */
+      confirmEmpty?: unknown;
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
@@ -335,6 +337,11 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
+    // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，仅显式确认放行；
+    // 读与写的竞态由下方 saveIfVersion 的版本条件闭环——本检查看到的行与被覆盖的行共用同一 expectedVersion 闸门。
+    if (previous.length > 0 && incoming.length === 0 && body.confirmEmpty !== true) {
+      return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: null } as const;
+    }
     // IKFM3Q 正文媒体索引契约 §7：mediaMentions/mediaRefs 同现同缺、区间与覆盖有效；
     // 新增身份素材真实可及且与来源节点身份一致；存量身份展示元数据不可变（失效身份豁免正文编辑）
     for (const node of incoming) {

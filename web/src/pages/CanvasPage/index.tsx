@@ -2639,6 +2639,9 @@ export default function CanvasPage() {
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
   const hydratedProjectRef = useRef<string | null>(null);
+  /** IKIIWN：水合基线是否非空。空保存的 confirmEmpty 只授予「本会话加载到过非空画布」的会话
+   *  （用户显式删光场景）；水合进来即为空（服务端返回空/内容丢失）的空保存不带标记，由服务端 422 拦下。 */
+  const hydratedNonEmptyRef = useRef(false);
   /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
   const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
   /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
@@ -2663,6 +2666,7 @@ export default function CanvasPage() {
       lastSavedRef.current = '';
       hydratedDocRef.current = null;
       hydratedProjectRef.current = null;
+      hydratedNonEmptyRef.current = false;
       setSaveStatus('idle');
       return;
     }
@@ -2680,6 +2684,7 @@ export default function CanvasPage() {
       return;
     }
     hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
+    hydratedNonEmptyRef.current = doc.nodes.length > 0;
     const t: Node[] = [];
     const m: Node[] = [];
     const p: Node[] = [];
@@ -2965,6 +2970,8 @@ export default function CanvasPage() {
     if (!currentId || !doc || applyingRef.current) return;
     const timer = window.setTimeout(() => {
       if (applyingRef.current || savePromiseRef.current) return;
+      // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不得自动保存——初始空状态无权覆盖服务端事实
+      if (hydratedProjectRef.current === null) return;
       if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
       const contentNodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
       // 组伪节点随 nodes 持久化（IKD0JT A3）：水合时剥离还原
@@ -2979,7 +2986,7 @@ export default function CanvasPage() {
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       trackCanvasSave(
-        saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
+        saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty: nodes.length === 0 && hydratedNonEmptyRef.current }, versionRef.current)
           .then((saved) => {
             versionRef.current = saved.version;
             setSaveBlocked(false);
@@ -3002,6 +3009,10 @@ export default function CanvasPage() {
             if (isApiError(e) && e.status === 412) {
               setSaveStatus('error');
               showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
+            } else if (isApiError(e) && e.status === 422) {
+              // IKIIWN：空覆盖被服务端拒绝（本地空状态与服务端非空事实不一致）——重试必然再拒，引导刷新复核
+              setSaveStatus('error');
+              showToast('warn', '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核');
             } else {
               if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
               setSaveStatus('error');
@@ -10610,6 +10621,8 @@ export default function CanvasPage() {
   const flushCanvasSave = (projectId: string): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
+      // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不保存——返回 false 语义同项目切换，调用方中止后续动作
+      if (hydratedProjectRef.current === null) return false;
       if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
       const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
       // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
@@ -10617,7 +10630,7 @@ export default function CanvasPage() {
       const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
       if (signature !== lastSavedRef.current) {
         try {
-          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty: nodes.length === 0 && hydratedNonEmptyRef.current }, versionRef.current);
           if (activeProjectRef.current !== projectId) {
             // 旧项目的保存结束后重启当前项目的自动保存防抖。
             setSaveEpoch((value) => value + 1);

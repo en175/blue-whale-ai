@@ -112,5 +112,22 @@ describe('saveCanvasDoc', () => {
     expect(body.edges).toBe('[{"id":"e1","source":"text-1","target":"media-1"}]');
     expect(body.nodes).toBe('[]');
     expect(JSON.parse(body.viewport)).toEqual({ x: 0, y: 0, zoom: 1 });
+    // IKIIWN：未确认时不得出现 confirmEmpty 字段（缺省即 false，服务端对空覆盖回 422）
+    expect('confirmEmpty' in body).toBe(false);
+  });
+
+  it('confirmEmpty=true 时空保存携带显式确认字段（IKIIWN），否则不带', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      okResponse({ id: 9, project_id: 7, version: 5, viewport: '{}', nodes: '[]', edges: '[]' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveCanvasDoc('p1', { viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [], confirmEmpty: true }, 4);
+    await saveCanvasDoc('p1', { viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] }, 5);
+
+    const confirmed = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    const unconfirmed = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string);
+    expect(confirmed.confirmEmpty).toBe(true);
+    expect('confirmEmpty' in unconfirmed).toBe(false);
   });
 });

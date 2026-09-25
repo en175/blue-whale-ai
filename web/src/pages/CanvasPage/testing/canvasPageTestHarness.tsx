@@ -57,7 +57,8 @@ export const apiMocks = {
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
+  /** 参数签名供测试断言 calls 元组（IKIIWN confirmEmpty 在 payload 上） */
+  saveCanvasDoc: vi.fn(async (_projectId: string, _payload: { viewport: unknown; nodes: unknown[]; edges: unknown[]; confirmEmpty?: boolean }, _version: number | null) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
   cancelGenerationJob: vi.fn(async () => null),
@@ -131,11 +132,20 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/** 画布文档接缝（useCanvasDoc 打桩）：各测试文件的 seed 函数改写 current 注入专属画布 */
-export const canvasDocMock = {
+/** 画布文档接缝（useCanvasDoc 打桩）：各测试文件的 seed 函数改写 current 注入专属画布；
+ *  loadFailed（IKIIWN 空覆盖防护）缺省视为水合成功，需要失败场景的测试显式置 true。 */
+export const canvasDocMock: {
   current: {
-    doc: null as unknown,
-    assets: {} as Record<string, unknown>,
+    doc: unknown;
+    assets: Record<string, unknown>;
+    refetch: () => Promise<unknown>;
+    acceptDoc: (doc: unknown) => void;
+    loadFailed?: boolean;
+  };
+} = {
+  current: {
+    doc: null,
+    assets: {},
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   },

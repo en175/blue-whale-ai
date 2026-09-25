@@ -344,3 +344,68 @@ describe("CanvasService.save 项目不属于调用方", () => {
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 });
+
+// IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，须显式 confirmEmpty。
+// 拒绝发生在读 current 之后、条件写之前：事务零写入，版本不消耗。
+describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
+  const nonEmpty = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: JSON.parse(NODES),
+    edges_json: [],
+  };
+
+  it("非空画布被空 nodes 覆盖且未确认 → 422 信封，零写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result).toEqual({
+      code: 422,
+      msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty",
+      data: null,
+    });
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("confirmEmpty 非 true（如字符串 \"true\"）→ 同样拒绝", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: "true" });
+
+    expect(result.code).toBe(422);
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("携带 confirmEmpty: true → 放行（用户显式删光场景），空文档条件写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ nodes_json: [] }) }),
+    );
+  });
+
+  it("既有画布本就为空 → 空保存不触发防护", async () => {
+    const { service, tx } = buildService({ ...nonEmpty, nodes_json: [] });
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalled();
+  });
+
+  it("画布行不存在 → 空保存直接新建（首次创建空画布）", async () => {
+    const { service, tx } = buildService(null);
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.create).toHaveBeenCalled();
+  });
+});
