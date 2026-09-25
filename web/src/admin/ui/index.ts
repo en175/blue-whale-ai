@@ -5,6 +5,7 @@
  * 看到某个页面自己写 button / table / select / chip 的样式，就是这里缺了对应组件。 */
 export { default as Alert, type AlertTone } from './Alert';
 export { default as Badge, type BadgeTone } from './Badge';
+export { default as Bar } from './Bar';
 export { default as Button, type ButtonSize, type ButtonVariant } from './Button';
 export { default as Card } from './Card';
 export { default as Checkbox } from './Checkbox';

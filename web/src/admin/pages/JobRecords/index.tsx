@@ -15,6 +15,7 @@ import {
   type AdminJobRecordQuery,
 } from '@/api/adminJobRecords';
 import { isApiError } from '@/api/http';
+import { TASK_TYPE_OPTIONS } from '../../taskTypeLabels';
 import {
   Alert,
   Badge,
@@ -59,28 +60,13 @@ const STATUS_OPTIONS = [
 ];
 
 /**
- * 任务类型选项 —— 取自 `web/src/api/jobs.ts` 的 `JobType`（**权威在那里**）。
+ * 任务类型选项（含「全部」）——来自 `../../taskTypeLabels`，**全管理端只有那一份**。
  *
- * ⚠️ 新增任务类型时**两处都要加**：那边的联合类型 + 这里的选项。
- *    这是刻意的重复：类型是编译期约束，选项是运行期数据（要让运营选得到），
- *    一方改了另一方没改，症状是「筛选里找不到那个类型」。
+ * ⚠️ 它原先长在本文件里，仪表盘也要同一套名字，于是移到了共用模块：
+ *    两份的漂移是必然的（加了新类型只改下拉、没改占比条，同一个类型会出现两个名字）。
+ *    新增任务类型时改 `../../taskTypeLabels`，并同步 `web/src/api/jobs.ts` 的 `JobType`。
  */
-const TYPE_OPTIONS = [
-  { value: '', label: '全部类型' },
-  { value: 'image', label: '图片' },
-  { value: 'video', label: '视频' },
-  { value: 'audio', label: '音频' },
-  { value: 'media_extract', label: '音频提取' },
-  { value: 'image_enhance', label: '高清放大' },
-  { value: 'image_erase', label: '图片擦除' },
-  { value: 'image_outpaint', label: '智能扩图' },
-  { value: 'image_cutout', label: '图片抠图' },
-  { value: 'video_subtitle_erase', label: '视频去字幕' },
-  { value: 'audio_trim', label: '音频截取' },
-  { value: 'audio_mix', label: '音频混合' },
-  { value: 'video_frame_interpolation', label: '视频插帧' },
-  { value: 'video_matting', label: '视频抠像' },
-];
+const TYPE_OPTIONS = TASK_TYPE_OPTIONS;
 
 interface Filters {
   userId: string;
@@ -105,8 +91,10 @@ export default function JobRecords() {
     pageSize: PAGE_SIZE,
     ...(applied.userId ? { userId: applied.userId } : {}),
     ...(applied.projectId ? { projectId: applied.projectId } : {}),
-    // 任务类型是自由文本：后端不写死白名单（类型在演进，写死会在新增类型时误伤），
-    // 所以这里也是输入框而不是下拉
+    // 任务类型是自由文本：**后端**不写死白名单（类型在演进，写死会在新增类型时误伤），
+    // 查不到就是空列表。这里给下拉只是「让运营好选」，它**不是**白名单——
+    // 传下去的就是选项的原值，中间没有校验。库里出现表里没收录的类型时选不到它，
+    // 那属于前端漏收录（补 `../../taskTypeLabels`），不是这条筛选坏了
     ...(applied.type.trim() ? { type: applied.type.trim() } : {}),
     ...(applied.status !== 'all' ? { status: applied.status } : {}),
   };

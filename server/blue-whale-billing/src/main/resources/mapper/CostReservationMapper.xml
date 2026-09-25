@@ -43,4 +43,24 @@
     WHERE generation_job_id = #{jobId}
   </update>
 
+  <!--
+    区间内已结算的实际消耗合计（管理端仪表盘用）。
+
+    ⚠️ COALESCE 不是装饰：SUM 在没有匹配行时返回 NULL，而接口声明的是基本类型 long。
+       不兜底的话「这段时间一个任务都没结算」这条最正常的路径会变成 null 拆箱报错。
+
+    ⚠️ 区间列是 gmt_modified（这张表没有 settled_at 列，结算那一刻由
+       ON UPDATE CURRENT_TIMESTAMP 写在它上面），与用户流水投影里 settled_at 的取法一致。
+
+    ⚠️ 半开区间 [from, to)：DATETIME 只到秒，写成 `<= '23:59:59'` 会漏掉那一秒内的行，
+       而漏掉的部分不会以任何形式表现出来。
+  -->
+  <select id="sumSettledActualCredits" resultType="long">
+    SELECT COALESCE(SUM(actual_credits), 0)
+    FROM billing_cost_reservations
+    WHERE status = 'settled'
+      AND gmt_modified &gt;= #{from}
+      AND gmt_modified &lt; #{to}
+  </select>
+
 </mapper>

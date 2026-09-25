@@ -1,6 +1,9 @@
 /* ============================================
- * 后台管理 API：会话身份校验 + 仪表盘统计
+ * 后台管理 API：会话身份校验 + 充值档位 / 模板 / 技能等管理端读写
  * 包络为后台侧 {success:true, data}，http 层已兼容
+ *
+ * ⚠️ 仪表盘统计**不在这里**，见 `adminDashboard.ts`：它按查询区间取数，
+ *    与这里这些「一次拿全量」的读写不同类。
  * ============================================ */
 import { http, apiRequest, apiRequestWithMeta } from './http';
 import { useAuthStore } from '@/stores/auth';
@@ -16,71 +19,6 @@ export interface AdminSessionData {
 /** 实时校验当前登录用户是否为管理员（登录态走 HttpOnly cookie） */
 export function fetchAdminSession() {
   return http.get<AdminSessionData>('/api/admin/session', { silent: true });
-}
-
-/** 最近充值记录（最近 5 笔） */
-export interface RechargeRecord {
-  /** 订单号 */
-  tradeNo: string;
-  userId: number;
-  /** 用户昵称（列表场景留空，前端展示 #userId） */
-  nickname: string;
-  phone: string;
-  /** 充值档位名称 */
-  tierName: string;
-  /** 充值积分数量 */
-  amount: number;
-  /** 支付金额（元） */
-  price: number;
-  /** 到账积分 */
-  points: number;
-  /** 赠送积分 */
-  bonus: number;
-  /** 订单状态：pending 待支付 / success 已到账 / expired 已过期 / failed 支付失败 */
-  status: string;
-  paymentMethod: string;
-  platformRefNo: string;
-  ip: string;
-  /** 创建时间（ISO） */
-  createdAt: string;
-  /** 支付时间（ISO），未支付时为 null */
-  paidAt: string | null;
-  /** 到账时间（ISO），未到账时为 null */
-  arrivedAt: string | null;
-}
-
-/** 最近消费记录（最近 5 笔） */
-export interface ConsumeRecord {
-  userId: number;
-  /** 消费的模型名称 */
-  model: string;
-  /** 消费积分数量 */
-  points: number;
-  /** 消费时间（ISO） */
-  createdAt: string;
-}
-
-/** GET /api/admin/dashboard 返回：仪表盘运行概览 */
-export interface DashboardData {
-  /** 总用户数 */
-  totalUsers: number;
-  /** 今日充值积分总额 */
-  todayRecharge: number;
-  /** 今日充值笔数 */
-  todayRechargeCount: number;
-  /** 今日消费积分总额 */
-  todaySpend: number;
-  /** 待处理订单数 */
-  pendingOrders: number;
-  /** 最近 5 笔充值记录 */
-  recentRecharges: RechargeRecord[];
-  /** 最近 5 笔消费记录 */
-  recentConsumes: ConsumeRecord[];
-}
-
-/** 获取仪表盘运行概览统计 */
-export function fetchAdminDashboard() {
-  return http.get<DashboardData>('/api/admin/dashboard');
 }
 
 /** 充值档位记录 */

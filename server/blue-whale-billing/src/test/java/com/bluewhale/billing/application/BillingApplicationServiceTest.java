@@ -5,6 +5,7 @@ import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
+import com.bluewhale.billing.ledger.ReservationRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
 import com.bluewhale.billing.pricing.BasePriceResolver;
 import com.bluewhale.billing.pricing.CompiledRule;
@@ -302,7 +303,8 @@ class BillingApplicationServiceTest {
                 mock(LedgerRepository.class),
                 catalog,
                 new GrantPolicy(),
-                mock(TransactionRepository.class));
+                mock(TransactionRepository.class),
+                mock(ReservationRepository.class));
         return service;
     }
 

@@ -207,6 +207,67 @@ export async function listAdminTransactions(
   );
 }
 
+/* ---------- 账本：读聚合（管理端） ---------- */
+
+/** `GET /admin/transactions/consumed-credits` 的回包。 */
+interface ConsumedCreditsResponse {
+  consumedCredits?: number;
+}
+
+/**
+ * 读区间内**已结算的实际消耗积分合计**（`GET /admin/transactions/consumed-credits`）。
+ *
+ * <p>⚠️ **不复用逐行的 {@link listAdminTransactions} 再自己累加**，理由三条：
+ * <ol>
+ *   <li>流水是**游标分页、无总数**（账本持续追加，给不出总数）。要累加就得把整个区间
+ *       一页页拉完，每页最多 100 行——区间一大就是几十次跨进程往返，而仪表盘每次打开
+ *       都要跑一遍。</li>
+ *   <li>逐行那条 SQL 是「批次 ∪ 预留 ∪ 账本凭证」的三路 UNION，还带 GROUP BY。
+ *       为求一个和而反复跑它，比在预留表上做一次索引区间扫描贵得多。</li>
+ *   <li><b>最要命的是它会静默算错</b>：翻到一半失败（超时、进程重启、游标坏掉）时
+ *       前面的页已经加进去了——得到的「总消耗」偏小，而偏小的总数与真实总数在界面上
+ *       长得一模一样。聚合在一条 SQL 里要么全对、要么报错。</li>
+ * </ol>
+ *
+ * <p>口径：只算 `status = 'settled'` 的预留行（取 {@code actual_credits} 这个最终值）。
+ * `held` 的钱还冻着、`released` 的钱原样退回，两者都**不是**消耗。
+ *
+ * @param from 区间起点（含）
+ * @param to   区间终点（**不含**）——半开区间，理由见 `dashboard-range.ts` 的文件头
+ */
+export async function fetchConsumedCredits(
+  from: Date,
+  to: Date,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  const params = new URLSearchParams({ from: rfc3339(from), to: rfc3339(to) });
+  const data = await request<ConsumedCreditsResponse>(
+    `/admin/transactions/consumed-credits?${params.toString()}`,
+    { method: "GET", env },
+  );
+  const credits = data.consumedCredits;
+  if (typeof credits !== "number" || !Number.isFinite(credits)) {
+    // 缺字段 / 非数字一律当失败：回落到 0 会得到一句「这段时间没人消费」的假话
+    throw new BillingAdminError(
+      `billing 管理端 /admin/transactions/consumed-credits 回包缺 consumedCredits：` +
+        JSON.stringify(data),
+    );
+  }
+  return credits;
+}
+
+/**
+ * 瞬时 → 带 **+08:00 偏移**的 RFC3339。
+ *
+ * <p>`toISOString()` 也表达同一个瞬时，但它会把「北京零点」写成**前一天的 UTC 16:00**——
+ * 排查时对着日志要心算 8 小时，而这条请求的参数恰恰**就是**我们精心算出来的北京日界。
+ * 带上偏移，日志里读到的就是我们想表达的那个日子。
+ */
+function rfc3339(instant: Date): string {
+  const beijing = new Date(instant.getTime() + 8 * 60 * 60 * 1000);
+  return `${beijing.toISOString().slice(0, 19)}+08:00`;
+}
+
 /* ---------- 传输 ---------- */
 
 async function request<T>(

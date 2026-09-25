@@ -1,12 +1,14 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.catalog.CatalogHolder;
+import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.ledger.Account;
 import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.CreditSource;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
+import com.bluewhale.billing.ledger.ReservationRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
 import com.bluewhale.billing.pricing.CompiledRule;
 import com.bluewhale.billing.pricing.PricingEngine;
@@ -63,6 +65,7 @@ public class BillingApplicationService {
     private final CatalogHolder catalog;
     private final GrantPolicy grantPolicy;
     private final TransactionRepository transactions;
+    private final ReservationRepository reservations;
 
     public BillingApplicationService(PricingEngine pricing,
                                      CreditService credits,
@@ -70,7 +73,8 @@ public class BillingApplicationService {
                                      LedgerRepository ledger,
                                      CatalogHolder catalog,
                                      GrantPolicy grantPolicy,
-                                     TransactionRepository transactions) {
+                                     TransactionRepository transactions,
+                                     ReservationRepository reservations) {
         this.pricing = pricing;
         this.credits = credits;
         this.lots = lots;
@@ -78,6 +82,7 @@ public class BillingApplicationService {
         this.catalog = catalog;
         this.grantPolicy = grantPolicy;
         this.transactions = transactions;
+        this.reservations = reservations;
     }
 
     /**
@@ -276,5 +281,33 @@ public class BillingApplicationService {
         }
         int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
         return transactions.listPage(userId, filter, size, pageToken == null ? "" : pageToken);
+    }
+
+    /**
+     * 区间内**已结算**的实际消耗积分合计（管理端仪表盘的「总使用积分」）。
+     *
+     * <p>为什么另开一个聚合，而不是让调用方翻 {@link #listTransactions} 自己累加：
+     * 那条是游标分页、**没有总数**，累加就得把整个区间一页页拉完；更要命的是它**会静默算错**
+     * ——翻到一半失败，前面几页已经加进去了，得到的「总消耗」偏小，而偏小的总数与真实
+     * 总数在界面上长得一模一样。聚合在一条 SQL 里要么全对、要么报错。
+     *
+     * <p>只算 {@code settled} 的预留：{@code held} 的钱还冻着、{@code released} 的钱原样
+     * 退回，两者都不是消耗。
+     *
+     * @param from 区间起点（含）
+     * @param to   区间终点（**不含**）——半开区间，理由见 {@code CostReservationMapper}
+     * @throws IllegalArgumentException 任一端为空、或起点不早于终点（反向区间求和得到 0，
+     *         与「这段时间真的没有消耗」长得一模一样）
+     */
+    public long consumedCredits(Instant from, Instant to) {
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("统计区间必须同时给出 from 与 to");
+        }
+        if (!from.isBefore(to)) {
+            throw new IllegalArgumentException(
+                    "统计区间的起点必须早于终点：from=" + from + " to=" + to);
+        }
+        // 瞬时 → 库内北京墙钟只走 DbTime 一处；与写入侧同一口径，比较才有意义
+        return reservations.sumSettledActualCredits(DbTime.toDb(from), DbTime.toDb(to));
     }
 }

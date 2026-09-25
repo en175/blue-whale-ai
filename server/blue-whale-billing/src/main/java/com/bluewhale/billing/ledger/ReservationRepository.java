@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -70,6 +71,17 @@ public class ReservationRepository {
 
     public void markReleased(long jobId, String releaseNote) {
         mapper.markReleased(jobId, releaseNote);
+    }
+
+    /**
+     * 区间内**已结算**的实际消耗合计（管理端仪表盘的「总使用积分」）。
+     *
+     * <p>口径与边界见 {@link CostReservationMapper#sumSettledActualCredits}。
+     * 参数是**库内墙钟**（北京时间），换算由调用方经 {@code DbTime} 做——
+     * 本层与其它库访问一样不碰时区。
+     */
+    public long sumSettledActualCredits(LocalDateTime from, LocalDateTime to) {
+        return mapper.sumSettledActualCredits(from, to);
     }
 
     private static Reservation toReservation(CostReservationEntity entity) {

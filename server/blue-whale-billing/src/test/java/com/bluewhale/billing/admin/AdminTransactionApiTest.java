@@ -1,6 +1,7 @@
 package com.bluewhale.billing.admin;
 
 import com.bluewhale.billing.application.BillingApplicationService;
+import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.CreditSource;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,7 @@ class AdminTransactionApiTest {
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private BillingApplicationService billing;
+    @Autowired private CreditService credits;
 
     @BeforeEach
     void clean() {
@@ -121,6 +123,124 @@ class AdminTransactionApiTest {
     @Test
     void 坏游标_400() throws Exception {
         mvc.perform(get("/admin/transactions").param("pageToken", "not-a-cursor"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+    }
+
+    /* ───────────────── 区间消耗合计（/admin/transactions/consumed-credits） ─────────────────
+     *
+     * 仪表盘的「总使用积分」用它。钉住三件事：**只算 settled**、**半开区间**、
+     * **空区间给 0 而不是报错**。三者任一错了，仪表盘都会显示一个偏大或偏小的数，
+     * 而那种数在界面上与真值长得一模一样。
+     */
+
+    private static final String FROM = "2026-09-25T00:00:00+08:00";
+    private static final String TO = "2026-09-26T00:00:00+08:00";
+
+    /**
+     * 直接插一条预留行，时间点由测试给死。
+     *
+     * <p>不走 {@code hold/settle} 是因为要验**边界**（正好落在 from / 正好落在 to 的行），
+     * 而走真实路径没法把 {@code gmt_modified} 设到指定的秒上。
+     */
+    private void insertReservation(long jobId, String status, Long actualCredits, String at) {
+        jdbc.update("INSERT INTO billing_cost_reservations "
+                        + "(generation_job_id, user_id, reserved_credits, actual_credits, status,"
+                        + " allocations, catalog_version, gmt_create, gmt_modified) "
+                        + "VALUES (?, ?, 100, ?, ?, '[]', 1, ?, ?)",
+                jobId, USER_A, actualCredits, status, at, at);
+    }
+
+    /**
+     * 半开区间 [from, to)：**正好落在起点的那秒算**、**正好落在终点的那秒不算**。
+     *
+     * <p>写成 `BETWEEN ... AND '2026-09-25 23:59:59'` 会漏掉 23:59:59 之后、次日零点之前
+     * 落库的行——DATETIME 只到秒，那半秒里的行不在任何区间里，且没人会发现。
+     */
+    @Test
+    void 消耗合计_半开区间且只算已结算() throws Exception {
+        insertReservation(9801L, "settled", 1L, "2026-09-24 23:59:59"); // 区间前：不计
+        insertReservation(9802L, "settled", 2L, "2026-09-25 00:00:00"); // = from：**计**
+        insertReservation(9803L, "settled", 4L, "2026-09-25 23:59:59"); // 区间内：计
+        insertReservation(9804L, "settled", 8L, "2026-09-26 00:00:00"); // = to：**不计**
+        insertReservation(9805L, "held", null, "2026-09-25 12:00:00"); // 冻着的钱不是消耗
+        insertReservation(9806L, "released", 0L, "2026-09-25 12:00:00"); // 退回的钱不是消耗
+
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", FROM)
+                        .param("to", TO))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consumedCredits").value(6));
+    }
+
+    /** 区间内无已结算行 → 0。SUM 无行返回 NULL，没兜住就会 500（long 拆箱）。 */
+    @Test
+    void 消耗合计_空区间给0而不是报错() throws Exception {
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", FROM)
+                        .param("to", TO))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consumedCredits").value(0));
+    }
+
+    /**
+     * 走真实链路（预扣 → 结算）的那笔消耗，必须落在**当下**的区间里。
+     *
+     * <p>这一条钉的是「结算时刻写在 {@code gmt_modified} 上」这个前提：整条口径都建立在
+     * 它上面，而它由 DDL 的 {@code ON UPDATE CURRENT_TIMESTAMP} 承担——不是代码里写死的，
+     * 换成别的列或去掉那个 DDL 子句，这条会红。
+     */
+    @Test
+    void 消耗合计_真结算的那笔落在当下区间() throws Exception {
+        billing.grant(USER_A, CreditSource.PURCHASED, 1000, "recharge", "a-9", "purchased:a-9", null);
+        credits.hold(USER_A, "cmd-cc-1", 9901L, 100, 1, 10000, "生成任务");
+        credits.settle(9901L, 30);
+
+        String now = java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .toString();
+        String yesterday = java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .minusDays(1).toString();
+        String tomorrow = java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .plusDays(1).toString();
+
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", yesterday)
+                        .param("to", tomorrow))
+                .andExpect(status().isOk())
+                // 实际 30，不是预扣 100 —— 预扣额不是消耗
+                .andExpect(jsonPath("$.consumedCredits").value(30));
+
+        // 完全落在过去一天的窗口里应当查不到这笔（它发生在今天）
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                                .minusDays(2).toString())
+                        .param("to", yesterday))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consumedCredits").value(0));
+    }
+
+    /**
+     * 缺参数 / 反向区间一律 400。
+     *
+     * <p>⚠️ 不能兜一个「最近 24 小时」之类的默认值：区间是调用方算出来的东西，
+     *    兜底会让它拿到一段「不是自己要求的」数，而返回值里没有任何东西能暴露这件事。
+     *    反向区间求和天然是 0，与「这段时间真的没有消耗」长得一模一样。
+     */
+    @Test
+    void 消耗合计_缺参数或反向区间_400() throws Exception {
+        mvc.perform(get("/admin/transactions/consumed-credits").param("from", FROM))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", "不是时间")
+                        .param("to", TO))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+
+        mvc.perform(get("/admin/transactions/consumed-credits")
+                        .param("from", TO)
+                        .param("to", FROM))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
     }

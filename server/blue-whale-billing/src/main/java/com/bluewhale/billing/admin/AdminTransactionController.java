@@ -9,7 +9,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 /**
@@ -58,6 +61,54 @@ public class AdminTransactionController {
 
     public AdminTransactionController(BillingApplicationService billing) {
         this.billing = billing;
+    }
+
+    /**
+     * 区间内**已结算**的实际消耗积分合计（管理端仪表盘的「总使用积分」）。
+     *
+     * <pre>
+     * curl 'localhost:4003/admin/transactions/consumed-credits?from=2026-09-25T00:00:00%2B08:00&amp;to=2026-09-26T00:00:00%2B08:00'
+     * </pre>
+     *
+     * <h2>为什么是一条聚合，而不是让调用方翻页自己累加</h2>
+     *
+     * <p>见 {@link BillingApplicationService#consumedCredits}：游标分页无总数，翻页中途失败
+     * 会得到一个**偏小**的总数——而偏小的总数与真实总数在界面上长得一模一样。
+     * 这里在一条 SQL 里算完，要么全对、要么报错。
+     *
+     * <p>⚠️ 区间是**半开**的 `[from, to)`：`DATETIME` 只到秒，用
+     * {@code <= 23:59:59} 表达「到当天为止」会漏掉最后一秒里落库的行。
+     * 仪表盘把「今天」表达成 `[今天 00:00, 明天 00:00)`，这个口径由调用方负责算对。
+     *
+     * <p>⚠️ 只算 {@code settled} 的预留：{@code held} 的钱还冻着、{@code released} 的钱
+     * 原样退回，两者都不是消耗。
+     *
+     * @param from 区间起点（含），RFC3339 带偏移
+     * @param to   区间终点（**不含**），RFC3339 带偏移
+     * @throws IllegalArgumentException 任一端缺失/无法解析，或起点不早于终点（映射成 400）
+     */
+    @GetMapping("/consumed-credits")
+    public Summary consumedCredits(@RequestParam(name = "from", required = false) String from,
+                                   @RequestParam(name = "to", required = false) String to) {
+        return new Summary(billing.consumedCredits(parseInstant(from), parseInstant(to)));
+    }
+
+    /**
+     * RFC3339 → 瞬时。
+     *
+     * <p>⚠️ 缺省与解析失败都要**报错**，不能在参数缺失时兜一个「最近 24 小时」之类的默认值：
+     *    求和接口的区间是调用方算出来的东西，兜底值会让它拿到一个「不是自己要求的那段」
+     *    的数，而返回值里没有任何东西能暴露这件事。
+     */
+    private static Instant parseInstant(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("统计区间参数缺失：from 与 to 都是必填的");
+        }
+        try {
+            return OffsetDateTime.parse(raw).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("无法解析时间参数（须为带偏移的 RFC3339）：" + raw);
+        }
     }
 
     /**
@@ -114,4 +165,11 @@ public class AdminTransactionController {
 
     /** @param nextPageToken 空 = 没有下一页 */
     public record Page(List<Item> items, String nextPageToken) {}
+
+    /**
+     * 区间内的消耗合计。
+     *
+     * @param consumedCredits 已结算的实际消耗积分（整数积分，与用户账本同单位）
+     */
+    public record Summary(long consumedCredits) {}
 }

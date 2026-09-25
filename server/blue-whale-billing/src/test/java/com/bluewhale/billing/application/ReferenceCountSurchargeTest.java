@@ -112,7 +112,8 @@ class ReferenceCountSurchargeTest {
                 mock(LedgerRepository.class),
                 holder,
                 new GrantPolicy(),
-                mock(TransactionRepository.class));
+                mock(TransactionRepository.class),
+                mock(ReservationRepository.class));
 
         CatalogDocument document = new CatalogDocument(
                 1, "CNY", 15, Map.of(MODEL, Map.of(TASK, taskRule())), null);

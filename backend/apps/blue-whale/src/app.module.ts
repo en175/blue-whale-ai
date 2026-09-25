@@ -6,6 +6,7 @@ import { TransformInterceptor } from "@lib/infra/interceptors/transform.intercep
 import { AccountModule } from "@lib/shared/account/account.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
+import { DashboardModule } from "@lib/shared/dashboard/index.js";
 import { GenerationModule } from "@lib/shared/generation/generation.module.js";
 import { HomepageHeroModule } from "@lib/shared/homepage-hero/homepage-hero.module.js";
 import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
@@ -76,6 +77,7 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     ProjectModule,
     JobsModule,
     CanvasModule,
+    DashboardModule,
     GenerationModule,
     SkillModule,
     SceneCardModule,

@@ -5,6 +5,8 @@ import com.bluewhale.billing.domain.entity.CostReservationEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
+
 /**
  * 预扣预留 Mapper。
  *
@@ -21,4 +23,25 @@ public interface CostReservationMapper extends BaseMapper<CostReservationEntity>
     int markSettled(@Param("jobId") long jobId, @Param("actualCredits") long actualCredits);
 
     int markReleased(@Param("jobId") long jobId, @Param("releaseNote") String releaseNote);
+
+    /**
+     * 区间内**已结算**的实际消耗合计（管理端仪表盘用）。
+     *
+     * <p>走 {@code idx_reservation__status (status, gmt_modified)}——第一条相等谓词（status）
+     * 之后的第二列正好是区间列，是一条索引区间扫描，不是全表扫。
+     *
+     * <p>⚠️ 区间按 {@code gmt_modified} 划：这张表**没有 settled_at 列**，而
+     * {@code ON UPDATE CURRENT_TIMESTAMP} 让「结算那一刻」落在 {@code gmt_modified} 上。
+     * 用户流水的 {@code settled_at} 用的就是它（见 {@code TransactionMapper.xml} 的 ② 段），
+     * 这里与那条口径一致——两处若各挑一列，仪表盘与消费记录页的数会对不上。
+     *
+     * <p>⚠️ 只算 {@code settled}：{@code held} 的钱还冻着、{@code released} 的钱原样退回，
+     * 两者都不是消耗。
+     *
+     * @param from 含
+     * @param to   不含（半开区间；DATETIME 只到秒，{@code BETWEEN ... AND 23:59:59}
+     *             会漏掉最后一秒里的行）
+     */
+    long sumSettledActualCredits(@Param("from") LocalDateTime from,
+                                 @Param("to") LocalDateTime to);
 }
