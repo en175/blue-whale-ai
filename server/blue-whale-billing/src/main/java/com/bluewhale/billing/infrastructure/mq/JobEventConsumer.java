@@ -94,10 +94,14 @@ public class JobEventConsumer implements AutoCloseable {
         String body = readBody(message);
         try {
             if (completedTopic.equals(topic)) {
-                settlement.settle(json.readValue(body, JobEventPayload.JobCompleted.class));
+                JobEventPayload.JobCompleted event =
+                        json.readValue(body, JobEventPayload.JobCompleted.class);
+                requireIdentifiable(event.jobId(), event.userId(), topic, body);
+                settlement.settle(event);
             } else if (failedTopic.equals(topic)) {
                 JobEventPayload.JobFailed event =
                         json.readValue(body, JobEventPayload.JobFailed.class);
+                requireIdentifiable(event.jobId(), event.userId(), topic, body);
                 settlement.refund(event.jobId(), event.reason());
             } else {
                 // 订阅之外的 topic 不该出现；出现说明配置串了，直接丢弃而不是重投，
@@ -110,6 +114,34 @@ public class JobEventConsumer implements AutoCloseable {
             //    那会让这笔钱永远冻着，却没有任何红灯亮起。
             log.error("处理计费事件失败，将重投：topic={} body={}", topic, body, e);
             return ConsumeResult.FAILURE;
+        }
+    }
+
+    /**
+     * 载荷里必须有可识别的 jobId / userId —— 否则**重投，不要当成功处理**。
+     *
+     * <h2>这个守卫防的是一次实测复现过的静默失败</h2>
+     *
+     * Jackson 对**对不上的字段名**不报错，它填默认值。于是生产者把 camelCase 写成
+     * snake_case 时，反序列化出的对象是 {@code jobId=0, userId=0, usage=null} ——
+     * 看起来完全正常。接下来：{@code settle} 按 {@code jobId=0} 查预留，查不到，
+     * 打一句 INFO「无待结算预留」就返回；方法正常结束，于是本类返回 {@code SUCCESS}，
+     * 消息被 **ack**。
+     *
+     * <p>结果：那笔预扣**永远冻着**，消息既不会重投也不会进死信，
+     * 日志里连一条 WARN 都没有。这正是本类注释自称要防的那种失败，
+     * 只是入口不是「异常」而是「字段名」。
+     *
+     * <p>所以这里把它变成**重投**：进死信队列会亮红灯，而红灯有人看得见。
+     *
+     * @throws IllegalArgumentException 载荷里没有可识别的身份
+     */
+    // 包私有而非 private：守卫本身要能被测试直接钉住（见 JobEventConsumerGuardTest）
+    static void requireIdentifiable(long jobId, long userId, String topic, String body) {
+        if (jobId <= 0 || userId <= 0) {
+            throw new IllegalArgumentException(
+                    "计费事件载荷缺少可识别的 jobId/userId（字段名对不上？）：jobId="
+                            + jobId + " userId=" + userId + " topic=" + topic + " body=" + body);
         }
     }
 

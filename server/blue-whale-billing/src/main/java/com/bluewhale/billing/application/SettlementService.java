@@ -93,9 +93,17 @@ public class SettlementService {
             //    worker 只成功了一部分却没报用量时，用户会被按全额结算。
             //    所以打 WARN 让漏报可观测，而不是默默多收。
             actualCredits = reservation.reservedCredits();
-            log.warn("结算事件未带用量，按预扣额结算：jobId={} status={} 预扣={} 成功槽={}"
-                            + " —— worker 侧可能漏报用量（部分成功时会导致按全额结算）",
-                    event.jobId(), event.status(), actualCredits, event.succeededSlots());
+            // ⚠️ **只在部分成功时报警**。worker 按设计对**所有**成功任务都发 `usage: []`
+            //    （契约用量即实际用量，见 JobSettlementPublisher 的注释），所以无条件 WARN
+            //    等于 100% 的成功结算都带一条告警——真正该看的那条会被淹掉。
+            //
+            //    只有 partially_succeeded 才是注释里说的那个「偏平台」场景：
+            //    只成功了一部分、却没报用量，用户会被按全额结算。
+            if ("partially_succeeded".equals(event.status())) {
+                log.warn("部分成功但结算事件未带用量，按全额预扣结算（偏平台）："
+                                + "jobId={} 预扣={} 成功槽={}",
+                        event.jobId(), actualCredits, event.succeededSlots());
+            }
         } else {
             actualCredits = 0;
             for (JobEventPayload.UsageLine line : event.usage()) {
