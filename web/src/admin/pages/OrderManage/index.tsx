@@ -1,10 +1,14 @@
 /* ============================================
  * OrderManage 订单管理：查看充值订单、支付链路、手动确认与导出
  * 数据源 GET /api/admin/orders + POST /:tradeNo/complete + GET /api/admin/operation-logs
+ *
+ * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
+ * 状态色走 Badge 的 tone、加载/失败/空态走 Empty、提示走 Alert，
+ * 页面只描述结构，样式一处定义在套件里。
  * ============================================ */
+import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Download, Search, X, CheckCircle2, Check } from 'lucide-react';
+import { Download, CheckCircle2, Check } from 'lucide-react';
 import {
   fetchAdminOrders,
   completeAdminOrder,
@@ -14,7 +18,21 @@ import {
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import { formatLogIp } from '@/admin/formatLogIp';
-import styles from './index.module.css';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Empty,
+  Input,
+  Modal,
+  Page,
+  PageHeader,
+  Select,
+  Table,
+  Toolbar,
+  type BadgeTone,
+} from '../../ui';
 
 /** 订单状态 */
 type OrderStatus = 'pending' | 'success' | 'expired' | 'failed';
@@ -26,20 +44,28 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   failed: '支付失败',
 };
 
-/** CSS 类按状态映射（模板字符串索引无法通过类型检查） */
-const STATUS_TEXT_CLS: Record<OrderStatus, string> = {
-  pending: styles.st_pending,
-  success: styles.st_paid,
-  expired: styles.st_expired,
-  failed: styles.st_failed,
+/** 状态 → Badge 色调（模板字符串索引无法通过类型检查，故用显式映射） */
+const STATUS_TONE: Record<OrderStatus, BadgeTone> = {
+  pending: 'accent',
+  success: 'success',
+  expired: 'neutral',
+  failed: 'danger',
 };
 
-const STATUS_BADGE_CLS: Record<OrderStatus, string> = {
-  pending: styles.badge_pending,
-  success: styles.badge_paid,
-  expired: styles.badge_expired,
-  failed: styles.badge_failed,
-};
+/** 列表筛选下拉选项 */
+const STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pending', label: '待支付' },
+  { value: 'success', label: '已到账' },
+  { value: 'expired', label: '已过期' },
+  { value: 'failed', label: '支付失败' },
+];
+
+const METHOD_OPTIONS = [
+  { value: 'all', label: '全部方式' },
+  { value: 'wechat', label: '微信支付' },
+  { value: 'alipay', label: '支付宝' },
+];
 
 /** 支付方式 code → 展示名 */
 const METHOD_LABEL: Record<string, string> = {
@@ -70,6 +96,13 @@ const dateKey = (iso: string) => {
 type StepState = 'done' | 'wait' | 'fail';
 
 const STEP_LABELS = ['创建订单', '发起支付', '支付回调', '积分到账'];
+
+/** 步骤状态 → Badge 色调：已完成绿、失败红、等待中性 */
+const STEP_TONE: Record<StepState, BadgeTone> = {
+  done: 'success',
+  wait: 'neutral',
+  fail: 'danger',
+};
 
 const stepsFor = (s: OrderStatus): StepState[] => {
   switch (s) {
@@ -168,122 +201,134 @@ export default function OrderManage() {
   };
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>订单管理</h1>
-          <p className={styles.subtitle}>查看充值订单、支付链路、手动确认与导出</p>
-        </div>
-        <button className={styles.exportBtn} onClick={exportExcel}>
-          <Download size={16} strokeWidth={2} />
-          <span>导出 Excel</span>
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title="订单管理"
+        subtitle="查看充值订单、支付链路、手动确认与导出"
+        extra={
+          <Button icon={<Download size={16} strokeWidth={2} />} onClick={exportExcel}>
+            导出 Excel
+          </Button>
+        }
+      />
 
-      {/* 筛选行 + 日期区间 */}
-      <div className={styles.filterRow}>
-        <div className={styles.searchWrap}>
-          <Search size={16} strokeWidth={2} className={styles.searchIcon} />
-          <input
-            className={styles.searchInput}
+      {/* 筛选行 + 日期区间；待处理计数放右对齐区 */}
+      <Card>
+        <Toolbar actions={<span>{pendingCount} 笔待处理</span>}>
+          <Input
+            style={{ flex: 1, minWidth: 240 }}
             placeholder="搜索用户/手机号/交易号..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-        </div>
-        <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="all">全部状态</option>
-          <option value="pending">待支付</option>
-          <option value="success">已到账</option>
-          <option value="expired">已过期</option>
-          <option value="failed">支付失败</option>
-        </select>
-        <select className={styles.select} value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)}>
-          <option value="all">全部方式</option>
-          <option value="wechat">微信支付</option>
-          <option value="alipay">支付宝</option>
-        </select>
-        <input type="date" className={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} />
-        <span className={styles.rangeDash}>—</span>
-        <input type="date" className={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} />
-      </div>
-
-      {/* 待处理计数 */}
-      <div className={styles.pendingCount}>{pendingCount} 笔待处理</div>
+          <Select
+            aria-label="状态筛选"
+            options={STATUS_OPTIONS}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+          <Select
+            aria-label="支付方式筛选"
+            options={METHOD_OPTIONS}
+            value={methodFilter}
+            onChange={setMethodFilter}
+          />
+          <Input
+            type="date"
+            aria-label="开始日期"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          <span>—</span>
+          <Input
+            type="date"
+            aria-label="结束日期"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </Toolbar>
+      </Card>
 
       {/* 订单表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
+      <Table>
+        <thead>
+          <tr>
+            <th>交易号</th>
+            <th>用户</th>
+            <th>档位</th>
+            <th>金额</th>
+            <th>积分</th>
+            <th>支付方式</th>
+            <th>状态</th>
+            <th>时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
             <tr>
-              <th>交易号</th>
-              <th>用户</th>
-              <th>档位</th>
-              <th>金额</th>
-              <th>积分</th>
-              <th>支付方式</th>
-              <th>状态</th>
-              <th>时间</th>
-              <th className={styles.thRight}>操作</th>
+              <td colSpan={9}>
+                <Empty message="加载中…" />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>
-                  加载中…
+          ) : loadError ? (
+            <tr>
+              <td colSpan={9}>
+                <Empty
+                  message={loadError}
+                  extra={<Button onClick={() => void loadOrders()}>重试</Button>}
+                />
+              </td>
+            </tr>
+          ) : filtered.length === 0 ? (
+            <tr>
+              <td colSpan={9}>
+                <Empty message="暂无订单" />
+              </td>
+            </tr>
+          ) : (
+            filtered.map((o) => (
+              <tr key={o.tradeNo}>
+                <td>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="查看订单详情"
+                    onClick={() => setDetailNo(o.tradeNo)}
+                  >
+                    {o.tradeNo}
+                  </Button>
+                </td>
+                <td>{o.nickname || `(#${o.userId})`}</td>
+                <td>{o.tierName}</td>
+                <td>{fmtMoney(o.price)}</td>
+                <td>{fmt(o.points)}</td>
+                <td>{methodLabel(o.paymentMethod)}</td>
+                <td>
+                  <Badge tone={STATUS_TONE[o.status]} dot>
+                    {STATUS_LABEL[o.status]}
+                  </Badge>
+                </td>
+                <td>{fmtTime(o.createdAt)}</td>
+                <td>
+                  {o.status === 'pending' ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="手动确认"
+                      aria-label={`手动确认订单 ${o.tradeNo}`}
+                      icon={<CheckCircle2 size={16} strokeWidth={2} />}
+                      onClick={() => setConfirmNo(o.tradeNo)}
+                    />
+                  ) : (
+                    '—'
+                  )}
                 </td>
               </tr>
-            ) : loadError ? (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>
-                  {loadError}{' '}
-                  <button className={styles.retryLink} onClick={() => void loadOrders()}>
-                    重试
-                  </button>
-                </td>
-              </tr>
-            ) : filtered.length === 0 ? (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>
-                  暂无订单
-                </td>
-              </tr>
-            ) : (
-              filtered.map((o) => (
-                <tr key={o.tradeNo}>
-                  <td>
-                    <button className={styles.noLink} onClick={() => setDetailNo(o.tradeNo)}>
-                      {o.tradeNo}
-                    </button>
-                  </td>
-                  <td className={styles.cellUser}>{o.nickname || `(#${o.userId})`}</td>
-                  <td>{o.tierName}</td>
-                  <td className={styles.cellNum}>{fmtMoney(o.price)}</td>
-                  <td className={styles.cellNum}>{fmt(o.points)}</td>
-                  <td>{methodLabel(o.paymentMethod)}</td>
-                  <td>
-                    <span className={STATUS_TEXT_CLS[o.status]}>{STATUS_LABEL[o.status]}</span>
-                  </td>
-                  <td className={styles.cellTime}>{fmtTime(o.createdAt)}</td>
-                  <td>
-                    <div className={styles.actionGroup}>
-                      {o.status === 'pending' ? (
-                        <button className={styles.iconBtn} title="手动确认" onClick={() => setConfirmNo(o.tradeNo)}>
-                          <CheckCircle2 size={16} strokeWidth={2} />
-                        </button>
-                      ) : (
-                        <span className={styles.dash}>—</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            ))
+          )}
+        </tbody>
+      </Table>
 
       {/* 订单详情 */}
       {detailNo && findOrder(detailNo) && (
@@ -301,6 +346,18 @@ export default function OrderManage() {
           }}
         />
       )}
+    </Page>
+  );
+}
+
+/* ============ 详情字段：标签在上、值在下 ============ */
+function InfoItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div>
+        <small>{label}</small>
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -330,124 +387,85 @@ function DetailModal({ order, onClose }: { order: AdminOrderRow; onClose: () => 
     };
   }, [order.tradeNo]);
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>订单详情·支付全链路</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          {/* 链路步骤 */}
-          <div className={styles.steps}>
-            {steps.map((s, i) => (
-              <Fragment key={STEP_LABELS[i]}>
-                {i > 0 && <div className={steps[i - 1] === 'done' && s === 'done' ? styles.stepLineDone : styles.stepLine} />}
-                <div className={`${styles.stepItem} ${s === 'done' ? styles.stepDone : s === 'fail' ? styles.stepFail : styles.stepWait}`}>
-                  <div className={styles.stepDot}>{s === 'done' && <Check size={16} strokeWidth={3} />}</div>
-                  <div className={styles.stepLabel}>{STEP_LABELS[i]}</div>
-                </div>
-              </Fragment>
-            ))}
-          </div>
-
-          {/* 信息网格 */}
-          <div className={styles.infoGrid}>
-            <div>
-              <div className={styles.infoLabel}>交易号</div>
-              <div className={`${styles.infoValue} ${styles.mono}`}>{order.tradeNo}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>状态</div>
-              <span className={STATUS_BADGE_CLS[order.status]}>{STATUS_LABEL[order.status]}</span>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>用户</div>
-              <div className={styles.infoValue}>
-                {order.nickname ? `${order.nickname} (#${order.userId})` : `(#${order.userId})`}
-              </div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>手机号</div>
-              <div className={styles.infoValue}>{order.phone || '—'}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>档位</div>
-              <div className={styles.infoValue}>{order.tierName}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>金额</div>
-              <div className={styles.infoValue}>{fmtMoney(order.price)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>购买积分</div>
-              <div className={styles.infoValue}>{fmt(order.points)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>赠送积分</div>
-              <div className={`${styles.infoValue} ${styles.greenText}`}>+{fmt(order.bonus)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>支付方式</div>
-              <div className={styles.infoValue}>{methodLabel(order.paymentMethod)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>支付平台流水号</div>
-              <div className={`${styles.infoValue} ${styles.mono}`}>{order.platformRefNo || '—'}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>IP</div>
-              <div className={`${styles.infoValue} ${styles.mono}`}>{order.ip || '—'}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>创建时间</div>
-              <div className={styles.infoValue}>{fmtTime(order.createdAt)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>支付时间</div>
-              <div className={styles.infoValue}>{fmtTime(order.paidAt)}</div>
-            </div>
-            <div>
-              <div className={styles.infoLabel}>到账时间</div>
-              <div className={styles.infoValue}>{fmtTime(order.arrivedAt)}</div>
-            </div>
-          </div>
-
-          {/* 操作日志（补单记录） */}
-          <div className={styles.logSection}>
-            <h3 className={styles.logTitle}>操作日志</h3>
-            {logsLoading ? (
-              <div className={styles.logEmpty}>加载中…</div>
-            ) : logsError ? (
-              <div className={styles.logEmpty}>{logsError}</div>
-            ) : logs.length === 0 ? (
-              <div className={styles.logEmpty}>暂无操作记录</div>
-            ) : (
-              <div className={styles.logList}>
-                {logs.map((log) => {
-                  const d = parseDetail(log.detail);
-                  return (
-                    <div key={log.id} className={styles.logItem}>
-                      <div className={styles.logHead}>
-                        <span className={styles.logAction}>{log.action === 'order.complete' ? '手动补单确认' : log.action}</span>
-                        <span className={styles.logMeta}>
-                          {log.operator} · {formatLogIp(log.ipAddress)} · {fmtTime(log.createdAt)}
-                        </span>
-                      </div>
-                      {d.reason && <div className={styles.logReason}>原因：{d.reason}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+  return (
+    <Modal open title="订单详情·支付全链路" onClose={onClose} width={760}>
+      {/* 链路步骤：已完成的步骤带勾，状态同时由色调与符号表达（不只靠颜色） */}
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}
+      >
+        {STEP_LABELS.map((label, i) => (
+          <Fragment key={label}>
+            {i > 0 && <span aria-hidden="true">→</span>}
+            <Badge tone={STEP_TONE[steps[i]]} dot>
+              {steps[i] === 'done' && <Check size={12} strokeWidth={3} />}
+              {label}
+            </Badge>
+          </Fragment>
+        ))}
       </div>
-    </div>,
-    document.body
+
+      {/* 信息网格 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px' }}>
+        <InfoItem label="交易号">{order.tradeNo}</InfoItem>
+        <InfoItem label="状态">
+          <Badge tone={STATUS_TONE[order.status]} dot>
+            {STATUS_LABEL[order.status]}
+          </Badge>
+        </InfoItem>
+        <InfoItem label="用户">
+          {order.nickname ? `${order.nickname} (#${order.userId})` : `(#${order.userId})`}
+        </InfoItem>
+        <InfoItem label="手机号">{order.phone || '—'}</InfoItem>
+        <InfoItem label="档位">{order.tierName}</InfoItem>
+        <InfoItem label="金额">{fmtMoney(order.price)}</InfoItem>
+        <InfoItem label="购买积分">{fmt(order.points)}</InfoItem>
+        <InfoItem label="赠送积分">+{fmt(order.bonus)}</InfoItem>
+        <InfoItem label="支付方式">{methodLabel(order.paymentMethod)}</InfoItem>
+        <InfoItem label="支付平台流水号">{order.platformRefNo || '—'}</InfoItem>
+        <InfoItem label="IP">{order.ip || '—'}</InfoItem>
+        <InfoItem label="创建时间">{fmtTime(order.createdAt)}</InfoItem>
+        <InfoItem label="支付时间">{fmtTime(order.paidAt)}</InfoItem>
+        <InfoItem label="到账时间">{fmtTime(order.arrivedAt)}</InfoItem>
+      </div>
+
+      {/* 操作日志（补单记录） */}
+      <div style={{ marginTop: 24 }}>
+        <h3>操作日志</h3>
+        {logsLoading ? (
+          <Empty message="加载中…" />
+        ) : logsError ? (
+          <Empty message={logsError} />
+        ) : logs.length === 0 ? (
+          <Empty message="暂无操作记录" />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {logs.map((log) => {
+              const d = parseDetail(log.detail);
+              return (
+                <Card key={log.id}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                    }}
+                  >
+                    <span>
+                      {log.action === 'order.complete' ? '手动补单确认' : log.action}
+                    </span>
+                    <small>
+                      {log.operator} · {formatLogIp(log.ipAddress)} · {fmtTime(log.createdAt)}
+                    </small>
+                  </div>
+                  {d.reason && <div style={{ marginTop: 6 }}>原因：{d.reason}</div>}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -479,56 +497,55 @@ function ConfirmOrderModal({
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modalNarrow} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>手动确认订单</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <div className={styles.summaryBox}>
-            <div className={styles.summaryLine}>
-              <span className={styles.summaryLabel}>交易号：</span>
-              <span className={styles.mono}>{order.tradeNo}</span>
-            </div>
-            <div className={styles.summaryLine}>
-              <span className={styles.summaryLabel}>用户：</span>
-              <span>{order.nickname ? `${order.nickname} (#${order.userId})` : `(#${order.userId})`}</span>
-            </div>
-            <div className={styles.summaryLine}>
-              <span className={styles.summaryLabel}>金额：</span>
-              <b>
-                {fmtMoney(order.price)} — {fmt(order.points)} 积分
-              </b>
-            </div>
-          </div>
-
-          <div className={styles.warnBox}>确认后用户积分将立即到账。仅 pending 状态可确认。</div>
-
-          <div className={styles.label}>
-            确认原因 <span className={styles.required}>*</span>
-          </div>
-          <input
-            className={styles.input}
-            placeholder="请输入确认原因（必填），如：支付回调丢失、用户已付款..."
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          {error && <div className={styles.formError}>{error}</div>}
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose} disabled={saving}>
+  return (
+    <Modal
+      open
+      title="手动确认订单"
+      onClose={onClose}
+      width={620}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>
             取消
-          </button>
-          <button className={styles.confirmGreen} disabled={!valid} onClick={() => void submit()}>
+          </Button>
+          <Button variant="primary" disabled={!valid} onClick={() => void submit()}>
             {saving ? '确认中…' : '确认并到账'}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      <Card>
+        <div>
+          交易号：<b>{order.tradeNo}</b>
         </div>
+        <div>
+          用户：
+          <b>{order.nickname ? `${order.nickname} (#${order.userId})` : `(#${order.userId})`}</b>
+        </div>
+        <div>
+          金额：
+          <b>
+            {fmtMoney(order.price)} — {fmt(order.points)} 积分
+          </b>
+        </div>
+      </Card>
+
+      <div style={{ marginTop: 16 }}>
+        <Alert tone="warning">确认后用户积分将立即到账。仅 pending 状态可确认。</Alert>
       </div>
-    </div>,
-    document.body
+
+      <div style={{ marginTop: 16 }}>确认原因 *</div>
+      <Input
+        style={{ width: '100%', marginTop: 6 }}
+        placeholder="请输入确认原因（必填），如：支付回调丢失、用户已付款..."
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+    </Modal>
   );
 }

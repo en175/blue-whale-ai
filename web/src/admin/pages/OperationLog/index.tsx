@@ -1,13 +1,16 @@
 /* ============================================
  * OperationLog 操作日志：管理操作审计记录，按类别/时间/关键词查询
  * 数据源 GET /api/admin/operation-logs（时间倒序）
+ *
+ * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
+ * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
 import { useCallback, useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import { fetchOperationLogs, type OperationLog } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import { formatLogIp } from '@/admin/formatLogIp';
-import styles from './index.module.css';
+import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
 
 /** 类别 code → 展示名（筛选下拉与表格徽章共用） */
 const CATEGORY_OPTIONS: { code: string; label: string }[] = [
@@ -16,6 +19,12 @@ const CATEGORY_OPTIONS: { code: string; label: string }[] = [
   { code: 'order', label: '订单管理' },
   { code: 'user', label: '用户管理' },
   { code: 'template', label: '模板管理' },
+];
+
+/** 类别筛选下拉选项（Select 基元收的是 {value,label}） */
+const CATEGORY_SELECT_OPTIONS = [
+  { value: 'all', label: '全部类别' },
+  ...CATEGORY_OPTIONS.map((c) => ({ value: c.code, label: c.label })),
 ];
 
 const categoryLabel = (code: string) =>
@@ -109,104 +118,91 @@ export default function OperationLog() {
   }, [loadLogs]);
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>操作日志</h1>
-          <p className={styles.subtitle}>管理操作审计记录，按类别和时间筛选</p>
-        </div>
-      </div>
+    <Page>
+      <PageHeader title="操作日志" subtitle="管理操作审计记录，按类别和时间筛选" />
 
       {/* 筛选行 */}
-      <div className={styles.filterRow}>
-        <select className={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="all">全部类别</option>
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-        <input type="date" className={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} />
-        <span className={styles.rangeDash}>—</span>
-        <input type="date" className={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} />
-        <div className={styles.searchWrap}>
-          <Search size={16} strokeWidth={2} className={styles.searchIcon} />
-          <input
-            className={styles.searchInput}
+      <Toolbar>
+        <Select options={CATEGORY_SELECT_OPTIONS} value={category} onChange={setCategory} />
+        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <span>—</span>
+        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        {/* 搜索框：基元没有「前置图标」位，图标与输入框并排放在同一行内；
+            宽度走内联而非私有样式类 —— 本页已无自己的 CSS 文件 */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Search size={16} strokeWidth={2} aria-hidden />
+          <Input
+            style={{ width: 260 }}
             placeholder="搜索目标/详情/操作人..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-      </div>
+      </Toolbar>
 
       {/* 日志表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
+      <Table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>类别</th>
+            <th>操作</th>
+            <th>目标</th>
+            <th>详情</th>
+            <th>IP</th>
+            <th>操作人</th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* 三态统一走 Empty：加载中 / 加载失败（可重试）/ 空数据 */}
+          {loading && (
             <tr>
-              <th>时间</th>
-              <th>类别</th>
-              <th>操作</th>
-              <th>目标</th>
-              <th>详情</th>
-              <th>IP</th>
-              <th className={styles.thRight}>操作人</th>
+              <td colSpan={7}>
+                <Empty message="加载中…" />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  加载中…
-                </td>
-              </tr>
-            ) : loadError ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  {loadError}{' '}
-                  <button className={styles.retryLink} onClick={() => void loadLogs()}>
-                    重试
-                  </button>
-                </td>
-              </tr>
-            ) : logs.length === 0 ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  暂无日志
-                </td>
-              </tr>
-            ) : (
-              logs.map((l) => {
-                const detailText = formatDetail(l.detail);
-                return (
-                  <tr key={l.id}>
-                    <td className={styles.cellTime}>{fmtTime(l.createdAt)}</td>
-                    <td>
-                      <span className={styles.catBadge}>{categoryLabel(l.category)}</span>
-                    </td>
-                    <td className={styles.cellAction} title={l.action}>
-                      {actionLabel(l.action)}
-                    </td>
-                    <td className={styles.cellTarget} title={l.target}>
-                      {l.target || '—'}
-                    </td>
-                    <td className={styles.cellDetail} title={l.detail}>
-                      {detailText}
-                    </td>
-                    <td className={styles.cellIp} title={l.ipAddress ?? undefined}>
-                      {formatLogIp(l.ipAddress)}
-                    </td>
-                    <td className={styles.cellOperator}>{l.operator}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          )}
+          {!loading && loadError && (
+            <tr>
+              <td colSpan={7}>
+                <Empty
+                  message={loadError}
+                  extra={
+                    <Button size="sm" onClick={() => void loadLogs()}>
+                      重试
+                    </Button>
+                  }
+                />
+              </td>
+            </tr>
+          )}
+          {!loading && !loadError && logs.length === 0 && (
+            <tr>
+              <td colSpan={7}>
+                <Empty message="暂无日志" />
+              </td>
+            </tr>
+          )}
+          {!loading &&
+            !loadError &&
+            logs.map((l) => {
+              const detailText = formatDetail(l.detail);
+              return (
+                <tr key={l.id}>
+                  <td>{fmtTime(l.createdAt)}</td>
+                  <td>
+                    <Badge tone="neutral">{categoryLabel(l.category)}</Badge>
+                  </td>
+                  <td title={l.action}>{actionLabel(l.action)}</td>
+                  <td title={l.target}>{l.target || '—'}</td>
+                  <td title={l.detail}>{detailText}</td>
+                  <td title={l.ipAddress ?? undefined}>{formatLogIp(l.ipAddress)}</td>
+                  <td>{l.operator}</td>
+                </tr>
+              );
+            })}
+        </tbody>
+      </Table>
+    </Page>
   );
 }

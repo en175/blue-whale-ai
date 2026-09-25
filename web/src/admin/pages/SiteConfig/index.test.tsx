@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SiteConfig from './index';
-import styles from './index.module.css';
 
 const api = vi.hoisted(() => ({
   fetchAdminHomepageHeroes: vi.fn(),
@@ -136,7 +135,9 @@ describe('SiteConfig 通用配置', () => {
     await act(async () => {
       buttons().find((btn) => btn.textContent === '保存')?.click();
     });
-    expect(document.body.querySelector(`.${styles.formError}`)?.textContent).toBe('请先上传封面图');
+    // 迁移到组件套件后校验失败提示走 Alert（role="status"），私有样式类已随 CSS 文件删除。
+    // 页面顶部还有一条 info 提示条，所以按弹窗（role="dialog"）限定作用域。
+    expect(document.body.querySelector('[role="dialog"] [role="status"]')?.textContent).toBe('请先上传封面图');
     expect(api.createHomepageHero).not.toHaveBeenCalled();
   });
 
@@ -145,7 +146,8 @@ describe('SiteConfig 通用配置', () => {
     await act(async () => {
       buttons().find((btn) => btn.textContent?.includes('新建条目'))?.click();
     });
-    expect(document.body.querySelector(`.${styles.typeRow}`)).toBeNull();
+    // 原断言查私有样式类 .typeRow，该类随 CSS 文件删除：弹窗里本就没有类型选择行，
+    // 类型由「有没有上传视频」推导。这里保留「上传封面图后视频入口仍在」这一条可观察事实。
     const cover = document.body.querySelector<HTMLInputElement>('[data-testid="hero-cover-upload"]');
     if (!cover) throw new Error('封面图上传控件未渲染');
     api.uploadHomepageHeroFile.mockResolvedValueOnce('https://cdn.example.com/hero.png');

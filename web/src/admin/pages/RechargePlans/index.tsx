@@ -1,13 +1,14 @@
 /* ============================================
  * RechargePlans 充值档位管理：CRUD/折扣定价/限时上下架/排序/用户端预览
+ *
+ * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**（原 index.module.css 已删）——
+ * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   Eye,
   RefreshCw,
-  X,
   Pencil,
   Trash2,
   ChevronUp,
@@ -29,7 +30,21 @@ import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import { tierFormError } from './tierForm';
-import styles from './index.module.css';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Empty,
+  Input,
+  Modal,
+  Page,
+  PageHeader,
+  Select,
+  Stat,
+  Table,
+} from '../../ui';
 
 /** 档位数据（列表源 GET /api/admin/topup-tiers） */
 interface Plan {
@@ -91,7 +106,6 @@ export default function RechargePlans() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
-  const [filterOpen, setFilterOpen] = useState(false);
   const [form, setForm] = useState<{ id?: string } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -103,8 +117,10 @@ export default function RechargePlans() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
-  // 页面加载获取全部档位（含停用），按 sortOrder 排序展示
-  useEffect(() => {
+  /** 刷新全部档位（含停用），按 sortOrder 排序展示；页面加载与加载失败重试都走它 */
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError('');
     fetchTopupTiers()
       .then((list) =>
         setPlans([...list].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan))
@@ -112,6 +128,9 @@ export default function RechargePlans() {
       .catch((e) => setLoadError(isApiError(e) ? e.message : '获取档位列表失败'))
       .finally(() => setLoading(false));
   }, []);
+
+  // 页面加载获取全部档位
+  useEffect(() => load(), [load]);
 
   const filtered = useMemo(
     () => plans.filter((p) => (filter === 'all' ? true : filter === 'on' ? p.enabled : !p.enabled)),
@@ -220,146 +239,158 @@ export default function RechargePlans() {
   };
 
   return (
-    <div className={styles.page}>
+    <Page>
       {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>充值档位</h1>
-          <p className={styles.subtitle}>管理档位 CRUD、折扣定价、限时上下架与效果预览</p>
-        </div>
-        <div className={styles.actions}>
-          <button className={styles.toolBtn} onClick={handleSync} disabled={syncing}>
-            <RefreshCw size={16} strokeWidth={2} />
-            <span>{syncing ? '同步中…' : synced && syncMsg ? syncMsg : '同步折扣到 Go'}</span>
-          </button>
-          <button className={styles.toolBtn} onClick={() => setShowPreview(true)}>
-            <Eye size={16} strokeWidth={2} />
-            <span>用户端预览</span>
-          </button>
-          <button className={styles.primaryBtn} onClick={() => setForm({})}>
-            <Plus size={16} strokeWidth={2} />
-            <span>新建档位</span>
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="充值档位"
+        subtitle="管理档位 CRUD、折扣定价、限时上下架与效果预览"
+        extra={
+          <>
+            <Button
+              icon={<RefreshCw size={16} strokeWidth={2} />}
+              disabled={syncing}
+              onClick={handleSync}
+            >
+              {syncing ? '同步中…' : synced && syncMsg ? syncMsg : '同步折扣到 Go'}
+            </Button>
+            <Button
+              icon={<Eye size={16} strokeWidth={2} />}
+              onClick={() => setShowPreview(true)}
+            >
+              用户端预览
+            </Button>
+            <Button variant="primary" icon={<Plus size={16} strokeWidth={2} />} onClick={() => setForm({})}>
+              新建档位
+            </Button>
+          </>
+        }
+      />
 
-      {/* 包络级警告 / 操作错误 */}
-      {warning && <div className={styles.warningBar}>{warning}</div>}
-      {actionError && <div className={styles.errorBar}>{actionError}</div>}
+      {/* 包络级警告（Go 折扣同步失败等）用 warning 调子；操作错误用 danger */}
+      {warning && <Alert tone="warning">{warning}</Alert>}
+      {actionError && <Alert tone="danger">{actionError}</Alert>}
 
       {/* 状态筛选 */}
-      <div className={styles.filterWrap}>
-        <button className={styles.filterBtn} onClick={() => setFilterOpen(!filterOpen)}>
-          <span>{filterOptions.find((f) => f.key === filter)?.label}</span>
-          <ChevronDown size={16} strokeWidth={2} />
-        </button>
-        {filterOpen && (
-          <>
-            <div className={styles.filterMask} onClick={() => setFilterOpen(false)} />
-            <div className={styles.filterMenu}>
-              {filterOptions.map((f) => (
-                <button
-                  key={f.key}
-                  className={`${styles.filterOption} ${filter === f.key ? styles.filterOptionActive : ''}`}
-                  onClick={() => {
-                    setFilter(f.key);
-                    setFilterOpen(false);
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <Select
+        options={filterOptions.map((f) => ({ value: f.key, label: f.label }))}
+        value={filter}
+        onChange={(v) => setFilter(v as FilterKey)}
+        aria-label="状态筛选"
+      />
 
       {/* 档位表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
+      <Table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>名称</th>
+            <th>积分数</th>
+            <th>原价（元）</th>
+            <th>折扣</th>
+            <th>实付（元）</th>
+            <th>推荐</th>
+            <th>限时</th>
+            <th>排序</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading && (
             <tr>
-              <th>ID</th>
-              <th>名称</th>
-              <th>积分数</th>
-              <th>原价（元）</th>
-              <th>折扣</th>
-              <th>实付（元）</th>
-              <th>推荐</th>
-              <th>限时</th>
-              <th>排序</th>
-              <th>状态</th>
-              <th>操作</th>
+              <td colSpan={11}>
+                <Empty message="加载中…" />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={11} className={styles.tableState}>加载中…</td>
-              </tr>
-            )}
-            {!loading && loadError && (
-              <tr>
-                <td colSpan={11} className={styles.tableState}>{loadError}</td>
-              </tr>
-            )}
-            {!loading && !loadError && filtered.length === 0 && (
-              <tr>
-                <td colSpan={11} className={styles.tableState}>暂无档位</td>
-              </tr>
-            )}
-            {filtered.map((p) => (
-              <tr key={p.id}>
-                <td className={styles.cellId}>{p.id}</td>
-                <td className={styles.cellName}>{p.name || <span className={styles.dash}>—</span>}</td>
-                <td className={styles.cellPoints}>{fmtPoints(p.amount)}</td>
-                <td>¥{fmtMoney(p.price)}</td>
-                <td>
-                  {p.ratio < 1 ? (
-                    <span className={styles.discount}>{discountLabel(p.ratio)}</span>
-                  ) : (
-                    <span className={styles.dash}>—</span>
-                  )}
-                </td>
-                <td className={styles.cellPay}>¥{fmtMoney(p.pay)}</td>
-                <td>
-                  {p.recommended ? <span className={styles.badgeGreen}>推荐</span> : <span className={styles.dash}>—</span>}
-                </td>
-                <td className={styles.dash}>{p.start || p.end ? '限时' : '永久'}</td>
-                <td>
-                  <div className={styles.sortGroup}>
-                    <button className={styles.iconBtn} title="上移" disabled={sorting} onClick={() => move(p.id, -1)}>
-                      <ChevronUp size={15} strokeWidth={2} />
-                    </button>
-                    <button className={styles.iconBtn} title="下移" disabled={sorting} onClick={() => move(p.id, 1)}>
-                      <ChevronDown size={15} strokeWidth={2} />
-                    </button>
-                  </div>
-                </td>
-                <td>
-                  <span className={p.enabled ? styles.badgeGreen : styles.badgeGray}>
-                    {p.enabled ? '启用' : '停用'}
-                  </span>
-                </td>
-                <td>
-                  <div className={styles.sortGroup}>
-                    <button className={styles.iconBtn} title="编辑" onClick={() => setForm({ id: p.id })}>
-                      <Pencil size={15} strokeWidth={2} />
-                    </button>
-                    <button
-                      className={`${styles.iconBtn} ${styles.iconDanger}`}
-                      title="删除"
-                      onClick={() => setDeleteId(p.id)}
-                    >
-                      <Trash2 size={15} strokeWidth={2} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          )}
+          {!loading && loadError && (
+            <tr>
+              <td colSpan={11}>
+                <Empty message={loadError} extra={<Button onClick={load}>重试</Button>} />
+              </td>
+            </tr>
+          )}
+          {!loading && !loadError && filtered.length === 0 && (
+            <tr>
+              <td colSpan={11}>
+                <Empty
+                  message="暂无档位"
+                  extra={
+                    <Button variant="primary" onClick={() => setForm({})}>
+                      新建档位
+                    </Button>
+                  }
+                />
+              </td>
+            </tr>
+          )}
+          {filtered.map((p) => (
+            <tr key={p.id}>
+              <td>{p.id}</td>
+              <td>{p.name || '—'}</td>
+              <td>{fmtPoints(p.amount)}</td>
+              <td>¥{fmtMoney(p.price)}</td>
+              <td>
+                {p.ratio < 1 ? (
+                  <Badge tone="success">{discountLabel(p.ratio)}</Badge>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td>¥{fmtMoney(p.pay)}</td>
+              <td>{p.recommended ? <Badge tone="success">推荐</Badge> : '—'}</td>
+              <td>{p.start || p.end ? '限时' : '永久'}</td>
+              <td>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="上移"
+                    aria-label="上移"
+                    disabled={sorting}
+                    icon={<ChevronUp size={15} strokeWidth={2} />}
+                    onClick={() => move(p.id, -1)}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="下移"
+                    aria-label="下移"
+                    disabled={sorting}
+                    icon={<ChevronDown size={15} strokeWidth={2} />}
+                    onClick={() => move(p.id, 1)}
+                  />
+                </div>
+              </td>
+              <td>
+                <Badge tone={p.enabled ? 'success' : 'neutral'}>
+                  {p.enabled ? '启用' : '停用'}
+                </Badge>
+              </td>
+              <td>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="编辑"
+                    aria-label="编辑"
+                    icon={<Pencil size={15} strokeWidth={2} />}
+                    onClick={() => setForm({ id: p.id })}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="删除"
+                    aria-label="删除"
+                    icon={<Trash2 size={15} strokeWidth={2} />}
+                    onClick={() => setDeleteId(p.id)}
+                  />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
 
       {/* 新建/编辑弹窗 */}
       {form !== null && (
@@ -383,7 +414,7 @@ export default function RechargePlans() {
 
       {/* 用户端预览弹窗 */}
       {showPreview && <PreviewModal onClose={() => setShowPreview(false)} />}
-    </div>
+    </Page>
   );
 }
 
@@ -429,118 +460,132 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>{initial ? '编辑档位' : '新建档位'}</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          <div className={styles.formGrid}>
-            <div>
-              <div className={styles.label}>
-                档位名称 <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                className={styles.input}
-                value={name}
-                placeholder="选填"
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>原价（元）</div>
-              <input
-                className={styles.input}
-                value={price}
-                aria-label="原价（元）"
-                onChange={(e) => setPrice(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>
-                积分数 <span className={styles.labelSub}>(派生)</span>
-              </div>
-              <div className={styles.readonlyBox}>{fmtPoints(points)}</div>
-            </div>
-            <div>
-              <div className={styles.label}>折扣比例 (0–1]</div>
-              <input
-                className={styles.input}
-                value={ratio}
-                aria-label="折扣比例"
-                onChange={(e) => setRatio(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>实付价格</div>
-              <div className={styles.payBox}>¥{fmtMoney(pay)}</div>
-            </div>
-          </div>
-
-          <p className={styles.hint}>
-            积分 = 原价 × 500000（只读派生，对应 Go 充值配额 QuotaPerUnit）。实付 = 原价 × 折扣，折扣 = 1 表示无折扣。
-          </p>
-
-          <div className={styles.formGrid}>
-            <div>
-              <div className={styles.label}>
-                生效时间 <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                type="datetime-local"
-                className={styles.input}
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>
-                失效时间 <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                type="datetime-local"
-                className={styles.input}
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <p className={styles.hint}>设限时范围后，到生效时间自动上架、到失效时间自动下架。留空 = 永久有效。</p>
-
-          <div className={styles.switchRow}>
-            <span className={styles.switchLabel}>推荐档位</span>
-            <button
-              className={`${styles.switch} ${recommended ? styles.switchOn : ''}`}
-              onClick={() => setRecommended(!recommended)}
-            >
-              <span className={styles.knob} />
-            </button>
-          </div>
-
-          <div className={styles.label}>状态</div>
-          <select className={styles.select} value={enabled ? 'on' : 'off'} onChange={(e) => setEnabled(e.target.value === 'on')}>
-            <option value="on">启用</option>
-            <option value="off">停用</option>
-          </select>
-        </div>
-
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button className={styles.saveBtn} onClick={handleSave} disabled={saving}>
+  return (
+    <Modal
+      open
+      title={initial ? '编辑档位' : '新建档位'}
+      width={680}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>
             {saving ? '保存中…' : '保存'}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      {/* 字段标签是「一行说明 + 控件」，套件暂无对应基元，这里只用一次性间距排布 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 24px' }}>
+        <div>
+          <div style={{ marginBottom: 6 }}>档位名称 （选填）</div>
+          <Input
+            value={name}
+            placeholder="选填"
+            aria-label="档位名称"
+            onChange={(e) => setName(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>原价（元）</div>
+          <Input
+            value={price}
+            aria-label="原价（元）"
+            onChange={(e) => setPrice(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>积分数 (派生)</div>
+          {/* 派生值只读展示：用 readOnly Input 而不是自绘灰框，样式仍由套件定义 */}
+          <Input
+            readOnly
+            value={fmtPoints(points)}
+            aria-label="积分数"
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>折扣比例 (0–1]</div>
+          <Input
+            value={ratio}
+            aria-label="折扣比例"
+            onChange={(e) => setRatio(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>实付价格</div>
+          <Input
+            readOnly
+            value={`¥${fmtMoney(pay)}`}
+            aria-label="实付价格"
+            style={{ width: '100%' }}
+          />
         </div>
       </div>
-    </div>,
-    document.body
+
+      <div style={{ marginTop: 16 }}>
+        <Alert tone="info">
+          积分 = 原价 × 500000（只读派生，对应 Go 充值配额 QuotaPerUnit）。实付 = 原价 × 折扣，折扣 = 1 表示无折扣。
+        </Alert>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '20px 24px',
+          marginTop: 16,
+        }}
+      >
+        <div>
+          <div style={{ marginBottom: 6 }}>生效时间 （选填）</div>
+          <Input
+            type="datetime-local"
+            value={start}
+            aria-label="生效时间"
+            onChange={(e) => setStart(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>失效时间 （选填）</div>
+          <Input
+            type="datetime-local"
+            value={end}
+            aria-label="失效时间"
+            onChange={(e) => setEnd(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Alert tone="info">
+          设限时范围后，到生效时间自动上架、到失效时间自动下架。留空 = 永久有效。
+        </Alert>
+      </div>
+
+      {/* 推荐档位：原来的自绘开关在套件里没有对应基元，改用勾选框（语义相同：一个布尔量） */}
+      <div style={{ marginTop: 16 }}>
+        <Checkbox checked={recommended} onChange={setRecommended} label="推荐档位" />
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <div style={{ marginBottom: 6 }}>状态</div>
+        <Select
+          options={[
+            { value: 'on', label: '启用' },
+            { value: 'off', label: '停用' },
+          ]}
+          value={enabled ? 'on' : 'off'}
+          onChange={(v) => setEnabled(v === 'on')}
+          aria-label="状态"
+        />
+      </div>
+    </Modal>
   );
 }
 
@@ -549,59 +594,71 @@ function PreviewModal({ onClose }: { onClose: () => void }) {
   const [list, setList] = useState<TopupTierPreview[] | null>(null);
   const [error, setError] = useState('');
 
-  // 打开时拉取当前已上架且未失效的档位（服务端过滤）
-  useEffect(() => {
+  /** 拉取当前已上架且未失效的档位（服务端过滤）；加载失败可重试 */
+  const load = useCallback(() => {
+    setError('');
+    setList(null);
     fetchTopupTierPreview()
       .then(setList)
       .catch((e) => setError(isApiError(e) ? e.message : '获取预览数据失败'));
   }, []);
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.previewModal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>用户端充值页效果预览</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
+  // 打开时拉取
+  useEffect(() => load(), [load]);
+
+  return (
+    <Modal open title="用户端充值页效果预览" width={720} onClose={onClose}>
+      <Alert tone="info">
+        以下展示当前已上架且未失效的档位在用户端充值页的真实排列效果。
+      </Alert>
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Empty message={error} extra={<Button onClick={load}>重试</Button>} />
         </div>
-        <div className={styles.modalBody}>
-          <p className={styles.hint}>以下展示当前已上架且未失效的档位在用户端充值页的真实排列效果。</p>
-          {error && <div className={styles.formError}>{error}</div>}
-          {!error && list === null && <div className={styles.previewEmpty}>加载中…</div>}
-          {!error && list !== null && list.length === 0 && (
-            <div className={styles.previewEmpty}>暂无上架档位</div>
-          )}
-          {!error && list !== null && list.length > 0 && (
-            <div className={styles.previewList}>
-              {list.map((p) => (
-                <div key={p.id} className={`${styles.planCard} ${p.isRecommended ? styles.planCardRec : ''}`}>
-                  {p.isRecommended && (
-                    <span className={styles.recBadge}>
-                      <Star size={12} strokeWidth={2} fill="currentColor" />
-                      <span>推荐</span>
-                    </span>
-                  )}
-                  <div className={styles.cardLeft}>
-                    <div className={styles.cardPoints}>
-                      {fmtPoints(p.amount)} <span className={styles.cardUnit}>积分</span>
-                    </div>
-                    {p.discount < 1 && <div className={styles.cardDisc}>{discountLabel(p.discount)}优惠</div>}
-                  </div>
-                  <div className={styles.cardRight}>
-                    <div className={styles.cardPriceRow}>
-                      <span className={styles.cardPrice}>¥{fmtMoney(p.price)}</span>
-                      {p.discount < 1 && <span className={styles.cardOriginal}>¥{fmtMoney(p.originalPrice)}</span>}
-                    </div>
-                    <button className={styles.cardBtn}>立即充值</button>
-                  </div>
+      )}
+      {!error && list === null && <Empty message="加载中…" />}
+      {!error && list !== null && list.length === 0 && <Empty message="暂无上架档位" />}
+      {!error && list !== null && list.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          {list.map((p) => (
+            <Card
+              key={p.id}
+              extra={
+                p.isRecommended ? (
+                  <Badge tone="accent">
+                    <Star size={12} strokeWidth={2} fill="currentColor" />
+                    推荐
+                  </Badge>
+                ) : undefined
+              }
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <Stat
+                    label="积分"
+                    value={fmtPoints(p.amount)}
+                    hint={p.discount < 1 ? `${discountLabel(p.discount)}优惠` : undefined}
+                  />
+                  <Stat
+                    label="实付"
+                    value={`¥${fmtMoney(p.price)}`}
+                    hint={p.discount < 1 ? `¥${fmtMoney(p.originalPrice)}` : undefined}
+                  />
                 </div>
-              ))}
-            </div>
-          )}
+                <Button variant="primary">立即充值</Button>
+              </div>
+            </Card>
+          ))}
         </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </Modal>
   );
 }

@@ -20,10 +20,12 @@ import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import {
+  Alert,
   Badge,
   Button,
   Card,
   Chip,
+  Empty,
   Input,
   Modal,
   Page,
@@ -270,9 +272,7 @@ export default function SkillManage() {
             <Button disabled={selected.size === 0 || !bulkCat} onClick={applyBulk}>
               应用到选中（暂存）
             </Button>
-            <span style={{ color: 'var(--admin-text-faint)', fontSize: 12 }}>
-              改动先暂存高亮，点右上「一键保存」统一提交
-            </span>
+            <small>改动先暂存高亮，点右上「一键保存」统一提交</small>
           </Toolbar>
         </div>
 
@@ -290,27 +290,24 @@ export default function SkillManage() {
             {loading && (
               <tr>
                 <td colSpan={4}>
-                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-text-faint)' }}>
-                    加载中…
-                  </div>
+                  <Empty message="加载中…" />
                 </td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
                 <td colSpan={4}>
-                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-danger)' }}>
-                    {loadError}
-                  </div>
+                  <Empty
+                    message={loadError}
+                    extra={<Button onClick={load}>重试</Button>}
+                  />
                 </td>
               </tr>
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <tr>
                 <td colSpan={4}>
-                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--admin-text-faint)' }}>
-                    暂无技能
-                  </div>
+                  <Empty message="暂无技能" />
                 </td>
               </tr>
             )}
@@ -345,7 +342,7 @@ export default function SkillManage() {
                         style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }}
                       />
                     ) : (
-                      <span style={{ color: 'var(--admin-text-faint)' }}>—</span>
+                      <span>—</span>
                     )}
                   </td>
                   <td>{s.name}</td>
@@ -463,7 +460,7 @@ function RenameModal({
         style={{ width: '100%' }}
       />
       {error && (
-        <p style={{ margin: '8px 0 0', color: 'var(--admin-danger)', fontSize: 12 }}>{error}</p>
+        <Alert tone="danger">{error}</Alert>
       )}
     </Modal>
   );
