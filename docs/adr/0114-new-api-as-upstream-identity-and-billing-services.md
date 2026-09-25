@@ -97,6 +97,23 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
 - **超时**：文生文按总时长、Agent 网关按**空闲**时长。两者对「上游卡住」的定义本来就
   不同（Agent 那边的理由见其注释：按总时长会误杀跑到 155 秒的正常调用）。
 
+**修正一（2026-09-25）：凭证的「值」收进出口，鉴权的「头」留在调用方。**
+
+出口现在多管一件事：`resolveUpstreamCredential()` 返回**项目唯一那把上游凭证**
+（`NEW_API_UPSTREAM_KEY`）。这不违反上面那条「不管鉴权」——出口只回答「以谁的身份出去」，
+仍然不决定**填哪个头**、不判别计费主体，调用方按自己的语义各取所需。
+
+- **触发**：凭证此前另有一个模块（`libs/shared/account/upstream-credential.ts`），
+  于是「new-api 从哪进来」和「以谁的身份进去」被拆成两个半边各答一半——出口的存在
+  正是为了终结那种局面。该模块已整体删除，读取点收进出口。
+- **`bwsvc_` 服务令牌确认不并**：它是 Agent 计费面的**服务身份**，不是第二把项目 key。
+  new-api 的 relay 入口按前缀分流（`blue-whale-api` 的 `middleware/relay_auth.go`），
+  换成 `sk-` 统一 key 不是报错而是**静默换路**（落 `TokenAuth` 查 token 表，
+  账单记到统一 key 属主头上，`x-bw-subject-user-id` 被无视）。理由写进了出口的文件头。
+- **`NEW_API_ROOT_ACCESS_TOKEN` 退役**：它只是被「技能格式化」当一次普通模型调用用，
+  没有 root 语义（`/api/option/` 的 RootAuth 走的是另一条按参数传凭证的路）。格式化改用
+  统一 key；`NEW_API_ROOT_USER_ID` 同时确认为零引用的死变量，一并删除。
+
 ### 8. 上游调用面的边界
 
 按「只有 worker 与素材库能调 new-api」这条规则，`backend` 里剩下的模型调用

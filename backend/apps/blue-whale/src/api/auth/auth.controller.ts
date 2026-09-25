@@ -27,7 +27,7 @@ import {
 import {
   resolveUpstreamCredential,
   UpstreamCredentialMissingError,
-} from "@lib/shared/account/upstream-credential.js";
+} from "@lib/shared/upstream/new-api-egress.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,

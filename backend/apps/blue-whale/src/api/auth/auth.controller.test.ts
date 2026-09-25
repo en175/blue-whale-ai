@@ -66,7 +66,7 @@ import {
   type IdentityService,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
-import { UPSTREAM_KEY_ENV } from "@lib/shared/account/upstream-credential.js";
+import { UPSTREAM_KEY_ENV } from "@lib/shared/upstream/new-api-egress.js";
 import {
   RATE_LIMIT_KEY,
   type RateLimitBucket,

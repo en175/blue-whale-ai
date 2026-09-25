@@ -19,6 +19,7 @@ import { create } from '@bufbuild/protobuf';
 import { Code, ConnectError, createClient, type Client } from '@connectrpc/connect';
 import { createGrpcTransport } from '@connectrpc/connect-node';
 import { NewApiError } from '@lib/core';
+import { UPSTREAM_KEY_ENV } from '@lib/shared/upstream/new-api-egress.js';
 import {
   BillingService,
   ListTransactionsRequestSchema,
@@ -195,7 +196,8 @@ export function billingEndpoint(env: NodeJS.ProcessEnv = process.env): string {
 export function missingBillingConfig(env: NodeJS.ProcessEnv = process.env): string[] {
   const missing: string[] = [];
   if (!(env[BILLING_URL_ENV] ?? "").trim()) missing.push(BILLING_URL_ENV);
-  if (!(env.NEW_API_UPSTREAM_KEY ?? "").trim()) missing.push("NEW_API_UPSTREAM_KEY");
+  // 变量名从上游出口取，不在这里重打一遍字面量——它是项目唯一的上游凭证。
+  if (!(env[UPSTREAM_KEY_ENV] ?? "").trim()) missing.push(UPSTREAM_KEY_ENV);
   return missing;
 }
 

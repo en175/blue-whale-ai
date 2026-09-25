@@ -31,7 +31,11 @@ RUN mvn -B -q -s docker-settings.xml -pl blue-whale-worker -am dependency:go-off
 
 COPY blue-whale-common/src blue-whale-common/src
 COPY blue-whale-worker/src blue-whale-worker/src
-RUN mvn -B -q -s docker-settings.xml -pl blue-whale-worker -am -DskipTests package
+# ⚠️ 是 `-Dmaven.test.skip=true` 而**不是** `-DskipTests`：后者只跳过「运行」测试、
+#    **测试源码照样编译**，而部分测试引用了 proto 生成类（`com.bluewhale.contracts.*`），
+#    镜像构建里不跑 codegen → 编译期就炸（实测：GeneratedContractsSmokeTest）。
+#    这与上面「契约测试不进镜像构建」那句话才是同一件事。
+RUN mvn -B -q -s docker-settings.xml -pl blue-whale-worker -am -Dmaven.test.skip=true package
 
 # ---------- 阶段2：运行时 ----------
 FROM eclipse-temurin:21-jre

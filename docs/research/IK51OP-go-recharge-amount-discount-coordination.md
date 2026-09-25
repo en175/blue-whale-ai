@@ -70,10 +70,13 @@ Money(实付) = N × Price × TopupGroupRatio[group] × AmountDiscount[N]
 - 且必须带 `New-Api-User: <root 用户的数字 id>` 头。
 
 **请 Go 侧为 web 后端预置一个 ROOT access token + 对应 root user id**，经环境变量注入 web。
-web 侧的承接机制已就绪：`NEW_API_ROOT_ACCESS_TOKEN` / `NEW_API_ROOT_USER_ID` 已接线
-（`deploy/local/.env.example` + `deploy/local/docker-compose.yml` 的 `blue-whale-web` environment），
-代码经 `loadGoDiscountSyncConfig` / `loadGoTopUpCredentials` 读取；未配置时降级为
-折扣同步 no-op、充值接口 503。**剩的只是 Go 侧预置真实凭证并填入本地 `.env`**（不入库）。
+
+> ⚠️ **本条已失效（2026-09-25 记）**：当时以为会接线的 `NEW_API_ROOT_ACCESS_TOKEN` /
+> `NEW_API_ROOT_USER_ID` 两个变量**从未落地**，现已整条退役——`NEW_API_ROOT_USER_ID`
+> 全仓零引用，`NEW_API_ROOT_ACCESS_TOKEN` 被「技能格式化」当普通模型调用误用（无 root 语义），
+> 已改走项目唯一那把上游凭证 `NEW_API_UPSTREAM_KEY`。`deploy/local/` 目录与
+> `loadGoDiscountSyncConfig` / `loadGoTopUpCredentials` 都不存在。折扣同步的 RootAuth 管理面
+> 随后也随 TS 侧管理面一并切断（见 ADR-0114 补记 7）。
 
 ## 已知泄漏与后续工单（IK5W97）
 

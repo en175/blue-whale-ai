@@ -1,7 +1,10 @@
 import { createControlledChatClient } from "./controlled-chat-client.js";
 import { ok, skillError } from "@lib/contracts";
 import { parseSkillMd } from "@lib/core";
-import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
+import {
+  newApiBaseUrl,
+  resolveUpstreamCredential,
+} from "@lib/shared/upstream/new-api-egress.js";
 
 export type SkillFormatChatClient = {
   complete(input: { rules: string; draft: string }): Promise<string>;
@@ -41,13 +44,15 @@ export function loadSkillFormatRules(
 export function createSkillFormatDeps():
   | { ai: SkillFormatChatClient; rules: string }
   | null {
-  // 地址从上游唯一出口取（不再自己读 NEW_API_BASE_URL）
-  const token = process.env.NEW_API_ROOT_ACCESS_TOKEN;
+  // 地址与凭证都从上游唯一出口取（不再自己读 NEW_API_BASE_URL / 任何一把 key）。
+  // 这里就是一次普通的模型调用，用项目统一 key 即可——不需要、也不该有专属凭证。
   const model = process.env.SKILL_FORMAT_MODEL;
-  if (!token || !model) return null;
+  if (!model) return null;
   let baseUrl: string;
+  let token: string;
   try {
     baseUrl = newApiBaseUrl();
+    token = resolveUpstreamCredential();
   } catch {
     return null;
   }
