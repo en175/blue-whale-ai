@@ -110,12 +110,30 @@ public record CatalogDocument(
      *
      *                   <p>⚠️ 配了它之后，{@code video=1}（含视频输入）而该键取不到时估算**返回取不到**
      *                   （走上限冻结或拒绝），不按 0 估——见 {@code TokenEstimator} 的说明。
+     * @param minimumTokens **最低 token 用量表**（官方明文规则，可选的配置位）：
+     *                   「分辨率 + 宽高比 + 输出时长」→ 最低 token 用量，
+     *                   键的语法与 {@code dimensions} 完全一致
+     *                   （如 {@code "resolution=480p|aspect_ratio=16:9|duration=5"}）。
+     *
+     *                   <p>火山原文：<i>「对于 Seedance 2.0 系列、Seedance 2.5 模型，
+     *                   当输入包含视频时，存在最低 token 用量限制：如果估算 token 用量 ＜
+     *                   最低 token 用量，则按最低 token 用量计算视频价格。」</i>
+     *
+     *                   <p>所以它①**只在 {@code video=1} 时生效**（官方限定语），
+     *                   ②只作用在**估算**上（官方原文用的就是「估算 token 用量」），
+     *                   ③是**逐段**的下限（一条视频的下限 × 片段数）。
+     *
+     *                   <p>⚠️ 官方原页只给了两张「最低 token 用量表格」的飞书链接
+     *                   （分辨率 × 宽高比 × 输出时长 → 最低用量），**没有公开可抄的形态**——
+     *                   所以这里是个**配置位**：不配 = 本规则不做下限（老目录照旧跑）；
+     *                   配了就必须配全，某格查不到时估算取不到（漏配要吵，不静默少冻）。
      */
     public record TokenEstimate(
             Integer divisor,
             Integer fps,
             Map<String, String> dimensions,
-            String inputSecondsKey
+            String inputSecondsKey,
+            Map<String, Long> minimumTokens
     ) {}
 
     /**

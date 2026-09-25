@@ -122,6 +122,11 @@ public final class CatalogCompiler {
      * 结算按真值兜住。所以这里不强制，但配了就必须是个非空的键名
      * （空白串等于「配了个查不到的键」，那是最坏的一种：看起来配了、实际永远取不到）。
      *
+     * <p>{@code minimumTokens}（官方的最低 token 用量）也是**可选的**，理由同
+     * {@code CatalogDocument.TokenEstimate#minimumTokens}：官方表没有公开可抄的形态，
+     * 目录里留个配置位，不配 = 不做下限。配了就逐格校验（键必须规范、值必须是正整数）——
+     * 半配的下限会让「官方按下限收、我们按估算收」的差额静默落进平台账。
+     *
      * <p>⚠️ 校验放在编译期（与 {@link #normalizeTable} 同一个立场）：
      * 尺寸表写错一个档位，运行时表现是「某个档位查不到 → 预扣推不出 → 拒绝提交」，
      * 那时用户已经在等了；这里拒绝则发布当场失败。
@@ -146,7 +151,7 @@ public final class CatalogCompiler {
         }
         try {
             return TokenEstimator.from(estimate.divisor(), estimate.fps(),
-                    estimate.dimensions(), estimate.inputSecondsKey());
+                    estimate.dimensions(), estimate.inputSecondsKey(), estimate.minimumTokens());
         } catch (IllegalArgumentException e) {
             throw new CompileException("tokenEstimate 不合法：" + e.getMessage(), e);
         }

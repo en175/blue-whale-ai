@@ -319,6 +319,28 @@ export default function RuleEditorModal({
               />
             </Field>
           </div>
+          {/* ── 最低 token 用量（官方明文规则）────────────────────────────────
+              火山：「当输入包含视频时，如果估算 token 用量 ＜ 最低 token 用量，
+              则按最低 token 用量计算视频价格」。官方原页只给了两张表格的飞书链接，
+              没有公开可抄的形态 —— 所以这是一块**留空即不做下限**的配置位。
+              留空不是「还没配」，是一个明确的状态，界面上要说清楚。 */}
+          <div style={{ marginTop: 12 }}>
+            <Field
+              label="最低 token 用量表（规格键 → 最低 token 数，选填）"
+              hint="火山官方规则：**含视频输入时**，估算 token ＜ 这一格的下限 ⇒ 按下限计费。
+                    键与价格表同一套语法，再带上输出时长（resolution=480p|aspect_ratio=16:9|duration=5）。
+                    整块留空 = 本规则不做下限；配了就必须配全 —— 某格查不到时提交会被拒绝"
+            >
+              <KeyValueEditor
+                rows={form.tokenMinimumTokens}
+                ariaPrefix="最低 token 用量表"
+                keyPlaceholder="resolution=480p|aspect_ratio=16:9|duration=5"
+                valuePlaceholder="200000"
+                makeRow={() => ({ key: '', value: '' })}
+                onChange={(tokenMinimumTokens) => patch({ tokenMinimumTokens })}
+              />
+            </Field>
+          </div>
         </>
       )}
 

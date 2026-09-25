@@ -55,6 +55,11 @@ export interface CatalogRuleView {
     dimensions?: Record<string, unknown>;
     /** 输入视频时长的规格键；不写 = 公式不含输入时长那一项 */
     inputSecondsKey?: unknown;
+    /**
+     * 最低 token 用量表：「分辨率 + 宽高比 + 输出时长」→ 最低用量（正整数）。
+     * 火山明文规则：**含视频输入时**估算 < 下限就按下限计。不写 = 本规则不做下限。
+     */
+    minimumTokens?: Record<string, unknown>;
   };
 }
 
@@ -363,6 +368,13 @@ export interface RuleForm {
   tokenDimensions: KeyValueRow[];
   /** 输入视频时长的规格键；空 = 公式不含输入时长那一项 */
   tokenInputSecondsKey: string;
+  /**
+   * 最低 token 用量表（规格键 → 最低 token 数）。
+   *
+   * <p>火山明文规则：**含视频输入时**估算 < 下限 ⇒ 按下限计。**留空 = 不做下限**
+   * （官方原页只给了两张表格的飞书链接，没有公开可抄的形态，所以这里是个可选的配置位）。
+   */
+  tokenMinimumTokens: KeyValueRow[];
 }
 
 /** 与 billing 的 `UsageDim` 注册表逐字一致（新增维度要两处一起改）。 */
@@ -464,6 +476,15 @@ export function ruleFormError(form: RuleForm, creditsPerYuan: number | null): st
       if (!row.key.trim()) return 'token 尺寸表的规格键不能为空';
       // 值只校验「非空」：`1248x704` 这种形态由 billing 编译期说了算（它是唯一的校验时机）
       if (!row.value.trim()) return `token 尺寸表「${row.key.trim()}」的宽高不能为空（写成 1248x704）`;
+    }
+    for (const row of form.tokenMinimumTokens) {
+      if (!row.key.trim()) return '最低 token 用量表的规格键不能为空';
+      // 值必须是**正整数**：0 不是下限（等于「看起来配了、实际没有」），
+      // 负数会让 max() 恒取估算值 —— 两者都让这条官方规则静默失效。
+      const floor = parseWhole(row.value);
+      if (floor === null || floor <= 0) {
+        return `最低 token 用量表「${row.key.trim()}」的值必须是正整数（token 数，如 200000）`;
+      }
     }
   }
 
@@ -595,6 +616,12 @@ export function ruleFromForm(
     // 清空输入框 = **明确不要那一项**，不能因为原文档里有就留着（那会让「我删了」变成没删）
     if (form.tokenInputSecondsKey.trim()) token.inputSecondsKey = form.tokenInputSecondsKey.trim();
     else delete token.inputSecondsKey;
+    // 最低 token 用量表：**整块写或整块删**（同 dimensions 的取舍）。
+    // 删掉全部行 = 本规则不做下限 —— 那是合法状态（官方表没有公开可抄的形态），
+    // 不能因为原文档里有就留着，否则「我删了」变成没删。
+    const minimumTokens = rowsToRecord(form.tokenMinimumTokens);
+    if (Object.keys(minimumTokens).length > 0) token.minimumTokens = minimumTokens;
+    else delete token.minimumTokens;
     rule.tokenEstimate = token;
   } else {
     delete rule.tokenEstimate;
@@ -650,6 +677,7 @@ export function formFromRule(
     tokenDimensions: recordToRows(token?.dimensions),
     tokenInputSecondsKey:
       typeof token?.inputSecondsKey === 'string' ? token.inputSecondsKey : '',
+    tokenMinimumTokens: recordToRows(token?.minimumTokens),
   };
 }
 
@@ -673,6 +701,7 @@ export function emptyRuleForm(): RuleForm {
     tokenFps: String(DEFAULT_TOKEN_FPS),
     tokenDimensions: [{ key: '', value: '' }],
     tokenInputSecondsKey: '',
+    tokenMinimumTokens: [],
   };
 }
 

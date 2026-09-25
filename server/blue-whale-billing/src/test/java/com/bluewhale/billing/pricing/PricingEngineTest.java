@@ -172,6 +172,46 @@ class PricingEngineTest {
         }
     }
 
+    /**
+     * **免费模型**（单价配成 0）的既有处置 —— 「免费」在目录里要配两个字段，缺一不可。
+     *
+     * <p>火山官方写 {@code doubao-seedream-5.0-flash} 免费（本仓暂无该模型；这组只钉机制）。
+     * 运营若把单价配成 0 而忘了 {@code minCredits}，算出来**不是 0 而是 1 积分**——
+     * 因为出口那次舍入是 {@code max(minCredits, ...)}，而 {@code minCredits} 的缺省是 1。
+     * 于是「免费」变成「每次 1 积分」，账面上看不出哪里不对。
+     *
+     * <p>真正的 0 价（{@code basePrice=0} **且** {@code minCredits=0}）走
+     * {@code BillingApplicationService#hold} 的既有分支：**不冻结、不建预留**
+     * （建了反而会让结算侧去解冻一笔不存在的钱）。这里断言的是**计价出口**那一步，
+     * 预扣侧那个分支由 {@code BillingApplicationServiceTest} 钉。
+     */
+    @Nested
+    class 零价模型 {
+
+        private CompiledRule free(long minCredits) {
+            return new CompiledRule(UsageDim.SUCCEEDED_SLOTS,
+                    new BasePriceResolver.Constant(0L), Map.of(), Map.of(), 1L,
+                    minCredits, null, new RoundingPolicy.HalfUp(), null);
+        }
+
+        private long creditsOf(CompiledRule rule) {
+            return PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
+                    .compute(req("free-model", "text2image", Map.of()),
+                            Usage.of(UsageDim.SUCCEEDED_SLOTS, 1), T)
+                    .credits();
+        }
+
+        @Test
+        void 单价零且下限零_真的零() {
+            assertThat(creditsOf(free(0L))).isZero();
+        }
+
+        @Test
+        void 单价零但下限仍是缺省的一_变成每次一积分() {
+            assertThat(creditsOf(free(1L))).isEqualTo(1L);
+        }
+    }
+
     @Nested
     class 按上限计价 {
 

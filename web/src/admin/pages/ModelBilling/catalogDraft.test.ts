@@ -614,6 +614,85 @@ describe('token 计价的规则编辑', () => {
     expect(rule.tokenEstimate?.divisor).toBe(1024);
   });
 
+  it('★ 最低 token 用量表：读得出、写得回，往返无损', () => {
+    const withFloor = {
+      ...TOKEN_RULE,
+      tokenEstimate: {
+        ...TOKEN_RULE.tokenEstimate,
+        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
+      },
+    };
+    const form = formFromRule('seedance-2.0', 'video', withFloor, 15);
+
+    expect(form.tokenMinimumTokens).toEqual([
+      { key: 'resolution=480p|aspect_ratio=16:9|duration=5', value: '200000' },
+    ]);
+    expect(ruleFromForm(form, withFloor, 15)).toMatchObject(withFloor);
+    expect(ruleFromForm(form, withFloor, 15).tokenEstimate?.minimumTokens).toEqual(
+      withFloor.tokenEstimate.minimumTokens,
+    );
+  });
+
+  it('★ 最低 token 用量表整块删空 → 从文档里去掉（「我删了」必须真的删掉）', () => {
+    const withFloor = {
+      ...TOKEN_RULE,
+      tokenEstimate: {
+        ...TOKEN_RULE.tokenEstimate,
+        minimumTokens: { 'resolution=480p|aspect_ratio=16:9|duration=5': 200000 },
+      },
+    };
+    const form = { ...formFromRule('m', 'video', withFloor, 15), tokenMinimumTokens: [] };
+    const rule = ruleFromForm(form, withFloor, 15);
+
+    expect(rule.tokenEstimate).not.toHaveProperty('minimumTokens');
+    // 同一块里的其余字段不受影响
+    expect(rule.tokenEstimate?.divisor).toBe(1024);
+    expect(rule.tokenEstimate?.dimensions).toEqual(TOKEN_RULE.tokenEstimate.dimensions);
+  });
+
+  it('★ 最低 token 用量的值必须是正整数（0 会静默失效，负数会让 max() 永远取估算值）', () => {
+    const base: RuleForm = {
+      ...emptyRuleForm(),
+      modelId: 'm',
+      taskType: 'video',
+      priceKind: 'unset' as const,
+      tokenEstimateEnabled: true,
+      tokenDimensions: [{ key: 'resolution=480p|aspect_ratio=16:9', value: '864x480' }],
+    };
+
+    expect(ruleFormError(base, 15)).toBeNull();
+    expect(ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '0' }] }, 15)).toContain(
+      '正整数',
+    );
+    expect(
+      ruleFormError({ ...base, tokenMinimumTokens: [{ key: 'k', value: '-1' }] }, 15),
+    ).toContain('正整数');
+    expect(
+      ruleFormError({ ...base, tokenMinimumTokens: [{ key: '', value: '100' }] }, 15),
+    ).toContain('规格键');
+    expect(
+      ruleFormError(
+        { ...base, tokenMinimumTokens: [{ key: 'resolution=480p', value: '100' }] },
+        15,
+      ),
+    ).toBeNull();
+  });
+
+  it('不勾 token 估算时，最低 token 用量表里的残行不该拦住保存（整块不写出去）', () => {
+    const form = {
+      ...emptyRuleForm(),
+      modelId: 'm',
+      taskType: 'image',
+      priceKind: 'const' as const,
+      priceValue: { value: '2', originalMc: null },
+      tokenEstimateEnabled: false,
+      tokenMinimumTokens: [{ key: '', value: '' }],
+    };
+
+    expect(ruleFormError(form, 15)).toBeNull();
+    expect(ruleFromForm(form, {}, 15)).not.toHaveProperty('tokenEstimate');
+  });
+
   it('尺寸表的值是文本（1248x704），不是数字 —— 不能被数字校验拦下', () => {
     const form = {
       ...emptyRuleForm(),

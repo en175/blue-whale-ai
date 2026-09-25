@@ -509,6 +509,163 @@ class TokenEstimatorTest {
         }
     }
 
+    @Nested
+    @DisplayName("最低 token 用量（官方明文规则：含视频输入时，估算 < 下限 ⇒ 按下限计费）")
+    class 最低token用量 {
+
+        /**
+         * 夹具：官方口径的表在目录里（键 = 分辨率 + 宽高比 + 输出时长）。
+         *
+         * <p>⚠️ 这两行的**数**是**测试夹具**，不是我们抄来的官方值 —— 官方原页只给了
+         * 「最低 token 用量表格」的飞书链接，没有公开可抄的形态（见
+         * {@code CatalogDocument.TokenEstimate#minimumTokens}）。这里用 200,000 / 150,000
+         * 只为证明机制（下限生效、只在含视频输入时生效、逐段生效）。
+         */
+        private static final String DOC = """
+                {
+                  "schemaVersion": 1, "currency": "CNY", "creditsPerYuan": 15,
+                  "models": { "m": { "video": {
+                    "baseUnit": "usage.c",
+                    "basePrice": { "kind": "const", "value": 555000 },
+                    "unitDenominator": 1000000,
+                    "tokenEstimate": {
+                      "divisor": 1024, "fps": 24,
+                      "inputSecondsKey": "video_input_seconds",
+                      "dimensions": { "resolution=480p|aspect_ratio=16:9": "864x480" },
+                      "minimumTokens": {
+                        "resolution=480p|aspect_ratio=16:9|duration=5": 200000,
+                        "resolution=480p|aspect_ratio=16:9|duration=10": 150000
+                      }
+                    }
+                  } } }
+                }
+                """;
+
+        private static TokenEstimator estimator() {
+            return CatalogCompiler.compile(parse(DOC)).get("m/video").tokenEstimator();
+        }
+
+        /** 480p 16:9 5 秒的公式值：864 × 480 × 24 × 5 ÷ 1024 = 48,600 —— 远低于下限 200,000。 */
+        private static final long FORMULA_5S = 48_600L;
+
+        /**
+         * 含视频输入的规格（{@code video_input_seconds} 必给：{@code inputSecondsKey} 配了它，
+         * 缺了会先走「输入时长取不到」那条路，测不到下限）。
+         */
+        private static Map<String, String> withVideoInput(String duration) {
+            return Map.of("resolution", "480p", "aspect_ratio", "16:9", "video", "1",
+                    "duration", duration, "video_input_seconds", duration);
+        }
+
+        @Test
+        @DisplayName("★ 含视频输入且估算 < 下限 → 按下限计（官方：按最低 token 用量计算视频价格）")
+        void 估算低于下限按下限() {
+            // 公式值：(5 + 5) × 864 × 480 × 24 ÷ 1024 = 97,200 < 200,000 → 取下限
+            assertThat(estimator().estimateVideoTokens(withVideoInput("5"), 5L, 1))
+                    .isEqualTo(200_000L);
+        }
+
+        @Test
+        @DisplayName("★ 不含视频输入（video=0）→ 下限不生效（官方限定语是「当输入包含视频时」）")
+        void 不含视频输入不受下限约束() {
+            assertThat(estimator().estimateVideoTokens(
+                    Map.of("resolution", "480p", "aspect_ratio", "16:9",
+                            "video", "0", "duration", "5"),
+                    5L, 1))
+                    .isEqualTo(FORMULA_5S);
+        }
+
+        @Test
+        @DisplayName("★ 估算已高于下限 → 用估算值（下限是下限，不是单价）")
+        void 估算高于下限用估算() {
+            TokenEstimator low = TokenEstimator.from(1024, 24,
+                    Map.of("resolution=480p|aspect_ratio=16:9", "864x480"), null,
+                    Map.of("resolution=480p|aspect_ratio=16:9|duration=5", 10_000L));
+
+            assertThat(low.estimateVideoTokens(
+                    Map.of("resolution", "480p", "aspect_ratio", "16:9",
+                            "video", "1", "duration", "5"),
+                    5L, 1))
+                    .isEqualTo(FORMULA_5S);
+        }
+
+        @Test
+        @DisplayName("★ 逐段生效：下限是「一条视频」的口径，片段数乘在外面（2 段 → 2 × 下限）")
+        void 下限逐段生效() {
+            assertThat(estimator().estimateVideoTokens(withVideoInput("5"), 5L, 2))
+                    .isEqualTo(400_000L);
+        }
+
+        @Test
+        @DisplayName("★ 配了下限表但这一格查不到 → 取不到（不当作「没有下限」静默少冻）")
+        void 配了表但这一格没有() {
+            // 表里只有 duration=5 / duration=10，问一个 duration=8 的
+            assertThat(estimator().estimateVideoTokens(withVideoInput("8"), 8L, 1))
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("没配下限表 → 老目录行为不变（估算照旧，不因缺配置被拒）")
+        void 未配下限行为不变() {
+            assertThat(officialEstimator().minimumTokens()).isEmpty();
+            assertThat(officialEstimator().hasMinimumTokens()).isFalse();
+            assertThat(officialEstimator().estimateVideoTokens(
+                    Map.of("resolution", "480p", "aspect_ratio", "16:9", "video", "1"), 5L, 1))
+                    .isEqualTo(FORMULA_5S);
+        }
+
+        @Test
+        @DisplayName("整条链路：含视频输入 + 估算低于下限 → 契约量 = 下限 → 预扣按下限计价")
+        void 整条链路按下限预扣() {
+            CompiledRule rule = CatalogCompiler.compile(parse(DOC)).get("m/video");
+            Map<String, String> specs = Map.of(
+                    "resolution", "480p", "aspect_ratio", "16:9", "video", "1",
+                    "duration", "5", "expected_output_count", "1", "video_input_seconds", "5");
+            Usage contract = Usage.contractFrom(rule, specs);
+
+            assertThat(contract.quantityOf(UsageDim.COMPLETION_TOKENS)).isEqualTo(200_000L);
+
+            PricingRequest request = new PricingRequest(1L, "m", "video", specs, "free");
+            PricingEngine engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
+            // 200,000 × 555,000 / 1,000,000 = 111,000 mc → 111 积分
+            assertThat(engine.compute(request, contract, java.time.Instant.now()).credits())
+                    .isEqualTo(111L);
+        }
+
+        @Test
+        @DisplayName("编译期：下限为 0 / 负数 / 键不规范 / 等价键 → 发布即拒")
+        void 编译期校验() {
+            assertThatThrownBy(() -> compileWith("\"minimumTokens\": {\"resolution=480p\": 0}"))
+                    .hasMessageContaining("必须为正");
+            assertThatThrownBy(() -> compileWith("\"minimumTokens\": {\"resolution=480p\": -1}"))
+                    .hasMessageContaining("必须为正");
+            assertThatThrownBy(() -> compileWith("\"minimumTokens\": {\"noseparator\": 100}"))
+                    .hasMessageContaining("缺少 '='");
+            assertThatThrownBy(() -> compileWith(
+                    "\"minimumTokens\": {\"Resolution=480P\": 100, \" resolution = 480p \": 200}"))
+                    .hasMessageContaining("等价键");
+        }
+
+        private static TokenEstimator compileWith(String minimumTokensJson) {
+            String doc = """
+                    {
+                      "schemaVersion": 1, "currency": "CNY", "creditsPerYuan": 15,
+                      "models": { "m": { "video": {
+                        "baseUnit": "usage.c",
+                        "basePrice": { "kind": "const", "value": 555000 },
+                        "unitDenominator": 1000000,
+                        "tokenEstimate": {
+                          "divisor": 1024, "fps": 24,
+                          "dimensions": { "resolution=480p|aspect_ratio=16:9": "864x480" },
+                          %s
+                        }
+                      } } }
+                    }
+                    """.formatted(minimumTokensJson);
+            return CatalogCompiler.compile(parse(doc)).get("m/video").tokenEstimator();
+        }
+    }
+
     /**
      * 目录 JSON → {@link CatalogDocument}。
      *
