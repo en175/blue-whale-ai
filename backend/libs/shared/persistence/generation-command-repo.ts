@@ -4,7 +4,6 @@ import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,
   SCENE_CARD_WIDTH,
-  type CostReservationSnapshot,
   type Rect,
 } from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -40,9 +39,6 @@ export interface CreateJobInput {
   sceneCardGenerationRecordId?: string;
   /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
-  /** IK7G9X：建预留时写入 cost_reservations 的记账快照（真实预估金额 + 定价口径版本）。
-   *  缺省时沿用旧行为：reserved_amount_fen=0 + 四版本 "dev"。 */
-  costReservation?: CostReservationSnapshot;
   /**
    * ★ 新计费（billing-svc）的**预扣**。由 handler 注入——它知道该冻多少
    * （模型 / 任务类型 / 规格 / 等级都是领域知识，这一层不该知道）。
@@ -51,9 +47,6 @@ export interface CreateJobInput {
    * 预扣失败（余额不足 / billing 不可用）则整体回滚——**不产生垃圾 job**，
    * 也不会有「冻了钱但没建成任务」或「建了任务但没冻钱」的中间态。
    * 代价是事务里多一次外部 RPC（billing 的 50ms 预算），这是刻意的取舍。
-   *
-   * <p>与 {@link costReservation} 的区别：那个是**旧**体系写进记账表的快照，
-   * 一分钱都不动；这个是**真的冻结**。
    */
   billingHold?: (jobId: number) => Promise<void>;
 }
@@ -266,9 +259,25 @@ async function freezePlacementAnchor(
   return { ...input.input, placement_anchor: anchor };
 }
 
-/** cost_reservations 建行数据：真实快照或旧行为兜底（reserved=0 + 四版本 dev）。 */
+/** cost_reservations 的行值：只有**重试**会从原 job 的行里原样搬运一次，其余一律兜底。
+ *
+ *  ⚠️ 这张表是 new-api 记账时代的产物：列 `reserved_amount_fen` 的单位是**分**
+ *     （那时值来自 quota→分 换算），四个 `*_version` 是当时的定价口径版本。
+ *     new-api 已被切断、价格改由 billing 的 `Quote` 出，两个账本的单位无法在同一列里共存，
+ *     所以**建任务不再写任何报价金额**——`reserved_amount_fen` 恒为 0、四版本恒为 "dev"。
+ *     该表随 IKEF1K 整体下线，故不为此做列改名与存量数据迁移。
+ *
+ *  重试搬运是为了让同一批记账行在退役前保持自洽（逐列复制，不做任何单位解释或换算）。 */
+interface LegacyReservationCarryOver {
+  reserved_amount_fen: bigint;
+  price_catalog_version: string;
+  exchange_rate_version: string;
+  model_policy_version: string;
+  cost_rule_version: string;
+}
+
 function costReservationCreateData(
-  reservation: CostReservationSnapshot | undefined,
+  carryOver: LegacyReservationCarryOver | null,
   jobId: bigint,
   userId: string,
   projectId: string,
@@ -281,12 +290,12 @@ function costReservationCreateData(
     action_identity: input.actionIdentity,
     action_type: input.actionType,
     provider: "volc",
-    reserved_amount_fen: reservation?.reservedAmountFen ?? 0n,
+    reserved_amount_fen: carryOver?.reserved_amount_fen ?? 0n,
     status: "reserved",
-    price_catalog_version: reservation?.priceCatalogVersion ?? "dev",
-    exchange_rate_version: reservation?.exchangeRateVersion ?? "dev",
-    model_policy_version: reservation?.modelPolicyVersion ?? "dev",
-    cost_rule_version: reservation?.costRuleVersion ?? "dev",
+    price_catalog_version: carryOver?.price_catalog_version ?? "dev",
+    exchange_rate_version: carryOver?.exchange_rate_version ?? "dev",
+    model_policy_version: carryOver?.model_policy_version ?? "dev",
+    cost_rule_version: carryOver?.cost_rule_version ?? "dev",
   };
 }
 
@@ -366,8 +375,9 @@ export async function createJobWithinTx(
     }
   }
   await tx.cost_reservations.create({
+    // 建任务不写金额（见 costReservationCreateData 的说明）：行照建，值走兜底。
     data: costReservationCreateData(
-      input.costReservation,
+      null,
       job.id,
       input.userId,
       input.projectId,
@@ -590,7 +600,8 @@ export function createGenerationCommandRepo(
             fencing_token: 0,
           },
         });
-        // IK7G9X：为重试 job 补 cost_reservations 行（复用原 job 的金额与版本口径）。
+        // 为重试 job 补 cost_reservations 行：原 job 有行就逐列搬运（见 costReservationCreateData），
+        // 没有就与建任务同款兜底。这张退役表不参与本次的计费口径变更。
         const retryInput: CreateJobInput = {
           projectId,
           userId: original.user_id.toString(),
@@ -609,17 +620,17 @@ export function createGenerationCommandRepo(
           data: costReservationCreateData(
             originalReservation
               ? {
-                  reservedAmountFen:
+                  reserved_amount_fen:
                     originalReservation.reserved_amount_fen ?? 0n,
-                  priceCatalogVersion:
+                  price_catalog_version:
                     originalReservation.price_catalog_version,
-                  exchangeRateVersion:
+                  exchange_rate_version:
                     originalReservation.exchange_rate_version,
-                  modelPolicyVersion:
+                  model_policy_version:
                     originalReservation.model_policy_version,
-                  costRuleVersion: originalReservation.cost_rule_version,
+                  cost_rule_version: originalReservation.cost_rule_version,
                 }
-              : undefined,
+              : null,
             retry.id,
             original.user_id.toString(),
             projectId,

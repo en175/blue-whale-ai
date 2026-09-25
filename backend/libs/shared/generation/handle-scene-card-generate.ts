@@ -12,10 +12,7 @@ import {
   sceneCardRegenerationRequestSchema,
 } from "@lib/contracts";
 import type { SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@lib/core";
-
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
 
 function isDecimalId(value: string): boolean {
@@ -48,8 +45,6 @@ export async function handleSceneCardGenerate(
   deps: SceneCardGenerationRepo,
   options?: {
     providerCredential?: string;
-    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
-    costEstimator?: GenerationCostEstimator;
     /** IKF YHJ（ADR-0087）：素材校验门。场景卡再生成是第三条视频创建路径，
      *  与创建期/重试期共用同一个门实现；缺省不接（未接线时行为与改造前一致）。 */
     materialGate?: MaterialGate;
@@ -74,17 +69,6 @@ export async function handleSceneCardGenerate(
   if (parsed.data.scene_card_id !== sceneCardId)
     return fail(400, "场景卡不一致");
 
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  let costReservation: CostReservationSnapshot | undefined;
-  if (options?.costEstimator) {
-    costReservation =
-      (await options.costEstimator({
-        modelId: parsed.data.parameters.model_id,
-        type: "video",
-        expectedOutputCount: 1,
-      })) ?? undefined;
-  }
-
   const result = await deps.regenerateSceneCard({
     userId,
     projectId,
@@ -100,7 +84,6 @@ export async function handleSceneCardGenerate(
     ...(options?.providerCredential
       ? { provider_credential: options.providerCredential }
       : {}),
-    ...(costReservation ? { costReservation } : {}),
     ...(options?.materialGate
       ? {
           guardInput: (jobInput: Record<string, unknown>) =>

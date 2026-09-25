@@ -64,7 +64,6 @@ import {
   type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
 
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 import {
   mapImageChannelRequest,
   parseStoredImageRequestMapping,
@@ -238,7 +237,8 @@ function uniqueAssetIds(ids: string[]): string[] {
   return ids.filter((id, index) => ids.indexOf(id) === index);
 }
 
-type GenerationType = "image" | "video" | "audio";
+/** 生成类型（job.type）。建任务与价格预览共用这一个 —— 报价的任务类型必须与创建一致。 */
+export type GenerationType = "image" | "video" | "audio";
 
 /** 全类型公共校验：type 已由策略分派保证合法；此处校验 target_node_id / prompt /
  *  aspect_ratio（audio 跳过）/ model_id / expected_output_count。
@@ -714,6 +714,47 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
   video: videoStrategy,
   audio: audioStrategy,
 };
+
+/**
+ * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
+ *
+ * ⚠️ **走的就是上面这一个 `composeInput`**（建任务冻结 input 的同一份），不是另写一份
+ *    「挑几个定价键」的投影。定价维度（模型 + 任务类型 + 规格 + 等级）只要有一处漂，
+ *    用户就会看到「预览一个价、实扣另一个价」—— 那是会被当成扣错了的一类不一致。
+ *    所以这里连能力位（features.audio ⇒ generate_audio 冻不冻）都交回给 composeInput 判，
+ *    不在本函数里重写一遍。
+ *
+ * ⚠️ 只喂面板给得出的那部分：无画布目标、无参考素材。它们的差别进不了 specs —— 数组
+ *    （references / input_asset_ids）被 `extractSpecs` 丢掉，scalar 的那几个快照键
+ *    （target_node_id / first_frame_asset_id）不是定价维度。**prompt 单独删掉**：提示词是
+ *    创作内容，不是定价维度，而带上它会让前端的查询键随每一次打字变化（每敲一个字重新报价）。
+ *
+ * 类型不支持、或请求体里没有可用的 parameters → 返回 null（调用方按「无报价」处置，不报错）。
+ */
+export function projectQuoteInput(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability?: ModelCapabilityView,
+): Record<string, unknown> | null {
+  const strategy = strategies[type];
+  const params = body.parameters as GenerationParameters | undefined;
+  if (!strategy || typeof params !== "object" || params === null) return null;
+
+  const input = strategy.composeInput({
+    body,
+    params,
+    resolvedModelId: resolveModelId(type, params.model_id),
+    promptText: isStr(params.prompt) ? params.prompt : "",
+    targetNodeId: null,
+    textAttachments: [],
+    referenceAssetIds: [],
+    ...(capability ? { capability } : {}),
+  });
+  delete input.prompt;
+  // 与建任务同口径：输出数也是定价维度（多图按张计价），它在建任务那边同样冻在 input 上。
+  input.expected_output_count = Number(body.expected_output_count);
+  return input;
+}
 
 // ---- pipeline 阶段 ----
 
@@ -1244,8 +1285,6 @@ interface GenerationDeps {
   canvas: Pick<CanvasRepo, "getByProject">;
   /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
-  /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
-  costEstimator?: GenerationCostEstimator;
   /**
    * ★ 新计费（billing-svc）的预扣。由装配层注入 —— 它负责解析用户等级、提取规格、
    * 调 billing 客户端；本函数只把「哪个用户、哪个 job、什么模型/任务」交给它。
@@ -1647,17 +1686,6 @@ export async function handleCreateGenerationJob(
     actionIdentity,
     actionType,
   };
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  if (deps.costEstimator) {
-    const snapshot = await deps.costEstimator({
-      modelId: resolvedModelId,
-      type,
-      expectedOutputCount,
-    });
-    if (snapshot) {
-      cmdInput.costReservation = snapshot;
-    }
-  }
   // ★ 新计费：预扣交给 repo 在**建 job 的事务内**执行（job 行插入后、提交前）。
   //   用 actionIdentity 作 commandId —— 它是同一动作的稳定指纹，重试命中同一幂等键。
   if (deps.billingHold) {

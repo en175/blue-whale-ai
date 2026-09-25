@@ -13,7 +13,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
 // IKDLQF「单个文本附件驱动图片生成」公开接口集成（契约「验证」节服务端项）：
 // 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKDLQF_DATABASE_URL 门控）。
@@ -71,7 +70,7 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
@@ -82,7 +81,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json({ limit: "16mb" }));

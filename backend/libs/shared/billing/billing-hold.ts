@@ -4,8 +4,12 @@
  * 这层存在的理由：handler 知道「哪个用户、哪个 job、什么模型」，但**不知道**
  * 用户等级（identity 域）与规格怎么归一（定价域）。让它自己拼就会把两个域的知识
  * 塞进生成流程里。所以回调在这里成形，handler 只负责在正确的时机调用它。
+ *
+ * ⚠️ 规格归一与报价（Quote）**共用** `billing-specs.ts` 那一份（见该文件说明）：
+ *    Hold 与 Quote 必须按同一份规格查同一份目录，否则预览价与实际扣价会分叉。
  * ============================================ */
 import type { BillingClient } from './billing-client.js';
+import { extractSpecs } from './billing-specs.js';
 
 /** handler 交过来的上下文。 */
 export interface BillingHoldContext {
@@ -22,27 +26,6 @@ export interface BillingHoldDeps {
   /** 用户等级（identity 域）。取不到时返回 free —— 保守方向：不打折，不会多让利 */
   resolveTier: (userId: string) => Promise<string>;
   logger?: { warn: (message: string) => void };
-}
-
-/**
- * 规格提取。
- *
- * ⚠️ 只取**标量**字段并统一小写键名 —— 定价目录里的规格表按规范化后的键查找
- * （《计费逻辑详细设计》§4.5.1）。这里不做值层面的归一（例如 "1080P" → "1080p"
- * 由 catalog 编译期负责），因为「哪些值等价」是定价配置的知识，不是生成流程的。
- *
- * <p>约定：catalog 里配了 table 的规格键，必须出现在 job 的冻结 input 上。
- * 漏键的后果是 `UNPRICEABLE`（拒绝提交）而不是按 0 计价 —— 这是刻意的。
- */
-function extractSpecs(input: Record<string, unknown>): Record<string, string> {
-  const specs: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      specs[key.toLowerCase()] = String(value).toLowerCase();
-    }
-  }
-  return specs;
 }
 
 export function createBillingHold(

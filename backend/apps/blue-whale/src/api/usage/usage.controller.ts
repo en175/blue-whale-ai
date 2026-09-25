@@ -1,29 +1,28 @@
-import { Controller, Get, Headers } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
-import { FAILURE_CODE, ok } from "@lib/contracts";
-import { AccountService } from "@lib/shared/account/account.service.js";
-import { toAuthError } from "@lib/shared/errors/auth-error.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { Controller, Get } from "@nestjs/common";
+import { ok } from "@lib/contracts";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { sharedBillingClient, toBillingError } from "@lib/shared/billing/billing-client.js";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-/** 走全局 AuthGuard：守卫已把 sess_ 会话回注为真实 sk-，此处照旧自解析代打 new-api。 */
+/**
+ * 余额查询。
+ *
+ * <p>数据源是 **billing 的账本**（`QueryBalance`）。原先这里转发 new-api 的
+ * `/api/usage/token`，而 new-api 已降级成「带一把统一 key 的上游供应商」——
+ * 那把 key 是全项目共用的，问它「余额多少」只会得到统一 key 属主一个人的余额。
+ *
+ * <p>返回的 `credits` 是**整数积分**（账本单位），不是 new-api 的 quota：
+ * 用户看到的数就是 billing 记的数，中间不再有一次 50,000 的换算。
+ */
 @Controller("usage")
 export class UsageController {
-  constructor(private readonly account: AccountService) {}
-
   @Get("token")
-  async token(@Headers("authorization") authorization?: string) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+  async token(@CurrentUser() user: AuthenticatedUser) {
     try {
-      const usage = await this.account.getTokenUsage(token);
-      return ok({ quota: usage.userQuota });
+      const balance = await sharedBillingClient().queryBalance(Number(user.userId));
+      return ok({ credits: balance.availableCredits });
     } catch (error) {
-      if (error instanceof NewApiError && error.status === 200) {
-        // 上游业务失败为 HTTP 200+success:false，透传原文，避免 toAuthError 吞成 502；
-        // HTTP 用 400，否则前端 code===200 会当成功读到 null data。
-        throw new NewApiError(error.message, FAILURE_CODE, error.code);
-      }
-      throw toAuthError(error);
+      throw toBillingError(error, "余额查询暂不可用");
     }
   }
 }

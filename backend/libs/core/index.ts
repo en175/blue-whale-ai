@@ -52,18 +52,10 @@ export {
   type NewApiImage,
   type NewApiImageEditInput,
   type NewApiImageInput,
-  type NewApiLog,
-  type NewApiUsage,
   type NewApiVideoInput,
   type NewApiVideoSubmission,
   type NewApiVideoTask,
-  type NewApiAdminManageUserInput,
-  type NewApiAdminTopUpRow,
-  type NewApiAdminUserRow,
   type NewApiAgentRunQuotaResult,
-  type NewApiLogRow,
-  type NewApiLogStat,
-  type NewApiPageInfo,
   type NewApiPricingItem,
   type NewApiPricingResult,
 } from "./new-api-client.js";
@@ -72,14 +64,6 @@ export {
   type MaterialLibraryClient,
   type MaterialLibraryResponse,
 } from "./material-library-client.js";
-export {
-  loadGenerationCostConfig,
-  quotaToFen,
-  buildCostVersions,
-  type GenerationCostConfig,
-  type CostReservationSnapshot,
-  type CostReservationVersions,
-} from "./generation-cost.js";
 export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
 export { transferReferenceMarkers } from "./transfer-reference-markers.js";
 export {

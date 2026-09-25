@@ -11,9 +11,8 @@ import type { Response } from "express";
 import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { SceneCardGenerationService } from "@lib/shared/generation/scene-card-generation.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -37,8 +36,6 @@ export class SceneCardGenerateController {
   constructor(
     private readonly sceneCard: SceneCardGenerationService,
     private readonly storyboard: StoryboardPreviewService,
-    private readonly cost: GenerationCostEstimatorService,
-    private readonly account: AccountService,
     // IKF YHJ：素材校验门（场景卡再生成是第三条视频创建路径）。
     private readonly material: MaterialService,
     private readonly assets: AssetService,
@@ -65,9 +62,6 @@ export class SceneCardGenerateController {
       {
         ...(internal.providerCredential
           ? { providerCredential: internal.providerCredential }
-          : {}),
-        ...(this.cost.estimator
-          ? { costEstimator: this.cost.estimator }
           : {}),
         // IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个门
         // （同一工厂、同一判定、同一失败处置）。原先漏接，导致预设保存后才变成 Failed 的素材
@@ -151,7 +145,7 @@ export class SceneCardGenerateController {
 
   /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
    *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检，凭证明文透传（修正四：去密）。 */
+   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：额度预检问 billing 账本，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,
@@ -162,16 +156,13 @@ export class SceneCardGenerateController {
     @Headers("authorization") authorization: string | undefined,
     @Res() res: Response,
   ) {
-    const token = authorization?.startsWith("Bearer ")
-      ? authorization.slice(7).trim()
-      : undefined;
     const internal = sealProviderCredential(authorization);
-    const quotaCheck = token?.startsWith("sk-")
-      ? async () => {
-          const usage = await this.account.getTokenUsage(token);
-          return { sufficient: usage.userQuota > 0 };
-        }
-      : undefined;
+    // 余额预检问 billing：new-api 那把 key 是全项目共用的，问它「余额够不够」
+    // 得到的是统一 key 属主的余额，与发起人无关。
+    const quotaCheck = async () => {
+      const balance = await sharedBillingClient().queryBalance(Number(user.userId));
+      return { sufficient: balance.availableCredits > 0 };
+    };
 
     const result = await handleStoryboardPreviewCreate(
       user.userId,
@@ -184,10 +175,7 @@ export class SceneCardGenerateController {
         ...(internal.providerCredential
           ? { providerCredential: internal.providerCredential }
           : {}),
-        ...(quotaCheck ? { quotaCheck } : {}),
-        ...(this.cost.estimator
-          ? { costEstimator: this.cost.estimator }
-          : {}),
+        quotaCheck,
       },
     );
 

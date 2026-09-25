@@ -15,7 +15,7 @@ import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import {
   parsePageParam,
   parsePageSizeParam,
-} from "@lib/shared/account/admin-mapper.js";
+} from "@lib/shared/account/admin-paging.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";

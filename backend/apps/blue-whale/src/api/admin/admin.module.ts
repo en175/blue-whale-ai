@@ -3,7 +3,6 @@ import { AdminController } from "./admin.controller.js";
 import { AdminDashboardController } from "./dashboard.controller.js";
 import { AdminHomepageHeroesController } from "./homepage-heroes.controller.js";
 import { AdminModelsController } from "./models.controller.js";
-import { AdminOrdersController } from "./orders.controller.js";
 import { AdminSkillsController } from "./skills.controller.js";
 import { AdminTemplateImagesController } from "./template-images.controller.js";
 import { AdminTemplateTagsController } from "./template-tags.controller.js";
@@ -20,7 +19,6 @@ import { AdminAssetsController } from "./assets.controller.js";
     AdminTopupTiersController,
     AdminUsersController,
     AdminUserRolesController,
-    AdminOrdersController,
     AdminSkillsController,
     AdminDashboardController,
     AdminTemplatesController,

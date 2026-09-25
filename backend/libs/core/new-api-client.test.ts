@@ -1,7 +1,8 @@
-// IK74V8：从 new-api-client.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
+// IK74V8：从 new-api-client.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 //
-// ⚠️ 账号面（能力探测 / 注册 / 登录 / Token 身份复核 / 改密）的用例已随这些 ops 一起
-//    删除：new-api 降级成带一把统一 key 的上游供应商后，身份类读写不再走它。
+// ⚠️ 账号面（能力探测 / 注册 / 登录 / Token 身份复核 / 改密 / 用量查询）的用例已随这些
+//    ops 一起删除：new-api 降级成带一把统一 key 的上游供应商后，身份与账单都不再走它。
+//    这里只剩下传输层本身的行为（客户端标识、超时、错误映射），统一用生成面出站验证。
 import {describe, expect, it} from "vitest";
 
 import {
@@ -12,7 +13,9 @@ import {
 import {createNewApiRequest} from "./new-api-transport.js";
 import {jsonResponse} from "./new-api-client.testlib.js";
 
-describe("new-api client —— Token 面查询与错误映射", () => {
+const IMAGE = { model: "m", prompt: "p", n: 1 };
+
+describe("new-api client —— 传输层与错误映射", () => {
   it("declares the bluewhale client system on every outbound request", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({
@@ -20,18 +23,17 @@ describe("new-api client —— Token 面查询与错误映射", () => {
       fetchImpl: async (input, init = {}) => {
         const url = String(input);
         requests.push({ url, init });
-        if (url.endsWith("/api/usage/token/")) {
-          return jsonResponse({ code: true, data: { user_quota: 99 } });
+        if (url.endsWith("/api/pricing")) {
+          return jsonResponse({ success: true, data: [] });
         }
-        return jsonResponse({ success: true, message: "", data: [] });
+        return jsonResponse({ data: [{ url: "https://cdn.test/image.png" }] });
       },
     });
 
-    await client.getTokenUsage("sk-1");
-    await client.getTokenLogs("sk-1");
-    await client.generateImages("sk-1", { model: "m", prompt: "p", n: 1 });
+    await client.getPricing();
+    await client.generateImages("sk-1", IMAGE);
 
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
     for (const { init } of requests) {
       expect(new Headers(init.headers).get("X-Client-System")).toBe(
         CLIENT_SYSTEM_BLUEWHALE,
@@ -62,29 +64,20 @@ describe("new-api client —— Token 面查询与错误映射", () => {
     );
   });
 
-  it("normalizes network failure to 503 and malformed usage data to 502", async () => {
+  it("normalizes network failure to 503", async () => {
     const unreachable = createNewApiClient({
       baseUrl: "http://internal-new-api.test",
       fetchImpl: async () => {
         throw new Error("connect ECONNREFUSED http://internal-new-api.test");
       },
     });
-    await expect(unreachable.getTokenUsage("sk-1")).rejects.toMatchObject({
+    await expect(unreachable.generateImages("sk-1", IMAGE)).rejects.toMatchObject({
       status: 503,
       message: "new-api 不可达",
     });
-
-    const malformed = createNewApiClient({
-      baseUrl: "http://internal-new-api.test",
-      fetchImpl: async () => jsonResponse({ success: true, data: {} }),
-    });
-    await expect(malformed.getTokenUsage("sk-1")).rejects.toMatchObject({
-      status: 502,
-      code: "invalid_usage_response",
-    });
   });
 
-  it("aborts account requests at the configured timeout and reports 503", async () => {
+  it("aborts requests at the configured timeout and reports 503", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
       timeoutMs: 5,
@@ -96,7 +89,7 @@ describe("new-api client —— Token 面查询与错误映射", () => {
         }),
     });
 
-    await expect(client.getTokenUsage("sk-1")).rejects.toMatchObject({
+    await expect(client.generateImages("sk-1", IMAGE)).rejects.toMatchObject({
       status: 503,
       message: "new-api 不可达",
     });
@@ -121,56 +114,35 @@ describe("new-api client —— Token 面查询与错误映射", () => {
       },
     });
 
-    await expect(client.getTokenUsage("sk-1")).rejects.toMatchObject({
+    await expect(client.generateImages("sk-1", IMAGE)).rejects.toMatchObject({
       status: 503,
       message: "new-api 不可达",
     });
   });
 
-  it("uses one sk token for usage, logs, and image relay", async () => {
+  it("uses one sk token for image relay", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({
       baseUrl: "http://new-api.test/",
       fetchImpl: async (input, init = {}) => {
         const url = String(input);
         requests.push({ url, init });
-        if (url.endsWith("/api/usage/token/")) {
-          return jsonResponse({
-            code: true,
-            message: "ok",
-            data: { user_quota: 123456 },
-          });
-        }
-        if (url.endsWith("/api/log/token")) {
-          return jsonResponse({
-            success: true,
-            message: "",
-            data: [{ quota: 42, model_name: "image-model" }],
-          });
-        }
         return jsonResponse({ data: [{ url: "https://cdn.test/image.png" }] });
       },
     });
 
-    const usage = await client.getTokenUsage("sk-login");
-    const logs = await client.getTokenLogs("sk-login");
     const images = await client.generateImages("sk-login", {
       model: "image-model",
       prompt: "a whale",
       n: 1,
     });
 
-    expect(usage.userQuota).toBe(123456);
-    expect(logs[0]?.quota).toBe(42);
     expect(images).toEqual([{ url: "https://cdn.test/image.png" }]);
-    expect(requests[2]?.url).toBe("http://new-api.test/v1/images/generations");
-    expect(
-      requests.every(
-        ({ init }) =>
-          new Headers(init.headers).get("Authorization") === "Bearer sk-login",
-      ),
-    ).toBe(true);
-    expect(JSON.parse(String(requests[2]?.init.body))).toMatchObject({
+    expect(requests[0]?.url).toBe("http://new-api.test/v1/images/generations");
+    expect(new Headers(requests[0]?.init.headers).get("Authorization")).toBe(
+      "Bearer sk-login",
+    );
+    expect(JSON.parse(String(requests[0]?.init.body))).toMatchObject({
       model: "image-model",
       prompt: "a whale",
       n: 1,
@@ -187,7 +159,7 @@ describe("new-api client —— Token 面查询与错误映射", () => {
     });
 
     await expect(
-      client.generateImages("sk-test", { model: "m", prompt: "p", n: 1 }),
+      client.generateImages("sk-test", IMAGE),
     ).rejects.toEqual(
       expect.objectContaining<Partial<NewApiError>>({
         status: 402,
