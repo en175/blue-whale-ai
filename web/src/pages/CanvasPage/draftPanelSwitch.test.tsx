@@ -327,6 +327,17 @@ function node(id: string): HTMLElement {
   return container.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
 }
 
+/** 合成鼠标手势事件（clickCard/selectCard 共用）：jsdom 需手动派发且 view 指回 window
+ *  供 d3-drag 识别；buttons 按真实手势时序——抬键/点击为 0、按住移动为 1。 */
+function fireMouse(type: 'mousedown' | 'mousemove' | 'mouseup' | 'click', target: EventTarget, cx: number, cy: number) {
+  const event = new MouseEvent(type, {
+    bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' || type === 'click' ? 0 : 1,
+    clientX: cx, clientY: cy,
+  });
+  Object.defineProperty(event, 'view', { value: window });
+  target.dispatchEvent(event);
+}
+
 /** 点选一张草稿卡：mousedown 于节点元素 → 小幅来回位移越过拖拽阈值（jsdom 中 d3-drag
  *  需首个 mousemove 才进入并选中，marqueeSelect「原地点击」先例）→ mouseup 于 window →
  *  补发原生 click（jsdom 不会从合成序列自动派生 click；浏览器中 click 紧随抬键）。
@@ -334,24 +345,16 @@ function node(id: string): HTMLElement {
  *  选中通报—渲染—effect 再通报的循环若存在会在同一刷新内滚成深度更新溢出。 */
 async function clickCard(id: string, x = 120, y = 90) {
   const el = node(id);
-  const fire = (type: 'mousedown' | 'mousemove' | 'mouseup' | 'click', target: EventTarget, cx: number, cy: number) => {
-    const event = new MouseEvent(type, {
-      bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' || type === 'click' ? 0 : 1,
-      clientX: cx, clientY: cy,
-    });
-    Object.defineProperty(event, 'view', { value: window });
-    target.dispatchEvent(event);
-  };
   await act(async () => {
-    fire('mousedown', el, x, y);
-    fire('mousemove', window, x + 4, y + 3);
-    fire('mousemove', window, x, y);
-    fire('mouseup', window, x, y);
+    fireMouse('mousedown', el, x, y);
+    fireMouse('mousemove', window, x + 4, y + 3);
+    fireMouse('mousemove', window, x, y);
+    fireMouse('mouseup', window, x, y);
     // click 前重查节点元素：手势中段（选中通报驱动的面板开合）可能令 React 重挂节点包裹层，
     // 浏览器中 click 目标是抬键时指针下的当前元素，故以当下 DOM 为准。注意位移超过 click
     // 距离时 d3-drag 会在 window 捕获层吞掉紧随 mouseup 的 click（真实浏览器同款语义，
     // d3 yesdrag 的 click.drag 捕获监听），面板打开由选中通报路径承担（IKIJ61 源码核验）。
-    fire('click', node(id), x, y);
+    fireMouse('click', node(id), x, y);
     await new Promise((resolve) => setTimeout(resolve, 5));
   });
 }
@@ -499,26 +502,19 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
    经「已打开同一面板」守卫判定（面板已关 → 守卫不命中、绑定还在、无豁免标记）重开对方
    面板，对方面板打开又关掉本面板，即「图片草稿卡、视频草稿卡、视频草稿卡」三拍互搏。
    本组用例锁定的外部行为：等值重复打开不重挂载；互关后对方卡纯选中通报（无 click，走
-   selection 路径）不回弹重开；手动点卡重开照常；草稿内容真实变化仍写入新 seed 回填。 */
+   selection 路径）原子切换重开对方面板、开合单调收敛（互搏循环燃料已断，重开是保留的
+   既有交互——互关不置对方隐藏豁免）；手动点卡重开照常；草稿内容真实变化仍写入新 seed 回填。 */
 describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
   /** 纯选中手势（无 click）：d3-drag 位移触发 ReactFlow 选中并经 onSelectionChange 通报，
    *  不派发 click（jsdom 不自动派生，浏览器中 click 只触发 onNodeClick）——复刻「选中变化
    *  经 React Flow useEffect 到达，早于或代替 onNodeClick」的通报扰动路径。 */
   async function selectCard(id: string, x = 120, y = 90) {
     const el = node(id);
-    const fire = (type: 'mousedown' | 'mousemove' | 'mouseup', target: EventTarget, cx: number, cy: number) => {
-      const event = new MouseEvent(type, {
-        bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1,
-        clientX: cx, clientY: cy,
-      });
-      Object.defineProperty(event, 'view', { value: window });
-      target.dispatchEvent(event);
-    };
     await act(async () => {
-      fire('mousedown', el, x, y);
-      fire('mousemove', window, x + 4, y + 3);
-      fire('mousemove', window, x, y);
-      fire('mouseup', window, x, y);
+      fireMouse('mousedown', el, x, y);
+      fireMouse('mousemove', window, x + 4, y + 3);
+      fireMouse('mousemove', window, x, y);
+      fireMouse('mouseup', window, x, y);
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
   }
@@ -582,7 +578,7 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
     expectNoUpdateDepthLoop();
   });
 
-  it('互关清绑定后手动点卡重开图片面板照常（豁免标记被打开路径重置）', async () => {
+  it('互关清绑定后图片卡纯选中通报原子切换重开，手动点卡重开照常', async () => {
     await renderPage();
     await vi.waitFor(() => expect(node('d1')).toBeTruthy());
 
@@ -592,13 +588,18 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
     await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
     expect(imageOpen()).toBe(false);
 
-    // 图片卡下轮选中通报（扰动）：不重开已关面板，选中落在图片卡
+    // 图片卡下轮纯选中通报（扰动）：互关已清图片绑定且不置隐藏豁免（保留选中路径开面板
+    // 的既有交互），经 handleSelectionChange 的 !alreadyOpen 分支原子切换重开图片面板——
+    // 视频面板关闭且其草稿绑定同步清理，开合单调收敛、无双面板叠加
     await selectCard('d1', 120, 90);
-    // 选中切回视频卡（守卫命中：视频面板保持开、绑定在）
+    await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
+    expect(videoOpen()).toBe(false);
+    // 再纯选中视频卡：上一步已清视频绑定，同样原子切换切回视频面板，一次到位收敛
     await selectCard('v1', 420, 90);
     await vi.waitFor(() => expect(videoOpen()).toBe(true), { timeout: 3000 });
 
-    // 手动点卡（带 click）经 onNodeClick → openImageDraftDialog 重置豁免，照常重开图片面板
+    // 手动点卡（带 click）经 onNodeClick → openImageDraftDialog 照常重开图片面板——
+    // 多轮纯选中扰动后显式打开路径不受影响
     await clickCard('d1', 120, 90);
     await vi.waitFor(() => expect(imageOpen()).toBe(true), { timeout: 3000 });
     expect(panelPromptText()).toBe('图片草稿提示词');

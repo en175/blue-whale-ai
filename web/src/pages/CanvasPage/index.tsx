@@ -290,7 +290,7 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
-import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
@@ -423,7 +423,7 @@ import {
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
-import { draftSeedEquals } from './draftSeed';
+import { draftSeedEquals, type ImageDraftSeed, type VideoDraftSeed, type AudioDraftSeed } from './draftSeed';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -1410,7 +1410,7 @@ export default function CanvasPage() {
    *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比）；
    *  targetNodeId/attachments 仅图片媒体节点面板发起时存在（IKDLQF）：提交携带 target_node_id，
    *  附件在打开当下按连线快照，面板只读展示 */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[]; promptDoc?: PromptDoc | null } | null>(null);
+  const [imageSeed, setImageSeed] = useState<ImageDraftSeed | null>(null);
   /** 面板当前绑定的图片草稿节点 id（IKDMQQ）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  草稿被删除/取消或成功转成品卡时由清理 effect 结束绑定并关闭面板 */
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
@@ -1426,9 +1426,9 @@ export default function CanvasPage() {
   const [videoFreeRefs, setVideoFreeRefs] = useState<VideoMediaRefs>({ reference: [] });
   /** 节点工具条/首页带入视频对话框的种子；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<VideoDraftSeed | null>(null);
   /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
-  const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string; doc?: PromptDoc | null; refs?: AudioRefItem[] } | null>(null);
+  const [audioSeed, setAudioSeed] = useState<AudioDraftSeed | null>(null);
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片/视频草稿绑定一致 */
   const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
@@ -4598,7 +4598,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setImageDraftId(nodeId);
-    const nextImageSeed: { ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[]; promptDoc?: PromptDoc | null } = {
+    const nextImageSeed: ImageDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       // IKFA1M：结构化正文与拍平镜像一致才恢复标签；旧客户端改写过则按纯文本恢复，不猜造标签
@@ -4887,7 +4887,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setVideoDraftId(nodeId);
-    const nextVideoSeed: { ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } = {
+    const nextVideoSeed: VideoDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       doc: restorePromptDoc(d.promptDoc, d.prompt),
@@ -5382,7 +5382,7 @@ export default function CanvasPage() {
       }
       patchMediaNode(nodeId, { audioRefs: [] });
     }
-    const nextAudioSeed: { ts: number; text?: string; modelId?: string; targetNodeId?: string; doc?: PromptDoc | null; refs?: AudioRefItem[] } = {
+    const nextAudioSeed: AudioDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
