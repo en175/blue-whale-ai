@@ -1,37 +1,422 @@
 /* ============================================
- * RechargeModal - 积分充值弹窗（暂未开放说明态）
+ * RechargeModal - 积分充值弹窗
  * ============================================ */
 
-.notice {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0 8px;
-  text-align: center;
+.modal {
+  background-color: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  padding: 48px 44px 40px;
 }
 
-.noticeIcon {
+.body {
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.content {
   display: flex;
+  gap: 40px;
+  align-items: stretch;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  margin: 0 0 10px;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: #fff;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: #ccc;
+}
+
+/* ---- 套餐卡片 ---- */
+.planRow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 20px;
+}
+
+/* 二维码面板出现后，为右侧支付区留出空间。 */
+.planRowPaying {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.planCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px 20px 22px;
+  background-color: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast);
+  overflow: hidden;
+}
+
+.planCard:hover {
+  border-color: #3a3a3a;
+}
+
+/* 推荐：顶部蓝色描边 */
+.planRecommended::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #3e63c4;
+}
+
+/* 选中：蓝色描边 + 浅蓝背景 + 阴影（明显区分选中态） */
+.planSelected {
+  border-color: #3e63c4;
+  background-color: #1e2a4a;
+  box-shadow: 0 0 0 1px #3e63c4 inset;
+}
+
+.planSelected:hover {
+  border-color: #3e63c4;
+  background-color: #1e2a4a;
+}
+
+/* 卡片主标题：到账积分（大字），替代旧的 name 展示（历史 quota 数字命名会误导） */
+.planTitle {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.recBadge {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background-color: #3e63c4;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 6px;
+}
+
+/* 已选角标（右上角，与推荐角标互斥位置：推荐在上方、已选在右下） */
+.selectedBadge {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background-color: #232323;
+  gap: 3px;
+  background-color: #3e63c4;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* 充值计价说明（标题下）。换算率由后端定价目录给，文案不写死常量 */
+.unitHint {
+  font-size: var(--font-size-sm);
+  color: #888;
+  margin: 8px 0 32px;
+}
+
+.planPriceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.planPrice {
+  font-size: 28px;
+  font-weight: 700;
+  color: #3e8efc;
+  line-height: 1.2;
+}
+
+.discountTag {
+  font-size: 12px;
+  font-weight: 600;
   color: #3e8efc;
 }
 
-.noticeTitle {
-  margin: 0;
+.planOriginal {
+  font-size: var(--font-size-sm);
+  color: #777;
+  text-decoration: line-through;
+}
+
+.perkList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.perkItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: #ccc;
+}
+
+.perkCheck {
+  color: #3e8efc;
+  flex-shrink: 0;
+}
+
+/* ---- 底部结算栏 ---- */
+.bottomBar {
+  margin-top: 36px;
+  padding: 20px 24px;
+  background-color: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 52px;
+}
+
+.emptyHint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #999;
+  font-size: var(--font-size-md);
+}
+
+.emptyIcon {
+  color: #3e8efc;
+}
+
+/* 未选套餐时左侧提示（简洁小字，与按钮区分） */
+.emptyHintText {
+  color: #999;
+  font-size: var(--font-size-sm);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.balance {
+  font-size: var(--font-size-md);
+  color: #888;
+}
+
+.selectedInfo {
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: #fff;
 }
 
-.noticeDesc {
-  margin: 0;
+.barOriginal {
   font-size: var(--font-size-sm);
-  line-height: 1.7;
+  color: #777;
+  text-decoration: line-through;
+}
+
+.barDiscount {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: #3e8efc;
+}
+
+.barError {
+  font-size: var(--font-size-sm);
+  color: #e5636c;
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 确认支付 */
+.confirmBtn {
+  height: 44px;
+  padding: 0 28px;
+  border-radius: 10px;
+  border: none;
+  background-color: #3e63c4;
+  color: #fff;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast);
+}
+
+.confirmBtn:hover {
+  background-color: #4a70d8;
+}
+
+/* 未选套餐 / 支付中 / 已支付：禁用态 */
+.confirmBtnDisabled {
+  background-color: #2a2a2a;
+  color: #777;
+  cursor: not-allowed;
+}
+
+.confirmBtnDisabled:hover {
+  background-color: #2a2a2a;
+}
+
+/* ---- 二维码面板 ---- */
+.qrPanel {
+  width: 420px;
+  flex-shrink: 0;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 36px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.qrBox {
+  background-color: #fff;
+  border-radius: 12px;
+  padding: 14px;
+  width: 220px;
+  height: 220px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 二维码不可用时的占位文案 */
+.qrPlaceholder {
+  font-size: var(--font-size-sm);
+  color: #777;
+  text-align: center;
+}
+
+.qrExpiry {
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  color: #888;
+}
+
+.qrHint {
+  font-size: var(--font-size-sm);
   color: #999;
+}
+
+.qrAmount {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.qrPoints {
+  font-size: var(--font-size-sm);
+  color: #999;
+}
+
+/* 加载点 */
+.dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #3e63c4;
+  animation: dotBlink 1.2s infinite ease-in-out;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dotBlink {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.waiting {
+  font-size: var(--font-size-sm);
+  color: #888;
+}
+
+/* 支付结果态（成功/过期/失败） */
+.payState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.payStateOk {
+  color: #4caf7d;
+}
+
+.payStateBad {
+  color: #e5636c;
+}
+
+.payStateTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: #fff;
+}
+
+/* ---- 协议 ---- */
+.agreement {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: #999;
+}
+
+.agreementLink {
+  color: #3e8efc;
+  text-decoration: none;
+}
+
+.agreementLink:hover {
+  text-decoration: underline;
 }

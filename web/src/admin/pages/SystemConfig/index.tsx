@@ -1,6 +1,6 @@
 /* ============================================
  * SystemConfig 系统设置：支付凭证安全配置·充值政策文案·限流参数
- * 数据源 GET/PUT /api/admin/settings（规划接口，后端暂未实现，按规范预接入）
+ * 数据源 GET/PUT /api/admin/settings
  *
  * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
  * 与 SkillManage 同一条纪律：页面只描述结构，样式一处定义在套件里。
@@ -52,14 +52,15 @@ export default function SystemConfig() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
-  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）；规划接口阶段失败不提示 */
+  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）。
+   *  失败提示由 http 层默认 toast 承担，这里只负责收掉 loading，避免卡在「加载中…」。 */
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchAdminSettings();
       setSettings(data);
     } catch {
-      /* 后端未实现，静默降级 */
+      /* 已 toast，收掉 loading 露出「未配置」即可 */
     } finally {
       setLoading(false);
     }
@@ -105,11 +106,32 @@ export default function SystemConfig() {
 }
 
 /* ============ 支付凭证 ============ */
-const CRED_FIELDS: { key: keyof SystemCredentials; section: string; label: string }[] = [
-  { key: 'wechat_mch_id', section: '微信支付', label: '商户号 (Merchant ID)' },
-  { key: 'wechat_api_key', section: '微信支付', label: 'API Key' },
-  { key: 'alipay_app_id', section: '支付宝', label: '应用 ID (App ID)' },
-  { key: 'alipay_private_key', section: '支付宝', label: '应用私钥 (Private Key)' },
+
+/** 凭证字段清单。
+ *  ⚠️ `secret` 只对**真的密文**为真：密字段走脱敏回显 + 密码框 + 眼睛切换，
+ *    非密字段（商户号 / App ID / 回调地址）必须明文回显 + 明文输入框——
+ *    它们是拿去和网关后台核对的标识和地址，显示成 **** 只会让人没法核对。
+ *
+ *  ⚠️ 这四个字段都是**支付网关那一侧**的「我们是谁」，不是杭州银行发给我们的商户参数。
+ *    杭州银行的 `merId` / `certId` / 银行签名证书标识 / 商户证书(.pfx) 与密码住在
+ *    支付网关自己的库（渠道配置页），**不在这个页面配**——这里再存一份就变成两处会漂的
+ *    真相：银行换证时改了一处，另一处静静地错着，而报错会出在远离原因的「验签失败」上。 */
+const CRED_SECTION = '杭州银行聚合主扫 · 支付网关商户信息';
+const CRED_FIELDS: {
+  key: keyof SystemCredentials;
+  section: string;
+  label: string;
+  secret: boolean;
+}[] = [
+  { key: 'hccb_mch_no', section: CRED_SECTION, label: '商户号 (mchNo)', secret: false },
+  { key: 'hccb_app_id', section: CRED_SECTION, label: '应用 ID (appId)', secret: false },
+  { key: 'hccb_app_secret', section: CRED_SECTION, label: '商户密钥 (appSecret)', secret: true },
+  {
+    key: 'hccb_notify_url',
+    section: CRED_SECTION,
+    label: '异步通知地址 (notifyUrl · 须公网可达)',
+    secret: false,
+  },
 ];
 
 function CredTab({
@@ -129,7 +151,8 @@ function CredTab({
             <CredCard
               key={f.key}
               label={f.label}
-              maskedValue={credentials?.[f.key] ?? ''}
+              secret={f.secret}
+              value={credentials?.[f.key] ?? ''}
               onSave={(v) => onSave(f.key, v)}
             />
           ))}
@@ -139,14 +162,17 @@ function CredTab({
   );
 }
 
-/** 单个凭证卡片：回显服务端脱敏值，编辑态密码输入 + 眼睛切换，保存走增量更新 */
+/** 单个凭证卡片：回显服务端值（密字段为脱敏值），编辑态输入 + 保存走增量更新 */
 function CredCard({
   label,
-  maskedValue,
+  secret,
+  value,
   onSave,
 }: {
   label: string;
-  maskedValue: string;
+  /** 是否密文：决定脱敏回显、输入框类型与眼睛切换，以及加密存储提示 */
+  secret: boolean;
+  value: string;
   onSave: (v: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -189,26 +215,28 @@ function CredCard({
         </Button>
       }
     >
-      <div>{maskedValue || '未配置'}</div>
+      <div>{value || '未配置'}</div>
 
       {editing && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Input
-              type={visible ? 'text' : 'password'}
+              type={secret && !visible ? 'password' : 'text'}
               placeholder="请输入新值"
               value={draft}
               style={{ flex: 1 }}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <Button
-              size="sm"
-              variant="ghost"
-              title={visible ? '隐藏' : '显示'}
-              aria-label={visible ? '隐藏' : '显示'}
-              icon={visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-              onClick={() => setVisible((v) => !v)}
-            />
+            {secret && (
+              <Button
+                size="sm"
+                variant="ghost"
+                title={visible ? '隐藏' : '显示'}
+                aria-label={visible ? '隐藏' : '显示'}
+                icon={visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
+                onClick={() => setVisible((v) => !v)}
+              />
+            )}
           </div>
           {error && <Alert tone="danger">{error}</Alert>}
           <div>
@@ -216,7 +244,7 @@ function CredCard({
               {saving ? '保存中…' : '保存'}
             </Button>
           </div>
-          <Alert tone="info">保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Alert>
+          {secret && <Alert tone="info">保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Alert>}
         </div>
       )}
     </Card>

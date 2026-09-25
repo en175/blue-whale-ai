@@ -681,16 +681,16 @@ export function createOperationLog(params: CreateOperationLogParams) {
   });
 }
 
-/** 支付凭证（GET 回显为脱敏值） */
+/** 支付凭证（GET 回显：secret 字段为脱敏值） */
 export interface SystemCredentials {
-  /** 微信商户号 */
-  wechat_mch_id: string;
-  /** 微信 API Key */
-  wechat_api_key: string;
-  /** 支付宝 App ID */
-  alipay_app_id: string;
-  /** 支付宝私钥 */
-  alipay_private_key: string;
+  /** 杭州银行商户号（支付网关侧的商户编号） */
+  hccb_mch_no: string;
+  /** 商户应用 ID（支付网关侧 appId） */
+  hccb_app_id: string;
+  /** 商户密钥 appSecret（**密**，回显脱敏） */
+  hccb_app_secret: string;
+  /** 异步通知地址（支付网关回调我们，须公网可达） */
+  hccb_notify_url: string;
 }
 
 /** 充值政策文案 */
@@ -723,12 +723,12 @@ export interface SystemSettings {
   rateLimit: SystemRateLimit;
 }
 
-/** GET /api/admin/settings 获取全部系统配置（支付凭证脱敏回显）——规划接口，后端暂未实现 */
+/** GET /api/admin/settings 获取全部系统配置（支付凭证脱敏回显） */
 export function fetchAdminSettings() {
   return apiRequest<SystemSettings>('/api/admin/settings');
 }
 
-/** PUT /api/admin/settings 按模块部分更新（支持按 key 增量更新）——规划接口，后端暂未实现 */
+/** PUT /api/admin/settings 按模块部分更新（支持按 key 增量更新） */
 export function updateAdminSettings(
   params: Partial<{
     credentials: Partial<SystemCredentials>;
