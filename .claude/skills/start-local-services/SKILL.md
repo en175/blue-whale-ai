@@ -45,9 +45,21 @@ nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>
 - 库是 `bw_billing`（billing 自己的库，Flyway 管 schema，**不归 Prisma**）
 - `ROCKETMQ_ENDPOINTS` 指向本地 `bw-rmq-proxy`（8081）。只想验 Hold 不想接 MQ 时用
   `BILLING_MQ_ENABLED=false`；**但那样跑完的任务不会被结算/返还**，钱会冻着
-- 本地库已有一份 `creditsPerYuan=15` 的 active 定价目录。⚠️ **不要跑 billing 的
-  DB 门控集成测试**（`BILLING_DB_PASSWORD` 一设它们就会跑）——`AdminApiIntegrationTest`
-  的 `@BeforeEach` 会 `DELETE FROM billing_pricing_catalogs`，把这份目录清掉
+- 本地库 `bw_billing` 已有一份 `creditsPerYuan=15` 的 active 定价目录，以及开发中的积分数据
+- **跑 billing 的真库集成测试是安全的**：它们落在**测试专用库 `bw_billing_test`** 上
+  （不存在会自动建：只建库，schema 交给 Flyway），开发库 `bw_billing` 碰不到 ——
+  那些 `@BeforeEach` 的 `DELETE` 只作用于测试库。设上口令就能跑，无额外准备：
+
+  ```bash
+  cd <worktree>/server
+  BILLING_DB_PASSWORD="$(docker inspect bw-mysql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD | cut -d= -f2)" \
+    mvn -o -pl blue-whale-billing -am test
+  ```
+- 门禁 `BillingTestDatabaseGate` 认库名不认人：目标库名不匹配 `bw_billing_test*` 就**拒跑**
+  （跳过 + 打印改法），上下文起来后还会拿真实连接核实一次 `SELECT DATABASE()`。
+  换库用 `BILLING_TEST_DB_URL=jdbc:mysql://<host>:<port>/bw_billing_test_xxx`；
+  **不要**拿 `BILLING_DB_URL` 指开发库来跑测试（会被拒跑）。
+  （旧的「别跑 billing 的 DB 门控测试，它会清掉开发库」警告**已作废**：那条路径被机制堵死了。）
 
 ## ⚠️ 部署前必须做：预建 billing 的两个 MQ topic
 
