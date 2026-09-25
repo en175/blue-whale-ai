@@ -78,10 +78,15 @@ function createDeps(
   client: BillingClient,
   resolveTier: (userId: string) => Promise<string>,
 ) {
-  const createJob = vi.fn(async (input: { billingHold?: (jobId: number) => Promise<void> }) => {
-    await input.billingHold?.(1);
-    return { generation_job_id: "1", cursor: 1 };
-  });
+  const createJob = vi.fn(
+    async (
+      _input: unknown,
+      options?: { billing?: { hold: (jobId: number) => Promise<void> } },
+    ) => {
+      await options?.billing?.hold(1);
+      return { generation_job_id: "1", cursor: 1 };
+    },
+  );
   const deps = {
     projects: { findOwnedById: ownedProject() },
     models: { listEnabledByType: modelWhitelist() },
@@ -91,7 +96,10 @@ function createDeps(
         ids.map((id) => ({ id, type: "image" })),
       ),
     },
-    billingHold: createBillingHold({ client, resolveTier, logger }),
+    billing: {
+      hold: createBillingHold({ client, resolveTier, logger }),
+      release: vi.fn(async () => {}),
+    },
   };
   return deps as unknown as Parameters<typeof handleCreateGenerationJob>[4];
 }

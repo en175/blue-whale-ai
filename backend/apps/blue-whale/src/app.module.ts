@@ -12,6 +12,8 @@ import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
 import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
+import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
+import { SystemSettingsModule } from "@lib/shared/system-settings/system-settings.module.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
@@ -87,7 +89,9 @@ import { IdentityModule } from "@lib/shared/identity/identity.module.js";
     AgentAssetsModule,
     AgentSkillsModule,
     GenerationApiModule,
+    RechargeLibModule,
     RechargeModule,
+    SystemSettingsModule,
     UsageModule,
     AdminModule,
     JobsApiModule,

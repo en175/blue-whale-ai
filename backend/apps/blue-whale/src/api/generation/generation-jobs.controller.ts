@@ -1,5 +1,10 @@
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
-import { createBillingHold } from "@lib/shared/billing/billing-hold.js";
+import { createBillingHold, type BillingHold } from "@lib/shared/billing/billing-hold.js";
+import {
+  createBillingRelease,
+  publishBillingJobFailed,
+  type BillingRelease,
+} from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { Body, Controller, Headers, HttpCode, Param, Post } from "@nestjs/common";
@@ -46,7 +51,7 @@ export class GenerationJobsController {
   ) {}
 
   /**
-   * 预扣依赖（懒建一次）。
+   * 预扣 + 失败补偿（懒建一次）。
    *
    * <p>⚠️ **必接，没有「不接线」的分支**。曾经有两种情况会跳过接线：`BILLING_GRPC_URL`
    * 未配置、或 `BILLING_ENFORCE_HOLD` 未开——那都是 new-api 还在替我们扣钱时期的产物。
@@ -54,22 +59,31 @@ export class GenerationJobsController {
    *
    * <p>地址缺失由 {@link sharedBillingClient} 内的 `billingEndpoint` 当场抛
    * （并已在启动期拦过一道），所以这里不需要判空。
+   *
+   * <p>release 与 hold **成对**（见 {@link createBillingRelease}）：预扣成功之后事务才失败时，
+   * 只有它能把那笔冻结退掉，否则会留下一笔没有对应任务的预留。
    */
-  private billingHoldDep?: ReturnType<typeof createBillingHold>;
+  private billingDep?: { hold: BillingHold; release: BillingRelease };
 
-  private billingHold() {
-    if (this.billingHoldDep === undefined) {
-      this.billingHoldDep = createBillingHold({
-        client: sharedBillingClient(),
-        resolveTier: (userId) => this.identity.resolveTier(userId),
-        logger,
-      });
+  private billing() {
+    if (this.billingDep === undefined) {
+      this.billingDep = {
+        hold: createBillingHold({
+          client: sharedBillingClient(),
+          resolveTier: (userId) => this.identity.resolveTier(userId),
+          logger,
+        }),
+        release: createBillingRelease({
+          publish: publishBillingJobFailed,
+          logger,
+        }),
+      };
     }
-    return this.billingHoldDep;
+    return this.billingDep;
   }
 
   /**
-   * 报价依赖（懒建一次）。与 {@link billingHold} 同一个客户端、同一个 `resolveTier`
+   * 报价依赖（懒建一次）。与 {@link billing} 同一个客户端、同一个 `resolveTier`
    * —— 预览价与实扣价必须出自同一套规格归一与同一个等级解析。
    *
    * <p>与预扣不同的一点：这里**允许降级**。`sharedBillingClient()` 在地址缺失时会抛，
@@ -148,7 +162,7 @@ export class GenerationJobsController {
     @Headers("authorization") authorization?: string,
   ) {
     const internal = sealProviderCredential(authorization);
-    const holdDep = this.billingHold();
+    const billing = this.billing();
     const result = await handleCreateGenerationJob(
       user.userId,
       projectId,
@@ -161,8 +175,8 @@ export class GenerationJobsController {
         canvas: this.canvas,
         assets: this.command.assets,
         materialGate: this.buildMaterialGate(user.userId, authorization),
-        // 预扣必然存在（见 billingHold 的说明），不再做条件展开
-        billingHold: holdDep,
+        // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
+        billing,
       },
       internal,
     );

@@ -617,6 +617,43 @@ model topup_tiers {
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
+// ===== 充值订单（blue_whale 侧；支付执行在 blue-whale-pay 的杭州银行聚合主扫渠道） =====
+//
+// 到账积分在下单时刻冻结（credits/credits_per_yuan）：换算率是定价目录的配置项、可改，
+// 用户按「N 积分」付了钱之后改口径不能反悔。status=paid 是「积分已发放」的唯一判据。
+model recharge_orders {
+  id               BigInt    @id @default(autoincrement())
+  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  user_id          BigInt
+  tier_id          BigInt
+  amount_fen       BigInt
+  credits          BigInt
+  credits_per_yuan Int
+  status           String    @default("pending") @db.VarChar(16)
+  paid_at          DateTime? @db.DateTime(0)
+  grant_lot_id     BigInt?
+  last_query_at    DateTime? @db.DateTime(0)
+  notify_count     Int       @default(0)
+  gmt_create       DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified     DateTime  @default(now()) @db.DateTime(0)
+  version          Int       @default(0)
+  is_delete        Int       @default(0) @db.TinyInt
+}
+
+// ===== 系统设置（管理端可配；按模块整行存一份快照） =====
+//
+// is_secret=1 的行必须是密文（AES-256-GCM），密钥只在进程环境变量里——
+// 库与密钥分开存放，只拿到库也读不出凭证。
+model system_settings {
+  setting_key   String   @id @db.VarChar(64)
+  setting_value String   @db.Text
+  is_secret     Boolean  @default(false)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+}
+
 // ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
 
 model admin_operation_logs {

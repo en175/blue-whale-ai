@@ -21,6 +21,9 @@ export interface BillingHoldContext {
   input: Record<string, unknown>;
 }
 
+/** 预扣依赖的成品形状（装配层注入给 handler 的那个回调）。 */
+export type BillingHold = (ctx: BillingHoldContext) => Promise<void>;
+
 export interface BillingHoldDeps {
   client: BillingClient;
   /** 用户等级（identity 域）。取不到时返回 free —— 保守方向：不打折，不会多让利 */
@@ -28,9 +31,7 @@ export interface BillingHoldDeps {
   logger?: { warn: (message: string) => void };
 }
 
-export function createBillingHold(
-  deps: BillingHoldDeps,
-): (ctx: BillingHoldContext) => Promise<void> {
+export function createBillingHold(deps: BillingHoldDeps): BillingHold {
   return async (ctx) => {
     let tier = 'free';
     try {

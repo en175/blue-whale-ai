@@ -11,6 +11,7 @@ import { AdminTopupTiersController } from "./topup-tiers.controller.js";
 import { AdminUserRolesController } from "./user-roles.controller.js";
 import { AdminUsersController } from "./users.controller.js";
 import { AdminAssetsController } from "./assets.controller.js";
+import { AdminSettingsController } from "./settings.controller.js";
 
 @Module({
   controllers: [
@@ -26,6 +27,7 @@ import { AdminAssetsController } from "./assets.controller.js";
     AdminTemplateImagesController,
     AdminHomepageHeroesController,
     AdminAssetsController,
+    AdminSettingsController,
   ],
 })
 export class AdminModule {}

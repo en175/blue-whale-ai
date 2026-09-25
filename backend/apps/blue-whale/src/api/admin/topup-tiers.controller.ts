@@ -12,11 +12,12 @@ import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { TierAuditService } from "@lib/shared/topup-tier/tier-audit.service.js";
 import {
-  deriveTierAmount,
   parseTierDiscount,
   parseTierOriginalPrice,
 } from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { deriveCredits } from "@lib/shared/recharge/recharge.service.js";
+import { fetchCreditsPerYuan } from "@lib/shared/billing/billing-admin-client.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
 
@@ -87,7 +88,7 @@ export class AdminTopupTiersController {
     const name = typeof body.name === "string" ? body.name : "";
     try {
       const tier = await this.topupTier.create({
-        amount: deriveTierAmount(originalPrice),
+        amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
         originalPrice,
         discount,
         ...(name ? { name } : {}),
@@ -181,7 +182,7 @@ export class AdminTopupTiersController {
       const tier = await this.topupTier.update(id, {
         ...(originalPrice !== null && {
           originalPrice,
-          amount: deriveTierAmount(originalPrice),
+          amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
         }),
         ...(discount !== undefined && { discount }),
         ...(typeof body.name === "string" && { name: body.name }),

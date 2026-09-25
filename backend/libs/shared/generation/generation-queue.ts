@@ -1,6 +1,12 @@
 import { Producer } from "rocketmq-client-nodejs";
 
 import {
+  closeRocketMqProducer,
+  getStartedRocketMqProducer,
+  loadRocketMqConfig,
+} from "@lib/infra/mq/rocketmq-producer.js";
+
+import {
   AUDIO_GENERATION_TAG,
   AUDIO_MIX_TAG,
   AUDIO_SPEED_TAG,
@@ -47,30 +53,6 @@ export type GenerationQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
 };
 
-/** 只含连接参数：topic / tag **不是配置项**，两侧都无 env 覆盖——它们是
- *  `queue.constants.ts` 的编译期常量（与 worker-java `GenerationMqRoute` 同值），
- *  故部署环境里残留的 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG` 静默忽略（无绑定目标）。 */
-export type RocketMqConfig = {
-  /** gRPC proxy 端点（如 115.190.244.91:8081）。 */
-  endpoints: string;
-  sslEnabled: boolean;
-  accessKey?: string;
-  accessSecret?: string;
-};
-
-/** 加载 RocketMQ 连接配置。生产火山实例：AK/SK + sslEnabled=false（5.x 不支持 SSL）；测试环境裸连。 */
-export function loadRocketMqConfig(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): RocketMqConfig {
-  const accessKey = env.ROCKETMQ_ACCESS_KEY;
-  const accessSecret = env.ROCKETMQ_SECRET_KEY;
-  return {
-    endpoints: env.ROCKETMQ_ENDPOINTS ?? "",
-    sslEnabled: env.ROCKETMQ_SSL_ENABLED === "true",
-    ...(accessKey && accessSecret ? { accessKey, accessSecret } : {}),
-  };
-}
-
 /** RocketMQ 适配器：把 Producer 包成 GenerationQueueProducer 端口。
  *  topic 恒为 {@link GENERATION_TASK_QUEUE}（编译期常量，读自本模块，不接受覆盖）；
  *  tag 由调用方传入本类任务的常量（六类任务各一）。
@@ -90,45 +72,6 @@ export function createRocketMqGenerationProducer(
       });
     },
   };
-}
-
-let rocketMqProducer: Producer | null = null;
-let rocketMqStartup: Promise<Producer> | null = null;
-
-/** 懒建 + 懒启动的 RocketMQ Producer 单例；启动失败重置，下次调用重试。 */
-async function getStartedRocketMqProducer(
-  config: RocketMqConfig,
-): Promise<Producer> {
-  if (!config.endpoints) {
-    throw new Error(
-      "未配置 ROCKETMQ_ENDPOINTS（测试环境 gRPC 端点，如 115.190.244.91:8081）",
-    );
-  }
-  if (!rocketMqStartup) {
-    const producer = new Producer({
-      endpoints: config.endpoints,
-      namespace: "",
-      sslEnabled: config.sslEnabled,
-      ...(config.accessKey && config.accessSecret
-        ? {
-            sessionCredentials: {
-              accessKey: config.accessKey,
-              accessSecret: config.accessSecret,
-            },
-          }
-        : {}),
-    });
-    rocketMqProducer = producer;
-    rocketMqStartup = producer
-      .startup()
-      .then(() => producer)
-      .catch((error) => {
-        rocketMqProducer = null;
-        rocketMqStartup = null;
-        throw error;
-      });
-  }
-  return rocketMqStartup;
 }
 
 /** 视频 job 入队（producer 侧入口）。rocketmq 唯一驱动。 */
@@ -357,16 +300,6 @@ export async function enqueueVideoFrameInterpolationJob(
   ).enqueue(jobId, options);
 }
 
-export async function closeGenerationQueue(): Promise<void> {
-  const startup = rocketMqStartup;
-  rocketMqProducer = null;
-  rocketMqStartup = null;
-  if (startup) {
-    try {
-      const producer = await startup;
-      await producer.shutdown();
-    } catch {
-      // 启动失败则无连接可关
-    }
-  }
-}
+/** 关掉共享的 RocketMQ 连接（未启动过则无事发生）。连接本体归 `@lib/infra/mq`，
+ *  这里只保留入队侧沿用的名字。 */
+export const closeGenerationQueue = closeRocketMqProducer;
