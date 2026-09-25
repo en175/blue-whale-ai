@@ -21,8 +21,20 @@ export interface AdminJobRecord {
   status: string;
   /** 0–100 */
   progress: number;
-  /** 实际调用的上游厂商；未派发为 null */
-  provider: string | null;
+  /**
+   * 这次任务用的模型（`generation_jobs.input.model_id`）；没有模型的任务（免费工具族）为 null。
+   *
+   * <p>⚠️ 只带 model 这一项，**不带整份 input**：input 里有提示词、素材 id、规格参数，
+   *    为了一列把整份搬到列表上，接口体积会跟着 input 的结构一起长。
+   */
+  model_id: string | null;
+  /**
+   * 模型的展示名（能力表 `generation_model_capability.model_label`）。
+   *
+   * <p>`null` = 能力表里查不到这个 model_id（下架了、或本来就只在目录里配了价）。
+   *    展示口径：**有展示名用展示名，否则原样显示 `model_id`** —— 不要自己拼一个名字。
+   */
+  model_label: string | null;
   retry_count: number;
   created_at: string;
   updated_at: string;

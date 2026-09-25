@@ -38,6 +38,20 @@ export class BillingAdminError extends Error {
   }
 }
 
+/**
+ * 目录文档被 billing **拒绝**（编译不过 / 不是合法 JSON）。
+ *
+ * <p>与 {@link BillingAdminError} 分开，因为处置方向相反：那个是「billing 出问题了，等它好」，
+ * 这个是「**文档写错了，改文档**」——把编不过的目录当成服务故障，运维会去重启一个没坏的服务，
+ * 而真正的错在眼前那份 JSON 里。所以这条必须把 billing 的原话（哪条规则、哪个维度）带上。
+ */
+export class CatalogRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogRejectedError";
+  }
+}
+
 /** billing 管理端地址（去掉尾部斜杠）。未配置即抛。 */
 export function billingAdminUrl(env: NodeJS.ProcessEnv = process.env): string {
   const raw = (env[BILLING_ADMIN_URL_ENV] ?? "").trim();
@@ -50,12 +64,56 @@ export function billingAdminUrl(env: NodeJS.ProcessEnv = process.env): string {
   return raw.replace(/\/+$/, "");
 }
 
-/* ---------- 定价目录：换算率 ---------- */
+/* ---------- 定价目录：读 / 发布 ---------- */
 
-/** `GET /admin/catalogs/active` 的回包。`catalogVersion = -1` 表示**没有生效的目录**。 */
-interface ActiveCatalogResponse {
-  catalogVersion?: number;
-  creditsPerYuan?: number;
+/**
+ * `GET /admin/catalogs/active` 的回包。
+ *
+ * <p>`catalogVersion = -1` 表示**没有生效的目录**；此时 `document` 是空串
+ * （与换算率同为 -1 同一个口径：不编造内容）。
+ */
+export interface ActiveCatalog {
+  catalogVersion: number;
+  /** 发布时对**提交文本**取的 SHA-256。⚠️ 与下面 `document` 的 hash 不相等，见其注释 */
+  documentHash: string;
+  /** 本版生效的规则条数 */
+  ruleCount: number;
+  /** 1 元 = 多少积分；没有生效目录时 -1 */
+  creditsPerYuan: number;
+  /**
+   * 落库的目录文档文本。管理端「读回来改一改再整份发布」的起点。
+   *
+   * <p>⚠️ 它是 MySQL JSON 列的规范化形态，**不是**当初提交的那串字节 ——
+   * 判断「内容改没改」必须解析成对象比，比文本会让一次没改过的保存凭空多出版本。
+   */
+  document: string;
+}
+
+/** 回包的宽容形态：对面是另一个进程，字段缺了不该在解析处炸，交给调用方按口径兜。 */
+type ActiveCatalogResponse = Partial<ActiveCatalog>;
+
+/**
+ * 读当前生效的定价目录（含文档文本）。
+ *
+ * <p>与 {@link fetchCreditsPerYuan} 打同一个端点，区别只在**没有生效目录时怎么办**：
+ * 充值路径取不到换算率就必须停（报不出价就别收钱），而管理端页面要能显示
+ * 「还没发布过任何目录」并让运营从零建一份 —— 所以这条**不抛**，
+ * 把 `catalogVersion = -1` 原样交给调用方判断。
+ */
+export async function fetchActiveCatalog(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ActiveCatalog> {
+  const data = await request<ActiveCatalogResponse>("/admin/catalogs/active", {
+    method: "GET",
+    env,
+  });
+  return {
+    catalogVersion: data.catalogVersion ?? -1,
+    documentHash: data.documentHash ?? "",
+    ruleCount: data.ruleCount ?? 0,
+    creditsPerYuan: data.creditsPerYuan ?? -1,
+    document: data.document ?? "",
+  };
 }
 
 /**
@@ -70,17 +128,72 @@ interface ActiveCatalogResponse {
 export async function fetchCreditsPerYuan(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  const data = await request<ActiveCatalogResponse>("/admin/catalogs/active", {
-    method: "GET",
-    env,
-  });
-  const rate = data.creditsPerYuan ?? -1;
+  const rate = (await fetchActiveCatalog(env)).creditsPerYuan;
   if (!Number.isInteger(rate) || rate <= 0) {
     throw new BillingAdminConfigError(
       `定价目录没有生效版本（creditsPerYuan=${rate}）：先发布一版目录再开充值`,
     );
   }
   return rate;
+}
+
+/** 发布目录的回包。`creditsPerYuan` 一并回来，运营不必再查一次库才知道发对了没有。 */
+export interface PublishCatalogResult {
+  catalogVersion: number;
+  documentHash: string;
+  ruleCount: number;
+  creditsPerYuan: number;
+}
+
+export interface PublishCatalogInput {
+  /** 目录文档**文本**（不是对象）。原样作为请求体发出去，理由见下面注释 */
+  document: string;
+  /** 谁发的，写进目录行的 `published_by`。事后要能回答「这版价是谁改的」 */
+  publishedBy: string;
+  note?: string;
+}
+
+/**
+ * 发布一份定价目录（`POST /admin/catalogs`）。
+ *
+ * <p>⚠️ **请求体就是文档文本本身**，不是包一层的 `{"document": "..."}`：
+ *    billing 那边存的是原文、对它取 hash，包一层就等于多一道「转义再解析」，
+ *    出问题就无法与提交的内容逐字节比对。所以这里收 `string` 而不是 `object` ——
+ *    序列化只发生一次（在调用方），中间没有任何人重新序列化它。
+ *
+ * @throws CatalogRejectedError 文档被拒（非法 JSON / 编译不过）—— 这是**改文档**的问题，
+ *         不是等服务恢复，所以错误类型与 {@link BillingAdminError} 分开
+ */
+export async function publishCatalog(
+  input: PublishCatalogInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<PublishCatalogResult> {
+  const params = new URLSearchParams({ publishedBy: input.publishedBy });
+  if (input.note) params.set("note", input.note);
+
+  const response = await send(`/admin/catalogs?${params.toString()}`, {
+    method: "POST",
+    body: input.document,
+    env,
+  });
+  if (response.status === 400) {
+    // 编译是发布时**唯一**的校验时机（billing 侧），所以对面那句话就是「哪儿配错了」：
+    // 丢掉它，运营看到的只剩「HTTP 400」，而能自己修的信息恰好只有这一句
+    const detail = await errorDetail(response);
+    throw new CatalogRejectedError(`目录被拒${detail}`);
+  }
+  if (!response.ok) {
+    throw new BillingAdminError(
+      `发布定价目录失败：billing 管理端返回 HTTP ${response.status}${await errorDetail(response)}`,
+    );
+  }
+  const data = (await response.json()) as Partial<PublishCatalogResult>;
+  return {
+    catalogVersion: data.catalogVersion ?? -1,
+    documentHash: data.documentHash ?? "",
+    ruleCount: data.ruleCount ?? 0,
+    creditsPerYuan: data.creditsPerYuan ?? -1,
+  };
 }
 
 /* ---------- 账本：发放 ---------- */

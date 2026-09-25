@@ -186,8 +186,9 @@ class SettlementServiceTest {
                 1, "CNY", 15,
                 Map.of(MODEL, Map.of(TASK, rule)),
                 null);
+        // 第三个参数是落库原文：只有管理端读它（读回来改一改再发布），本用例不碰，占位即可
         when(catalogs.loadVersion(1)).thenReturn(new CatalogRepository.LoadedCatalog(
-                1, "hash", document, CatalogCompiler.compile(document), Instant.now()));
+                1, "hash", "{}", document, CatalogCompiler.compile(document), Instant.now()));
     }
 
     /** 一笔未决预留：冻结 {@code reservedCredits}，折扣 10000（原价）。 */

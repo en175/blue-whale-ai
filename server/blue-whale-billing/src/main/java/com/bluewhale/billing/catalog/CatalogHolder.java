@@ -84,6 +84,24 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
     }
 
     /**
+     * 当前生效目录的**文本**（落库的那份）。
+     *
+     * <p>管理端「读回来改一改再整份发布」从这里取内容 —— 取库里的文本而不是把
+     * {@link CatalogDocument} 序列化回去，是因为后者会丢掉服务端不认识的字段
+     * （那正是宽容解析留下来的向前兼容空间）。
+     *
+     * <p>⚠️ 该文本是 MySQL JSON 列的规范化形态，**不是**发布时提交的那串字节，
+     * 因此它与 {@link #currentDocumentHash()} 不对应（hash 是对提交文本取的）。
+     * 调用方要判断「内容改没改」请比解析后的对象。
+     *
+     * @return 无生效目录时返回空串（与 {@link #currentVersion()} 的 -1 同口径：不编造内容）
+     */
+    public String currentDocumentJson() {
+        var loaded = current.get();
+        return loaded == null ? "" : loaded.documentJson();
+    }
+
+    /**
      * 当前生效目录的折扣策略（叠加方式 + 底线）。
      *
      * <p>折扣规则本身在两张独立 live 表；这里只取「怎么叠加」这个策略——

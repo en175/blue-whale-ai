@@ -17,7 +17,12 @@ public record CatalogDocument(
         int schemaVersion,
         String currency,
         /** ★ 1 元 = 多少积分（元 → 积分的换算率）。**这是目录的配置项，不是硬编码常量**：
-         *  与目录一起版本化，改价不影响已提交任务（结算按 job 冻结的版本复现）。
+         *  与目录一起版本化，所以口径的每一次变化都能追溯到「哪个版本改的」，也随时可整体回滚。
+         *
+         *  <p>⚠️ 它只作用于**充值**（到账积分 = 原价 × 本值，且在下单时刻冻结进订单）。
+         *  生成任务的计价与它无关（单价本身就是 mc），所以改它不影响任何已提交的任务 ——
+         *  详见 {@code CatalogCompiler#compileCreditsPerYuan} 的注释。
+         *
          *  合法区间见 {@link #MIN_CREDITS_PER_YUAN} ~ {@link #MAX_CREDITS_PER_YUAN}，编译期校验。 */
         int creditsPerYuan,
         /** modelId → taskType → 规则 */
@@ -48,7 +53,7 @@ public record CatalogDocument(
      * @param usageSemantic   仅文本/多模态用：{@code openai} | {@code claude}。本期不启用
      * @param baseUnit        ★ 基准维度键，如 {@code usage.seconds}
      * @param basePrice       ★ 基准单价：常数或按轴查表
-     * @param dims            按数量加权的其他维度 → **万分比**（4000 = 4.0 倍）
+     * @param dims            按数量加权的其他维度 → **万分比**（10000 = 1 倍，4000 = 0.4 倍）
      * @param multipliers     整单连乘的倍率 → **万分比**（12000 = 1.2 倍）
      * @param unitDenominator 「每多少个单位多少钱」：1000000 = 每百万 token，1 = 每秒/每张/每次
      * @param minCredits      下限（整数积分）

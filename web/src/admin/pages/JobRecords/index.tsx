@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import {
   adminJobRecordsOptions,
+  type AdminJobRecord,
   type AdminJobRecordQuery,
 } from '@/api/adminJobRecords';
 import { isApiError } from '@/api/http';
@@ -34,6 +35,18 @@ import {
 const PAGE_SIZE = 20;
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
+
+/**
+ * 模型列的显示文本。
+ *
+ * ⚠️ 口径是「**有展示名用展示名，没有就原样显示 model_id，都没有才是「—」**」：
+ *    - 展示名（中文）维护在 `generation_model_capability.model_label`，只认它，不在这里拼名字
+ *      （拼出来的名字与模型列表页对不上，运营会以为是两个模型）；
+ *    - 查不到展示名的（模型下架了、只在定价目录里配过价）显示内部 id —— 它至少能拿去搜、
+ *      去对配置，比一个「未知模型」有用；
+ *    - 没有模型的任务（免费工具族的抠图、混音一类）显示「—」，**不是空串、更不是 undefined**。
+ */
+const modelText = (row: AdminJobRecord) => row.model_label ?? row.model_id ?? '—';
 
 /** 任务状态全集（对齐 web/src/api/jobs.ts 的 JobStatus，另加扇出任务的 partially_succeeded）。 */
 const STATUS_LABELS: Record<string, string> = {
@@ -187,9 +200,9 @@ export default function JobRecords() {
             <th>用户 ID</th>
             <th>项目 ID</th>
             <th>类型</th>
+            <th>模型</th>
             <th>状态</th>
             <th>进度</th>
-            <th>厂商</th>
             <th>重试</th>
             <th>创建时间</th>
             <th>更新时间</th>
@@ -233,13 +246,13 @@ export default function JobRecords() {
               <td>
                 <Badge tone="neutral">{row.type}</Badge>
               </td>
+              <td>{modelText(row)}</td>
               <td>
                 <Badge dot tone={STATUS_TONES[row.status] ?? 'neutral'}>
                   {STATUS_LABELS[row.status] ?? row.status}
                 </Badge>
               </td>
               <td>{row.progress}%</td>
-              <td>{row.provider ?? '—'}</td>
               <td>{row.retry_count}</td>
               <td>{fmtTime(row.created_at)}</td>
               <td>{fmtTime(row.updated_at)}</td>

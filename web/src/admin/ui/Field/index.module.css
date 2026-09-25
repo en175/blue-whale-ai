@@ -1,0 +1,19 @@
+/* Field：标签 + 控件 + 说明 的纵向排布。
+   只有间距与文字层级，没有任何颜色/边框 —— 控件长什么样由控件自己决定。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 13px;
+  color: var(--admin-text);
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--admin-text-faint);
+}

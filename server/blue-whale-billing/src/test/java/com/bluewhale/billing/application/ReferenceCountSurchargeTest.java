@@ -117,8 +117,9 @@ class ReferenceCountSurchargeTest {
 
         CatalogDocument document = new CatalogDocument(
                 1, "CNY", 15, Map.of(MODEL, Map.of(TASK, taskRule())), null);
+        // 第三个参数是落库原文：只有管理端读它，本用例不碰，占位即可
         when(catalogs.loadVersion(1)).thenReturn(new CatalogRepository.LoadedCatalog(
-                1, "hash", document, CatalogCompiler.compile(document), Instant.now()));
+                1, "hash", "{}", document, CatalogCompiler.compile(document), Instant.now()));
 
         settlement = new SettlementService(catalogs, reservations, credits);
     }

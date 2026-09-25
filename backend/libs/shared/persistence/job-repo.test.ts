@@ -228,10 +228,23 @@ describe("createJobRepo.listForAdmin", () => {
     error: { code: "unsupported_input" },
   };
 
-  function buildPrisma() {
+  const CAPS = [
+    { model_id: "doubao-seedance-2-5-260628", model_label: "豆包 Seedance 2.5" },
+  ];
+
+  function buildPrisma(caps: { model_id: string; model_label: string }[] = []) {
     const count = vi.fn().mockResolvedValue(1);
     const findMany = vi.fn().mockResolvedValue([ROW]);
-    return { count, findMany, repo: createJobRepo({ generation_jobs: { count, findMany } } as never) };
+    const capabilityFindMany = vi.fn().mockResolvedValue(caps);
+    return {
+      count,
+      findMany,
+      capabilityFindMany,
+      repo: createJobRepo({
+        generation_jobs: { count, findMany },
+        generation_model_capability: { findMany: capabilityFindMany },
+      } as never),
+    };
   }
 
   it("一个筛选条件都不传 = 全站列表：where 里**没有**那些键", async () => {
@@ -297,5 +310,99 @@ describe("createJobRepo.listForAdmin", () => {
     const page = await repo.listForAdmin({ page: 1, size: 20 });
 
     expect(page.records[0]).toMatchObject({ project_id: "", stored_error: null });
+  });
+
+  /* ---------- 模型列（IK：任务记录不再显示厂商，有模型就显示模型） ---------- */
+
+  it("从 input 只取 model_id，整份 input 不上列表", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        ...ROW,
+        input: {
+          model_id: "doubao-seedance-2-5-260628",
+          prompt: "一句提示词",
+          parameters: { duration: 5 },
+        },
+      },
+    ]);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    // 提示词、规格都留在库里：为了一列把整份 input 搬到列表上，接口体积会跟着 input 的结构长
+    expect(page.records[0]).not.toHaveProperty("input");
+    expect(page.records[0]?.model_id).toBe("doubao-seedance-2-5-260628");
+  });
+
+  it("能力表里查得到就用展示名（中文名由能力表维护，这里不另造一个）", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { ...ROW, input: { model_id: "doubao-seedance-2-5-260628" } },
+    ]);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue(CAPS) },
+    } as never);
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(page.records[0]).toMatchObject({
+      model_id: "doubao-seedance-2-5-260628",
+      model_label: "豆包 Seedance 2.5",
+    });
+  });
+
+  it("能力表里查不到 → model_label 为 null（由前端原样显示 model_id，不编名字）", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { ...ROW, input: { model_id: "已下架的模型" } },
+    ]);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(page.records[0]).toMatchObject({ model_id: "已下架的模型", model_label: null });
+  });
+
+  it("没有 model_id 的任务（免费工具族）两个字段都是 null，不是空串", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ ...ROW, input: { source_node_id: "n1" } }]);
+    const capabilityFindMany = vi.fn().mockResolvedValue(CAPS);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
+      generation_model_capability: { findMany: capabilityFindMany },
+    } as never);
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(page.records[0]).toMatchObject({ model_id: null, model_label: null });
+    // 一个 model_id 都没收到就不该去查能力表
+    expect(capabilityFindMany).not.toHaveBeenCalled();
+  });
+
+  it("整页的模型名一次批量查（不是一行一次）", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { ...ROW, id: 1n, input: { model_id: "a" } },
+      { ...ROW, id: 2n, input: { model_id: "b" } },
+      { ...ROW, id: 3n, input: { model_id: "a" } },
+    ]);
+    const capabilityFindMany = vi.fn().mockResolvedValue([]);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(3), findMany },
+      generation_model_capability: { findMany: capabilityFindMany },
+    } as never);
+
+    await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(capabilityFindMany).toHaveBeenCalledTimes(1);
+    // 去重后只查这两个
+    expect(capabilityFindMany).toHaveBeenCalledWith({
+      where: { model_id: { in: ["a", "b"] } },
+      select: { model_id: true, model_label: true },
+      orderBy: { id: "asc" },
+    });
   });
 });

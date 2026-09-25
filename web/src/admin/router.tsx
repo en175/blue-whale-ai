@@ -8,6 +8,7 @@ import AdminLayout from './layouts/AdminLayout';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const RechargePlans = lazy(() => import('./pages/RechargePlans'));
+const ModelBilling = lazy(() => import('./pages/ModelBilling'));
 const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
 const ConsumptionRecords = lazy(() => import('./pages/ConsumptionRecords'));
 const JobRecords = lazy(() => import('./pages/JobRecords'));
@@ -35,6 +36,7 @@ export const adminRoutes = {
   children: [
     { index: true, element: <L><Dashboard /></L> },
     { path: 'recharge-plans', element: <L><RechargePlans /></L> },
+    { path: 'billing', element: <L><ModelBilling /></L> },
     { path: 'recharge-records', element: <L><RechargeRecords /></L> },
     { path: 'consumption-records', element: <L><ConsumptionRecords /></L> },
     { path: 'job-records', element: <L><JobRecords /></L> },

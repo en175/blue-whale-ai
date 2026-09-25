@@ -72,6 +72,7 @@ public class CatalogRepository {
         return new LoadedCatalog(
                 row.getCatalogVersion(),
                 row.getDocumentHash(),
+                row.getDocument(),
                 document,
                 CatalogCompiler.compile(document),
                 DbTime.fromDb(row.getPublishedAt()));
@@ -80,11 +81,23 @@ public class CatalogRepository {
     /**
      * 一次加载的完整结果。
      *
-     * @param index 编译后的索引：{@code modelId/taskType → CompiledRule}
+     * @param documentJson **落库的目录文本**，与 {@code document}（解析后的形态）并存。
+     *                     两者不是冗余：管理端要「读回来改一改再整份发布」，而发布接口收的是
+     *                     文本（见 {@code CatalogPublisher}）。若只留解析后的 {@link CatalogDocument}，
+     *                     读回来再序列化会**丢掉服务端不认识的字段**（那些字段正是靠
+     *                     {@code FAIL_ON_UNKNOWN_PROPERTIES=false} 容忍下来、留给未来版本的），
+     *                     一次「只改一个单价」的无害操作就会把它们静默删掉。
+     *                     <p>⚠️ 但**它不等于发布时提交的那串字节**：{@code document} 列是 MySQL 的
+     *                     JSON 类型，读回来是它自己的规范化文本（键按长度重排、冒号后补空格）。
+     *                     所以 {@code documentHash}（发布时对**提交文本**取的 SHA-256）与
+     *                     {@code sha256(documentJson)} 不相等。判定「内容有没有变」必须比
+     *                     解析后的对象，比文本会把一次没改过的保存变成一个新版本。
+     * @param index        编译后的索引：{@code modelId/taskType → CompiledRule}
      */
     public record LoadedCatalog(
             int version,
             String documentHash,
+            String documentJson,
             CatalogDocument document,
             Map<String, com.bluewhale.billing.pricing.CompiledRule> index,
             Instant publishedAt
