@@ -147,4 +147,18 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
      剩下的 new-api 调用只有**上游本职**：text-completions / agent 模型网关 / 素材（真人人像库）/
      技能格式化 / 定价目录。
      ⚠️ 若严格执行「只有 worker 与素材库能调 new-api」，这几类都要另作安排——需要一个明确决定。
+  10. **billing 的两个 MQ topic 必须预建**（2026-09-25 实测）—— RocketMQ 的**消费者不会自动建
+      topic**，订阅不存在的 topic 会以 `No topic route info` 失败，消费者 bean 造不出来，
+      **整个 billing 起不来**。52 的 broker 上实测**没有**这两个 topic。已记进
+      `.claude/skills/start-local-services` 的部署前清单。同一类问题还有个更隐蔽的：
+      **topic 名不能带点号**（RocketMQ 只收 `[%|a-zA-Z0-9_-]`），契约里原本叫
+      `generation.job.completed`，已改为 `generation-job-completed`。
+  11. **跨进程字段名对不上是静默的**（2026-09-25 实测复现，**已加守卫**）——
+      Jackson 对不上的字段名不报错、填默认值，于是 `jobId=0` 的消息会被当作
+      「无待结算预留」正常 ack：**钱永远冻着，既不重投也不进死信，日志里连 WARN 都没有**。
+      现在载荷缺 jobId/userId 即抛 → 重投 → 死信 → 红灯。
+  12. **「按成功槽计费」此前只是注释**（2026-09-25）—— `events.proto` 写明
+      `succeeded_slots` 决定 actualCredits，而 `SettlementService` 从未读它；
+      worker 又恒发 `usage: []`，于是 `partially_succeeded` 按**全额**结算（偏平台）。
+      修复见对应提交。
 - 成立前提：切换顺序不可颠倒。**先打开真扣、后断 sk- 链** = 用户被扣两遍；**先断链、后接好计费** = 白嫖。
