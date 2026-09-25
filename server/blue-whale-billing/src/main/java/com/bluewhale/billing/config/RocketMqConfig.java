@@ -68,9 +68,9 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public JobEventConsumer jobEventConsumer(ClientConfiguration clientConfiguration,
                                              SettlementService settlement,
-                                             @Value("${billing.mq.topic-completed:generation.job.completed}")
+                                             @Value("${billing.mq.topic-completed:generation-job-completed}")
                                              String completedTopic,
-                                             @Value("${billing.mq.topic-failed:generation.job.failed}")
+                                             @Value("${billing.mq.topic-failed:generation-job-failed}")
                                              String failedTopic) throws Exception {
         return new JobEventConsumer(clientConfiguration, CONSUMER_GROUP,
                 completedTopic, failedTopic, settlement);

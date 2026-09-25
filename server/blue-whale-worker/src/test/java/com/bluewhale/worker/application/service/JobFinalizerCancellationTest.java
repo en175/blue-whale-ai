@@ -67,7 +67,7 @@ class JobFinalizerCancellationTest {
         finalizer.releaseHoldForCancelled("801");
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.failed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-failed");
         assertThat(sent.get(0)[1]).contains("\"jobId\":801").contains("\"userId\":42");
     }
 
@@ -92,6 +92,6 @@ class JobFinalizerCancellationTest {
 
         // 真被误调时它按 succeeded 结算 —— 与「取消却发了返还」相比，
         // 这条至少不会让平台白送一笔。断言它落在 completed 而不是 failed。
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.completed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
     }
 }

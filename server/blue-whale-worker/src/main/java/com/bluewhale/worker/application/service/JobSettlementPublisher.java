@@ -54,12 +54,12 @@ public class JobSettlementPublisher {
 
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
-    /** 走 {@code generation.job.completed}（触发结算）的状态。 */
+    /** 走 {@code generation-job-completed}（触发结算）的状态。 */
     private static final Set<String> SETTLED_STATUSES = Set.of(
             JobStatusEnum.SUCCEEDED.value(),
             JobStatusEnum.PARTIALLY_SUCCEEDED.value());
 
-    /** 走 {@code generation.job.failed}（触发全额返还）的状态。 */
+    /** 走 {@code generation-job-failed}（触发全额返还）的状态。 */
     private static final Set<String> REFUNDED_STATUSES = Set.of(
             JobStatusEnum.FAILED.value(),
             JobStatusEnum.CANCELLED.value());
@@ -72,8 +72,8 @@ public class JobSettlementPublisher {
         this.producer = producer;
         // 默认值与 billing 侧 consumer 的默认值成对（billing.mq.topic-completed/failed）；
         // 两边都改才算改，只改一边的表现是「事件发出去了但没人消费」——静默且致命。
-        this.completedTopic = env.getProperty("worker.billing.topic-completed", "generation.job.completed");
-        this.failedTopic = env.getProperty("worker.billing.topic-failed", "generation.job.failed");
+        this.completedTopic = env.getProperty("worker.billing.topic-completed", "generation-job-completed");
+        this.failedTopic = env.getProperty("worker.billing.topic-failed", "generation-job-failed");
     }
 
     /**
@@ -130,7 +130,7 @@ public class JobSettlementPublisher {
     }
 
     /**
-     * {@code generation.job.completed} 的载荷。
+     * {@code generation-job-completed} 的载荷。
      *
      * <p>{@code usage} 发**空数组**：worker 侧尚未按用量维度上报。billing 的
      * {@code SettlementService} 对空用量按**预扣额**结算——这正是媒介类任务
@@ -152,7 +152,7 @@ public class JobSettlementPublisher {
     }
 
     /**
-     * {@code generation.job.failed} 的载荷。
+     * {@code generation-job-failed} 的载荷。
      *
      * <p>{@code reason} 从 status_changed 的 {@code error} 里取——两条事件说的是
      * 同一件事，理由必须同源，否则运维看到的失败原因和用户看到的对不上。

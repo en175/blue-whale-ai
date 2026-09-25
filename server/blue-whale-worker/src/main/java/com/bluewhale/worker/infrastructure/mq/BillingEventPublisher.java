@@ -18,7 +18,7 @@ public interface BillingEventPublisher {
     /**
      * 发布一条领域事件。
      *
-     * @param topic billing 消费的 topic（{@code generation.job.completed} / {@code ...failed}）
+     * @param topic billing 消费的 topic（{@code generation-job-completed} / {@code ...failed}）
      * @param body  JSON 载荷，字段见 {@code events.proto}
      */
     void publish(String topic, String body);

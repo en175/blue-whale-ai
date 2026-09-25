@@ -98,8 +98,8 @@ billing:
   #    本地只想验 Hold：BILLING_MQ_ENABLED=false。
   mq:
     enabled: ${BILLING_MQ_ENABLED:true}
-    topic-completed: ${BILLING_MQ_TOPIC_COMPLETED:generation.job.completed}
-    topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation.job.failed}
+    topic-completed: ${BILLING_MQ_TOPIC_COMPLETED:generation-job-completed}
+    topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation-job-failed}
 
 # gRPC proxy 端点。键名与 worker 逐字相同，部署时不必记两套；凭证只走 env（不落库）。
 rocketmq:

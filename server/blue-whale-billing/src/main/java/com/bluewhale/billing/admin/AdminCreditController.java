@@ -108,7 +108,7 @@ public class AdminCreditController {
     /**
      * **手动全额返还**一个任务（运维工具）。
      *
-     * <p>任务失败本该由 {@code generation.job.failed} 触发；这里是给「事件丢了 / 进死信」
+     * <p>任务失败本该由 {@code generation-job-failed} 触发；这里是给「事件丢了 / 进死信」
      * 的情况兜底——钱冻在用户账上而任务早已失败，是最容易被投诉的那种状态。
      */
     @PostMapping("/jobs/{jobId}/refund")

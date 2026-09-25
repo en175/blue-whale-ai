@@ -56,7 +56,7 @@ class JobSettlementPublisherTest {
                 Map.of("status", "succeeded", "output_asset_ids", List.of("7", "8", "9")));
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.completed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
         JsonNode json = body(0);
         assertThat(json.get("jobId").asLong()).isEqualTo(101);
         assertThat(json.get("userId").asLong()).isEqualTo(42);
@@ -72,7 +72,7 @@ class JobSettlementPublisherTest {
         publisher.publishTerminal(job(102, 42, "partially_succeeded"),
                 Map.of("status", "partially_succeeded", "output_asset_ids", List.of("7")));
 
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.completed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-completed");
         assertThat(body(0).get("status").asText()).isEqualTo("partially_succeeded");
         assertThat(body(0).get("succeededSlots").asInt()).isEqualTo(1);
     }
@@ -94,7 +94,7 @@ class JobSettlementPublisherTest {
                 Map.of("status", "failed",
                         "error", Map.of("code", "1102", "message", "上游返回超时")));
 
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.failed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-failed");
         JsonNode json = body(0);
         assertThat(json.get("jobId").asLong()).isEqualTo(201);
         assertThat(json.get("userId").asLong()).isEqualTo(7);
@@ -107,7 +107,7 @@ class JobSettlementPublisherTest {
         publisher.publishTerminal(job(202, 7, "cancelled"), Map.of("status", "cancelled"));
 
         assertThat(sent).hasSize(1);
-        assertThat(sent.get(0)[0]).isEqualTo("generation.job.failed");
+        assertThat(sent.get(0)[0]).isEqualTo("generation-job-failed");
     }
 
     @Test
@@ -144,6 +144,21 @@ class JobSettlementPublisherTest {
         assertThatCode(() -> failing.publishTerminal(job(401, 1, "succeeded"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1"))))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("★ 默认 topic 名不含点号 —— RocketMQ 只收 [%|a-zA-Z0-9_-]，含点会让消费者起不来")
+    void 默认topic名合法() {
+        // 契约里原本叫 generation.job.completed / .failed（点号分隔，读起来很自然），
+        // 2026-09-25 本地起服务时以 BadRequestException 当场炸出来 ——
+        // 编译器不会说、单测不会红，只有进程真去连 broker 才知道。
+        String allowed = "^[%|a-zA-Z0-9_-]+$";
+        assertThat(sent).isEmpty();
+        publisher.publishTerminal(job(1, 1, "succeeded"), Map.of("status", "succeeded"));
+        publisher.publishTerminal(job(2, 1, "failed"), Map.of("status", "failed"));
+        assertThat(sent.get(0)[0]).matches(allowed);
+        assertThat(sent.get(1)[0]).matches(allowed);
+        assertThat(sent.get(0)[0]).isNotEqualTo(sent.get(1)[0]);
     }
 
     @Test

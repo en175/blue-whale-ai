@@ -18,7 +18,7 @@ public final class JobEventPayload {
     }
 
     /**
-     * {@code generation.job.completed} 的载荷 —— 触发**结算**。
+     * {@code generation-job-completed} 的载荷 —— 触发**结算**。
      *
      * @param status         {@code succeeded} | {@code partially_succeeded}
      * @param catalogVersion ★ 提交时冻结的版本，billing 按它复现定价，不按当前版本
@@ -71,7 +71,7 @@ public final class JobEventPayload {
         }
     }
 
-    /** {@code generation.job.failed} 的载荷 —— 触发**全额返还**。 */
+    /** {@code generation-job-failed} 的载荷 —— 触发**全额返还**。 */
     public record JobFailed(long jobId, long userId, String reason) {
 
         public JobFailed {

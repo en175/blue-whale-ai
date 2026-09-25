@@ -11,7 +11,7 @@ import "billing/v1/usage.proto";
 option java_package = "com.bluewhale.contracts.billing.v1";
 option java_multiple_files = true;
 
-// topic: generation.job.completed —— billing 消费后触发 **Settle**。
+// topic: generation-job-completed —— billing 消费后触发 **Settle**。
 message JobCompletedEvent {
   int64  job_id  = 1;
   int64  user_id = 2;
@@ -25,7 +25,7 @@ message JobCompletedEvent {
   int32  succeeded_slots = 6;
 }
 
-// topic: generation.job.failed —— billing 消费后触发 **Refund**（全额返还）。
+// topic: generation-job-failed —— billing 消费后触发 **Refund**（全额返还）。
 message JobFailedEvent {
   int64  job_id  = 1;
   int64  user_id = 2;
