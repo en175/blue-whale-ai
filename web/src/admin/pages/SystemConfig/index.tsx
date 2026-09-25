@@ -1,5 +1,5 @@
 /* ============================================
- * SystemConfig 系统设置：支付凭证安全配置·充值政策文案·限流参数
+ * SystemConfig 系统设置：上游凭证·支付凭证安全配置·充值政策文案·限流参数
  * 数据源 GET/PUT /api/admin/settings
  *
  * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
@@ -14,6 +14,7 @@ import {
   type SystemPolicy,
   type SystemRateLimit,
   type SystemSettings,
+  type SystemUpstream,
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import {
@@ -30,6 +31,7 @@ import {
 } from '../../ui';
 
 const TABS = [
+  { key: 'upstream', label: '上游凭证' },
   { key: 'cred', label: '支付凭证' },
   { key: 'policy', label: '充值政策文案' },
   { key: 'rate', label: '限流配置' },
@@ -48,7 +50,7 @@ const tabBodyStyle = {
 } as const;
 
 export default function SystemConfig() {
-  const [tab, setTab] = useState<TabKey>('cred');
+  const [tab, setTab] = useState<TabKey>('upstream');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -76,6 +78,12 @@ export default function SystemConfig() {
     await loadSettings();
   };
 
+  /** 上游凭证按 key 增量更新（与支付凭证同一条合并语义） */
+  const saveUpstream = async (key: keyof SystemUpstream, value: string) => {
+    await updateAdminSettings({ upstream: { [key]: value } });
+    await loadSettings();
+  };
+
   const savePolicy = async (policy: SystemPolicy) => {
     await updateAdminSettings({ policy });
     await loadSettings();
@@ -88,7 +96,10 @@ export default function SystemConfig() {
 
   return (
     <Page>
-      <PageHeader title="系统设置" subtitle="支付凭证安全配置 · 充值政策文案 · 限流参数" />
+      <PageHeader
+        title="系统设置"
+        subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数"
+      />
 
       <Tabs items={TABS} value={tab} onChange={(key) => setTab(key as TabKey)} />
 
@@ -96,12 +107,65 @@ export default function SystemConfig() {
         <Empty message="加载中…" />
       ) : (
         <>
+          {tab === 'upstream' && (
+            <UpstreamTab upstream={settings?.upstream ?? null} onSave={saveUpstream} />
+          )}
           {tab === 'cred' && <CredTab credentials={settings?.credentials ?? null} onSave={saveCredential} />}
           {tab === 'policy' && <PolicyTab policy={settings?.policy ?? null} onSave={savePolicy} />}
           {tab === 'rate' && <RateTab rateLimit={settings?.rateLimit ?? null} onSave={saveRateLimit} />}
         </>
       )}
     </Page>
+  );
+}
+
+/* ============ 上游凭证（new-api） ============ */
+
+/** 上游字段清单。
+ *  ⚠️ 只有 `new_api_key` 一项，且是**密**字段：它是全项目共用的一把 key，
+ *    backend 与 worker 都从这里取——改一处即全项目生效，不需要重新部署。
+ *
+ *  ⚠️ Agent 计费面的 `bwsvc_` 服务令牌**不在这里配**：它不是「我们发给上游的我们是谁」，
+ *    是服务之间的身份，走 new-api 另一套鉴权模型（按前缀分流），并进统一 key 会静默错账。 */
+const UPSTREAM_FIELDS: {
+  key: keyof SystemUpstream;
+  label: string;
+  hint: string;
+  secret: boolean;
+}[] = [
+  {
+    key: 'new_api_key',
+    label: '项目统一 key',
+    hint:
+      '全项目调用 new-api 共用这一把（登录后回注请求头、技能格式化、worker 素材跟进）。' +
+      '保存后立即生效，无需重启。',
+    secret: true,
+  },
+];
+
+function UpstreamTab({
+  upstream,
+  onSave,
+}: {
+  upstream: SystemUpstream | null;
+  onSave: (key: keyof SystemUpstream, value: string) => Promise<void>;
+}) {
+  return (
+    <div style={tabBodyStyle}>
+      <Alert tone="info">
+        这一把 key 是全项目共用的：backend 与 worker-java 都从这里取，改一处即全项目生效。
+      </Alert>
+      {UPSTREAM_FIELDS.map((f) => (
+        <CredCard
+          key={f.key}
+          label={f.label}
+          hint={f.hint}
+          secret={f.secret}
+          value={upstream?.[f.key] ?? ''}
+          onSave={(v) => onSave(f.key, v)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -165,11 +229,14 @@ function CredTab({
 /** 单个凭证卡片：回显服务端值（密字段为脱敏值），编辑态输入 + 保存走增量更新 */
 function CredCard({
   label,
+  hint,
   secret,
   value,
   onSave,
 }: {
   label: string;
+  /** 该字段说明（可省）。卡片标题下的一行散文，用来讲清「这玩意儿是给谁用的」。 */
+  hint?: string;
   /** 是否密文：决定脱敏回显、输入框类型与眼睛切换，以及加密存储提示 */
   secret: boolean;
   value: string;
@@ -216,6 +283,7 @@ function CredCard({
       }
     >
       <div>{value || '未配置'}</div>
+      {hint && <p style={{ margin: '8px 0 0' }}>{hint}</p>}
 
       {editing && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>

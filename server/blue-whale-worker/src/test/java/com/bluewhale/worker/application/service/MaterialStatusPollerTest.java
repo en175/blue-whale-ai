@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.config.SystemSettingEnvelopeVectors;
 import com.bluewhale.worker.domain.entity.MaterialAssetEntity;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient.MaterialStatusResult;
@@ -35,8 +36,8 @@ import static org.mockito.Mockito.*;
 class MaterialStatusPollerTest {
 
     private static final int MAX_AGE_MINUTES = 10;
-    /** 部署注入的项目级统一 key（不是任何用户的 sk-）。 */
-    private static final String UNIFIED_KEY = "sk-unified-upstream";
+    /** 项目级统一 key（不是任何用户的 sk-）——跨语言测试向量里的假值。 */
+    private static final String UNIFIED_KEY = SystemSettingEnvelopeVectors.FAKE_KEY;
 
     @Mock private MaterialAssetMapper assetMapper;
     @Mock private NewApiMaterialClient client;
@@ -54,8 +55,15 @@ class MaterialStatusPollerTest {
     @BeforeEach
     void setUp() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt())).thenReturn(List.of());
-        poller = new MaterialStatusPoller(assetMapper, new UpstreamCredential(UNIFIED_KEY), client,
+        poller = new MaterialStatusPoller(assetMapper, upstreamCredential(), client,
                 MAX_AGE_MINUTES);
+    }
+
+    /** 上游凭证读点：stub 掉「库里的那一行」，走真实的解封路径取到假 key。 */
+    private static UpstreamCredential upstreamCredential() {
+        return new UpstreamCredential(
+                key -> SystemSettingEnvelopeVectors.ENVELOPE,
+                SystemSettingEnvelopeVectors.FAKE_SECRET_HEX);
     }
 
     @Test

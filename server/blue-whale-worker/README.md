@@ -18,7 +18,7 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 **服务启动即消费全部 6 个 tag**：`video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（契约 §1 / §16）。不存在按 tag 的启停开关，也不存在「空配置只探活」形态：
 
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
-- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL` / `NEW_API_UPSTREAM_KEY`（上游网关地址与调用凭证）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关地址与凭证两项都由 `NewApiUpstreamConfig` 在装配期守卫（**地址的唯一读取点**）：`NEW_API_BASE_URL` 由 18 个客户端（17 个 `@Component` 构造器注入 + `RocketMqConfig` 手工 `@Bean` 的视频客户端）从同一个 `UpstreamBaseUrl` bean 取，缺/空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」；非空是载体自身的不变式）——收敛前它被 18 处各读各的（ADR-0114 决策 7，TS 侧同一收敛在 `new-api-egress.ts`）；`NEW_API_UPSTREAM_KEY` 是项目级统一 key（ADR-0114）——job 之内的调用用冻结在 `job.input.provider_credential` 的凭证，只有素材状态定时跟进（无 job 可借）需要这把部署注入的 key。
+- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL` / `SYSTEM_SETTINGS_SECRET`（上游网关地址与读凭证的主密钥）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关地址与凭证两项都由 `NewApiUpstreamConfig` 在装配期守卫（**地址的唯一读取点**）：`NEW_API_BASE_URL` 由 18 个客户端（17 个 `@Component` 构造器注入 + `RocketMqConfig` 手工 `@Bean` 的视频客户端）从同一个 `UpstreamBaseUrl` bean 取，缺/空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」；非空是载体自身的不变式）——收敛前它被 18 处各读各的（ADR-0114 决策 7，TS 侧同一收敛在 `new-api-egress.ts`）；上游调用凭证（项目级统一 key，ADR-0114）**已不在 env 里**——它是 `system_settings` 表 `upstream` 模块的一行，管理端「系统设置 → 上游凭证」维护，worker 直连该表读取并用 `SYSTEM_SETTINGS_SECRET` 解开信封（见 `SystemSettingMapper` 对 ADR-0113 例外口径的说明）。装配期只守主密钥（部署配置，缺了没有任何界面能补）；**key 本身是数据**，未配时 `MaterialStatusPoller` 一轮一次记 error 跳过，不 crash-loop——那个窗口的生产者是管理端，不是这里。job 之内的调用用冻结在 `job.input.provider_credential` 的凭证，只有素材状态定时跟进（无 job 可借）需要读这把配置里的 key。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
 - **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/generation-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
 - `GET /ready` 只返回 `{"status":"ready"}`。
@@ -67,7 +67,7 @@ curl localhost:4002/ready
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
 | `NEW_API_BASE_URL` | 是 | new-api 网关地址 | — |
-| `NEW_API_UPSTREAM_KEY` | 是 | 上游调用凭证：项目级统一 key（ADR-0114）。素材状态定时跟进没有 job 凭证可借，用它代打网关 | — |
+| `SYSTEM_SETTINGS_SECRET` | 是 | 解 `system_settings` 密文信封的主密钥（32 字节：64 位十六进制或 base64）。必须与库分开存放；缺它读不出上游凭证，装配期即失败 | — |
 | `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 | `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
@@ -80,7 +80,8 @@ curl localhost:4002/ready
 ### 启动行为
 
 - **无条件启动全部 6 个 tag 的消费者**（修正六：无按 tag 开关；`WORKER_ENABLED_TAGS` 已删除）。
-- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `NEW_API_UPSTREAM_KEY` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
+- 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `SYSTEM_SETTINGS_SECRET` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
+- 上游统一 key **不在 env 里**：管理端「系统设置 → 上游凭证」配一次，全项目共用（backend 与 worker 都读 `system_settings` 的 `upstream` 行）。改动在一轮素材跟进（默认 5s）内生效。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
 
 ### Docker 部署
@@ -91,7 +92,7 @@ docker build -t worker-java .
 docker run -e DATABASE_URL=mysql://... \
            -e ROCKETMQ_ENDPOINTS=... \
            -e NEW_API_BASE_URL=... \
-           -e NEW_API_UPSTREAM_KEY=... \
+           -e SYSTEM_SETTINGS_SECRET=... \
            -e VOLC_ACCESS_KEY_ID=... \
            -e VOLC_SECRET_ACCESS_KEY=... \
            -e VOLC_TOS_ENDPOINT=... \

@@ -1,7 +1,7 @@
 import { DomainError, SKILL_ERROR_SPECS } from "@lib/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleFormatSkillDraft } from "./skill-format.js";
+import { createSkillFormatDeps, handleFormatSkillDraft } from "./skill-format.js";
 
 const rules = "格式规则";
 const GOOD = `---\nname: 拆解短视频\ndescription: 一句话说明\n---\n\n正文。\n`;
@@ -54,5 +54,56 @@ describe("AI 格式化草稿", () => {
       rules,
     });
     expect(result).toMatchObject({ code: 200, data: { content: GOOD } });
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 依赖组装：地址读环境变量，凭证读**配置表**（所以这个函数是异步的）
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe("createSkillFormatDeps", () => {
+  const ENV_KEYS = ["SKILL_FORMAT_MODEL", "NEW_API_BASE_URL"] as const;
+
+  beforeEach(() => {
+    process.env.SKILL_FORMAT_MODEL = "gpt-test";
+    process.env.NEW_API_BASE_URL = "http://new-api:3006";
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) delete process.env[k];
+  });
+
+  it("★ 配了 → 组装出调用客户端（凭证来自配置表，不再是环境变量）", async () => {
+    const requireUpstreamKey = vi.fn(async () => "sk-from-config");
+
+    const deps = await createSkillFormatDeps({ requireUpstreamKey });
+
+    expect(deps).not.toBeNull();
+    expect(deps!.rules).toContain("SKILL.md");
+    expect(requireUpstreamKey).toHaveBeenCalled();
+  });
+
+  it("★ 凭证没配 → 返回 null（调用方翻成 503），**不带着空串去打上游**", async () => {
+    const deps = await createSkillFormatDeps({
+      requireUpstreamKey: async () => {
+        throw new Error("上游凭证未配置");
+      },
+    });
+
+    expect(deps).toBeNull();
+  });
+
+  it("缺地址 → 同样 null（不拼出一个没有 host 的 URL）", async () => {
+    delete process.env.NEW_API_BASE_URL;
+    const deps = await createSkillFormatDeps({ requireUpstreamKey: async () => "sk-x" });
+    expect(deps).toBeNull();
+  });
+
+  it("缺模型名 → 直接 null，连配置都不查", async () => {
+    delete process.env.SKILL_FORMAT_MODEL;
+    const requireUpstreamKey = vi.fn(async () => "sk-x");
+
+    expect(await createSkillFormatDeps({ requireUpstreamKey })).toBeNull();
+    expect(requireUpstreamKey).not.toHaveBeenCalled();
   });
 });

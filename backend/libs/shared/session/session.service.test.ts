@@ -107,7 +107,6 @@ const BASE = {
   role: 1,
   status: 1,
   email: "alice@example.com",
-  sk: "sk-upstream-secret",
 };
 
 const hash = (token: string) => createHash("sha256").update(token).digest("hex");
@@ -127,18 +126,20 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     vi.unstubAllEnvs();
   });
 
-  it("createSession 签发 sess_ 令牌、明文 sk- 写入 Redis（修正四：不再密封）", async () => {
+  it("createSession 签发 sess_ 令牌，载荷里**没有**上游凭证", async () => {
     const token = await service.createSession(BASE);
     expect(token).toMatch(/^sess_[A-Za-z0-9_-]+$/);
     const raw = [...redis.store.values()][0];
-    // 字段名与值均为明文（修正四）；断言 JSON 字段存在而非子串
-    expect(JSON.parse(raw)).toMatchObject({ sk: "sk-upstream-secret" });
+    // 会话只记身份。它曾存过每个用户的 sk-，统一 key 之后变成「给每个用户存同一把 key」——
+    // 一份 7 天不过期的密钥副本，且「管理端改了 key」对已登录用户不生效。
+    // 现在 key 由 AuthGuard 按当前配置回注，Redis 里不该再有它的任何形态。
+    expect(JSON.parse(raw)).not.toHaveProperty("sk");
     // 会话键 + 按用户索引键各一条
     expect(redis.store.size).toBe(2);
     expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(true);
   });
 
-  it("resolveSession 解出身份与真实 sk-（round-trip）", async () => {
+  it("resolveSession 解出身份（round-trip）", async () => {
     const token = await service.createSession(BASE);
     const session = await service.resolveSession(token);
     expect(session).toMatchObject({
@@ -147,9 +148,20 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
       role: 1,
       status: 1,
       email: "alice@example.com",
-      sk: "sk-upstream-secret",
     });
     expect(session?.needsRecheck).toBe(false);
+  });
+
+  it("★ 部署前的旧会话（载荷里还带 sk）照样可用 —— 退出登录时不该把在线用户全踢掉", async () => {
+    const token = await service.createSession(BASE);
+    const key = `session:${hash(token)}`;
+    const data = JSON.parse(redis.store.get(key)!);
+    data.sk = "sk-legacy-upstream"; // 老版本写下的字段
+    redis.store.set(key, JSON.stringify(data));
+
+    const session = await service.resolveSession(token);
+    expect(session?.userId).toBe(8);
+    expect(session).not.toHaveProperty("sk");
   });
 
   it("resolveSession 对未知令牌返回 null", async () => {
@@ -199,17 +211,15 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     expect(after?.needsRecheck).toBe(false);
   });
 
-  it("sk- 缺失 → 返回 null 并删会话（不 503）", async () => {
+  it("载荷损坏 → 返回 null 并删会话（不 503）", async () => {
     const token = await service.createSession(BASE);
     const key = `session:${hash(token)}`;
-    const data = JSON.parse(redis.store.get(key)!);
-    data.sk = null; // 修正四：明文 sk 为 null → 视为凭证缺失
-    redis.store.set(key, JSON.stringify(data));
+    redis.store.set(key, "{ 不是 JSON");
     expect(await service.resolveSession(token)).toBeNull();
     expect(redis.store.has(key)).toBe(false);
   });
 
-  it("revoke 删除会话与索引（登出吊销，上游 sk- 不动）", async () => {
+  it("revoke 删除会话与索引（登出吊销）", async () => {
     const token = await service.createSession(BASE);
     await service.revoke(token);
     expect(await service.resolveSession(token)).toBeNull();

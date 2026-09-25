@@ -693,6 +693,12 @@ export interface SystemCredentials {
   hccb_notify_url: string;
 }
 
+/** 上游（new-api）凭证（GET 回显：secret 字段为脱敏值） */
+export interface SystemUpstream {
+  /** new-api 项目统一 key（**密**，回显脱敏）——全项目共用这一把 */
+  new_api_key: string;
+}
+
 /** 充值政策文案 */
 export interface SystemPolicy {
   /** 退款政策文案 */
@@ -717,13 +723,15 @@ export interface SystemRateLimit {
 export interface SystemSettings {
   /** 支付凭证（脱敏回显） */
   credentials: SystemCredentials;
+  /** 上游 new-api 凭证（脱敏回显） */
+  upstream: SystemUpstream;
   /** 充值政策文案 */
   policy: SystemPolicy;
   /** 限流配置 */
   rateLimit: SystemRateLimit;
 }
 
-/** GET /api/admin/settings 获取全部系统配置（支付凭证脱敏回显） */
+/** GET /api/admin/settings 获取全部系统配置（凭证类字段脱敏回显） */
 export function fetchAdminSettings() {
   return apiRequest<SystemSettings>('/api/admin/settings');
 }
@@ -732,6 +740,7 @@ export function fetchAdminSettings() {
 export function updateAdminSettings(
   params: Partial<{
     credentials: Partial<SystemCredentials>;
+    upstream: Partial<SystemUpstream>;
     policy: Partial<SystemPolicy>;
     rateLimit: Partial<SystemRateLimit>;
   }>

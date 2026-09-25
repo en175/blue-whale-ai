@@ -34,33 +34,29 @@ describe('billingEndpoint', () => {
 });
 
 describe('missingBillingConfig', () => {
-  it('两项都缺时两个都报出来（不要修一个再发现还有一个）', () => {
-    expect(missingBillingConfig({})).toEqual(['BILLING_GRPC_URL', 'NEW_API_UPSTREAM_KEY']);
+  it('缺 billing 地址就报出来', () => {
+    expect(missingBillingConfig({})).toEqual(['BILLING_GRPC_URL']);
   });
 
   it('齐备时返回空数组', () => {
-    expect(
-      missingBillingConfig({
-        [BILLING_URL_ENV]: 'http://billing:9100',
-        NEW_API_UPSTREAM_KEY: 'sk-upstream',
-      }),
-    ).toEqual([]);
+    expect(missingBillingConfig({ [BILLING_URL_ENV]: 'http://billing:9100' })).toEqual([]);
   });
 
-  it('★ 缺 NEW_API_UPSTREAM_KEY 也算不齐 —— 它现在是登录的硬依赖', () => {
-    // 只判 billing 地址会漏掉这一项，而缺它的表现是「所有人都登不上」，
-    // 比不扣钱还早暴露，但同样是启动时才该拦下的配置错误。
-    expect(missingBillingConfig({ [BILLING_URL_ENV]: 'http://billing:9100' })).toEqual([
-      'NEW_API_UPSTREAM_KEY',
-    ]);
+  it('★ 上游 key 不再参与这道门 —— 它是配置表里的数据，不是环境变量', () => {
+    // 它曾经在这里，理由是「缺它登录就签发不出会话」。两件事变了：
+    //   1. 值搬到 system_settings（管理端可配），查 process.env 永远查不到——留着就是恒真的废话；
+    //   2. 登录不再需要它（会话只记身份）。把它留作启动门禁会把新部署卡成死循环：
+    //      key 要在管理端填，管理端要先登得进来，而进程根本不起。
+    // 它的 fail-closed 改落在真正打上游的地方（见 UpstreamCredentialMissingError）。
+    const env = {
+      [BILLING_URL_ENV]: 'http://billing:9100',
+      NEW_API_UPSTREAM_KEY: 'sk-upstream',
+    } as NodeJS.ProcessEnv;
+    expect(missingBillingConfig(env)).toEqual([]);
+    expect(missingBillingConfig({})).not.toContain('NEW_API_UPSTREAM_KEY');
   });
 
   it('空白串不算配了', () => {
-    expect(
-      missingBillingConfig({
-        [BILLING_URL_ENV]: '  ',
-        NEW_API_UPSTREAM_KEY: '\t',
-      }),
-    ).toEqual(['BILLING_GRPC_URL', 'NEW_API_UPSTREAM_KEY']);
+    expect(missingBillingConfig({ [BILLING_URL_ENV]: '  ' })).toEqual(['BILLING_GRPC_URL']);
   });
 });

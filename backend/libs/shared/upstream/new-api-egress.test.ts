@@ -5,12 +5,10 @@ import { TRACE_ID_HEADER } from "@lib/core/logging";
 import {
   NEW_API_BASE_URL_ENV,
   NewApiConfigError,
-  UPSTREAM_KEY_ENV,
   UpstreamCredentialMissingError,
   newApiBaseUrl,
   newApiFetch,
   newApiUrl,
-  resolveUpstreamCredential,
 } from "./new-api-egress.js";
 
 /**
@@ -50,29 +48,20 @@ describe("newApiUrl", () => {
   });
 });
 
-describe("resolveUpstreamCredential", () => {
-  it("配了就返回（去掉首尾空白）", () => {
-    expect(
-      resolveUpstreamCredential({ [UPSTREAM_KEY_ENV]: "  sk-project-key  " }),
-    ).toBe("sk-project-key");
+describe("UpstreamCredentialMissingError（凭证缺失的错误形态，值本身已搬到配置表）", () => {
+  it("★ 503 + 专属错误码，与「上游不认这把 key」的 401 分开", () => {
+    // 拿 `Bearer ` 去打 new-api 会收到 401——那是「上游不认」，读起来像凭证配错了，
+    // 实际是压根没配。这两种要在错误类型上分开：一个该去管理端配，一个该查 key 本身。
+    const error = new UpstreamCredentialMissingError();
+    expect(error.status).toBe(503);
+    expect(error.code).toBe("upstream_credential_missing");
   });
 
-  it("★ 未配置就抛 503，而不是返回空串", () => {
-    // 拿 `Bearer ` 去打 new-api 会收到一个 401——那是「上游不认」，读起来像凭证配错了，
-    // 实际是压根没配。这两种要在错误类型上分开。
-    expect(() => resolveUpstreamCredential({})).toThrow(UpstreamCredentialMissingError);
-    expect(() => resolveUpstreamCredential({})).toThrow(UPSTREAM_KEY_ENV);
-  });
-
-  it("只填空格也算没配", () => {
-    expect(() => resolveUpstreamCredential({ [UPSTREAM_KEY_ENV]: " \t " })).toThrow(
-      UpstreamCredentialMissingError,
-    );
-  });
-
-  it("★ 全项目只有这一个变量名 —— 它就是那把统一 key", () => {
-    // 这条断言是「单一凭证」约定的机器可读形态：换名字 = 改这里 + 改出口，没有第三处。
-    expect(UPSTREAM_KEY_ENV).toBe("NEW_API_UPSTREAM_KEY");
+  it("文案指向管理端的具体位置，而不是「缺某个环境变量」", () => {
+    // 值现在住在 system_settings，由管理端维护——文案若还说「缺环境变量 X」，
+    // 运维会去翻部署配置，永远找不到。
+    expect(new UpstreamCredentialMissingError().message).toContain("管理端");
+    expect(new UpstreamCredentialMissingError().message).not.toContain("环境变量");
   });
 });
 

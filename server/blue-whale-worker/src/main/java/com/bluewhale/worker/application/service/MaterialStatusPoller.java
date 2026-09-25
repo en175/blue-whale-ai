@@ -26,10 +26,11 @@ import java.util.List;
  * 超窗仍 {@code Processing} 的行不再跟进，也不改写状态——本表不引入第四种状态。这类素材若被
  * 拿来生成，拦截点（backend 创建期/重试期）会自己实时查一次上游，正确性不打折。
  * <p>
- * 凭据来源：项目级统一 key（{@code NEW_API_UPSTREAM_KEY}，见
- * {@link com.bluewhale.worker.config.NewApiUpstreamConfig}）。new-api 降级为上游供应商后
- * （ADR-0114），调用它的凭证是**部署配置**而不是某个用户的 sk-——所以这里不再按 userId
- * 去库里取凭证，也不需要会话。
+ * 凭据来源：项目级统一 key（ADR-0114），配在**管理端「系统设置 → 上游凭证」**，
+ * worker 直连 {@code system_settings} 读取（见
+ * {@link com.bluewhale.worker.infrastructure.mapper.SystemSettingMapper} 对 ADR-0113 例外口径的说明）。
+ * new-api 降级为上游供应商后，调用它的凭证是全项目共用的**一个配置项**，而不是某个用户的
+ * sk-——所以这里不按 userId 去库里取凭证，也不需要会话。
  * <p>
  * 与 {@link RecoveryService} 同一套调度约定：启动即扫一次，整轮异常兜底不逃逸。
  */
@@ -75,22 +76,31 @@ public class MaterialStatusPoller {
     )
     public void poll() {
         try {
+            // 一轮取一次 key（不是一行一次）：它在库里是加密行，逐行取等于每 5s 打 100 次 DB。
+            // 一轮一次的开销可忽略，「管理端改完下一轮生效」照样成立。
+            String token;
+            try {
+                token = credential.requireKey();
+            } catch (Exception e) {
+                // 未配置 / 解不开：跳过本轮，而不是逐行报错（100 行就是 100 条同样的日志）。
+                // 也绝不拿空串继续：那样会以 `Bearer ` 打上游收 401，报错点离原因很远。
+                log.error("素材状态跟进跳过本轮：{}", e.getMessage());
+                return;
+            }
             List<MaterialAssetEntity> rows =
                     assetMapper.listProcessingWithin(SCAN_LIMIT, maxAgeMinutes);
             for (MaterialAssetEntity row : rows) {
-                followUp(row);
+                followUp(row, token);
             }
         } catch (Exception e) {
             log.error("素材状态跟进扫描失败: {}", e.getMessage(), e);
         }
     }
 
-    /** 单行跟进：取统一 key → 查上游 → 回写。任何一步未知就保持 Processing，下轮再试。 */
-    private void followUp(MaterialAssetEntity row) {
+    /** 单行跟进：查上游 → 回写。任何一步未知就保持 Processing，下轮再试。 */
+    private void followUp(MaterialAssetEntity row, String token) {
         String materialId = row.getMaterialId();
         try {
-            String token = credential.key();
-
             MaterialStatusResult upstream = client.getAsset(token, materialId);
             if (upstream == null) {
                 return; // 本轮未知（网络/信封异常），保持 Processing

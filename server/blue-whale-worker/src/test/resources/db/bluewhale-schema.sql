@@ -9,9 +9,11 @@
 --   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
 --   按上面命令全量再生成时，该表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
 -- 2026-09-25（ADR-0114）：同批追加的**用户凭证表**已从本夹具删除——worker 侧不再按 userId 取
---   上游凭证（改走部署注入的项目级统一 key NEW_API_UPSTREAM_KEY），本夹具只服务 worker 测试，
---   没有 worker 代码访问的表不必留。该表在生产库仍由 backend/prisma 持有（登录时写入），
---   故全量再生成时它会照原样回来——回来也不必管，与 worker 无关。
+--   上游凭证，本夹具只服务 worker 测试，没有 worker 代码访问的表不必留。该表在生产库仍由
+--   backend/prisma 持有，故全量再生成时它会照原样回来——回来也不必管，与 worker 无关。
+-- 2026-09-25（IKC 上游 key 入配置表）：`system_settings` **没有**加进本夹具。本夹具只服务
+--   不启动 Spring 上下文的单元测试，没有任何用例经真实 DB 走 SystemSettingMapper；
+--   若将来出现起容器的集成用例，须按 backend/prisma 的 DDL 逐字补上该表。
 -- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,

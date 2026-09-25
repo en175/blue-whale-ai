@@ -85,27 +85,36 @@ cd <worktree>/backend && npm run build   # prisma generate && tsc -b && tsc-alia
 形态 A：本地库（默认）
 
 ```bash
+# ⚠️ 主密钥必须**跨重启稳定**：凭证（上游 key、支付商户密钥）用它加密存在库里，
+#    每次换一把 = 之前存的密文再也解不开（管理端回显「未配置」、打上游 503）。
+#    首次生成、之后复用同一份。
+export SYSTEM_SETTINGS_SECRET="$(cat ~/.bw-settings-secret 2>/dev/null \
+  || (openssl rand -hex 32 | tee ~/.bw-settings-secret))"
+
 cd backend && PORT=3100 \
-  NEW_API_UPSTREAM_KEY='<统一 key，取自测试站网关>' \
   BILLING_GRPC_URL='http://127.0.0.1:4004' \
   BILLING_ADMIN_URL='http://127.0.0.1:4003' \
   PAY_SERVER_BASE_URL='http://14.103.43.52:9216' \
-  SYSTEM_SETTINGS_SECRET="$(openssl rand -hex 32)" \
   nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
-⚠️ **这两个变量现在是启动硬依赖**：缺任意一个，后端**拒绝启动**（listen 之前就
-`process.exit(1)`）。理由：
+⚠️ **`BILLING_GRPC_URL` 现在是启动硬依赖**：缺它后端**拒绝启动**（listen 之前就
+`process.exit(1)`）。理由：提交生成必须能预扣。曾经「为空 = 跳过预扣」，new-api 被切断后
+那就是一条**静默的免费通道**：全站生成不扣钱且毫无报错。开关已整条删除。
 
-- `BILLING_GRPC_URL` —— 提交生成必须能预扣。曾经「为空 = 跳过预扣」，new-api 被切断后
-  那就是一条**静默的免费通道**：全站生成不扣钱且毫无报错。开关已整条删除。
-- `NEW_API_UPSTREAM_KEY` —— 登录签发会话要用它当上游凭证。
+⚠️ **上游 key 不在环境变量里了**（`NEW_API_UPSTREAM_KEY` 已删）。它是
+`system_settings` 表里 `upstream` 模块的一行，在**管理端「系统设置 → 上游凭证」**配，
+全项目共用这一把（backend 与 worker 都从这一行走）。所以：
+- 起后端**不再需要**给 env；第一次要在管理端填一次。
+- 想让它跨重启还在，`SYSTEM_SETTINGS_SECRET` 就必须**稳定**（上面换成了一份存在
+  `~/.bw-settings-secret` 的固定密钥）。每次起都换一把的话，上一轮存的加密行再也解不开，
+  表现为管理端回显「未配置」、打上游 503 `upstream_credential_missing`。
 
-⚠️ **`NEW_API_UPSTREAM_KEY` 是项目里唯一的一把上游凭证。** 所有以「蓝鲸自己」身份打
-new-api 的调用都用它（登录、技能格式化、worker 素材状态跟进……），多配一处就是多一处
-轮换与漂移。唯一看似例外的 `NEW_API_AGENT_BILLING_TOKEN`（`bwsvc_` 前缀）**不是第二把
-key，是服务身份**——new-api 的 relay 入口按前缀分流，把它换成统一 key 会让 Agent 的账
-静默记到别人头上（详见下）。
+⚠️ **上游 key 是项目里唯一的一把上游凭证。** 所有以「蓝鲸自己」身份打 new-api 的调用都用
+它（登录后回注请求头、技能格式化、worker 素材状态跟进……），多配一处就是多一处轮换与漂移。
+唯一看似例外的 `NEW_API_AGENT_BILLING_TOKEN`（`bwsvc_` 前缀）**不是第二把 key，是服务
+身份**——new-api 的 relay 入口按前缀分流，把它换成统一 key 会让 Agent 的账静默记到别人头上
+（详见下）。**它也刻意不配在管理端**：那不是「我们发给上游的我们是谁」。
 
 一个扣不了钱的进程不该开始接受请求，所以拦在启动而不是首次请求。
 
@@ -136,14 +145,18 @@ set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务三件套；缺�
 nohup env \
   DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale' \
   NEW_API_BASE_URL='http://14.103.43.52:3006' \
-  NEW_API_UPSTREAM_KEY='<统一 key，从同一容器 inspect 取>' \
   REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_DB=0 \
   PORT=3100 node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
 - 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/weitian.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
 - Agent 三件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN` + `NEW_API_AGENT_BILLING_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这三项：右侧边栏 Agent 会话 502、模型网关 503。
-  - 其中 `NEW_API_AGENT_BILLING_TOKEN` **必须保持 `bwsvc_` 前缀**，且它**不等于** `NEW_API_UPSTREAM_KEY`：它是 new-api 那边 `AGENT_BILLING_SERVICE_TOKEN` 的同一个值，属于**服务身份**而非项目凭证，new-api 的 relay 入口按前缀分流，换成统一 key 不会报错、只会把账静默记到统一 key 的属主头上。后端启动时会校验前缀，配错直接拒绝启动。
+  - 其中 `NEW_API_AGENT_BILLING_TOKEN` **必须保持 `bwsvc_` 前缀**，且它**不等于管理端配的那把统一 key**：它是 new-api 那边 `AGENT_BILLING_SERVICE_TOKEN` 的同一个值，属于**服务身份**而非项目凭证，new-api 的 relay 入口按前缀分流，换成统一 key 不会报错、只会把账静默记到统一 key 的属主头上。后端启动时会校验前缀，配错直接拒绝启动。
+- ⚠️ **上游 key 读的是测试站库里的 `system_settings` 行**，而它是用**测试站部署的
+  `SYSTEM_SETTINGS_SECRET`** 加密的。本地随便 `openssl rand` 一个密钥解不开它——管理端会
+  回显「未配置」、打上游 503 `upstream_credential_missing`。要么用测试站那把密钥（从
+  backend 容器 `docker inspect` 取），要么在管理端重新填一次 key（会覆盖测试站那份，
+  同事可见，动手前先问）。**不要再试图给 `NEW_API_UPSTREAM_KEY`**：那个 env 已经没人读了。
 - Redis 三个变量必须显式传。`REDIS_CONN_STRING` 不带 `/0` 库号会被解析成 db=NaN，启动即崩（`ReplyError: SELECT NaN`）。
 - 风险先告知用户：此形态下写操作真实落测试站库（同事可见），生成任务与 Agent 对话消耗测试站真实积分。
 

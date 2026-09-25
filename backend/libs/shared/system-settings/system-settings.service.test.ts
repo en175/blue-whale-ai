@@ -5,6 +5,7 @@ import {
   maskSecret,
 } from "./credentials-crypto.js";
 import { SystemSettingsService } from "./system-settings.service.js";
+import { UpstreamCredentialMissingError } from "@lib/shared/upstream/new-api-egress.js";
 
 /** 内存假 Prisma：只实现 system_settings 的两个方法（够 system-settings 用）。 */
 function makePrisma() {
@@ -168,6 +169,136 @@ describe("SystemSettingsService — 支付凭证", () => {
       concurrent: 5,
       burst: 2,
     });
+  });
+});
+
+
+describe("SystemSettingsService — 上游凭证（new-api 项目统一 key）", () => {
+  beforeEach(() => {
+    process.env[SYSTEM_SETTINGS_SECRET_ENV] = KEY;
+  });
+  afterEach(() => {
+    delete process.env[SYSTEM_SETTINGS_SECRET_ENV];
+  });
+
+  it("以密文入库：库里查不到明文，管理端只回显脱敏值", async () => {
+    const { service, rows } = serviceWith();
+    await service.update({ upstream: { new_api_key: "sk-fake-live-key-1234" } });
+
+    const stored = rows.get("upstream")!;
+    expect(stored.is_secret).toBe(true);
+    expect(String(stored.setting_value)).not.toContain("sk-fake-live-key-1234");
+
+    const view = await service.read();
+    expect(view.upstream.new_api_key).toBe("****1234");
+  });
+
+  it("★ 配了 → 取到真值（全项目共用这一把）", async () => {
+    const { service } = serviceWith();
+    await service.update({ upstream: { new_api_key: "  sk-fake-live-key-1234  " } });
+
+    expect(await service.requireUpstreamKey()).toBe("sk-fake-live-key-1234");
+  });
+
+  it("★ 没配 → 明确拒绝，**不是空串**（空串打上游只会收一个来路不明的 401）", async () => {
+    const { service } = serviceWith();
+    await expect(service.requireUpstreamKey()).rejects.toBeInstanceOf(
+      UpstreamCredentialMissingError,
+    );
+    await expect(service.requireUpstreamKey()).rejects.toMatchObject({
+      status: 503,
+      code: "upstream_credential_missing",
+    });
+  });
+
+  it("只填空格也算没配", async () => {
+    const { service } = serviceWith();
+    await service.update({ upstream: { new_api_key: "   " } });
+    await expect(service.requireUpstreamKey()).rejects.toBeInstanceOf(
+      UpstreamCredentialMissingError,
+    );
+  });
+
+  it("★ 改配置 → 立即生效（读点现查库，进程内不缓存）", async () => {
+    const { service } = serviceWith();
+    await service.update({ upstream: { new_api_key: "sk-fake-before-1" } });
+    expect(await service.requireUpstreamKey()).toBe("sk-fake-before-1");
+
+    await service.update({ upstream: { new_api_key: "sk-fake-after-2" } });
+    expect(await service.requireUpstreamKey()).toBe("sk-fake-after-2");
+  });
+
+  it("★ 脱敏回显被原样提交回来 → 当「没改」，真值不被 `****1234` 覆盖", async () => {
+    // 脱敏回显最容易踩的坑：管理端把 GET 到的 `****1234` 原样 PUT 回来，
+    // 「合并语义」把它当新值存下——真 key 变成一串星号，而且当场看不出来，
+    // 要等下一次打上游才炸，报错点离原因很远。
+    const { service, rows } = serviceWith();
+    await service.update({ upstream: { new_api_key: "sk-fake-live-key-1234" } });
+
+    const view = await service.read();
+    expect(view.upstream.new_api_key).toBe("****1234");
+    // 把 GET 到的回显原样 PUT 回来
+    await service.update({ upstream: { new_api_key: view.upstream.new_api_key } });
+
+    // 真值仍在（若被当成新值存下，这里会取到 "****1234"，而库里是一串星号的密文）
+    expect(await service.requireUpstreamKey()).toBe("sk-fake-live-key-1234");
+    expect(rows.get("upstream")!.is_secret).toBe(true);
+  });
+
+  it("同一坑在支付凭证上同样被挡住（一份实现，两个模块都受益）", async () => {
+    const { service } = serviceWith();
+    await service.update({
+      credentials: {
+        hccb_mch_no: "M1",
+        hccb_app_id: "app-1",
+        hccb_app_secret: "super-secret-value",
+        hccb_notify_url: "https://api.example.com/notify",
+      },
+    });
+
+    const view = await service.read();
+    expect(view.credentials.hccb_app_secret).toBe("****alue");
+    await service.update({ credentials: { hccb_app_secret: view.credentials.hccb_app_secret } });
+
+    expect((await service.requirePayMerchantConfig()).appSecret).toBe("super-secret-value");
+  });
+
+  it("真·新值与回显恰好同形时不误判：值本来就短/以星号开头，照样能改", async () => {
+    // 只有「等于当前真值的脱敏形态」才按未改处理。用户真想换成别的值，一律照存。
+    const { service } = serviceWith();
+    await service.update({ upstream: { new_api_key: "sk-aaaa-1111" } });
+    await service.update({ upstream: { new_api_key: "sk-bbbb-2222" } });
+    expect(await service.requireUpstreamKey()).toBe("sk-bbbb-2222");
+  });
+
+  it("改上游凭证不影响支付凭证（按模块隔离）", async () => {
+    const { service } = serviceWith();
+    await service.update({
+      credentials: { hccb_mch_no: "M1", hccb_app_id: "a", hccb_app_secret: "s", hccb_notify_url: "u" },
+    });
+    await service.update({ upstream: { new_api_key: "sk-fake-x" } });
+
+    expect((await service.requirePayMerchantConfig()).mchNo).toBe("M1");
+    expect(await service.requireUpstreamKey()).toBe("sk-fake-x");
+  });
+
+  it("缺主密钥时不写也不读上游凭证（fail closed，不降级成明文）", async () => {
+    delete process.env[SYSTEM_SETTINGS_SECRET_ENV];
+    const { service, rows } = serviceWith();
+    await expect(
+      service.update({ upstream: { new_api_key: "sk-fake-x" } }),
+    ).rejects.toThrow(SystemSettingsConfigError);
+    expect(rows.size).toBe(0);
+  });
+
+  it("密文解不开 → 读点抛（不退化成「未配置」：那会把运维指去管理端，而问题在部署）", async () => {
+    const { service, rows } = serviceWith();
+    await service.update({ upstream: { new_api_key: "sk-fake-x" } });
+    rows.get("upstream")!.setting_value = "v1.AAAA.BBBB.CCCC";
+
+    await expect(service.requireUpstreamKey()).rejects.toThrow(SystemSettingsConfigError);
+    // 管理端页面仍按「未配置」回显，运营进得去改
+    expect((await service.read()).upstream.new_api_key).toBe("");
   });
 });
 

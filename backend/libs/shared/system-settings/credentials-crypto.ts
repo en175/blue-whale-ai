@@ -91,13 +91,19 @@ export function openSecret(envelope: string, env: NodeJS.ProcessEnv = process.en
         `不接受明文或旧格式`,
     );
   }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    masterKey(env),
-    Buffer.from(ivPart, "base64url"),
-  );
-  decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
+  const key = masterKey(env);
   try {
+    // ⚠️ **整段都在 try 里**，包括 createDecipheriv / setAuthTag。曾经只有 update+final 被包住，
+    //    于是一段 Base64 合法但**长度不对**的 tag（比如被截断的密文）会让 Node 抛出裸的
+    //    `TypeError: Invalid authentication tag length: 3` 一路冒到调用方——那既不是
+    //    `SystemSettingsConfigError`（调用方按「配置坏了」处置的那一类），文案也毫无指向性。
+    //    密文受损的处理口径只有一个：说清「解不开」，别把 Node 的内部措辞漏出去。
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      key,
+      Buffer.from(ivPart, "base64url"),
+    );
+    decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
     return Buffer.concat([
       decipher.update(Buffer.from(dataPart, "base64url")),
       decipher.final(),

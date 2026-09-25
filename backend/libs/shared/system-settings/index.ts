@@ -19,6 +19,7 @@ export {
   type SystemRateLimit,
   type SystemSettingsPatch,
   type SystemSettingsView,
+  type SystemUpstream,
 } from "./system-settings.service.js";
 export {
   SYSTEM_SETTINGS_SECRET_ENV,

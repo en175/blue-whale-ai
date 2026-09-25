@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { NewApiError } from "@lib/core";
 import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
-import { createAuthRepo, createUserInfoRepo } from "@lib/shared/persistence/index.js";
+import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
@@ -24,10 +24,6 @@ import {
   UsernameTakenError,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
-import {
-  resolveUpstreamCredential,
-  UpstreamCredentialMissingError,
-} from "@lib/shared/upstream/new-api-egress.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -47,19 +43,6 @@ function loginData(result: LocalLoginResult, isNewUser: boolean) {
     is_new_user: isNewUser,
     has_password: true,
   };
-}
-
-/**
- * 把登录/注册链路上的异常翻成 HTTP 错误。
- *
- * <p>⚠️ **配置类错误必须原样透传**：`toAuthError` 会把所有 503 压成「账户服务暂不可用」，
- * 而那句通用文案对「上游凭证没配」毫无帮助——运维看到它只会去查上游健康，
- * 而真正原因是少了一个环境变量。这类错误当初特地把变量名写进 message，
- * 就是为了在这一刻说出来，不能被兜底文案吃掉。
- */
-function toAuthFailure(error: unknown): NewApiError {
-  if (error instanceof UpstreamCredentialMissingError) return error;
-  return toAuthError(error);
 }
 
 /** IKDR4J：IP 20 次/分拦单机批量撞库；账号 5 次/分拦多 IP 分散撞单账号。 */
@@ -115,52 +98,36 @@ export class AuthController {
   }
 
   /**
-   * 会话签发。
+   * 会话签发：**只记身份，不记上游凭证**。
    *
-   * <h2>这里以前存的是用户的 sk-，现在存的是项目级统一 key</h2>
+   * <h2>这里存过什么</h2>
    *
-   * 口令校验已经切到我们自己的库（{@link IdentityService.login}），登录结果里
-   * 不再有上游凭证——new-api 那边已经没有这个用户了，自然也发不出他的 key。
-   * 下游仍然要一把 key 才能打 new-api，所以改用部署配置里的统一 key。
+   * 最早存用户自己的 `sk-`（一用户一把）。new-api 改成项目级统一 key 之后，这里变成
+   * **给每个用户存同一把 key**：既是一份 7 天不过期的密钥副本，也是「管理端改了 key
+   * 对已登录用户不生效」的来源——会话是登录那一刻的快照。现在会话不再带凭证，
+   * 上游 key 由 AuthGuard 按**当前配置**回注（`SystemSettingsService.requireUpstreamKey()`），
+   * 轮换对全部在线会话立即生效。
+   *
+   * <p>⚠️ **登录不再依赖上游配置**。以前缺 key 时这里抛 503，于是「还没配 key 的部署
+   * 谁也登不进去」——**包括要进去配它的管理员**，成死锁。凭证缺失的 fail-closed 落在
+   * 真正打上游的地方（AuthGuard 不注入 → 下游 `parseBearerToken` 拿到 null 即 401，
+   * 直接调用点抛 `UpstreamCredentialMissingError`），不在「进门」这一步。
    *
    * <p>⚠️ **过渡期的已知后果**：new-api 的 per-user 数据（消费流水、充值记录）
-   * 从此返回的是**项目维度**的数。这不是 bug，是「上游不再认识我们的用户」的必然结果，
+   * 返回的是**项目维度**的数。这不是 bug，是「上游不再认识我们的用户」的必然结果，
    * 也正是必须建自己计费体系的原因。计费域接过来之后，这些接口改走 billing。
    */
-  private async establishSession(result: LocalLoginResult): Promise<string> {
+  private establishSession(result: LocalLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
-    // 缺 key 时这里抛 503（UpstreamCredentialMissingError）：让问题在登录时就暴露，
-    // 而不是等到用户点了生成、拿到一个来路不明的 401。
-    const upstreamKey = resolveUpstreamCredential();
-    const token = await this.sessions.createSession({
+    return this.sessions.createSession({
       userId: result.userId,
       username: result.username,
       role: result.role,
       status: result.status,
       email: result.email ?? null,
-      sk: upstreamKey,
     });
-    // IKF YHJ：登录成功即刷新网关侧执行凭证，供 worker-java 的素材状态定时兜底按 userId 取用
-    // （网关无服务级查询入口，素材接口只能以用户身份调用，见 ADR-0087）。
-    // 失败只告警不阻断登录：缺行/旧行只会让该用户的素材状态停止跟进，登录与生成都不受影响。
-    //
-    // ⚠️ 统一 key 之后这里是在**给每个用户写同一把 key**。看着冗余，但它是 worker-java
-    //    那条按 userId 取凭证的链路目前唯一的入口；等 worker 也用服务身份取 key 时一并去掉。
-    try {
-      await createUserInfoRepo(this.prisma.client).upsertCredential(
-        String(result.userId),
-        upstreamKey,
-      );
-    } catch (error) {
-      logger.error(
-        `auth establishSession: upsert user_info failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    return token;
   }
 
   @Public()
@@ -223,7 +190,7 @@ export class AuthController {
         await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw projected;
       }
-      throw toAuthFailure(error);
+      throw toAuthError(error);
     }
   }
 
@@ -293,7 +260,7 @@ export class AuthController {
       if (error instanceof UsernameTakenError || error instanceof PasswordPolicyError) {
         throw new NewApiError(error.message, 400, FAILURE_CODE);
       }
-      throw toAuthFailure(error);
+      throw toAuthError(error);
     }
   }
 

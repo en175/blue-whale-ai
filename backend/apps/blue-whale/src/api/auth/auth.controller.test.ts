@@ -66,7 +66,6 @@ import {
   type IdentityService,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
-import { UPSTREAM_KEY_ENV } from "@lib/shared/upstream/new-api-egress.js";
 import {
   RATE_LIMIT_KEY,
   type RateLimitBucket,
@@ -90,23 +89,11 @@ function loginResult(): LocalLoginResult {
   };
 }
 
-/** 项目级统一的上游 key —— 登录成功后它进会话，不再是每个用户自己的 sk-。 */
-const UPSTREAM_KEY = "sk-unified-upstream";
-
-beforeEach(() => {
-  process.env[UPSTREAM_KEY_ENV] = UPSTREAM_KEY;
-});
-
-afterEach(() => {
-  delete process.env[UPSTREAM_KEY_ENV];
-});
-
 function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
   const sessions = { createSession: vi.fn(async () => "session-token") };
-  // IKF YHJ：登录成功后写 user_info（执行凭证）；缺 mock 时旁路抛错被吞，不影响登录。
-  const prisma = { client: { user_info: { upsert: vi.fn(async () => ({})) } } };
+  const prisma = { client: {} };
   // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
   // 否则「日志到底写没写」这件事在测试里永远看不出来。
   const identity = {
@@ -241,28 +228,45 @@ describe("AuthController 限流声明（IKDR4J）", () => {
   });
 });
 
-describe("AuthController IKF YHJ 执行凭证落库", () => {
-  it("登录成功：把**项目统一 key**按 userId 写入 user_info", async () => {
-    const { controller, identity, prisma, res } = setup();
+describe("AuthController 会话内容（凭证已移出会话）", () => {
+  it("★ 会话只记身份，**不带**上游 key —— 带上就是一份 7 天不过期的密钥副本", async () => {
+    const { controller, identity, sessions, res } = setup();
     identity.login.mockResolvedValue(loginResult());
 
     await controller.login(LOGIN_BODY, res);
 
-    expect(prisma.client.user_info.upsert).toHaveBeenCalledWith({
-      where: { user_id: BigInt(42) },
-      update: expect.objectContaining({ provider_credential: UPSTREAM_KEY }),
-      create: { user_id: BigInt(42), provider_credential: UPSTREAM_KEY },
+    expect(sessions.createSession).toHaveBeenCalledWith({
+      userId: 42,
+      username: "alice",
+      role: 1,
+      status: 1,
+      email: null,
     });
+    // 断言的是「没有任何额外的密钥字段」：createSession 的入参就是上面那五个，
+    // 上游 key 由 AuthGuard 按当前配置回注（见 auth.guard.test.ts）。
+    expect(Object.keys(sessions.createSession.mock.calls[0]![0])).toEqual([
+      "userId",
+      "username",
+      "role",
+      "status",
+      "email",
+    ]);
   });
 
-  it("落库失败：只告警，不阻断登录（会话 cookie 照发）", async () => {
-    const { controller, identity, prisma, res } = setup();
+  it("★ 登录**不依赖**上游配置 —— 否则「还没配 key」就把要进去配它的人挡在门外", async () => {
+    // 以前缺 key 时这里抛 503：key 要在管理端填，管理端要先登得进来，而登录又要求先有 key，
+    // 新部署谁也进不去。凭证缺失的 fail-closed 现在落在真正打上游的地方。
+    const { controller, identity, res } = setup();
     identity.login.mockResolvedValue(loginResult());
-    prisma.client.user_info.upsert.mockRejectedValue(new Error("db down"));
+    const before = process.env.NEW_API_UPSTREAM_KEY;
+    delete process.env.NEW_API_UPSTREAM_KEY;
 
-    await controller.login(LOGIN_BODY, res);
-
-    expect(res.cookie).toHaveBeenCalled();
+    try {
+      await expect(controller.login(LOGIN_BODY, res)).resolves.toBeDefined();
+      expect(res.cookie).toHaveBeenCalled();
+    } finally {
+      if (before !== undefined) process.env.NEW_API_UPSTREAM_KEY = before;
+    }
   });
 });
 
@@ -360,24 +364,15 @@ describe("AuthController capabilities（本地常量）", () => {
 });
 
 describe("AuthController 上游凭证缺失", () => {
-  it("★ 缺 NEW_API_UPSTREAM_KEY 时报出**变量名**，而不是被兜底文案吃掉", async () => {
-    // toAuthError 会把所有 503 压成「账户服务暂不可用」。那句文案对「凭证没配」
-    // 毫无帮助——运维看到它只会去查上游健康，而真正原因是少了一个环境变量。
-    const saved = process.env[UPSTREAM_KEY_ENV];
-    delete process.env[UPSTREAM_KEY_ENV];
+  it("★ 再没人写 user_info 凭证行 —— 全仓零读取者的写入已随本轮删除", async () => {
+    // 那行是「登录即把统一 key 按 userId 写一份」的遗留：全项目共用一把 key 之后它
+    // 只是把同一个密文抄 N 份，而且 **Java 侧从来不读 user_info**（迁移后素材跟进走
+    // job 凭证 + 配置表）。没有读取者的密钥副本不该继续产生。
+    const { controller, identity, prisma, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
 
-    try {
-      const { controller, identity, res } = setup();
-      identity.login.mockResolvedValue(loginResult());
+    await controller.login(LOGIN_BODY, res);
 
-      await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
-        status: 503,
-        code: "upstream_credential_missing",
-      });
-      // 变量名必须在文案里，否则这条错误和「上游挂了」在运维眼里没有区别
-      await expect(controller.login(LOGIN_BODY, res)).rejects.toThrow(UPSTREAM_KEY_ENV);
-    } finally {
-      if (saved !== undefined) process.env[UPSTREAM_KEY_ENV] = saved;
-    }
+    expect(prisma.client.user_info?.upsert).toBeUndefined();
   });
 });

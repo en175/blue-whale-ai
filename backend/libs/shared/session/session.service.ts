@@ -14,8 +14,6 @@ export interface ResolvedSession {
   role: number;
   status: number;
   email: string | null;
-  /** 上游执行凭证（sk-，修正四：明文），AuthGuard 回注请求头代打 new-api。 */
-  sk: string;
   /** role/status 是否已过期、需要回源**我们自己的身份库**复核。 */
   needsRecheck: boolean;
 }
@@ -26,15 +24,19 @@ type SessionPayload = {
   role: number;
   status: number;
   email: string | null;
-  /** 上游 sk-（修正四：明文存 Redis，不再 AES 密封）。 */
-  sk: string;
   /** role/status 最近一次回源复核的时间戳（ms）。 */
   verifiedAt: number;
 };
 
 /**
  * 登录态会话（ADR-0062 #19 凭证分层）。浏览器只持 HttpOnly 会话 cookie 里的 `sess_` 令牌，
- * 会话映射存 Redis（7 天滑动 TTL），上游 sk- 明文随会话存放（修正四：去密），供 BFF 回注请求头代打 new-api。
+ * 会话映射存 Redis（7 天滑动 TTL）。
+ *
+ * <p>⚠️ **会话不再存上游 key**。它以前存每个用户自己的 `sk-`，后来 new-api 改成项目级统一
+ * key，这里就变成**给每个用户存同一把 key**——那既是一份 7 天不过期的密钥副本，也让
+ * 「管理端改了 key」对已登录用户不生效（他们手里那份是登录那一刻的快照）。现在 key 由
+ * AuthGuard 按**当前配置**回注（`SystemSettingsService.requireUpstreamKey()`），
+ * 轮换对全部在线会话立即生效。
  */
 @Injectable()
 export class SessionService implements OnModuleDestroy {
@@ -61,14 +63,13 @@ export class SessionService implements OnModuleDestroy {
     return `user_session:${userId}:${hash}`;
   }
 
-  /** 写会话（sk- 明文存 Redis，修正四），返回下发给浏览器的会话令牌。 */
+  /** 写会话，返回下发给浏览器的会话令牌。 */
   async createSession(input: {
     userId: number;
     username: string;
     role: number;
     status: number;
     email: string | null;
-    sk: string;
   }): Promise<string> {
     const token = `sess_${randomBytes(32).toString("base64url")}`;
     const hash = this.hashOf(token);
@@ -78,7 +79,6 @@ export class SessionService implements OnModuleDestroy {
       role: input.role,
       status: input.status,
       email: input.email,
-      sk: input.sk,
       verifiedAt: Date.now(),
     };
     // 会话键 + 按用户索引键同写同 TTL（EX），冻结时可枚举该用户全部会话。
@@ -116,24 +116,12 @@ export class SessionService implements OnModuleDestroy {
       "EX",
       SESSION_TTL_SECONDS,
     );
-    let sk: string;
-    try {
-      if (typeof data.sk !== "string" || data.sk.length === 0) {
-        throw new Error("会话凭证缺失");
-      }
-      sk = data.sk;
-    } catch {
-      // 凭证缺失/损坏：会话不可用，删除并要求重新登录（而非 503）。
-      await this.redis.del(key);
-      return null;
-    }
     return {
       userId: data.userId,
       username: data.username,
       role: data.role,
       status: data.status,
       email: data.email,
-      sk,
       needsRecheck: Date.now() - data.verifiedAt > ROLE_STATUS_RECHECK_MS,
     };
   }
@@ -164,7 +152,7 @@ export class SessionService implements OnModuleDestroy {
     }
   }
 
-  /** 登出吊销：删除会话（上游 sk- 不动，普通登出与凭证轮换分离，ADR-0062 #10/#19）。 */
+  /** 登出吊销：删除会话（普通登出与凭证轮换分离，ADR-0062 #10/#19）。 */
   async revoke(token: string): Promise<void> {
     const key = this.key(token);
     const hash = this.hashOf(token);

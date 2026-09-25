@@ -11,10 +11,12 @@ import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.contract.JobTypeEnum;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.SystemSettingMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 
@@ -26,6 +28,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.mock.env.MockEnvironment;
 
 import javax.sql.DataSource;
 import java.lang.reflect.RecordComponent;
@@ -44,7 +47,7 @@ import static org.mockito.Mockito.mock;
  *   <li>缺 {@code ROCKETMQ_ENDPOINTS} → 启动中止且失败信息点名该变量；</li>
  *   <li>缺 {@code DATABASE_URL} → 启动中止且失败信息点名该变量；</li>
  *   <li>缺 {@code NEW_API_BASE_URL} → 装配期失败且失败信息点名该变量；</li>
- *   <li>缺 {@code NEW_API_UPSTREAM_KEY}（项目级统一 key，ADR-0114）→ 启动中止且失败信息点名该变量；</li>
+ *   <li>缺 {@code SYSTEM_SETTINGS_SECRET}（读上游凭证主密钥）→ 装配期失败且失败信息点名该变量；</li>
  *   <li>视频 tag 在「消费侧订阅值 / 处理器声明值 / 路由表」三处一致；</li>
  *   <li>{@link GenerationMqRouteEnum} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
  *   <li>退役的 {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 残留属性被忽略（不报错、不生效）。</li>
@@ -119,32 +122,61 @@ class StartupContractTest {
     }
 
     /**
-     * 上游统一 key 经 {@code System.getenv} 读取，只有未设置时才能复现缺失路径。
+     * 读上游凭证要用的**主密钥**（{@code SYSTEM_SETTINGS_SECRET}）必须在装配期就位。
      * <p>
-     * 缺它为什么必须中止启动：素材状态定时跟进每 5s 一轮，拿空 key 会一直以
-     * {@code Bearer } 打网关收 401——报错点离原因很远，且表现为「静默什么都不做」。
+     * 它取代了原来守 {@code NEW_API_UPSTREAM_KEY} 的那条用例。取代的理由不是「新变量一样重要」，
+     * 而是**两者性质不同**：
+     * <ul>
+     *   <li>统一 key 现在是 {@code system_settings} 里的**数据**，由运营在管理端补填。
+     *       拿它拒启会让 worker 在「还没配」的窗口里 crash-loop，而那个窗口的生产者恰恰是管理端，
+     *       不是这里。它的 fail-closed 改落在读点上：{@code requireKey()} 未配即抛、
+     *       一轮一次日志跳过，绝不以 {@code Bearer } 打上游收那个来路不明的 401。</li>
+     *   <li>主密钥是**部署配置**，缺了连信封都打不开，且没有任何界面能补——正属于
+     *       ADR-0084 决策 2「缺配置即启动失败」那一类。</li>
+     * </ul>
      * <p>
-     * 地址显式喂进去：同一配置类里的地址守卫（{@link NewApiUpstreamConfig#newApiBaseUrl}）
-     * 装配在先，不喂它就会抢先把失败点顶掉，让本用例验不到 key。
+     * 直调 bean 方法并注入空的 {@code MockEnvironment}：走属性源，缺失路径**确定性**可复现，
+     * 不像 {@code System.getenv} 那样依赖「本机恰好没设这个变量」。
      */
     @Test
-    @DisplayName("NEW_API_UPSTREAM_KEY 缺失 → 启动中止，失败信息点名 NEW_API_UPSTREAM_KEY")
-    void missingUpstreamKeyAbortsStartup() {
-        Assumptions.assumeTrue(
-                System.getenv(NewApiUpstreamConfig.ENV_UPSTREAM_KEY) == null
-                        || System.getenv(NewApiUpstreamConfig.ENV_UPSTREAM_KEY).isBlank(),
-                "本机已设 NEW_API_UPSTREAM_KEY，缺失路径不可复现");
+    @DisplayName("SYSTEM_SETTINGS_SECRET 缺失 → 装配期抛 IllegalStateException 且点名该变量")
+    void missingSystemSettingsSecretAbortsStartup() {
+        SystemSettingMapper mapper = mock(SystemSettingMapper.class);
 
-        new ApplicationContextRunner()
-                .withUserConfiguration(NewApiUpstreamConfig.class)
-                .withPropertyValues(NewApiUpstreamConfig.ENV_BASE_URL + "=http://new-api.invalid")
-                .run(ctx -> {
-                    Throwable failure = ctx.getStartupFailure();
-                    assertThat(failure).as("缺 NEW_API_UPSTREAM_KEY 必须中止启动").isNotNull();
-                    assertThat(chainContains(failure, NewApiUpstreamConfig.ENV_UPSTREAM_KEY))
-                            .as("失败信息必须点名 NEW_API_UPSTREAM_KEY，实际：%s", failure)
-                            .isTrue();
-                });
+        assertThatThrownBy(() -> new NewApiUpstreamConfig()
+                .newApiUpstreamCredential(mapper, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(SystemSettingEnvelope.SECRET_ENV);
+
+        assertThatThrownBy(() -> new NewApiUpstreamConfig()
+                .newApiUpstreamCredential(mapper, new MockEnvironment()
+                        .withProperty(SystemSettingEnvelope.SECRET_ENV, "   ")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(SystemSettingEnvelope.SECRET_ENV);
+    }
+
+    /**
+     * 主密钥到位即可装配——**不要求此刻已经配好 key**（那是运行期数据，见上一条用例）。
+     */
+    @Test
+    @DisplayName("SYSTEM_SETTINGS_SECRET 到位 → 凭证读点装配成功（key 本身可以还没填）")
+    void upstreamCredentialAssemblesWithoutConfiguredKey() {
+        SystemSettingMapper mapper = mock(SystemSettingMapper.class);
+        // 库里还没有 upstream 行
+        org.mockito.Mockito.when(mapper.selectValue(UpstreamCredential.SETTING_KEY))
+                .thenReturn(null);
+
+        UpstreamCredential credential = new NewApiUpstreamConfig().newApiUpstreamCredential(
+                mapper,
+                new MockEnvironment().withProperty(
+                        SystemSettingEnvelope.SECRET_ENV,
+                        SystemSettingEnvelopeVectors.FAKE_SECRET_HEX));
+
+        assertThat(credential).isNotNull();
+        // 装配成功但读不到 key：读点明确拒绝，不是空串
+        assertThatThrownBy(credential::requireKey)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("未配置");
     }
 
     /**
@@ -152,11 +184,10 @@ class StartupContractTest {
      * <p>
      * 为什么必须在装配期就失败：地址是这个进程唯一的上游入口（ADR-0114 决策 7），拿空串继续跑
      * 只会让每次调用拼出 {@code /v1/...} 这样没有 host 的 URL——报错点离原因很远。
-     * 与 MQ / DB / 统一 key 同属硬门槛（ADR-0084 决策 2 四套配置齐备才允许启动）。
+     * 与 MQ / DB / 主密钥同属硬门槛（ADR-0084 决策 2 四套配置齐备才允许启动）。
      * <p>
-     * 直调 bean 方法而非起 runner：{@code NewApiUpstreamConfig} 里的统一 key 走
-     * {@code System.getenv}，runner 里无法注入，装配顺序会让失败点漂到 key 守卫上；
-     * 这里用属性源替身把地址守卫单独钉死。
+     * 直调 bean 方法而非起 runner：装配顺序会让失败点漂到别的守卫上；这里用属性源替身
+     * 把地址守卫单独钉死。
      */
     @Test
     @DisplayName("NEW_API_BASE_URL 缺失/空白 → 装配期抛 IllegalStateException 且点名该变量")
