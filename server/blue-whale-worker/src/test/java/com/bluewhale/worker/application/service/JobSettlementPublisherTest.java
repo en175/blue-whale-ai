@@ -127,6 +127,65 @@ class JobSettlementPublisherTest {
     }
 
     @Test
+    @DisplayName("★ 参考素材数按 references 数组长度上报 —— 与预扣侧的 reference_count 同一口径")
+    void 参考素材数按references长度上报() throws Exception {
+        // 这个 job 的 input 里**同时**有单数组 references（2 项）和旧分字段路径的参考
+        // （input_asset_ids 5 项 + reference_asset_ids 2 项 + 首尾帧 1 项）。
+        // 预扣侧 billing-specs.ts 的 extractSpecs 只把 `references` 的长度折算成
+        // reference_count（旧字段不进那个数），结算侧必须**只有同一个数**——
+        // 统计得更宽就会出现「预扣按 2 个参考加价、结算按 10 个收回」，比不加价更糟。
+        publisher.publishTerminal(
+                job(106, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"references\":["
+                                + "{\"role\":\"first_frame\",\"asset_id\":\"11\",\"type\":\"image\"},"
+                                + "{\"role\":\"reference\",\"asset_id\":\"12\",\"type\":\"image\"}],"
+                                + "\"input_asset_ids\":[1,2,3,4,5],"
+                                + "\"reference_asset_ids\":[\"21\",\"22\"],"
+                                + "\"first_frame_asset_id\":\"31\"}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        JsonNode quantities = body(0).get("usage").get(0).get("quantities");
+        // ⚠️ 键名是字面量，必须是 UsageDim.REFERENCE_COUNT 的 key（billing 侧
+        // ReferenceCountSurchargeTest 钉住了那个枚举值与 "usage.referenceCount" 相等）：
+        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
+        assertThat(quantities.get("usage.referenceCount").asLong()).isEqualTo(2);
+        // 只是长度，不是别的数组的长度
+        assertThat(quantities).hasSize(2);
+        // 数组不进规格（与 extractSpecs 一致），所以规格里也不该冒出这个键
+        assertThat(body(0).get("usage").get(0).get("specs").has("references")).isFalse();
+    }
+
+    @Test
+    @DisplayName("没有 references 时参考素材数报 0 —— 与预扣侧折算出的 reference_count=0 同口径")
+    void 无参考素材时报零() throws Exception {
+        // 旧分字段路径建出来的 job：input 里没有 references 键。
+        // 预扣侧同样只认这一个数组 ⇒ reference_count = "0" ⇒ 倍率 ×1.0；
+        // 结算侧报 0（而不是**不报**）让账面上看得出「这个量我们算过，就是 0」，
+        // 与 UsageDim.quantityOf「取不到也是 0」两不冲突。
+        publisher.publishTerminal(
+                job(107, 42, "succeeded", "image",
+                        "{\"model_id\":\"m\",\"input_asset_ids\":[1,2,3]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        assertThat(body(0).get("usage").get(0).get("quantities")
+                .get("usage.referenceCount").asLong()).isZero();
+    }
+
+    @Test
+    @DisplayName("references 为空数组时也报 0 —— 与 extractSpecs 的 Array.isArray 分支一致")
+    void 空references报零() throws Exception {
+        // { references: [] } 在 TS 侧折算出的 reference_count 是 "0"（长度 0），
+        // 不是「没这个键」——两侧都取 0，倍率都 ×1.0
+        publisher.publishTerminal(
+                job(108, 42, "succeeded", "image",
+                        "{\"model_id\":\"m\",\"references\":[]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        assertThat(body(0).get("usage").get(0).get("quantities")
+                .get("usage.referenceCount").asLong()).isZero();
+    }
+
+    @Test
     @DisplayName("报不出 model_id 时 usage 发空数组，billing 退回按预扣额结算")
     void 报不出用量时发空数组() throws Exception {
         // 没有 input（历史 job / input 损坏）→ 不敢猜一个模型去计价

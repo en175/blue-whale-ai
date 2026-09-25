@@ -30,10 +30,13 @@ import java.util.Set;
  *
  * <h2>报什么、不报什么</h2>
  *
- * 只报 worker **真正掌握**的量（{@link #SUCCEEDED_SLOTS}：本次终态实际写下的产物数）。
- * 不报的维度一律**不出现**在 {@code quantities} 里，而不是填 0——
+ * 只报 worker **真正掌握**的量：{@link #SUCCEEDED_SLOTS}（本次终态实际写下的产物数）
+ * 与 {@link #REFERENCE_COUNT}（建任务时冻结的参考素材数）。两者都在 job 行里取得到，
+ * 都是「我们知道确切值」的量，所以**恒上报**——包括 0。
+ *
+ * <p>其余不报的维度一律**不出现**在 {@code quantities} 里，而不是填 0——
  * billing 对「没报这个维度」和「这个维度是 0」都取 0 参与运算，两者在引擎里没有区别，
- * 但账面上能看出我们到底知不知道这个量。
+ * 但账面上能看出我们到底知不知道这个量。所以「填 0」只留给上面那两个真的算得出来的维度。
  *
  * <p>⚠️ {@code usage.seconds} **暂不上报**：终态事件的载荷（{@code status_changed} 的
  * payload）是全家族共用的，今天没有任何一条路径把上游返回的时长放进去——视频/音频
@@ -53,6 +56,33 @@ public final class SettlementUsageLines {
      * {@code baseUnit} 三处**逐字一致**，改一处等于三处都要改。
      */
     public static final String SUCCEEDED_SLOTS = "usage.succeededSlots";
+
+    /**
+     * 参考素材数 —— 与 {@code UsageDim.REFERENCE_COUNT} 的同名维度**逐字一致**。
+     *
+     * <p>为什么结算必须报它：目录可以把参考素材配成整单加价倍率（{@code multipliers}），
+     * 而倍率按**数量**取值（见 {@code AbstractPricingCalculator#multiplierPermille}）。
+     * 预扣侧这个数来自 {@code reference_count}，结算侧只有本键能给——**缺了就是
+     * 按数量 0 取值 ⇒ 倍率恒 ×1.0**，预扣加的那笔钱会在结算时被全额退回去，
+     * 用户实际没被多收，而账面上看不出任何异常。
+     *
+     * <p>⚠️ 字面值是 **camelCase** 的 {@code usage.referenceCount}，与
+     * {@code usage.succeededSlots} 同一套写法——{@code UsageDim.of} 按这个串查注册表，
+     * 写错一个字母就是 {@code UnknownUsageDimException}（拒绝计价，不是少收）。
+     */
+    public static final String REFERENCE_COUNT = "usage.referenceCount";
+
+    /**
+     * 参考素材数取自 job input 快照里的**这一个数组**，不取别的。
+     *
+     * <p>⚠️ 口径必须与预扣侧**逐条相同**：{@code billing-specs.ts} 的 {@code extractSpecs}
+     * 只把 {@code input.references} 的长度折算成 {@code reference_count}，
+     * 旧分字段路径（视频的 {@code reference_asset_ids} / {@code reference_materials} /
+     * 首尾帧字段、图片的 {@code input_asset_ids}）**不计入**。
+     * 这边若统计得更宽（例如把 {@code input_asset_ids} 也算上），就会
+     * 「预扣按 2 个参考加价、结算按 5 个收回」——比不加价更糟。
+     */
+    private static final String REFERENCES_KEY = "references";
 
     /**
      * 内容字段 —— **不是定价维度，不进规格**。
@@ -88,6 +118,9 @@ public final class SettlementUsageLines {
         }
         Map<String, Object> quantities = new LinkedHashMap<>();
         quantities.put(SUCCEEDED_SLOTS, succeededSlots);
+        // 参考素材数：预扣时按它加过价，结算必须报出来，否则那笔加价会被全额退回
+        // （缺维度 ⇒ 倍率恒 ×1.0，见 REFERENCE_COUNT 的注释）
+        quantities.put(REFERENCE_COUNT, referenceCount(input));
 
         Map<String, Object> line = new LinkedHashMap<>();
         line.put("modelId", modelId);
@@ -95,6 +128,22 @@ public final class SettlementUsageLines {
         line.put("quantities", quantities);
         line.put("specs", specsOf(input));
         return List.of(line);
+    }
+
+    /**
+     * 参考素材数 = job input 快照里 {@code references} 数组的**长度**；没有这个键就是 0。
+     *
+     * <p>取值口径与预扣侧**同源**：{@code billing-specs.ts} 的 {@code extractSpecs} 也是
+     * 「{@code Array.isArray(input.references) ? length : 0}」——同一个键、同一个长度、
+     * 同一份 job input 快照（那张快照就是建任务时喂给 Hold 的同一个对象）。
+     * 所以两侧拿到的是同一个数：{@link #REFERENCES_KEY} 的注释说明了为什么**只**认这一个数组。
+     *
+     * <p>数组缺失与空数组都给 0，这与预扣侧一致（{@code references: []} 折算出的
+     * {@code reference_count} 也是 {@code "0"}），也与 {@code UsageDim.quantityOf}
+     * 「取不到 = 0」一致——三处对齐，倍率都取 ×1.0。
+     */
+    private static int referenceCount(Map<String, Object> input) {
+        return input.get(REFERENCES_KEY) instanceof List<?> references ? references.size() : 0;
     }
 
     /**

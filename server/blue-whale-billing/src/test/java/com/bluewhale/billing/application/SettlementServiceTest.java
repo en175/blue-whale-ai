@@ -44,10 +44,11 @@ import static org.mockito.Mockito.when;
  * （{@code SettlementIntegrationTest} 考的是冻结版本 / 冻结折扣那条链路，那是另一个考点）。
  *
  * <p>⚠️ 夹具里的预扣额是**上限**（4 张就冻 4 张的钱），因为本类只考结算口径。
- * 真实链路里 {@code BillingApplicationService#hold} 用的是 {@code Usage.empty()}，
- * 目录若真按槽计价，它会只冻到 {@code minCredits} —— 那是**预扣侧**的缺口（在 TS 侧接线，
- * 不在本单范围），本类不替它背书也不掩盖：见 {@link #部分成功_按成功槽结算} 的断言，
- * 它只钉「实际额算对了没有」，不钉「预扣冻够了没有」。
+ * （曾经这里还写着「真实链路里 {@code hold} 用的是 {@code Usage.empty()}，
+ * 按槽计价的规则只会冻到 {@code minCredits}」——那是**预扣侧**的缺口，已由
+ * {@code BillingApplicationService#priceAtSubmit} 按**契约用量**计价修掉，
+ * 该缺口不复存在，本段随之改写。）见 {@link #部分成功_按成功槽结算} 的断言：
+ * 它只钉「实际额算对了没有」，不钉「预扣冻够了没有」——后者归 {@code BillingApplicationServiceTest}。
  */
 class SettlementServiceTest {
 
