@@ -8,6 +8,7 @@ import ModelBilling from './index';
 const api = vi.hoisted(() => ({
   fetchBillingCatalog: vi.fn(),
   publishBillingCatalog: vi.fn(),
+  fetchAdminModels: vi.fn(),
 }));
 
 vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
@@ -21,6 +22,12 @@ vi.mock('@/api/adminBillingCatalog', async (importOriginal) => {
       queryFn: api.fetchBillingCatalog,
     }),
   };
+});
+
+/** 模型配置（能力行）：定价页只拿它派生档位候选，取不到就退回手工填键。 */
+vi.mock('@/api/admin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/admin')>();
+  return { ...actual, fetchAdminModels: api.fetchAdminModels };
 });
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() }, Toaster: () => null }));
@@ -133,6 +140,8 @@ function inputByLabel(label: string): HTMLInputElement {
 beforeEach(() => {
   notifyManager.setScheduler((cb) => cb());
   api.fetchBillingCatalog.mockResolvedValue(CATALOG);
+  // 默认：读不到能力行 → 退回手工填键（下面有专门的 describe 覆盖派生形态）
+  api.fetchAdminModels.mockResolvedValue([]);
   api.publishBillingCatalog.mockResolvedValue({
     catalogVersion: 4,
     documentHash: 'ffffffff',
@@ -473,5 +482,231 @@ describe('ModelBilling 视频 token 计价的规则', () => {
       'resolution=720p|aspect_ratio=16:9': '1248x704',
       'resolution=1080p|aspect_ratio=1:1': '1080x1080',
     });
+  });
+});
+
+/* ── 候选集来自模型配置（用户口径：「模型尺寸表，模型配置里面有啊」）────────────────
+ *
+ * 定价页此前让运营**手敲**规格键（`resolution=720p|aspect_ratio=16:9`），而同一件事已经在
+ * 模型配置里声明过了 —— 两个真相源，并且已经漂过。这里钉住派生后的行为：
+ * 键只读、只填数、候选集外来的是孤儿（标出来、不静默删）。
+ */
+describe('ModelBilling 规格键由模型配置派生', () => {
+  const CAPABILITY_DOCUMENT = JSON.stringify({
+    schemaVersion: 1,
+    currency: 'CNY',
+    creditsPerYuan: 15,
+    models: {
+      // 图片：按尺寸档配价。能力行是 1k/1.5k/2k，目录里却配了 1k/2k/4k —— 就是那个漂移
+      'doubao-seedream-5-0-pro-260628': {
+        text2image: {
+          baseUnit: 'usage.succeededSlots',
+          basePrice: {
+            kind: 'table',
+            by: ['size'],
+            table: { 'size=1k': 4500, 'size=2k': 9000, 'size=4k': 9000 },
+          },
+          unitDenominator: 1,
+          minCredits: 1,
+          maxCredits: null,
+          rounding: 'halfUp',
+        },
+      },
+      // 视频：按 token 配价，尺寸表的键应当来自能力行
+      'doubao-seedance-2-5-260628': {
+        text2video: {
+          baseUnit: 'usage.c',
+          basePrice: {
+            kind: 'table',
+            by: ['resolution', 'video'],
+            table: { 'resolution=720p|video=0': 1050000 },
+          },
+          unitDenominator: 1000000,
+          minCredits: 1,
+          maxCredits: null,
+          rounding: 'halfUp',
+          tokenEstimate: {
+            divisor: 1024,
+            fps: 24,
+            inputSecondsKey: 'video_input_seconds',
+            dimensions: {
+              'resolution=720p|aspect_ratio=16:9': '1248x704',
+              'resolution=4k|aspect_ratio=16:9': '3840x2160',
+            },
+          },
+        },
+      },
+    },
+    discountPolicy: { stackMode: 'multiply', floorFactorBp: 3000 },
+  });
+
+  /** 能力行夹具：只填本页读的字段。 */
+  const capabilityRow = (over: Record<string, unknown>) => ({
+    id: '1',
+    provider_id: 'volcengine',
+    capability_type: 'image',
+    model_label: 'x',
+    icon: null,
+    supported_sizes: [],
+    supported_aspect_ratios: [],
+    supported_durations: null,
+    supported_formats: [],
+    default_size: null,
+    default_format: null,
+    default_aspect_ratio: null,
+    default_duration: null,
+    features: {},
+    channel_parser: null,
+    request_mapping: null,
+    enabled: true,
+    sort_order: 0,
+    is_default: false,
+    created_at: '',
+    updated_at: '',
+    ...over,
+  });
+
+  beforeEach(() => {
+    api.fetchBillingCatalog.mockResolvedValue({
+      catalogVersion: 6,
+      documentHash: 'ffffffff',
+      ruleCount: 2,
+      creditsPerYuan: 15,
+      document: CAPABILITY_DOCUMENT,
+    });
+    api.fetchAdminModels.mockResolvedValue([
+      capabilityRow({
+        model_id: 'doubao-seedream-5-0-pro-260628',
+        model_label: 'Seedream 5.0 Pro',
+        supported_sizes: [
+          { id: '1k', label: '1K', api_value: '1K' },
+          { id: '1.5k', label: '1.5K', api_value: '1.5K' },
+          { id: '2k', label: '2K', api_value: '2K' },
+        ],
+        supported_aspect_ratios: ['1:1'],
+        default_aspect_ratio: '1:1',
+        request_mapping: { matrix: { '2K': { '1:1': '2048x2048' }, '1K': { '1:1': '1024x1024' } } },
+      }),
+      capabilityRow({
+        model_id: 'doubao-seedance-2-5-260628',
+        capability_type: 'video',
+        model_label: 'Seedance 2.5',
+        supported_sizes: [
+          { id: '480p', label: '480P', api_value: '480p' },
+          { id: '720p', label: '720P', api_value: '720p' },
+        ],
+        supported_aspect_ratios: ['16:9', '9:16'],
+        default_aspect_ratio: '16:9',
+      }),
+    ]);
+  });
+
+  async function openEditorFor(modelId: string) {
+    const row = [...document.body.querySelectorAll('tr')].find((tr) =>
+      tr.textContent?.includes(modelId),
+    );
+    const edit = row?.querySelector<HTMLButtonElement>('button[aria-label="编辑"]');
+    if (!edit) throw new Error(`没有找到 ${modelId} 的编辑按钮`);
+    await click(edit);
+  }
+
+  function labels(label: string): HTMLInputElement[] {
+    return [...document.body.querySelectorAll<HTMLInputElement>(`input[aria-label="${label}"]`)];
+  }
+
+  it('★ 图片价格表：候选键来自能力行；能力行没有的档位标成孤儿，缺的档位直接列出来补', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedream-5-0-pro-260628');
+
+    // 键是只读文本（不再是输入框）——不再有「价格表键」这种自由输入
+    expect(labels('价格表键')).toHaveLength(0);
+    expect(document.body.textContent).toContain('size=1k');
+    expect(document.body.textContent).toContain('size=1.5k'); // 能力行有、目录缺 → 列出来等着填
+    expect(document.body.textContent).toContain('size=4k'); // 目录有、能力行没有 → 孤儿
+    expect(document.body.textContent).toContain('模型配置里没有这一档');
+    // 像素数就摆在档位旁边：按像素分档定价时要看得见 2K = 419 万
+    expect(document.body.textContent).toContain('2048x2048（419 万像素）');
+    expect(document.body.textContent).toContain('1024x1024（105 万像素）');
+    // 要加档位去模型配置加，这里不提供手工加行
+    expect(document.body.textContent).toContain('这里不提供手工加行');
+  });
+
+  it('★ 图片价格表：给缺的那一档填价（元）→ 只把填过的档位写进目录', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedream-5-0-pro-260628');
+
+    // 行序 = 候选（1k / 1.5k / 2k）+ 孤儿（4k）
+    // 1.5K = 1536² = 236 万 < 261 万 ⇒ 0.30 元/张
+    await type(labels('价格表值')[1]!, '0.3');
+    await click(button('确定'));
+
+    await click(button('保存并发布'));
+    await click(button('确认发布'));
+    const payload = api.publishBillingCatalog.mock.calls[0]?.[0] as { document: string };
+    const published = JSON.parse(payload.document) as {
+      models: Record<string, Record<string, { basePrice: { table: Record<string, number> } }>>;
+    };
+    expect(
+      published.models['doubao-seedream-5-0-pro-260628']?.text2image?.basePrice.table,
+    ).toEqual({
+      'size=1k': 4500,
+      'size=2k': 9000,
+      'size=4k': 9000, // 孤儿行**保留**：静默删掉等于在保存里顺手改了别人的配置
+      'size=1.5k': 4500, // 0.3 元 × 15 积分/元 × 1000 = 4500 mc
+    });
+  });
+
+  it('★ 视频尺寸表：候选键 = 分辨率档 × 宽高比；能力行没有的组合是孤儿、不新增键', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedance-2-5-260628');
+
+    // 候选 4 行（480p/720p × 16:9/9:16）+ 孤儿 1 行（resolution=4k|aspect_ratio=16:9）
+    const keyInputs = labels('token 尺寸表键');
+    expect(keyInputs).toHaveLength(0); // 键不再可手敲
+    expect(labels('token 尺寸表值')).toHaveLength(5);
+    expect(document.body.textContent).toContain('resolution=480p|aspect_ratio=16:9');
+    expect(document.body.textContent).toContain('resolution=720p|aspect_ratio=9:16');
+    expect(document.body.textContent).toContain('模型配置里没有这一档');
+    // 尺寸表也没有「添加一行」
+    expect(
+      document.body.querySelector('button[aria-label="给token 尺寸表添加一行"]'),
+    ).toBeNull();
+  });
+
+  it('★ 视频尺寸表：只填宽度就写进目录 —— 预扣推得出这一档了', async () => {
+    await renderPage();
+    await openEditorFor('doubao-seedance-2-5-260628');
+
+    // 第 1 行是 resolution=480p|aspect_ratio=16:9（能力行里没有宽高，留空给运营填）
+    await type(labels('token 尺寸表值')[0]!, '864x480');
+    await click(button('确定'));
+
+    await click(button('保存并发布'));
+    await click(button('确认发布'));
+    const payload = api.publishBillingCatalog.mock.calls[0]?.[0] as { document: string };
+    const published = JSON.parse(payload.document) as {
+      models: Record<
+        string,
+        Record<string, { tokenEstimate: { dimensions: Record<string, string> } }>
+      >;
+    };
+    expect(
+      published.models['doubao-seedance-2-5-260628']?.text2video?.tokenEstimate.dimensions,
+    ).toEqual({
+      'resolution=720p|aspect_ratio=16:9': '1248x704',
+      // 孤儿行保留（运营没删）
+      'resolution=4k|aspect_ratio=16:9': '3840x2160',
+      'resolution=480p|aspect_ratio=16:9': '864x480',
+    });
+  });
+
+  it('读不到能力行时退回手工填键，并在弹窗里说明原因（不替它猜一份档位清单）', async () => {
+    api.fetchAdminModels.mockResolvedValue([]);
+
+    await renderPage();
+    await openEditorFor('doubao-seedance-2-5-260628');
+
+    expect(document.body.textContent).toContain('读不到这个模型的**能力行**');
+    expect(labels('token 尺寸表键')).toHaveLength(2); // 目录里既有那两行，照旧可编辑
   });
 });

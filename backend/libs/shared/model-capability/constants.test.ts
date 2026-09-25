@@ -342,3 +342,59 @@ describe("features 扩展键闸门（i2i_model_name / max_prompt_length）", () 
     expect(parsed.ok).toBe(true);
   });
 });
+
+describe("seedream 矩阵键闸门（写侧）", () => {
+  const SIZES = [
+    { id: "1k", label: "1K", api_value: "1K" },
+    { id: "2k", label: "2K", api_value: "2K" },
+  ];
+
+  it("create：矩阵键不是任何档位的 api_value/id → 400", () => {
+    const parsed = parseModelCreateBody({
+      model_id: "doubao-seedream-5-0-pro-260628",
+      capability_type: "image",
+      model_label: "Seedream 5.0 Pro",
+      channel_parser: "seedream",
+      supported_sizes: SIZES,
+      request_mapping: { matrix: { "2": { "1:1": "2048x2048" } } },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toContain("api_value");
+  });
+
+  it("create：键对得上 → 放行", () => {
+    const parsed = parseModelCreateBody({
+      model_id: "doubao-seedream-5-0-pro-260628",
+      capability_type: "image",
+      model_label: "Seedream 5.0 Pro",
+      channel_parser: "seedream",
+      supported_sizes: SIZES,
+      request_mapping: { matrix: { "2k": { "1:1": "2048x2048" } } },
+    });
+    expect(parsed.ok).toBe(true);
+  });
+
+  // ⚠️ 更新是 diff 提交：没改过的 supported_sizes 不在 body 里。少了这个回落，
+  //    「只改矩阵」的保存会因为拿不到档位而跳过校验 —— 闸门形同虚设。
+  it("★ update：body 没带 supported_sizes 时回落到**库中那一行**的档位", () => {
+    const parsed = parseModelUpdateBody(
+      { request_mapping: { matrix: { "2": { "1:1": "2048x2048" } } } },
+      { channel_parser: "seedream", supported_sizes: SIZES },
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toContain("api_value");
+  });
+
+  it("update：库里那一行的档位也对不上、但请求体给了新档位 → 按请求体判", () => {
+    const parsed = parseModelUpdateBody(
+      {
+        supported_sizes: SIZES,
+        request_mapping: { matrix: { "2k": { "1:1": "2048x2048" } } },
+      },
+      { channel_parser: "seedream", supported_sizes: [{ id: "旧档" }] },
+    );
+    expect(parsed.ok).toBe(true);
+  });
+});

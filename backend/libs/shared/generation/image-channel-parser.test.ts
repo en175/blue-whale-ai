@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   availableAspectRatiosForSize,
   mapImageChannelRequest,
+  validateRequestMapping,
 } from "./image-channel-parser.js";
 
 /** 工单 IKDBYY 灌数：GPT 全量交叉格。空串 = 未填。 */
@@ -168,5 +169,66 @@ describe("availableAspectRatiosForSize", () => {
         "16:9",
       ]),
     ).toEqual(["1:1", "16:9"]);
+  });
+});
+
+/* ── seedream 矩阵键的写侧闸门 ────────────────────────────────────────────────
+ *
+ * worker 的查找链是「按 id 命中 supported_sizes 条目 → 取 api_value 当 providerSize
+ * → 用它当矩阵查找键」，所以键的拼写错了这一档就解不出尺寸（上游 400 Invalid size），
+ * 而界面上看不出异常。实测漏过一次（`2` / `1.5` 这种既不是 id 也不是 api_value 的陈旧键），
+ * 根因是本函数此前对 seedream 直接 `return null` —— 完全不校验。
+ */
+describe("validateRequestMapping seedream 矩阵键", () => {
+  /** 5.0 Pro 的能力行形态：id 与 api_value 只有大小写差异。 */
+  const SIZES = [
+    { id: "1k", label: "1K", api_value: "1K" },
+    { id: "1.5k", label: "1.5K", api_value: "1.5K" },
+    { id: "2k", label: "2K", api_value: "2K" },
+  ];
+
+  it("键等于 api_value：放行（大小写不敏感）", () => {
+    expect(
+      validateRequestMapping(
+        "seedream",
+        { matrix: { "1K": { "1:1": "1024x1024" }, "2k": { "1:1": "2048x2048" } } },
+        SIZES,
+      ),
+    ).toBeNull();
+  });
+
+  it("★ 陈旧拼写（既不是 id 也不是 api_value）：拒绝，且报错点出那个键", () => {
+    const error = validateRequestMapping(
+      "seedream",
+      { matrix: { "1k": { "1:1": "1024x1024" }, "2": { "1:1": "2048x2048" } } },
+      SIZES,
+    );
+    expect(error).toContain("2");
+    expect(error).toContain("api_value");
+  });
+
+  it("api_value 缺失时回落 id", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { "1k": { "1:1": "1024x1024" } } }, [
+        { id: "1k", label: "1K" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("拿不到 supported_sizes 时不拦（宁可不查，也不把正常保存拦死）", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { 任意: { "1:1": "1x1" } } }),
+    ).toBeNull();
+  });
+
+  it("矩阵横排不是对象：拒绝", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { "1k": "1024x1024" } }, SIZES),
+    ).toContain("须为对象");
+  });
+
+  it("没有 matrix（或整个 mapping 为空）：放行 —— seedream 的矩阵是可选的", () => {
+    expect(validateRequestMapping("seedream", null, SIZES)).toBeNull();
+    expect(validateRequestMapping("seedream", {}, SIZES)).toBeNull();
   });
 });

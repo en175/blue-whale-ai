@@ -1,0 +1,66 @@
+/* TagInput：值列表 + 输入行。颜色/边框沿用 Chip 与 Input 的同一组 token。 */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius-full);
+  background: var(--admin-accent-soft);
+  color: var(--admin-text);
+  font-size: 13px;
+}
+
+.tagText {
+  /* 长 mode_id 不许把整行撑破；完整值在 title 与输入框里都能看到 */
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--admin-text-muted);
+  cursor: pointer;
+}
+
+.remove:hover {
+  color: var(--admin-text);
+}
+
+.remove:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.row input {
+  flex: 1;
+  min-width: 0;
+}

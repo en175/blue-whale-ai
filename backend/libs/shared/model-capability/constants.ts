@@ -283,6 +283,7 @@ function parseParserAndMapping(
   body: Record<string, unknown>,
   mode: "create" | "update",
   currentParser?: unknown,
+  currentSizes?: unknown,
 ): ParseResult<{
   channel_parser?: ImageChannelParserId;
   request_mapping?: unknown;
@@ -339,7 +340,11 @@ function parseParserAndMapping(
     return { ok: false, error: "request_mapping 不能为空" };
   }
   if (mappingProvided) {
-    const mappingErr = validateRequestMapping(parser, body.request_mapping);
+    // ⚠️ 档位清单（supported_sizes）也是 diff 提交：没改过的尺寸不在 body 里。seedream 的
+    //    矩阵键校验要拿它当**合法键集合**，所以与 channel_parser 同一套回落 —— 用库中那一行。
+    //    （少了这一步，一次「只改矩阵」的保存会因为拿不到档位而跳过校验，闸门形同虚设。）
+    const sizesForGate = body.supported_sizes ?? currentSizes;
+    const mappingErr = validateRequestMapping(parser, body.request_mapping, sizesForGate);
     if (mappingErr) return { ok: false, error: mappingErr };
   }
   return {
@@ -498,7 +503,7 @@ export function parseModelCreateBody(
  *  传进来。调用方须读库，**不得读缓存**：校验读到旧值等于没校验。 */
 export function parseModelUpdateBody(
   body: unknown,
-  current?: { channel_parser?: unknown },
+  current?: { channel_parser?: unknown; supported_sizes?: unknown },
 ): ParseResult<ModelUpdatePayload> {
   if (!isPlainObject(body)) return { ok: false, error: "请求体须为 JSON 对象" };
 
@@ -588,7 +593,12 @@ export function parseModelUpdateBody(
   const featuresErr = featuresFieldErr(body.features);
   if (featuresErr) return { ok: false, error: featuresErr };
 
-  const parsedMapping = parseParserAndMapping(body, "update", current?.channel_parser);
+  const parsedMapping = parseParserAndMapping(
+    body,
+    "update",
+    current?.channel_parser,
+    current?.supported_sizes,
+  );
   if (!parsedMapping.ok) return parsedMapping;
 
   return {

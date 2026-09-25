@@ -20,6 +20,8 @@ import {
   ReceiptText,
   ListChecks,
   Coins,
+  Megaphone,
+  BadgePercent,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
@@ -32,6 +34,8 @@ const navItems = [
   { to: '/admin', end: true, label: '仪表盘', icon: LayoutDashboard },
   { to: '/admin/recharge-plans', end: false, label: '充值档位', icon: Layers },
   { to: '/admin/billing', end: false, label: '模型计费', icon: Coins },
+  { to: '/admin/billing-promotions', end: false, label: '限时活动', icon: Megaphone },
+  { to: '/admin/billing-member-discounts', end: false, label: '会员折扣', icon: BadgePercent },
   { to: '/admin/recharge-records', end: false, label: '充值记录', icon: Wallet },
   { to: '/admin/consumption-records', end: false, label: '消费记录', icon: ReceiptText },
   { to: '/admin/job-records', end: false, label: '任务记录', icon: ListChecks },

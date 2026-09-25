@@ -31,6 +31,11 @@ export default function Checkbox({
   indeterminate = false,
   'aria-label': ariaLabel,
 }: CheckboxProps) {
+  const toggle = () => {
+    if (disabled) return;
+    onChange(!checked);
+  };
+
   const box = (
     <span
       role="checkbox"
@@ -42,16 +47,15 @@ export default function Checkbox({
         indeterminate ? styles.mixed : ''
       }`}
       onClick={(e) => {
-        if (disabled) return;
-        // 有 label 时点击会先冒泡到 label 的 onClick，那里统一处理；这里只挡重复触发
+        // 有 label 时统一由外层 label 处理（点方框的 click 会冒泡上去），
+        // 这里只挡掉浏览器对 label 的默认激活行为，否则会切换两次
         e.preventDefault();
-        onChange(!checked);
+        if (label === undefined) toggle();
       }}
       onKeyDown={(e) => {
-        if (disabled) return;
         if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
-          onChange(!checked);
+          toggle();
         }
       }}
     >
@@ -63,7 +67,16 @@ export default function Checkbox({
   if (label === undefined) return box;
 
   return (
-    <label className={`${styles.row} ${disabled ? styles.disabled : ''}`}>
+    // ⚠️ 点击处理挂在 label 上而不是只挂在方框上：`<span role="checkbox">` 不是
+    //    labelable 元素，浏览器不会把「点文字」转发给它 —— 只挂方框的话，
+    //    点「周一」这两个字不会有任何反应（而用户几乎总是点文字）。
+    <label
+      className={`${styles.row} ${disabled ? styles.disabled : ''}`}
+      onClick={(e) => {
+        e.preventDefault();
+        toggle();
+      }}
+    >
       {box}
       <span className={styles.label}>{label}</span>
     </label>

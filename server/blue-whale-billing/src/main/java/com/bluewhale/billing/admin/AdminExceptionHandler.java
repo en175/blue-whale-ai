@@ -31,6 +31,7 @@ public class AdminExceptionHandler {
     private static final String CODE_UNPRICEABLE = "UNPRICEABLE";
     private static final String CODE_DUPLICATE = "DUPLICATE";
     private static final String CODE_INVALID = "INVALID_ARGUMENT";
+    private static final String CODE_NOT_FOUND = "NOT_FOUND";
     private static final String CODE_INTERNAL = "INTERNAL";
 
     @ExceptionHandler(InsufficientCreditsException.class)
@@ -87,6 +88,19 @@ public class AdminExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorBody> invalid(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(new ErrorBody(CODE_INVALID, e.getMessage()));
+    }
+
+    /**
+     * 目标不存在（改/删一条已被删掉的折扣）。
+     *
+     * <p>⚠️ 必须**排在 {@link #invalid} 之前**判定：404 与 400 在界面上是两句不同的人话 ——
+     * 「你填的不对，回去改表单」与「这条已经不在了，刷新一下」。
+     * 合成 400 会让运营对着一个没有问题的表单反复保存。
+     */
+    @ExceptionHandler(AdminNotFoundException.class)
+    public ResponseEntity<ErrorBody> notFound(AdminNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ErrorBody(CODE_NOT_FOUND, e.getMessage()));
     }
 
     @ExceptionHandler(RuntimeException.class)

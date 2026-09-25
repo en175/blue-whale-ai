@@ -3,11 +3,20 @@ import {
   BillingAdminConfigError,
   BillingAdminError,
   CatalogRejectedError,
+  DiscountNotFoundError,
+  DiscountRejectedError,
   billingAdminUrl,
+  createMemberDiscount,
+  createPromotion,
+  deleteMemberDiscount,
   fetchActiveCatalog,
   fetchCreditsPerYuan,
   grantCredits,
+  listMemberDiscounts,
+  listPromotions,
   publishCatalog,
+  updateMemberDiscount,
+  updatePromotion,
 } from "./billing-admin-client.js";
 
 const ENV = { BILLING_ADMIN_URL: "http://billing.internal:4003/" };
@@ -31,6 +40,24 @@ function stub(body: unknown, status = 200) {
   );
   return calls;
 }
+
+/** 一个完整的活动写请求体：PUT 是整条覆盖，每一列都要给。 */
+const PROMOTION_INPUT = {
+  code: "night-70",
+  name: "夜间 7 折",
+  discountBp: 7000,
+  modelIds: ["*"],
+  taskTypes: null,
+  tierScope: null,
+  startAt: "2026-10-01T00:00",
+  endAt: "2026-11-01T00:00",
+  dailyTimeStart: null,
+  dailyTimeEnd: null,
+  daysOfWeek: null,
+  tz: "Asia/Shanghai",
+  status: "enabled",
+  priority: 0,
+};
 
 describe("billing-admin-client", () => {
   beforeEach(() => {
@@ -165,5 +192,107 @@ describe("billing-admin-client", () => {
     await expect(
       publishCatalog({ document: "{}", publishedBy: "42" }),
     ).rejects.toThrow(BillingAdminError);
+  });
+
+  /* ---------- 折扣（会员折扣 / 营销活动） ---------- */
+
+  it("会员折扣：列 / 建 / 改 / 删各打对端点", async () => {
+    const listCalls = stub([{ id: 1, tier: "pro", discountBp: 9000 }]);
+    await listMemberDiscounts({ tier: "pro", status: "enabled" });
+    expect(listCalls[0]?.url).toBe(
+      "http://billing.internal:4003/admin/member-discounts?tier=pro&status=enabled",
+    );
+
+    // ⚠️ 省略过滤条件时**不带查询串**：带上 `tier=` 会让 billing 收到一个空值，
+    //    而「不过滤」与「过滤一个空等级」是两件事
+    const bareCalls = stub([]);
+    await listMemberDiscounts();
+    expect(bareCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts");
+
+    const writeCalls = stub({ id: 7 });
+    await createMemberDiscount({
+      tier: "pro",
+      modelPattern: "*",
+      taskPattern: "*",
+      discountBp: 9000,
+      priority: 0,
+      status: "enabled",
+    });
+    expect(writeCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts");
+    expect(writeCalls[0]?.body).toMatchObject({ tier: "pro", discountBp: 9000 });
+
+    const updateCalls = stub({ id: 7 });
+    await updateMemberDiscount(7, {
+      tier: "pro",
+      modelPattern: "*",
+      taskPattern: "*",
+      discountBp: 8000,
+      priority: 1,
+      status: "disabled",
+    });
+    expect(updateCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts/7");
+
+    const deleteCalls = stub({ id: 7, deleted: true });
+    await deleteMemberDiscount(7);
+    expect(deleteCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts/7");
+  });
+
+  it("活动：建的时候把操作人带上（billing 那边没有鉴权，这是唯一的来路）", async () => {
+    const calls = stub({ id: 3, code: "night-70" });
+
+    await createPromotion(
+      {
+        code: "night-70",
+        name: "夜间 7 折",
+        discountBp: 7000,
+        modelIds: ["seedance-*"],
+        taskTypes: null,
+        tierScope: ["pro", "max"],
+        startAt: "2026-10-01T00:00",
+        endAt: "2026-11-01T00:00",
+        dailyTimeStart: "22:00",
+        dailyTimeEnd: "06:00",
+        daysOfWeek: [1, 5],
+        tz: "Asia/Shanghai",
+        status: "draft",
+        priority: 0,
+      },
+      "42",
+    );
+
+    expect(calls[0]?.url).toBe("http://billing.internal:4003/admin/promotions?operator=42");
+    // null 必须原样外发：它是「不限 / 全天」这个状态，被 JSON.stringify 丢掉就变成了
+    // 「没填」—— billing 那一侧会按默认值处理，界面上看到的和库里存的就对不上了
+    expect(calls[0]?.body).toMatchObject({ taskTypes: null, daysOfWeek: [1, 5] });
+  });
+
+  it("折扣写入被拒（400）→ DiscountRejectedError，且带上 billing 的原话", async () => {
+    stub({ code: "INVALID_ARGUMENT", message: "折扣必须大于 0：万分比 0 表示免费" }, 400);
+
+    await expect(
+      createMemberDiscount({
+        tier: "pro",
+        modelPattern: "*",
+        taskPattern: "*",
+        discountBp: 0,
+        priority: 0,
+        status: "enabled",
+      }),
+    ).rejects.toThrow(DiscountRejectedError);
+    await expect(
+      deleteMemberDiscount(7),
+    ).rejects.toThrow(/折扣必须大于 0/);
+  });
+
+  it("目标已被删（404）→ DiscountNotFoundError，与 400 分开（一个刷新、一个改表单）", async () => {
+    stub({ code: "NOT_FOUND", message: "活动不存在（可能已被删除）：id=7" }, 404);
+
+    await expect(updatePromotion(7, PROMOTION_INPUT)).rejects.toThrow(DiscountNotFoundError);
+  });
+
+  it("billing 不可用（502）→ BillingAdminError，与服务故障同向", async () => {
+    stub({ message: "网关超时" }, 502);
+
+    await expect(listPromotions()).rejects.toThrow(BillingAdminError);
   });
 });

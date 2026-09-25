@@ -11,9 +11,16 @@
  * 2. **不编辑的字段原样带回去**（`usageSemantic` / `by` 等，见 `ruleFromForm` 的入参 `original`）；
  * 3. **「单价待配」（unset）是显式的空位**，不是「先不收费」——弹窗要把它说清楚，
  *    因为它是运营最可能误判的一处（详见下面那段 Alert 的文案）。
+ *
+ * ── 规格键不再手敲：候选集来自模型配置 ──────────────────────────────────────
+ *
+ * 用户口径：「模型尺寸表，模型配置里面有啊，不是在模型价格这而已」。所以价格表与尺寸表
+ * 的**键**一律派生自能力行（`sizeCandidates.ts`），运营只填**数**（宽高 / 单价）。
+ * 目录里有、能力行里没有的键会作为**孤儿行**标出来——那是两份配置已经漂了的证据，
+ * 不能静默丢掉。读不到能力行时退回自由编辑并在界面上说明。
  * ============================================ */
-import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import {
   BASE_UNIT_OPTIONS,
   describePriceInHuman,
@@ -25,7 +32,23 @@ import {
   type KeyValueRow,
   type RuleForm,
 } from './catalogDraft';
-import { Alert, Button, Checkbox, Field, Input, Modal, Select } from '../../ui';
+import {
+  filledKeyValueRows,
+  filledPriceRows,
+  planRows,
+  type RowPlan,
+} from './rowPlan';
+import {
+  configuredSizePixels,
+  defaultAxesForBaseUnit,
+  describePixels,
+  dimensionTableCandidates,
+  prefillDimensionValue,
+  priceTableCandidates,
+  sizeOfSpecKey,
+  type ModelCapabilityView,
+} from './sizeCandidates';
+import { Alert, Badge, Button, Checkbox, Field, Input, Modal, Select } from '../../ui';
 
 const ROUNDING_OPTIONS = [
   { value: 'halfUp', label: 'halfUp（四舍五入，默认）' },
@@ -47,11 +70,19 @@ export interface RuleEditorState {
 export default function RuleEditorModal({
   state,
   creditsPerYuan,
+  capabilityIndex,
   onClose,
   onSave,
 }: {
   state: RuleEditorState;
   creditsPerYuan: number | null;
+  /**
+   * 模型配置（能力行）索引；`null` = 还没读到（或读取失败）。
+   *
+   * <p>按 `form.modelId` 现查而不是在打开弹窗时查一次：**新建**规则的模型 ID 正是在这个
+   * 弹窗里填的，打开时还没有值。它只用来**派生候选规格键**，不参与钱的换算。
+   */
+  capabilityIndex: Map<string, ModelCapabilityView> | null;
   onClose: () => void;
   /** 回传组装好的规则，以及它在目录里的两个键（模型 / 任务类型） */
   onSave: (rule: CatalogRuleView, modelId: string, taskType: string) => void;
@@ -59,6 +90,12 @@ export default function RuleEditorModal({
   const [form, setForm] = useState<RuleForm>(state.initial);
   const [error, setError] = useState('');
   const patch = (next: Partial<RuleForm>) => setForm((f) => ({ ...f, ...next }));
+
+  /** 这个模型的能力行（模型配置）。拿不到就是 `null` —— 界面退回手工填键（见 `SpecRowEditor`）。 */
+  const capability = useMemo(
+    () => capabilityIndex?.get(form.modelId.trim()) ?? null,
+    [capabilityIndex, form.modelId],
+  );
 
   /** 基准维度可能是目录里的老值（新维度、文本类维度）：不在候选里就补一条，别显示成空白 */
   const baseUnitOptions = BASE_UNIT_OPTIONS.some((o) => o.value === form.baseUnit)
@@ -70,6 +107,57 @@ export default function RuleEditorModal({
     baseUnit: form.baseUnit,
     unitDenominator: Number(form.unitDenominator.trim() || '1'),
   });
+
+  /* ── 规格键的候选集：来自模型配置（见 sizeCandidates.ts 的文件头） ───────────── */
+
+  /**
+   * 价格表的定价轴。规则已经存进目录的，以它自己声明的 `basePrice.by` 为准
+   * （那是目录里的事实）；新建规则（还没有 by）按基准维度给一个初值。
+   */
+  const priceAxes = useMemo(() => {
+    const declared = state.original.basePrice?.by;
+    if (Array.isArray(declared)) {
+      const names = declared
+        .filter((axis): axis is string => typeof axis === 'string' && axis.trim().length > 0)
+        .map((axis) => axis.trim());
+      if (names.length) return names;
+    }
+    return defaultAxesForBaseUnit(form.baseUnit);
+  }, [state.original.basePrice, form.baseUnit]);
+
+  const originalPriceKeys = useMemo(
+    () => Object.keys(state.original.basePrice?.table ?? {}),
+    [state.original.basePrice],
+  );
+
+  /** `null` = 派生不出来（读不到能力行 / 轴取不到取值）→ 退回自由编辑 */
+  const priceCandidates = useMemo(
+    () =>
+      capability === null ? null : priceTableCandidates(capability, priceAxes, originalPriceKeys),
+    [capability, priceAxes, originalPriceKeys],
+  );
+
+  /** 尺寸表恒为「分辨率档 × 宽高比」两轴；值全部来自能力行 */
+  const dimensionCandidates = useMemo(
+    () => (capability === null ? null : dimensionTableCandidates(capability)),
+    [capability],
+  );
+
+  const pricePlan = useMemo(
+    () =>
+      planRows(form.priceTable, priceCandidates, (key) => ({ key, value: '', originalMc: null })),
+    [form.priceTable, priceCandidates],
+  );
+
+  const dimensionPlan = useMemo(
+    () =>
+      planRows(form.tokenDimensions, dimensionCandidates, (key) => ({
+        key,
+        // 能力行里已经有这一格宽高就预填（图片矩阵）；视频没有，留空给运营填
+        value: capability === null ? '' : prefillDimensionValue(capability, key),
+      })),
+    [form.tokenDimensions, dimensionCandidates, capability],
+  );
 
   const priceYuan = form.priceValue.value.trim();
   const priceMc = priceYuan === '' ? null : yuanToMc(Number(priceYuan), creditsPerYuan);
@@ -185,15 +273,21 @@ export default function RuleEditorModal({
         ) : form.priceKind === 'table' ? (
           <Field
             label={`价格表（规格键 → 单价，元 / ${unitLabel}）`}
-            hint="规格键与提交时的规格一致（例如 resolution=1080p|video=1 / video=0 / size=2k）；键不区分大小写，等价键重复会被拒绝。没配到的档位组合提交会被拒绝（不会按 0 免费）"
+            hint="档位候选来自**模型配置**（这个模型声明了哪些尺寸/比例档），这里只填价。没配到的档位组合提交会被拒绝（不会按 0 免费）"
           >
-            <KeyValueEditor
-              rows={form.priceTable}
+            <SpecRowEditor
+              plan={pricePlan}
+              derived={priceCandidates !== null}
               ariaPrefix="价格表"
               keyPlaceholder="resolution=720p|video=1"
               valuePlaceholder="70"
+              capability={capability}
               makeRow={() => ({ key: '', value: '', originalMc: null })}
-              onChange={(priceTable) => patch({ priceTable })}
+              onRows={(priceTable) =>
+                patch({
+                  priceTable: priceCandidates === null ? priceTable : filledPriceRows(priceTable),
+                })
+              }
             />
           </Field>
         ) : (
@@ -306,16 +400,25 @@ export default function RuleEditorModal({
           <div style={{ marginTop: 12 }}>
             <Field
               label="尺寸表（规格键 → 宽x高）"
-              hint="规格键与价格表同一套语法（resolution=720p|aspect_ratio=16:9）。
-                    官方表里没有的档位+比例组合就是没配 —— 那时预扣推不出，提交会被拒绝"
+              hint="「有哪些档位 × 比例组合」来自**模型配置**（这个模型声明的分辨率档与宽高比），
+                    这里只填宽高。官方表里没有的组合就是没配 —— 那时预扣推不出，提交会被拒绝"
             >
-              <KeyValueEditor
-                rows={form.tokenDimensions}
+              <SpecRowEditor
+                plan={dimensionPlan}
+                derived={dimensionCandidates !== null}
                 ariaPrefix="token 尺寸表"
                 keyPlaceholder="resolution=720p|aspect_ratio=16:9"
                 valuePlaceholder="1248x704"
+                capability={capability}
                 makeRow={() => ({ key: '', value: '' })}
-                onChange={(tokenDimensions) => patch({ tokenDimensions })}
+                onRows={(tokenDimensions) =>
+                  patch({
+                    tokenDimensions:
+                      dimensionCandidates === null
+                        ? tokenDimensions
+                        : filledKeyValueRows(tokenDimensions),
+                  })
+                }
               />
             </Field>
           </div>
@@ -383,10 +486,140 @@ export default function RuleEditorModal({
   );
 }
 
-/* ============ 键值对编辑器（dims / multipliers / 尺寸表 / 价格表共用） ============
+/* ============ 规格表编辑器（价格表 / 尺寸表共用） ============
+ *
+ * 两种形态，由 `derived` 决定：
+ *
+ * - `derived`（读到了能力行）：**键是派生的只读文本**，只编辑值。候选集外的行作为
+ *   「孤儿」标出来（那是两份配置漂了的证据），孤儿可以删 —— 但**不能新增**：要加档位
+ *   去模型配置页加（用户口径：尺寸表在模型配置里，不该在定价页再录一遍）。
+ * - 非 `derived`（读不到能力行）：退回原来的自由键值编辑，并在上方说明原因 ——
+ *   锁住页面比让人填错更坏，但**不替它猜**一份档位清单。
+ */
+function SpecRowEditor<T extends KeyValueRow>({
+  plan,
+  derived,
+  ariaPrefix,
+  keyPlaceholder,
+  valuePlaceholder,
+  capability,
+  makeRow,
+  onRows,
+}: {
+  plan: RowPlan<T>;
+  derived: boolean;
+  ariaPrefix: string;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+  capability: ModelCapabilityView | null;
+  /** 自由编辑时「添加一行」要造的行（价格表得多带 `originalMc`，见 `MoneyField`） */
+  makeRow: () => T;
+  onRows: (rows: T[]) => void;
+}) {
+  if (!derived) {
+    return (
+      <>
+        <Alert tone="warning">
+          读不到这个模型的**能力行**，档位候选集派生不出来 —— 暂时按手工填键的方式编辑。
+          档位以模型配置为准，配好后回到这里会显示成只读候选。
+        </Alert>
+        <KeyValueEditor
+          rows={plan.rows}
+          ariaPrefix={ariaPrefix}
+          keyPlaceholder={keyPlaceholder}
+          valuePlaceholder={valuePlaceholder}
+          makeRow={makeRow}
+          onChange={onRows}
+        />
+      </>
+    );
+  }
+
+  const all = [...plan.rows, ...plan.orphans];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {all.map((row, index) => {
+        const orphan = index >= plan.rows.length;
+        const hint = capability === null ? '' : specKeyHint(capability, row);
+        return (
+          <div key={`${row.key}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <code style={{ fontSize: 12 }}>{row.key}</code>
+              {orphan && (
+                <span style={{ marginLeft: 8 }}>
+                  {/* ⚠️ 不静默丢掉：静默删掉等于在一次「只改单价」的保存里顺手改了别的档位 */}
+                  <Badge tone="warning">模型配置里没有这一档</Badge>
+                </span>
+              )}
+              {hint && <div style={{ fontSize: 11, opacity: 0.7 }}>{hint}</div>}
+            </div>
+            <Input
+              aria-label={`${ariaPrefix}值`}
+              placeholder={valuePlaceholder}
+              value={row.value}
+              onChange={(e) =>
+                onRows(all.map((r, i) => (i === index ? { ...r, value: e.target.value } : r)))
+              }
+              style={{ width: 120 }}
+            />
+            {orphan ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                title="删掉这一行"
+                aria-label={`删掉${ariaPrefix}第 ${index + 1} 行`}
+                icon={<Trash2 size={15} strokeWidth={2} />}
+                onClick={() => onRows(all.filter((_, i) => i !== index))}
+              />
+            ) : (
+              // 占位，让候选行的输入框与孤儿行左对齐
+              <span style={{ width: 30 }} />
+            )}
+          </div>
+        );
+      })}
+      {plan.orphans.length > 0 && (
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          <AlertTriangle size={13} strokeWidth={2} /> 标黄的行在**模型配置**里没有对应档位
+          —— 用户根本选不到它。要么在模型配置里补上，要么在这里删掉。
+        </div>
+      )}
+      {all.length === 0 && (
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          这个模型的能力行里没有档位可派生（尺寸/比例都没配）—— 请先在模型配置里补。
+        </div>
+      )}
+      <div style={{ fontSize: 12, opacity: 0.75 }}>
+        要增加档位请改**模型配置**（那里是尺寸表的唯一来源），这里不提供手工加行。
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 候选行下面那行小字：这个档位在模型配置里是多少像素。
+ *
+ * 图片按像素分档定价时（如 5.0 Pro 的 261 万像素分界），运营得看得见 2K = 419 万
+ * 这种数才判得对档 —— 而那个数就记在能力行的矩阵里，不该让人去别处找。
+ *
+ * 能力行里没有这一档（孤儿行）时不给小字：那种行已经戴了徽标，再写一句是同义重复。
+ */
+function specKeyHint(capability: ModelCapabilityView, row: KeyValueRow): string {
+  const size = sizeOfSpecKey(capability, row.key);
+  if (size === null) return '';
+  const pixels = describePixels(configuredSizePixels(capability, size));
+  return pixels ? `模型配置：${pixels}` : '';
+}
+
+/* ============ 自由键值对编辑器（dims / 倍率 / 最低 token 用量表，以及读不到能力行时的规格表） ============
  *
  * 泛型是为了价格表：它每行还要多带一个 `originalMc`（未改动时原值写回，见
  * `MoneyField`），而 dims / 倍率 / 尺寸表不需要。`makeRow` 让「添加一行」知道该造哪种行。
+ */
+/* ============ 自由键值对编辑器（dims / 倍率 / 最低 token 用量表，以及读不到能力行时的规格表） ============
+ *
+ * 泛型是为了价格表：它每行还要多带一个 `originalMc`（未改动时原值写回，见
+ * `MoneyField`），而 dims / 倍率不需要。`makeRow` 让「添加一行」知道该造哪种行。
  */
 function KeyValueEditor<T extends KeyValueRow>({
   rows,

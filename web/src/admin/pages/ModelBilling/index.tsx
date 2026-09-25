@@ -37,10 +37,12 @@ import {
   publishBillingCatalog,
   type BillingCatalog,
 } from '@/api/adminBillingCatalog';
+import { fetchAdminModels } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import NumberField from './NumberField';
 import RuleEditorModal, { type RuleEditorState } from './RuleEditorModal';
+import { buildCapabilityIndex } from './sizeCandidates';
 import {
   bpToMultiple,
   describeBasePrice,
@@ -86,6 +88,22 @@ const STACK_MODE_OPTIONS = [
 export default function ModelBilling() {
   const queryClient = useQueryClient();
   const catalog = useQuery(billingCatalogOptions());
+
+  /**
+   * 模型配置（`generation_model_capability`）—— 只用来给规则编辑弹窗**派生档位候选**。
+   *
+   * <p>为什么是页面去读、而不是让 billing 去读：能力行在 `blue_whale` 库，定价目录在 billing
+   * 自己的库，两者不共享库（ADR-0114）。页面经 `/api/admin/models`（backend 是 blue_whale
+   * 的属主）拿候选、**预填**进目录草稿；发出去的仍是一份完整的目录 JSON，billing 只看见目录。
+   *
+   * <p>取不到时**不阻塞本页**：编辑退回手工填键，并在弹窗里说明（见 `SpecRowEditor`）。
+   * 目录编辑不该被另一个接口的可用性绑死 —— 那会把一次后端抖动变成「今天不能改价」。
+   */
+  const models = useQuery({ queryKey: ['admin-models'], queryFn: fetchAdminModels });
+  const capabilityIndex = useMemo(
+    () => (models.data === undefined ? null : buildCapabilityIndex(models.data)),
+    [models.data],
+  );
 
   /** 已加载的版本信息 + 它对应的解析结果（基线）。只在「加载 / 重新加载 / 发布成功」三处变。 */
   const [loaded, setLoaded] = useState<{
@@ -387,6 +405,7 @@ export default function ModelBilling() {
         <RuleEditorModal
           state={editor}
           creditsPerYuan={creditsPerYuan}
+          capabilityIndex={capabilityIndex}
           onClose={() => setEditor(null)}
           // ⚠️ 模型 / 任务类型是 models 映射的**键**，所以由弹窗把表单里最终的这两个值回传，
           //    而不是页面从 `state.initial` 里取：新建时用户正是在弹窗里填的它们，

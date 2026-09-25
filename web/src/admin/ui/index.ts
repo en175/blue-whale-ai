@@ -22,4 +22,5 @@ export { default as Stat, type StatTone } from './Stat';
 export { default as Table } from './Table';
 export { default as Textarea } from './Textarea';
 export { default as Tabs, type TabItem } from './Tabs';
+export { default as TagInput } from './TagInput';
 export { default as Toolbar } from './Toolbar';

@@ -381,6 +381,269 @@ function rfc3339(instant: Date): string {
   return `${beijing.toISOString().slice(0, 19)}+08:00`;
 }
 
+/* ---------- 折扣：会员等级折扣 / 营销活动 ---------- */
+
+/**
+ * 折扣写入被 billing 拒了（400 + 一句人话：哪一列、为什么不合法）。
+ *
+ * <p>与 {@link CatalogRejectedError} 同一个立场：**这是「你填的不对」，不是「服务坏了」**。
+ * 压成 503/500 会让运营去等服务恢复，而真正要改的是表单里的那个值。
+ * billing 那边的校验文案是逐条写的（`DiscountRules`），原样带出来 —— 丢了它，
+ * 界面上只剩「HTTP 400」，而能自己修的信息恰好只有这一句。
+ */
+export class DiscountRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DiscountRejectedError";
+  }
+}
+
+/**
+ * 改/删的那条折扣已经不在了（404）。
+ *
+ * <p>与 {@link DiscountRejectedError} 分开：那个是「回去改表单」，这个是「刷新一下，
+ * 别人已经删了」。两者的界面动作完全不同，混成一个码运营只能猜。
+ */
+export class DiscountNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DiscountNotFoundError";
+  }
+}
+
+/** 会员等级折扣（`billing_member_discounts` 的一行）。 */
+export interface BillingMemberDiscount {
+  id: number;
+  /** free | basic | pro | max —— 权威定义在 `@lib/core/identity/tier` */
+  tier: string;
+  /** 模型匹配：`*` / `seedance-*` / 精确 id（**不支持中间带 \* **，billing 会拒） */
+  modelPattern: string;
+  /** 任务匹配：`*` / `text2video` */
+  taskPattern: string;
+  /** 万分比折扣，9000 = 9 折。⚠️ 界面按「折」展示，这一列是内部单位 */
+  discountBp: number;
+  /** 同等级命中多条时取最优惠；此项只用于展示排序 */
+  priority: number;
+  /** enabled | disabled */
+  status: string;
+  gmtCreate: string;
+  gmtModified: string;
+}
+
+/**
+ * 新建 / 整条覆盖一条会员折扣。
+ *
+ * <p>⚠️ **每一列都要给**（PUT 是整条覆盖，不是部分更新）：`priority` 与 `status`
+ * 在 billing 侧有默认值（0 / enabled），但把「没给」与「给了个默认值」混在一起，
+ * 就会出现「界面上看着是停用、库里其实还是启用」这类要靠读代码才能解释的差异。
+ */
+export interface MemberDiscountInput {
+  tier: string;
+  modelPattern: string;
+  taskPattern: string;
+  discountBp: number;
+  priority: number;
+  status: string;
+}
+
+/**
+ * 营销活动（`billing_promotions` 的一行）。
+ *
+ * <p>⚠️ 四个条件列（`modelIds` / `taskTypes` / `tierScope` / `daysOfWeek`）在这里是
+ * **解析后的数组**，不是库里的 JSON 文本：文本形态对界面毫无意义，而
+ * 「`[]`（= 全部）还是 `null`（= 不限）」的区别恰恰是最容易看错的一处。
+ * billing 侧用与计价**同一份**解析器（`PatternJson`）。
+ */
+export interface BillingPromotion {
+  id: number;
+  /** 活动标识，唯一，审计/排查用 */
+  code: string;
+  name: string;
+  /** 万分比折扣，7000 = 7 折 */
+  discountBp: number;
+  /** 模型范围，至少一个；`*` = 全部 */
+  modelIds: string[];
+  /** 任务范围；null = 不限 */
+  taskTypes: string[] | null;
+  /** 适用等级；null = 不限 */
+  tierScope: string[] | null;
+  /** 起始时间（含），无时区的墙钟：`2026-10-01T00:00:00` */
+  startAt: string;
+  /** 结束时间（**不含**） */
+  endAt: string;
+  /** 每日时段起；与 end 同时为 null = 全天 */
+  dailyTimeStart: string | null;
+  /** 每日时段止，可跨天（22:00→06:00） */
+  dailyTimeEnd: string | null;
+  /** 生效星期 [1..7]（1 = 周一）；null = 每天 */
+  daysOfWeek: number[] | null;
+  /** 时区（ADR-0111 北京时间口径），必填 */
+  tz: string;
+  /** draft | enabled | disabled | expired */
+  status: string;
+  priority: number;
+  /** 建这条活动的人（backend 传当前管理员的 userId） */
+  createdBy: string;
+  gmtCreate: string;
+  gmtModified: string;
+}
+
+/**
+ * 新建 / 整条覆盖一条活动。**每一列都要给**（PUT 是整条覆盖），
+ * `null` 是「不限 / 全天」这个明确的状态，不是「没填」。
+ */
+export interface PromotionInput {
+  code: string;
+  name: string;
+  discountBp: number;
+  modelIds: string[];
+  /** null = 不限任务类型；billing 侧与空数组合一 */
+  taskTypes: string[] | null;
+  /** null = 不限等级 */
+  tierScope: string[] | null;
+  startAt: string;
+  endAt: string;
+  /** 两个都为 null = 全天；只给一个 billing 会拒（那在计价侧会静默变成全天） */
+  dailyTimeStart: string | null;
+  dailyTimeEnd: string | null;
+  /** null = 每天 */
+  daysOfWeek: number[] | null;
+  tz: string;
+  status: string;
+  priority: number;
+}
+
+const MEMBER_DISCOUNTS_PATH = "/admin/member-discounts";
+const PROMOTIONS_PATH = "/admin/promotions";
+
+/** 列会员折扣。省略 tier / status = 全部（**停用的也列出来**，见 billing 侧的注释）。 */
+export async function listMemberDiscounts(
+  query: { tier?: string; status?: string } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingMemberDiscount[]> {
+  const params = new URLSearchParams();
+  if (query.tier) params.set("tier", query.tier);
+  if (query.status) params.set("status", query.status);
+  const qs = params.toString();
+  return discountRequest<BillingMemberDiscount[]>(
+    `${MEMBER_DISCOUNTS_PATH}${qs ? `?${qs}` : ""}`,
+    { method: "GET" },
+    env,
+  );
+}
+
+export async function createMemberDiscount(
+  input: MemberDiscountInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingMemberDiscount> {
+  return discountRequest<BillingMemberDiscount>(
+    MEMBER_DISCOUNTS_PATH,
+    { method: "POST", body: JSON.stringify(input) },
+    env,
+  );
+}
+
+export async function updateMemberDiscount(
+  id: number,
+  input: MemberDiscountInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingMemberDiscount> {
+  return discountRequest<BillingMemberDiscount>(
+    `${MEMBER_DISCOUNTS_PATH}/${id}`,
+    { method: "PUT", body: JSON.stringify(input) },
+    env,
+  );
+}
+
+export async function deleteMemberDiscount(
+  id: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  await discountRequest<unknown>(`${MEMBER_DISCOUNTS_PATH}/${id}`, { method: "DELETE" }, env);
+}
+
+/** 列活动（含 draft / 停用 / 过期的：藏掉它们，运营会以为已经删了）。 */
+export async function listPromotions(
+  query: { status?: string } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingPromotion[]> {
+  const params = new URLSearchParams();
+  if (query.status) params.set("status", query.status);
+  const qs = params.toString();
+  return discountRequest<BillingPromotion[]>(
+    `${PROMOTIONS_PATH}${qs ? `?${qs}` : ""}`,
+    { method: "GET" },
+    env,
+  );
+}
+
+/**
+ * 新建活动。
+ *
+ * @param operator 当前管理员的 userId，写进 `created_by`。billing 的管理面**没有鉴权**，
+ *                 它是唯一能回答「这条活动是谁建的」的来源，所以必须由这里带上。
+ */
+export async function createPromotion(
+  input: PromotionInput,
+  operator: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingPromotion> {
+  const params = new URLSearchParams({ operator });
+  return discountRequest<BillingPromotion>(
+    `${PROMOTIONS_PATH}?${params.toString()}`,
+    { method: "POST", body: JSON.stringify(input) },
+    env,
+  );
+}
+
+export async function updatePromotion(
+  id: number,
+  input: PromotionInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BillingPromotion> {
+  return discountRequest<BillingPromotion>(
+    `${PROMOTIONS_PATH}/${id}`,
+    { method: "PUT", body: JSON.stringify(input) },
+    env,
+  );
+}
+
+export async function deletePromotion(
+  id: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  await discountRequest<unknown>(`${PROMOTIONS_PATH}/${id}`, { method: "DELETE" }, env);
+}
+
+/**
+ * 折扣接口的请求：把 billing 的失败**分类**成调用方能处置的三种。
+ *
+ * <p>⚠️ 这三个分类是这个文件里唯一重要的逻辑：400 是「改表单」、404 是「刷新」、
+ * 其余是「等服务」。压成一个 Error 之后，管理端只能一律显示「操作失败」——
+ * 而运营面对的那三种情况，要做的事完全不一样。
+ */
+async function discountRequest<T>(
+  path: string,
+  init: RequestInit,
+  env: NodeJS.ProcessEnv,
+): Promise<T> {
+  const response = await send(path, { ...init, env });
+  if (response.status === 400) {
+    throw new DiscountRejectedError(`折扣配置被拒${await errorDetail(response)}`);
+  }
+  if (response.status === 404) {
+    throw new DiscountNotFoundError(`目标不存在${await errorDetail(response)}`);
+  }
+  if (!response.ok) {
+    throw new BillingAdminError(
+      `计费管理端 ${path} 返回 HTTP ${response.status}${await errorDetail(response)}`,
+    );
+  }
+  // DELETE 回 `{id, deleted}`，对调用方没有信息；统一按文本读再决定要不要解析
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
 /* ---------- 传输 ---------- */
 
 async function request<T>(

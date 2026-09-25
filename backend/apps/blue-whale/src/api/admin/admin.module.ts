@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { AdminController } from "./admin.controller.js";
 import { AdminBillingCatalogController } from "./billing-catalog.controller.js";
+import { AdminBillingDiscountsController } from "./billing-discounts.controller.js";
+import { AdminBillingPromotionsController } from "./billing-promotions.controller.js";
 import { AdminConsumptionRecordsController } from "./consumption-records.controller.js";
 import { AdminDashboardController } from "./dashboard.controller.js";
 import { AdminHomepageHeroesController } from "./homepage-heroes.controller.js";
@@ -36,6 +38,8 @@ import { AdminSettingsController } from "./settings.controller.js";
     AdminConsumptionRecordsController,
     AdminJobRecordsController,
     AdminBillingCatalogController,
+    AdminBillingDiscountsController,
+    AdminBillingPromotionsController,
   ],
 })
 export class AdminModule {}

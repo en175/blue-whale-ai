@@ -129,6 +129,75 @@ export function mapImageChannelRequest(
   return { ok: true, size, quality };
 }
 
+/**
+ * seedream 的映射表校验：矩阵的**键必须等于某个档位的 `api_value`**（没有 api_value 时回落 id）。
+ *
+ * <h2>为什么必须在这里拦</h2>
+ *
+ * worker 的查找链是「按 id（或 api_value）命中 `supported_sizes` 条目 → 取该条目的
+ * `api_value` 当 providerSize → **再用它当矩阵查找键**」（`ImageChannelMapper.matchSupportedSize`
+ * / `resolveSeedreamSize`）。所以键写成别的拼写，这一档的出站尺寸就解不出来 ——
+ * 上游回 `400 Invalid size`，而界面上看不出任何异常。
+ *
+ * <h2>它此前是完全不校验的</h2>
+ *
+ * 本函数原先对 seedream 直接 `return null`（「seedream 不吃矩阵」时代的遗留）。实测已经漏过
+ * 一次：`doubao-seedream-5-0-pro-260628` 的矩阵键是 `1k` / `2` / `1.5`，而它的档位 id 是
+ * `1k` / `1.5k` / `2k` —— `2` 与 `1.5` 既不是 id 也不是 api_value，是两次迁移之间的陈旧拼写，
+ * 于是 1.5K / 2K 两档的尺寸都解不出来。
+ *
+ * 按 [ADR-0110](../../../../docs/adr/0110-model-capability-config-is-authoritative.md)：
+ * **不许为运营误配写运行时兜底**（那会让「配错了会怎样」再也没人验证），
+ * 运营误配由**写侧闸门 + 后台表单**负责 —— 这就是那道闸门（表单侧见
+ * `web/src/admin/pages/ModelList/model-form.ts` 的 `seedreamWireMatrix`）。
+ *
+ * <p>⚠️ **只校验键的归属，不要求全覆盖**：少一档的后果是「那一档解不出尺寸」，
+ * 与写错键是同一类；但要求全覆盖会让「先加档位、后补矩阵」的正常编辑顺序保存不了。
+ * 空缺由「配了就必须配全」留待后续单独决定（见工单遗留）。
+ *
+ * @param sizes 该行的 `supported_sizes`（画布/DB 的原始 JSON）；拿不到时**跳过**键校验
+ *              —— 宁可不查，也不拿「未知」当「没有档位」把正常保存拦死
+ */
+function seedreamMappingErr(mapping: unknown, sizes: unknown): string | null {
+  if (mapping === null || mapping === undefined) return null;
+  if (typeof mapping !== "object" || Array.isArray(mapping)) {
+    return "seedream request_mapping 须为 JSON 对象";
+  }
+  const matrix = (mapping as { matrix?: unknown }).matrix;
+  if (matrix === null || matrix === undefined) return null;
+  if (typeof matrix !== "object" || Array.isArray(matrix)) {
+    return "seedream request_mapping.matrix 须为对象";
+  }
+  const allowed = seedreamSizeKeys(sizes);
+  if (allowed === null || allowed.size === 0) return null;
+  for (const [key, row] of Object.entries(matrix as Record<string, unknown>)) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      return `seedream 交叉格每一行须为对象：${key}`;
+    }
+    if (allowed.has(key.trim().toLowerCase())) continue;
+    return `seedream 矩阵的键必须是该档位的 api_value（或 id）：${key} 不在 [${[...allowed].join(" / ")}] 里`;
+  }
+  return null;
+}
+
+/**
+ * 该行档位的合法矩阵键（api_value 优先，回落 id），全部小写。
+ *
+ * @returns `null` = 拿不到 `supported_sizes`（不校验）
+ */
+function seedreamSizeKeys(sizes: unknown): Set<string> | null {
+  if (!Array.isArray(sizes)) return null;
+  const keys = new Set<string>();
+  for (const item of sizes) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    for (const raw of [o.api_value, o.apiValue, o.id]) {
+      if (typeof raw === "string" && raw.trim()) keys.add(raw.trim().toLowerCase());
+    }
+  }
+  return keys.size ? keys : null;
+}
+
 export function availableAspectRatiosForSize(
   mapping: ImageRequestMapping,
   sizeOptionId: string,
@@ -151,8 +220,9 @@ export function availableAspectRatiosForSize(
 export function validateRequestMapping(
   parser: ImageChannelParserId,
   mapping: unknown,
+  sizes?: unknown,
 ): string | null {
-  if (parser === "seedream") return null;
+  if (parser === "seedream") return seedreamMappingErr(mapping, sizes);
   if (mapping == null) return "request_mapping 不能为空";
   if (typeof mapping !== "object" || Array.isArray(mapping)) {
     return "request_mapping 须为 JSON 对象";

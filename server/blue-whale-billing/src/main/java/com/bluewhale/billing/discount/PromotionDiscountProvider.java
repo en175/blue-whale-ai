@@ -5,10 +5,6 @@ import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.entity.PromotionEntity;
 import com.bluewhale.billing.infrastructure.mapper.PromotionMapper;
 import com.bluewhale.billing.pricing.PricingContext;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -31,10 +27,7 @@ import java.util.Set;
 @Component
 public class PromotionDiscountProvider extends DiscountProvider.Abstract<PromotionDiscountProvider.Row> {
 
-    private static final Logger log = LoggerFactory.getLogger(PromotionDiscountProvider.class);
-
     private final PromotionMapper mapper;
-    private final ObjectMapper json = new ObjectMapper();
 
     public PromotionDiscountProvider(PromotionMapper mapper) {
         this.mapper = mapper;
@@ -85,8 +78,8 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
                         entity.getId(),
                         entity.getCode(),
                         entity.getDiscountBp(),
-                        parseStringList(entity.getModelIds()),
-                        parseStringList(entity.getTaskTypes()),
+                        PatternJson.stringList(entity.getModelIds()),
+                        PatternJson.stringList(entity.getTaskTypes()),
                         parseIntSet(entity.getDaysOfWeek()),
                         entity.getDailyTimeStart(),
                         entity.getDailyTimeEnd(),
@@ -124,29 +117,15 @@ public class PromotionDiscountProvider extends DiscountProvider.Abstract<Promoti
         return !now.isBefore(start) || now.isBefore(end);
     }
 
-    // ── JSON 列解析。配置坏了不该让整次计价崩，但也不能静默放行：记 WARN + 当作「没配」 ──
-
-    private List<String> parseStringList(String jsonText) {
-        if (jsonText == null || jsonText.isBlank()) return List.of();
-        try {
-            return json.readValue(jsonText, new TypeReference<List<String>>() {});
-        } catch (Exception e) {
-            log.warn("营销活动的目标集合不是合法 JSON，按「不限」处理：{}", jsonText, e);
-            return List.of();
-        }
-    }
+    // ── JSON 列解析。⚠️ 解析实现已抽到 {@link PatternJson}：管理端要从同一列推出
+    //    「这条活动限了哪些模型」，两处各写一份解析必然有一天对不上（界面上显示限了 3 个，
+    //    计价侧当成不限）。配置坏了不该让整次计价崩，但也不能静默放行：记 WARN + 当作「没配」。 ──
 
     private Set<String> parseStringSet(String jsonText) {
-        return Set.copyOf(parseStringList(jsonText));
+        return Set.copyOf(PatternJson.stringList(jsonText));
     }
 
     private Set<Integer> parseIntSet(String jsonText) {
-        if (jsonText == null || jsonText.isBlank()) return Set.of();
-        try {
-            return Set.copyOf(json.readValue(jsonText, new TypeReference<List<Integer>>() {}));
-        } catch (Exception e) {
-            log.warn("营销活动的星期集合不是合法 JSON，按「不限」处理：{}", jsonText, e);
-            return Set.of();
-        }
+        return Set.copyOf(PatternJson.intList(jsonText));
     }
 }
