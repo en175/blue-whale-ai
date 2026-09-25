@@ -1,0 +1,78 @@
+/* ============================================
+ * 管理端 API：充值记录（`GET /api/admin/recharge-records`）
+ *
+ * 数据源是我们自己的 `recharge_orders`（本地表），所以是 **offset 分页 + 有总数**。
+ * 与消费记录（读 billing 账本、游标分页、无总数）形状不同，但两者用同一个
+ * `Pagination` 组件，翻页观感一致。
+ * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
+import { apiRequest } from './http';
+
+/** 与后端 `RechargeOrderStatus` 逐字一致（后端的白名单会拒绝其它值）。 */
+export type AdminRechargeStatus = 'pending' | 'paid' | 'expired' | 'failed';
+
+export interface AdminRechargeRecord {
+  /** 交易单号（我们生成的，也是 billing 那边发放积分的幂等键来源） */
+  tradeNo: string;
+  /** 支付网关订单号；下单应答回来前为 null */
+  payOrderId: string | null;
+  /** 用户 ID（bigint 字符串，超出 JS 安全整数范围也不丢精度） */
+  userId: string;
+  tierId: string;
+  /** 实付金额，单位**分**——不是元，也不是积分 */
+  amountFen: number;
+  /** 下单时冻结的到账积分（按档位原价 × 当时的换算率算定，之后改口径不追溯） */
+  credits: number;
+  creditsPerYuan: number;
+  status: AdminRechargeStatus;
+  paidAt: string | null;
+  /** billing 的发放批次 id；未到账为 null */
+  grantLotId: string | null;
+  /** 网关回调到达次数（只做可观测，不参与到账判定） */
+  notifyCount: number;
+  createdAt: string;
+}
+
+export interface AdminRechargeRecordListData {
+  list: AdminRechargeRecord[];
+  total: number;
+}
+
+export interface AdminRechargeRecordQuery {
+  page: number;
+  pageSize: number;
+  /** 按用户过滤；空 = 全部用户 */
+  userId?: string;
+  /** 空 = 全部状态 */
+  status?: AdminRechargeStatus;
+  /** 交易单号**精确**匹配（后端也是精确的） */
+  tradeNo?: string;
+}
+
+export const adminRechargeRecordKeys = {
+  all: ['admin-recharge-records'] as const,
+  list: (query: AdminRechargeRecordQuery) =>
+    [...adminRechargeRecordKeys.all, query] as const,
+};
+
+export function fetchAdminRechargeRecords(
+  query: AdminRechargeRecordQuery,
+): Promise<AdminRechargeRecordListData> {
+  const qs = new URLSearchParams();
+  qs.set('page', String(query.page));
+  qs.set('pageSize', String(query.pageSize));
+  if (query.userId) qs.set('userId', query.userId);
+  if (query.status) qs.set('status', query.status);
+  if (query.tradeNo) qs.set('tradeNo', query.tradeNo);
+  return apiRequest<AdminRechargeRecordListData>(
+    `/api/admin/recharge-records?${qs.toString()}`,
+    { silent: true },
+  );
+}
+
+export function adminRechargeRecordsOptions(query: AdminRechargeRecordQuery) {
+  return queryOptions({
+    queryKey: adminRechargeRecordKeys.list(query),
+    queryFn: () => fetchAdminRechargeRecords(query),
+  });
+}

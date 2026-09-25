@@ -84,6 +84,56 @@ export interface JobListFilter {
 export interface JobRepo {
   listByUser(userId: string, filter: JobListFilter): Promise<JobPage>;
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
+  /** 管理端列表（offset 分页，全站）。**不供用户端使用**——那条路是 listByUser。 */
+  listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
+}
+
+/**
+ * 管理端任务记录的一行。
+ *
+ * <p>与 {@link JobListItem} 的差别只有两处，都是有意的：
+ * <ul>
+ *   <li>带 {@code user_id} / {@code project_id}——管理端必须能回答「这是谁的任务」，
+ *       用户端不需要（他自己就是那个人）</li>
+ *   <li>**不带产出资料**——管理端看的是任务的状态，去拉一遍 assets 只是多一轮
+ *       查询与 N+1，而列表里那一列缩略图没人看。要看产出请按 job_id 走详情。</li>
+ * </ul>
+ */
+export interface AdminJobListItem {
+  job_id: string;
+  user_id: string;
+  project_id: string;
+  type: string;
+  status: string;
+  progress: number;
+  provider: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+  /**
+   * 库里存的原始 error map。**本层不投影**——投影（→ {@code {code,message}}）在
+   * `JobsService` 那一层做，因为投影器住在 jobs 模块，persistence 反向引它会成环。
+   * 与 `listByUser` 的 `stored_error` 同一口径。
+   */
+  stored_error: Record<string, unknown> | null;
+}
+
+export interface AdminJobPage {
+  records: AdminJobListItem[];
+  total: number;
+  size: number;
+  current: number;
+}
+
+/** 管理端任务列表的筛选条件。 */
+export interface AdminJobListFilter {
+  /** 按用户过滤；不传 = 全部用户 */
+  userId?: string;
+  projectId?: string;
+  type?: string;
+  status?: string;
+  page: number;
+  size: number;
 }
 
 type AssetRow = {
@@ -161,6 +211,49 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       }));
 
       return { records, total, size: filter.size, current: filter.page };
+    },
+
+    async listForAdmin(filter) {
+      const where = {
+        is_delete: false,
+        ...(filter.userId !== undefined ? { user_id: BigInt(filter.userId) } : {}),
+        ...(filter.projectId !== undefined ? { project_id: BigInt(filter.projectId) } : {}),
+        ...(filter.type !== undefined ? { type: filter.type } : {}),
+        ...(filter.status !== undefined ? { status: filter.status } : {}),
+      };
+      const [total, rows] = await Promise.all([
+        prisma.generation_jobs.count({ where }),
+        prisma.generation_jobs.findMany({
+          where,
+          // 次级键 id 与 listByUser 同款：DATETIME 只到秒，同一秒建多个任务很常见，
+          // 只按时间排序时翻页会跳行或重复行。
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (filter.page - 1) * filter.size,
+          take: filter.size,
+        }),
+      ]);
+
+      return {
+        records: rows.map((r) => ({
+          job_id: r.id.toString(),
+          user_id: r.user_id.toString(),
+          project_id: r.project_id?.toString() ?? "",
+          type: r.type,
+          status: r.status,
+          progress: r.progress,
+          provider: r.provider,
+          retry_count: r.retry_count,
+          created_at: r.gmt_create.toISOString(),
+          updated_at: r.gmt_modified.toISOString(),
+          stored_error:
+            r.error && typeof r.error === "object" && !Array.isArray(r.error)
+              ? (r.error as Record<string, unknown>)
+              : null,
+        })),
+        total,
+        size: filter.size,
+        current: filter.page,
+      };
     },
 
     async findByIdForUser(jobId, userId) {

@@ -46,11 +46,12 @@ public class TransactionRepository {
     /**
      * 取一页流水（时间倒序）。
      *
+     * @param userId     非空 = 只看该用户（用户面）；{@code null} = 全站（管理面）
      * @param typeFilter 已校验过的类型；空串 = 全部
      * @param size       本页最多几行（上限由应用层钳制）
      * @param pageToken  上一页返回的游标；空串 = 首页
      */
-    public TransactionView.Page listPage(long userId, String typeFilter, int size, String pageToken) {
+    public TransactionView.Page listPage(Long userId, String typeFilter, int size, String pageToken) {
         Cursor cursor = pageToken.isEmpty() ? null : Cursor.decode(pageToken);
 
         // 多取一条：PageResponse 只有 next_page_token，没有总数可填，
@@ -73,6 +74,8 @@ public class TransactionRepository {
     private static TransactionView toView(TransactionRow row) {
         return new TransactionView(
                 row.getTxId(),
+                // 管理面没有 userId 过滤，行上必须带得动归属；NULL 只可能来自脏数据
+                row.getUserId() == null ? 0L : row.getUserId(),
                 row.getType(),
                 row.getDirection(),
                 row.getTitle(),

@@ -26,6 +26,10 @@ import java.util.List;
  *
  * @param id        流水 id（{@code lot:} / {@code res:} / {@code led:} 前缀 + 该来源的主键）。
  *                  前缀不是装饰：三类来源的 id 各自独立自增，不带前缀就会撞
+ * @param userId    归属用户。用户面（按 userId 过滤）时它恒等于入参、没有信息量；
+ *                  **管理面**（billing 的 {@code /admin/transactions}）才是它的用武之地——
+ *                  全站流水每一行都得能回答「这是谁的」。契约 {@code UserTransaction} 里
+ *                  **没有**这个字段，gRPC 适配器不投影它——用户看见的永远只有自己那份
  * @param type      见 {@link TransactionType}
  * @param direction {@code in}（进账）| {@code out}（出账）——由 {@code TransactionMapper.xml} 判定
  * @param title     展示文案快照（消费行是提交时的任务标题；发放类由来源决定）
@@ -36,6 +40,7 @@ import java.util.List;
  */
 public record TransactionView(
         String id,
+        long userId,
         String type,
         String direction,
         String title,

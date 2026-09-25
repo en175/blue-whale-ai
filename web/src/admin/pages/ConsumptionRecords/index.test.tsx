@@ -1,0 +1,174 @@
+// @vitest-environment jsdom
+import { act, createElement, type ReactElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import ConsumptionRecords from './index';
+
+const api = vi.hoisted(() => ({ fetchAdminConsumptionRecords: vi.fn() }));
+
+vi.mock('@/api/adminConsumptionRecords', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/api/adminConsumptionRecords')>();
+  return {
+    ...actual,
+    fetchAdminConsumptionRecords: api.fetchAdminConsumptionRecords,
+    adminConsumptionRecordsOptions: (query: import('@/api/adminConsumptionRecords').AdminConsumptionRecordQuery) => ({
+      queryKey: actual.adminConsumptionRecordKeys.list(query),
+      queryFn: () => api.fetchAdminConsumptionRecords(query),
+    }),
+  };
+});
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root;
+let mountNode: HTMLDivElement;
+
+const ITEM = {
+  id: 'res:7',
+  user_id: 9001,
+  type: 'consume',
+  direction: 'out',
+  title: '视频生成 · seedance-2.5',
+  credits: 30,
+  status: 'done',
+  created_at: '2026-09-25T10:00:00+08:00',
+  settled_at: '2026-09-25T10:01:00+08:00',
+};
+
+function withQuery(node: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return createElement(QueryClientProvider, { client }, node);
+}
+
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function waitUntilLoaded() {
+  for (let i = 0; i < 25; i += 1) {
+    if (!document.body.textContent?.includes('加载中…')) return;
+    await settle();
+  }
+  throw new Error(`列表仍在加载: ${document.body.textContent}`);
+}
+
+async function renderPage() {
+  mountNode = document.createElement('div');
+  document.body.appendChild(mountNode);
+  root = createRoot(mountNode);
+  await act(async () => {
+    root.render(withQuery(createElement(ConsumptionRecords)));
+  });
+  await waitUntilLoaded();
+}
+
+function button(label: string): HTMLButtonElement {
+  const found = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent?.trim() === label,
+  );
+  if (!found) throw new Error(`没有找到按钮：${label}`);
+  return found;
+}
+
+async function click(label: string) {
+  await act(async () => button(label).click());
+  await settle();
+}
+
+/** 第 n 次请求带的游标（第 1 次是首次加载）。 */
+function tokenOfCall(n: number): string {
+  return api.fetchAdminConsumptionRecords.mock.calls[n - 1]?.[0]?.pageToken ?? '<缺>';
+}
+
+beforeEach(() => {
+  notifyManager.setScheduler((cb) => cb());
+  api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: '' });
+});
+
+afterEach(async () => {
+  notifyManager.setScheduler((cb) => {
+    setTimeout(cb, 0);
+  });
+  vi.clearAllMocks();
+  if (root) await act(async () => root.unmount());
+  mountNode?.remove();
+});
+
+describe('ConsumptionRecords 消费记录（游标分页）', () => {
+  it('首次加载不带游标，且因为是全站视图所以 userId 一个也不传', async () => {
+    await renderPage();
+
+    expect(api.fetchAdminConsumptionRecords).toHaveBeenCalledTimes(1);
+    expect(tokenOfCall(1)).toBe('');
+    // userId 不在参数里 —— 传 undefined 与「不过滤」在契约上是两回事
+    expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('userId');
+  });
+
+  it('渲染归属用户、说明与带方向的金额', async () => {
+    await renderPage();
+
+    expect(document.body.textContent).toContain('9001');
+    expect(document.body.textContent).toContain('视频生成 · seedance-2.5');
+    expect(document.body.textContent).toContain('-30');
+  });
+
+  it('点「下一页」把上一页给的游标原样带上；「上一页」回到**当初那一页的**游标', async () => {
+    api.fetchAdminConsumptionRecords
+      .mockResolvedValueOnce({ items: [ITEM], next_page_token: 'tok-1' })
+      .mockResolvedValueOnce({ items: [ITEM], next_page_token: 'tok-2' });
+
+    await renderPage();
+
+    await click('下一页');
+    expect(tokenOfCall(2)).toBe('tok-1');
+
+    await click('上一页');
+    // 回到首页的游标是空串，不是把 tok-1 删掉就算完 —— 游标是单向的，
+    // 「上一页」只能靠自己存过的那个值
+    expect(tokenOfCall(3)).toBe('');
+  });
+
+  it('首页禁用「上一页」；没有下一页时禁用「下一页」', async () => {
+    await renderPage();
+
+    expect(button('上一页').disabled).toBe(true);
+    // next_page_token 为空 = 到底了。这里**不从总数推** —— 账本给不出总数
+    expect(button('下一页').disabled).toBe(true);
+  });
+
+  it('不在界面上编一个总数出来', async () => {
+    await renderPage();
+
+    expect(document.body.textContent).toContain('第 1 页');
+    expect(document.body.textContent).not.toContain('共');
+  });
+
+  it('翻到第 2 页后修改筛选条件，游标回到首页而不是停在第 2 页', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: 'tok-1' });
+
+    await renderPage();
+    await click('下一页');
+    expect(tokenOfCall(2)).toBe('tok-1');
+
+    const userInput = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="用户 ID（留空 = 全站）"]',
+    );
+    if (!userInput) throw new Error('用户 ID 输入框未渲染');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(userInput, '9001');
+      userInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('查询');
+
+    // 换了条件还停在原游标上，翻出来的页与看到的条件对不上
+    expect(tokenOfCall(3)).toBe('');
+    expect(api.fetchAdminConsumptionRecords.mock.calls[2]?.[0]?.userId).toBe('9001');
+  });
+});

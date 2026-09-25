@@ -19,6 +19,14 @@ public class TransactionRow {
     /** 形如 {@code lot:12} / {@code res:7} / {@code led:expire:...}。 */
     private String txId;
 
+    /**
+     * 这行属于谁。
+     *
+     * <p>用户面（按 userId 过滤）时它恒等于入参，没有信息量；**管理面**（不过滤 userId）
+     * 时它是唯一能回答「这行是谁的」的列——没有它的全站流水是一列无法归属的账。
+     */
+    private Long userId;
+
     /** 见 {@code TransactionType}。 */
     private String type;
 
@@ -46,6 +54,8 @@ public class TransactionRow {
 
     public String getTxId() { return txId; }
     public void setTxId(String txId) { this.txId = txId; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
     public String getDirection() { return direction; }

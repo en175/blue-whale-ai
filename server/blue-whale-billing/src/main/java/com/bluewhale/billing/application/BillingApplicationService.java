@@ -261,11 +261,13 @@ public class BillingApplicationService {
      *       而空列表与「真的没有」长得一模一样，调用方查的是 {@code "recharg"} 也发现不了</li>
      * </ol>
      *
+     * @param userId     非空 = 只看该用户（用户面，{@code ListTransactions}）；{@code null} = 全站
+     *                   （**管理面**，billing 的 {@code /admin/transactions}）
      * @param typeFilter 空串/null = 全部；否则必须是 {@link TransactionType} 的合法值
      * @param pageToken  上一页给的游标；空串/null = 首页
      * @throws IllegalArgumentException 类型过滤非法或游标损坏（gRPC 映射成 INVALID_ARGUMENT）
      */
-    public TransactionView.Page listTransactions(long userId, String typeFilter,
+    public TransactionView.Page listTransactions(Long userId, String typeFilter,
                                                  int pageSize, String pageToken) {
         String filter = typeFilter == null ? "" : typeFilter.trim();
         if (!filter.isEmpty()) {

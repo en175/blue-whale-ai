@@ -16,6 +16,9 @@ import {
   Images,
   PanelLeftClose,
   PanelLeftOpen,
+  Wallet,
+  ReceiptText,
+  ListChecks,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
@@ -27,6 +30,9 @@ import styles from './index.module.css';
 const navItems = [
   { to: '/admin', end: true, label: '仪表盘', icon: LayoutDashboard },
   { to: '/admin/recharge-plans', end: false, label: '充值档位', icon: Layers },
+  { to: '/admin/recharge-records', end: false, label: '充值记录', icon: Wallet },
+  { to: '/admin/consumption-records', end: false, label: '消费记录', icon: ReceiptText },
+  { to: '/admin/job-records', end: false, label: '任务记录', icon: ListChecks },
   { to: '/admin/templates', end: false, label: '模板管理', icon: LayoutTemplate },
   { to: '/admin/skills', end: false, label: '技能管理', icon: Sparkles },
   { to: '/admin/models', end: false, label: '模型列表', icon: Boxes },

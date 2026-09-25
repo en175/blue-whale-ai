@@ -41,6 +41,8 @@ import {
 import { sharedBillingClient, toBillingError } from "@lib/shared/billing/billing-client.js";
 import {
   createRechargeOrderRepo,
+  type RechargeOrderListFilter,
+  type RechargeOrderPage,
   type RechargeOrderRepo,
   type RechargeOrderStatus,
   type RechargeOrderView,
@@ -239,6 +241,21 @@ export class RechargeService {
       amount: tier.price,
       credits,
     };
+  }
+
+  /* ---------- 管理端：充值记录 ---------- */
+
+  /**
+   * 充值记录列表（管理端，offset 分页）。
+   *
+   * <p>⚠️ **不做归属过滤**：`loadOwnOrder` 那套「这单是不是你的」在这里不适用——
+   *    管理端看的就是全部人的单。鉴权由调用方的 `AdminGuard` 承担。
+   *
+   * <p>分页是 offset（本地表有总数可算）而**不是游标**：与消费记录那边的游标分页
+   *    形状不同，但前端的翻页控件是同一个组件，体验一致。
+   */
+  async listOrdersForAdmin(filter: RechargeOrderListFilter): Promise<RechargeOrderPage> {
+    return this.repo.list(filter);
   }
 
   /* ---------- 查单 ---------- */

@@ -40,6 +40,9 @@ export {
   type JobStatusView,
   type JobPage,
   type JobListFilter,
+  type AdminJobListItem,
+  type AdminJobPage,
+  type AdminJobListFilter,
 } from "./job-repo.js";
 export {
   createSnapshotRepo,
@@ -250,6 +253,8 @@ export {
   type RechargeOrderView,
   type RechargeOrderStatus,
   type CreateRechargeOrderInput,
+  type RechargeOrderListFilter,
+  type RechargeOrderPage,
 } from "./recharge-order-repo.js";
 export {
   createSystemSettingRepo,

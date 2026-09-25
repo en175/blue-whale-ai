@@ -1,8 +1,11 @@
 import { Module } from "@nestjs/common";
 import { AdminController } from "./admin.controller.js";
+import { AdminConsumptionRecordsController } from "./consumption-records.controller.js";
 import { AdminDashboardController } from "./dashboard.controller.js";
 import { AdminHomepageHeroesController } from "./homepage-heroes.controller.js";
+import { AdminJobRecordsController } from "./job-records.controller.js";
 import { AdminModelsController } from "./models.controller.js";
+import { AdminRechargeRecordsController } from "./recharge-records.controller.js";
 import { AdminSkillsController } from "./skills.controller.js";
 import { AdminTemplateImagesController } from "./template-images.controller.js";
 import { AdminTemplateTagsController } from "./template-tags.controller.js";
@@ -28,6 +31,9 @@ import { AdminSettingsController } from "./settings.controller.js";
     AdminHomepageHeroesController,
     AdminAssetsController,
     AdminSettingsController,
+    AdminRechargeRecordsController,
+    AdminConsumptionRecordsController,
+    AdminJobRecordsController,
   ],
 })
 export class AdminModule {}

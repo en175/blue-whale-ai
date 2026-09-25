@@ -19,8 +19,9 @@ public interface TransactionMapper {
     /**
      * 取一页流水（时间倒序）。
      *
-     * <p>三道条件都在 SQL 里，因为这正是「一页」的定义所在：
+     * <p>四道条件都在 SQL 里，因为这正是「一页」的定义所在：
      * <ol>
+     *   <li><b>用户</b> —— 非空 = 只看该用户（用户面）；{@code null} = 全站（管理面）</li>
      *   <li><b>游标</b> —— {@code (created_at, kind, src_id) < cursor}（三元组比较，
      *       见 XML 的注释：DATETIME 只到秒，必须有稳定的次级键）</li>
      *   <li><b>类型过滤</b> —— {@code null} = 全部</li>
@@ -29,11 +30,12 @@ public interface TransactionMapper {
      *       没有总数可填）</li>
      * </ol>
      *
+     * @param userId     {@code null} = 全站（管理端）；非空 = 只看该用户
      * @param cursorTime 游标的时刻；{@code null} = 首页
      * @param cursorKind 游标的来源段；与 {@code cursorTime} 同生共死
      * @param cursorId   游标的行 id；同上
      */
-    List<TransactionRow> selectPage(@Param("userId") long userId,
+    List<TransactionRow> selectPage(@Param("userId") Long userId,
                                     @Param("typeFilter") String typeFilter,
                                     @Param("cursorTime") LocalDateTime cursorTime,
                                     @Param("cursorKind") String cursorKind,

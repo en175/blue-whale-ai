@@ -6,8 +6,13 @@ import {
   fail,
   ok,
   videoSceneSplitResultSchema,
+  type PublicGenerationError,
 } from "@lib/contracts";
-import { createJobRepo } from "@lib/shared/persistence/index.js";
+import {
+  createJobRepo,
+  type AdminJobListItem,
+  type AdminJobListFilter,
+} from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { fallbackErrorCode, messageFor, projectPublicError } from "./generation-job-error-projection.js";
@@ -22,6 +27,18 @@ export interface ListJobsQuery {
   ids?: string[] | undefined;
   page: number;
   size: number;
+}
+
+/** 管理端任务记录的一行：与仓库层相比，把 `stored_error` 换成了投影后的 `error`。 */
+export type AdminJobRecord = Omit<AdminJobListItem, "stored_error"> & {
+  error: PublicGenerationError | null;
+};
+
+export interface AdminJobListResult {
+  records: AdminJobRecord[];
+  total: number;
+  size: number;
+  current: number;
 }
 
 @Injectable()
@@ -75,6 +92,29 @@ export class JobsService {
         error: projectPublicError(storedError ?? null, record.type),
       })),
     });
+  }
+
+  /**
+   * 管理端任务列表（全站，offset 分页）。
+   *
+   * <p>与 {@link list} 的差别只有「谁的」：那条按登录用户过滤（用户只看自己的），
+   * 这条可以不过滤（管理端要看全站）或指定某个用户。投影口径一致——
+   * 失败原因用的是**同一份** {@link projectPublicError}，所以管理端看到的文案
+   * 与用户申诉时看到的是同一句，不必再去猜「他说的那个报错是哪个码」。
+   *
+   * <p>⚠️ 不做归属校验（那是 user 面的 `getStatus` 才需要的）：能进这个方法的调用者
+   *    已经过了 `AdminGuard`。
+   */
+  async listForAdmin(filter: AdminJobListFilter): Promise<AdminJobListResult> {
+    const page = await this.repo.listForAdmin(filter);
+    return {
+      ...page,
+      records: page.records.map(({ stored_error: storedError, ...record }) => ({
+        ...record,
+        // 与 listByUser 同一个投影器：管理端与用户端看到的是同一句话
+        error: projectPublicError(storedError ?? null, record.type),
+      })),
+    };
   }
 
   async getStatus(userId: string, jobId: string) {

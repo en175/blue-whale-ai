@@ -14,6 +14,7 @@ export { default as Input } from './Input';
 export { default as Modal } from './Modal';
 export { default as Page } from './Page';
 export { default as PageHeader } from './PageHeader';
+export { default as Pagination } from './Pagination';
 export { default as Select, type SelectOption } from './Select';
 export { default as Stat, type StatTone } from './Stat';
 export { default as Table } from './Table';

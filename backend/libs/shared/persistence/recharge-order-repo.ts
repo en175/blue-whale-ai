@@ -34,9 +34,27 @@ export interface CreateRechargeOrderInput {
   creditsPerYuan: number;
 }
 
+/** 管理端充值记录列表的筛选条件（全部可选，除分页外）。 */
+export interface RechargeOrderListFilter {
+  page: number;
+  pageSize: number;
+  /** 按用户过滤；不传 = 全部用户 */
+  userId?: number;
+  status?: RechargeOrderStatus;
+  /** **精确**匹配交易单号（`uk_recharge_orders__trade_no`）——运营是拿单号来对账的，模糊匹配会带出无关行 */
+  tradeNo?: string;
+}
+
+export interface RechargeOrderPage {
+  items: RechargeOrderView[];
+  total: number;
+}
+
 export interface RechargeOrderRepo {
   create(input: CreateRechargeOrderInput): Promise<RechargeOrderView>;
   getByTradeNo(tradeNo: string): Promise<RechargeOrderView | null>;
+  /** 管理端列表（offset 分页，时间倒序）。**不供用户端使用**——用户只看得到自己那份。 */
+  list(filter: RechargeOrderListFilter): Promise<RechargeOrderPage>;
   /** 绑定网关订单号。该号已被别的订单占用（或本单已绑过别的号）时返回 false */
   bindPayOrderId(tradeNo: string, payOrderId: string): Promise<boolean>;
   /**
@@ -109,6 +127,27 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         where: { trade_no: tradeNo, is_delete: 0 },
       });
       return row ? toView(row) : null;
+    },
+
+    async list(filter) {
+      const where = {
+        is_delete: 0,
+        ...(filter.userId !== undefined ? { user_id: BigInt(filter.userId) } : {}),
+        ...(filter.status !== undefined ? { status: filter.status } : {}),
+        ...(filter.tradeNo !== undefined ? { trade_no: filter.tradeNo } : {}),
+      };
+      const [total, rows] = await Promise.all([
+        prisma.recharge_orders.count({ where }),
+        prisma.recharge_orders.findMany({
+          where,
+          // 次级键 id 不是可选项：DATETIME 只到秒，同一秒下单两笔是常态，
+          // 只按时间排序时翻页会跳行或重复行（与 billing 游标的理由同源）。
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (filter.page - 1) * filter.pageSize,
+          take: filter.pageSize,
+        }),
+      ]);
+      return { items: rows.map(toView), total };
     },
 
     async bindPayOrderId(tradeNo, payOrderId) {

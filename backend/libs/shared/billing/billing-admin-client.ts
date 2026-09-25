@@ -144,6 +144,69 @@ export async function grantCredits(
   return { lotId: String(data.lotId ?? ""), duplicated: false };
 }
 
+/* ---------- 账本：读流水（管理端全局） ---------- */
+
+/** `GET /admin/transactions` 的一行。字段口径同 `UserTransaction`，多一个 `userId`。 */
+export interface AdminTransactionItem {
+  /** 形如 `lot:12` / `res:7` / `led:expire:...`，三类来源全局唯一 */
+  id: string;
+  /** 归属用户。**管理面独有的列**——契约的 UserTransaction 没有它（用户只看自己那份） */
+  userId: number;
+  type: string;
+  direction: string;
+  title: string;
+  /** **整数积分**，该行唯一的金额（status=pending 时是预计消耗，done 时是实际消耗） */
+  amount: number;
+  status: string;
+  createdAt: string;
+  /** RFC3339；未结算为空串 */
+  settledAt: string;
+}
+
+export interface AdminTransactionPage {
+  items: AdminTransactionItem[];
+  /** 空串 = 没有下一页 */
+  nextPageToken: string;
+}
+
+export interface AdminTransactionsQuery {
+  /** 不传 = **全站流水**。这条自由度只有管理面有：用户面的 ListTransactions 里 userId 是必填的 */
+  userId?: number;
+  /** 单值（consume | recharge | ...），空 = 全部。未知类型 billing 会返回 400 */
+  type?: string;
+  pageSize?: number;
+  /** 上一页给的 nextPageToken，原样回传；空 = 首页 */
+  pageToken?: string;
+}
+
+/**
+ * 读全站/按用户流水（`GET /admin/transactions`）。
+ *
+ * <p>⚠️ **不复用 gRPC 的 `ListTransactions`**：那条契约里 `user_id` 是必填的，
+ *    语义是「把我的账给我」。管理端要的「某个人的 / 所有人一起看」它答不了，
+ *    而给用户面契约加「userId 可不填」等于给每个持 token 的调用者开了拉全站流水的口子。
+ *    所以管理面另开一条 HTTP，proto 一个字没动。
+ *
+ * <p>⚠️ 分页是**游标**、**没有总数**（账本持续追加，要准确总数就得扫全表，
+ *    而扫完那一刻它又变了）。所以「上一页」得靠调用方自己存游标栈，
+ *    不能像本地表那样算页码。
+ */
+export async function listAdminTransactions(
+  query: AdminTransactionsQuery = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AdminTransactionPage> {
+  const params = new URLSearchParams();
+  if (query.userId !== undefined) params.set("userId", String(query.userId));
+  if (query.type) params.set("type", query.type);
+  if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
+  if (query.pageToken) params.set("pageToken", query.pageToken);
+  const qs = params.toString();
+  return request<AdminTransactionPage>(
+    `/admin/transactions${qs ? `?${qs}` : ""}`,
+    { method: "GET", env },
+  );
+}
+
 /* ---------- 传输 ---------- */
 
 async function request<T>(
@@ -152,9 +215,28 @@ async function request<T>(
 ): Promise<T> {
   const response = await send(path, init);
   if (!response.ok) {
-    throw new BillingAdminError(`billing 管理端 ${path} 返回 HTTP ${response.status}`);
+    throw new BillingAdminError(
+      `billing 管理端 ${path} 返回 HTTP ${response.status}${await errorDetail(response)}`,
+    );
   }
   return (await response.json()) as T;
+}
+
+/**
+ * 取错误响应体里的 `message` 拼成 `：xxx`（billing 的 AdminExceptionHandler 统一回 `{code,message}`）。
+ *
+ * <p>没有它，一个 400 在日志与页面上都只是「HTTP 400」——而它恰恰是**能自己改**的那一类错
+ * （比如类型过滤传错、游标坏了），看得到原因才修得动。
+ *
+ * <p>读不出来就返回空串：**附带信息失败不该盖掉主错误**。
+ */
+async function errorDetail(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    return typeof body.message === "string" && body.message ? `：${body.message}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function send(

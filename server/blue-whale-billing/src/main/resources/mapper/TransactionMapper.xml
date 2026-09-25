@@ -54,8 +54,17 @@
 -->
 <mapper namespace="com.bluewhale.billing.infrastructure.mapper.TransactionMapper">
 
+  <!--
+    ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，游标分页，gRPC ListTransactions），
+    **为 null = 管理面**（全站流水，billing 的 /admin/transactions）。
+    两种调用共用这条语句，所以三个分支各自用 <if> 决定要不要过滤 user_id ——
+    **过滤条件写在分支内部**（而不是提到 UNION 外面包一层），这样「给 userId」时
+    生成的 SQL 与加管理面之前逐字相同，用户面走的是同一条执行计划，不受这次改动影响。
+
+    ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
+  -->
   <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.mapper.TransactionRow">
-    SELECT t.tx_id, t.type, t.direction, t.title, t.amount, t.status,
+    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.status,
            t.created_at, t.settled_at, t.kind, t.src_id
     FROM (
 
@@ -96,9 +105,12 @@
              l.gmt_create AS created_at,
              l.gmt_create AS settled_at,
              'grant'      AS kind,
-             l.id         AS src_id
+             l.id         AS src_id,
+             l.user_id    AS user_id
       FROM billing_credit_lots l
-      WHERE l.user_id = #{userId}
+      <where>
+        <if test="userId != null">l.user_id = #{userId}</if>
+      </where>
 
       UNION ALL
 
@@ -124,10 +136,11 @@
              r.gmt_create AS created_at,
              CASE WHEN r.status = 'settled' THEN r.gmt_modified END AS settled_at,
              'consume' AS kind,
-             r.id AS src_id
+             r.id AS src_id,
+             r.user_id AS user_id
       FROM billing_cost_reservations r
-      WHERE r.user_id = #{userId}
-        AND r.status != 'released'
+      WHERE r.status != 'released'
+        <if test="userId != null">AND r.user_id = #{userId}</if>
 
       UNION ALL
 
@@ -163,12 +176,14 @@
              MIN(e.gmt_create) AS created_at,
              MIN(e.gmt_create) AS settled_at,
              'ledger' AS kind,
-             MIN(e.id) AS src_id
+             MIN(e.id) AS src_id,
+             <!-- 一个凭证只属于一个用户，MIN 只是为了让它在 GROUP BY 下合法 -->
+             MIN(e.user_id) AS user_id
       FROM billing_ledger_entries e
-      WHERE e.user_id = #{userId}
-        AND e.account IN ('wallet', 'frozen')
+      WHERE e.account IN ('wallet', 'frozen')
         AND e.idempotency_key LIKE CONCAT('%:', e.account)
         AND e.biz_type IN ('expire', 'adjust')
+        <if test="userId != null">AND e.user_id = #{userId}</if>
       GROUP BY tx_id, e.biz_type
       HAVING SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) != 0
 

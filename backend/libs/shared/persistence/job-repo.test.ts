@@ -211,3 +211,91 @@ describe("createJobRepo.findByIdForUser", () => {
     expect(prisma.assets.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe("createJobRepo.listForAdmin", () => {
+  /** 一行真实列的子集：够投影出管理端那一行即可。 */
+  const ROW = {
+    id: 73n,
+    user_id: 9001n,
+    project_id: 55n,
+    type: "video",
+    status: "failed",
+    progress: 40,
+    provider: "doubao",
+    retry_count: 2,
+    gmt_create: new Date("2026-09-25T00:00:00Z"),
+    gmt_modified: new Date("2026-09-25T00:01:00Z"),
+    error: { code: "unsupported_input" },
+  };
+
+  function buildPrisma() {
+    const count = vi.fn().mockResolvedValue(1);
+    const findMany = vi.fn().mockResolvedValue([ROW]);
+    return { count, findMany, repo: createJobRepo({ generation_jobs: { count, findMany } } as never) };
+  }
+
+  it("一个筛选条件都不传 = 全站列表：where 里**没有**那些键", async () => {
+    const { count, repo } = buildPrisma();
+
+    await repo.listForAdmin({ page: 2, size: 20 });
+
+    // is_delete 是 Boolean 列（recharge_orders 那张是 Int，别抄错）
+    expect(count).toHaveBeenCalledWith({ where: { is_delete: false } });
+  });
+
+  it("用户 / 项目 / 类型 / 状态按原值过滤，两个 id 转 BigInt", async () => {
+    const { findMany, repo } = buildPrisma();
+
+    await repo.listForAdmin({
+      userId: "9001",
+      projectId: "55",
+      type: "video",
+      status: "failed",
+      page: 2,
+      size: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        is_delete: false,
+        user_id: 9001n,
+        project_id: 55n,
+        type: "video",
+        status: "failed",
+      },
+      // 次级键 id：DATETIME 只到秒，只按时间排序会在秒边界跳行或重复行
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      skip: 20,
+      take: 20,
+    });
+  });
+
+  it("投影出归属与失败原因原文（错误码投影是上层的事，这里只给库里的东西）", async () => {
+    const { repo } = buildPrisma();
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(page).toMatchObject({ total: 1, size: 20, current: 1 });
+    expect(page.records[0]).toMatchObject({
+      job_id: "73",
+      user_id: "9001",
+      project_id: "55",
+      provider: "doubao",
+      retry_count: 2,
+      stored_error: { code: "unsupported_input" },
+    });
+    // 管理端列表不拉 assets：那一列没人看，却会多一轮查询 + N+1
+    expect(page.records[0]).not.toHaveProperty("output_assets");
+  });
+
+  it("project_id 为 null（不在项目里的任务）投影成空串，不是 'null'", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ ...ROW, project_id: null, error: null }]);
+    const repo = createJobRepo({
+      generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
+    } as never);
+
+    const page = await repo.listForAdmin({ page: 1, size: 20 });
+
+    expect(page.records[0]).toMatchObject({ project_id: "", stored_error: null });
+  });
+});
