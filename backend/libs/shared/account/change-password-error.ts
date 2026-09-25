@@ -9,7 +9,7 @@ import {
   accountErrorToNumeric,
   accountMessageFor,
 } from "@lib/contracts";
-import { PasswordPolicyError } from "@lib/shared/identity/password.js";
+import { PasswordPolicyError } from "@lib/shared/identity/index.js";
 
 export interface ProjectedAccountError {
   code: number;

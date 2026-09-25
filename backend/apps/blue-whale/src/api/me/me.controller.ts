@@ -10,7 +10,7 @@ import {
 } from "@lib/contracts";
 import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,

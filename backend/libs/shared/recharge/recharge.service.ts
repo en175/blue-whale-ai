@@ -56,8 +56,10 @@ import {
   unifiedOrder,
   verifyPaySign,
 } from "@lib/shared/pay-server/index.js";
-import { SystemSettingsConfigError } from "@lib/shared/system-settings/credentials-crypto.js";
-import { SystemSettingsService } from "@lib/shared/system-settings/system-settings.service.js";
+import {
+  SystemSettingsConfigError,
+  SystemSettingsService,
+} from "@lib/shared/system-settings/index.js";
 import { displayTierName } from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 

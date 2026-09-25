@@ -2,13 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ERROR_MODEL_UNAVAILABLE } from "@lib/contracts";
 
-import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
+import {
+  generationCreateRequestHash,
+  handleCreateGenerationJob,
+} from "./handle-create-generation-job.js";
 
 // IK9ILQ：音频生成接入 —— 校验分支单测。
 // 通过公开入口 handleCreateGenerationJob 打私有 validate()（对齐 Java CreateGenerationJobRequest 约束）：
 // 音频任务无 aspect_ratio 校验、prompt≤3000、单输出、一期不支持参考素材、model_id 白名单。
 
 type HandlerDeps = Parameters<typeof handleCreateGenerationJob>[4];
+
+/** 建任务幂等查询（command 端口）。缺省「无行」——没带 Idempotency-Key 的用例走的就是
+ *  与加幂等表之前完全相同的路径（这个函数根本不会被调用）。 */
+function idempotencyLookup(result: unknown = null) {
+  return vi.fn().mockResolvedValue(result);
+}
 
 function buildDeps() {
   const findOwnedById = vi.fn().mockResolvedValue({
@@ -37,7 +46,7 @@ function buildDeps() {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
   return { deps, findOwnedById, listEnabledByType, createJob };
@@ -381,7 +390,7 @@ function buildImageDeps(imageReferenceMax?: number) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets },
   } as unknown as HandlerDeps;
   return { deps, createJob, resolveInputAssets };
@@ -711,7 +720,7 @@ function buildVideoDeps(modelRow: Record<string, unknown> = {}) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
     assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
   } as unknown as HandlerDeps;
@@ -1282,7 +1291,7 @@ function buildTargetDeps(canvasView: { nodes: string | null; edges: string | nul
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     canvas: { getByProject },
     assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
@@ -1727,7 +1736,7 @@ function buildCapabilityDeps(capabilityRows: Array<Record<string, unknown>>) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets },
   } as unknown as HandlerDeps;
   return { deps, createJob, resolveInputAssets };
@@ -2268,7 +2277,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
           },
         ]),
       },
-      command: { createJob },
+      command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
       assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
     } as unknown as HandlerDeps;
     return { deps, createJob };
@@ -2422,7 +2431,7 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
           })),
         ),
       },
-      command: { createJob },
+      command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
       assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
     } as unknown as HandlerDeps;
     return { deps, createJob };
@@ -2488,5 +2497,166 @@ describe("handleCreateGenerationJob 计费接线", () => {
       jobId: 501,
       reason: "写库失败",
     });
+  });
+});
+
+// ★ 建任务幂等（command_idempotency，operation=generation.create）：带 Idempotency-Key 的
+//   重复提交返回**第一次的结果**，而不是再建一个 job。
+describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
+  const REPLAY = { generation_job_id: "777", cursor: 42 };
+
+  function buildIdempotentDeps(lookup: unknown) {
+    const findOwnedById = vi.fn().mockResolvedValue({
+      id: "1",
+      name: "项目",
+      thumb: null,
+      created_at: "2026-08-18T00:00:00.000Z",
+    });
+    const createJob = vi.fn().mockResolvedValue({
+      generation_job_id: "888",
+      cursor: 7,
+    });
+    const lookupCreateIdempotency = idempotencyLookup(lookup);
+    const deps = {
+      projects: { findOwnedById },
+      models: { listEnabledByType: vi.fn().mockResolvedValue([VIDEO_CAPABILITY_ROW]) },
+      command: { createJob, lookupCreateIdempotency },
+      assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob, lookupCreateIdempotency };
+  }
+
+  it("★ 同一 key 命中重放 → 返回首次结果（含 generation_job_id），不再建 job", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    // 响应体就是第一次那次的形状与数值——客户端拿到的 generation_job_id 没变
+    expect(result.data).toEqual(REPLAY);
+    expect(lookupCreateIdempotency).toHaveBeenCalledWith("p1", {
+      key: "key-1",
+      requestHash: expect.any(String),
+    });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ 重放先于状态校验：模型此刻已不在白名单，命中重放仍返回首次结果", async () => {
+    // 「同一个请求被重试」的答案在第一次提交时就定了，不该被此刻的模型目录改写
+    // （白名单、素材门、画布快照都在幂等查询**之后**）。
+    const { deps, createJob } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, model_id: "早就停用的模型" },
+      },
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual(REPLAY);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("同键异载荷 → 100409 冲突，不建 job（同键同载荷才重放）", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps({
+      kind: "idempotency_conflict",
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(100409);
+    expect(lookupCreateIdempotency).toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("没带 Idempotency-Key → 完全不接幂等（不查、照常建 job），行为与加幂等表之前一致", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("Idempotency-Key 只发空白 → 与没带同口径，不接幂等", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "   ",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("Idempotency-Key 超过列宽（128）→ 400，不是拖到落库那一刻以截断/500 收场", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "k".repeat(129),
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("摘要只取决于请求语义：键序不同的同一份载荷摘要相同", async () => {
+    const body = {
+      type: "video",
+      expected_output_count: 1,
+      parameters: { prompt: "人物走过街角", model_id: "m", aspect_ratio: "16:9" },
+    };
+    const reordered = {
+      parameters: { aspect_ratio: "16:9", model_id: "m", prompt: "人物走过街角" },
+      expected_output_count: 1,
+      type: "video",
+    };
+
+    expect(generationCreateRequestHash("p1", reordered)).toBe(
+      generationCreateRequestHash("p1", body),
+    );
+    // 载荷真的不同则摘要必须不同（否则「同键异载荷」永远判不出来）
+    expect(
+      generationCreateRequestHash("p1", {
+        ...body,
+        parameters: { ...body.parameters, prompt: "换一句" },
+      }),
+    ).not.toBe(generationCreateRequestHash("p1", body));
+    // 定长 64 hex：正好落进 request_hash 的 VarChar(64)
+    expect(generationCreateRequestHash("p1", body)).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -19,11 +19,11 @@ import {
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import {
+  IdentityService,
   USER_STATUS_DISABLED,
   USER_STATUS_NORMAL,
-} from "@lib/shared/persistence/identity-user-repo.js";
+} from "@lib/shared/identity/index.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 

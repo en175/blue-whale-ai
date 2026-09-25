@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SYSTEM_SETTINGS_SECRET_ENV } from "@lib/shared/system-settings/credentials-crypto.js";
-import { SystemSettingsService } from "@lib/shared/system-settings/system-settings.service.js";
+import {
+  SYSTEM_SETTINGS_SECRET_ENV,
+  SystemSettingsService,
+} from "@lib/shared/system-settings/index.js";
 import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 import { deriveCredits, RechargeService } from "./recharge.service.js";
 

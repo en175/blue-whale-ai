@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import { NewApiError } from "@lib/core";
-import { PasswordPolicyError } from "@lib/shared/identity/password.js";
+import { PasswordPolicyError } from "@lib/shared/identity/index.js";
 import { projectAccountError } from "./change-password-error.js";
 
 describe("projectAccountError", () => {

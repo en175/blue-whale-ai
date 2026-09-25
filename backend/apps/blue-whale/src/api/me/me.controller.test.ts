@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
-import { InvalidCredentialsError } from "@lib/shared/identity/identity.service.js";
-import { PasswordPolicyError } from "@lib/shared/identity/password.js";
+import {
+  InvalidCredentialsError,
+  PasswordPolicyError,
+} from "@lib/shared/identity/index.js";
 import { MeController } from "./me.controller.js";
 
 // IKBRCK：PUT /me/password 改密端点的入口校验 + 本地改密 + 账号域错误映射单测。

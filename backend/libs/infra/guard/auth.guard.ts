@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NewApiError } from "@lib/core";
 import type { Request, Response } from "express";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,

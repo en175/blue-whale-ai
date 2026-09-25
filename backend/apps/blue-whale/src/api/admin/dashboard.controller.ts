@@ -1,7 +1,7 @@
 import { Controller, Get, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { toAdminError } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
 
 /**
  * 仪表盘运行概览。

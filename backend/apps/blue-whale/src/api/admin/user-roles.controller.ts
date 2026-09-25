@@ -8,13 +8,15 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import { LastSuperAdminError } from "@lib/core/identity/roles.js";
+import {
+  IdentityService,
+  LastSuperAdminError,
+  UnknownRoleError,
+} from "@lib/shared/identity/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
-import { UnknownRoleError } from "@lib/shared/persistence/identity-role-repo.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 /** BigInt 入参守卫：仅十进制正整数串。 */

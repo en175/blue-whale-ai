@@ -13,7 +13,7 @@ import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-c
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
-import { SystemSettingsModule } from "@lib/shared/system-settings/system-settings.module.js";
+import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
@@ -61,7 +61,7 @@ import { VideoSceneSplitsApiModule } from "./api/video-scene-splits/video-scene-
 import { VideoMattingsApiModule } from "./api/video-mattings/video-mattings.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
-import { IdentityModule } from "@lib/shared/identity/identity.module.js";
+import { IdentityModule } from "@lib/shared/identity/index.js";
 
 @Module({
   imports: [

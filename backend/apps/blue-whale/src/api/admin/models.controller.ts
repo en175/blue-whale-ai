@@ -18,7 +18,7 @@ import {
   parseModelCreateBody,
   parseModelUpdateBody,
 } from "@lib/shared/model-capability/constants.js";
-import { invalidateModelCapabilityCache } from "@lib/shared/persistence/model-capability-cache.js";
+import { invalidateModelCapabilityCache } from "@lib/shared/persistence/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;

@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import type { Request } from "express";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 type RequestWithUser = Request & { user?: AuthenticatedUser };

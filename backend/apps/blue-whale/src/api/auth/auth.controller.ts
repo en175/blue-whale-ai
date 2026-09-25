@@ -20,14 +20,14 @@ import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import {
   IdentityService,
   InvalidCredentialsError,
+  PasswordPolicyError,
+  UsernameTakenError,
   type LocalLoginResult,
-} from "@lib/shared/identity/identity.service.js";
+} from "@lib/shared/identity/index.js";
 import {
   resolveUpstreamCredential,
   UpstreamCredentialMissingError,
 } from "@lib/shared/account/upstream-credential.js";
-import { UsernameTakenError } from "@lib/shared/persistence/identity-user-repo.js";
-import { PasswordPolicyError } from "@lib/shared/identity/password.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,

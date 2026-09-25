@@ -6,7 +6,7 @@ import {
   type SystemCredentials,
   type SystemPolicy,
   type SystemRateLimit,
-} from "@lib/shared/system-settings/system-settings.service.js";
+} from "@lib/shared/system-settings/index.js";
 
 /**
  * 系统设置（管理端）。

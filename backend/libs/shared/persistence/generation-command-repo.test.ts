@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGenerationCommandRepo,
   createJobWithinTx,
+  type CreateJobInput,
 } from "./generation-command-repo.js";
+import {
+  CREATE_GENERATION_JOB_OPERATION,
+  type CreateJobResult,
+} from "./generation-job-idempotency.js";
 
 describe("generation command placement anchor", () => {
   it("freezes the SceneCard output anchor in the job input", async () => {
@@ -868,5 +873,275 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
     ).rejects.toThrow(/不可序列化/);
 
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+});
+
+// ★ 建任务幂等（command_idempotency，operation=generation.create）：
+//   同一把 Idempotency-Key 只建一个 job、只扣一次钱。
+describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣一次钱", () => {
+  const JOB_INPUT: CreateJobInput = {
+    projectId: "55",
+    userId: "9",
+    type: "video",
+    expectedOutputCount: 1,
+    input: { prompt: "whale" },
+    actionIdentity: "act-1",
+    actionType: "generate_video",
+  };
+  const IDEMPOTENCY = { key: "key-1", requestHash: "hash-1" };
+
+  interface IdemRow {
+    project_id: bigint;
+    operation: string;
+    idempotency_key: string;
+    request_hash: string;
+    generation_job_id: bigint | null;
+    accepted_cursor: bigint;
+  }
+
+  function rowKey(row: {
+    project_id: bigint;
+    operation: string;
+    idempotency_key: string;
+  }): string {
+    return `${row.project_id}|${row.operation}|${row.idempotency_key}`;
+  }
+
+  /** Prisma 的唯一约束冲突（P2002），语义照 `uk_command_idempotency` 写。 */
+  function uniqueViolation() {
+    return Object.assign(
+      new Error("Unique constraint failed: uk_command_idempotency"),
+      { code: "P2002" },
+    );
+  }
+
+  /** 期望「建成了任务」的那一支（另一支是幂等冲突）。 */
+  function created(result: CreateJobResult) {
+    if ("kind" in result) throw new Error("期望建成任务，实际是幂等冲突");
+    return result;
+  }
+
+  /**
+   * 假件：`command_idempotency`（含唯一索引语义）+ 建 job 事务 + 预扣。
+   *
+   * ⚠️ 唯一索引那部分**必须照真库写**：同键的第二个 INSERT 会等先到的事务结束（真库上是
+   * 索引项的行锁），然后按它提交与否决定是抢到键还是撞唯一索引。少了这一步，两个并发请求
+   * 会双双写进去，测出来的就不是「并发同键」而是两次顺序执行。
+   *
+   * 回滚同样照真语义：写入先进本事务的 pending，**提交才合并**进 committed——事务抛错时
+   * pending 直接随闭包丢掉，job 行与幂等行一起消失。
+   */
+  function createHarness() {
+    const committed = new Map<string, IdemRow>();
+    const inflight = new Map<string, Promise<void>>();
+    const committedJobIds: bigint[] = [];
+    let nextJobId = 500n;
+
+    // 形参类型只为让 `mock.calls` 能按位取（vi.fn 无参时 calls 是空元组，取不出来）
+    const hold = vi.fn(async (_jobId: number) => {});
+    const release = vi.fn(async (_jobId: number, _reason: string) => {});
+    const billing = { hold, release };
+
+    const prisma = {
+      async $transaction(callback: (tx: unknown) => Promise<CreateJobResult>) {
+        const pending = new Map<string, IdemRow>();
+        const jobIds: bigint[] = [];
+        const held: Array<{ key: string; settle: () => void }> = [];
+        const tx = {
+          generation_jobs: {
+            create: vi.fn(async () => {
+              const id = nextJobId++;
+              jobIds.push(id);
+              return {
+                id,
+                type: "video",
+                source: "bottom_dock",
+                status: "queued",
+                progress: 0,
+                version: 1,
+              };
+            }),
+          },
+          generation_output_slots: { create: vi.fn(async () => ({})) },
+          cost_reservations: { create: vi.fn(async () => ({})) },
+          generation_job_logs: { create: vi.fn(async () => ({})) },
+          project_events: {
+            create: vi.fn(
+              async ({ data }: { data: Record<string, unknown> }) => data,
+            ),
+          },
+          command_idempotency: {
+            create: vi.fn(async ({ data }: { data: IdemRow }) => {
+              const key = rowKey(data);
+              if (committed.has(key)) throw uniqueViolation();
+              const prior = inflight.get(key);
+              if (prior) {
+                await prior;
+                if (committed.has(key)) throw uniqueViolation();
+              }
+              let settle!: () => void;
+              inflight.set(
+                key,
+                new Promise<void>((resolve) => {
+                  settle = resolve;
+                }),
+              );
+              held.push({ key, settle });
+              pending.set(key, data);
+              return data;
+            }),
+          },
+        };
+        try {
+          const result = await callback(tx);
+          for (const [key, row] of pending) committed.set(key, row);
+          committedJobIds.push(...jobIds);
+          return result;
+        } finally {
+          for (const { key, settle } of held) {
+            inflight.delete(key);
+            settle();
+          }
+        }
+      },
+      command_idempotency: {
+        findUnique: vi.fn(
+          async ({
+            where,
+          }: {
+            where: {
+              project_id_operation_idempotency_key: {
+                project_id: bigint;
+                operation: string;
+                idempotency_key: string;
+              };
+            };
+          }) => {
+            const row = committed.get(
+              rowKey(where.project_id_operation_idempotency_key),
+            );
+            return row
+              ? {
+                  request_hash: row.request_hash,
+                  generation_job_id: row.generation_job_id,
+                  accepted_cursor: row.accepted_cursor,
+                }
+              : null;
+          },
+        ),
+      },
+    };
+
+    return {
+      repo: createGenerationCommandRepo(prisma as never),
+      committed,
+      committedJobIds,
+      hold,
+      release,
+      billing,
+    };
+  }
+
+  it("★ 同一 key 提交两次 → 只建一个 job、只扣一次钱，第二次拿到第一次的结果", async () => {
+    const h = createHarness();
+
+    const first = await h.repo.createJob(JOB_INPUT, {
+      billing: h.billing,
+      idempotency: IDEMPOTENCY,
+    });
+    const second = await h.repo.createJob(JOB_INPUT, {
+      billing: h.billing,
+      idempotency: IDEMPOTENCY,
+    });
+
+    // 响应体（含客户端要的那个 generation_job_id）两次完全一致
+    expect(second).toEqual(first);
+    expect(created(second).generation_job_id).toBe(
+      created(first).generation_job_id,
+    );
+    expect(h.committedJobIds).toHaveLength(1);
+    expect(h.hold).toHaveBeenCalledTimes(1);
+    // 命中幂等这条路径上**不能再扣一次钱**，也不需要退（压根没冻第二笔）
+    expect(h.release).not.toHaveBeenCalled();
+    const row = h.committed.get(`55|${CREATE_GENERATION_JOB_OPERATION}|key-1`);
+    expect(row?.request_hash).toBe("hash-1");
+    expect(row?.generation_job_id?.toString()).toBe(
+      created(first).generation_job_id,
+    );
+  });
+
+  it("★ 并发同键 → 两个请求同一个 job、只留一笔预扣（输家那笔被补偿退掉）", async () => {
+    const h = createHarness();
+
+    const [a, b] = await Promise.all([
+      h.repo.createJob(JOB_INPUT, {
+        billing: h.billing,
+        idempotency: IDEMPOTENCY,
+      }),
+      h.repo.createJob(JOB_INPUT, {
+        billing: h.billing,
+        idempotency: IDEMPOTENCY,
+      }),
+    ]);
+
+    expect(a).toEqual(b);
+    // 只有一个事务提交（job 行与幂等行一起），另一个整体回滚
+    expect(h.committedJobIds).toHaveLength(1);
+    // 两个都冻过，但输家那笔被补偿退掉了 —— 净额只留一笔预扣
+    expect(h.hold).toHaveBeenCalledTimes(2);
+    expect(h.release).toHaveBeenCalledTimes(1);
+    expect(h.release.mock.calls[0]?.[0]).not.toBe(
+      Number(h.committedJobIds[0]),
+    );
+  });
+
+  it("同键异载荷 → 冲突（不建 job、不扣钱），不静默返回首次结果", async () => {
+    const h = createHarness();
+    await h.repo.createJob(JOB_INPUT, {
+      billing: h.billing,
+      idempotency: IDEMPOTENCY,
+    });
+
+    const conflict = await h.repo.createJob(JOB_INPUT, {
+      billing: h.billing,
+      idempotency: { key: IDEMPOTENCY.key, requestHash: "hash-2" },
+    });
+
+    expect(conflict).toEqual({ kind: "idempotency_conflict" });
+    expect(h.committedJobIds).toHaveLength(1);
+    expect(h.hold).toHaveBeenCalledTimes(1);
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it("没带幂等凭据（客户端没传 Idempotency-Key）→ 两次提交就是两个 job、两笔预扣", async () => {
+    const h = createHarness();
+
+    const a = await h.repo.createJob(JOB_INPUT, { billing: h.billing });
+    const b = await h.repo.createJob(JOB_INPUT, { billing: h.billing });
+
+    expect(created(a).generation_job_id).not.toBe(created(b).generation_job_id);
+    expect(h.committedJobIds).toHaveLength(2);
+    expect(h.hold).toHaveBeenCalledTimes(2);
+    expect(h.committed.size).toBe(0);
+  });
+
+  it("幂等行缺 generation_job_id（被外部改过）→ 明确报错，不装作重放成功", async () => {
+    const h = createHarness();
+    h.committed.set(`55|${CREATE_GENERATION_JOB_OPERATION}|key-1`, {
+      project_id: 55n,
+      operation: CREATE_GENERATION_JOB_OPERATION,
+      idempotency_key: "key-1",
+      request_hash: "hash-1",
+      generation_job_id: null,
+      accepted_cursor: 1n,
+    });
+
+    await expect(
+      h.repo.createJob(JOB_INPUT, {
+        billing: h.billing,
+        idempotency: IDEMPOTENCY,
+      }),
+    ).rejects.toThrow(/generation_job_id/);
+    expect(h.committedJobIds).toHaveLength(0);
   });
 });

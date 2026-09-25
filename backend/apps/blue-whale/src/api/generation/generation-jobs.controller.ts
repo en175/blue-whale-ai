@@ -6,7 +6,7 @@ import {
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
 import { Body, Controller, Headers, HttpCode, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { DomainError, ok } from "@lib/contracts";
@@ -163,6 +163,14 @@ export class GenerationJobsController {
   ) {
     const internal = sealProviderCredential(authorization);
     const billing = this.billing();
+    // 建任务幂等：`result.data` 也可能是**幂等重放**的首次结果（同一个 generation_job_id）。
+    // 这条路径下面照旧把它入队一次，是**刻意**的：
+    //   · 对已领走/已终态的任务，worker 侧 claim 是 CAS 的（候选要求 queued，或 processing
+    //     且租约过期），落不进去就是一次干净的 no-op，不会重复执行；
+    //   · RocketMQ 本身是 at-least-once，消费端**本来就必须**容忍同一 job 的重复消息；
+    //   · 反过来，第一次「建行成功但入队失败/进程崩了」的任务正靠这次重放捞回来
+    //     （否则它只能等恢复扫描）。
+    // 所以这里不按「是不是重放」分流。
     const result = await handleCreateGenerationJob(
       user.userId,
       projectId,
