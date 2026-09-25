@@ -88,9 +88,12 @@ if [ -n "${BW_TESTSITE_MYSQL_ARGS:-}" ]; then
 fi
 if [ "${#extra_args[@]}" -gt 0 ]; then
   # Fail closed：调用方不得自带字符集参数——唯一合法字符集 utf8mb4 由脚本注入。
+  # 全名及其变体按前缀拦截；--charset 不带通配，避免误伤 --character-sets-dir。
+  # mysql 的唯一前缀缩写形态（如 --def=latin1）无法穷举拦截，实际防护依赖
+  # 注入参数排在调用方参数之后——mysql 对重复选项取最后出现的值。
   for arg in "${extra_args[@]}"; do
     case "$arg" in
-      --default-character-set|--default-character-set=*|--charset|--charset=*)
+      --default-character-set*|--charset|--charset=*)
         echo "❌ 调用方参数不得指定字符集（检测到：${arg}）；utf8mb4 由脚本强制注入（IKIJ41 / ADR-0064 补记）" >&2
         exit 1 ;;
     esac

@@ -125,18 +125,21 @@ def fetch_canvas_row():
     }
 
 
+def hex_json_expr(text):
+    """文本 → 纯 ASCII 十六进制 JSON 写入表达式：任何字符集客户端执行都无损。"""
+    return f"CONVERT(UNHEX('{text.encode('utf-8').hex().upper()}') USING utf8mb4)"
+
+
 def write_backup(row):
     """行级备份：纯 ASCII 十六进制 SQL，与 09-25 /tmp/canvas-309-pre-recover.sql 同口径可回滚。"""
     ts = time.strftime("%Y%m%d-%H%M%S")
     path = os.path.join(BACKUP_DIR, f"canvas-309-pre-ikij40-{ts}.sql")
-    nodes_hex = row["nodes_json"].encode("utf-8").hex().upper()
-    edges_hex = row["edges_json"].encode("utf-8").hex().upper()
     with open(path, "w", encoding="ascii") as f:
         f.write(f"-- IKIJ40 row backup: canvas {CANVAS_ID}, version={row['version']}, {ts}\n")
         f.write(f"-- rollback: mysql --default-character-set=utf8mb4 blue_whale < this-file\n")
         f.write(
-            f"UPDATE canvas SET nodes_json = CONVERT(UNHEX('{nodes_hex}') USING utf8mb4), "
-            f"edges_json = CONVERT(UNHEX('{edges_hex}') USING utf8mb4), "
+            f"UPDATE canvas SET nodes_json = {hex_json_expr(row['nodes_json'])}, "
+            f"edges_json = {hex_json_expr(row['edges_json'])}, "
             f"version = {row['version']} WHERE id = {CANVAS_ID};\n"
         )
     return path
@@ -153,7 +156,7 @@ def diff_nodes(restored, source_path, allowed_missing=None):
     current = json.loads(restored)
     src_by_id = {str(n.get("id")): json.dumps(n, ensure_ascii=False, sort_keys=True) for n in source}
     cur_by_id = {str(n.get("id")): json.dumps(n, ensure_ascii=False, sort_keys=True) for n in current}
-    matched, missing, extra, changed = [], [], [], []
+    missing, extra, changed = [], [], []
     for node_id, src_json in src_by_id.items():
         if node_id not in cur_by_id:
             missing.append(node_id)
@@ -175,16 +178,14 @@ def diff_nodes(restored, source_path, allowed_missing=None):
         "changed": changed,
         # 闸门口径：恢复源全部节点 matched 或已豁免（用户确认删除），零内容差异。
         # 源节点总数以恢复源文件为准（本单事实值 37，不硬编码进闸门）。
-        "all_match": not unexpected_missing and not changed
-        and matched_count + len(missing) == len(source),
+        "all_match": not unexpected_missing and not changed,
     }
 
 
 def apply_fix(restored_nodes, expected_version):
     """带乐观锁版本闸写入；0 命中返回 False（期间有新自动保存，不重试）。"""
-    hex_literal = restored_nodes.encode("utf-8").hex().upper()
     sql = (
-        f"UPDATE canvas SET nodes_json = CONVERT(UNHEX('{hex_literal}') USING utf8mb4), "
+        f"UPDATE canvas SET nodes_json = {hex_json_expr(restored_nodes)}, "
         f"version = version + 1 "
         f"WHERE id = {CANVAS_ID} AND version = {expected_version}; "
         f"SELECT ROW_COUNT();"
@@ -196,17 +197,16 @@ def apply_fix(restored_nodes, expected_version):
 def verify_post(row_after, restored_nodes, row_before, version_before):
     """写后回读校验，返回失败项列表（空 = 全过）。
 
-    节点数守恒以写入内容为准（写入多少读回多少）；上限合法性由 dry-run 闸门把关。
+    写入完整性由「回读与离线还原结果逐字节一致」保证（覆盖截断/部分写入），
+    节点集合合法性由 dry-run 闸门在写前把关。
     连线守恒口径：本修复只写 nodes_json，edges 必须与写前快照逐字节一致——
     用户后续编辑增删连线是画布自身状态演进，连线数本身不是固定常量。"""
     errors = []
     try:
-        nodes = json.loads(row_after["nodes_json"])
-        edges = json.loads(row_after["edges_json"])
+        json.loads(row_after["nodes_json"])
+        json.loads(row_after["edges_json"])
     except json.JSONDecodeError as e:
         return [f"JSON 不合法: {e}"]
-    if len(nodes) != len(json.loads(restored_nodes)):
-        errors.append(f"节点数守恒失败: 写入 {len(json.loads(restored_nodes))}, 回读 {len(nodes)}")
     if row_after["edges_json"] != row_before["edges_json"]:
         errors.append("edges_json 与写前快照不一致（本修复不应触碰连线）")
     residue = has_mojibake_residue(row_after["nodes_json"])
