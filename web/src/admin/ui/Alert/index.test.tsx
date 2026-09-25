@@ -42,12 +42,12 @@ describe('Alert', () => {
 
   it('没有 title 时不渲染标题节点', async () => {
     const withTitle = await render({ title: 'T', children: 'x' });
-    const titleClass = (withTitle.firstElementChild?.firstElementChild as HTMLElement).className;
+    const titleClass = withTitle.firstElementChild?.firstElementChild?.className;
     await act(async () => root.unmount());
 
     root = createRoot(mountNode);
     const withoutTitle = await render({ children: 'x' });
-    const bodyClass = (withoutTitle.firstElementChild?.firstElementChild as HTMLElement).className;
+    const bodyClass = withoutTitle.firstElementChild?.firstElementChild?.className;
 
     // 空标题会占一行高度，让一条单行提示变成两行
     expect(bodyClass).not.toBe(titleClass);

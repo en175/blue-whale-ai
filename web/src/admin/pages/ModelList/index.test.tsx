@@ -82,6 +82,28 @@ async function settle() {
   });
 }
 
+/**
+ * 弹窗里的下拉已从原生 select 换成套件的自绘 Select（原生控件外观由 OS 决定，
+ * 系统深色模式下会渲染成深色方块）：先点触发器展开，再点候选项。
+ * 定位方式变了，断言意图不变。
+ */
+async function pickFromSelect(ariaLabel: string, optionLabel: string) {
+  const trigger = document.body.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`);
+  expect(trigger).not.toBeNull();
+  await act(async () => {
+    trigger?.click();
+  });
+  await settle();
+  const option = [...document.body.querySelectorAll<HTMLLIElement>('li[role="option"]')].find(
+    (li) => li.textContent === optionLabel,
+  );
+  expect(option).toBeTruthy();
+  await act(async () => {
+    option?.click();
+  });
+  await settle();
+}
+
 describe('ModelList 按类型分表单', () => {
   afterEach(() => {
     act(() => root.unmount());
@@ -121,15 +143,7 @@ describe('ModelList 按类型分表单', () => {
       createBtn?.click();
     });
     await settle();
-    const typeSelect = [...document.body.querySelectorAll('select')].find((el) =>
-      [...el.options].some((opt) => opt.value === 'video'),
-    );
-    await act(async () => {
-      if (!typeSelect) return;
-      typeSelect.value = 'video';
-      typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await settle();
+    await pickFromSelect('类型', '视频');
     expect(document.body.textContent).toContain('时长范围');
     expect(document.body.textContent).toContain('默认时长（秒）');
     // IKHBDO：task_types 此前只能在整个 features 的 JSON 里手写
@@ -152,23 +166,9 @@ describe('ModelList 按类型分表单', () => {
       createBtn?.click();
     });
     await settle();
-    const parserSelect = [...document.body.querySelectorAll('select')].find((el) =>
-      [...el.options].some((opt) => opt.value === 'gpt'),
-    );
-    expect(parserSelect).toBeTruthy();
-    await act(async () => {
-      if (!parserSelect) return;
-      parserSelect.value = 'gpt';
-      parserSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await settle();
+    await pickFromSelect('图片解析器', 'gpt');
     expect(document.body.textContent).toContain('格子填官方 size');
-    await act(async () => {
-      if (!parserSelect) return;
-      parserSelect.value = 'banana';
-      parserSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await settle();
+    await pickFromSelect('图片解析器', 'banana');
     expect(document.body.textContent).toContain('尺寸选项 → quality');
     expect(document.body.textContent).not.toContain('格子填官方 size');
   });
@@ -187,16 +187,7 @@ describe('ModelList 按类型分表单', () => {
       createBtn?.click();
     });
     await settle();
-    const typeSelect = [...document.body.querySelectorAll('select')].find((el) =>
-      [...el.options].some((opt) => opt.value === 'text'),
-    );
-    expect(typeSelect).toBeTruthy();
-    await act(async () => {
-      if (!typeSelect) return;
-      typeSelect.value = 'text';
-      typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await settle();
+    await pickFromSelect('类型', '文生文');
     expect(document.body.textContent).not.toContain('供应商 provider_id');
     expect(document.body.textContent).not.toContain('尺寸选项');
     expect(document.body.textContent).not.toContain('比例选项');
@@ -291,7 +282,12 @@ describe('ModelList 按类型分表单', () => {
       '1K',
       '2K',
     ]);
-    const before = [...document.body.querySelectorAll('select')].map((el) => el.value);
+    // 格子里的下拉已换成套件 Select，选中的官方 size 就显示在触发器上
+    const cellValues = () =>
+      [...document.body.querySelectorAll('table')]
+        .find((table) => table.querySelector('thead th')?.textContent === '比例')
+        ?.querySelectorAll('tbody td') ?? [];
+    const before = [...cellValues()].map((td) => td.textContent?.trim());
     expect(before).toContain('1024x1024');
     expect(before).toContain('2048x2048');
     const removeButtons = [...document.body.querySelectorAll('button')].filter(
@@ -303,7 +299,7 @@ describe('ModelList 按类型分表单', () => {
     });
     await settle();
     // IKHBDO：删行 / 删比例 chip 原先按空矩阵重建，整张交叉格被清零（其余格的映射全丢）
-    const after = [...document.body.querySelectorAll('select')].map((el) => el.value);
+    const after = [...cellValues()].map((td) => td.textContent?.trim());
     expect(after).toContain('1024x1024');
     expect(after).not.toContain('2048x2048');
   });

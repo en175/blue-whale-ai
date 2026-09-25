@@ -2,8 +2,8 @@
  * ModelList 模型列表：dock 模型能力目录管理（generation_model_capability）
  * 数据源 GET/POST/PUT /api/admin/models + PATCH /:id/toggle + PATCH /:id/default
  *
- * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
- * 唯一的例外是表单弹窗 ModelFormModal（仍是自有样式，见 ModelFormModal.module.css）。
+ * 呈现层全部走 ../../ui 的组件，**本页与表单弹窗都没有自己的样式文件**——
+ * ModelList 目录下已无任何 index.module.css。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
