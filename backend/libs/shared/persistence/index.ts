@@ -169,8 +169,12 @@ export {
   createGenerationCommandRepo,
   type GenerationCommandRepo,
   type CreateJobInput,
+  type CreateJobOptions,
   type CreatedJob,
 } from "./generation-command-repo.js";
+// 建 job 的计费依赖（预扣 + 失败补偿）：装配层（handler/controller）经这里取端口类型；
+// 补偿的执行与纯数据闸只在 persistence 内部用（generation-command-repo 直接相对导入）。
+export type { JobBilling } from "./job-billing.js";
 export {
   aggregateSlotStatus,
   resolveLogicalSlots,
@@ -231,3 +235,15 @@ export {
   type CostAdjustmentItemInput,
   type CostAdjustmentBatchInput,
 } from "./cost-adjustment-repo.js";
+export {
+  createRechargeOrderRepo,
+  type RechargeOrderRepo,
+  type RechargeOrderView,
+  type RechargeOrderStatus,
+  type CreateRechargeOrderInput,
+} from "./recharge-order-repo.js";
+export {
+  createSystemSettingRepo,
+  type SystemSettingRepo,
+  type SystemSettingRow,
+} from "./system-setting-repo.js";

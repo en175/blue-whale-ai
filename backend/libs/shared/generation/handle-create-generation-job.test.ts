@@ -62,7 +62,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "audio",
         expectedOutputCount: 1,
@@ -142,7 +142,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "audio",
         input: expect.objectContaining({
@@ -170,7 +170,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           references: [{ role: "reference", asset_id: "42", type: "image" }],
@@ -413,7 +413,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "image",
         input: expect.objectContaining({
@@ -472,7 +472,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
       okDeps,
     );
     expect(ok.code).toBe(200);
-    expect(okCreate).toHaveBeenCalledWith(
+    expect(okCreate.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           input_asset_ids: expect.any(Array),
@@ -1003,7 +1003,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       deps,
     );
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           reference_materials: [
@@ -1224,7 +1224,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       deps,
     );
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           references: [
@@ -2442,5 +2442,51 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
     expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
     expect(result.data?.code).toBe(ERROR_MODEL_UNAVAILABLE);
     expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// ★ 计费接线（IK 计费切换）：预扣与补偿必须**成对**下传给 repo —— 少了 release，
+//   事务回滚后那笔冻结没人退，就是一笔永远冻着、没有对应任务的预留。
+describe("handleCreateGenerationJob 计费接线", () => {
+  it("hold 与 release 一起交给 repo；release 带上本次 userId 与失败原因", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const hold = vi.fn(async () => {});
+    const release = vi.fn(async () => {});
+    const withBilling = {
+      ...deps,
+      billing: { hold, release },
+    } as unknown as HandlerDeps;
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      withBilling,
+    );
+    expect(result.code).toBe(200);
+
+    // 计费依赖是**第二个参数**（行为不进数据），不在任务入参上
+    const [jobInput, options] = createJob.mock.calls.at(-1)!;
+    expect(jobInput).not.toHaveProperty("billing");
+    expect(jobInput).not.toHaveProperty("billingHold");
+
+    const billing = (options as {
+      billing: {
+        hold: (jobId: number) => Promise<void>;
+        release: (jobId: number, reason: string) => Promise<void>;
+      };
+    }).billing;
+    await billing.hold(501);
+    await billing.release(501, "写库失败");
+
+    expect(hold).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u1", jobId: 501, taskType: "video" }),
+    );
+    expect(release).toHaveBeenCalledWith({
+      userId: "u1",
+      jobId: 501,
+      reason: "写库失败",
+    });
   });
 });

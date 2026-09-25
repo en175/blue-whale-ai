@@ -731,3 +731,142 @@ describe("generation command repo retry", () => {
     });
   });
 });
+
+describe("generation command repo billing（预扣与失败补偿）", () => {
+  const JOB_INPUT = {
+    projectId: "55",
+    userId: "9",
+    type: "video" as const,
+    expectedOutputCount: 1,
+    input: { prompt: "whale" },
+    actionIdentity: "act-1",
+    actionType: "generate_video",
+  };
+
+  /** 能一路走到「日志写入」的事务形状 —— 那一步正是实测炸掉的地方。 */
+  function createTx(options: { failAtLog?: boolean } = {}) {
+    const tx = {
+      generation_jobs: {
+        create: vi.fn().mockResolvedValue({
+          id: 501n,
+          type: "video",
+          source: "bottom_dock",
+          status: "queued",
+          progress: 0,
+          version: 1,
+        }),
+      },
+      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
+      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      generation_job_logs: {
+        create: options.failAtLog
+          ? vi
+              .fn()
+              .mockRejectedValue(
+                new Error("We could not serialize [object Function] value"),
+              )
+          : vi.fn().mockResolvedValue({}),
+      },
+      project_events: {
+        create: vi.fn(
+          async ({ data }: { data: Record<string, unknown> }) => data,
+        ),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    };
+    return { tx, prisma };
+  }
+
+  function billingOf() {
+    const hold = vi.fn(async () => {});
+    const release = vi.fn(async () => {});
+    return { hold, release, billing: { hold, release } };
+  }
+
+  it("★ 预扣成功但事务随后失败 → 补偿返还（钱不能留在 billing 那边）", async () => {
+    const { prisma } = createTx({ failAtLog: true });
+    const { hold, release, billing } = billingOf();
+    const repo = createGenerationCommandRepo(prisma as never);
+
+    await expect(repo.createJob(JOB_INPUT, { billing })).rejects.toThrow(
+      "could not serialize",
+    );
+
+    // 预扣在 job 行插入之后（billing 按 job_id 找预留）
+    expect(hold).toHaveBeenCalledWith(501);
+    // 事务回滚只撤掉本地行，冻住的积分不会跟着回来；而任务行没了 ⇒ 终态事件永远不会发
+    // ⇒ 这笔钱会永远冻着。所以必须显式退。
+    expect(release).toHaveBeenCalledWith(
+      501,
+      expect.stringContaining("could not serialize"),
+    );
+  });
+
+  it("成功路径不还钱（只有回滚才补偿）", async () => {
+    const { prisma } = createTx();
+    const { release, billing } = billingOf();
+    const repo = createGenerationCommandRepo(prisma as never);
+
+    const created = await repo.createJob(JOB_INPUT, { billing });
+
+    expect(created).toEqual({
+      generation_job_id: "501",
+      cursor: expect.any(Number),
+    });
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("预扣被拒（余额不足）→ 不补偿：钱没冻上，多返一条反而可能撞上别人的预留", async () => {
+    const { prisma } = createTx();
+    const release = vi.fn(async () => {});
+    const billing = {
+      hold: vi.fn().mockRejectedValue(new Error("INSUFFICIENT_CREDITS")),
+      release,
+    };
+    const repo = createGenerationCommandRepo(prisma as never);
+
+    await expect(repo.createJob(JOB_INPUT, { billing })).rejects.toThrow(
+      "INSUFFICIENT_CREDITS",
+    );
+
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("★ 入参混进函数 → 在预扣之前拦下（钱没动，也不会留下无主冻结）", async () => {
+    const { tx, prisma } = createTx();
+    const { hold, release, billing } = billingOf();
+    const repo = createGenerationCommandRepo(prisma as never);
+
+    // 函数藏在 input 快照里 —— 那个对象同时是 Prisma 的 create 入参和日志载荷，
+    // 序列化不了就会在落库那一刻抛错（实测的 500）。类型看不穿 Record<string, unknown>，
+    // 所以有一道运行时纵深闸兜底，且刻意在**预扣之前**。
+    await expect(
+      repo.createJob(
+        { ...JOB_INPUT, input: { prompt: "whale", onDone: () => {} } },
+        { billing },
+      ),
+    ).rejects.toThrow(/不可序列化/);
+
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+    expect(hold).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("自引用（环）同样算不可序列化：它也会在落库时才炸", async () => {
+    const { tx, prisma } = createTx();
+    const repo = createGenerationCommandRepo(prisma as never);
+    const cyclic: Record<string, unknown> = { prompt: "whale" };
+    cyclic.self = cyclic;
+
+    await expect(
+      repo.createJob({ ...JOB_INPUT, input: cyclic }),
+    ).rejects.toThrow(/不可序列化/);
+
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+});

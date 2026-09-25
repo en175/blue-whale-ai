@@ -57,12 +57,15 @@ import {
   type CanvasRepo,
   type CreateJobInput,
   type GenerationCommandRepo,
+  type JobBilling,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelFeatures,
   type ProjectRepo,
   type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
+import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
+import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 
 import {
   mapImageChannelRequest,
@@ -1286,23 +1289,38 @@ interface GenerationDeps {
   /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /**
-   * ★ 新计费（billing-svc）的预扣。由装配层注入 —— 它负责解析用户等级、提取规格、
-   * 调 billing 客户端；本函数只把「哪个用户、哪个 job、什么模型/任务」交给它。
+   * ★ 新计费（billing-svc）：**预扣**与它的**失败补偿**。由装配层注入 —— 它负责解析
+   * 用户等级、提取规格、调 billing 客户端；本函数只把「哪个用户、哪个 job、什么模型/
+   * 任务」交给它。
    *
    * <p>调用时机在**建 job 的同一个事务里、job 行插入之后**（见 generation-command-repo）：
-   * 预扣失败整体回滚，不产生垃圾 job。实现抛出的异常（余额不足 / billing 不可用）
-   * 会原样冒泡，由上层翻成对用户的响应（fail closed —— 扣不动就不要开始干活）。
+   * 预扣失败整体回滚，不产生垃圾 job；而预扣**成功之后**事务才失败时，由 release 把这笔
+   * 冻结退掉 —— billing 是外部服务，不跟我们的数据库回滚走。两者成对：缺了 release 就会
+   * 留下一笔没有对应任务的冻结（永远冻着）。
+   *
+   * <p>实现抛出的异常（余额不足 / billing 不可用）会原样冒泡，由上层翻成对用户的响应
+   * （fail closed —— 扣不动就不要开始干活）。
+   *
+   * <p>⚠️ **同一 Idempotency-Key 重复提交会不会重复 Hold**：会各冻一笔（两个 job 两笔），
+   * 但不会出现「冻了钱却没有 job」，也不会出现「一个 job 冻两次」。两层理由：
+   * <ul>
+   *   <li>建任务路径刻意没有幂等表（本函数的简化模型）：两次提交就是两个 job，各自随自己的
+   *       job 结算/返还。`actionIdentity`（commandId 的来源）里带 `Date.now()`，每次提交
+   *       本就不同 —— 这不是疏漏，见下条。</li>
+   *   <li>⚠️ **不能**把 commandId 改成「同一 Idempotency-Key 恒定」：billing 的幂等记录是
+   *       **永久**的（`hold:{commandId}` 进账本），而它的重放分支按 **job_id** 找预留
+   *       （CreditService.hold → `reservations.findByJobId(jobId)`）。重试必然拿到新的 job_id
+   *       ⇒ 重放找不到那笔预留 ⇒ 抛 IllegalStateException，用户此后**永远**提交不了这个 key。</li>
+   * </ul>
+   * <p>所以「重试不重复扣」这条保证落在**补偿**上，而不是幂等键上：失败那次的钱被 release
+   * 退掉，重试是一次全新动作、冻它自己那一笔，净额正确。要真正做成「同一个 key 只冻一次」，
+   * 前提是建任务路径自己也有幂等表并且**复用同一个 job 行**（job_id 不变才谈得上重放）——
+   * 那是另一件事，不在本次范围内。
    */
-  billingHold?: (ctx: {
-    userId: string;
-    jobId: number;
-    /** 幂等键来源：同一动作重试要命中同一个 commandId */
-    commandId: string;
-    modelId: string;
-    taskType: string;
-    /** 冻结后的 input，供装配层提取规格 */
-    input: Record<string, unknown>;
-  }) => Promise<void>;
+  billing?: {
+    hold: BillingHold;
+    release: BillingRelease;
+  };
   /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
    *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
    *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
@@ -1686,20 +1704,28 @@ export async function handleCreateGenerationJob(
     actionIdentity,
     actionType,
   };
-  // ★ 新计费：预扣交给 repo 在**建 job 的事务内**执行（job 行插入后、提交前）。
-  //   用 actionIdentity 作 commandId —— 它是同一动作的稳定指纹，重试命中同一幂等键。
-  if (deps.billingHold) {
-    const hold = deps.billingHold;
-    cmdInput.billingHold = (jobId) =>
-      hold({
-        userId: String(userId),
-        jobId,
-        commandId: actionIdentity,
-        modelId: resolvedModelId,
-        taskType: type,
-        input: input as unknown as Record<string, unknown>,
-      });
-  }
-  const created = await deps.command.createJob(cmdInput);
+  // ★ 新计费：预扣 + 失败补偿一起交给 repo —— 它在**建 job 的事务内**（job 行插入后、
+  //   提交前）调 hold，并在事务失败时调 release 把那笔冻结退掉（幂等键与等级的说明见
+  //   GenerationDeps.billing）。两者都不进 cmdInput：那个对象是要落库的数据。
+  const billingDep = deps.billing;
+  const billing: JobBilling | undefined = billingDep
+    ? {
+        hold: (jobId) =>
+          billingDep.hold({
+            userId: String(userId),
+            jobId,
+            commandId: actionIdentity,
+            modelId: resolvedModelId,
+            taskType: type,
+            input: input as unknown as Record<string, unknown>,
+          }),
+        release: (jobId, reason) =>
+          billingDep.release({ userId: String(userId), jobId, reason }),
+      }
+    : undefined;
+  const created = await deps.command.createJob(
+    cmdInput,
+    billing ? { billing } : {},
+  );
   return ok(created);
 }

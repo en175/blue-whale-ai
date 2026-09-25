@@ -9,6 +9,8 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
+import { assertPureJobInput } from "./job-input-purity.js";
+import { withBillingCompensation, type JobBilling } from "./job-billing.js";
 import {
   resolveLogicalSlots,
   type OutputSlotStatus,
@@ -39,16 +41,17 @@ export interface CreateJobInput {
   sceneCardGenerationRecordId?: string;
   /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
-  /**
-   * ★ 新计费（billing-svc）的**预扣**。由 handler 注入——它知道该冻多少
-   * （模型 / 任务类型 / 规格 / 等级都是领域知识，这一层不该知道）。
-   *
-   * <p><b>为什么在事务里执行</b>：此时 job 行已插入、id 已拿到，但**尚未提交**。
-   * 预扣失败（余额不足 / billing 不可用）则整体回滚——**不产生垃圾 job**，
-   * 也不会有「冻了钱但没建成任务」或「建了任务但没冻钱」的中间态。
-   * 代价是事务里多一次外部 RPC（billing 的 50ms 预算），这是刻意的取舍。
-   */
-  billingHold?: (jobId: number) => Promise<void>;
+}
+
+/** createJob 的**调用参数**（区别于任务本身的数据）：事务复用与计费依赖。两者都是「每次
+ *  调用」的东西——callerTx 属于调用方，计费依赖闭包了本次请求的模型与规格。 */
+export interface CreateJobOptions {
+  /** 复用调用方事务（如 plan apply 同 tx 建 job 行）；缺省自起 `$transaction`。
+   *  ⚠️ 与 billing 同用时补偿只覆盖本方法内的失败：调用方事务在本方法返回**之后**才回滚
+   *  的话，那笔预扣得由调用方自己退（当前没有这样的调用方——计划应用那条路不接计费）。 */
+  callerTx?: Prisma.TransactionClient;
+  /** ★ 新计费依赖（端口与补偿语义见 job-billing）。缺省不接 → 行为与改造前一致。 */
+  billing?: JobBilling;
 }
 
 export interface CreatedJob {
@@ -57,11 +60,12 @@ export interface CreatedJob {
 }
 
 export interface GenerationCommandRepo {
-  /** 创建任务。callerTx 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
-   *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。 */
+  /** 创建任务。`options.callerTx` 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
+   *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。
+   *  事务失败而预扣已成功时，会先把它**补偿返还**再抛错（见实现）。 */
   createJob(
     input: CreateJobInput,
-    callerTx?: Prisma.TransactionClient,
+    options?: CreateJobOptions,
   ): Promise<CreatedJob>;
   /** 图片取消原子收敛并撤销写入权；其他媒体登记软取消，由 worker 确认终态。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
@@ -301,11 +305,15 @@ function costReservationCreateData(
 
 /** 在调用方事务内创建 GenerationJob + cost 预留 + 日志 + 事件（IK67H9 抽出，让计划应用可组合进更大事务）。
  *  IK67HE/T14：同时固定 expectedOutputCount 个输出槽（status=pending），槽身份与顺序稳定。
- *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提 + 增加槽位固定。 */
+ *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提 + 增加槽位固定。
+ *  预扣走 {@link JobBilling}（行为不进数据），其失败补偿由 createJob 统一兜——本函数只负责
+ *  在正确的时点调用它。禁止行为进数据这道闸见 job-input-purity。 */
 export async function createJobWithinTx(
   tx: Prisma.TransactionClient,
   input: CreateJobInput,
+  billing?: JobBilling,
 ): Promise<CreatedJob> {
+  assertPureJobInput(input);
   if (input.input.prompt_plan_snapshot !== undefined) {
     const snapshot = promptPlanSnapshotSchema.parse(input.input.prompt_plan_snapshot);
     const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
@@ -350,8 +358,9 @@ export async function createJobWithinTx(
     },
   });
   // ★ 预扣：job 行已插入（id 已拿到），但事务未提交 —— 失败整体回滚，不留垃圾 job。
-  if (input.billingHold) {
-    await input.billingHold(Number(job.id));
+  //   若此后事务仍失败，由 createJob 的补偿把这一笔退掉（见那里的说明）。
+  if (billing) {
+    await billing.hold(Number(job.id));
   }
 
   // IK67HE/T14：固定输出槽（spec §4.4「输出槽位在首次提交时固定」）。
@@ -391,6 +400,7 @@ export async function createJobWithinTx(
       status: "queued",
       message: "任务已创建",
       payload: {
+        // 载荷与 Prisma 入参是**同一个对象**，只能是纯数据（闸在 assertPureJobInput）。
         input,
         ...(input.planMessageId
           ? { plan_message_id: input.planMessageId }
@@ -424,13 +434,18 @@ export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
   return {
-    async createJob(input, callerTx) {
+    async createJob(input, options) {
       // callerTx 非空：复用调用方事务（plan apply 同 tx 建 job 行）；否则自起事务。
-      if (callerTx) return createJobWithinTx(callerTx, input);
-      return prisma.$transaction((tx) => createJobWithinTx(tx, input), {
-        maxWait: 10_000,
-        timeout: 30_000,
-      });
+      // ★ 预扣与「事务失败就把它退掉」的补偿由 withBillingCompensation 兜住
+      //   ——billing 是外部服务，不跟我们的回滚走（见 job-billing 的说明）。
+      return withBillingCompensation(options?.billing, (billing) =>
+        options?.callerTx
+          ? createJobWithinTx(options.callerTx, input, billing)
+          : prisma.$transaction(
+              (tx) => createJobWithinTx(tx, input, billing),
+              { maxWait: 10_000, timeout: 30_000 },
+            ),
+      );
     },
 
     async requestCancel(jobId, userId) {
