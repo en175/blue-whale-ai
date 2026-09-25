@@ -58,6 +58,30 @@ const STATUS_OPTIONS = [
   ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
 ];
 
+/**
+ * 任务类型选项 —— 取自 `web/src/api/jobs.ts` 的 `JobType`（**权威在那里**）。
+ *
+ * ⚠️ 新增任务类型时**两处都要加**：那边的联合类型 + 这里的选项。
+ *    这是刻意的重复：类型是编译期约束，选项是运行期数据（要让运营选得到），
+ *    一方改了另一方没改，症状是「筛选里找不到那个类型」。
+ */
+const TYPE_OPTIONS = [
+  { value: '', label: '全部类型' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' },
+  { value: 'audio', label: '音频' },
+  { value: 'media_extract', label: '音频提取' },
+  { value: 'image_enhance', label: '高清放大' },
+  { value: 'image_erase', label: '图片擦除' },
+  { value: 'image_outpaint', label: '智能扩图' },
+  { value: 'image_cutout', label: '图片抠图' },
+  { value: 'video_subtitle_erase', label: '视频去字幕' },
+  { value: 'audio_trim', label: '音频截取' },
+  { value: 'audio_mix', label: '音频混合' },
+  { value: 'video_frame_interpolation', label: '视频插帧' },
+  { value: 'video_matting', label: '视频抠像' },
+];
+
 interface Filters {
   userId: string;
   projectId: string;
@@ -65,7 +89,10 @@ interface Filters {
   status: string;
 }
 
-const EMPTY_FILTERS: Filters = { userId: '', projectId: '', type: 'all', status: 'all' };
+// ⚠️ `type` 的默认是**空串**，不是 'all'。它曾经是 'all'，而判空用的是 `applied.type.trim()`
+//    —— 'all' 是**真值**，于是每次查询都实打实地带上 `type=all`，列表被过滤成空。
+//    「全部」在这里由**空值**表达（下拉的第一个选项 value=''），不需要哨兵值。
+const EMPTY_FILTERS: Filters = { userId: '', projectId: '', type: '', status: 'all' };
 
 export default function JobRecords() {
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
@@ -145,14 +172,11 @@ export default function JobRecords() {
             if (e.key === 'Enter') apply();
           }}
         />
-        <Input
-          style={{ width: 160 }}
-          placeholder="任务类型（如 video）"
+        <Select
+          aria-label="任务类型"
+          options={TYPE_OPTIONS}
           value={draft.type}
-          onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value }))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') apply();
-          }}
+          onChange={(type) => setDraft((d) => ({ ...d, type }))}
         />
         <Select
           aria-label="任务状态"
