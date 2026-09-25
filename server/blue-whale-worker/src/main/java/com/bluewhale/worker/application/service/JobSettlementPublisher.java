@@ -100,6 +100,21 @@ public class JobSettlementPublisher {
      *                      就会出现「事件说的成功、结算看到的失败」
      */
     public void publishTerminal(GenerationJobEntity job, Map<String, Object> statusPayload) {
+        publishTerminal(job, statusPayload, null);
+    }
+
+    /**
+     * 终态收口，带**上游真实 token**（视频专用）。
+     *
+     * @param job           已写入终态的作业行（userId 从其取）
+     * @param statusPayload ★ 与 {@code status_changed} **同一个** payload——
+     *                      结算需要的成功槽数、失败原因都在里面，另起一份数据源
+     *                      就会出现「事件说的成功、结算看到的失败」
+     * @param upstreamTotalTokens 上游返回的真实 token 数（**结算的权威用量**）；
+     *                      {@code null} = 这次没有——结算退回按预扣额计价，不是填 0
+     */
+    public void publishTerminal(GenerationJobEntity job, Map<String, Object> statusPayload,
+                                Long upstreamTotalTokens) {
         String status = job.getStatus();
         if (status == null) {
             return;
@@ -116,7 +131,7 @@ public class JobSettlementPublisher {
 
         String topic = settled ? completedTopic : failedTopic;
         String body = settled
-                ? completedBody(job, status, statusPayload)
+                ? completedBody(job, status, statusPayload, upstreamTotalTokens)
                 : failedBody(job, statusPayload);
 
         try {
@@ -142,9 +157,11 @@ public class JobSettlementPublisher {
      * 通常就是对的（契约用量即实际用量），对 {@code partially_succeeded} 则偏平台——
      * 所以打 WARN 让它可观测，而不是默默多收。
      */
-    private String completedBody(GenerationJobEntity job, String status, Map<String, Object> payload) {
+    private String completedBody(GenerationJobEntity job, String status, Map<String, Object> payload,
+                                 Long upstreamTotalTokens) {
         int succeededSlots = succeededSlots(payload);
-        List<Map<String, Object>> usage = SettlementUsageLines.forJob(job, succeededSlots);
+        List<Map<String, Object>> usage =
+                SettlementUsageLines.forJob(job, succeededSlots, upstreamTotalTokens);
         if (usage.isEmpty()) {
             // 只有一种情形会走到这里：job.input 缺 model_id（或不是合法 JSON），billing 无法查目录。
             // 宁可退回预扣额结算并留一条 WARN，也不要猜一个 modelId —— 猜错就是按别人的价扣钱。

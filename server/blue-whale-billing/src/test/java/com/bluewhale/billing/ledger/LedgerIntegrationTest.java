@@ -187,6 +187,28 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    void 结算_实际大于预扣_分录仍然平_超出部分挂应收() {
+        // ★ 这条是线上实测打出来的（jobId=1924，2026-09-25）：视频按 token 计价后，
+        //   预扣是**按官方公式估**的、结算用**上游真值**，于是「实际 > 预扣」是常态而不再是
+        //   「理论不该发生」。当时 settle 抛 `借贷不平：借 28 / 贷 27` → 事件被 MQ 无限重投，
+        //   用户的钱永远冻着。
+        long lot = grant(CreditSource.PURCHASED, 100, null, "g-over");
+        credits.hold(USER, "cmd-over", JOB, 27, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+
+        credits.settle(JOB, 28);
+
+        // 批次只被扣掉**预扣额**（27）——超出的 1 分不悄悄从余额里多扣用户
+        assertThat(remainingOf(lot)).isEqualTo(73);
+        assertThat(frozenOf(lot)).isZero();
+        // 超出的 1 分记应收（平台垫付），收入照记 28 = 27 + 1
+        assertThat(ledger.balanceOf(USER, Account.REVENUE)).isEqualTo(28);
+        assertThat(reservations.findByJobId(JOB).orElseThrow().status())
+                .isEqualTo(Reservation.Status.SETTLED);
+        assertInvariant();
+        assertEveryVoucherBalanced();
+    }
+
+    @Test
     void 结算_跨来源批次_收入与成本分别记账() {
         long gift = grant(CreditSource.GIFT, 20, null, "g6");            // priority 30，先扣
         long purchased = grant(CreditSource.PURCHASED, 100, null, "p4"); // priority 80，后扣

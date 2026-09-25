@@ -50,7 +50,12 @@ describe('createBillingHold', () => {
     const specs = hold.mock.calls[0]?.[0].specs as Record<string, string>;
     // reference_count 是 `references` 的**长度**折算出来的标量（定价要的是数量）：
     // 数组本身仍不进规格，见下一行
-    expect(specs).toEqual({ size: '2k', duration: '5', reference_count: '1' });
+    expect(specs).toEqual({
+      size: '2k',
+      duration: '5',
+      reference_count: '1',
+      has_video_input: 'false',
+    });
     // 数组与 null 不是规格——混进去会让 catalog 的规格表查不到，变成 UNPRICEABLE
     expect(specs).not.toHaveProperty('references');
     expect(specs).not.toHaveProperty('nested');

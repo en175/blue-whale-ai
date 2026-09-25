@@ -74,6 +74,7 @@ class CatalogCompilerTest {
                         1L,
                         1L,
                         null,
+                        null,
                         null))),
                 null);
     }

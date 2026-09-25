@@ -193,10 +193,11 @@ public class JobStateMachineService {
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size, String md5,
-                                      Integer width, Integer height, double duration) {
+                                      Integer width, Integer height, double duration,
+                                      Long upstreamTotalTokens) {
         return finalizer.publishVideoResult(
                 jobId, projectId, userId, workerId, fencingToken,
-                url, storageKey, mime, size, md5, width, height, duration);
+                url, storageKey, mime, size, md5, width, height, duration, upstreamTotalTokens);
     }
 
     public boolean failVideoJob(String jobId, String errorCode, String errorMessage,

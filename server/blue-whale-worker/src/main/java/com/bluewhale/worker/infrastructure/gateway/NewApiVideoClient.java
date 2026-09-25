@@ -307,6 +307,13 @@ public class NewApiVideoClient {
             Double quota = data.has("quota") && data.get("quota").isNumber()
                     ? data.get("quota").asDouble() : null;
 
+            // 上游真实 token 数（结算的**权威**用量，见 usage.proto 的 USAGE_SOURCE_UPSTREAM）。
+            // 实测（2026-09-25，task_FIwJhbur…，doubao-seedance-2-0-fast 480p 16:9 4s）：
+            //   {"data":{"usage":{"total_tokens":40594,"completion_tokens":40594},
+            //            "data":{"usage":{"total_tokens":40594,...}}}}
+            // 即**外层信封与内层任务结果各带一份**，取值以外层优先。
+            Long totalTokens = extractTotalTokens(data);
+
             // url / result_url（:316-321）
             String url = textOrNull(data, "url");
             if (url == null) url = textOrNull(data, "result_url");
@@ -315,7 +322,7 @@ public class NewApiVideoClient {
             String normalizedStatus = status.toLowerCase();
 
             if (SUCCESS_STATUSES.containsKey(normalizedStatus)) {
-                return new VideoTaskObservation("succeeded", 100, url, quota, null);
+                return new VideoTaskObservation("succeeded", 100, url, quota, null, totalTokens);
             }
             if (FAILED_STATUSES.containsKey(normalizedStatus)) {
                 // 错误码分类（new-api-video-task-provider.ts:91-97）。
@@ -338,18 +345,74 @@ public class NewApiVideoClient {
                     code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;
                 }
                 return new VideoTaskObservation("failed", 100, null, quota,
-                        new TaskError(code, message));
+                        new TaskError(code, message), totalTokens);
             }
 
             // queued / processing（:109-115）
             String obsStatus = "queued".equals(normalizedStatus) ? "queued" : "processing";
-            return new VideoTaskObservation(obsStatus, 0, null, quota, null);
+            return new VideoTaskObservation(obsStatus, 0, null, quota, null, totalTokens);
         } catch (VideoProviderError e) {
             throw e;
         } catch (Exception e) {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 视频轮询解析失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 从轮询响应里取上游真实 token 数。
+     *
+     * <p><b>取不到 = null，不是 0</b>：null 让上报侧「干脆不报这个维度」，
+     * 结算退回按预扣额计价并留痕；报 0 则是一笔货真价实的「免费生成」。
+     *
+     * <p>三处形状都认，按可信度取第一个非空：
+     * <ol>
+     *   <li>外层信封 {@code data.usage.total_tokens}（实测在的位置）</li>
+     *   <li>内层任务结果 {@code data.data.usage.total_tokens}（上游回显，与外层同值）</li>
+     *   <li>上面两处的 {@code completion_tokens} 兜底 —— 视频任务实测
+     *       {@code total_tokens == completion_tokens}，任缺一个都还能拿到数</li>
+     * </ol>
+     *
+     * <p>另兼容 {@code usage_total_tokens} 扁平写法（ADR-0063 记的 new-api Task 信封形态，
+     * 当时 token 字段不带 {@code usage} 对象）。两种形态都在线上出现过，
+     * 只认一种就会静默丢 token —— 而那是钱。
+     *
+     * <p>值可能是字符串（上游 {@code flexInt} 序列化），所以文本与数值都读。
+     */
+    private static Long extractTotalTokens(JsonNode data) {
+        JsonNode inner = data.has("data") && data.get("data").isObject() ? data.get("data") : null;
+        for (JsonNode node : new JsonNode[]{data, inner}) {
+            if (node == null) continue;
+            JsonNode usage = node.get("usage");
+            Long fromObject = usage != null && usage.isObject()
+                    ? firstToken(usage, "total_tokens", "completion_tokens") : null;
+            if (fromObject != null) return fromObject;
+            Long fromFlat = firstToken(node, "usage_total_tokens", "usage_completion_tokens");
+            if (fromFlat != null) return fromFlat;
+        }
+        return null;
+    }
+
+    /** 按序取第一个可解析为整数的 token 字段。 */
+    private static Long firstToken(JsonNode node, String... fields) {
+        for (String field : fields) {
+            JsonNode value = node.get(field);
+            if (value == null) continue;
+            Long parsed = null;
+            if (value.isNumber()) {
+                parsed = value.asLong();
+            } else if (value.isTextual()) {
+                try {
+                    parsed = Long.parseLong(value.asText().trim());
+                } catch (NumberFormatException ignored) {
+                    // 非数字文本 = 这个字段不可用，继续看下一个（缺省/非法兜底不 panic）
+                }
+            }
+            if (parsed != null && parsed > 0) {
+                return parsed;
+            }
+        }
+        return null;
     }
 
     // ========== 工具方法 ==========
@@ -413,13 +476,19 @@ public class NewApiVideoClient {
     /**
      * 轮询观测（video-job-runner.ts:96-103 VideoTaskObservation 逐字移植）。
      * status: queued | processing | succeeded | failed
+     *
+     * @param totalTokens 上游报的**真实 token 数**（成功终态才可能有）。
+     *        {@code null} = 这次响应里没有可用 token —— 上报侧据此**不报**这个维度，
+     *        结算退回按预扣额计价；**不要填 0**（0 是一笔免费生成，会静默少收）。
+     *        取值与回退顺序见 {@link #extractTotalTokens}
      */
     public record VideoTaskObservation(
             String status,
             int progress,
             String url,
             Double quota,
-            TaskError error
+            TaskError error,
+            Long totalTokens
     ) {}
 
     /** 任务错误（new-api-generation-ops.ts:294-310）。 */

@@ -218,7 +218,7 @@ class BillingApplicationServiceTest {
         // 基准维度是字符数（TTS）：提交时刻压根没有这个量的来源（见 UsageDim.CHARACTERS）。
         // 这是**结构性**的推不出，不是这次传参的问题 —— 冻上限只会把它掩盖掉
         service(new CompiledRule(UsageDim.CHARACTERS, new BasePriceResolver.Constant(2_000L),
-                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp()));
+                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp(), null));
 
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
                 () -> hold(Map.of("voice", "female")), Usage.ContractQuantityUnavailableException.class);
@@ -234,7 +234,7 @@ class BillingApplicationServiceTest {
         // 价表只配了 1080p；上限 50 是配了的，所以这条路会走到兜底那一步
         service(new CompiledRule(UsageDim.SECONDS,
                 new BasePriceResolver.Table(Map.of("resolution=1080p", 2_000L)),
-                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp()));
+                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp(), null));
 
         // duration=-1 本会兜到上限，但这个规格组合查不到价：上限算得出来不代表结算算得出来，
         // 冻了钱也结不掉 —— 漏配必须当场暴露（与常规计价同一立场）
@@ -270,7 +270,7 @@ class BillingApplicationServiceTest {
         return new CompiledRule(
                 UsageDim.SUCCEEDED_SLOTS,
                 new BasePriceResolver.Constant(mc),
-                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp());
+                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp(), null);
     }
 
     /** 按秒计价：每秒 {@code mc} 微积分。 */
@@ -278,7 +278,7 @@ class BillingApplicationServiceTest {
         return new CompiledRule(
                 UsageDim.SECONDS,
                 new BasePriceResolver.Constant(mc),
-                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp());
+                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp(), null);
     }
 
     /** 按次计价：一次 {@code mc} 微积分，基准是 {@code constant:1}。 */

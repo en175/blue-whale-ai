@@ -438,14 +438,17 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:510）
         double duration = resolveDuration(claim.input());
 
-        // publishVideoResult（:504-512）
+        // publishVideoResult（:504-512）。
+        // 上游真实 token 一并交给终态收口：它是**结算的权威用量**（按 token 计价的模型靠它），
+        // 而这里正是**唯一**拿得到轮询结果的地方——终态事件由 finalizer 发出，晚了就没了。
         boolean published = stateMachine.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
-                width, height, duration);
+                width, height, duration, observation.totalTokens());
         if (published) {
-            log.info("[video] 发布成功 jobId={}", claim.id());
+            log.info("[video] 发布成功 jobId={} 上游token={}", claim.id(),
+                    observation.totalTokens() != null ? observation.totalTokens() : "未上报");
         } else {
             log.warn("[video] 终态失败(publishVideoResult 守卫未命中) jobId={}", claim.id());
         }

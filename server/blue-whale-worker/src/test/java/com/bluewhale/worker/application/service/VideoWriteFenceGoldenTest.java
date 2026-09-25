@@ -138,7 +138,7 @@ class VideoWriteFenceGoldenTest {
 
         boolean ok = service.publishVideoResult("300", "42", "9", "w1", 5,
                 "https://x/v.mp4", "generated/9/video/abc.mp4", "video/mp4", 123L,
-                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5);
+                "0123456789abcdef0123456789abcdef", 1080, 1920, 8.5, null);
 
         assertThat(ok).isTrue();
         // 单槽 88L 恰好一次，asset 绑定回填 id

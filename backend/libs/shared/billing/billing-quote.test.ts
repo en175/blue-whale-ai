@@ -39,7 +39,12 @@ describe('createBillingQuote', () => {
     expect(quoteCall?.specs).toEqual(holdCall?.specs);
     // 值本身也要对：只取标量、键小写、值小写；数组与 null 不是规格
     //（reference_count 是数组**长度**折算的标量，两边取到同一个数）
-    expect(quoteCall?.specs).toEqual({ size: '2k', duration: '5', reference_count: '1' });
+    expect(quoteCall?.specs).toEqual({
+      size: '2k',
+      duration: '5',
+      reference_count: '1',
+      has_video_input: 'false',
+    });
   });
 
   it('★ 等级透传 —— 报价与预扣必须同一档，否则预览价 != 实扣价', async () => {

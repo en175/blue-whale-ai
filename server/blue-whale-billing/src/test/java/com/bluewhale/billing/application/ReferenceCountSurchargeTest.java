@@ -14,6 +14,7 @@ import com.bluewhale.billing.ledger.ReservationRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
 import com.bluewhale.billing.pricing.BasePriceResolver;
 import com.bluewhale.billing.pricing.CompiledRule;
+import com.bluewhale.billing.pricing.ContractSource;
 import com.bluewhale.billing.pricing.DiscountResolver;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.RoundingPolicy;
@@ -166,7 +167,8 @@ class ReferenceCountSurchargeTest {
         // Usage.ofKeys 会以 UnknownUsageDimException **拒绝计价**——整单结算不出去
         assertThat(UsageDim.REFERENCE_COUNT.key()).isEqualTo("usage.referenceCount");
         // 预扣侧：billing-specs.ts 折算出的 specs 键名（Hold / Quote 共用那一份归一）
-        assertThat(UsageDim.REFERENCE_COUNT.contractSpecKey()).isEqualTo("reference_count");
+        assertThat(UsageDim.REFERENCE_COUNT.contractSource())
+                .isEqualTo(new ContractSource.SpecKey("reference_count"));
     }
 
     // ========== 夹具 ==========
@@ -209,7 +211,7 @@ class ReferenceCountSurchargeTest {
         return new CatalogDocument.TaskRule(
                 null, "usage.succeededSlots",
                 new CatalogDocument.BasePrice("const", 3_000L, null, null),
-                null, Map.of("usage.referenceCount", 12_000), 1L, 1L, null, null);
+                null, Map.of("usage.referenceCount", 12_000), 1L, 1L, null, null, null);
     }
 
     /** 按成功槽计价：每槽 {@code mc} 微积分。 */
@@ -217,6 +219,6 @@ class ReferenceCountSurchargeTest {
         return new CompiledRule(
                 UsageDim.SUCCEEDED_SLOTS,
                 new BasePriceResolver.Constant(mc),
-                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp());
+                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp(), null);
     }
 }

@@ -59,6 +59,8 @@ public record CatalogDocument(
      * @param minCredits      下限（整数积分）
      * @param maxCredits      上限，null = 不封顶
      * @param rounding        {@code halfUp}（默认）| {@code ceil} | {@code floor}
+     * @param tokenEstimate   视频按 token 计价的**预扣估算参数**；不配 = 该规则不做估算
+     *                        （按 {@code usage.c} 计价就必须配，否则提交时算不出契约量）
      */
     public record TaskRule(
             String usageSemantic,
@@ -69,7 +71,31 @@ public record CatalogDocument(
             Long unitDenominator,
             Long minCredits,
             Long maxCredits,
-            String rounding
+            String rounding,
+            TokenEstimate tokenEstimate
+    ) {}
+
+    /**
+     * token 估算参数（火山方舟官方 token 计费公式的系数）。
+     *
+     * <p>为什么它必须在目录里而不是代码里：{@code divisor}、{@code fps} 与
+     * 「档位 + 比例 → 宽高」三样都是**运营可能改的数**——火山改口径、开新档位、
+     * 某档位换帧率，都只该是一次目录发布，而不是改代码发版。
+     * 代码只固定公式的形状（见 {@code TokenEstimator}）。
+     *
+     * <p>⚠️ 它**只服务预扣**。结算按 worker 上报的**上游真实 token** 计价。
+     *
+     * @param divisor    除数字：token ≈ 宽 × 高 × 帧率 × 时长 ÷ divisor（官方 1024）
+     * @param fps        帧率（官方对照表是 24；生成任务的参数里没有帧率这个轴，
+     *                   上游返回的 {@code framespersecond} 也是 24，故取官方默认）
+     * @param dimensions 档位 + 比例 → 输出宽高，值写成 {@code "1248x704"}；
+     *                   键的语法与 {@link BasePrice#table} 完全一致
+     *                   （如 {@code "resolution=720p|aspect_ratio=16:9"}）
+     */
+    public record TokenEstimate(
+            Integer divisor,
+            Integer fps,
+            Map<String, String> dimensions
     ) {}
 
     /**

@@ -91,13 +91,13 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("101"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null))
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(anyString(), eq("task-123"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(stateMachine)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("101");
 
@@ -246,19 +246,19 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("104"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null))
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-789"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(stateMachine)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("104");
 
         verify(videoClient, never()).submit(anyString(), any());
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
     }
 
     @Test
@@ -269,7 +269,7 @@ class VideoJobProcessorTest {
                 .claimVideoJobById(eq("105"), anyString());
         doReturn("token").when(credentialService).open(anyString());
         doReturn(new VideoTaskObservation("failed", 100, null, null,
-                new TaskError("provider_failed", "上游失败")))
+                new TaskError("provider_failed", "上游失败"), null))
                 .when(videoClient).poll(eq("token"), eq("parent-task-fail"));
         doReturn(new SubmitResult("new-task", "queued")).when(videoClient)
                 .submit(anyString(), any(VideoSubmitInput.class));
@@ -290,7 +290,7 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("106"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("processing", 50, null, null, null))
+        doReturn(new VideoTaskObservation("processing", 50, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-106"));
         doReturn(true).when(stateMachine)
                 .rescheduleProviderPoll(eq("106"), anyString(), eq(1L), eq(50));
@@ -308,7 +308,7 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("107"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("processing", 90, null, null, null))
+        doReturn(new VideoTaskObservation("processing", 90, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-107"));
         doReturn(true).when(stateMachine)
                 .failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
@@ -327,20 +327,20 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("108"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null))
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-108"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(stateMachine)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
 
         processor.handle("108");
 
         verify(mediaRelay).persist(eq("http://video.mp4"), anyString());
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
-                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble());
+                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
     }
 
     @Test
@@ -352,20 +352,20 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("109a"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null))
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(stateMachine)
                 .publishVideoResult(anyString(), anyString(), anyString(), anyString(), anyLong(),
-                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble());
+                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any());
 
         processor.handle("109a");
 
         // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
         verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
                 anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
-                isNull(), isNull(), anyDouble());
+                isNull(), isNull(), anyDouble(), any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -378,7 +378,7 @@ class VideoJobProcessorTest {
                 .claimVideoJobById(eq("109"), anyString());
         doReturn("token").when(credentialService).open(anyString());
         doReturn(new VideoTaskObservation("failed", 100, null, null,
-                new TaskError("content_rejected", "内容违规")))
+                new TaskError("content_rejected", "内容违规"), null))
                 .when(videoClient).poll(eq("token"), eq("task-109"));
         doReturn(true).when(stateMachine)
                 .failVideoJob(eq("109"), eq("content_rejected"),
@@ -400,7 +400,7 @@ class VideoJobProcessorTest {
         // IKFL53：new-api tasks 表 FAILURE 状态把终端错误放顶层 fail_reason，无 data.error。
         doReturn(new VideoTaskObservation("failed", 100, null, null,
                 new TaskError("content_rejected_reference",
-                        "The request failed because the output video may be related to copyright restrictions. Request id: req-2048")))
+                        "The request failed because the output video may be related to copyright restrictions. Request id: req-2048"), null))
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
         doReturn(true).when(stateMachine)
                 .failVideoJob(eq("109a"), eq("content_rejected_reference"),
@@ -421,7 +421,7 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("110"), anyString());
         doReturn("token").when(credentialService).open(anyString());
-        doReturn(new VideoTaskObservation("succeeded", 100, null, null, null))
+        doReturn(new VideoTaskObservation("succeeded", 100, null, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
         doReturn(true).when(stateMachine)
                 .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),

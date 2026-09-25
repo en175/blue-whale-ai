@@ -188,6 +188,69 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("上游真实 token：实测信封 data.usage.total_tokens 被取出（结算的权威用量）")
+    void pollExtractsUpstreamTotalTokens() throws Exception {
+        // 逐字取自线上实测（2026-09-25，task_FIwJhbur…，doubao-seedance-2-0-fast 480p 16:9 4s）：
+        // 外层信封与内层任务结果**各带一份** usage，外层优先。
+        server.createContext("/v1/video/generations/task-tokens", exchange -> {
+            byte[] resp = ("{\"code\":\"success\",\"data\":{\"task_id\":\"task-tokens\","
+                    + "\"status\":\"SUCCESS\",\"result_url\":\"https://tos/v.mp4\","
+                    + "\"usage\":{\"total_tokens\":40594,\"completion_tokens\":40594},"
+                    + "\"data\":{\"usage\":{\"total_tokens\":40594,\"completion_tokens\":40594},"
+                    + "\"framespersecond\":24,\"resolution\":\"480p\"}}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-tokens");
+
+        assertThat(observation.status()).isEqualTo("succeeded");
+        assertThat(observation.totalTokens()).isEqualTo(40_594L);
+    }
+
+    @Test
+    @DisplayName("token 兜底：只有 completion_tokens、或只有字符串形态、或扁平 usage_total_tokens 都读得到")
+    void pollTokenFallbacks() throws Exception {
+        server.createContext("/v1/video/generations/task-completion-only", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-completion-only\",\"status\":\"SUCCESS\","
+                    + "\"usage\":{\"completion_tokens\":108900}}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+        // ADR-0063 记的 new-api Task 信封形态：token 字段**扁平**（不带 usage 对象），
+        // 且值可能是字符串（上游 flexInt 序列化）。只认一种形态就会静默丢 token。
+        server.createContext("/v1/video/generations/task-flat", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-flat\",\"status\":\"SUCCESS\","
+                    + "\"usage_total_tokens\":\"46875000\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+        server.createContext("/v1/video/generations/task-none", exchange -> {
+            byte[] resp = "{\"task_id\":\"task-none\",\"status\":\"SUCCESS\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        assertThat(client.poll("t", "task-completion-only").totalTokens()).isEqualTo(108_900L);
+        assertThat(client.poll("t", "task-flat").totalTokens()).isEqualTo(46_875_000L);
+        // ★ 取不到就是 null，**不是 0**：0 会被下游当成「报过、且真的是 0」→ 免费生成
+        assertThat(client.poll("t", "task-none").totalTokens()).isNull();
+    }
+
+    @Test
     @DisplayName("IKFL53: poll FAILURE + 顶层 fail_reason 版权拒绝 → content_rejected_reference + 上游原文透出")
     void pollTopLevelFailReasonCopyrightMapsToContentRejected() throws Exception {
         String copyrightText = "The request failed because the output video may be related to copyright restrictions. Request id: req-2048";

@@ -4,6 +4,7 @@ import com.bluewhale.billing.pricing.BasePriceResolver;
 import com.bluewhale.billing.pricing.CompiledRule;
 import com.bluewhale.billing.pricing.PricingKeys;
 import com.bluewhale.billing.pricing.RoundingPolicy;
+import com.bluewhale.billing.pricing.TokenEstimator;
 import com.bluewhale.billing.pricing.UsageDim;
 
 import java.util.LinkedHashMap;
@@ -105,7 +106,40 @@ public final class CatalogCompiler {
                 rule.unitDenominator() == null ? 1L : rule.unitDenominator(),
                 rule.minCredits() == null ? 1L : rule.minCredits(),
                 rule.maxCredits(),
-                compileRounding(rule.rounding()));
+                compileRounding(rule.rounding()),
+                compileTokenEstimate(rule.tokenEstimate()));
+    }
+
+    /**
+     * 编译 token 估算参数。
+     *
+     * <p>缺省（运营没配）返回 {@code null} —— 那是**合法的**：绝大多数规则不按 token 计价。
+     * 配了就必须整块配全：缺 divisor / fps / 空尺寸表都当场拒绝，
+     * 因为半配的估算会算出一个「像那么回事」的数，而它是钱。
+     *
+     * <p>⚠️ 校验放在编译期（与 {@link #normalizeTable} 同一个立场）：
+     * 尺寸表写错一个档位，运行时表现是「某个档位查不到 → 预扣推不出 → 拒绝提交」，
+     * 那时用户已经在等了；这里拒绝则发布当场失败。
+     */
+    private static TokenEstimator compileTokenEstimate(CatalogDocument.TokenEstimate estimate) {
+        if (estimate == null) {
+            return null;
+        }
+        if (estimate.divisor() == null) {
+            throw new CompileException("tokenEstimate.divisor 必填（官方 1024）");
+        }
+        if (estimate.fps() == null) {
+            throw new CompileException("tokenEstimate.fps 必填（官方对照表是 24）");
+        }
+        if (estimate.dimensions() == null || estimate.dimensions().isEmpty()) {
+            throw new CompileException("tokenEstimate.dimensions 必填且非空"
+                    + "（「档位 + 比例 → 宽高」是火山的知识，不配就估不出 token）");
+        }
+        try {
+            return TokenEstimator.from(estimate.divisor(), estimate.fps(), estimate.dimensions());
+        } catch (IllegalArgumentException e) {
+            throw new CompileException("tokenEstimate 不合法：" + e.getMessage(), e);
+        }
     }
 
     private static BasePriceResolver compileBasePrice(CatalogDocument.BasePrice price) {

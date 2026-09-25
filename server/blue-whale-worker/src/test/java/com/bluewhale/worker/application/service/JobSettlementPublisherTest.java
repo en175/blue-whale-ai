@@ -197,6 +197,74 @@ class JobSettlementPublisherTest {
         assertThat(body(0).get("succeededSlots").asInt()).isEqualTo(1);
     }
 
+    // ========== 视频按 token 计价：上游真值 + 单价档 ==========
+
+    @Test
+    @DisplayName("★ 上报**上游返回**的真实 token（usage.c）—— 结算的权威用量，不是我们估的")
+    void 上报上游真实token() throws Exception {
+        publisher.publishTerminal(
+                job(111, 42, "succeeded", "video",
+                        "{\"model_id\":\"doubao-seedance-2-0-fast-260128\",\"resolution\":\"480p\","
+                                + "\"aspect_ratio\":\"16:9\",\"duration\":4}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")),
+                // 实测值：task_FIwJhbur… 480p 16:9 4s 带音频，上游 usage.total_tokens
+                40_594L);
+
+        JsonNode quantities = body(0).get("usage").get(0).get("quantities");
+        // 键名是字面量，必须与 UsageDim.COMPLETION_TOKENS.key() 逐字一致：
+        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
+        assertThat(quantities.get("usage.c").asLong()).isEqualTo(40_594L);
+        // 槽数与参考数照旧
+        assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★ 上游没报 token 时**整个维度不出现**，不填 0 —— 填 0 是一笔免费生成")
+    void 没有上游token时不报该维度() throws Exception {
+        publisher.publishTerminal(
+                job(112, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"resolution\":\"480p\"}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")),
+                null);
+
+        JsonNode quantities = body(0).get("usage").get(0).get("quantities");
+        assertThat(quantities.has("usage.c")).isFalse();
+        // 缺维度 ⇒ billing 走「按预扣额结算」那条路；填 0 则会被当成「报过、且真的是 0」
+        assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★ has_video_input 按 references 里的 video 条目折算 —— 决定视频 token 的单价档")
+    void 含视频输入折算() throws Exception {
+        // 含视频参考 → true（走火山「含视频输入」那一档更便宜的单价）
+        publisher.publishTerminal(
+                job(113, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"references\":["
+                                + "{\"role\":\"reference\",\"type\":\"image\",\"asset_id\":\"1\"},"
+                                + "{\"role\":\"reference\",\"type\":\"video\",\"asset_id\":\"2\"}]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+        assertThat(body(0).get("usage").get(0).get("specs").get("has_video_input").asText())
+                .isEqualTo("true");
+
+        // 只有图片参考 → false
+        publisher.publishTerminal(
+                job(114, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"references\":["
+                                + "{\"role\":\"reference\",\"type\":\"image\",\"asset_id\":\"1\"}]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+        assertThat(body(1).get("usage").get(0).get("specs").get("has_video_input").asText())
+                .isEqualTo("false");
+
+        // 没有 references 键（旧分字段路径）→ false。与 reference_count 同一条边界：
+        // 旧路径的参考素材不进这套口径，两侧都不进 ⇒ 预扣与结算取到同一个值
+        publisher.publishTerminal(
+                job(115, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"reference_asset_ids\":[\"21\"]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+        assertThat(body(2).get("usage").get(0).get("specs").get("has_video_input").asText())
+                .isEqualTo("false");
+    }
+
     @Test
     @DisplayName("payload 没有 output_asset_ids 时成功槽数为 0，不抛异常")
     void 缺产物键不炸() throws Exception {

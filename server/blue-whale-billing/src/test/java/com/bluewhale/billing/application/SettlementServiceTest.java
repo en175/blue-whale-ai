@@ -138,7 +138,7 @@ class SettlementServiceTest {
         // 规则按秒计价，而 worker 只报了槽数（比如将来漏报时长的那条路径）
         useCatalog(new CatalogDocument.TaskRule(
                 null, "usage.seconds", new CatalogDocument.BasePrice("const", 2_000L, null, null),
-                null, null, 1L, 2L, null, null));
+                null, null, 1L, 2L, null, null, null));
         hold(10L);
 
         JobEventPayload.JobCompleted event = completed("succeeded", 5, 5);
@@ -170,7 +170,7 @@ class SettlementServiceTest {
         return new CatalogDocument.TaskRule(
                 null, "usage.succeededSlots",
                 new CatalogDocument.BasePrice("const", mc, null, null),
-                null, null, 1L, minCredits, null, null);
+                null, null, 1L, minCredits, null, null, null);
     }
 
     /** 按次计价：一次 {@code mc} 微积分，基准是 {@code constant:1}。 */
@@ -178,7 +178,7 @@ class SettlementServiceTest {
         return new CatalogDocument.TaskRule(
                 null, "constant:1",
                 new CatalogDocument.BasePrice("const", mc, null, null),
-                null, null, 1L, 1L, null, null);
+                null, null, 1L, 1L, null, null, null);
     }
 
     private void useCatalog(CatalogDocument.TaskRule rule) {

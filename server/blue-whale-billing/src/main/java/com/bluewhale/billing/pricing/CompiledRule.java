@@ -22,6 +22,8 @@ import java.util.Map;
  * @param minCredits       下限（整数积分）
  * @param maxCredits       上限（整数积分），null = 不封顶。**基础价的封顶，在折扣之前生效**
  * @param rounding         舍入策略
+ * @param tokenEstimator   token 估算参数（视频按 token 计价的预扣用），{@code null} = 该规则不做估算；
+ *                         非 null 时 {@code usage.c} 的契约量由它从规格推出来（见 {@link Usage#contractFrom}）
  */
 public record CompiledRule(
         UsageDim baseUnit,
@@ -31,7 +33,8 @@ public record CompiledRule(
         long unitDenominator,
         long minCredits,
         Long maxCredits,
-        RoundingPolicy rounding
+        RoundingPolicy rounding,
+        TokenEstimator tokenEstimator
 ) {
 
     public CompiledRule {
@@ -57,21 +60,27 @@ public record CompiledRule(
         multipliers = multipliers == null ? Map.of() : Map.copyOf(multipliers);
     }
 
-    /** 简化构造：媒介类（图片/视频/音频/按次）常用形态——无 dims，四舍五入，不封顶。 */
+    /** 简化构造：媒介类（图片/视频/音频/按次）常用形态——无 dims，四舍五入，不封顶，不估算。 */
     public static CompiledRule of(UsageDim baseUnit, BasePriceResolver basePrice, long unitDenominator) {
         return new CompiledRule(baseUnit, basePrice, Map.of(), Map.of(), unitDenominator,
-                1L, null, new RoundingPolicy.HalfUp());
+                1L, null, new RoundingPolicy.HalfUp(), null);
+    }
+
+    /** 带上 token 估算参数（视频按 token 计价时用）。 */
+    public CompiledRule withTokenEstimator(TokenEstimator estimator) {
+        return new CompiledRule(baseUnit, basePrice, dims, multipliers, unitDenominator,
+                minCredits, maxCredits, rounding, estimator);
     }
 
     public CompiledRule withMultiplier(UsageDim dim, int permille) {
         var next = new java.util.LinkedHashMap<>(multipliers);
         next.put(dim, permille);
         return new CompiledRule(baseUnit, basePrice, dims, next, unitDenominator,
-                minCredits, maxCredits, rounding);
+                minCredits, maxCredits, rounding, tokenEstimator);
     }
 
     public CompiledRule withMaxCredits(long max) {
         return new CompiledRule(baseUnit, basePrice, dims, multipliers, unitDenominator,
-                minCredits, max, rounding);
+                minCredits, max, rounding, tokenEstimator);
     }
 }

@@ -297,7 +297,7 @@ public class JobFinalizer {
                         "source", job.getSource(),
                         "status", job.getStatus(),
                         "progress", job.getProgress(),
-                        "output_asset_ids", assetIds));
+                        "output_asset_ids", assetIds), null);
 
         for (int i = 0; i < assetIds.size(); i++) {
             GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
@@ -388,7 +388,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)));
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
             for (GenerationOutputSlotEntity slot : slots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -441,12 +441,15 @@ public class JobFinalizer {
     /**
      * 发布视频结果（video-ops.ts:60-198 publishVideoResult）。
      * 单槽语义（评审 I2）：findFirst slot_index=0；只回写 record summary，不调 storyboard。
+     *
+     * @param upstreamTotalTokens 上游返回的真实 token 数（结算的权威用量）；{@code null} = 这次没有
      */
     @Transactional
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size, String md5,
-                                      Integer width, Integer height, double duration) {
+                                      Integer width, Integer height, double duration,
+                                      Long upstreamTotalTokens) {
         Long jobIdLong = Long.parseLong(jobId);
 
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
@@ -478,7 +481,8 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
+                            "output_asset_ids", List.of(asset.getId().toString())),
+                    upstreamTotalTokens);
         }
 
         GenerationOutputSlotEntity videoSlot = slotMapper.findByJobId(jobIdLong).stream()
@@ -547,7 +551,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)));
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
             for (GenerationOutputSlotEntity slot : pendingSlots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -667,7 +671,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", assetIds));
+                            "output_asset_ids", assetIds), null);
         }
         return true;
     }
@@ -856,7 +860,7 @@ public class JobFinalizer {
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "output_asset_ids", assetIds,
-                            "result", resultPayload));
+                            "result", resultPayload), null);
         }
         return true;
     }
@@ -966,7 +970,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())));
+                            "output_asset_ids", List.of(asset.getId().toString())), null);
         }
         return true;
     }
@@ -1024,7 +1028,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)));
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
         }
         return true;
     }
@@ -1049,12 +1053,25 @@ public class JobFinalizer {
      * <p>沿用同一个 {@code payload}：它同时是 project_events 的行内容和 billing 事件的
      * 数据源（成功槽数、失败原因都从里面取）。另起一份就会出现「事件说的成功、
      * 结算看到的失败」这种对不上的账。
+     *
+     * <p>⚠️ 本方法**只有一个**（没有「不带 token」的重载）：{@code JobFinalizerStatusChanged
+     * ConvergenceTest} 的守卫以「这个类里只有一处发 status_changed」为准，多一个同名重载
+     * 就会让它取方法体的区间落错地方。所以非视频路径显式传 {@code null}，而不是走重载。
+     *
+     * <p>token 单独传而不塞进 {@code payload}：payload 是 {@code status_changed} 的
+     * **事件体**（前端游标，用户能看到的进度面），而 token 是给 billing 的原始用量，
+     * 两者受众不同——塞进去会让每个用户的进度事件都多带一个只对账有用的数。
+     *
+     * @param upstreamTotalTokens 上游返回的真实 token 数（**结算的权威用量**）；
+     *                            {@code null} = 这条路径没有（图片/音频/mediakit，
+     *                            或视频但上游没报）——结算退回按预扣额计价，不是填 0
      */
-    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
+    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload,
+                                      Long upstreamTotalTokens) {
         eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
                 "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
                 payload);
-        settlementPublisher.publishTerminal(job, payload);
+        settlementPublisher.publishTerminal(job, payload, upstreamTotalTokens);
     }
 
     /**

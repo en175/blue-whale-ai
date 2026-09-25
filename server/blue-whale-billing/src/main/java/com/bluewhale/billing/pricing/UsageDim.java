@@ -20,7 +20,7 @@ import java.util.Map;
  * <h2>契约量从哪来</h2>
  *
  * <p>提交时刻还没有真实用量，但**契约用量是已知的**（这次任务最多会产出多少）。
- * 「哪个规格键带着这个维度的契约量」也在本枚举里登记（{@link #contractSpecKey()}）——
+ * 「这个维度的契约量从哪来」也在本枚举里登记（{@link #contractSource()}）——
  * 它和维度键一样是「三方一致」的一部分：配了某个维度做基准，就必须有对应的契约量来源，
  * 否则预扣算不出上限（{@code null} = 该维度在提交时刻**结构性**地没有来源）。
  * 这一列是这个不变式的登记处。
@@ -31,10 +31,10 @@ public enum UsageDim {
     CONSTANT_ONE("constant:1", null),
 
     /** 成功的输出槽数：图片多张 / 视频多段。**按 slot 计费的基数**。 */
-    SUCCEEDED_SLOTS("usage.succeededSlots", "expected_output_count"),
+    SUCCEEDED_SLOTS("usage.succeededSlots", new ContractSource.SpecKey("expected_output_count")),
 
     /** 时长（秒）：视频 / 音频。 */
-    SECONDS("usage.seconds", "duration"),
+    SECONDS("usage.seconds", new ContractSource.SpecKey("duration")),
 
     /**
      * 字符数：TTS。
@@ -54,16 +54,27 @@ public enum UsageDim {
      * {@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段、图片的
      * {@code input_asset_ids}）冻结的是别的规格键，不在这个数里 —— 那些路径下本维度为 0。
      */
-    REFERENCE_COUNT("usage.referenceCount", "reference_count"),
+    REFERENCE_COUNT("usage.referenceCount", new ContractSource.SpecKey("reference_count")),
 
-    // ── 以下为文本 / 多模态维度，**本期不启用**（文本模型不纳入计费），
+    // ── 以下为文本 / 多模态维度，**文本模型仍不纳入计费**，
     //    但契约与注册表先登记：启用时只需配 catalog，不改引擎。
     //    它们的契约量来源一概为 null：token 数由上游返回，提交时刻无从得知。
 
     /** 输入 token。 */
     PROMPT_TOKENS("usage.p", null),
-    /** 输出 token。 */
-    COMPLETION_TOKENS("usage.c", null),
+    /**
+     * 输出 token。
+     *
+     * <p>⚠️ **视频生成按它计价**（2026-09-25 起）：上游返回的
+     * {@code usage.total_tokens}（不可用时回退 {@code usage.completion_tokens}）就是模型的
+     * 输出 token 数——它与文本的 completion token 是同一个量纲、同一个语义「模型产出的 token」，
+     * 所以共用本维度，而不是为视频另开一个键（{@code usage.proto} 已冻结，不动）。
+     *
+     * <p>契约量来源是 {@link ContractSource.Estimated}：提交时刻 specs 里**没有** token 键，
+     * 只能按目录里登记的官方公式估一个上限（{@link TokenEstimator}）。
+     * 结算仍用 worker 上报的上游真值——**估算只服务预扣**。
+     */
+    COMPLETION_TOKENS("usage.c", new ContractSource.Estimated()),
     /** 缓存读 token。 */
     CACHE_READ_TOKENS("usage.cr", null),
     /** 缓存写 token（5 分钟档）。 */
@@ -80,11 +91,11 @@ public enum UsageDim {
     TOTAL_INPUT_LENGTH("usage.len", null);
 
     private final String key;
-    private final String contractSpecKey;
+    private final ContractSource contractSource;
 
-    UsageDim(String key, String contractSpecKey) {
+    UsageDim(String key, ContractSource contractSource) {
         this.key = key;
-        this.contractSpecKey = contractSpecKey;
+        this.contractSource = contractSource;
     }
 
     /** catalog / proto 里使用的字面键。 */
@@ -93,13 +104,16 @@ public enum UsageDim {
     }
 
     /**
-     * 提交时刻带着本维度**契约量**的规格键；{@code null} = 提交时刻取不到。
+     * 提交时刻本维度**契约量**的来源；{@code null} = 提交时刻结构性取不到。
      *
-     * <p>值就是 job 规格快照（{@code specs}）里的键名，例如按槽计费的契约张数在
-     * {@code expected_output_count}。它必须是**标量**——数组进不了 specs。
+     * <p>两种来源（直读规格键 / 按目录参数估算）见 {@link ContractSource}。
+     * ⚠️ 与 {@code null} 的区别不是「有没有值」，而是「有没有来源」——
+     * 直读可能这次的值不在 specs 里（{@code duration=-1} 的自动时长），
+     * 估算也可能这次推不出来（档位 + 比例没配）。这两种都**有**来源，
+     * 因而允许走「按规则上限冻结」的兜底；{@code null} 则直接拒绝。
      */
-    public String contractSpecKey() {
-        return contractSpecKey;
+    public ContractSource contractSource() {
+        return contractSource;
     }
 
     private static final Map<String, UsageDim> BY_KEY =

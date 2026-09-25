@@ -54,7 +54,7 @@ class PricingEngineTest {
                 new BasePriceResolver.Constant(2_000L),
                 Map.of(UsageDim.COMPLETION_TOKENS, 4_000),
                 Map.of(),
-                1_000_000L, 1L, null, new RoundingPolicy.HalfUp());
+                1_000_000L, 1L, null, new RoundingPolicy.HalfUp(), null);
     }
 
     /** 测试目录：模型/任务 → 规则。真实实现从 billing_pricing_catalogs 编译而来。 */
@@ -359,7 +359,7 @@ class PricingEngineTest {
         void maxCredits_小于_minCredits() {
             assertThatThrownBy(() -> new CompiledRule(
                     UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(),
-                    1L, 10L, 5L, new RoundingPolicy.HalfUp()))
+                    1L, 10L, 5L, new RoundingPolicy.HalfUp(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("maxCredits");
         }
@@ -368,7 +368,7 @@ class PricingEngineTest {
         void unitDenominator_必须为正() {
             assertThatThrownBy(() -> new CompiledRule(
                     UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(),
-                    0L, 1L, null, new RoundingPolicy.HalfUp()))
+                    0L, 1L, null, new RoundingPolicy.HalfUp(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("unitDenominator");
         }

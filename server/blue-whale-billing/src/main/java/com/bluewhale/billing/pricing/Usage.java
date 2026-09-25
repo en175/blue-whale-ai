@@ -1,7 +1,9 @@
 package com.bluewhale.billing.pricing;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -87,8 +89,22 @@ public record Usage(
      */
     public static Usage contractFrom(CompiledRule rule, Map<String, String> specs) {
         Map<UsageDim, Long> fromSpecs = new LinkedHashMap<>();
+        // 估算维度（视频 token）留到直读都取完之后再算：它的公式要吃「时长」（SECONDS）
+        // 与「片段数」（SUCCEEDED_SLOTS）这两个契约量，而那两个都是直读来的——
+        // 依赖枚举声明顺序是脆的，分两趟是把它变成结构性的。
+        List<UsageDim> estimatedDims = new ArrayList<>();
         for (UsageDim dim : UsageDim.values()) {
+            if (dim.contractSource() instanceof ContractSource.Estimated) {
+                estimatedDims.add(dim);
+                continue;
+            }
             Long quantity = contractQuantity(dim, specs);
+            if (quantity != null) {
+                fromSpecs.put(dim, quantity);
+            }
+        }
+        for (UsageDim dim : estimatedDims) {
+            Long quantity = estimatedQuantity(dim, rule, specs, fromSpecs);
             if (quantity != null) {
                 fromSpecs.put(dim, quantity);
             }
@@ -107,8 +123,11 @@ public record Usage(
      * 真实时长提交时未知——当成 -1 个秒数会把基准量算成负数，最后仍然落到下限。
      */
     private static Long contractQuantity(UsageDim dim, Map<String, String> specs) {
-        String specKey = dim.contractSpecKey();
-        String raw = specKey == null ? null : specs.get(specKey);
+        ContractSource source = dim.contractSource();
+        if (!(source instanceof ContractSource.SpecKey specKey)) {
+            return null;
+        }
+        String raw = specs.get(specKey.key());
         if (raw == null || raw.isBlank()) {
             return null;
         }
@@ -120,6 +139,30 @@ public record Usage(
         } catch (NumberFormatException | ArithmeticException e) {
             return null;
         }
+    }
+
+    /**
+     * 估算维度的契约量 —— 从**规则**登记的估算参数与已直读到的其他契约量推出来。
+     *
+     * @param direct 本趟之前已直读到的契约量（按槽数、时长）——估算公式的输入
+     * @return 估算值；{@code null} = 这次推不出（档位+比例没配、或时长未知）
+     */
+    private static Long estimatedQuantity(UsageDim dim, CompiledRule rule,
+                                          Map<String, String> specs, Map<UsageDim, Long> direct) {
+        return switch (dim) {
+            // 视频 token：官方公式 ≈ 宽 × 高 × 帧率 × 时长 ÷ divisor（× 片段数）。
+            // 时长取 SECONDS 的契约量——**取不到就不估**（duration=-1 的自动时长真实值未知，
+            // 用 0 兜等于把 token 估成 0 → 预扣冻下限 → 差额平台吃，且账面无信号）。
+            case COMPLETION_TOKENS -> rule.tokenEstimator() == null
+                    ? null
+                    : rule.tokenEstimator().estimateVideoTokens(
+                            specs,
+                            direct.get(UsageDim.SECONDS),
+                            direct.getOrDefault(UsageDim.SUCCEEDED_SLOTS, 1L));
+            // 登记了「估算」却没人实现 = 漏写代码，不是取不到。当场炸比按 0 冻钱强。
+            default -> throw new IllegalStateException(
+                    "维度 " + dim.key() + " 登记为估算来源，但 estimatedQuantity 没有实现它");
+        };
     }
 
     /**
@@ -137,12 +180,20 @@ public record Usage(
          */
         public ContractQuantityUnavailableException(UsageDim baseUnit, Map<String, String> specs) {
             super("预扣算不出上限：" + baseUnit.key() + " 是本规则的基准维度，而"
-                    + (baseUnit.contractSpecKey() == null
+                    + (baseUnit.contractSource() == null
                             ? "它在提交时刻没有契约量来源"
-                            : "请求的规格里没有可用的 " + baseUnit.contractSpecKey())
+                            : "它在提交时刻的契约量这次取不到"
+                                    + "（" + describeSource(baseUnit.contractSource()) + "）")
                     + "（本次规格键：" + specs.keySet() + "）"
                     + " —— 按 0 计价只会冻到下限，差额由平台承担，故拒绝");
             this.baseUnit = baseUnit;
+        }
+
+        private static String describeSource(ContractSource source) {
+            return switch (source) {
+                case ContractSource.SpecKey specKey -> "读规格键 " + specKey.key();
+                case ContractSource.Estimated ignored -> "按目录的 tokenEstimate 估算";
+            };
         }
 
         /** 取不到契约量的那个基准维度。 */

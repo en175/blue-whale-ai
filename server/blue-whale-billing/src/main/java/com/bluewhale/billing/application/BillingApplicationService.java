@@ -205,7 +205,7 @@ public class BillingApplicationService {
         try {
             return pricing.compute(request, Usage.contractFrom(rule, request.specs()), at);
         } catch (Usage.ContractQuantityUnavailableException e) {
-            if (e.baseUnit().contractSpecKey() == null || rule.maxCredits() == null) {
+            if (e.baseUnit().contractSource() == null || rule.maxCredits() == null) {
                 // ① 该维度**压根没有**契约量来源（如 TTS 的字符数）：那是结构性的推不出，
                 //    不是这次传参的问题——冻上限只会掩盖它。
                 // ② 规则没配上限：没有上限可依，冻下限就是静默少收。
@@ -220,7 +220,7 @@ public class BillingApplicationService {
      * 契约量取不到时的兜底：**按规则上限冻结**。
      *
      * <p>只对「本该推得出、只是这次的值不可用」开这个口子——判据是那个维度**登记了**
-     * 契约量来源（{@code contractSpecKey} 非 null）。典型情形是 {@code duration=-1}：
+     * 契约量来源（{@code contractSource} 非 null）。典型情形是 {@code duration=-1}：
      * {@code edit} / {@code prolong} 的自动时长，真实时长提交时未知。这类任务今天能提交，
      * 不该因为配了按秒价就变成 400。上限正是为这种情形准备的——**用上限冻结、按实际扣款**：
      * 结算按 worker 上报的真实用量重算，多冻的退回。

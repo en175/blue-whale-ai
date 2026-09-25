@@ -167,8 +167,15 @@ public class CreditService {
      * 差额自动回到可用余额。**不重算分配**——期间可能插入了新批次或旧批次过期，
      * 重算会扣到别的批次上。
      *
-     * @param actualCredits 实际消耗（积分）。{@code > 预扣} 理论不该发生（预扣已按上限冻结），
-     *                      真发生说明定价漏算了维度：差额记应收并告警，**不悄悄多扣用户**
+     * @param actualCredits 实际消耗（积分）。{@code > 预扣} 分两种情形，处理相同
+     *                      （差额记应收并告警，**不悄悄多扣用户**）：
+     *                      <ul>
+     *                        <li><b>按 token 计价的模型</b>（视频）：预扣是**估算**（按官方公式
+     *                            猜 token），真实用量由上游返回 —— 估算偏低是<b>正常</b>的
+     *                            （实测 480p 16:9 5s：估算 48,600 / 上游实报 50,638，
+     *                            差额来自官方公式未含的音频）。这类超出有界且可预期。</li>
+     *                        <li>其余按上限冻结的模型：真发生说明定价漏算了维度。</li>
+     *                      </ul>
      */
     @Transactional
     public void settle(long jobId, long actualCredits) {
@@ -223,6 +230,21 @@ public class CreditService {
             consumedByAccount.merge(marginalAccount, rest, Long::sum);
             log.warn("结算超出预扣：jobId={} 预扣={} 实际={} 多出={} —— 预扣阶段可能漏算了计价维度",
                     jobId, reserved, actualCredits, rest);
+        }
+
+        // ── 超出预扣的部分：**贷消耗科目**（收入照记）──────
+        // 它下面由 refund<0 那支以「借应收」配对，两边必须同时出现，否则分录不平（曾经
+        // 借 actual / 贷 reserved），整笔结算抛 IllegalArgumentException 并被 MQ 无限重投，
+        // 用户的钱永远冻着 —— 线上实测（jobId=1924：预扣 27 / 实际 28）。
+        //
+        // 为什么计入收入而不是少记：那是平台先垫、用户后欠（应收），金额本身是真的。
+        long overage = actualCredits - consumed;
+        if (overage > 0) {
+            consumedByAccount.merge(marginalAccount, overage, Long::sum);
+            log.warn("结算超出预扣：jobId={} 预扣={} 实际={} 多出={} 挂应收 —— "
+                            + "按 token 估的预扣偏低是预期内的（估算 vs 上游真值），"
+                            + "若某个模型长期单向偏高，多半是它的估算参数该调了",
+                    jobId, reserved, actualCredits, overage);
         }
 
         // ── 复式分录（§3 分录 6/7/8）
