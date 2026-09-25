@@ -384,6 +384,10 @@ public class JobStateMachineService {
         if (!ok) {
             log.warn("[video_frame_interpolation] cancel 守卫未命中(stale/已终态) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
+        } else {
+            // ★ 只有 CAS 真的改到了行才解冻：未命中说明 job 已是别的终态，
+            //   那条路径自己会发结算/返还事件，这里再发一次就是重复返还。
+            finalizer.releaseHoldForCancelled(jobId);
         }
         return ok;
     }
@@ -515,6 +519,10 @@ public class JobStateMachineService {
         if (!ok) {
             log.warn("[video] cancelVideoBeforeDispatch 守卫未命中(stale/已提交上游) jobId={} workerId={} token={}",
                     jobId, workerId, fencingToken);
+        } else {
+            // 取消是终态，但走的是 mapper CAS 而不是 JobFinalizer 的 8 个路径——
+            // 不显式解冻的话这笔预扣没有任何人会去动它。
+            finalizer.releaseHoldForCancelled(jobId);
         }
         return ok;
     }

@@ -94,6 +94,55 @@ class JobFinalizerStatusChangedConvergenceTest {
                 .isEqualTo(EXPECTED_CALL_SITES);
     }
 
+    @Test
+    @DisplayName("★ 两条取消路径都接了预扣解冻（它们不走 8 个终态路径）")
+    void 取消路径接了解冻() throws IOException {
+        // 取消把 status='cancelled' 的 CAS 写在自己的 mapper SQL 里，由 JobStateMachineService
+        // 调用，**完全不经过 JobFinalizer 的 8 个终态路径**。所以上面那三条断言一条都盖不到它。
+        // 接上解冻之前，这个缺口的表现是：job 已经终态，而那笔预扣没有任何人会去动它。
+        //
+        // ⚠️ 按**方法**取而不是按行取：cancelVideoFrameInterpolation 里那两条 CAS 落在同一句
+        //    三目表达式的两行上，按行数会数出 3 个「调用点」，而那只是 1 个决策点。
+        Path machine = Path.of(
+                "src/main/java/com/bluewhale/worker/application/service/JobStateMachineService.java");
+        assertThat(Files.exists(machine)).withFailMessage("找不到 %s", machine).isTrue();
+        List<String> lines = Files.readAllLines(machine);
+
+        for (String signature : List.of(
+                "public boolean cancelVideoBeforeDispatch(",
+                "public boolean cancelVideoFrameInterpolation(")) {
+            String body = methodBody(lines, signature);
+            assertThat(body)
+                    .withFailMessage("""
+                            %s 里没有 releaseHoldForCancelled：
+                            取消会成功（CAS 命中、status 落到 cancelled），但那条路径不经过
+                            JobFinalizer 的终态路径，于是**没有任何人告诉 billing**——
+                            该 job 的预扣永远冻着，没有报错、没有红灯。""", signature.trim())
+                    .contains("releaseHoldForCancelled");
+        }
+    }
+
+    /** 按签名行取一个方法的源码体（到下一个 `    }` 行为止）。 */
+    private static String methodBody(List<String> lines, String signature) {
+        int start = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).contains(signature)) {
+                start = i;
+                break;
+            }
+        }
+        assertThat(start)
+                .withFailMessage("%s 不见了——取消入口被改名/删除后本守卫会失效", signature.trim())
+                .isNotEqualTo(-1);
+
+        for (int i = start + 1; i < lines.size(); i++) {
+            if (lines.get(i).equals("    }")) {
+                return String.join("\n", lines.subList(start, i + 1));
+            }
+        }
+        throw new AssertionError("找不到 " + signature + " 的结束大括号");
+    }
+
     /**
      * helper 方法体的行号区间（闭区间，0-based）。
      *

@@ -1057,6 +1057,35 @@ public class JobFinalizer {
         settlementPublisher.publishTerminal(job, payload);
     }
 
+    /**
+     * 取消后的**预扣解冻**。
+     *
+     * <h2>为什么它不在上面那个 helper 里</h2>
+     *
+     * 取消是把 {@code status='cancelled'} 的 CAS 写在
+     * {@link com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper#cancelVideoBeforeDispatch}
+     * 与 {@code cancelVideoAfterDispatch} 两条 mapper SQL 里，由
+     * {@link JobStateMachineService} 调用——**完全不经过本类的 8 个终态路径**。
+     * 于是出现一个只属于取消的缺口：job 落到终态了，但没有任何人告诉 billing，
+     * **那笔预扣永远冻着**。
+     *
+     * <p>也刻意**不写 project_events**：取消路径此前从不发 {@code status_changed}，
+     * 加上它是在修一个 bug 的同时改掉前端的事件流（前端会突然多收到一类它没见过的
+     * 终态事件）。钱必须先解冻，事件面留作独立的一次改动。
+     *
+     * <p>⚠️ 只允许在取消 CAS **成功之后**调用。CAS 未命中说明 job 已是别的终态，
+     * 那条路径自己会发事件——这里再发一次就是重复返还（billing 侧有 pending 守卫兜底，
+     * 但那是防线不是理由）。
+     */
+    public void releaseHoldForCancelled(String jobId) {
+        GenerationJobEntity job = jobMapper.selectById(Long.parseLong(jobId));
+        if (job == null) {
+            log.warn("[cancel] 取不到 job，无法解冻预扣：jobId={}", jobId);
+            return;
+        }
+        settlementPublisher.publishTerminal(job, Map.of("status", job.getStatus()));
+    }
+
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
                                    String url, String storageKey, String mime, Long size, String md5,
                                    Integer width, Integer height, Integer durationMs) {
