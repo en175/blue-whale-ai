@@ -120,6 +120,20 @@ class BillingApplicationServiceTest {
         assertThat(reservedCredits()).isEqualTo(10L);
     }
 
+    @Test
+    @DisplayName("★ 参考素材加价算进预扣 —— reference_count 也是契约量")
+    void 参考素材加价算进预扣() {
+        // 每槽 3 积分，参考素材每个 ×1.2（12000 万分比，见 AbstractPricingCalculator）
+        service(perSlotRule(3_000L, 1L).withMultiplier(UsageDim.REFERENCE_COUNT, 12_000));
+
+        // 2 张图 + 2 个参考素材：references 是数组，进不了 specs —— 它的**长度**由
+        // billing-specs.ts 折算成 reference_count（Hold 与 Quote 共用那一份）
+        hold(Map.of("expected_output_count", "2", "size", "2k", "reference_count", "2"));
+
+        // 2 张 × 3 积分 = 6000 mc；参考 2 个 × 1.2 = 2.4 倍 → 14400 mc = 14.4 → 四舍五入 14
+        assertThat(reservedCredits()).isEqualTo(14L);
+    }
+
     // ========== 取不到契约量：拒绝，不冻下限 ==========
 
     @Test
@@ -142,17 +156,94 @@ class BillingApplicationServiceTest {
     }
 
     @Test
-    @DisplayName("自适应时长（duration=-1）取不到契约秒数 ⇒ 拒绝预扣")
-    void 自适应时长_拒绝而不是冻下限() {
+    @DisplayName("★ 自适应时长（duration=-1）没配上限 ⇒ 仍拒绝预扣")
+    void 自适应时长_没配上限_拒绝而不是冻下限() {
         service(perSecondRule(2_000L, 2L));
 
         // duration=-1 是 edit/prolong 的「自动时长」——真实时长提交时未知，
-        // 按秒计价就无法定上限。宁可拒绝（配置能改），也不静默只冻下限。
+        // 按秒计价就无法定上限。规则又没配 maxCredits：没有上限可依，
+        // 宁可拒绝（配置能改），也不静默只冻下限。
         Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
                 () -> hold(Map.of("duration", "-1")), Usage.ContractQuantityUnavailableException.class);
 
         assertThat(thrown.baseUnit()).isEqualTo(UsageDim.SECONDS);
         assertThat(thrown).hasMessageContaining("usage.seconds");
+    }
+
+    @Test
+    @DisplayName("★ 契约张数缺失、规则配了上限 ⇒ 按上限冻结（与 duration=-1 同一判据）")
+    void 契约张数缺失_配了上限_按上限冻结() {
+        service(perSlotRule(3_000L, 1L).withMaxCredits(30L));
+
+        // 判据是**这个维度登记了契约量来源**（expected_output_count），不是「键在不在」：
+        // 缺键与 duration=-1 都是「这次的值取不到」。有上限兜底就不会把正常提交变成 400，
+        // 没上限则照上面的用例那样拒绝
+        hold(Map.of("size", "2k"));
+
+        assertThat(reservedCredits()).isEqualTo(30L);
+    }
+
+    // ========== 契约量取不到、但规则配了上限：按上限冻结（不拒绝） ==========
+
+    @Test
+    @DisplayName("★ 自适应时长（duration=-1）配了上限 ⇒ 按上限冻结，不再拒绝提交")
+    void 自适应时长_配了上限_按上限冻结() {
+        // 每秒 2 积分、下限 2、上限 50：真实时长未知，按上限冻 50，
+        // 结算按 worker 上报的实际秒数重算、多冻的退回 —— 「用上限冻结、按实际扣款」
+        service(perSecondRule(2_000L, 2L).withMaxCredits(50L));
+
+        hold(Map.of("duration", "-1", "resolution", "1080p"));
+
+        assertThat(reservedCredits()).isEqualTo(50L);
+    }
+
+    @Test
+    @DisplayName("★ 上限冻结与预览同价 —— 预览 50，实冻也是 50")
+    void 上限冻结_报价与预扣同价() {
+        service(perSecondRule(2_000L, 2L).withMaxCredits(50L));
+        Map<String, String> specs = Map.of("duration", "-1", "resolution", "1080p");
+
+        // 提交前预览：调用方报不出真实用量（proto 的 usage 留空）
+        long preview = service.quote(new QuoteQuery(USER, MODEL, TASK, specs, "free",
+                Usage.empty(), Instant.now())).credits();
+        hold(specs);
+
+        assertThat(preview).isEqualTo(50L).isEqualTo(reservedCredits());
+    }
+
+    @Test
+    @DisplayName("没有契约量来源的维度不兜底 —— 配了上限也拒绝")
+    void 没有契约量来源_不兜底() {
+        // 基准维度是字符数（TTS）：提交时刻压根没有这个量的来源（见 UsageDim.CHARACTERS）。
+        // 这是**结构性**的推不出，不是这次传参的问题 —— 冻上限只会把它掩盖掉
+        service(new CompiledRule(UsageDim.CHARACTERS, new BasePriceResolver.Constant(2_000L),
+                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp()));
+
+        Usage.ContractQuantityUnavailableException thrown = catchThrowableOfType(
+                () -> hold(Map.of("voice", "female")), Usage.ContractQuantityUnavailableException.class);
+
+        assertThat(thrown.baseUnit()).isEqualTo(UsageDim.CHARACTERS);
+        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+                anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("规格组合查不到价 —— 有上限也不兜底，照原样拒绝")
+    void 规格查不到价_不兜底() {
+        // 价表只配了 1080p；上限 50 是配了的，所以这条路会走到兜底那一步
+        service(new CompiledRule(UsageDim.SECONDS,
+                new BasePriceResolver.Table(Map.of("resolution=1080p", 2_000L)),
+                Map.of(), Map.of(), 1L, 2L, 50L, new RoundingPolicy.HalfUp()));
+
+        // duration=-1 本会兜到上限，但这个规格组合查不到价：上限算得出来不代表结算算得出来，
+        // 冻了钱也结不掉 —— 漏配必须当场暴露（与常规计价同一立场）
+        BasePriceResolver.UnpriceableSpecException thrown = catchThrowableOfType(
+                () -> hold(Map.of("duration", "-1", "resolution", "720p")),
+                BasePriceResolver.UnpriceableSpecException.class);
+
+        assertThat(thrown.normalizedKey()).isEqualTo("resolution=720p");
+        verify(credits, never()).hold(anyLong(), anyString(), anyLong(), anyLong(),
+                anyInt(), anyInt(), anyString());
     }
 
     // ========== 报价与预扣同源 ==========

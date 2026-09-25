@@ -173,6 +173,62 @@ class PricingEngineTest {
     }
 
     @Nested
+    class 按上限计价 {
+
+        /** seedream：封顶 10 积分（每槽 5 积分，2 张就顶到）。 */
+        private PricingEngine engineWith(DiscountResolver discounts) {
+            return PricingEngine.forMedia(
+                    (m, t) -> seedream().withMaxCredits(10L), discounts);
+        }
+
+        @Test
+        void 上限即价格_与用量无关() {
+            // 契约量取不到时（duration=-1 之类）按上限冻：规格是 4k、按常规价要 10 积分/张
+            long credits = engineWith(DiscountResolver.NONE).computeAtCap(
+                    req("seedream-4.0", "text2image", Map.of("size", "4k")), T).credits();
+
+            assertThat(credits).isEqualTo(10);
+        }
+
+        @Test
+        void 折扣在封顶之后生效_与常规计价同一条通道() {
+            var engine = engineWith(ctx -> new DiscountResolver.Discount(
+                    9_000, java.util.List.of(DiscountResolver.AppliedDiscount.member(17L, 9_000))));
+
+            var result = engine.computeAtCap(req("seedream-4.0", "text2image", Map.of("size", "2k")), T);
+
+            // 上限 10 积分 → 九折 = 9：兜底也要走出折扣与舍入那一步（不是直接冻 maxCredits）
+            assertThat(result.credits()).isEqualTo(9);
+            assertThat(result.isDiscounted()).isTrue();
+        }
+
+        @Test
+        void 没配上限_拒绝而不是猜一个数() {
+            assertThatThrownBy(() -> engine().computeAtCap(
+                    req("seedream-4.0", "text2image", Map.of("size", "2k")), T))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("没有配上限");
+        }
+
+        @Test
+        void 规格查不到价仍拒绝_上限不豁免漏配() {
+            // 上限是常数、与单价无关，但结算会按真实用量重新计价：漏配的价必须当场暴露
+            assertThatThrownBy(() -> engineWith(DiscountResolver.NONE).computeAtCap(
+                    req("seedream-4.0", "text2image", Map.of("size", "8k")), T))
+                    .isInstanceOf(BasePriceResolver.UnpriceableSpecException.class)
+                    .hasMessageContaining("size=8k");
+        }
+
+        @Test
+        void 未配规则仍拒绝() {
+            assertThatThrownBy(() -> engine().computeAtCap(
+                    req("unknown-model", "text2image", Map.of("size", "2k")), T))
+                    .isInstanceOf(PricingEngine.RuleNotFoundException.class)
+                    .hasMessageContaining("unknown-model");
+        }
+    }
+
+    @Nested
     class 上下限与舍入 {
 
         @Test

@@ -116,11 +116,18 @@ public class BillingApplicationService {
      * 基准量恒为 0，一路算到下限，而结算侧又把消耗截到预扣额
      * （{@link CreditService#settle}），差额**平台自己吃**，账面上没有任何异常。
      *
+     * <h2>契约量取不到时</h2>
+     *
+     * 有些任务提交时刻**本来就没有**契约量：{@code edit} / {@code prolong} 的
+     * {@code duration=-1}（自动时长，真实时长提交时才知道）。这类任务不能因为配了按秒价
+     * 就变成 400：规则配了 {@code maxCredits} 时**按上限冻结**（上限正是为「真实量未知」
+     * 准备的，结算按实际用量退回差额），没配上限才拒绝。判据与理由见 {@link #priceAtCap}。
+     *
      * @throws PricingEngine.RuleNotFoundException 该 (model, taskType) 未配规则——**拒绝提交**
      * @throws com.bluewhale.billing.pricing.BasePriceResolver.UnpriceableSpecException
-     *         该规格组合查不到价——同样拒绝（漏配不是免费）
-     * @throws Usage.ContractQuantityUnavailableException 基准维度的契约量取不到——
-     *         同样拒绝：冻下限是静默少收（见 {@link Usage#contractFrom}）
+     *         该规格组合查不到价——同样拒绝（漏配不是免费），**契约量取不到也不豁免这一条**
+     * @throws Usage.ContractQuantityUnavailableException 基准维度的契约量取不到、
+     *         而规则又没配 {@code maxCredits}——没有上限可依，拒绝而不是冻下限
      * @throws com.bluewhale.billing.ledger.InsufficientCreditsException 余额不足
      */
     public HoldResult hold(HoldCommand command) {
@@ -128,7 +135,7 @@ public class BillingApplicationService {
                 command.userId(), command.modelId(), command.taskType(),
                 command.specs(), command.tier());
 
-        PricingResult priced = pricing.compute(request, contractUsage(request), command.submittedAt());
+        PricingResult priced = priceAtSubmit(request, command.submittedAt());
         int catalogVersion = catalog.currentVersion();
 
         if (priced.credits() == 0) {
@@ -159,8 +166,8 @@ public class BillingApplicationService {
      * 对上了只能说明两条实现恰好一致，对不上则不知道信谁。
      *
      * <p>用量留空（{@link Usage#empty()}）＝**按契约用量报价**，与 {@link #hold} 走
-     * 同一份 {@link #contractUsage}。这一条是硬的：预览价与实扣价一旦分叉，用户看到的就是
-     * 「预览一个价、实扣另一个价」。
+     * 同一份 {@link #priceAtSubmit}（含「契约量取不到按上限」的兜底）。这一条是硬的：
+     * 预览价与实扣价一旦分叉，用户看到的就是「预览一个价、实扣另一个价」。
      *
      * @throws PricingEngine.RuleNotFoundException 该组合未配规则——影子期这条异常
      *         就是**切换前要修掉的漏配清单**
@@ -168,21 +175,67 @@ public class BillingApplicationService {
     public PricingResult quote(QuoteQuery query) {
         PricingRequest request = new PricingRequest(
                 query.userId(), query.modelId(), query.taskType(), query.specs(), query.tier());
-        // 留空 = 调用方还没有用量（提交前预览）：契约用量是此刻唯一已知的量。
         // 带了用量（结算 / 影子对账）就按真实用量算，不替它补契约量。
-        Usage usage = query.usage().quantities().isEmpty() ? contractUsage(request) : query.usage();
-        return pricing.compute(request, usage, query.pricedAt());
+        if (!query.usage().quantities().isEmpty()) {
+            return pricing.compute(request, query.usage(), query.pricedAt());
+        }
+        // 留空 = 调用方还没有用量（提交前预览）：契约用量是此刻唯一已知的量。
+        return priceAtSubmit(request, query.pricedAt());
     }
 
     /**
-     * 这次请求的**契约用量** —— 提交与预览共用的那一份。
+     * 提交 / 预览时刻的价 —— **契约用量**；契约量取不到时按规则上限兜底。
+     *
+     * <p>{@link #hold} 与 {@link #quote} 共用这一段 —— 计价口径只写一份，两个入口就不会分叉。
      *
      * <p>规则缺失时不在这里报错：那是 {@link PricingEngine} 的职责
      * （抛 {@code RuleNotFoundException}），同一个错误不报第二遍。
      */
-    private Usage contractUsage(PricingRequest request) {
+    private PricingResult priceAtSubmit(PricingRequest request, Instant at) {
         CompiledRule rule = catalog.lookup(request.modelId(), request.taskType());
-        return rule == null ? Usage.empty() : Usage.contractFrom(rule, request.specs());
+        if (rule == null) {
+            // 没有规则就没有「契约量」可推，用量传什么都一样
+            return pricing.compute(request, Usage.empty(), at);
+        }
+        try {
+            return pricing.compute(request, Usage.contractFrom(rule, request.specs()), at);
+        } catch (Usage.ContractQuantityUnavailableException e) {
+            if (e.baseUnit().contractSpecKey() == null || rule.maxCredits() == null) {
+                // ① 该维度**压根没有**契约量来源（如 TTS 的字符数）：那是结构性的推不出，
+                //    不是这次传参的问题——冻上限只会掩盖它。
+                // ② 规则没配上限：没有上限可依，冻下限就是静默少收。
+                // 两条都照原样拒绝（见 Usage#contractFrom 的立场）。
+                throw e;
+            }
+            return priceAtCap(request, e, at);
+        }
+    }
+
+    /**
+     * 契约量取不到时的兜底：**按规则上限冻结**。
+     *
+     * <p>只对「本该推得出、只是这次的值不可用」开这个口子——判据是那个维度**登记了**
+     * 契约量来源（{@code contractSpecKey} 非 null）。典型情形是 {@code duration=-1}：
+     * {@code edit} / {@code prolong} 的自动时长，真实时长提交时未知。这类任务今天能提交，
+     * 不该因为配了按秒价就变成 400。上限正是为这种情形准备的——**用上限冻结、按实际扣款**：
+     * 结算按 worker 上报的真实用量重算，多冻的退回。
+     *
+     * <p>⚠️ 只开这一个口子，别的推不出照原样拒绝：规格组合查不到价、未配规则都不在这里兜
+     * （见 {@link #priceAtSubmit} 与 {@link PricingEngine#computeAtCap}）。
+     *
+     * <p>⚠️ 冻结额会**明显高于实际**（用户看到的「预计消耗」偏高），所以打 WARN：
+     * 运营据此知道哪个模型走上了这条路（配了按秒价而契约时长取不到），
+     * 再决定是给规则补上限、还是别让这类任务按秒计价。
+     */
+    private PricingResult priceAtCap(PricingRequest request,
+                                     Usage.ContractQuantityUnavailableException cause, Instant at) {
+        PricingResult priced = pricing.computeAtCap(request, at);
+        log.warn("契约用量取不到，改按规则上限冻结：{}/{} 的基准维度 {} 在本次规格里取不到"
+                        + "（specs={}）→ 冻结上限 {} 积分。"
+                        + "按实际上报用量结算、多冻的退回；未配上限的模型在这条路径上会直接拒绝提交",
+                request.modelId(), request.taskType(), cause.baseUnit().key(),
+                request.specs(), priced.credits());
+        return priced;
     }
 
     /** 余额与临期批次（用户可见）。 */

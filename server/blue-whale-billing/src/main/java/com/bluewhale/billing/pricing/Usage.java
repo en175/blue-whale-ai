@@ -76,6 +76,11 @@ public record Usage(
      * 静默少收，而拒绝会当场暴露成一次提交失败 + 一条「补配置」的信号。这与
      * {@code BasePriceResolver} 查不到规格就抛 {@code UnpriceableSpecException} 同一个立场。
      *
+     * <p>本方法只**如实报告**「这次取不到」，不自己兜底：调用方
+     * （{@code BillingApplicationService}）在规则配了 {@code maxCredits}、且该维度登记了
+     * 契约量来源时，会改用**上限冻结**（{@code duration=-1} 的自动时长就是这种情形——
+     * 真实量提交时未知，但这类任务不该变成 400）；其余情形这条异常就是最终结果。
+     *
      * @param rule  该 (model, taskType) 的规则 —— 它决定哪个维度是基准
      * @param specs job 规格快照（标量，键已小写）
      * @throws ContractQuantityUnavailableException 基准维度取不到契约量
@@ -117,7 +122,13 @@ public record Usage(
         }
     }
 
-    /** 规则的基准维度在提交时刻取不到契约量——预扣算不出上限。这是**配置/传参对不上**，不是用户错误。 */
+    /**
+     * 规则的基准维度在提交时刻取不到契约量——按契约量算不出预扣额。
+     *
+     * <p>不一定是用户错误：{@code duration=-1}（自动时长）是**正常的业务输入**，
+     * 所以调用方在规则配了上限时会改用上限冻结；这条异常冒到调用方时，
+     * 要么该维度压根没有契约量来源，要么规则没配上限（见 {@code BillingApplicationService}）。
+     */
     public static class ContractQuantityUnavailableException extends RuntimeException {
 
         /**

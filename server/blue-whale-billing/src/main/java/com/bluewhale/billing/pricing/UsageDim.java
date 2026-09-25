@@ -22,7 +22,8 @@ import java.util.Map;
  * <p>提交时刻还没有真实用量，但**契约用量是已知的**（这次任务最多会产出多少）。
  * 「哪个规格键带着这个维度的契约量」也在本枚举里登记（{@link #contractSpecKey()}）——
  * 它和维度键一样是「三方一致」的一部分：配了某个维度做基准，就必须有对应的契约量来源，
- * 否则预扣只能冻到下限（见 {@code Usage#contractFrom}）。这一列是这个不变式的登记处。
+ * 否则预扣算不出上限（{@code null} = 该维度在提交时刻**结构性**地没有来源）。
+ * 这一列是这个不变式的登记处。
  */
 public enum UsageDim {
 
@@ -45,11 +46,15 @@ public enum UsageDim {
     /**
      * 参考素材数。通常出现在 multipliers（整单倍率）而非 dims。
      *
-     * <p>⚠️ 没有契约量来源：参考素材在 job 的规格快照里是**数组**（{@code references}），
-     * 而送进 billing 的 specs 只带标量——数量在这一层被丢掉了（见 {@code billing-specs.ts}）。
-     * 所以按参考素材加价（multipliers）时，预扣冻的是**不含加价**的价。
+     * <p>契约量来自 {@code reference_count}：参考素材在 job 的规格快照里是**数组**
+     * （{@code references}），数组进不了 specs，所以 {@code billing-specs.ts} 在提取规格时
+     * 把它的**长度**写成一个标量键——Hold 与 Quote 共用那一份归一，两边取到同一个数。
+     *
+     * <p>⚠️ 只统计 {@code references} 这一个数组：走旧分字段路径提交的参考素材（视频的
+     * {@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段、图片的
+     * {@code input_asset_ids}）冻结的是别的规格键，不在这个数里 —— 那些路径下本维度为 0。
      */
-    REFERENCE_COUNT("usage.referenceCount", null),
+    REFERENCE_COUNT("usage.referenceCount", "reference_count"),
 
     // ── 以下为文本 / 多模态维度，**本期不启用**（文本模型不纳入计费），
     //    但契约与注册表先登记：启用时只需配 catalog，不改引擎。

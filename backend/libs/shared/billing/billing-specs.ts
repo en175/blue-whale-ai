@@ -48,5 +48,12 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
       specs[key.toLowerCase()] = String(value).toLowerCase();
     }
   }
+  // ⚠️ 参考素材数：`references` 是**数组**，数组进不了规格，但定价要的正是它的**长度**
+  //    （catalog 用 `usage.referenceCount` 做加价倍率）。所以在这里折算成一个标量键，
+  //    键名与 UsageDim.REFERENCE_COUNT 的 contractSpecKey 一致。
+  //    放在这份共用的归一里而不是各调用点：Hold 与 Quote 必须取到同一个数 —— 少取一处，
+  //    预览价就比实冻价少了加价那部分（也就是「预览一个价、实扣另一个价」）。
+  //    只取长度：**数组本身不进规格**（有测试钉住这条，混进去会让 catalog 查不到规格）。
+  specs.reference_count = String(Array.isArray(input.references) ? input.references.length : 0);
   return specs;
 }

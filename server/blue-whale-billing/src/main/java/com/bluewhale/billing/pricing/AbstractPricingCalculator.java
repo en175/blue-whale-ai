@@ -17,6 +17,9 @@ package com.bluewhale.billing.pricing;
  *   <li>折扣</li>
  *   <li>★ **出口唯一一次舍入**，在写账本之前</li>
  * </ol>
+ *
+ * <p>另有一条**旁路** {@link #capDetailed}：契约量取不到时按规则上限计价。它只跳过
+ * ①~④（上限与用量无关），⑤~⑦ 一步不少 —— 旁路存在不是因为流程可以各写一份。
  */
 public abstract class AbstractPricingCalculator {
 
@@ -50,11 +53,55 @@ public abstract class AbstractPricingCalculator {
         mc = applyMultipliers(ctx, usage, mc);
         mc = clamp(ctx, mc);
 
+        return settle(ctx, mc);
+    }
+
+    /**
+     * 按**规则上限**计价 —— 「契约量取不到」时的兜底（见 {@link PricingEngine#computeAtCap}）。
+     *
+     * <p>只跳过前四步：上限是目录里配的一个常数，**与用量、基准单价、倍率都无关**。
+     * 封顶 → 折扣 → 舍入仍走 {@link #settle}，与常规计价同一条通道 ——
+     * 折扣解析只做一次、舍入只做一次这两条不变式不因为兜底而破。
+     *
+     * <p>规格组合**仍须可计价**（见 {@link #requirePriceable}）：上限算得出来，不代表
+     * 结算时算得出来。
+     *
+     * @throws IllegalArgumentException 该规则没配上限——没有上限可依，调用方须先判
+     * @throws BasePriceResolver.UnpriceableSpecException 该规格组合没配价（与常规计价同一立场）
+     */
+    public final Outcome capDetailed(PricingContext ctx) {
+        Long capCredits = ctx.rule().maxCredits();
+        if (capCredits == null) {
+            throw new IllegalArgumentException("该规则没有配上限，不能按上限计价："
+                    + ctx.request().modelId() + "/" + ctx.request().taskType());
+        }
+        requirePriceable(ctx);
+        return settle(ctx, capCredits * 1000L);
+    }
+
+    /**
+     * 收口：折扣 → 舍入，出口**唯一一次**舍入。
+     *
+     * @param mc 封顶之后的金额（mc），1 积分 = 1000 mc
+     */
+    private Outcome settle(PricingContext ctx, long mc) {
         DiscountResolver.Discount discount = discountResolver.resolve(ctx);
         mc = mc * discount.factorBp() / 10_000L;
 
         long credits = ctx.rule().rounding().round(mc, ctx.rule().minCredits());
         return new Outcome(credits, discount);
+    }
+
+    /**
+     * 该规格组合的基准单价**必须查得到** —— 返回值不用，只为当场暴露漏配。
+     *
+     * <p>为什么上限计价也要查一次价：上限是常数，与单价无关，但**结算会按真实用量
+     * 重新计价**。规格组合查不到价 ⇒ 结算同样算不出价 ⇒ 那笔预扣结不掉、用户的钱一直冻着。
+     * 所以这里让 {@link BasePriceResolver.UnpriceableSpecException} 照常抛出：
+     * 兜底只对「契约量取不到」开一个口子，不对「漏配价」开口子。
+     */
+    private void requirePriceable(PricingContext ctx) {
+        ctx.rule().basePrice().resolve(ctx.specs());
     }
 
     /**

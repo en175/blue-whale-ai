@@ -51,14 +51,39 @@ public final class PricingEngine {
      * @throws RuleNotFoundException 该 (model, taskType) 未配规则——**拒绝，不降级为 0**
      */
     public PricingResult compute(PricingRequest request, Usage usage, Instant submitAt) {
+        var outcome = calculator.computeDetailed(context(request, usage, submitAt));
+        return resultOf(request, outcome);
+    }
+
+    /**
+     * **按规则上限**计价 —— 契约量取不到时的兜底（调用方见
+     * {@code BillingApplicationService#priceAtCap}）。
+     *
+     * <p>上限是目录里配的一个常数，**与用量无关**：这里传 {@link Usage#empty()} 而不是
+     * 编一个用量出来——编出来的数量会进加权和与倍率，而上限本来就是「不管用量多少都封到这里」。
+     *
+     * @throws RuleNotFoundException 该 (model, taskType) 未配规则——与 {@link #compute} 同一立场
+     * @throws IllegalArgumentException 该规则没配上限（调用方须先判 {@code maxCredits}）
+     * @throws BasePriceResolver.UnpriceableSpecException 该规格组合查不到价——
+     *         **上限计价不豁免这一条**：结算同样算不出价，漏配必须当场暴露
+     */
+    public PricingResult computeAtCap(PricingRequest request, Instant submitAt) {
+        var outcome = calculator.capDetailed(context(request, Usage.empty(), submitAt));
+        return resultOf(request, outcome);
+    }
+
+    /** 查规则并装配上下文；**没有规则就抛**（两个入口共用同一处判定）。 */
+    private PricingContext context(PricingRequest request, Usage usage, Instant submitAt) {
         CompiledRule rule = catalog.lookup(request.modelId(), request.taskType());
         if (rule == null) {
             // 与 BasePriceResolver 的「查不到规格」同一立场：配置缺失是错误，不是免费。
             // 降级为 0 会让漏配变成白送，且没有任何信号。
             throw new RuleNotFoundException(request.modelId(), request.taskType());
         }
-        var ctx = new PricingContext(rule, request, usage, submitAt);
-        var outcome = calculator.computeDetailed(ctx);
+        return new PricingContext(rule, request, usage, submitAt);
+    }
+
+    private static PricingResult resultOf(PricingRequest request, AbstractPricingCalculator.Outcome outcome) {
         return new PricingResult(outcome.credits(), outcome.discount(),
                 request.modelId(), request.taskType());
     }
