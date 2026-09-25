@@ -10,9 +10,9 @@
  * ============================================ */
 
 /**
- * 内容字段 —— **不是定价维度，不进规格**。
+ * 不进规格的字段 —— 两类，**理由不同但后果一样：它们不该出现在定价那侧**。
  *
- * <h2>为什么需要这份名单</h2>
+ * <h2>一、内容字段（prompt / title）</h2>
  *
  * 光靠「取所有标量」会把 `prompt` 也收进来（它是字符串）。于是：
  *
@@ -26,12 +26,27 @@
  * 创作内容不是。** 将来若要按内容计价（例如按提示词长度），那应当由上游把
  * 「长度」算成一个数字规格传进来，而不是把正文塞进规格表。
  */
-const CONTENT_FIELDS = new Set(["prompt", "title"]);
+
+/**
+ * <h2>二、凭证（provider_credential）—— 这是**密钥泄漏**，不是分层问题</h2>
+ *
+ * 建任务时把上游 key 明文写进 `job.input.provider_credential`
+ * （`handle-create-generation-job.ts`，修正四「凭证去密」）。它是字符串，
+ * 于是被「取所有标量」的规则一并收进 specs，**跟着 Hold/Quote 的请求离开这个进程**、
+ * 落进 billing 的 MQ 日志与计费记录里。
+ *
+ * <p>实测撞到：billing 的 MQ 日志里能读到明文 key。
+ *
+ * <p>⚠️ 它与上面那类字段**理由不同**（那个是分层，这个是安全），但处理方式一样 ——
+ * 都在离开本进程之前挡掉。加进来的时候别再分两个集合：**「不该进规格的字段」
+ * 只有一个清单，分开维护就一定有一边漏。**
+ */
+const NON_SPEC_FIELDS = new Set(["prompt", "title", "provider_credential"]);
 
 /**
  * 规格提取。
  *
- * ⚠️ 只取**标量**字段、排除 {@link CONTENT_FIELDS}、统一小写键名 —— 定价目录里的规格表
+ * ⚠️ 只取**标量**字段、排除 {@link NON_SPEC_FIELDS}、统一小写键名 —— 定价目录里的规格表
  * 按规范化后的键查找（《计费逻辑详细设计》§4.5.1）。这里不做值层面的归一
  * （例如 "1080P" → "1080p" 由 catalog 编译期负责），因为「哪些值等价」是定价配置的知识，
  * 不是生成流程的。
@@ -43,7 +58,7 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
   const specs: Record<string, string> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value === null || value === undefined) continue;
-    if (CONTENT_FIELDS.has(key.toLowerCase())) continue;
+    if (NON_SPEC_FIELDS.has(key.toLowerCase())) continue;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
       specs[key.toLowerCase()] = String(value).toLowerCase();
     }
@@ -55,5 +70,20 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
   //    预览价就比实冻价少了加价那部分（也就是「预览一个价、实扣另一个价」）。
   //    只取长度：**数组本身不进规格**（有测试钉住这条，混进去会让 catalog 查不到规格）。
   specs.reference_count = String(Array.isArray(input.references) ? input.references.length : 0);
+  // ⚠️ 是否含视频输入：视频按 token 计价的**单价**分两档（火山官方：无视频输入 / 含视频输入），
+  //    而「有没有视频参考」是 `references` 数组里的**元素类型**，同样进不了规格。
+  //    与 reference_count 同一处、同一套理由折算成标量键，两个调用点取到同一个值。
+  //    口径与 reference_count **逐条相同**：只认 `input.references` 里 type === 'video' 的条目，
+  //    旧分字段路径（`reference_asset_ids` / `reference_materials`）不计入——两边口径必须一致，
+  //    否则会出现「预扣按含视频输入计价、结算按不含视频输入收」这种对不上的账。
+  specs.has_video_input = String(
+    Array.isArray(input.references) &&
+      input.references.some(
+        (ref) =>
+          typeof ref === 'object' &&
+          ref !== null &&
+          (ref as { type?: unknown }).type === 'video',
+      ),
+  );
   return specs;
 }
