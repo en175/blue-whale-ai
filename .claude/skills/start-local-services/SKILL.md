@@ -66,6 +66,9 @@ cd <worktree>/backend && npm run build   # prisma generate && tsc -b && tsc-alia
 cd backend && PORT=3100 \
   NEW_API_UPSTREAM_KEY='<统一 key，取自测试站网关>' \
   BILLING_GRPC_URL='http://127.0.0.1:4004' \
+  BILLING_ADMIN_URL='http://127.0.0.1:4003' \
+  PAY_SERVER_BASE_URL='http://14.103.43.52:9216' \
+  SYSTEM_SETTINGS_SECRET="$(openssl rand -hex 32)" \
   nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
 ```
 
@@ -77,6 +80,22 @@ cd backend && PORT=3100 \
 - `NEW_API_UPSTREAM_KEY` —— 登录签发会话要用它当上游凭证。
 
 一个扣不了钱的进程不该开始接受请求，所以拦在启动而不是首次请求。
+
+## 另外三个变量（充值要用，**刻意不进启动硬门禁**）
+
+| 变量 | 干什么 | 缺了会怎样 |
+| --- | --- | --- |
+| `PAY_SERVER_BASE_URL` | BlueWhalePay 的地址。本地连测试站：`http://14.103.43.52:9216`（容器 `bw-pay-payment`） | 充值下单 **503**，其余功能不受影响 |
+| `BILLING_ADMIN_URL` | billing 的 HTTP 管理面（`http://127.0.0.1:4003`），充值到账要靠它发积分 | 到账时发不出积分 |
+| `SYSTEM_SETTINGS_SECRET` | 系统设置里商户密钥的 AES-256-GCM 主密钥（32 字节 hex） | **不写也不读**凭证；系统设置里存不进去 |
+
+这三个**不在**启动硬门禁里，是有意的：充值缺配置只是「不卖」，不属于
+「配置缺失就免费」那条通道——为它拒启整个服务不划算。
+
+⚠️ 充值的**回调**是 pay **推**给我们的。本地后端在 `localhost:3100`，
+测试站的 pay **够不到它**。所以本地只能验「我们主动打 pay」（下单 / 查单）；
+回调那一段只能自己打自己的入口来验（验签 + 幂等 + 发放），**不是真链路**。
+真链路要到测试站后端上才验得了——那时回调地址必须是 52 能访问到的那个。
 
 取值来源：与其它 new-api 变量一样，从测试站 backend 容器的 `docker inspect` 提取
 （见下方「形态 B」的连接串获取），只走进程环境变量注入，**不落任何入库文件或日志**（ADR-0064）。
