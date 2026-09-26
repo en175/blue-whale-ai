@@ -17,6 +17,11 @@ import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
+import com.sun.net.httpserver.HttpServer;
+import com.volcengine.tos.TOSV2;
+import com.volcengine.tos.model.object.DeleteObjectInput;
+import com.volcengine.tos.model.object.PreSignedURLInput;
+import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import ch.qos.logback.classic.Logger;
@@ -24,6 +29,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,10 +50,15 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -281,14 +292,14 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
     /** 转存成功返回后的首次取消状态查询（第 4 次）注入 DB 异常；前三段真跑（未命中取消）。 */
     private static final String CANCEL_QUERY_ERROR = "取消状态查询 DB 断连（IKIN91）";
 
-    private void throwOnPostTransferCancelQuery(WiredProcessor wired, long jobId) {
+    private void throwOnPostTransferCancelQuery(JobStateMachineService spyService, long jobId) {
         AtomicInteger cancelCalls = new AtomicInteger();
         doAnswer(invocation -> {
             if (cancelCalls.incrementAndGet() == 4) {
                 throw new RuntimeException(CANCEL_QUERY_ERROR);
             }
             return invocation.callRealMethod();
-        }).when(wired.spyService())
+        }).when(spyService)
                 .cancelAudioVideoMuxIfRequested(eq(String.valueOf(jobId)), anyString(), anyLong());
     }
 
@@ -306,6 +317,73 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }
     }
 
+    // ========== 真实 relay 组合线法（IKIN8V：处理器级组合用例，复用 StreamingTransferTest 线法） ==========
+
+    private HttpServer sourceServer;
+    private HttpServer uploadServer;
+
+    /** 受控源分块参数：4×64KiB、块间 20ms——真实 HTTP 流式下载（持续有进度），转存亚秒完成。 */
+    private static final int SOURCE_BLOCK_BYTES = 64 * 1024;
+    private static final int SOURCE_BLOCK_COUNT = 4;
+
+    @AfterEach
+    void stopLocalServers() {
+        if (uploadServer != null) uploadServer.stop(0);
+        if (sourceServer != null) sourceServer.stop(0);
+    }
+
+    /** 本地受控视频源（真实 relay 线法，AudioVideoMuxStreamingTransferTest 同款缩小版）。 */
+    private String serveControlledSource() throws IOException {
+        byte[] block = new byte[SOURCE_BLOCK_BYTES];
+        for (int i = 0; i < SOURCE_BLOCK_BYTES; i++) block[i] = (byte) (i % 251);
+        sourceServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        sourceServer.createContext("/", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (int i = 0; i < SOURCE_BLOCK_COUNT; i++) {
+                    out.write(block, 0, SOURCE_BLOCK_BYTES);
+                    out.flush();
+                    Thread.sleep(20);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        sourceServer.start();
+        return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.mp4";
+    }
+
+    /** 真实 relay 的有状态 TOS 替身：preSignedURL 走 mock 指向本地上传桩（key 可经 sink 捕获），
+     *  上传字节真实流式送达并按 key 落对象表；deleteObject 查表真删——对象存在性断言以此为准。 */
+    private TOSV2 realTosStandin(ConcurrentHashMap<String, byte[]> objects,
+                                 AtomicReference<String> keySink) throws IOException {
+        uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        uploadServer.createContext("/", exchange -> {
+            String key = exchange.getRequestURI().getPath().substring(1);
+            try (InputStream in = exchange.getRequestBody()) {
+                objects.put(key, in.readAllBytes());
+                exchange.sendResponseHeaders(200, -1);
+            } finally {
+                exchange.close();
+            }
+        });
+        uploadServer.start();
+        TOSV2 client = mock(TOSV2.class);
+        when(client.preSignedURL(any(PreSignedURLInput.class))).thenAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            if (keySink != null) keySink.set(input.getKey());
+            return new PreSignedURLOutput("http://127.0.0.1:" + uploadServer.getAddress().getPort()
+                    + "/" + input.getKey(), input.getHeader());
+        });
+        doAnswer(invocation -> {
+            DeleteObjectInput input = invocation.getArgument(0);
+            objects.remove(input.getKey());
+            return null;
+        }).when(client).deleteObject(any(DeleteObjectInput.class));
+        return client;
+    }
+
     // ========== 用例 ==========
 
     @Test
@@ -316,7 +394,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         String key = "generated/9/video/cancel-query-error.mp4";
         ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
         WiredProcessor wired = wireProcessor(objects, key);
-        throwOnPostTransferCancelQuery(wired, jobId);
+        throwOnPostTransferCancelQuery(wired.spyService(), jobId);
 
         wired.processor().handle(String.valueOf(jobId));
 
@@ -324,6 +402,48 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         assertThat(objects).doesNotContainKey(key);
         assertThat(countAssets(jobId, key)).isZero();
         // DB 短暂故障恢复后按既有失败语义收口：fail 守卫命中落 failed 终态并清租约
+        GenerationJobEntity job = readJob(jobId);
+        assertThat(job.getStatus()).isEqualTo("failed");
+        assertThat(job.getError()).contains("audio_video_mux_failed").contains(CANCEL_QUERY_ERROR);
+        assertThat(job.getLeaseOwner()).isNull();
+    }
+
+    /**
+     * 处理器级组合用例（IKIN8V，规格 Testing Decisions「Worker 处理器使用真实 relay、隔离
+     * MySQL、受控租约与提交时序，并复用同一有状态 TOS 替身」）：与
+     * {@link #transientCancelQueryErrorCleansObjectAndClosesJobAsFailed} 同一收口语义，但
+     * 转存换**真实 relay**——本地 HttpServer 受控源 + mock TOSV2 仅签名 + 上传真实流式落
+     * 对象表（真实 key 含本次执行独有 uuid）后取消查询抛 DB 异常：断言真实上传对象被替身
+     * 真删（非仅删除接口被调用）、真库不产生引用该键的 Asset、任务按失败语义落终态。
+     */
+    @Test
+    @Timeout(90)
+    @DisplayName("组合（真实 relay）：取消查询 DB 异常——真实上传对象被真删、真库无该键 Asset、任务按失败语义落 failed 终态")
+    void realRelayTransferThenCancelQueryErrorDeletesRealObjectWithoutAssetReference() throws Exception {
+        long jobId = seedClaimableMuxJob();
+        ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
+        AtomicReference<String> realKey = new AtomicReference<>();
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, realKey), "bkt", "tos.example.com");
+        JobStateMachineService spyService = spy(realService);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        when(gateway.poll("sk-frozen", "mux-task-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
+                        227.0, "1920x1080", null, null, "request-db-1"));
+        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+                mock(GenerationMessageProducer.class));
+        throwOnPostTransferCancelQuery(spyService, jobId);
+
+        processor.handle(String.valueOf(jobId));
+
+        // 真实上传（完整 4×64KiB 送达替身）的对象被替身真删：对象表无残留、无孤儿
+        assertThat(realKey.get()).startsWith("generated/9/video/");
+        assertThat(objects).doesNotContainKey(realKey.get());
+        assertThat(objects).isEmpty();
+        // 真库不产生引用该键的 Asset（发布从未开始）
+        assertThat(countAssets(jobId, realKey.get())).isZero();
+        // 任务按既有失败语义收口：fail 守卫命中落 failed 终态并清租约
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("failed");
         assertThat(job.getError()).contains("audio_video_mux_failed").contains(CANCEL_QUERY_ERROR);
@@ -338,7 +458,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         String key = "generated/9/video/persistent-outage.mp4";
         ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
         WiredProcessor wired = wireProcessor(objects, key);
-        throwOnPostTransferCancelQuery(wired, jobId);
+        throwOnPostTransferCancelQuery(wired.spyService(), jobId);
         // fail 落库自身也失败（DB 持续不可用）
         doAnswer(invocation -> {
             throw new RuntimeException("fail 落库断连");

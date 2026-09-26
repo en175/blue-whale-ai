@@ -17,10 +17,16 @@ import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
+import com.sun.net.httpserver.HttpServer;
+import com.volcengine.tos.TOSV2;
+import com.volcengine.tos.model.object.DeleteObjectInput;
+import com.volcengine.tos.model.object.PreSignedURLInput;
+import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +46,10 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -294,6 +304,73 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         return raw;
     }
 
+    // ========== 真实 relay 组合线法（IKIN8V：处理器级组合用例，复用 StreamingTransferTest 线法） ==========
+
+    private HttpServer sourceServer;
+    private HttpServer uploadServer;
+
+    /** 受控源分块参数：4×64KiB、块间 20ms——真实 HTTP 流式下载（持续有进度），转存亚秒完成。 */
+    private static final int SOURCE_BLOCK_BYTES = 64 * 1024;
+    private static final int SOURCE_BLOCK_COUNT = 4;
+
+    @AfterEach
+    void stopLocalServers() {
+        if (uploadServer != null) uploadServer.stop(0);
+        if (sourceServer != null) sourceServer.stop(0);
+    }
+
+    /** 本地受控视频源（真实 relay 线法，AudioVideoMuxStreamingTransferTest 同款缩小版）。 */
+    private String serveControlledSource() throws IOException {
+        byte[] block = new byte[SOURCE_BLOCK_BYTES];
+        for (int i = 0; i < SOURCE_BLOCK_BYTES; i++) block[i] = (byte) (i % 251);
+        sourceServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        sourceServer.createContext("/", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (int i = 0; i < SOURCE_BLOCK_COUNT; i++) {
+                    out.write(block, 0, SOURCE_BLOCK_BYTES);
+                    out.flush();
+                    Thread.sleep(20);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        sourceServer.start();
+        return "http://127.0.0.1:" + sourceServer.getAddress().getPort() + "/out.mp4";
+    }
+
+    /** 真实 relay 的有状态 TOS 替身：preSignedURL 走 mock 指向本地上传桩（key 可经 sink 捕获），
+     *  上传字节真实流式送达并按 key 落对象表；deleteObject 查表真删——对象存在性断言以此为准。 */
+    private TOSV2 realTosStandin(ConcurrentHashMap<String, byte[]> objects,
+                                 AtomicReference<String> keySink) throws IOException {
+        uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        uploadServer.createContext("/", exchange -> {
+            String key = exchange.getRequestURI().getPath().substring(1);
+            try (InputStream in = exchange.getRequestBody()) {
+                objects.put(key, in.readAllBytes());
+                exchange.sendResponseHeaders(200, -1);
+            } finally {
+                exchange.close();
+            }
+        });
+        uploadServer.start();
+        TOSV2 client = mock(TOSV2.class);
+        when(client.preSignedURL(any(PreSignedURLInput.class))).thenAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            if (keySink != null) keySink.set(input.getKey());
+            return new PreSignedURLOutput("http://127.0.0.1:" + uploadServer.getAddress().getPort()
+                    + "/" + input.getKey(), input.getHeader());
+        });
+        doAnswer(invocation -> {
+            DeleteObjectInput input = invocation.getArgument(0);
+            objects.remove(input.getKey());
+            return null;
+        }).when(client).deleteObject(any(DeleteObjectInput.class));
+        return client;
+    }
+
     private void executeInFlightPublish(Connection raw, long jobId, String workerId, long token,
                                         String storageKey) throws Exception {
         // 逐字复刻 publishResultGuard（守卫 CAS：第一句即持 generation_jobs 行 X 锁直至提交/回滚）
@@ -499,6 +576,101 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(countAssets(jobId, oldKey)).isZero();
         // 守卫拒绝路径不落失败终态（对象键清理即收口）
         verify(wired.spyService(), never()).failMediaExtractJob(any());
+    }
+
+    /**
+     * 处理器级组合用例（IKIN8V，规格 Testing Decisions「Worker 处理器使用真实 relay、隔离
+     * MySQL、受控租约与提交时序，并复用同一有状态 TOS 替身」）：与
+     * {@link #inFlightPublishCommittingAfterFirstProbeKeepsObjectAndBlocksOldExecutor} 同一
+     * 交错（发布异常 + 在飞事务于探测窗口内提交），但转存换**真实 relay**——本地 HttpServer
+     * 受控源 + mock TOSV2 仅签名 + 上传真实流式落对象表（真实 key 含本次执行独有 uuid，非
+     * 测试预置）：对象确实完整送达过替身，保留 / 引用 / 终态断言全部对着真实上传结果。
+     */
+    @Test
+    @Timeout(90)
+    @DisplayName("组合（真实 relay）：在飞发布事务于探测窗口内提交——替身对象保留、真库 Asset 引用真实 key、成功终态、旧执行者 fail/publish 被 fencing 拒")
+    void realRelayInFlightPublishCommitKeepsUploadedObjectWithRealKeyReferenced() throws Exception {
+        long jobId = seedClaimableMuxJob();
+        ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
+        AtomicReference<String> realKey = new AtomicReference<>();
+        AtomicReference<String> oldWorkerId = new AtomicReference<>();
+        AtomicReference<Long> oldToken = new AtomicReference<>();
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
+        JobStateMachineService spyService = spy(realService);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        when(gateway.poll("sk-frozen", "mux-task-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
+                        227.0, "1920x1080", null, null, "request-db-1"));
+        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+                mock(GenerationMessageProducer.class));
+
+        CountDownLatch rawTxOpen = new CountDownLatch(1);
+        CountDownLatch firstProbeDone = new CountDownLatch(1);
+        CountDownLatch rawTxSettled = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        AtomicReference<Connection> rawRef = new AtomicReference<>();
+
+        // 发布调用视角「结果不明」：真实转存产物（真实 key）进入在飞发布事务后抛异常
+        doAnswer(invocation -> {
+            PublishAudioVideoMuxDto dto = invocation.getArgument(0);
+            realKey.set(dto.storageKey());
+            oldWorkerId.set(dto.workerId());
+            oldToken.set(dto.fencingToken());
+            Connection raw = openRawConnection();
+            rawRef.set(raw);
+            executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), dto.storageKey());
+            rawTxOpen.countDown();
+            throw new RuntimeException("发布事务提交窗口断连（结果不明）");
+        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+
+        // 探测钩子：首轮真跑（行锁被在飞事务占用 → in-flight）；后续轮等主线程落定 raw 事务再放行
+        doAnswer(invocation -> {
+            if (probes.incrementAndGet() == 1) {
+                boolean inFlight = (Boolean) invocation.callRealMethod();
+                firstProbeDone.countDown();
+                return inFlight;
+            }
+            assertThat(rawTxSettled.await(20, TimeUnit.SECONDS)).as("主线程应先落定在飞事务").isTrue();
+            return (Boolean) invocation.callRealMethod();
+        }).when(spyService).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+
+        ExecutorService single = Executors.newSingleThreadExecutor();
+        try {
+            var handle = single.submit(() -> processor.handle(String.valueOf(jobId)));
+            assertThat(rawTxOpen.await(20, TimeUnit.SECONDS)).as("真实转存应完成并进入发布异常").isTrue();
+            assertThat(firstProbeDone.await(20, TimeUnit.SECONDS)).as("首轮探测应已执行").isTrue();
+            // 真实上传的完整字节数（受控源 4×64KiB 全量送达替身）；提交前 Asset 行对并发查询不可见
+            assertThat(objects).containsKey(realKey.get());
+            assertThat(objects.get(realKey.get())).hasSize(SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
+            assertThat(countAssets(jobId, realKey.get())).as("提交前 Asset 行对并发查询不可见").isZero();
+            rawRef.get().commit();
+            rawTxSettled.countDown();
+            handle.get(60, TimeUnit.SECONDS);
+        } finally {
+            settleQuietly(rawRef.get());
+            single.shutdownNow();
+        }
+
+        // 替身中真实上传对象仍在（未删）+ 真库 Asset 引用真实 key + GenerationJob 成功终态
+        assertThat(objects).containsKey(realKey.get());
+        assertThat(countAssets(jobId, realKey.get())).isOne();
+        GenerationJobEntity job = readJob(jobId);
+        assertThat(job.getStatus()).isEqualTo("succeeded");
+        assertThat(job.getLeaseOwner()).isNull();
+        // 旧执行者 fencing：发布异常上抛后的 fail 尝试被守卫拒绝，不能改写成功终态
+        verify(spyService).failMediaExtractJob(any());
+        assertThat(readJob(jobId).getError()).isNull();
+        assertThat(realService.failMediaExtractJob(new com.bluewhale.worker.domain.dto.FailMediaExtractDto(
+                String.valueOf(jobId), oldWorkerId.get(), oldToken.get(),
+                "audio_video_mux_failed", "迟到失败", Map.of()))).isFalse();
+        assertThat(realService.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+                String.valueOf(jobId), "99", "9", oldWorkerId.get(), oldToken.get(),
+                "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
+                (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5", 227.0, "1920x1080", "12"))).isFalse();
+        assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+        assertThat(probes.get()).isEqualTo(2);
     }
 
     /** raw 连接兜底落定（容器复用防污染）：未关闭则回滚并关闭。 */
