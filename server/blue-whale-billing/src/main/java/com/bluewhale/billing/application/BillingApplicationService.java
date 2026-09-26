@@ -1,22 +1,24 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.catalog.CatalogHolder;
+import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.QuoteQuery;
+import com.bluewhale.billing.application.view.BalanceView;
+import com.bluewhale.billing.application.view.TransactionType;
+import com.bluewhale.billing.application.view.TransactionView;
 import com.bluewhale.billing.domain.DbTime;
-import com.bluewhale.billing.ledger.Account;
-import com.bluewhale.billing.ledger.CreditLotRepository;
-import com.bluewhale.billing.ledger.CreditService;
-import com.bluewhale.billing.ledger.CreditSource;
-import com.bluewhale.billing.ledger.HoldResult;
-import com.bluewhale.billing.ledger.LedgerRepository;
-import com.bluewhale.billing.ledger.ReservationRepository;
-import com.bluewhale.billing.ledger.TransactionRepository;
-import com.bluewhale.billing.pricing.AbstractPricingCalculator;
-import com.bluewhale.billing.pricing.CompiledRule;
-import com.bluewhale.billing.pricing.PricingEngine;
-import com.bluewhale.billing.pricing.PricingRequest;
-import com.bluewhale.billing.pricing.PricingResult;
-import com.bluewhale.billing.pricing.Usage;
+import com.bluewhale.billing.domain.ledger.Account;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.domain.ledger.CreditSource;
+import com.bluewhale.billing.domain.ledger.HoldResult;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.TransactionRepository;
+import com.bluewhale.billing.domain.pricing.AbstractPricingCalculator;
+import com.bluewhale.billing.domain.pricing.CompiledRule;
+import com.bluewhale.billing.domain.pricing.PricingEngine;
+import com.bluewhale.billing.domain.pricing.PricingRequest;
+import com.bluewhale.billing.domain.pricing.PricingResult;
+import com.bluewhale.billing.domain.pricing.Usage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -131,13 +133,13 @@ public class BillingApplicationService {
      * 准备的，结算按实际用量退回差额），没配上限才拒绝。判据与理由见 {@link #priceAtCap}。
      *
      * @throws PricingEngine.RuleNotFoundException 该 (model, taskType) 未配规则——**拒绝提交**
-     * @throws com.bluewhale.billing.pricing.BasePriceResolver.UnpriceableSpecException
+     * @throws com.bluewhale.billing.domain.pricing.BasePriceResolver.UnpriceableSpecException
      *         该规格组合查不到价——同样拒绝（漏配不是免费），**契约量取不到也不豁免这一条**
      * @throws Usage.ContractQuantityUnavailableException 基准维度的契约量取不到、
      *         而规则又没配 {@code maxCredits}——没有上限可依，拒绝而不是冻下限
      * @throws CatalogCompiler.CompileException 请求没带规则快照，或带了却编不过——**拒绝提交**
      *         （规则快照是唯一的规则来源，见 {@link #requireSnapshot}）
-     * @throws com.bluewhale.billing.ledger.InsufficientCreditsException 余额不足
+     * @throws com.bluewhale.billing.domain.ledger.InsufficientCreditsException 余额不足
      */
     public HoldResult hold(HoldCommand command) {
         PricingRequest request = new PricingRequest(

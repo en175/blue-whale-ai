@@ -1,7 +1,7 @@
 package com.bluewhale.billing.config;
 
-import com.bluewhale.billing.api.grpc.BillingAdminGrpcService;
-import com.bluewhale.billing.api.grpc.BillingGrpcService;
+import com.bluewhale.billing.adapter.inbound.grpc.BillingAdminGrpcService;
+import com.bluewhale.billing.adapter.inbound.grpc.BillingGrpcService;
 import io.grpc.Server;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.protobuf.services.ProtoReflectionService;

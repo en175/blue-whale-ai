@@ -1,7 +1,7 @@
 package com.bluewhale.billing.config;
 
 import com.bluewhale.billing.application.SettlementService;
-import com.bluewhale.billing.infrastructure.mq.JobEventConsumer;
+import com.bluewhale.billing.adapter.inbound.mq.JobEventConsumer;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
 import org.apache.rocketmq.client.apis.StaticSessionCredentialsProvider;

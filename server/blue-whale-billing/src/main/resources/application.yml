@@ -64,7 +64,7 @@ spring:
   #     字段名由方法引用推导（CreditLotEntity::getUserId），编译期即可校验，
   #     不会因为改名而静默查错列。
   #
-  # 实体在 com.bluewhale.billing.domain.entity，对应 Flyway 迁移建的表——
+  # 实体在 com.bluewhale.billing.adapter.outbound.persistence.entity，对应 Flyway 迁移建的表——
   # schema 权威仍在 Flyway，实体只是映射，改字段先改迁移。
   mybatis-plus:
     mapper-locations: classpath*:mapper/**/*.xml
@@ -79,7 +79,7 @@ logging:
     # 首次接入时想看 Flyway 实际跑了哪些迁移，临时调到 INFO 即可
     org.flywaydb: INFO
     # 排查「为什么这条查不到」时把下面这行放开，日志里会回显实际 SQL 与参数
-    # com.bluewhale.billing.infrastructure.mapper: DEBUG
+    # com.bluewhale.billing.adapter.outbound.persistence.mapper: DEBUG
 
 # ── gRPC（契约的 server 端；契约见 contracts/proto/billing/v1/billing.proto） ──
 #

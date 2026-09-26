@@ -1,8 +1,8 @@
 package com.bluewhale.billing.config;
 
-import com.bluewhale.billing.pricing.AbstractPricingCalculator;
-import com.bluewhale.billing.pricing.DiscountResolver;
-import com.bluewhale.billing.pricing.MediaPricingCalculator;
+import com.bluewhale.billing.domain.pricing.AbstractPricingCalculator;
+import com.bluewhale.billing.domain.pricing.DiscountResolver;
+import com.bluewhale.billing.domain.pricing.MediaPricingCalculator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 

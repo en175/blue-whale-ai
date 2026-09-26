@@ -1,15 +1,15 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.admin.CatalogPublisher;
-import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.ledger.Account;
-import com.bluewhale.billing.ledger.CreditLotRepository;
-import com.bluewhale.billing.ledger.CreditService;
-import com.bluewhale.billing.ledger.CreditSource;
-import com.bluewhale.billing.ledger.HoldResult;
-import com.bluewhale.billing.ledger.LedgerRepository;
-import com.bluewhale.billing.ledger.Reservation;
-import com.bluewhale.billing.ledger.ReservationRepository;
+import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.SettlementCommand;
+import com.bluewhale.billing.application.command.SettlementUsageLine;
+import com.bluewhale.billing.domain.ledger.Account;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.domain.ledger.CreditSource;
+import com.bluewhale.billing.domain.ledger.HoldResult;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.domain.ledger.Reservation;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;

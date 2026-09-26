@@ -54,7 +54,7 @@
   次级键不是可选项：DATETIME 只到秒，同一秒内多行是常态（一次 hold 与一次 grant
   常常落在同一秒），只按时间翻页会在秒边界丢行或重复行。
 -->
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.TransactionMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.TransactionMapper">
 
   <!--
     ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，游标分页，gRPC ListTransactions），
@@ -65,7 +65,7 @@
 
     ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
   -->
-  <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.mapper.TransactionRow">
+  <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
     SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
            t.status, t.created_at, t.settled_at, t.kind, t.src_id
     FROM (

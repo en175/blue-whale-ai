@@ -8,7 +8,7 @@
   落位约定（全模块统一）：带 ORDER BY / LIMIT / FOR UPDATE / 聚合 / 自引用表达式的语句写在
   XML；纯等值或比较谓词的单表读写用 LambdaQueryWrapper，不在这里重复一遍样板。
 -->
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.CreditLotMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CreditLotMapper">
 
   <!--
     ★ 锁该用户的全部有效批次，按扣减顺序排好序返回（《计费逻辑详细设计》§4.1）。
@@ -31,7 +31,7 @@
 
     过期批次靠 WHERE 天然排除，不需要定时任务清理。
   -->
-  <select id="lockActiveLots" resultType="com.bluewhale.billing.domain.entity.CreditLotEntity">
+  <select id="lockActiveLots" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, source_priority, amount, remaining, frozen, expires_at, biz_type, biz_id
     FROM billing_credit_lots
     WHERE user_id = #{userId}
@@ -62,7 +62,7 @@
 
     按到期时间从近到远 + LIMIT：先到期的先提示（扣减顺序也是先扣它们）。
   -->
-  <select id="listExpiring" resultType="com.bluewhale.billing.domain.entity.CreditLotEntity">
+  <select id="listExpiring" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity">
     SELECT id, user_id, source, amount, remaining, frozen, expires_at
     FROM billing_credit_lots
     WHERE user_id = #{userId}

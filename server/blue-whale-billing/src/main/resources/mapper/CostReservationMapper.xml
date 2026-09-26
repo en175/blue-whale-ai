@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.CostReservationMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.CostReservationMapper">
 
   <!--
     取出并锁住该 job 的预留。
@@ -12,7 +12,7 @@
 
     走 uk_reservation__job（generation_job_id 唯一索引），锁的是那一行本身。
   -->
-  <select id="lockByJobId" resultType="com.bluewhale.billing.domain.entity.CostReservationEntity">
+  <select id="lockByJobId" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.CostReservationEntity">
     SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, receivable_credits,
            status, allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
            gmt_create, gmt_modified, version
@@ -87,7 +87,7 @@
     ORDER BY gmt_modified ASC + LIMIT：最久的先处理。配合「每轮重扫」，
     即使一轮取不完（limit 截断），下一轮也会接着最久的那些，不会有饥饿。
   -->
-  <select id="listStaleHeld" resultType="com.bluewhale.billing.infrastructure.mapper.StaleReservationRow">
+  <select id="listStaleHeld" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.StaleReservationRow">
     SELECT id,
            generation_job_id,
            user_id,

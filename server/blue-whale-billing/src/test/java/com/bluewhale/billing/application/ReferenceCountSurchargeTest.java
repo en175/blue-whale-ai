@@ -1,16 +1,18 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.ledger.CreditLotRepository;
-import com.bluewhale.billing.ledger.CreditService;
-import com.bluewhale.billing.ledger.HoldResult;
-import com.bluewhale.billing.ledger.LedgerRepository;
-import com.bluewhale.billing.ledger.Reservation;
-import com.bluewhale.billing.ledger.ReservationRepository;
-import com.bluewhale.billing.ledger.TransactionRepository;
-import com.bluewhale.billing.pricing.ContractSource;
-import com.bluewhale.billing.pricing.DiscountResolver;
-import com.bluewhale.billing.pricing.MediaPricingCalculator;
-import com.bluewhale.billing.pricing.UsageDim;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository;
+import com.bluewhale.billing.application.command.HoldCommand;
+import com.bluewhale.billing.application.command.SettlementCommand;
+import com.bluewhale.billing.application.command.SettlementUsageLine;
+import com.bluewhale.billing.domain.ledger.HoldResult;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
+import com.bluewhale.billing.domain.ledger.Reservation;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.TransactionRepository;
+import com.bluewhale.billing.domain.pricing.ContractSource;
+import com.bluewhale.billing.domain.pricing.DiscountResolver;
+import com.bluewhale.billing.domain.pricing.MediaPricingCalculator;
+import com.bluewhale.billing.domain.pricing.UsageDim;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -109,7 +111,7 @@ class ReferenceCountSurchargeTest {
                 credits,
                 mock(CreditLotRepository.class),
                 mock(LedgerRepository.class),
-                mock(com.bluewhale.billing.catalog.CatalogHolder.class),
+                mock(com.bluewhale.billing.application.CatalogHolder.class),
                 new GrantPolicy(),
                 mock(TransactionRepository.class),
                 mock(ReservationRepository.class));

@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.LedgerEntryMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.LedgerEntryMapper">
 
   <!--
     取该 (用户, 科目) 的最近一笔余额快照，并**锁住那一行**。
@@ -61,7 +61,7 @@
        快照自洽性（cost / revenue / receivable 同样由同一段代码写入，同样的断裂风险），
        而「按用户不平」的判定只用 wallet+frozen——两件事，不要混成一件。
   -->
-  <select id="listRecentForAudit" resultType="com.bluewhale.billing.domain.entity.LedgerEntryEntity">
+  <select id="listRecentForAudit" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.LedgerEntryEntity">
     SELECT *
     FROM (
       SELECT id, user_id, account, direction, amount, biz_type, biz_id,

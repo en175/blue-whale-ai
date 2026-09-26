@@ -1,9 +1,9 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.ledger.CreditService;
-import com.bluewhale.billing.ledger.Reservation;
-import com.bluewhale.billing.ledger.ReservationRepository;
+import com.bluewhale.billing.application.command.SettlementCommand;
+import com.bluewhale.billing.application.command.SettlementUsageLine;
+import com.bluewhale.billing.domain.ledger.Reservation;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

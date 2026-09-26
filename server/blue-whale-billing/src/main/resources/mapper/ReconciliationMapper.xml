@@ -12,7 +12,7 @@
   左边是余额的**唯一权威**（批次表），右边是复式账本。两边只要有一次对不上，
   就说明某条业务路径改了其中一边却没改另一边——而钱的问题**宁可吵醒人，也不能静默**。
 -->
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.ReconciliationMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.ReconciliationMapper">
 
   <!--
     「每个 (用户, 科目) 的最近一笔分录」——下面两条查询共用的取数口径。
@@ -78,7 +78,7 @@
     ⚠️ LIMIT 只截**报告**，不截判定：调用方以「返回条数 == limit」识别截断并明说，
        而不是让人以为「就这几个」。全量判定由 sumLotsRemaining / sumLedgerBalance 给出。
   -->
-  <select id="imbalancedUsers" resultType="com.bluewhale.billing.infrastructure.mapper.UserImbalanceRow">
+  <select id="imbalancedUsers" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserImbalanceRow">
     SELECT combo.user_id            AS user_id,
            SUM(combo.lots_remaining) AS lots_remaining,
            SUM(combo.ledger_total)   AS ledger_total

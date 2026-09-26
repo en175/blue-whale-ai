@@ -1,7 +1,7 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.domain.DbTime;
-import com.bluewhale.billing.ledger.CreditSource;
+import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

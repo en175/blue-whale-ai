@@ -1,16 +1,16 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.ledger.CreditService;
-import com.bluewhale.billing.ledger.Reservation;
-import com.bluewhale.billing.ledger.ReservationRepository;
-import com.bluewhale.billing.pricing.CompiledRule;
-import com.bluewhale.billing.pricing.DiscountResolver;
-import com.bluewhale.billing.pricing.MediaPricingCalculator;
-import com.bluewhale.billing.pricing.PricingEngine;
-import com.bluewhale.billing.pricing.PricingRequest;
-import com.bluewhale.billing.pricing.Usage;
-import com.bluewhale.billing.pricing.UsageDim;
+import com.bluewhale.billing.application.command.SettlementCommand;
+import com.bluewhale.billing.application.command.SettlementUsageLine;
+import com.bluewhale.billing.domain.ledger.Reservation;
+import com.bluewhale.billing.adapter.outbound.persistence.repository.ReservationRepository;
+import com.bluewhale.billing.domain.pricing.CompiledRule;
+import com.bluewhale.billing.domain.pricing.DiscountResolver;
+import com.bluewhale.billing.domain.pricing.MediaPricingCalculator;
+import com.bluewhale.billing.domain.pricing.PricingEngine;
+import com.bluewhale.billing.domain.pricing.PricingRequest;
+import com.bluewhale.billing.domain.pricing.Usage;
+import com.bluewhale.billing.domain.pricing.UsageDim;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,7 +22,7 @@ import java.time.Instant;
  *
  * <p>入参是**应用层类型**（{@link SettlementCommand} / {@link SettlementUsageLine}），
  * 不是 MQ 载荷——wire 类型的转换在适配器（{@code JobEventConsumer}）里做。
- * 理由与 {@link HoldCommand} 同一条：换一种 MQ 编码不该改到本包，第三个入口
+ * 理由与 {@link com.bluewhale.billing.application.command.HoldCommand} 同一条：换一种 MQ 编码不该改到本包，第三个入口
  * （重放工具、管理端补结算、测试夹具）也不该先伪造一个 {@code infrastructure.mq} 的对象。
  *
  * <h2>为什么结算必须用「冻结的规则 + 冻结的折扣」</h2>

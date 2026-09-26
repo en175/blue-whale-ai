@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.bluewhale.billing.infrastructure.mapper.PricingCatalogMapper">
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.PricingCatalogMapper">
 
   <!--
     取当前生效版本。
@@ -14,7 +14,7 @@
     status='active' 全表至多一条（迁移脚本的约定），ORDER BY 只是防御：
     万一因为人工操作出现两条，取版本号大的那条，而不是随机一条。
   -->
-  <select id="selectActive" resultType="com.bluewhale.billing.domain.entity.PricingCatalogEntity">
+  <select id="selectActive" resultType="com.bluewhale.billing.adapter.outbound.persistence.entity.PricingCatalogEntity">
     SELECT id, catalog_version, status, document, schema_version, document_hash,
            effective_from, effective_to, published_by, published_at, note
     FROM billing_pricing_catalogs
