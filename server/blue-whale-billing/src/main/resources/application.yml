@@ -107,6 +107,18 @@ billing:
   admin:
     enabled: ${BILLING_ADMIN_ENABLED:false}
 
+  # ── 定价目录：定期兜底重载 ──
+  #
+  # 多副本下的收敛靠它，**不靠事件**：events.proto 里那个 `pricing.catalog.activated`
+  # 只有声明、没有生产者也没有消费者（2026-09-26 评审查出）。没有它的话，目录只由
+  # **发布它的那一个实例**热重载，其余副本永远停在启动那份 —— 表现为
+  # 「充值的换算率按实例不同」「同一笔单在不同实例算出两个价」。
+  # 5 分钟对低频人工发布的目录绰绰有余；要秒级收敛再接事件，本任务留着当兜底。
+  # 关掉（设成很大的值）之前先确认：billing 是单副本部署。
+  catalog:
+    reload-interval: ${BILLING_CATALOG_RELOAD_INTERVAL:PT5M}
+    reload-initial-delay: ${BILLING_CATALOG_RELOAD_INITIAL_DELAY:PT1M}
+
   # ── MQ：结算 / 返还的消费端 ──
   #
   # ⚠️ 缺 ROCKETMQ_ENDPOINTS 会**启动失败**（与 worker 同一立场）：静默跳过消费者的话，

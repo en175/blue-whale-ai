@@ -28,8 +28,14 @@ import org.springframework.stereotype.Component;
  * 起不来就只剩「改配置文件重启」一条路。代价是换算率读不到——而这是**正确的**反应，
  * 比编一个默认值强。
  *
- * <p>⚠️ 发布新目录后要使它生效，目前需要重启进程或显式调用 {@code reload()}——
- * 「发布即热生效」要走管理端接口（《架构设计》§12），尚未落地。
+ * <p>⚠️ 发布新目录后要使它生效，有**三条**互不冲突的路径（本条注释此前停在「尚未落地」，
+ * 而它其实早就落地了 —— 过时注释比没有注释更坏，因为它会让人去做一件已经做完的事）：
+ * <ol>
+ *   <li><b>发布即热生效</b>：管理端 {@code POST /admin/catalogs} → {@link CatalogPublisher}
+ *       发布后立刻调 {@link CatalogHolder#reload()}（《架构设计》§12）。**发布的那一个实例**走这条。</li>
+ *   <li><b>定期兜底重载</b>：{@link CatalogReloadTask}（多副本下其余实例靠它收敛）。</li>
+ *   <li>重启进程（本类负责启动装载）——不再有人需要这么做，留作最后手段。</li>
+ * </ol>
  */
 @Component
 public class CatalogBootstrap implements ApplicationRunner {
