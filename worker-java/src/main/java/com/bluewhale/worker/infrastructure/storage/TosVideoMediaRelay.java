@@ -89,12 +89,10 @@ public class TosVideoMediaRelay {
     private static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
 
     /**
-     * 四参兼容入口的下载正文段总窗兜底 10 分钟（IKILU5 恢复、IKIN01 修正口径）：未迁移到
-     * 任务截止时间模型的旧调用方（如 VideoMatting 未传 {@code execution_deadline_at}）走四参
-     * {@link #persistStreaming(String, String, long, TransferAbortHandle)}——恢复 IKILVH 之前
-     * 的旧语义：响应头等待 60s 独立超时不在此窗内；窗从正文开始读取时起算、进度不重置、正文
-     * 结束即撤销；上传段不受此窗约束；60s 停流规则不适用于本入口（停流只属五参模型，
-     * IKILVH 时限模型不对四参调用方外溢）。只有五参入口用调用方任务截止时间替代兜底。
+     * 四参兼容入口的下载正文段总窗兜底 10 分钟（IKILU5 恢复、IKIN01 修正口径）：完整时限
+     * 口径见四参入口
+     * {@link #persistStreaming(String, String, long, TransferAbortHandle)} javadoc；
+     * 只有五参入口用调用方任务截止时间替代兜底。
      */
     private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
 
@@ -249,9 +247,9 @@ public class TosVideoMediaRelay {
      * 临时文件落在系统临时目录，正常与异常路径都删（失败留垃圾会把容器盘吃满）。同一
      * {@code maxBytes} 语义与字节数组路径一致：等于上限通过、大于上限拒绝。
      * <p>
-     * 本三参重载为无中止源兼容入口：等价四参传 null 句柄——响应头 60s 独立、下载正文段
-     * {@link #STREAM_COPY_DEADLINE} 10 分钟固定窗兜底（进度不重置）、上传段无时限、无停流
-     * 限制。测试桩与跨端验收仍在使用。
+     * 本三参重载为无中止源兼容入口：等价四参传 null 句柄，时限口径见四参入口
+     * {@link #persistStreaming(String, String, long, TransferAbortHandle)} javadoc。
+     * 测试桩与跨端验收仍在使用。
      *
      * @param sourceUrl 上游生成的视频 URL
      * @param userId    归属用户（key 路径用）
@@ -300,9 +298,10 @@ public class TosVideoMediaRelay {
     /**
      * 全参内部版（IKHSFC 起可注入截止；IKILVH 起 {@code stallTimeout} 语义改为停流超时——
      * 以「上次有进度」为基准，测试用亚秒级值做确定性回归，不真等 60s；IKIN01 起增
-     * {@code copyWindow} 下载正文段固定总窗——从正文开始读取时起算、进度不重置、正文结束即
-     * 撤销、只管下载段不管上传段，四参兼容入口注入 {@link #STREAM_COPY_DEADLINE}，五参传
-     * null。{@code taskDeadline} 与 {@code stallTimeout} 均可为 null（四参旧口径两者皆 null）。
+     * {@code copyWindow} 下载正文段固定总窗，四参兼容入口注入 {@link #STREAM_COPY_DEADLINE}、
+     * 五参传 null，窗语义细则见四参入口
+     * {@link #persistStreaming(String, String, long, TransferAbortHandle)} javadoc。
+     * {@code taskDeadline} 与 {@code stallTimeout} 均可为 null（四参旧口径两者皆 null）。
      */
     StoredVideo persistStreamingInternal(String sourceUrl, String userId, long maxBytes,
                                          TransferAbortHandle abortHandle, Instant taskDeadline,
@@ -536,9 +535,8 @@ public class TosVideoMediaRelay {
                 handle.wire(() -> pending.cancel(true));
             }
             if (taskDeadline != null) {
-                long nanos = System.nanoTime() + Duration.between(Instant.now(), taskDeadline).toNanos();
                 deadlineTask = WATCHDOG_SCHEDULER.schedule(this::abortFromDeadline,
-                        Math.max(0, nanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+                        Math.max(0, Duration.between(Instant.now(), taskDeadline).toNanos()), TimeUnit.NANOSECONDS);
             }
         }
 
