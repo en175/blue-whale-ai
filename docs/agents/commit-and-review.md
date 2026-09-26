@@ -98,7 +98,6 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
 | 本地 master 提交 | 🟢 放行 | 本地 master 是生产版本。Agent 普通任务不可在 master 或 release 直接写入。仅经 Git 确认已忽略的根 `CLAUDE.local.md` / `.codex/config.toml` 可在 master 修改，且不得提交。 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
-| 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `pnpm --filter @blue-whale/web lint`，失败只警告不拦 |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | PR 前目标基线校验 | 🔴 发布门禁 | 普通任务分支即使落后也允许日常 push；创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |

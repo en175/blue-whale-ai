@@ -33,3 +33,12 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 8. Mark the PR as ready for review.
 
 9. Clean up all **implementer subagent** worktrees.
+
+本仓适配（worktree 与提交，2026-09-26 IKIMN8 实证）：仓 Hook 硬拦无元数据 worktree 的提交——任务 worktree 只能由 `scripts/start-task-worktree.sh` 建立，提交只能走 `scripts/commit-task-for-review.sh`（详见 `docs/agents/git-workflow.md`）。步骤 4/5/9 的多 worktree 并行设计不变，在本仓按以下方式落地：
+
+- 父规格单先建集成 worktree（`--issue <父单号>`），其分支即 PR 分支。
+- 每个 implementer 子代理用开工入口建自己的 worktree（`--issue <子单号>`，子单状态随入口自动流转）；建后先 `git merge <集成任务分支>` 补入先遣票产出的基础设施（Hook 只拦 merge `origin/master` 与 `origin/release`，合本地任务分支放行），再实施、自跑定向测试、提交。
+- merger 子代理把子单分支 merge 回集成分支；全部合完后在集成 worktree 跑收口与 PR 阶段验证（`node scripts/verify-change-scope.mjs run --stage pr`）。
+- 步骤 9 的清理对每个任务 worktree 跑 `scripts/cleanup-task-worktree.sh`。
+- 纯后端工单子 worktree 零额外成本（mvn 直接可用，`~/.m2` 共享）；涉及 backend/web 依赖的票需先在该 worktree 跑一次 `pnpm install --frozen-lockfile`。
+- 轻量变体（可选）：frontier 票为纯机械复制且父代理已核对文件集不相交时，可共用集成 worktree 并发只改文件不提交，由父代理统一验证后逐票提交。文件集无法确认不相交时回退上面的标准形态。
