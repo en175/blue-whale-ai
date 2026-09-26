@@ -32,18 +32,58 @@ export class AudioVideoMuxesService {
   ) {}
 
   /** 创建入口（IKIHPJ，免费任务：无积分冻结、无成本预留、无余额拦截）。
-   *  权威复核两份资产归属/媒体类型/URL 协议白名单/公开可读后冻结输入快照；拒绝时不留任务。 */
+   *  权威复核两份资产归属/媒体类型/URL 协议白名单/公开可读后冻结输入快照；拒绝时不留任务。
+   *  幂等双轨（IKILVF）：Idempotency-Key + command_idempotency 表（operation
+   *  audio_video_mux.create），同键同内容重放原任务、同键异内容 409；创建任务与幂等
+   *  记录同事务落库，唯一约束冲突回落重放（与 audio_mix.create 同一套口径）。 */
   async create(
     userId: string,
     projectId: string,
     body: unknown,
-    internal: { providerCredential?: string } = {},
+    internal: { providerCredential?: string; idempotencyKey?: string } = {},
   ) {
     const parsed = audioVideoMuxCreateSchema.safeParse(body);
     if (!parsed.success) throw new DomainError(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音视频合成参数非法");
+    const idempotencyKey = internal.idempotencyKey ?? "";
+    if (idempotencyKey && !/^[!-~]{1,128}$/.test(idempotencyKey)) {
+      throw new DomainError(PARAM_MISSING_CODE, "Idempotency-Key 必须为 1–128 个可打印非空白字符");
+    }
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    const hash = createHash("sha256").update(JSON.stringify(parsed.data)).digest("hex");
+    const key = idempotencyKey
+      ? { project_id: BigInt(projectId), operation: "audio_video_mux.create", idempotency_key: idempotencyKey }
+      : null;
+    const replay = async () => {
+      if (!key) return null;
+      const existing = await this.prisma.client.command_idempotency.findUnique({
+        where: { project_id_operation_idempotency_key: key },
+      });
+      if (!existing) return null;
+      if (existing.request_hash !== hash || !existing.generation_job_id) {
+        throw new DomainError(409, "幂等键已用于另一项音视频合成创建");
+      }
+      const job = await this.prisma.client.generation_jobs.findFirst({
+        where: { id: existing.generation_job_id, project_id: BigInt(projectId), user_id: BigInt(userId), type: AUDIO_VIDEO_MUX_JOB_TYPE },
+        select: { id: true, status: true, version: true, error: true },
+      });
+      if (!job) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+      const error = job.error;
+      if (job.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
+          && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
+        const resumed = await this.prisma.client.generation_jobs.updateMany({
+          where: { id: job.id, status: "failed", version: job.version },
+          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000), version: { increment: 1 } },
+        });
+        if (resumed.count === 1) return ok({ job_id: job.id.toString(), status: "queued", replayed: true, enqueue_required: true });
+      }
+      const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id }, select: { status: true } });
+      return ok({ job_id: job.id.toString(), status: latest.status, replayed: true, enqueue_required: false });
+    };
+    const previous = await replay();
+    if (previous) return previous;
+
     const links = await this.prisma.client.project_asset.findMany({
       where: { user_id: BigInt(userId), project_id: BigInt(projectId), is_delete: 0 },
       select: { asset_id: true },
@@ -139,29 +179,45 @@ export class AudioVideoMuxesService {
     // 估算时长取源视频资产时长毫秒（IKIHPJ 拍板⑥）；缺失走未知 7d 预算。
     const estimatedDurationMs = videoSlot.durationMs;
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: AUDIO_VIDEO_MUX_JOB_TYPE,
-        source: AUDIO_VIDEO_MUX_SOURCE,
-        status: "queued",
-        progress: 0,
-        expected_output_count: 1,
-        input: {
-          audio: audioSlot.frozen,
-          video: videoSlot.frozen,
-          is_audio_reserve: parsed.data.is_audio_reserve,
-          sync: parsed.data.sync,
-          estimated_duration_ms: estimatedDurationMs,
-          submit_attempt: 1,
-          ...(internal.providerCredential ? { provider_credential: internal.providerCredential } : {}),
-        },
-        next_action_at: new Date(Date.now() - 60_000),
-        execution_deadline_at: audioVideoMuxDeadline(estimatedDurationMs),
+    const data = {
+      user_id: BigInt(userId),
+      project_id: BigInt(projectId),
+      type: AUDIO_VIDEO_MUX_JOB_TYPE,
+      source: AUDIO_VIDEO_MUX_SOURCE,
+      status: "queued",
+      progress: 0,
+      expected_output_count: 1,
+      input: {
+        audio: audioSlot.frozen,
+        video: videoSlot.frozen,
+        is_audio_reserve: parsed.data.is_audio_reserve,
+        sync: parsed.data.sync,
+        estimated_duration_ms: estimatedDurationMs,
+        submit_attempt: 1,
+        ...(internal.providerCredential ? { provider_credential: internal.providerCredential } : {}),
       },
-    });
-    return ok({ job_id: job.id.toString(), status: "queued", enqueue_required: true });
+      next_action_at: new Date(Date.now() - 60_000),
+      execution_deadline_at: audioVideoMuxDeadline(estimatedDurationMs),
+    };
+    if (!key) {
+      const job = await this.prisma.client.generation_jobs.create({ data });
+      return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
+    }
+    let job;
+    try {
+      job = await this.prisma.client.$transaction(async (tx) => {
+        const created = await tx.generation_jobs.create({ data });
+        await tx.command_idempotency.create({
+          data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
+        });
+        return created;
+      });
+    } catch (error) {
+      const existing = await replay();
+      if (existing) return existing;
+      throw error;
+    }
+    return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
   }
 
   /** 重试入口（IKIHPL）：读冻结快照重放，不读画布当前选中态、不重新解析资产 URL；

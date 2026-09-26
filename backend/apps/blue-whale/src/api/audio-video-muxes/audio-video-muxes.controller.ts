@@ -17,12 +17,13 @@ export class AudioVideoMuxesController {
     @Param("projectId") projectId: string,
     @Body() body: unknown,
     @Headers("authorization") authorization?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.audioVideoMuxes.create(
       user.userId,
       projectId,
       body ?? {},
-      sealProviderCredential(authorization),
+      { ...sealProviderCredential(authorization), idempotencyKey: idempotencyKey ?? "" },
     );
     if (!result.data?.enqueue_required) return result;
     const jobId = result.data.job_id;
