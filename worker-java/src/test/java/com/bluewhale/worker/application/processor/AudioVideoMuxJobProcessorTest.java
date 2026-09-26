@@ -212,7 +212,8 @@ class AudioVideoMuxJobProcessorTest {
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, "request-relay-1"));
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenThrow(new MediaExtractError("upload_failed", "TOS 转存失败"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
@@ -232,7 +233,8 @@ class AudioVideoMuxJobProcessorTest {
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "3840x2160", null, null, null));
         // 5 GiB 产物超过抠像 1 GiB 旧口径：本家族 10 GiB 上限内照常转存发布，杜绝「供应商成功而用户结果丢失」。
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                         "video/mp4", 5L << 30, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
@@ -254,7 +256,8 @@ class AudioVideoMuxJobProcessorTest {
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
@@ -277,7 +280,8 @@ class AudioVideoMuxJobProcessorTest {
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         null, null, null, null, "request-min"));
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
                         "video/mp4", 100L, "md5"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
@@ -304,7 +308,8 @@ class AudioVideoMuxJobProcessorTest {
             if (renewals.incrementAndGet() == 2) heartbeat.countDown();
             return true;
         });
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenAnswer(invocation -> {
                     assertThat(heartbeat.await(2, TimeUnit.SECONDS)).isTrue();
                     return new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
@@ -337,17 +342,100 @@ class AudioVideoMuxJobProcessorTest {
             lost.countDown();
             return false;
         });
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        // IKILVH：失租经中止句柄打断进行中的传输（不再等传输自然结束才检查 flag）
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenAnswer(invocation -> {
-                    assertThat(lost.await(2, TimeUnit.SECONDS)).isTrue();
-                    return new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
-                            "video/mp4", 100L, "md5");
+                    TosVideoMediaRelay.TransferAbortHandle handle = invocation.getArgument(3);
+                    long deadline = System.currentTimeMillis() + 5_000;
+                    while (!handle.aborted() && System.currentTimeMillis() < deadline) {
+                        Thread.sleep(10);
+                    }
+                    assertThat(handle.aborted()).as("心跳失租必须中止转存句柄").isTrue();
+                    assertThat(handle.reason()).contains("租约未命中");
+                    throw new TosVideoMediaRelay.TransferAbortedException(handle.reason());
                 });
         var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
 
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void cancellationDuringTransferAbortsTheStreamingRelay() throws Exception {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        // 转存前三次取消检查（runStep 入口 + poll 观察后 + 续租前）都未命中；心跳里第四次命中取消
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
+                .thenReturn(false, false, false, true, true);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenAnswer(invocation -> {
+                    TosVideoMediaRelay.TransferAbortHandle handle = invocation.getArgument(3);
+                    long deadline = System.currentTimeMillis() + 5_000;
+                    while (!handle.aborted() && System.currentTimeMillis() < deadline) {
+                        Thread.sleep(10);
+                    }
+                    assertThat(handle.aborted()).as("取消必须中止转存句柄").isTrue();
+                    assertThat(handle.reason()).contains("取消");
+                    throw new TosVideoMediaRelay.TransferAbortedException(handle.reason());
+                });
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        processor.leaseRenewIntervalMs = 20;
+
+        processor.handle("70");
+
+        // 取消路径：cancelled 终态由 cancelIfRequested 落，本执行者不发布也不写普通失败
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void abortedTransferReturningAResultDoesNotPublishOrFail() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenAnswer(invocation -> {
+                    // 传输返回成功结果前一刻失租：发布前再查句柄，命中即静默放弃
+                    TosVideoMediaRelay.TransferAbortHandle handle = invocation.getArgument(3);
+                    handle.abort("结果转存期租约未命中（已被接管/终态）");
+                    return new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                            "video/mp4", 100L, "md5");
+                });
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void leaseMissedBeforeTransferSkipsTheRelayEntirely() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        // 转存前续租未命中（已被接管/终态）：不进转存，静默退出
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(false);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verifyNoInteractions(relay);
         verify(stateMachine, never()).publishAudioVideoMuxResult(any());
         verify(stateMachine, never()).failMediaExtractJob(any());
     }
@@ -425,7 +513,8 @@ class AudioVideoMuxJobProcessorTest {
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
                         227.0, "1920x1080", null, null, null));
-        when(relay.persistStreaming("https://temporary/out.mp4", "9", AudioVideoMuxContract.MAX_RESULT_BYTES))
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
                 .thenThrow(new MediaExtractError("upload_failed", "TOS 转存失败"));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);

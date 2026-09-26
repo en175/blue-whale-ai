@@ -118,6 +118,31 @@ class TosVideoMediaRelayTest {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
     }
 
+    /**
+     * 受控慢速源桩（IKILVH）：块间 sleep 控制持续吞吐——连接持续有进度但速率受限，模拟
+     * 「合法慢传输」（与停流桩相对：不是不吐数据，只是吐得慢）。真实 HTTP/TCP 流式读写。
+     */
+    private String serveSlow(String contentType, int blockBytes, int blockCount, long blockDelayMs)
+            throws IOException {
+        byte[] block = patternBlock();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", contentType);
+            exchange.sendResponseHeaders(200, (long) blockBytes * blockCount);
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (int i = 0; i < blockCount; i++) {
+                    out.write(block, 0, blockBytes);
+                    out.flush();
+                    Thread.sleep(blockDelayMs);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        server.start();
+        return "http://127.0.0.1:" + server.getAddress().getPort() + "/out.bin";
+    }
+
     /** 仅替代 SDK 本地签名；上传走真实 HTTP 流，服务端校验实际收到的字节和元数据。 */
     private List<PreSignedURLInput> captureUploads(TOSV2 client, AtomicLong uploadedBytes) throws IOException {
         List<PreSignedURLInput> uploads = new ArrayList<>();
@@ -307,9 +332,9 @@ class TosVideoMediaRelayTest {
     // ========== IKHSFC：停流主动中止（截止时间只在 read 返回后检查 → 停流挂死） ==========
 
     @Test
-    @DisplayName("成功响应停流（头已到、正文停发、连接保持）→ 截止时间到主动中止读取，不等对端发数据或断连")
+    @DisplayName("成功响应停流（头已到、正文停发、连接保持）→ 停流超时到点主动中止读取，不等对端发数据或断连")
     @Timeout(30)
-    void persistStreaming_stalledBody_abortsAtDeadline() throws Exception {
+    void persistStreaming_stalledBody_abortsAtStallTimeout() throws Exception {
         String url = serveStalled("video/webm", 200, 8L * 1024 * 1024, 64 * 1024);
         TOSV2 client = mock(TOSV2.class);
         List<String> tempBefore = relayTempFiles();
@@ -317,11 +342,12 @@ class TosVideoMediaRelayTest {
 
         assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                        null, Duration.ofMillis(200), Duration.ofSeconds(5)))
+                        null, null, Duration.ofMillis(200), Duration.ofSeconds(5)))
                 .isInstanceOf(VideoProviderError.class)
-                .hasMessageContaining("下载超时");
+                .hasMessageContaining("下载停流")
+                .hasMessageContaining("无进度");
 
-        // 及时性即证明：中止是主动触发（deadline 200ms），不是等对端超时/断连
+        // 及时性即证明：中止是主动触发（停流 200ms 即止），不是等对端超时/断连
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(5));
         verify(client, never()).putObject(any(PutObjectInput.class));
@@ -339,7 +365,7 @@ class TosVideoMediaRelayTest {
 
         assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                        null, Duration.ofMinutes(10), Duration.ofMillis(200)))
+                        null, null, Duration.ofMinutes(10), Duration.ofMillis(200)))
                 .isInstanceOf(VideoProviderError.class)
                 .hasMessageContaining("错误响应正文");
 
@@ -370,14 +396,16 @@ class TosVideoMediaRelayTest {
 
         assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                 .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                        handle, Duration.ofMinutes(10), Duration.ofSeconds(5)))
+                        handle, null, Duration.ofMinutes(10), Duration.ofSeconds(5)))
                 .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
                 .hasMessageContaining("结果转存租约丢失");
 
         aborter.join(5_000);
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
                 .isLessThan(Duration.ofSeconds(5));
+        // 下载阶段中止：PUT 未发起，无对象可清理
         verify(client, never()).putObject(any(PutObjectInput.class));
+        verify(client, never()).deleteObject(any());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
@@ -427,6 +455,13 @@ class TosVideoMediaRelayTest {
                 assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
                 assertThat(relayTempFiles()).isEqualTo(before);
                 verify(client, never()).putObjectAcl(any());
+                // IKILVH：PUT 已发起且 body 已完整送达（对象可能已在上游落地成无 Asset 引用
+                // 的孤儿）→ 中止退出前必须 deleteObject 清理未发布对象
+                var deleted = org.mockito.ArgumentCaptor.forClass(
+                        com.volcengine.tos.model.object.DeleteObjectInput.class);
+                verify(client).deleteObject(deleted.capture());
+                assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+                assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
             } finally {
                 handle.abort("test cleanup");
                 socketServer.close();
@@ -434,6 +469,72 @@ class TosVideoMediaRelayTest {
                 peer.cancel(true);
             }
         }
+    }
+
+    // ========== IKILVH：总时限除名——停流超时 + 任务截止时间 + 容量上限三限界 ==========
+
+    /**
+     * 缩比模型说明（IKILVH）：注入的 stallTimeout（500ms）正是旧 {@code copyDeadline} 参数位
+     * ——若实现仍按「总时限」语义，本用例总时长 ~1.2s > 500ms 必失败；按「停流超时」语义
+     * （块间隔 100ms < 500ms，持续有进度）必完成。同一注入参数的两种语义由本用例判别。
+     * <p>
+     * 受控吞吐与时长记录：慢流桩 64KiB/100ms ≈ 0.6MiB/s 持续吞吐，总转存时长 ~1.2s（>
+     * 2× 停流超时缩比值）；对应真实参数（60s 停流 / 10GiB 上限）线上能否完成取决于实际
+     * 吞吐与任务截止时间（10GiB@2MiB/s ≈ 85 分钟），本测试不宣称线上任意速率均可完成。
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("受控慢流持续有进度：总时长超过注入时限 2 倍仍完成转存（固定总时限已除名，停流超时才计时）")
+    void persistStreaming_slowStreamWithProgress_completesPastLegacyTotalDeadline() throws Exception {
+        int blocks = 12;
+        int blockBytes = 64 * 1024;
+        String url = serveSlow("video/webm", blockBytes, blocks, 100);
+        TOSV2 client = mock(TOSV2.class);
+        AtomicLong uploadedBytes = new AtomicLong();
+        captureUploads(client, uploadedBytes);
+        List<String> tempBefore = relayTempFiles();
+        long startNanos = System.nanoTime();
+
+        TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        null, null, Duration.ofMillis(500), Duration.ofSeconds(5));
+
+        long elapsedMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+        // 前提钉死：传输确实持续了 ~1.2s（真慢流），且超过注入时限（500ms）2 倍——旧总时限
+        // 语义下此传输必被中止；停流语义下块间隔 100ms 持续重置基准，全程无中止
+        // 慢流块是 patternBlock 的前 blockBytes 切片（桩按块截断发送），期望 md5 按同切片重复
+        byte[] slice = java.util.Arrays.copyOf(patternBlock(), blockBytes);
+        assertThat(elapsedMs).isGreaterThan(1_000);
+        assertThat(stored.size()).isEqualTo((long) blockBytes * blocks);
+        assertThat(uploadedBytes.get()).isEqualTo((long) blockBytes * blocks);
+        assertThat(stored.md5()).isEqualTo(expectedMd5(slice, blocks));
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+        verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("任务截止时间到点（execution_deadline_at）→ 主动中止慢流传输，文案与停流/超限/中止分别命名")
+    void persistStreaming_taskDeadline_abortsSlowTransfer() throws Exception {
+        String url = serveSlow("video/mp4", 64 * 1024, 12, 100);
+        TOSV2 client = mock(TOSV2.class);
+        List<String> tempBefore = relayTempFiles();
+        long startNanos = System.nanoTime();
+        // 停流超时给足（慢流持续有进度本就不会触发），确保中止只能来自任务截止
+        java.time.Instant deadline = java.time.Instant.now().plusMillis(300);
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                        null, deadline, Duration.ofMinutes(10), Duration.ofSeconds(5)))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessageContaining("任务执行截止时间已到");
+
+        // 及时性即证明：截止 300ms 即止，不是等 1.2s 慢流自然结束，也不是 10 分钟停流超时
+        assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
+                .isLessThan(Duration.ofSeconds(3));
+        verify(client, never()).putObject(any(PutObjectInput.class));
+        verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 
     @Test
