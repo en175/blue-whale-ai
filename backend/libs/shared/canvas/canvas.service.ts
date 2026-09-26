@@ -339,8 +339,17 @@ export class CanvasService {
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
     // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，仅显式确认放行；
     // 读与写的竞态由下方 saveIfVersion 的版本条件闭环——本检查看到的行与被覆盖的行共用同一 expectedVersion 闸门。
-    if (previous.length > 0 && incoming.length === 0 && body.confirmEmpty !== true) {
-      return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: null } as const;
+    if (previous.length > 0 && incoming.length === 0) {
+      if (body.confirmEmpty !== true) {
+        return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: null } as const;
+      }
+      // IKIMQJ（契约 §9 IKIMPQ）：破坏性清空只认明确的数值版本——确认了但缺 If-Match 一律 428，
+      // 不回落到下方「undefined 补 current.version」的宽松写；"missing" 哨兵与过期数字版本则交给
+      // saveIfVersion 条件闸门拦下（create 撞唯一键 / updateMany 不命中）回 412 + 当前版本，零写入。
+      // 必须放在 promptSource 分支之前：含方案卡的画布缺头会先撞 400，破坏性清空的 428 语义优先。
+      if (body.expectedVersion === undefined) {
+        return { code: 428, msg: "确认清空必须携带 If-Match 数值版本", data: null } as const;
+      }
     }
     // IKFM3Q 正文媒体索引契约 §7：mediaMentions/mediaRefs 同现同缺、区间与覆盖有效；
     // 新增身份素材真实可及且与来源节点身份一致；存量身份展示元数据不可变（失效身份豁免正文编辑）

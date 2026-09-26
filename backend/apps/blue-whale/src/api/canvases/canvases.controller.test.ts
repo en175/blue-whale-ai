@@ -65,6 +65,25 @@ describe("CanvasesController.save 响应写出", () => {
     });
   });
 
+  // IKIMQJ：确认清空缺 If-Match 的 428 信封也走真实 HTTP 状态码（Precondition Required）。
+  it("确认清空缺 If-Match → HTTP 428，信封原样写出（IKIMQJ）", async () => {
+    const { controller, res } = makeController({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+
+    await controller.save(USER, "523", { nodes: "[]", confirmEmpty: true }, undefined, res);
+
+    expect(res.status).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(428);
+    expect(res.json).toHaveBeenCalledWith({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+  });
+
   it("保存成功 → HTTP 200，信封与 data.version 原样透传（与成功路径字段一致）", async () => {
     const { controller, res } = makeController({
       code: 200,

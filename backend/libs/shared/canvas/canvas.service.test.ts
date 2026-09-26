@@ -347,6 +347,7 @@ describe("CanvasService.save 项目不属于调用方", () => {
 
 // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，须显式 confirmEmpty。
 // 拒绝发生在读 current 之后、条件写之前：事务零写入，版本不消耗。
+// IKIMQJ：确认清空进一步只认明确的数值 If-Match——缺头 428；哨兵/过期版本落条件闸门回 412。
 describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
   const nonEmpty = {
     id: 1n,
@@ -380,14 +381,61 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     expect(tx.canvas.updateMany).not.toHaveBeenCalled();
   });
 
-  it("携带 confirmEmpty: true → 放行（用户显式删光场景），空文档条件写入", async () => {
-    const { service, tx } = buildService(nonEmpty);
+  // IKIMQJ：破坏性清空只认明确的数值 If-Match——确认了但缺头，同样拒绝（428）。
+  it("确认清空缺 If-Match → 428 信封，零写入、不消耗版本", async () => {
+    const { service, client, tx } = buildService(nonEmpty);
 
     const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true });
 
+    expect(result).toEqual({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it(`确认清空携带 "missing" 哨兵 → 已有非空画布上 create 撞唯一键 → 412 带当前版本，零写入`, async () => {
+    const { service, tx } = buildService(nonEmpty);
+    tx.canvas.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
+    );
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: null });
+
+    expect(result.code).toBe(412);
+    expect(result.data).toEqual({ version: 3 });
+    expect(tx.canvas.create).toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("确认清空携带过期数值版本 → 条件写不命中 → 412 带当前版本，零写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+    tx.canvas.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 2 });
+
+    expect(result.code).toBe(412);
+    expect(result.data).toEqual({ version: 3 });
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { project_id: 1n, version: 2 } }),
+    );
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("携带当前数值版本的确认清空 → 放行（用户显式删光场景），空文档条件写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 3 });
+
     expect(result.code).toBe(200);
     expect(tx.canvas.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ nodes_json: [] }) }),
+      expect.objectContaining({
+        where: { project_id: 1n, version: 3 },
+        data: expect.objectContaining({ nodes_json: [] }),
+      }),
     );
   });
 
