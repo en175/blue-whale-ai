@@ -17,7 +17,9 @@ import {
    服务端 422 兜底（水合进来即为空的空提交不带标记被拒）由 canvas.service / canvas.test 覆盖。
    IKILUE 追加：confirmEmpty 空保存被 412 冲突信封拒绝后登记清空待复核闸门——空文档不再
    自动/手动发出（防旧空文档覆盖另一会话的新画布），本地保留清空态、入口提示刷新复核；
-   重新水合后闸门解除、confirmEmpty 按新基线重新授予。 */
+   重新水合后闸门解除、confirmEmpty 按新基线重新授予。
+   IKILUG 追加：空保存被 422 拒后，防抖自动保存/项目切换强制保存/手动「重试保存」
+   三个入口统一提示刷新复核（不再笼统「保存失败，请重试」），本地编辑保留、不当成保存成功。 */
 
 function seedDoc(nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>, loadFailed = false) {
   canvasDocMock.current = {
@@ -168,5 +170,101 @@ describe('IKILUE 412 后阻止旧空文档重发', () => {
       expect(call[1].nodes).toHaveLength(0);
       expect(call[1].confirmEmpty).toBe(true);
     }, { timeout: 3000 });
+  });
+});
+
+/* IKILUG：统一画布保存 422 的刷新复核提示 */
+const REJECTED_422_TOAST = '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核';
+
+/** 空覆盖被拒的 422 信封（口径同后端实返：ApiError status=422 + msg，data 无版本可对齐） */
+function rejected422() {
+  return new ApiError(422, '画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty');
+}
+
+describe('IKILUG 画布保存 422 刷新复核提示', () => {
+  it('a. 水合为空画布 → 防抖自动保存的空文档（不带 confirmEmpty）收 422 → 提示刷新复核', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+
+    // viewport 变化驱动防抖发出空文档 PUT（水合基线为空 → confirmEmpty 不授予）
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+
+    await vi.waitFor(() => {
+      const call = apiMocks.saveCanvasDoc.mock.calls.at(-1)!;
+      expect(call[1].nodes).toHaveLength(0);
+      expect(call[1].confirmEmpty).toBeFalsy();
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+  });
+
+  it('b. 项目切换前强制保存收 422 → 刷新复核提示，中止导航停留当前项目', async () => {
+    seedDoc([]);
+    await renderPage();
+    // 全部 PUT 均拒：防抖计时器与 flush 竞争首发时，任何一方收到 422 提示与中止行为都应一致
+    apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
+
+    // viewport 变化制造未落盘编辑后立即点「返回首页」（与项目切换共用 ensureSavedBeforeProjectSwitch）
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
+    expect(exitBtn).toBeTruthy();
+    await act(async () => { exitBtn!.click(); });
+    await act(async () => {});
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+    expect(locationRef!.search).toContain('project=p1'); // 中止导航，停留当前项目
+    // 未把空文档 PUT 发到错误目标
+    for (const call of apiMocks.saveCanvasDoc.mock.calls) {
+      expect(call[0]).toBe('p1');
+    }
+  });
+
+  it('c. 手动「重试保存」收 422 → 刷新复核提示（而非笼统保存失败）', async () => {
+    seedDoc([]);
+    await renderPage();
+    // 防抖首发 mock 500 进入 error 态（该路径仍是笼统文案），重试链路再收 422
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new ApiError(500, '服务器开小差'));
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    const findRetry = () => [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    await vi.waitFor(() => {
+      expect(findRetry()).toBeTruthy();
+    }, { timeout: 3000 });
+
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+    await act(async () => { findRetry()!.click(); });
+    await act(async () => {});
+
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+  });
+
+  it('d. 422 后本地编辑保留、保存未当成成功（重试按钮仍在，「已保存」未出现）', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+
+    // 本地工作副本保留：画布仍保持用户的空文档形态，未被覆盖/回滚（viewport prop 不反映实时编辑，不在此断言）
+    expect(flowProps.current.textNodes).toHaveLength(0);
+    // 未当成成功：saveStatus 停在 error（重试按钮仍在），「已保存」未出现
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    expect(document.body.textContent).not.toContain('已保存');
   });
 });

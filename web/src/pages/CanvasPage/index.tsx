@@ -518,6 +518,10 @@ function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
  *  刷新重新水合后 confirmEmpty 才会按新基线重新授予，直接重试只会用旧空文档覆盖对方成果。 */
 const EMPTY_CLEAR_CONFLICT_TOAST = '画布已被其他会话更新，本次清空未保存，请刷新页面复核';
 
+/** IKILUG：空保存被服务端 422 拒（本地空状态与服务端非空事实不一致，重试必然再拒）——
+ *  防抖自动保存/项目切换强制保存/手动「重试保存」三个入口共用的刷新复核指引。 */
+const EMPTY_OVERWRITE_REJECTED_TOAST = '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核';
+
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -3034,8 +3038,9 @@ export default function CanvasPage() {
               showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
             } else if (isApiError(e) && e.status === 422) {
               // IKIIWN：空覆盖被服务端拒绝（本地空状态与服务端非空事实不一致）——重试必然再拒，引导刷新复核
+              // IKILUG：文案提取为共享常量，项目切换强制保存/手动重试同口径（见 EMPTY_OVERWRITE_REJECTED_TOAST）
               setSaveStatus('error');
-              showToast('warn', '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核');
+              showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
             } else {
               if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
               setSaveStatus('error');
@@ -5511,6 +5516,8 @@ export default function CanvasPage() {
     } catch (e) {
       // IKILUE：切换落盘首发即 412 的清空保存——闸门已在 flush 内登记，给刷新复核指引而非笼统重试
       if (emptyClearConflictRef.current) showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+      // IKILUG：空保存被服务端 422 拒（本地空状态与非空事实不一致）——重试必然再拒，同自动保存引导刷新复核
+      else if (isApiError(e) && e.status === 422) showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
       else showToast('error', '保存失败，请重试');
       console.warn('项目切换前画布落盘失败:', e);
       return false;
@@ -10740,10 +10747,12 @@ export default function CanvasPage() {
     try {
       if (!(await flushCanvasSave(currentId))) setSaveStatus('error');
       else setSaveEpoch(value => value + 1);
-    } catch {
+    } catch (e) {
       setSaveStatus('error');
       // IKILUE：重试首发即 412 的清空保存——闸门已在 flush 内登记，给刷新复核指引而非笼统重试
       if (emptyClearConflictRef.current) showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+      // IKILUG：空保存被服务端 422 拒——重试必然再拒，同自动保存引导刷新复核
+      else if (isApiError(e) && e.status === 422) showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
       else showToast('error', '保存失败，请重试');
     } finally {
       applyingRef.current = false;
