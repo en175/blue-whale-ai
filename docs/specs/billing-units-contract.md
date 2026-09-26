@@ -31,7 +31,7 @@
   - 与目录一起**版本化**、可整体回滚；
   - 随 job **冻结**——结算按冻结版本复现，改价不影响已提交任务；
   - 改口径 = 发一版新目录，不改代码、不重启（`POST /admin/catalogs`）；
-  - 管理端可查当前值：`GET /admin/catalogs/active` → `creditsPerYuan`（发布接口回包同样带它）。
+  - 管理端可查当前值：`BillingAdminService.AdminGetActiveCatalog` → `credits_per_yuan`（发布接口回包同样带它；读接口 2026-09-26 迁到 gRPC，`GET /admin/catalogs/active` 已删）。
 - 编译期校验：`creditsPerYuan` ≤ 0 或 > 100000 的目录**发不出去**（`CatalogCompiler`）。
 - ⚠️ **旧口径已作废**：原先的「积分 = quota ÷ 50,000（1 元 = 10 积分）」
   （BFF `backend/libs/shared/credits/credits.ts` 的 `QUOTA_TO_CREDITS_DIVISOR = 50_000`、

@@ -129,7 +129,7 @@ function asAdminError(what: string, error: unknown): BillingAdminError | Billing
 /* ---------- 定价目录：读 / 发布 ---------- */
 
 /**
- * `GET /admin/catalogs/active` 的回包。
+ * `AdminGetActiveCatalog` 的回包（读接口 2026-09-26 从 `GET /admin/catalogs/active` 迁到 gRPC）。
  *
  * <p>`catalogVersion = -1` 表示**没有生效的目录**；此时 `document` 是空串
  * （与换算率同为 -1 同一个口径：不编造内容）。
@@ -323,7 +323,10 @@ export async function grantCredits(
 
 /* ---------- 账本：读流水（管理端全局） ---------- */
 
-/** `GET /admin/transactions` 的一行。字段口径同 `UserTransaction`，多一个 `userId`。 */
+/**
+ * `AdminListTransactions` 的一行（读接口 2026-09-26 从 `GET /admin/transactions` 迁到 gRPC）。
+ * 字段口径同 `UserTransaction`，多一个 `userId`。
+ */
 export interface AdminTransactionItem {
   /** 形如 `lot:12` / `res:7` / `led:expire:...`，三类来源全局唯一 */
   id: string;

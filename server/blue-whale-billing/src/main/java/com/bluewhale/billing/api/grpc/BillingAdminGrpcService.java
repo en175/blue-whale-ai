@@ -242,9 +242,9 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
      *
      * <p>⚠️ 缺省与解析失败都要**报错**，不能兜一个「最近 24 小时」之类的默认值：
      * 求和接口的区间是调用方算出来的东西，兜底值会让它拿到一个「不是自己要求的那段」的数，
-     * 而返回值里没有任何东西能暴露这件事。与 HTTP 侧 {@code AdminTransactionController}
-     * 的 {@code parseInstant} 同一条纪律（那条靠 Spring 的 400 缺参/解析失败，
-     * 这条在这里显式判）。
+     * 而返回值里没有任何东西能暴露这件事。（HTTP 时代这条纪律写在 {@code AdminTransactionController}
+     * 的 {@code parseInstant} 里、靠 Spring 的 400 承担；那个类随读端点迁到 gRPC 已删，
+     * 缺参与解析失败改在这里显式判。）
      */
     private static Instant parseInstant(String field, String raw) {
         if (raw == null || raw.isBlank()) {

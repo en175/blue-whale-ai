@@ -32,6 +32,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -44,8 +45,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <h2>它替掉的是什么</h2>
  *
  * <p>运营面的这四条（流水 / 余额 / 消耗合计 / 目录）此前只有 HTTP（{@code /admin/**}）。
- * 本次迁到 gRPC 后，HTTP 那边仍是薄壳，所以**两份实现同时存在**——本文件钉住的是
- * 「迁过来的这份与 HTTP 那份同源同口径」，而不是「新写了一套读模型」。
+ * 本次迁到 gRPC 后，HTTP 那边的**读**端点已经删掉（{@code AdminTransactionController} 整个类、
+ * {@code AdminCatalogController#active}）——读的这份自此是**唯一**实现，不再是「两份并存」。
+ *
+ * <p>所以本文件还**接过了那些端点原先的测试覆盖**（类型过滤 / 游标翻页 / 坏游标 /
+ * 半开区间边界 / 文档原文的规范化形态）：端点删掉时，它钉住的边界不该跟着消失。
+ * 搬过来的每条都注明了它在守什么，别当成重复用例删掉。
  *
  * <h2>三条最要紧的约束</h2>
  *
@@ -173,6 +178,92 @@ class BillingAdminGrpcIntegrationTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 过滤与游标：参数错了必须报错，而不是给一个「看起来正常」的空列表
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * 未知类型必须报 INVALID_ARGUMENT，不能返回空列表。
+     *
+     * <p>空列表与「真的没有这个类型的流水」长得一模一样——查的是 {@code "recharg"} 也发现不了。
+     * 这条口径由 {@code TransactionType.of} 保证；吞掉异常换成「过滤不到就是空」，运营看到的
+     * 会是一张「这个用户没有充值记录」的假报表，而它看上去完全正常。
+     */
+    @Test
+    void 未知类型_报INVALID_ARGUMENT而不是给空列表() {
+        assertThatThrownBy(() -> admin.adminListTransactions(
+                AdminListTransactionsRequest.newBuilder()
+                        .setUserId(USER).setType("recharg").setPageSize(50).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    /**
+     * 合法类型过滤**真的过滤**，只出该类型的行。
+     *
+     * <p>与上一条是同一件事的两半。只验「未知类型报错」是不够的：把 {@code type} 整个忽略掉
+     * （永远返回全部）在上面那条下照样全绿，而管理端「只看消费」的表里会混进发放行。
+     */
+    @Test
+    void 合法类型过滤_只出该类型的行() {
+        userFacing.hold(hold(USER, "adm-type-1", 9_212L));
+
+        // setUp 发过一笔 gift，这里一笔消费 —— 两类各一行，过滤才分得开
+        List<AdminTransactionItem> consumes = adminListTyped(USER, "consume");
+        assertThat(consumes).hasSize(1);
+        assertThat(consumes).allSatisfy(item -> assertThat(item.getType()).isEqualTo("consume"));
+
+        List<AdminTransactionItem> gifts = adminListTyped(USER, "gift");
+        assertThat(gifts).hasSize(1);
+        assertThat(gifts).allSatisfy(item -> assertThat(item.getType()).isEqualTo("gift"));
+    }
+
+    /**
+     * 游标翻页：每页一条，两次翻完，不重不漏。
+     *
+     * <p>游标是**不透明**的排序三元组（{@code TransactionRepository}），唯一能证明「翻页真的
+     * 接上了」的方式就是拿上一页给的 token 再查一次、并核对第二页不是第一页的重复。
+     * 一个写死的 offset 也能让「总数对」的断言全绿，却会在账本持续追加时漏行或重行
+     * ——而账本**一直在追加**，这正是这条接口的常态。
+     */
+    @Test
+    void 游标翻页_不重不漏() {
+        userFacing.hold(hold(USER, "adm-page-1", 9_213L));
+
+        AdminListTransactionsResponse first = admin.adminListTransactions(
+                AdminListTransactionsRequest.newBuilder().setUserId(USER).setPageSize(1).build());
+        assertThat(first.getItemsList()).hasSize(1);
+        String firstId = first.getItems(0).getId();
+        String token = first.getPage().getNextPageToken();
+        // 后面还有行时游标必须给出，否则「下一页」按钮永远是灰的
+        assertThat(token).isNotEmpty();
+
+        AdminListTransactionsResponse second = admin.adminListTransactions(
+                AdminListTransactionsRequest.newBuilder()
+                        .setUserId(USER).setPageSize(1).setPageToken(token).build());
+        assertThat(second.getItemsList()).hasSize(1);
+        assertThat(second.getItems(0).getId()).isNotEqualTo(firstId);
+        // 最后一页的游标为空 = 没有下一页
+        assertThat(second.getPage().getNextPageToken()).isEmpty();
+    }
+
+    /**
+     * 坏游标报 INVALID_ARGUMENT，不能悄悄当成首页。
+     *
+     * <p>「静默重来」在界面上表现为列表**自己跳回顶部**（用户以为翻页翻反了），
+     * 而服务端一个异常都不留——排查时无从下手。宁可报错让人看见。
+     */
+    @Test
+    void 坏游标_报INVALID_ARGUMENT而不是当首页() {
+        assertThatThrownBy(() -> admin.adminListTransactions(
+                AdminListTransactionsRequest.newBuilder()
+                        .setUserId(USER).setPageToken("not-a-cursor").build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 两个契约的差集：预扣额
     // ─────────────────────────────────────────────────────────────
 
@@ -252,6 +343,37 @@ class BillingAdminGrpcIntegrationTest {
         // 这个数会用在途任务的数量变化，而对账要的是一个定值
         userFacing.hold(hold(OTHER_USER, "adm-cc-2", 9_208L));
         assertThat(consumed(from, to)).isEqualTo(30);
+
+        // 完全落在过去一天的窗口里**查不到这笔**（它发生在今天）：区间不只是「有没有过滤」，
+        // 还得落在对的地方。取错列（比如 gmt_create）或漏掉下界，这里都会把 30 漏出来
+        assertThat(consumed(Instant.now().minus(2, ChronoUnit.DAYS),
+                Instant.now().minus(1, ChronoUnit.DAYS))).isZero();
+    }
+
+    /**
+     * 半开区间 {@code [from, to)}：**正好落在起点的那秒算、正好落在终点的那秒不算**。
+     *
+     * <p>区间列是 {@code gmt_modified}（这张表没有 {@code settled_at}，结算那一刻由 DDL 的
+     * {@code ON UPDATE CURRENT_TIMESTAMP} 写在它上面）。写成 {@code <= '23:59:59'} 表达
+     * 「到当天为止」会漏掉最后一秒里落库的行，而漏掉的那部分**不会以任何形式表现出来**：
+     * 对账数字偏小，偏小的数与真值在界面上长得一模一样。
+     *
+     * <p>直插预留行（而不走 hold/settle）是因为要验的正是**边界**——真实路径没法把
+     * {@code gmt_modified} 设到指定的那一秒上。
+     */
+    @Test
+    void 消耗合计_半开区间且只算已结算() {
+        Instant from = OffsetDateTime.parse("2026-09-25T00:00:00+08:00").toInstant();
+        Instant to = OffsetDateTime.parse("2026-09-26T00:00:00+08:00").toInstant();
+
+        insertReservation(9_301L, "settled", 1L, "2026-09-24 23:59:59"); // 区间前：不计
+        insertReservation(9_302L, "settled", 2L, "2026-09-25 00:00:00"); // = from：**计**
+        insertReservation(9_303L, "settled", 4L, "2026-09-25 23:59:59"); // 区间内：计
+        insertReservation(9_304L, "settled", 8L, "2026-09-26 00:00:00"); // = to：**不计**
+        insertReservation(9_305L, "held", null, "2026-09-25 12:00:00"); // 冻着的钱不是消耗
+        insertReservation(9_306L, "released", 0L, "2026-09-25 12:00:00"); // 退回的钱不是消耗
+
+        assertThat(consumed(from, to)).isEqualTo(6);
     }
 
     @Test
@@ -262,6 +384,15 @@ class BillingAdminGrpcIntegrationTest {
         assertThatThrownBy(() -> admin.adminConsumedCredits(
                 AdminConsumedCreditsRequest.newBuilder()
                         .setFrom(now.minus(1, ChronoUnit.HOURS).toString()).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+
+        // 解析不了的时间串：**不能兜一个「最近 24 小时」之类的默认区间**——
+        // 兜底会让调用方拿到一段「不是自己要求的那段」的数，而返回值里没有任何东西暴露这件事
+        assertThatThrownBy(() -> admin.adminConsumedCredits(
+                AdminConsumedCreditsRequest.newBuilder()
+                        .setFrom("不是时间").setTo(now.toString()).build()))
                 .isInstanceOf(StatusRuntimeException.class)
                 .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
                         .isEqualTo(Status.Code.INVALID_ARGUMENT));
@@ -320,10 +451,14 @@ class BillingAdminGrpcIntegrationTest {
         // ⚠️ 原文是 MySQL JSON 列的**规范化形态**：键序与空白都由 MySQL 决定，与插入时那串
         //    字节不同 —— 这条断言当场就能看见：setUp 插的是紧凑的 `"creditsPerYuan":15`，
         //    读回来是带空格的 `"creditsPerYuan": 15`。
-        //    所以判「内容改没改」只能**解析回来比**，比文本会让一次没改过的保存凭空多出版本
-        //    （`AdminCatalogController#active` 与 proto 的注释都写了这条）。
-        assertThat(new ObjectMapper().readTree(active.getDocumentJson())
-                .get("creditsPerYuan").asInt()).isEqualTo(15);
+        //    所以判「内容改没改」只能**解析回来比**（比文本会让一次没改过的保存凭空多出版本，
+        //    proto 的注释写了这条）；而管理端「读当前 → 改 → 整份发布」就是靠这段原文本起步的，
+        //    它必须真的是**库里那份**，而不是解析后重新序列化的形态。
+        ObjectMapper mapper = new ObjectMapper();
+        assertThat(mapper.readTree(active.getDocumentJson())).isEqualTo(mapper.readTree(CATALOG));
+        // 反例当场钉住：这段文本与发上去的字节**不相等**，`documentHash` 取的又是提交文本的
+        // SHA-256（与它也不对应）—— 谁想用「比对文本」判断有没有改过，这里就是反例
+        assertThat(active.getDocumentJson()).isNotEqualTo(CATALOG);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -358,6 +493,27 @@ class BillingAdminGrpcIntegrationTest {
         return admin.adminListTransactions(AdminListTransactionsRequest.newBuilder()
                         .setUserId(userId).setPageSize(50).build())
                 .getItemsList();
+    }
+
+    /** 全站/按用户 + 类型过滤。空类型串 = 全部（服务端口径）。 */
+    private List<AdminTransactionItem> adminListTyped(long userId, String type) {
+        return admin.adminListTransactions(AdminListTransactionsRequest.newBuilder()
+                        .setUserId(userId).setType(type).setPageSize(50).build())
+                .getItemsList();
+    }
+
+    /**
+     * 直接插一条预留行，时间点由测试给死（**库内北京墙钟**，与 {@code DbTime} 的换算一致）。
+     *
+     * <p>不走 hold/settle 是因为要验**边界**（正好落在 from / 正好落在 to 的行），
+     * 而走真实路径没法把 {@code gmt_modified} 设到指定的秒上。
+     */
+    private void insertReservation(long jobId, String status, Long actualCredits, String at) {
+        jdbc.update("INSERT INTO billing_cost_reservations "
+                        + "(generation_job_id, user_id, reserved_credits, actual_credits, status,"
+                        + " allocations, catalog_version, gmt_create, gmt_modified) "
+                        + "VALUES (?, ?, 100, ?, ?, '[]', 1, ?, ?)",
+                jobId, USER, actualCredits, status, at, at);
     }
 
     private long consumed(Instant from, Instant to) {

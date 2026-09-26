@@ -346,7 +346,7 @@ public class BillingApplicationService {
      * </ol>
      *
      * @param userId     非空 = 只看该用户（用户面，{@code ListTransactions}）；{@code null} = 全站
-     *                   （**管理面**，billing 的 {@code /admin/transactions}）
+     *                   （**管理面**，{@code BillingAdminService.AdminListTransactions}）
      * @param typeFilter 空串/null = 全部；否则必须是 {@link TransactionType} 的合法值
      * @param pageToken  上一页给的游标；空串/null = 首页
      * @throws IllegalArgumentException 类型过滤非法或游标损坏（gRPC 映射成 INVALID_ARGUMENT）

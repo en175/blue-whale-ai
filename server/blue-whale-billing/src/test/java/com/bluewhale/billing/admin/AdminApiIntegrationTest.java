@@ -5,8 +5,6 @@ import com.bluewhale.billing.application.HoldCommand;
 import com.bluewhale.billing.catalog.CatalogHolder;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.CreditSource;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -104,34 +102,12 @@ class AdminApiIntegrationTest {
         // ★ 关键：同一进程内马上就能用，不需要重启 —— 这正是把发布做成接口的意义。
         //   假如只写库不调 reload()，这里会是 -1。
         assertThat(catalog.currentVersion()).isEqualTo(1);
-
-        mvc.perform(get("/admin/catalogs/active"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.catalogVersion").value(1))
-                // 管理端要能直接确认「现在 1 元 = 多少积分」——它来自目录文档，不是代码常量
-                .andExpect(jsonPath("$.creditsPerYuan").value(15));
     }
 
-    @Test
-    void 读回当前目录_拿到的是库里那份文档_而不是解析后重新序列化的形态() throws Exception {
-        publish(CATALOG);
-
-        String body = mvc.perform(get("/admin/catalogs/active"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.catalogVersion").value(1))
-                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-
-        // 管理端「读回来改一改再整份发布」的起点就是这段文本，所以这里钉两件事：
-        //
-        // ① 内容与发上去的一致（**比语义不比字节**）。document 列是 MySQL 的 JSON 类型，
-        //    读回来是它自己的规范化文本（键按长度重排、冒号后补空格），与原文不是同一串字节。
-        //    顺带钉住一个容易误解的点：documentHash 是对**提交文本**取的 SHA-256，
-        //    与这段文本的 hash 不相等 —— 谁想用「比对文本」来判断有没有改过，这里就是反例。
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode readBack = mapper.readTree(mapper.readTree(body).get("document").asText());
-        assertThat(readBack).isEqualTo(mapper.readTree(CATALOG));
-        assertThat(catalog.currentDocumentJson()).isNotEqualTo(CATALOG);
-    }
+    // ⚠️ 目录的**读**端点（`GET /admin/catalogs/active`）已随运营面迁到 gRPC 而删除，
+    //   它那几条断言（版本 / 换算率 / 文档原文的规范化形态）在
+    //   `BillingAdminGrpcIntegrationTest#目录_回原文与换算率_充值路径靠它` 里。
+    //   本类自此只剩**写**的那半边（发布目录 / 发放 / 手动结算返还）。
 
     @Test
     void 再发一版_版本号递增且旧版降级() throws Exception {

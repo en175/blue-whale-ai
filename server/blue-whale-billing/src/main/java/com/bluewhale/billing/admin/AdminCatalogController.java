@@ -2,7 +2,6 @@ package com.bluewhale.billing.admin;
 
 import com.bluewhale.billing.catalog.CatalogHolder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -59,29 +58,5 @@ public class AdminCatalogController {
                 "catalogVersion", version,
                 "documentHash", holder.currentDocumentHash(),
                 "creditsPerYuan", holder.currentCreditsPerYuan());
-    }
-
-    /**
-     * 当前生效版本；没有 active 版本时 version = -1。
-     *
-     * <p>返回 {@code document}（落库的目录文本）：管理端用它实现「读当前 → 改 → 整份发布」。
-     * 回文本而不是让调用方自己拼，是为了与 {@link #publish} 对齐 —— 让「只改一个单价」的保存
-     * 顺手把服务端**不认识的字段**（向前兼容空间）抹掉是更坏的默认值。
-     *
-     * <p>⚠️ 这段文本是 MySQL JSON 列的规范化形态（键序与空白由 MySQL 决定），
-     * 与发布时提交的字节不同，因此**它与 {@code documentHash} 不对应** ——
-     * 判断「内容改没改」要解析成对象比，别比文本，否则一次没改过的保存会凭空多出版本。
-     *
-     * @return 含本版生效的换算率 {@code creditsPerYuan}（1 元 = 多少积分），
-     *         供管理端确认「现在 1 元 = 多少积分」；无生效目录时 {@code document} 为空串，
-     *         与 {@code catalogVersion} 的 -1 同口径（不编造内容）
-     */
-    @GetMapping("/active")
-    public Map<String, Object> active() {
-        return Map.of(
-                "catalogVersion", holder.currentVersion(),
-                "documentHash", String.valueOf(holder.currentDocumentHash()),
-                "creditsPerYuan", holder.currentCreditsPerYuan(),
-                "document", holder.currentDocumentJson());
     }
 }
