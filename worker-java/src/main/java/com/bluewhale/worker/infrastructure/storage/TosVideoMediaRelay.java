@@ -103,9 +103,9 @@ public class TosVideoMediaRelay {
     private static final Duration STREAM_ERROR_BODY_TIMEOUT = Duration.ofSeconds(60);
 
     /**
-     * 任务截止中止的统一文案（HeaderWait / 看门狗四处抛出，文案不变）：IKIN90 起 catch 清理
-     * 据此判别「截止口径的失败」——截止以 {@link VideoProviderError}（普通失败口径）抛出，
-     * 无法按异常类型与停流 / copyWindow / 网络失败区分，文案是唯一稳定判别依据。
+     * 任务截止中止的统一文案（HeaderWait / 看门狗四处抛出，文案不变）：截止以
+     * {@link TaskDeadlineAbortException}（{@link VideoProviderError} 子类，普通失败口径）抛出，
+     * IKIN90 起的清理条件以该类型判别「截止口径的失败」；本常量保留作该异常的消息来源。
      */
     static final String TASK_DEADLINE_ABORT_MESSAGE = "任务执行截止时间已到，中止结果转存";
 
@@ -448,13 +448,14 @@ public class TosVideoMediaRelay {
     }
 
     /**
-     * 截止口径失败的判别（IKIN90）：任务截止中止抛 {@link VideoProviderError}（普通失败口径），
-     * 与停流 / copyWindow / 网络失败同类型，仅文案可稳定区分——命中即视为「转存未成功返回的
-     * 已落地对象」，与外部中止同等清理。截止只可能由本类的截止布防（HeaderWait / 看门狗）
-     * 抛出，其余入口不会产生此文案；四参兼容入口无截止布防，天然不触发。
+     * 截止口径失败的判别（IKIN90；IKIN8V 起类型化）：任务截止中止一律以
+     * {@link TaskDeadlineAbortException} 抛出（本类的截止布防 HeaderWait / 看门狗是唯一来源），
+     * 按类型即可与停流 / copyWindow / 网络失败等同类型（{@link VideoProviderError}）失败稳定
+     * 区分——命中即视为「转存未成功返回的已落地对象」，与外部中止同等清理。四参兼容入口无
+     * 截止布防，天然不触发。
      */
     private static boolean isTaskDeadlineAbort(RuntimeException e) {
-        return e instanceof VideoProviderError && TASK_DEADLINE_ABORT_MESSAGE.equals(e.getMessage());
+        return e instanceof TaskDeadlineAbortException;
     }
 
     /**
@@ -532,6 +533,22 @@ public class TosVideoMediaRelay {
     }
 
     /**
+     * 任务截止时间到点的中止（IKIN8V 判别化）：仍是 {@link VideoProviderError}（普通失败口径，
+     * processor 侧按 VideoProviderError 归类的既有处理不变），差异只在以异常类型取代文案作为
+     * 「截止口径失败」的稳定判别（IKIN90 清理条件的判别依据）——消息保持既有文案逐字不变
+     * （{@link #TASK_DEADLINE_ABORT_MESSAGE}）。仅由本类的截止布防（HeaderWait / 看门狗）抛出。
+     */
+    public static final class TaskDeadlineAbortException extends VideoProviderError {
+        TaskDeadlineAbortException() {
+            super(GenerationError.ERROR_PROVIDER_FAILED, TASK_DEADLINE_ABORT_MESSAGE);
+        }
+
+        TaskDeadlineAbortException(Throwable cause) {
+            super(GenerationError.ERROR_PROVIDER_FAILED, TASK_DEADLINE_ABORT_MESSAGE, cause);
+        }
+    }
+
+    /**
      * 响应头等待期的可取消等待责任（IKIN01）：发起供应商下载请求（sendAsync）的同时把外部
      * 中止句柄与任务截止接到 pending future 上——中止信号先于响应头到达也能立即取消请求，
      * 不必等到 60s 响应头超时。此前的实现只在拿到正文流后才接线（StreamWatchdog 构造），
@@ -583,8 +600,7 @@ public class TosVideoMediaRelay {
                         throw new TransferAbortedException(handle.reason());
                     }
                     if (deadlineAbort) {
-                        throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                                TASK_DEADLINE_ABORT_MESSAGE);
+                        throw new TaskDeadlineAbortException();
                     }
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载已取消", e);
                 }
@@ -751,8 +767,7 @@ public class TosVideoMediaRelay {
             Long deadline = deadlineNanos;
             if (deadline != null && System.nanoTime() >= deadline) {
                 deadlineAbort = true;
-                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        TASK_DEADLINE_ABORT_MESSAGE);
+                throw new TaskDeadlineAbortException();
             }
             Long copyEnd = copyWindowNanos;
             if (copyEnd != null && System.nanoTime() >= copyEnd) {
@@ -768,8 +783,7 @@ public class TosVideoMediaRelay {
                 return new TransferAbortedException(externalReason());
             }
             if (deadlineAbort) {
-                return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        TASK_DEADLINE_ABORT_MESSAGE, e);
+                return new TaskDeadlineAbortException(e);
             }
             if (stallAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -795,8 +809,7 @@ public class TosVideoMediaRelay {
          */
         void requireNotAborted() {
             if (externalAbort) throw new TransferAbortedException(externalReason());
-            if (deadlineAbort) throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                    TASK_DEADLINE_ABORT_MESSAGE);
+            if (deadlineAbort) throw new TaskDeadlineAbortException();
         }
 
         void upload(Call call) {

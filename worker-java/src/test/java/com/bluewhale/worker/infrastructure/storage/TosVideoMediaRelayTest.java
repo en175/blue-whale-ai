@@ -616,7 +616,7 @@ class TosVideoMediaRelayTest {
                 .persistStreamingInternal(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
                         null, deadline, null, Duration.ofMinutes(10), Duration.ofSeconds(5)))
                 .isInstanceOf(VideoProviderError.class)
-                .hasMessageContaining("任务执行截止时间已到");
+                .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE);
 
         // 及时性即证明：截止 300ms 即止，不是等 1.2s 慢流自然结束，也不是 10 分钟停流超时
         assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
@@ -887,7 +887,7 @@ class TosVideoMediaRelayTest {
                 assertThatThrownBy(() -> transfer.get(8, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(VideoProviderError.class)
-                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                         .hasMessageNotContaining("转存网络失败");
                 // 截止取消连接后服务端读到 EOF；截止是普通失败口径，但 PUT 已落地 → 与外部中止
                 // 同等清理（IKIN90：转存未成功返回的已落地对象不留无主孤儿）
@@ -1011,7 +1011,7 @@ class TosVideoMediaRelayTest {
                 assertThatThrownBy(() -> transfer.get(8, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(VideoProviderError.class)
-                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                         .hasMessageNotContaining("转存网络失败");
                 assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
                 // 清理确实执行过且对象身份传入（失败详情由 log.warn 记录 storageKey 与 err）
@@ -1176,7 +1176,7 @@ class TosVideoMediaRelayTest {
                 assertThatThrownBy(() -> transfer.get(5, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(VideoProviderError.class)
-                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                         .hasMessageNotContaining("转存网络失败");
                 long elapsedMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
                 System.out.printf("[IKIN01] 响应头等待期任务截止中止延迟 %dms（截止注入 500ms，60s 响应头超时为对照基准）%n",
@@ -1292,7 +1292,7 @@ class TosVideoMediaRelayTest {
                 new TosVideoMediaRelay.HeaderWait(expired, null, java.time.Instant.now().plusMillis(100));
         assertThatThrownBy(deadlineWait::await)
                 .isInstanceOf(VideoProviderError.class)
-                .hasMessageContaining("任务执行截止时间已到")
+                .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                 .hasMessageNotContaining("转存网络失败");
     }
 }
