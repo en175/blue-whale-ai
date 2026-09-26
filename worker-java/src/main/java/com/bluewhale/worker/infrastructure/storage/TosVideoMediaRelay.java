@@ -81,7 +81,7 @@ public class TosVideoMediaRelay {
      * 截止时间内完成 10 GiB 取决于实际吞吐（10GiB@2MiB/s ≈ 85 分钟），本类不对未实测的
      * 线上速率做任何「任意速率均可完成」的承诺。
      */
-    static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
 
     /**
      * 四参兼容入口的总时限兜底 10 分钟（IKILU5 恢复）：未迁移到任务截止时间模型的旧调用方
