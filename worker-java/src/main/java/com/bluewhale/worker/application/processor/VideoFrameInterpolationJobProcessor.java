@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
@@ -10,6 +11,7 @@ import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient.InterpolateVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -146,10 +148,16 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频插帧失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS4），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_frame_interpolation] 终态失败 jobId={} code={}: {}",
                     claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -501,9 +509,21 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
      *  槽位段天然空转；details.raw 透传原始原因）。守卫要求 status='processing'，故已取消 /
      *  已终态任务的失败写入同样不会生效（终态权威）。 */
     private void failClaimed(ClaimedVideoFrameInterpolationJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
+     *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
+     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）与轮询预算耗尽路径
+     *  （failPollBudgetExhausted 走三参重载，语义是预算耗尽）不写该键。 */
+    private void failClaimed(ClaimedVideoFrameInterpolationJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_frame_interpolation job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }

@@ -825,6 +825,34 @@ class VideoFrameInterpolationJobProcessorTest {
         assertFailCode(GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input(60), 3);
+        VideoFrameInterpolationError unauthorized = new VideoFrameInterpolationError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 视频插帧任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 视频插帧任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========
 
     @Test
