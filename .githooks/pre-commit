@@ -2,8 +2,7 @@
 # pre-commit hook — Blue-Whale
 # 纯 shell，零依赖。功能：
 #   1. 禁提交生成物（dist/ target/ .next/ __pycache__/ node_modules/ 等；graphify-out/ 团队图谱除外）
-#   2. 后端改动时跑 py_compile（软提醒，不拦提交）
-#   3. 远程落后软提醒（按任务元数据中的目标 release）
+#   2. 远程落后软提醒（按任务元数据中的目标 release）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
