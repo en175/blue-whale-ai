@@ -115,8 +115,8 @@ const videoModel = {
   provider_id: 'prov',
   model_label: '测试视频模型',
   icon: null,
-  supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-  supported_aspect_ratios: ['16:9'],
+  supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }, { id: '1080p', label: '1080P', api_value: '1080p' }],
+  supported_aspect_ratios: ['16:9', '9:16'],
   supported_formats: [],
   supported_durations: { min: 4, max: 12, step: 1 },
   default_size: '720p',
@@ -134,11 +134,12 @@ const videoModel = {
     first_frame: true,
     last_frame: true,
     first_last_frame: true,
-    audio: false,
+    audio: true,
   },
   version: 1,
   digest: '',
 };
+const fallbackVideoModel = { ...videoModel, model_id: 'other-video', model_label: '默认视频模型' };
 const audioModel = {
   model_id: 'a-test',
   provider_id: 'prov',
@@ -284,7 +285,11 @@ function seedDoc() {
           id: 'v1',
           type: 'mediaNode',
           position: { x: 300, y: 0 },
-          data: { src: '', mediaType: 'video', fileName: '视频草稿', genStatus: 'draft', draft: true, prompt: '视频草稿提示词' },
+          data: {
+            src: '', mediaType: 'video', fileName: '视频草稿', genStatus: 'draft', draft: true,
+            prompt: '视频草稿提示词', draftModelId: 'seedance-2', draftRatio: '9:16',
+            draftSize: '1080p', draftDuration: 8, draftMode: 'all', draftGenerateAudio: false,
+          },
         },
         {
           id: 'au1',
@@ -405,7 +410,7 @@ beforeEach(() => {
   seedDoc();
   apiMocks.fetchGenerationModels.mockImplementation(async (type?: string) => {
     if (type === 'audio') return [audioModel];
-    if (type === 'video') return [videoModel];
+    if (type === 'video') return [fallbackVideoModel, videoModel];
     return [imageModel];
   });
 });
@@ -440,8 +445,17 @@ describe('IKIJ60 草稿面板切换崩溃回归（真实画布选中通报路径
     expectNoUpdateDepthLoop();
     // 选中切换渲染次数维持个位数（无明显性能退化，验收项）
     expect(pageRenderCount - rendersBeforeSwitch).toBeLessThan(10);
-    // 草稿参数完整回填（视频面板正文 = 视频草稿 prompt）
+    // 草稿正文与非默认生成参数均从视频卡回填
     expect(panelPromptText()).toBe('视频草稿提示词');
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent?.trim() === '全能参考')).toBe(true);
+    const configButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('测试视频模型') && button.textContent?.includes('8s'),
+    );
+    expect(configButton).toBeTruthy();
+    expect(configButton!.textContent).toContain('9:16');
+    expect(configButton!.textContent).toContain('1080P');
+    await act(async () => { configButton!.click(); });
+    expect(container.querySelector('button[role="switch"][aria-label="生成的视频带音频"]')?.getAttribute('aria-checked')).toBe('false');
     // 原图片面板按既有交互正常关闭
     expect(imageOpen()).toBe(false);
     // 选中状态落在视频草稿卡
