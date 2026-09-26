@@ -63,7 +63,7 @@ Codex 已通过官方插件市场安装并启用（`~/.codex/config.toml` → `[
 
 ### `.claude/skills/` 与 `.zcode/skills/` 物理一致
 
-两端目录 = 2 个 superpowers（本文件）+ mattpocock 全量。mattpocock skill 的权威源是 `.claude/skills/`（已含 Gitee 适配，git 跟踪、团队共享），需同步到 `.zcode/skills/` 以保证 ZCode 客户端可发现——`.agents/skills/` 被 `.gitignore` 忽略、仅为本地副本，不作发现依据。
+两端目录 = 2 个 superpowers（本文件）+ mattpocock 全量。mattpocock skill 的权威源是 `.claude/skills/`（已含 Gitee 适配，git 跟踪、团队共享），需同步到 `.zcode/skills/` 以保证 ZCode 客户端可发现——`.agents/skills/` 被 `.gitignore` 忽略、仅为本地副本。注意：Kimi Code 实际从 `.agents/skills/` 发现技能（2026-09-26 实证），且无同步脚本覆盖——修改技能后除同步 `.zcode/skills/` 外，还要把变更文件复制到各现存 worktree 的 `.agents/skills/` 副本（新 worktree 无 `.agents/`，不受影响）。
 
 > 维护提示：新增或修改 mattpocock skill 后，需手动同步 `.claude/skills/` → `.zcode/skills/`（本仓库尚无 mattpocock 专用同步脚本，不像 superpowers 有 `sync-superpowers-skills.sh`）。
 
