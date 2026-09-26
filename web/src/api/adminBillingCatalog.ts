@@ -11,6 +11,10 @@
  *    对原文取 hash。中间任何一次「解析再序列化」都会改变 hash 的对应物，出问题时就没法
  *    拿运营提交的内容与库里那份逐字节比对了。解析只为**编辑**，发回去的一定是序列化后的
  *    那份文本本身。
+ *
+ * ⚠️ 响应里**没有** `ruleCount`：目录曾经装着每个模型的计价规则，那些规则已搬进模型能力行
+ *    （`generation_model_capability.pricing`），目录现在只装 `creditsPerYuan` 与 `discountPolicy`
+ *    两项全局配置，没有「规则条数」可报（billing 的响应里也一并删了这个字段）。
  * ============================================ */
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
@@ -20,8 +24,6 @@ export interface BillingCatalog {
   catalogVersion: number;
   /** 发布时对**提交文本**取的 SHA-256。⚠️ 与 `document` 的 hash 不相等（见 `document`） */
   documentHash: string;
-  /** 本版生效的规则条数 */
-  ruleCount: number;
   /** 1 元 = 多少积分；没有生效目录时 -1 */
   creditsPerYuan: number;
   /**
@@ -44,7 +46,6 @@ export interface PublishBillingCatalogInput {
 export interface PublishBillingCatalogResult {
   catalogVersion: number;
   documentHash: string;
-  ruleCount: number;
   creditsPerYuan: number;
 }
 

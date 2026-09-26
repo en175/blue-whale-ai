@@ -1,25 +1,24 @@
 package com.bluewhale.billing.catalog;
 
-import com.bluewhale.billing.pricing.CompiledRule;
-import com.bluewhale.billing.pricing.PricingEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 持有当前生效目录的编译结果（《计费逻辑详细设计》§4.5.8 运行时消费）。
+ * 持有当前生效的定价目录（《计费逻辑详细设计》§4.5.8 运行时消费）。
  *
- * <p>实现 {@link PricingEngine.CatalogLookup}，所以引擎直接依赖本类即可，
- * 不必知道目录存在哪。
+ * <p>持有的是**目录里那两项全局配置**：换算率（1 元 = 多少积分）与折扣叠加策略。
+ * ⚠️ 计价规则**不在**这里——它按模型归属，住在模型能力行，由属主随 Hold / Quote
+ * 作为快照送来（见 {@link CatalogCompiler#compileRuleSnapshot}）。所以本类不再实现
+ * 规则查询接口，也不再持有任何按 (model, task) 的索引。
  *
  * <p><b>读路径无锁</b>：{@link AtomicReference} 整体替换引用，读方拿到的永远是
- * 一份完整不可变的索引。不用 volatile 字段 + 逐项更新那种写法——那会暴露中间态。
+ * 一份完整不可变的快照。不用 volatile 字段 + 逐项更新那种写法——那会暴露中间态。
  */
 @Component
-public class CatalogHolder implements PricingEngine.CatalogLookup {
+public class CatalogHolder {
 
     private static final Logger log = LoggerFactory.getLogger(CatalogHolder.class);
 
@@ -33,9 +32,9 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
     /**
      * 重新加载生效版本。
      *
-     * <p>⚠️ <b>失败时保持旧版本，绝不降级为空</b>：目录读不出来或编不过，
-     * 正确的反应是「继续用上一份能用的」+ 告警，而不是「算不出价」。
-     * 后者会把一次配置错误放大成全站不可用。
+     * <p>⚠️ <b>失败时保持旧版本，绝不降级为空</b>：目录读不出来或校验不过，
+     * 正确的反应是「继续用上一份能用的」+ 告警，而不是「换算率没了」。
+     * 后者会把一次配置错误放大成全站不可用（充值算不出到账积分）。
      *
      * @return 本次是否成功换成了新版本
      */
@@ -44,22 +43,21 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
             var loaded = repository.loadActive();
             if (loaded == null) {
                 // 首次部署时确实可能还没有任何 active 版本 —— 这不是错误，
-                // 但计价会被 RuleNotFoundException 拒绝（调用方据此拒绝提交）
-                log.warn("定价目录没有 active 版本；计价将拒绝（不会降级为 0）");
+                // 但换算率会读成 -1，调用方（充值）据此拒绝（不会自己编一个数）
+                log.warn("定价目录没有 active 版本；换算率与折扣策略都读不到");
                 return false;
             }
             var previous = current.getAndSet(loaded);
             if (previous == null) {
-                log.info("定价目录已加载：v{}（{} 条规则）", loaded.version(), loaded.index().size());
+                log.info("定价目录已加载：v{}", loaded.version());
             } else if (previous.version() != loaded.version()) {
-                log.info("定价目录已切换：v{} → v{}（{} 条规则）",
-                        previous.version(), loaded.version(), loaded.index().size());
+                log.info("定价目录已切换：v{} → v{}", previous.version(), loaded.version());
             }
             return true;
         } catch (RuntimeException e) {
             // 保持旧版本 —— 这是「加载失败不影响服务」的实现
             var kept = current.get();
-            log.error("定价目录加载失败，保持{}；计价继续用旧版本",
+            log.error("定价目录加载失败，保持{}；继续用旧版本",
                     kept == null ? "（当前无可用版本）" : " v" + kept.version(), e);
             return false;
         }
@@ -71,16 +69,10 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
         return loaded == null ? -1 : loaded.version();
     }
 
-    /** 当前生效内容哈希；从未加载过返回 null。写进 job 的定价快照用。 */
+    /** 当前生效内容哈希；从未加载过返回 null。 */
     public String currentDocumentHash() {
         var loaded = current.get();
         return loaded == null ? null : loaded.documentHash();
-    }
-
-    /** 当前生效的完整编索引（只读）。 */
-    public Map<String, CompiledRule> currentIndex() {
-        var loaded = current.get();
-        return loaded == null ? Map.of() : loaded.index();
     }
 
     /**
@@ -129,20 +121,5 @@ public class CatalogHolder implements PricingEngine.CatalogLookup {
     public int currentCreditsPerYuan() {
         var loaded = current.get();
         return loaded == null ? -1 : loaded.creditsPerYuan();
-    }
-
-    /**
-     * 引擎入口：按 (model, task) 取规则。
-     *
-     * @return 没有配规则时返回 null —— 引擎会抛 {@code RuleNotFoundException}
-     *         （**拒绝计价**，不是算成 0）
-     */
-    @Override
-    public CompiledRule lookup(String modelId, String taskType) {
-        var loaded = current.get();
-        if (loaded == null) {
-            return null;
-        }
-        return loaded.index().get(CatalogCompiler.indexKey(modelId, taskType));
     }
 }

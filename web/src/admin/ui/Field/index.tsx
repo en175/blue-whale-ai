@@ -1,16 +1,30 @@
 import type { ReactNode } from 'react';
+import Hint from '../Hint';
 import styles from './index.module.css';
 
 interface FieldProps {
   /** 字段名（一句话说清「这里填什么」） */
   label: ReactNode;
   /**
-   * 字段下面的补充说明：单位、可行范围、以及这个值改大了会怎样。
+   * **字段级微文案**：单位、可行范围、「留空 = 不封顶」这类一句话说明。
    *
-   * <p>定价这类表单，字段名本身不足以让人填对（`100000` 是什么单位？`4000` 是几倍？），
+   * <p>渲染在控件下方一行 12px 灰字 —— 这是表单的常规做法，一眼可见、不占版面。
+   * 定价这类表单字段名本身不足以让人填对（`100000` 是什么单位？`4000` 是几倍？），
    * 所以说明是**字段的一部分**，不是可有可无的装饰。
+   *
+   * <p>⚠️ **别把段落塞进这里**：超过两行的说明会把控件往下顶，那时该用 {@link info}。
+   * 判据不是字数，而是「它是不是一句话」——是就留这儿，不是就搬去 `info`。
    */
   hint?: ReactNode;
+  /**
+   * **段落级解释**：为什么这么设计、改了什么会怎样 —— 一两句说不完的那种。
+   *
+   * <p>渲染成标签旁的一个 **`?`**（悬停 / 聚焦才展开）。它与 {@link hint} 是**两层**，
+   * 不是一个开关的两个档：微文案内联、段落收起，两种界面元素各有其位。
+   *
+   * <p>⛔ 一句话能说清的别放这儿：把「留空 = 不封顶」藏进 hover 只会让人多点一次。
+   */
+  info?: ReactNode;
   children: ReactNode;
 }
 
@@ -30,10 +44,13 @@ interface FieldProps {
  * <p>⚠️ **不做栅格**：一行放几个字段是页面的事（`display: grid` 写在页面里），
  *    基元只负责「一个字段内部长什么样」。把栅格也收进来，就得为每种列数开一个 prop。
  */
-export default function Field({ label, hint, children }: FieldProps) {
+export default function Field({ label, hint, info, children }: FieldProps) {
   return (
     <div className={styles.field}>
-      <div className={styles.label}>{label}</div>
+      <div className={styles.label}>
+        {label}
+        {info !== undefined && <Hint>{info}</Hint>}
+      </div>
       {children}
       {hint !== undefined && <div className={styles.hint}>{hint}</div>}
     </div>

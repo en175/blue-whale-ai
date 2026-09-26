@@ -70,8 +70,21 @@ class ImageJobProcessorI2iAliasTest {
     }
 
     private Outbound captureOutbound(List<String> refs, String featuresJson) {
+        return captureOutbound(refs, featuresJson, "seedream-image", "{}");
+    }
+
+    /** @param channel 能力行的 {@code channel} 列——出站协议与解析器都由它决定（不再读 features 键）。
+     *  @param requestMapping gpt / banana 渠道必须给一张能解出尺寸的映射表（空表会先落到
+     *         `empty_mapping` 而根本走不到 provider，那时断言 protocol 只会看到「零次调用」）。 */
+    private Outbound captureOutbound(List<String> refs, String featuresJson, String channel) {
+        return captureOutbound(refs, featuresJson, channel, "{}");
+    }
+
+    private Outbound captureOutbound(
+            List<String> refs, String featuresJson, String channel, String requestMapping) {
         Map<String, Object> input = new HashMap<>(Map.of(
                 "prompt", "hello", "model_id", MODEL_ID,
+                "size", "1024x1024", "aspect_ratio", "1:1",
                 "provider_credential", "sealed-token"));
         if (!refs.isEmpty()) input.put("input_asset_ids", refs);
         ClaimedJobDto job = new ClaimedJobDto(
@@ -81,10 +94,14 @@ class ImageJobProcessorI2iAliasTest {
 
         GenerationModelCapabilityEntity cap = new GenerationModelCapabilityEntity();
         cap.setModelId(MODEL_ID);
+        cap.setCapabilityType("image");
         cap.setApiSize("1024x1024");
         cap.setWidth(1024);
         cap.setHeight(1024);
-        cap.setChannelParser("seedream");
+        cap.setChannel(channel);
+        cap.setRequestMapping(requestMapping);
+        cap.setDefaultSize("1024x1024");
+        cap.setDefaultAspectRatio("1:1");
         cap.setFeatures(featuresJson);
         when(capabilityMapper.findByModelId(MODEL_ID)).thenReturn(cap);
 
@@ -132,7 +149,7 @@ class ImageJobProcessorI2iAliasTest {
     @DisplayName("inline 形态 + 别名 + 无参考图 → 出站 model 仍 canonical")
     void inlineAliasWithoutReferencesKeepsCanonical() {
         Outbound out = captureOutbound(
-                List.of(), "{\"image_protocol\": \"inline-image\", \"i2i_model_name\": \"" + ALIAS + "\"}");
+                List.of(), "{\"i2i_model_name\": \"" + ALIAS + "\"}");
         assertThat(out.protocol()).isEqualTo(ImageProtocol.INLINE_IMAGE);
         assertThat(out.model()).isEqualTo(MODEL_ID);
     }
@@ -165,36 +182,47 @@ class ImageJobProcessorI2iAliasTest {
                 .isEqualTo(ALIAS);
     }
 
-    // ========== 官方协议（IKF4LI） ==========
+    // ========== 官方协议（渠道 gpt-image-openai） ==========
+
+    /** 一张能解出尺寸的 gpt 交叉格（渠道是 gpt 系时必须给，否则先落 empty_mapping）。 */
+    private static final String GPT_MATRIX = "{\"matrix\":{\"1024x1024\":{\"1:1\":\"2048x2048\"}}}";
 
     @Test
-    @DisplayName("openai-images + 参考图 → 出站 protocol 为官方协议，模型名恒 canonical 不换别名")
+    @DisplayName("openai 渠道 + 参考图 → 出站 protocol 为官方协议，模型名恒 canonical 不换别名")
     void openAiProtocolIgnoresAlias() {
-        Outbound out = captureOutbound(List.of("101"),
-                "{\"image_protocol\": \"openai-images\", \"i2i_model_name\": \"" + ALIAS + "\"}");
+        Outbound out = captureOutbound(
+                List.of("101"), "{\"i2i_model_name\": \"" + ALIAS + "\"}",
+                "gpt-image-openai", GPT_MATRIX);
         assertThat(out.protocol()).isEqualTo(ImageProtocol.OPENAI_IMAGES);
         assertThat(out.model()).isEqualTo(MODEL_ID);
     }
 
     @Test
-    @DisplayName("openai-images + 无参考图 → 同样是官方协议（端点由客户端按有无参考图选）")
+    @DisplayName("openai 渠道 + 无参考图 → 同样是官方协议（端点由客户端按有无参考图选）")
     void openAiProtocolWithoutReferences() {
-        Outbound out = captureOutbound(List.of(), "{\"image_protocol\": \"openai-images\"}");
+        Outbound out = captureOutbound(List.of(), "{}", "gpt-image-openai", GPT_MATRIX);
         assertThat(out.protocol()).isEqualTo(ImageProtocol.OPENAI_IMAGES);
         assertThat(out.model()).isEqualTo(MODEL_ID);
     }
 
     @Test
-    @DisplayName("camelCase 键形 imageProtocol 同样识别")
-    void camelCaseProtocolRecognized() {
-        assertThat(captureOutbound(List.of(), "{\"imageProtocol\": \"openai-images\"}").protocol())
-                .isEqualTo(ImageProtocol.OPENAI_IMAGES);
+    @DisplayName("内联 gpt 渠道（gpt-image）→ 仍走内联协议，与 openai 渠道是两个渠道")
+    void inlineGptChannelStaysInline() {
+        Outbound out = captureOutbound(List.of("101"), "{}", "gpt-image", GPT_MATRIX);
+        assertThat(out.protocol()).isEqualTo(ImageProtocol.INLINE_IMAGE);
     }
 
     @Test
-    @DisplayName("未知协议值 → 回落 inline（协议切错的代价是全量调用失败，宁可不切）")
-    void unknownProtocolFallsBackToInline() {
-        assertThat(captureOutbound(List.of(), "{\"image_protocol\": \"随便写的\"}").protocol())
+    @DisplayName("未知渠道值 → 按媒介回落 seedream-image（= 内联），与该媒介的缺省一致")
+    void unknownChannelFallsBackToMediaDefault() {
+        assertThat(captureOutbound(List.of(), "{}", "随便写的").protocol())
+                .isEqualTo(ImageProtocol.INLINE_IMAGE);
+    }
+
+    @Test
+    @DisplayName("渠道列为 NULL（回填不到的存量行）→ 同样按媒介回落，不静默变协议")
+    void nullChannelFallsBackToMediaDefault() {
+        assertThat(captureOutbound(List.of(), "{}", null).protocol())
                 .isEqualTo(ImageProtocol.INLINE_IMAGE);
     }
 }

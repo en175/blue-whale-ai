@@ -1,0 +1,40 @@
+/* 只读一行：**靠字号与颜色分层，不靠底色或边框**。
+   同组两项之间 32px —— 足够读成两组，又不至于让人以为它们无关。 */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--admin-space-2) var(--admin-space-6);
+  margin: 0 0 var(--admin-space-5);
+}
+
+.sunken {
+  padding: var(--admin-space-3) var(--admin-space-4);
+  border-radius: var(--admin-radius-surface);
+  background: var(--admin-surface-sunken);
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--admin-space-2);
+  min-width: 0;
+}
+
+/* 标签降灰降号，值用正文色 —— 一眼扫过去读到的是值，标签只在需要时确认。
+   ⚠️ 用 `muted` 而不是 `faint`：标签是**要读的**（「模型」「任务类型」是这个值的名字），
+      不是装饰；实测 faint 只有 2.6:1，低于 WCAG AA。 */
+.label {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-muted);
+}
+
+.value {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--admin-font-sm);
+  font-weight: 500;
+  color: var(--admin-text);
+  overflow-wrap: anywhere;
+}

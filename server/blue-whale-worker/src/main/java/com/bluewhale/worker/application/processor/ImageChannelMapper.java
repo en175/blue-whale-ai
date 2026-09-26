@@ -82,11 +82,11 @@ final class ImageChannelMapper {
      * 返回结构化的映射对象供 mapImageChannelRequest 使用。
      */
     static ImageRequestMapping parseStoredMapping(
-            String channelParser, String requestMappingJson,
+            ImageChannel channel, String requestMappingJson,
             String defaultSizeId, String defaultRatioId
     ) {
-        String parser = (channelParser != null && !channelParser.isEmpty())
-                ? channelParser : "seedream";
+        // 解析器由**渠道**给出（非图片渠道为 null → 与旧列的 NOT NULL DEFAULT 对齐）。
+        String parser = channel.parser() != null ? channel.parser() : "seedream";
 
         if ("seedream".equals(parser)) {
             return new ImageRequestMapping("seedream", null, null, null, null, null);
@@ -246,38 +246,27 @@ final class ImageChannelMapper {
     }
 
     /**
-     * 从 features JSON 提取 image_protocol（契约 §12 / IKF4LI）。
+     * 归一能力行的 {@code channel} 列（TS 侧 {@code parseStoredChannel} 的同源实现）。
      * <p>
-     * 读侧宽容但有痕：**缺省（键不存在）= 常态，静默回落** {@link ImageProtocol#INLINE_IMAGE}；
-     * **值存在却认不出 / features JSON 损坏 = 配置错误，回落的同时打 WARN**——静默咽掉会让
-     * 排查从「该模型整个挂了」开始，而根因埋在 DB 的 features 里（评审 Important#1）。
+     * 读侧宽容但有痕：**空值**按 {@link ImageChannel#defaultFor} 静默回落（列是 NOT NULL，
+     * 所以这不是为存量兜底，而是防直接改库造出的脏值）；**值存在却认不出 = 配置错误**，
+     * 回落的同时打 WARN —— 静默咽掉会让排查从「这个模型整个挂了」开始，而根因埋在
+     * DB 的 channel 列里。
      * <p>
-     * 回落方向恒为 inline-image：协议切错的代价是全量调用失败，宁可不切。
-     * snake_case 与 camelCase 两种键形同 parseI2iModelName。
+     * 回落方向按媒介（video 行 → seedream-video），不恒落 seedream-image：
+     * 一个 video 行读到 NULL 若落成图片渠道，媒体闸门会在下次保存时判它非法，
+     * 而运营什么都没改。
      */
-    static ImageProtocol parseImageProtocol(String featuresJson) {
-        if (featuresJson == null || featuresJson.isBlank()) return ImageProtocol.INLINE_IMAGE;
-
-        Object raw;
-        try {
-            Map<String, Object> features = JSON.readValue(featuresJson,
-                    new TypeReference<Map<String, Object>>() {});
-            raw = features.get("imageProtocol");
-            if (raw == null) raw = features.get("image_protocol");
-        } catch (Exception e) {
-            log.warn("features JSON 解析失败，图片出站协议回落 inline-image: {}", e.getMessage());
-            return ImageProtocol.INLINE_IMAGE;
+    static ImageChannel parseChannel(String channelColumn, String capabilityType) {
+        if (channelColumn != null && !channelColumn.isBlank()) {
+            ImageChannel parsed = ImageChannel.fromWire(channelColumn);
+            if (parsed != null) return parsed;
+            ImageChannel fallback = ImageChannel.defaultFor(capabilityType);
+            log.warn("channel 取值不认识，回落 {}（该行解析/出站形态可能与配置意图不符）: {}",
+                    fallback.wireValue(), channelColumn);
+            return fallback;
         }
-
-        if (raw == null) return ImageProtocol.INLINE_IMAGE; // 没配 = 缺省，不吵
-
-        ImageProtocol parsed = ImageProtocol.fromWire(raw instanceof String s ? s : null);
-        if (parsed == null) {
-            log.warn("image_protocol 取值不认识，回落 inline-image（该行出站形态可能与上游不符）: {}",
-                    raw);
-            return ImageProtocol.INLINE_IMAGE;
-        }
-        return parsed;
+        return ImageChannel.defaultFor(capabilityType);
     }
 
     /**

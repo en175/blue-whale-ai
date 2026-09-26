@@ -22,6 +22,26 @@ import {
 const USER_ID = "42";
 const PROJECT_ID = "1";
 const MODEL_ID = "doubao-seedance-2-0-260128";
+const IMAGE_MODEL_ID = "doubao-seedream-5-0-pro-260628";
+
+/** 图片请求体：参考图是**定价维度**（Pro 首张免费、第 2 张起 0.02 元/张）。
+ *  ⚠️ 图片的参考图落在 `input.input_asset_ids`，报价侧必须按同一媒介分支投影进去 ——
+ *  这里就是钉那条投影的（把它改回 `referenceAssetIds: []`，下面那条断言立刻红）。 */
+const IMAGE_BODY = {
+  type: "image",
+  expected_output_count: 1,
+  references: [
+    { role: "reference", type: "image", asset_id: "1" },
+    { role: "reference", type: "image", asset_id: "2" },
+    { role: "reference", type: "image", asset_id: "3" },
+  ],
+  parameters: {
+    prompt: "把这三张融合成一张",
+    model_id: IMAGE_MODEL_ID,
+    size: "1k",
+    aspect_ratio: "1:1",
+  },
+};
 
 /** 视频请求体：创建与报价**同一份**（面板也是同一份），两边必须因此得出同一个规格。 */
 const VIDEO_BODY = {
@@ -58,7 +78,10 @@ const logger = { warn: vi.fn() };
 function modelWhitelist() {
   return vi
     .fn()
-    .mockResolvedValue([{ model_id: MODEL_ID, features: { audio: true } }]);
+    .mockResolvedValue([
+      { model_id: MODEL_ID, features: { audio: true } },
+      { model_id: IMAGE_MODEL_ID, features: { image_reference_max: 10 } },
+    ]);
 }
 
 const ownedProject = () =>
@@ -173,6 +196,27 @@ describe("handleQuoteGenerationJob", () => {
     // 回给前端的只有**一个整数积分**（不返折扣系数、不返明细）
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ credits: 42 });
+  });
+
+  it("★ 图片参考图进报价规格 —— 参考图是定价维度，漏了预览就比实扣低", async () => {
+    // 这一条钉的是**报价侧**的投影（`projectQuoteInput`）。它原先写死
+    // `referenceAssetIds: []`，那时参考图还不计价；现在 Pro 按张收（首张免费、
+    // 第 2 张起 0.02 元），写死就等于预览少算 2 × 0.02 元。
+    // ⚠️ 图片的参考落 `input.input_asset_ids`，视频/音频落 `input.references` ——
+    //    报价必须走与建任务**同一个** `resolveReferenceAssets`，而不是自己数一遍。
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      IMAGE_BODY,
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    expect(result.code).toBe(200);
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    // 3 张参考 —— 预扣侧读的也是这个规格键（`UsageDim.REFERENCE_COUNT` 的契约量来源）
+    expect(quoteArg.specs.reference_count).toBe("3");
+    expect(quoteArg.taskType).toBe("image");
   });
 
   it("★ 算不出价（UNPRICEABLE 定价漏配）→ credits: null，不报错、不阻断", async () => {

@@ -5,6 +5,7 @@
 - **决策者**：lixq
 - **取代**：[ADR-0062](0062-new-api-account-center-and-quota-billing.md) 中「new-api 是我们的账户中心」的全部条款（new-api 不再是用户体系提供方，也不再是计费权威）。ADR-0062 关于**凭证分层**（HttpOnly 会话 cookie + BFF 回注，浏览器不碰上游 key）的条款继续有效。
 - **修订**：[CLAUDE.md](../../CLAUDE.md) 红线 #10「产品实现技术栈」——为 billing-svc 增加 Java 例外（见决策 6）
+- **修订（2026-09-25）**：决策 3 里「定价规则住在定价目录」那一半，由**决策 9** 修正 —— 定价与像素表搬进模型能力行，结算改认预留行的规则快照。目录退化为全局配置容器。
 - **关联**：[ADR-0021](0021-unified-rmb-billing.md)、[ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md)、[ADR-0084](0084-generation-worker-java-runtime.md)（Java 运行时先例与治理形态）
 
 ## 背景
@@ -123,6 +124,41 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
 而这两条是**同步流式**请求，没有 job 行。硬搬进去不是搬移，是塞一个异物；
 真要剥离，落点是单独一个 model-gateway 服务。
 
+### 9. 定价与像素表的归属：按「用它的那一刻谁在场」决定
+
+**本决策修正决策 3 的一半**：模型的计价规则原先住在定价目录（billing 的库），
+现搬到**模型能力行**；视频的输出像素表也一样。
+
+- **计价规则** → `generation_model_capability.pricing`（JSON，形态与目录里 `models.<id>.<type>` 那条逐字相同）
+- **输出像素表** → `features.video_dimensions`（键格式与目录里 `tokenEstimate.dimensions` 逐字相同）
+
+判据不是「看起来像不像配置」，而是**谁在用它的那一刻在场**：
+
+| 数据 | 什么时候用 | 那一刻谁在场 | 于是放哪 |
+| --- | --- | --- | --- |
+| 输出像素（估 token） | **预扣** | backend（Hold 由它发起） | 能力行：按规格查表，把宽高冻成 `output_width` / `output_height` 两个标量随 Hold 带走 |
+| 单价 | **预扣 + 结算** | 预扣时 backend；**结算时只有 billing**（MQ 事件驱动，见决策 3） | 住在能力行，**随 Hold 冻进预留行**，结算用那一份 |
+
+结算那一刻 backend 不在链路里（`JobEventConsumer → settlement.settle`），而 billing 读不到
+`blue_whale`（决策 4 不为它开口子）。所以单价必须**在 Hold 时随请求送过去**：
+proto 新增 `HoldRequest.rule_snapshot` 与 `QuoteRequest.rule_snapshot`（都是必填），
+billing 编译后连同 `discount_bp` 一起冻进 `billing_cost_reservations`。
+**结算只认预留行的快照，不回读目录** ——「改价不影响已提交任务」因此比原先更直接：
+不再依赖「retired 版本的目录行必须仍可读」这条不变量。
+
+**目录随之退化为全局配置容器**：只剩 `creditsPerYuan`（充值换算率）与 `discountPolicy`
+（折扣叠加方式与底线）。两者**仍然版本化** —— 折扣参与计价，结算仍按冻结版本复现。
+
+**一处必须成对**：单价既然有「能力行那一份」与「预留行快照那一份」，写侧闸门就不止一道 ——
+`constants.ts` 的 `pricingFieldErr`（结构）与 billing 的 `CatalogCompiler.compileRuleSnapshot`（语义）
+都要在。两者拦的不是同一件事：前者拦「脏配置存不进去」，后者拦「脏配置已经在库里了」。
+
+**管理端随之收敛**：模型列表的编辑弹窗分 tab（基础 / 尺寸与素材 / 定价 / 高级），成为
+**单个模型**的唯一配置入口 —— 能力、像素、定价**一次 `PUT` 提交，天然原子**，
+不再有「写两个存储、可能半失败」的问题；「模型计费」页删除，`creditsPerYuan` 与
+`discountPolicy` 移入「系统管理 → 计费」。
+
+
 ## 被否决的方案
 
 - **继续转发 new-api**：它独立那天所有人一起登不上，且我们无法自己扣费。这不是取舍，是把风险留给一个不由我们决定的日子。
@@ -131,10 +167,18 @@ new-api 从「我们的用户体系 + 计费平台」变成「带一把统一调
 - **影子模式（双写对账表）**：需要额外的 `billing_shadow_entries` 表与开关，而「对比上游扣费记录」用 `/api/log/self` 直接查即可，不必在库里再养一份副本。已整刀回滚。
 - **登录保留 new-api 转发、只切计费**：用户体系是「用户不能丢」那条硬目标本身，砍掉它等于只完成一半。
 
+- **过渡期双轨：快照为空时回落到目录读规则**（初版实现留过这条，已删）。否决理由：
+  这套 billing **从未部署到测试站或生产**；目录里那 13 条规则对应的能力行**全部**已有 `pricing`；
+  仅有的十几条「没快照」的预留是本地测试数据。**留一个没有保护对象的兼容分支就是留屎山。**
+  删掉之后，预留行没有快照 = **算不出价、拒绝并重投**（fail-closed：吵，但不静默）。
+
 ## 后果
 
 - 正向：两个硬目标都可在切换日自动达成；new-api 的独立时间点从「我们的风险」变成「我们的事件」。
 - 成本：一次跨越 TS/Java 两栈、四个服务的迁移；契约先行带来的前期冻结成本；过渡期 per-user 数据不可用的产品缺口。
+- 归属变化（决策 9）：模型的计价规则与输出像素表从 billing 的定价目录搬进 backend 的能力行，
+  管理端收敛为「模型列表配单个模型、系统管理配全局两项」。已知代价：
+  定价的**编辑面**不再有「全站横向对比」视图（原先的「模型计费」页），调一批模型的价要逐个进弹窗。
 - 已知风险（本 ADR 不解决，均已登记）：
   1. **存量管理员角色 ETL 未做** —— new-api 的 admin 迁到 `identity_user_roles` 的步骤还没写进 runbook，漏做会导致切换后无人能进管理端。
   2. **worker 侧 usage 上报为空** —— 目前终态事件带空用量，billing 按预扣额结算；对 `partially_succeeded` 而言这条兜底偏平台（billing 侧打 WARN，见 `SettlementService`）。

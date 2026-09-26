@@ -24,6 +24,8 @@ export interface BillingQuoteContext {
   modelId: string;
   taskType: string;
   input: Record<string, unknown>;
+  /** 能力行的 `pricing` 快照（JSON 文本）。缺省 = 不传，billing 回落目录那份。 */
+  ruleSnapshot?: string;
 }
 
 export interface BillingQuoteDeps {
@@ -56,8 +58,9 @@ export function createBillingQuote(deps: BillingQuoteDeps): BillingQuote {
         userId: Number(ctx.userId),
         modelId: ctx.modelId,
         taskType: ctx.taskType,
-        specs: extractSpecs(ctx.input),
+        specs: extractSpecs(ctx.input, ctx.taskType),
         tier,
+        ...(ctx.ruleSnapshot !== undefined ? { ruleSnapshot: ctx.ruleSnapshot } : {}),
       });
     } catch (error) {
       // 算不出价多半是**定价漏配**（契约：INVALID_ARGUMENT / UNPRICEABLE），

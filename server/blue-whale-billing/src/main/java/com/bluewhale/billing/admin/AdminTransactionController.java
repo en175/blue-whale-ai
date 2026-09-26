@@ -37,14 +37,19 @@ import java.util.List;
  *
  * <h2>不过滤 userId 的代价</h2>
  *
- * <p>⚠️ 三个来源里 **`billing_cost_reservations` 没有 user_id 索引**
- * （只有 `uk_reservation__job` 与 `idx_reservation__status`），所以**那一支现在就是全表扫**——
+ * <p>⚠️ 三个来源里 **`billing_cost_reservations` 的 user_id 侧原先没有索引**
+ * （只有 `uk_reservation__job` 与 `idx_reservation__status`），所以**那一支就是全表扫**——
  * 这是用户面已经付着的成本，不是这次新加的。
+ * <b>V7 迁移已补上 `idx_reservation__user_time(user_id, gmt_create)`（与账本表同形），
+ * 带 userId 时这一支不再扫全表</b>（1 万行实测：扫 10000 行 → 20 行）。
  *
- * <p>新加的成本只在**不过滤 userId** 时出现：批次表（`idx_lots__user_expiry`）与账本表
- * （`idx_ledger__user_time`）这两支会因为丢了 user_id 前缀而改成全表扫，再对整个 UNION
- * 做排序取前 N 行。管理端是低频人工查询、且 LIMIT 很小，这个量级可以接受；
- * 要真正优化得先给预留表补 user_id 索引，那是另一次迁移。
+ * <p>新加的成本只在**不过滤 userId** 时出现：三支都丢了 user_id 前缀——
+ * 预留表与批次表（`idx_lots__user_expiry`）、账本表（`idx_ledger__user_time`）一样改成范围更宽的扫，
+ * 再对整个 UNION 做排序取前 N 行。管理端是低频人工查询、且 LIMIT 很小，这个量级可以接受。
+ *
+ * <p>⚠️ <b>V7 那条索引救不了「不过滤 userId」</b>，别指望它：UNION 的每一支都**没有自己的
+ * LIMIT**（ORDER BY / LIMIT 落在外层），必须把全部匹配行交出来物化，索引只能把「扫全表」
+ * 变成「扫全索引」。要真正优化这一支得改查询形态（例如按时间窗口分片），不在本次范围。
  *
  * <p>⚠️ <b>本接口没有鉴权</b>，与 billing 的其它管理面接口相同：它由 backend 经
  * {@code BILLING_ADMIN_URL} 调用，那个端口只在内网、不对公网开放。
@@ -145,6 +150,9 @@ public class AdminTransactionController {
                 view.direction(),
                 view.title(),
                 view.amount(),
+                // 只有消费行有预扣额；发放 / 账本行没有这回事，为 null。
+                // ⚠️ 不用 0 兜底：0 是「冻了 0 分」，与「没有这个概念」是两回事
+                view.reservedCredits(),
                 view.status(),
                 RFC3339.format(view.createdAt().atZone(DbTime.ZONE)),
                 // 契约口径：仅 done 时非空，未结算没有「结算时刻」这回事
@@ -158,10 +166,16 @@ public class AdminTransactionController {
      * @param userId    归属用户。**这一列是管理面独有的**：契约的 {@code UserTransaction}
      *                  没有它（用户只看自己那份，带了也是冗余）
      * @param amount    整数积分，该行**唯一的金额**（语义随 status：pending = 预计消耗，done = 实际消耗）
+     * @param reservedCredits 该行预留当初冻了多少（整数积分）；**只有消费行有值**，
+     *                  其余行为 {@code null}。它答的是「为什么余额先降后回」——
+     *                  结算后 amount 换成实际值，预扣额就只剩这里能读。
+     *                  **与用户面无关**：{@code UserTransaction} 里没有它，
+     *                  gRPC 适配器不投影，用户界面仍然只出现一个金额
      * @param settledAt RFC3339；未结算为空串
      */
     public record Item(String id, long userId, String type, String direction, String title,
-                       long amount, String status, String createdAt, String settledAt) {}
+                       long amount, Long reservedCredits, String status,
+                       String createdAt, String settledAt) {}
 
     /** @param nextPageToken 空 = 没有下一页 */
     public record Page(List<Item> items, String nextPageToken) {}

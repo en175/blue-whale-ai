@@ -58,13 +58,15 @@ class AudioJobProcessorTextAttachmentTest {
     /** 走通成功路径：generate 返回 data → TOS 转存 → createAsset → completeJob。 */
     private void stubSuccessPath() {
         when(credentialService.open("v1.aaa.bbb.ccc")).thenReturn("sk-token");
+        // 时长给一个真实值：它同时决定 assets.duration_ms 与结算的 usage.seconds
+        // （官方按输出时长计费，精确至秒）——12.4s → 12 秒
         when(audioClient.generate(anyString(), anyString(), anyString(), any()))
                 .thenReturn(new NewApiAudioClient.AudioResult(
-                        new byte[]{1, 2, 3}, null, "audio/mpeg", null, "req-1"));
+                        new byte[]{1, 2, 3}, null, "audio/mpeg", 12.4, "req-1"));
         when(tosService.uploadBytes(any(), eq("audio/mpeg")))
                 .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.createAsset(any())).thenReturn("a1");
-        when(stateMachine.completeJob(eq("100"), anyList(), anyString(), anyLong()))
+        when(stateMachine.completeJob(eq("100"), anyList(), anyString(), anyLong(), any()))
                 .thenReturn(true);
     }
 
@@ -99,12 +101,18 @@ class AudioJobProcessorTextAttachmentTest {
         // 正文不再由附件组合而来——供应商收到的就是冻结的 input.prompt
         verify(audioClient).generate(eq("sk-token"), eq("seed-audio-1.0"),
                 eq("生成环境音"), any());
-        verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L));
+        // ★ 第 5 个参数是产出音频的真实秒数（12.4s → 12）——它一路走到 billing 的
+        //   usage.seconds，是音频按秒计价的**唯一**数据来源。丢了它结算会被拒。
+        verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L), eq(12L));
         // IKGS73：md5 必须从 TOS 上传出口穿透到建资产入参
         ArgumentCaptor<JobStateMachineService.CreateAssetInput> assetCaptor =
                 ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
         verify(stateMachine).createAsset(assetCaptor.capture());
         assertThat(assetCaptor.getValue().md5()).isEqualTo("0123456789abcdef0123456789abcdef");
+        // ★ 同一个时长、两个落点：资产行记毫秒（12.4s → 12400），结算记整秒（→ 12）。
+        //   两处必须来自**同一次**上游返回值——各自算一遍，迟早分叉成
+        //   「资产说 12.4 秒、结算按 11 秒收钱」这种账面看不出原因的不一致。
+        assertThat(assetCaptor.getValue().durationMs()).isEqualTo(12_400);
     }
 
     @Test

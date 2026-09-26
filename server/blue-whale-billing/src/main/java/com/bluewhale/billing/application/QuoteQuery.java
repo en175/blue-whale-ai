@@ -21,6 +21,11 @@ import java.util.Map;
  * @param pricedAt ★ 计价时刻。**由调用方传**，不在内部取 now()——
  *                 营销活动按时间窗命中，影子对账时要用「当时」而不是「现在」，
  *                 否则一个已经结束的活动会让对账差异看起来像定价错误
+ * @param ruleSnapshot ★ 本条规则的**快照**（JSON 文本）。语义与
+ *                 {@link HoldCommand#ruleSnapshot()} 逐条相同：**必填**，
+ *                 空 = 拒单；带上了就必须编译得过。
+ *                 <p>⚠️ 预览必须与实扣取到**同一份**规则，否则就是
+ *                 「预览一个价、实扣另一个价」。
  */
 public record QuoteQuery(
         long userId,
@@ -29,12 +34,15 @@ public record QuoteQuery(
         Map<String, String> specs,
         String tier,
         Usage usage,
-        Instant pricedAt
+        Instant pricedAt,
+        String ruleSnapshot
 ) {
 
     public QuoteQuery {
         specs = specs == null ? Map.of() : Map.copyOf(specs);
         tier = tier == null || tier.isBlank() ? "free" : tier;
         usage = usage == null ? Usage.empty() : usage;
+        // 与 HoldCommand 同口径：只有一种「没带快照」的写法
+        ruleSnapshot = ruleSnapshot == null ? "" : ruleSnapshot;
     }
 }

@@ -24,11 +24,19 @@ import java.util.Map;
  * 本估算**只**用于提交时刻冻一个上限——两者混起来就是「预扣用什么、结算也用什么」，
  * 等于把估算误差变成真实收费误差（《计费逻辑详细设计》§4.5 计费准确四规则）。
  *
- * <h2>为什么公式在代码里、参数在目录里</h2>
+ * <h2>为什么公式在代码里、参数在规则里</h2>
  *
- * {@code divisor} / {@code fps} / 「档位 + 比例 → 宽高」三样都是**运营可能改的数**
- * （火山改口径、开新档位、调帧率），所以它们放在定价目录的 {@code tokenEstimate} 里，
- * 与目录一起版本化、一起回滚。本类只固定公式的**形状**，不含任何具体数值。
+ * {@code divisor} / {@code fps} / {@code minimumTokens} / 「输入时长的规格键」都是
+ * **运营可能改的数**（火山改口径、调帧率、补上输入时长那一项），所以它们放在规则的
+ * {@code tokenEstimate} 里（随规则快照冻进预留行）。本类只固定公式的**形状**，
+ * 不含任何具体数值。
+ *
+ * <p>⚠️ 而**输出宽高不在其中**：那是**模型的像素属性**，住在能力行的
+ * {@code features.video_dimensions} 里，由接纳侧按规格解析后冻成
+ * {@link #OUTPUT_WIDTH_KEY} / {@link #OUTPUT_HEIGHT_KEY} 两个标量随 Hold 过来。
+ * 像素是「这个模型长什么样」，帧率与除数是「我们怎么把它折算成钱」——两者不同类，
+ * 所以不放在同一处（对照图片侧：像素在能力行 {@code request_mapping.matrix}，
+ * 单价与公式参数在规则里）。
  *
  * <h2>⚠️ 已知偏差：带音频的任务会低估（**刻意接受，不补系数**）</h2>
  *
@@ -46,11 +54,11 @@ import java.util.Map;
  * 由平台先垫（账上记借应收，见 {@code CreditService.settle}）。**用户不会被多收**
  * ——结算按上游真值计价，多冻的退回、少冻的补收。这是「预扣估算、结算真实」这套分工
  * 本来就允许的偏差，而不是一个待修的 bug。要收窄它只有一个正路：
- * 等火山给出音频口径，再作为**目录参数**补进来（而不是在代码里加一个魔数）。
+ * 等火山给出音频口径，再作为**规则参数**补进来（而不是在代码里加一个魔数）。
  *
- * <p>⚠️ 目录里查不到「档位 + 比例」这一组合时返回 {@code null}（＝这次推不出），
- * **不降级为 0、也不兜一个别的档位**：按 0 计价只会冻到下限，差额由平台承担且账面无信号；
- * 兜一个别的档位是按另一个档位收钱。两者都比如实报告「取不到」更坏。
+ * <p>⚠️ 规格里取不到冻结的输出宽高时返回 {@code null}（＝这次推不出），
+ * **不降级为 0、也不兜一个别的尺寸**：按 0 计价只会冻到下限，差额由平台承担且账面无信号；
+ * 兜一个别的尺寸是按另一个档位收钱。两者都比如实报告「取不到」更坏。
  *
  * <h2>最低 token 用量（官方明文规则，本类实现）</h2>
  *
@@ -64,11 +72,11 @@ import java.util.Map;
  * <p><b>它是下限，不是单价</b>：不含视频输入（{@code video=0}）的任务**不受它影响**
  * （官方限定语是「当输入包含视频时」）。
  *
- * <p><b>表在目录里、机制在代码里</b>：官方那张「分辨率 × 宽高比 × 输出时长 → 最低用量」
- * 的表没有公开可抄的形态（原页只给了两张飞书表格链接），所以目录里留了
- * {@code tokenEstimate.minimumTokens} 这个配置位；**没配就不做下限**（老目录照旧跑）。
+ * <p><b>表在规则里、机制在代码里</b>：官方那张「分辨率 × 宽高比 × 输出时长 → 最低用量」
+ * 的表没有公开可抄的形态（原页只给了两张飞书表格链接），所以规则的 {@code tokenEstimate}
+ * 里留了 {@code minimumTokens} 这个配置位；**没配就不做下限**。
  * 配了之后**半配必拒**：某一格查不到就是「官方会按下限收、我们按估算收」的静默少冻，
- * 与尺寸表查不到同一立场（见 {@link #estimateVideoTokens}）。
+ * 与输出宽高取不到同一立场（见 {@link #estimateVideoTokens}）。
  */
 public final class TokenEstimator {
 
@@ -78,27 +86,6 @@ public final class TokenEstimator {
         public Dimensions {
             if (width <= 0 || height <= 0) {
                 throw new IllegalArgumentException("宽高必须为正：" + width + "x" + height);
-            }
-        }
-
-        /**
-         * 解析目录里的字面值，形如 {@code "1248x704"}。
-         *
-         * @throws IllegalArgumentException 格式不对——**加载期就该拒绝**，
-         *         不能等到某次预扣才发现（那时用户已经在等了）
-         */
-        public static Dimensions parse(String raw) {
-            if (raw == null) {
-                throw new IllegalArgumentException("宽高不能为空");
-            }
-            String[] parts = raw.trim().toLowerCase(java.util.Locale.ROOT).split("x");
-            if (parts.length != 2) {
-                throw new IllegalArgumentException("宽高要写成 宽x高（如 1248x704），实际：" + raw);
-            }
-            try {
-                return new Dimensions(Long.parseLong(parts[0].trim()), Long.parseLong(parts[1].trim()));
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("宽高不是整数：" + raw);
             }
         }
     }
@@ -121,10 +108,20 @@ public final class TokenEstimator {
     /** 含视频输入那一档的取值（另一档是 {@code "0"}）。 */
     static final String VIDEO_TIER_WITH = "1";
 
+    /**
+     * 输出宽 / 高：接纳侧按能力行的像素表解析后冻结进快照的**标量**规格键。
+     *
+     * <p>与 {@link #VIDEO_TIER_KEY} 同性质——**跨进程的规格契约**（TS 侧冻结、Java 侧读），
+     * 不是运营可调的数；能调的是那张「档位 + 比例 → 宽高」的表本身，它住在模型的
+     * {@code features.video_dimensions} 里。
+     */
+    static final String OUTPUT_WIDTH_KEY = "output_width";
+
+    /** 输出高，见 {@link #OUTPUT_WIDTH_KEY}。 */
+    static final String OUTPUT_HEIGHT_KEY = "output_height";
+
     private final long divisor;
     private final long fps;
-    /** 已规范化的「档位 + 比例」键 → 宽高（规范化见 {@link PricingKeys#normalizeKey}）。 */
-    private final Map<String, Dimensions> dimensions;
     /**
      * 输入视频时长（秒）在规格里的键；{@code null} = 公式**不含**输入时长那一项。
      */
@@ -135,29 +132,16 @@ public final class TokenEstimator {
      */
     private final Map<String, Long> minimumTokens;
 
-    public TokenEstimator(long divisor, long fps, Map<String, Dimensions> dimensions) {
-        this(divisor, fps, dimensions, null, Map.of());
-    }
-
-    public TokenEstimator(long divisor, long fps, Map<String, Dimensions> dimensions,
-                          String inputSecondsKey) {
-        this(divisor, fps, dimensions, inputSecondsKey, Map.of());
-    }
-
-    public TokenEstimator(long divisor, long fps, Map<String, Dimensions> dimensions,
-                          String inputSecondsKey, Map<String, Long> minimumTokens) {
+    public TokenEstimator(long divisor, long fps, String inputSecondsKey,
+                          Map<String, Long> minimumTokens) {
         if (divisor <= 0) {
             throw new IllegalArgumentException("divisor 必须为正：" + divisor);
         }
         if (fps <= 0) {
             throw new IllegalArgumentException("fps 必须为正：" + fps);
         }
-        if (dimensions == null || dimensions.isEmpty()) {
-            throw new IllegalArgumentException("tokenEstimate 的尺寸表不能为空");
-        }
         this.divisor = divisor;
         this.fps = fps;
-        this.dimensions = Map.copyOf(dimensions);
         this.inputSecondsKey =
                 inputSecondsKey == null || inputSecondsKey.isBlank() ? null : inputSecondsKey.trim();
         this.minimumTokens = minimumTokens == null ? Map.of() : Map.copyOf(minimumTokens);
@@ -169,11 +153,6 @@ public final class TokenEstimator {
                         "最低 token 用量必须为正：" + entry.getKey() + " → " + entry.getValue());
             }
         }
-    }
-
-    /** 目录里声明的尺寸表（键已规范化）；供管理端与测试查看，不参与计价。 */
-    public Map<String, Dimensions> dimensions() {
-        return dimensions;
     }
 
     public long divisor() {
@@ -189,7 +168,7 @@ public final class TokenEstimator {
         return inputSecondsKey;
     }
 
-    /** 目录里声明的最低 token 用量表（键已规范化）；供管理端与测试查看，不参与计价。 */
+    /** 规则里声明的最低 token 用量表（键已规范化）；供测试查看，不参与计价。 */
     public Map<String, Long> minimumTokens() {
         return minimumTokens;
     }
@@ -202,7 +181,7 @@ public final class TokenEstimator {
     /**
      * 本次规格对应的**最低 token 用量**（含视频输入时官方规定的下限）。
      *
-     * <p>键的语法与 {@code dimensions} / {@code basePrice.table} 完全同一套
+     * <p>键的语法与 {@code basePrice.table} 完全同一套
      * （如 {@code resolution=480p|aspect_ratio=16:9|duration=5}），查表走
      * {@link PricingKeys#normalizeSubset}「只按本表声明过的轴匹配」。
      *
@@ -219,12 +198,19 @@ public final class TokenEstimator {
     /**
      * 估算一次产出的 token 数。
      *
-     * @param specs         本次规格（含 {@code resolution} / {@code aspect_ratio} 等定价轴）
+     * @param specs         本次规格（含 {@code output_width} / {@code output_height} 等）
      * @param outputSeconds 产出时长（秒）；{@code null} / 非正 = 时长未知
      *                      （{@code duration=-1} 的自动时长就是这种），返回 {@code null}
      * @param segments      片段数（产出槽数）；{@code <= 0} 视为 1
-     * @return 估算 token；档位 + 比例在目录里没配、时长未知、**含视频输入却拿不到输入时长**、
-     *         或**配了最低用量表而这一格查不到** → {@code null}（＝这次推不出）
+     * @return 估算 token；时长未知、**规格里取不到冻结的输出宽高**、
+     *         **含视频输入却拿不到输入时长**、或**配了最低用量表而这一格查不到**
+     *         → {@code null}（＝这次推不出）
+     *
+     * <p>⚠️ <b>输出宽高只从规格里取，没有第二条来源</b>：它是模型的像素属性
+     * （能力行的 {@code features.video_dimensions}），由接纳侧按规格解析后冻成
+     * {@code output_width} / {@code output_height} 随 Hold 过来。取不到就是**推不出**，
+     * 返回 {@code null} 让调用方按「契约量取不到」处置（走上限冻结或拒绝），
+     * **不按 0 估、也不兜一个别的尺寸**——两者都会算出一个像那么回事的错数，而它是钱。
      *
      * <p>⚠️ <b>含视频输入时，输入时长取不到就如实返回「取不到」，不按 0 估</b>：
      * 这次任务的单价档白纸黑字写着「含视频输入」（{@code video=1}），
@@ -234,23 +220,22 @@ public final class TokenEstimator {
      *
      * <p>输入时长本身**不由本类计算**：它由规格提取侧折算成 {@link #inputSecondsKey()}
      * 指定的标量键冻结进快照（参考视频的时长在建任务时就写进 job input），
-     * 本类只负责把它加进公式——公式的形状在代码里，参数（含「要不要加这一项」）在目录里。
+     * 本类只负责把它加进公式——公式的形状在代码里，参数（含「要不要加这一项」）在规则里。
      *
      * <p>⚠️ <b>最低 token 用量（官方明文规则）在这里生效</b>：含视频输入（{@code video=1}）
-     * 且目录配了 {@code minimumTokens} 时，**逐段**取 {@code max(估算, 下限)} 再乘片段数
+     * 且规则配了 {@code minimumTokens} 时，**逐段**取 {@code max(估算, 下限)} 再乘片段数
      * ——下限是「一条视频」的口径（官方：与分辨率、宽高比、**输出时长**有关），
      * 而片段数是并行的多条视频，按下限整体封一次会让「3 段各 5 秒」只按一条的下限兜底。
      *
      * <p>配了表而这一格查不到 → 返回 {@code null}（＝推不出），**不当作没有下限**：
      * 官方在这档会按下限收、我们按估算收，少冻的那一截同样由平台垫且账面无信号。
-     * 与尺寸表、价格表查不到键同一个立场（漏配要吵，不要静默少收）。
+     * 与价格表查不到键同一个立场（漏配要吵，不要静默少收）。
      */
     public Long estimateVideoTokens(Map<String, String> specs, Long outputSeconds, long segments) {
         if (outputSeconds == null || outputSeconds <= 0) {
             return null;
         }
-        String key = PricingKeys.normalizeSubset(specs, dimensions.keySet());
-        Dimensions dims = dimensions.get(key);
+        Dimensions dims = dimensionsFromSpecs(specs);
         if (dims == null) {
             return null;
         }
@@ -274,9 +259,39 @@ public final class TokenEstimator {
         return perVideo * count;
     }
 
+    /**
+     * 从规格里取冻结的输出宽高；两个都取不到 / 有任何一个非法 → {@code null}（＝这次推不出）。
+     *
+     * <p>值由接纳侧按能力行的 {@code features.video_dimensions} 解析后冻进快照，
+     * 经 {@code extractSpecs} 变成字符串规格键过来（数字被 {@code String(value)} 串化）。
+     *
+     * <p>⚠️ <b>一个取到一个取不到时返回 null，不「凑」一个尺寸</b>：那种状态只在快照损坏
+     * 或版本不匹配时出现，随便取一个（比如复用另一个值）会算出一个看起来合理的错 token 数。
+     */
+    private static Dimensions dimensionsFromSpecs(Map<String, String> specs) {
+        Long width = positiveLongOf(specs.get(OUTPUT_WIDTH_KEY));
+        Long height = positiveLongOf(specs.get(OUTPUT_HEIGHT_KEY));
+        if (width == null || height == null) {
+            return null;
+        }
+        return new Dimensions(width, height);
+    }
+
+    /** 正整数解析；非数字 / 小数 / 非正 → {@code null}。 */
+    private static Long positiveLongOf(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            long value = new java.math.BigDecimal(raw.trim()).longValueExact();
+            return value <= 0 ? null : value;
+        } catch (NumberFormatException | ArithmeticException e) {
+            return null;
+        }
+    }
+
     /** 本次是否含视频输入（规格契约键，见 {@link #VIDEO_TIER_KEY}）。 */
-    private static boolean isVideoInput(Map<String, String> specs) {
-        return VIDEO_TIER_WITH.equalsIgnoreCase(specs.get(VIDEO_TIER_KEY));
+    private static boolean isVideoInput(Map<String, String> specs) {        return VIDEO_TIER_WITH.equalsIgnoreCase(specs.get(VIDEO_TIER_KEY));
     }
 
     /**
@@ -298,51 +313,21 @@ public final class TokenEstimator {
     }
 
     /**
-     * 编译期构造：把目录里的字面尺寸表（{@code "resolution=480p|aspect_ratio=16:9" → "864x480"}）
-     * 规范化并解析成运行时形态。
+     * 编译期构造：把规则里的参数规范化成运行时形态。
      *
-     * <p>键用 {@link PricingKeys#normalizeKey} 重新拼装，与 {@code basePrice.table} 完全同一套写法
-     * ——运营不必记两套键语法，运行时也只做等值查找。
+     * <p>目前只规范化最低用量表的键（{@link PricingKeys#normalizeKey} 重拼，与
+     * {@code basePrice.table} 完全同一套写法——运营不必记两套键语法，运行时也只做等值查找），
+     * 并查出等价键。
      *
-     * @throws IllegalArgumentException 键不规范、值不是宽x高、或两个键规范化后等价
-     */
-    public static TokenEstimator from(
-            long divisor, long fps, Map<String, String> rawDimensions) {
-        return from(divisor, fps, rawDimensions, null, null);
-    }
-
-    /**
-     * 编译期构造（含输入时长那一项的配置）。
-     *
-     * @param inputSecondsKey 输入视频时长的规格键；{@code null} / 空白 = 公式不含输入时长项
-     *                        （此时含视频输入的任务预扣偏低，缺口上界 = 输入时长那一项）
-     */
-    public static TokenEstimator from(
-            long divisor, long fps, Map<String, String> rawDimensions, String inputSecondsKey) {
-        return from(divisor, fps, rawDimensions, inputSecondsKey, null);
-    }
-
-    /**
-     * 编译期构造（含输入时长项与最低 token 用量表）。
-     *
+     * @param inputSecondsKey  输入视频时长的规格键；{@code null} / 空白 = 公式不含输入时长项
+     *                         （此时含视频输入的任务预扣偏低，缺口上界 = 输入时长那一项）
      * @param rawMinimumTokens 「分辨率 + 宽高比 + 输出时长 → 最低 token 用量」的原始键值表；
      *                         {@code null} / 空 = 本规则不做下限（官方表没有公开可抄的形态）
      * @throws IllegalArgumentException 最低用量表的键不规范、出现等价键、或值不是正整数
      */
     public static TokenEstimator from(
-            long divisor, long fps, Map<String, String> rawDimensions, String inputSecondsKey,
+            long divisor, long fps, String inputSecondsKey,
             Map<String, Long> rawMinimumTokens) {
-        Map<String, Dimensions> normalized = new LinkedHashMap<>();
-        Map<String, String> originals = new LinkedHashMap<>();
-        for (var entry : rawDimensions.entrySet()) {
-            String canonical = PricingKeys.normalizeKey(entry.getKey());
-            String previous = originals.putIfAbsent(canonical, entry.getKey());
-            if (previous != null) {
-                throw new IllegalArgumentException("尺寸表存在等价键：" + previous + " 与 " + entry.getKey()
-                        + " 规范化后都是 " + canonical + " —— 请删掉一个");
-            }
-            normalized.put(canonical, Dimensions.parse(entry.getValue()));
-        }
         Map<String, Long> floors = new LinkedHashMap<>();
         Map<String, String> floorOriginals = new LinkedHashMap<>();
         if (rawMinimumTokens != null) {
@@ -357,6 +342,6 @@ public final class TokenEstimator {
                 floors.put(canonical, entry.getValue());
             }
         }
-        return new TokenEstimator(divisor, fps, normalized, inputSecondsKey, floors);
+        return new TokenEstimator(divisor, fps, inputSecondsKey, floors);
     }
 }

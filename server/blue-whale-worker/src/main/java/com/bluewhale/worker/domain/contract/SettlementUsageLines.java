@@ -40,12 +40,16 @@ import java.util.Set;
  * billing 对「没报这个维度」和「这个维度是 0」都取 0 参与运算，两者在引擎里没有区别，
  * 但账面上能看出我们到底知不知道这个量。所以「填 0」只留给上面那两个真的算得出来的维度。
  *
- * <p>⚠️ {@code usage.seconds} **暂不上报**：终态事件的载荷（{@code status_changed} 的
- * payload）是全家族共用的，今天没有任何一条路径把上游返回的时长放进去——视频/音频
- * processor 手上有那个数，但它写在 assets 行上。要报它得先给 8 条 publish 路径的载荷
- * 加一个时长键，那是另一单的事。**在此之前，目录里若真有规则以 {@code usage.seconds}
- * 为基准维度，billing 会拒绝计价并亮红灯**（见 {@code SettlementService} 的基准维度守卫），
- * 不会静默按 0 收——漏配要吵，不要悄悄少收。
+ * <h2>为什么不从 job 行反查、而要调用方显式传</h2>
+ *
+ * 时长（{@link #SECONDS}）这件事**与 token 同构**：它只有执行期才存在，落点是 assets 行，
+ * 而本类是静态的、不读库。调用方（processor）手上有那个数，就由它传——「谁知道谁报」，
+ * 与本仓 {@code SettlementUsageLines} 只做「把量说清楚」的分工一致。
+ *
+ * <p>⚠️ 按秒计价的规则**必须**收到 {@link #SECONDS}：{@code SettlementService} 有一条
+ * 基准维度守卫，没报就是拒绝计价（抛出去 → MQ 重投 → 死信 → 红灯），**不会静默按 0 收**。
+ * 所以调用方传 {@code null} 不是「无所谓」，而是「这次不按秒计价」的声明——
+ * 音频传不出时长时宁可让它吵，也不要少收。
  */
 public final class SettlementUsageLines {
 
@@ -88,16 +92,52 @@ public final class SettlementUsageLines {
     public static final String COMPLETION_TOKENS = "usage.c";
 
     /**
-     * 参考素材数取自 job input 快照里的**这一个数组**，不取别的。
+     * 输出时长（秒）—— 音频生成按它计价（{@code UsageDim.SECONDS}，字面键逐字一致）。
      *
-     * <p>⚠️ 口径必须与预扣侧**逐条相同**：{@code billing-specs.ts} 的 {@code extractSpecs}
-     * 只把 {@code input.references} 的长度折算成 {@code reference_count}，
-     * 旧分字段路径（视频的 {@code reference_asset_ids} / {@code reference_materials} /
-     * 首尾帧字段、图片的 {@code input_asset_ids}）**不计入**。
-     * 这边若统计得更宽（例如把 {@code input_asset_ids} 也算上），就会
-     * 「预扣按 2 个参考加价、结算按 5 个收回」——比不加价更糟。
+     * <p><b>报的是上游返回的真值</b>：火山官方对音频生成（Seed Audio）的口径是
+     * 「按模型原始输出时长计费、精确至秒折算」，所以我们按秒收就必须用**产出音频的真实时长**，
+     * 而不是请求里猜的那个。{@code usage.proto} 把「上游返回的 usage」定为权威，
+     * 音频这条路径上「上游返回的 duration」就是那个权威值——它是**产物本身的属性**，
+     * 与 video 那侧上游返回的 token 同一个性质。
+     *
+     * <p>⚠️ 火山对 Seed Audio 1.0 单次输出的上限是 **2 分钟**，这个数在**预扣**侧被用来
+     * 定上限冻结（规则的 {@code maxCredits}），结算侧按真实秒数收——两边口径见
+     * {@code PricingTab} 的按秒计价说明。
+     *
+     * <p>取不到时**整个维度不出现**，不填 0：billing 的基准维度守卫会把「按秒计价却没报秒」
+     * 判成拒绝计价（死信 + 红灯），而填 0 会被它当成「报过、且真的是 0 秒」——
+     * 那就是一次白送，且账面无信号。
+     */
+    public static final String SECONDS = "usage.seconds";
+
+    /**
+     * 参考素材列表取自 job input 快照，**取哪个键按媒介** —— 这就是「参考数」的唯一口径。
+     *
+     * <h2>为什么图片与视频取的不是同一个键</h2>
+     *
+     * 建任务时两条路各写各的（{@code handle-create-generation-job.ts}）：
+     * <ul>
+     *   <li><b>图片</b>：合并去重后的参考图落 {@code input.input_asset_ids}，**从不写**
+     *       {@code input.references}（{@code imageStrategy.composeInput}：「image 参考图统一落
+     *       input_asset_ids」）。执行期的 {@code ImageJobProcessor} 读的也正是这个键。</li>
+     *   <li><b>视频 / 音频</b>：落 {@code input.references}（单数组契约，保序）。</li>
+     * </ul>
+     * 所以在改造前，图片单的 {@code referenceCount} 恒为 **0** —— 不是「没有参考」，
+     * 是**取错了键**。而 Seedream 5.0 Pro 的参考图要按张收费（首张免费、第 2 张起 0.02 元），
+     * 那个 0 会让加价永远不生效。
+     *
+     * <p>⚠️ 口径必须与预扣侧（{@code billing-specs.ts} 的 {@code referenceList}）**逐条相同**：
+     * 同一个媒介分支、同一个键。两边漂一点就是「预扣按 2 张冻、结算按 5 张收」——比不加价更糟。
+     *
+     * <p>⚠️ **视频/音频刻意保持只认 {@code references}**：它们走旧分字段路径
+     * （{@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段）时那个数组
+     * 整键缺失，今天算 0；现在放开会把老客户端的单子突然算上参考费。图片**只有**这一个键，
+     * 不存在「新老两条路」的问题，所以只改图片。
      */
     private static final String REFERENCES_KEY = "references";
+
+    /** 图片的参考图键（与 {@code references} 并列的另一种存在形式，见 {@link #REFERENCES_KEY}）。 */
+    private static final String IMAGE_REFERENCES_KEY = "input_asset_ids";
 
     /**
      * 内容字段 —— **不是定价维度，不进规格**。
@@ -105,7 +145,7 @@ public final class SettlementUsageLines {
      * <p>与 {@code backend/libs/shared/billing/billing-specs.ts} 的 {@code CONTENT_FIELDS}
      * 逐字一致（那边是 Hold / Quote 侧唯一的实现）。
      */
-    private static final Set<String> CONTENT_FIELDS = Set.of("prompt", "title");
+    private static final Set<String> CONTENT_FIELDS = Set.of("prompt", "title", "provider_credential");
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -124,11 +164,14 @@ public final class SettlementUsageLines {
      *                       见 {@code JobSettlementPublisher#succeededSlots}）
      * @param upstreamTotalTokens 上游返回的真实 token 数；{@code null} = 这次没有可用值
      *                       （非视频任务、上游没报、或响应里取不到）——此时**不报**该维度
+     * @param upstreamSeconds 产出音频的真实时长（**整秒**，取自上游返回的 {@code duration}）；
+     *                       {@code null} = 这次没有可用值——此时**不报**该维度，
+     *                       按秒计价的规则会因此被 billing 拒绝计价（吵出来，不少收）
      * @return 一条用量行；**空列表 = 报不出**（job 的 input 里没有 model_id）——
      *         这不是「没有用量」，billing 会退回按预扣额结算，所以调用方要打 WARN
      */
     public static List<Map<String, Object>> forJob(GenerationJobEntity job, int succeededSlots,
-                                                   Long upstreamTotalTokens) {
+                                                   Long upstreamTotalTokens, Long upstreamSeconds) {
         Map<String, Object> input = parseObject(job.getInput());
         String modelId = input.get("model_id") instanceof String s && !s.isBlank() ? s : null;
         if (modelId == null || job.getType() == null || job.getType().isBlank()) {
@@ -137,11 +180,16 @@ public final class SettlementUsageLines {
         Map<String, Object> quantities = new LinkedHashMap<>();
         quantities.put(SUCCEEDED_SLOTS, succeededSlots);
         // 参考素材数：预扣时按它加过价，结算必须报出来，否则那笔加价会被全额退回
-        // （缺维度 ⇒ 倍率恒 ×1.0，见 REFERENCE_COUNT 的注释）
-        quantities.put(REFERENCE_COUNT, referenceCount(input));
+        // （缺维度 ⇒ 倍率恒 ×1.0；Seedream 5.0 Pro 的按张加价同理会不生效）
+        quantities.put(REFERENCE_COUNT, referenceCount(input, job.getType()));
         // 上游真实 token（视频按 token 计价）：有才报。缺它就是「按预扣额结算」那条路。
         if (upstreamTotalTokens != null && upstreamTotalTokens > 0) {
             quantities.put(COMPLETION_TOKENS, upstreamTotalTokens);
+        }
+        // 产出音频的真实时长（音频按秒计价）：有才报。与 token 同一条纪律——
+        // 缺维度时 billing 的基准维度守卫直接拒绝计价，而不是按 0 秒白送。
+        if (upstreamSeconds != null && upstreamSeconds > 0) {
+            quantities.put(SECONDS, upstreamSeconds);
         }
 
         Map<String, Object> line = new LinkedHashMap<>();
@@ -153,19 +201,28 @@ public final class SettlementUsageLines {
     }
 
     /**
-     * 参考素材数 = job input 快照里 {@code references} 数组的**长度**；没有这个键就是 0。
+     * 参考素材数 = {@link #referenceList} 的长度。数组缺失与空数组都给 0，
+     * 这与预扣侧一致（{@code references: []} 折算出的 {@code reference_count} 也是 {@code "0"}），
+     * 也与 {@code UsageDim.quantityOf}「取不到 = 0」一致——三处对齐，倍率都取 ×1.0。
      *
-     * <p>取值口径与预扣侧**同源**：{@code billing-specs.ts} 的 {@code extractSpecs} 也是
-     * 「{@code Array.isArray(input.references) ? length : 0}」——同一个键、同一个长度、
-     * 同一份 job input 快照（那张快照就是建任务时喂给 Hold 的同一个对象）。
-     * 所以两侧拿到的是同一个数：{@link #REFERENCES_KEY} 的注释说明了为什么**只**认这一个数组。
-     *
-     * <p>数组缺失与空数组都给 0，这与预扣侧一致（{@code references: []} 折算出的
-     * {@code reference_count} 也是 {@code "0"}），也与 {@code UsageDim.quantityOf}
-     * 「取不到 = 0」一致——三处对齐，倍率都取 ×1.0。
+     * <p>⚠️ 报告的是 {@code usage.referenceCount} 这个 **quantity**（结算侧），
+     * 它与预扣侧读的规格键 {@code reference_count} 是**两条路**（见 {@code UsageDim#REFERENCE_COUNT}
+     * 的 contractSource）。两条路取到同一个数，靠的是这里与 {@code billing-specs.ts}
+     * 的 {@link #referenceList} 同口径 —— 那是本类唯一的跨进程不变量来源，改一处必须改两处。
      */
-    private static int referenceCount(Map<String, Object> input) {
-        return input.get(REFERENCES_KEY) instanceof List<?> references ? references.size() : 0;
+    private static int referenceCount(Map<String, Object> input, String type) {
+        return referenceList(input, type).size();
+    }
+
+    /**
+     * 本次生成的参考素材列表 —— 取哪个键**按媒介**（口径与 {@code billing-specs.ts}
+     * 的 {@code referenceList} 逐条相同，理由见 {@link #REFERENCES_KEY}）。
+     */
+    private static List<?> referenceList(Map<String, Object> input, String type) {
+        if ("image".equals(type) && input.get(IMAGE_REFERENCES_KEY) instanceof List<?> ids) {
+            return ids;
+        }
+        return input.get(REFERENCES_KEY) instanceof List<?> references ? references : List.of();
     }
 
     /**

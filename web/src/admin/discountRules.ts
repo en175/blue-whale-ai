@@ -172,8 +172,8 @@ export function shortDateTime(value: string | null): string {
 /**
  * 折扣叠加方式的说明。
  *
- * <p>它是**目录级配置**（在「模型计费」页改），但会直接改变这里配的活动能落到什么价，
- * 所以两个折扣页都要只读地把它摆出来。
+ * <p>它是**目录级配置**（由定价目录承载，见 `lib/billing-catalog/catalogDraft.ts`），
+ * 但会直接改变这里配的活动能落到什么价，所以两个折扣页都要只读地把它摆出来。
  */
 export function describeStackMode(stackMode: string): string {
   if (stackMode === 'best') {

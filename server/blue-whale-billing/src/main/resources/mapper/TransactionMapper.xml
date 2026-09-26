@@ -23,6 +23,8 @@
      每个 job 恰好一条预留（uk_reservation__job 唯一）。状态与两个金额都在这里：
      held → pending（金额 = 预扣额，即用户提交时看到的「预计消耗」），
      settled → done（金额 = actual_credits，结算定下的**最终值**）。
+     ⚠️ 预扣额另出一列 `reserved_credits`（**管理面独用**）：结算后金额换成实际值，
+        「当初冻了多少」就只剩这一列能答——详见下面 ② 分支的注释。
 
   ③ 其余资金动作（in/out） ← billing_ledger_entries，一凭证一行
      过期核销、人工调账这类「不是发放也不是消费」的动作用它。
@@ -64,8 +66,8 @@
     ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
   -->
   <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.mapper.TransactionRow">
-    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.status,
-           t.created_at, t.settled_at, t.kind, t.src_id
+    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
+           t.status, t.created_at, t.settled_at, t.kind, t.src_id
     FROM (
 
       <!-- ① 发放 / 充值：批次表。金额是发放量，方向恒为 in，落地即完成。 -->
@@ -101,6 +103,10 @@
                ELSE '积分发放'
              END AS title,
              l.amount     AS amount,
+             <!-- 发放没有「预扣」这回事：钱是直接进来的，不存在先冻后结算。
+                  用 NULL 而不是 0 —— 0 是「冻了 0 分」，与「没有这个概念」是两回事，
+                  界面上后者不该显示任何预扣文案。 -->
+             NULL         AS reserved_credits,
              'done'       AS status,
              l.gmt_create AS created_at,
              l.gmt_create AS settled_at,
@@ -122,6 +128,14 @@
           settled → actual_credits  （最终值）
         两个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
 
+        reserved_credits 另出一列（**管理面独用**）：settled 之后 amount 已经换成实际值，
+        「当初冻了多少」就再也无处可读了 —— 而用户余额先降后回的差额恰恰要靠它解释
+        （实测：某任务冻 12、实扣 1，用户在流水里只看到 -1，那 11 的来回无人交代）。
+        一行的两列都在同一张表上，**不需要 join**：这一行的身份就是那条预留。
+        ⚠️ 用户面（gRPC ListTransactions）**不投影**这一列，见 BillingGrpcService
+           与 {@code TransactionView} 的说明——「用户界面永远只出现一个金额」不受影响。
+        held 行的这两个数是同一个值（amount 就是预扣额），由调用方决定要不要重复展示。
+
         released（任务失败全额返）刻意**不出行**：那次动作对用户资产的净变化是 0
         （借 frozen / 贷 wallet，钱原样回到可用），用户不该看到一行「消费 0」或
         「退还 40」——他从未被扣过。撤销的是一笔从未发生的消费，不是一笔收入。
@@ -132,6 +146,7 @@
              <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」 -->
              CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END AS title,
              CASE WHEN r.status = 'settled' THEN r.actual_credits ELSE r.reserved_credits END AS amount,
+             r.reserved_credits AS reserved_credits,
              CASE WHEN r.status = 'settled' THEN 'done' ELSE 'pending' END AS status,
              r.gmt_create AS created_at,
              CASE WHEN r.status = 'settled' THEN r.gmt_modified END AS settled_at,
@@ -172,6 +187,8 @@
                   THEN 'in' ELSE 'out' END AS direction,
              CASE e.biz_type WHEN 'expire' THEN '积分过期' ELSE '人工调账' END AS title,
              ABS(SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END)) AS amount,
+             <!-- 账本动作（过期核销 / 人工调账）不经预留，同样没有预扣 -->
+             NULL AS reserved_credits,
              'done' AS status,
              MIN(e.gmt_create) AS created_at,
              MIN(e.gmt_create) AS settled_at,

@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * {@code billing.v1.BillingService} 的**端到端**测试：真库 + 真 gRPC 端口 + 真 catalog 编译。
+ * {@code billing.v1.BillingService} 的**端到端**测试：真库 + 真 gRPC 端口 + 真规则编译。
  *
  * <p>从 stub 发请求、经传输层、到账本落库，整条链路只有网络栈是真的（本地回环）。
  * 之所以不 mock 任何一层：本切片的价值全在**接线**上——
@@ -51,14 +51,23 @@ class BillingGrpcIntegrationTest {
     private static final String MODEL = "seedance-2.5";
     private static final String TASK = "text2video";
 
-    /** 目录：单价 100000 mc → 出口四舍五入成 **100 积分**（mc 只在管线内部）。 */
+    /**
+     * 目录：只有换算率与折扣策略（**规则不在目录里**——它随每次请求送来）。
+     *
+     * <p>它仍然要发一份：Hold / Quote 的回包里带着 {@code catalog_version}。
+     */
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
-             "models":{"seedance-2.5":{"text2video":{
-               "baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
-               "unitDenominator":1,"minCredits":1}}},
              "discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}
             """;
+
+    /**
+     * 规则快照：单价 100000 mc → 出口四舍五入成 **100 积分**（mc 只在管线内部）。
+     *
+     * <p>形态就是 backend 能力行的 {@code pricing} 列——
+     * 每次 Hold / Quote 都随请求送来，没有它就算不出价。
+     */
+    private static final String DEFAULT_RULE = ruleSnapshot(100_000L);
 
     @Autowired private Server grpcServer;
     @Autowired private JdbcTemplate jdbc;
@@ -151,7 +160,9 @@ class BillingGrpcIntegrationTest {
     }
 
     @Test
-    void 未配规则的模型_映射成INVALID_ARGUMENT与UNPRICEABLE() {
+    void 未带规则快照的提交_映射成INVALID_ARGUMENT与UNPRICEABLE() {
+        // 规则住在能力行、billing 读不到那个库：没有快照就算不出价。
+        // 真实触发场景是「这个模型的能力行上还没配 pricing」——backend 于是没有快照可发。
         HoldRequest request = HoldRequest.newBuilder()
                 .setUserId(USER).setCommandId("cmd-4").setJobId(9_004L)
                 .setModelId("从未配置过的模型").setTaskType(TASK)
@@ -167,6 +178,10 @@ class BillingGrpcIntegrationTest {
                     assertThat(status.getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
                     assertThat(status.getDescription()).contains("UNPRICEABLE");
                 });
+
+        // 拒单要干净：一分钱没冻、也没有预留
+        assertThat(availableCredits()).isEqualTo(1_000);
+        assertThat(countReservations()).isZero();
     }
 
     @Test
@@ -207,6 +222,60 @@ class BillingGrpcIntegrationTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 规则快照（来自 backend 的能力行）：规则的**唯一**来源
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void 预扣_带规则快照时按快照计价_并把原文冻进预留行() {
+        // 默认规则是 100 积分；这次请求带来的快照写的是 300 积分
+        // （真实场景：能力行里那条规则与默认夹具不是同一个价）
+        HoldResponse response = stub.hold(holdWithSnapshot("cmd-snap", 9_007L, ruleSnapshot(300_000)));
+
+        assertThat(response.getReservedCredits()).isEqualTo(300);
+        // ★ 冻结的不只是算出来的价，还有**规则本身** —— 结算靠它复现（billing 再也读不到别的来源）
+        assertThat(ruleSnapshotOf(9_007L)).isEqualTo(ruleSnapshot(300_000));
+        assertThat(availableCredits()).isEqualTo(700);
+    }
+
+    @Test
+    void 预扣_规则快照编不过_映射成INVALID_ARGUMENT与UNPRICEABLE() {
+        // 缺 baseUnit：写侧闸门没拦住（或规则是被人直接改库改坏的），这里是最后一道
+        HoldRequest request = holdWithSnapshot("cmd-bad", 9_008L,
+                "{\"basePrice\":{\"kind\":\"const\",\"value\":100000}}");
+
+        assertThatThrownBy(() -> stub.hold(request))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> {
+                    Status status = ((StatusRuntimeException) thrown).getStatus();
+                    // ★ 拒绝提交（fail closed），**不是静默放过**：放过会让这次按另一个价成交，
+                    //   谁都看不出用的不是能力行里那条规则
+                    assertThat(status.getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
+                    assertThat(status.getDescription()).contains("UNPRICEABLE");
+                    assertThat(status.getDescription()).contains("baseUnit");
+                });
+
+        // 拒单要干净：一分钱没冻、也没有预留
+        assertThat(availableCredits()).isEqualTo(1_000);
+        assertThat(countReservations()).isZero();
+    }
+
+    @Test
+    void 报价_带规则快照时按快照算() {
+        QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
+                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
+                .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
+                .setTier("free")
+                .setRuleSnapshot(ruleSnapshot(300_000))
+                .build());
+
+        // 默认规则是 100，快照里是 300 —— 报价必须与实扣取到**同一份**规则
+        assertThat(quote.getCredits()).isEqualTo(300);
+        // 报价仍然不碰钱，也不建预留
+        assertThat(countLedgerEntries()).isEqualTo(2);   // 只有 setUp 里那笔发放
+        assertThat(countReservations()).isZero();
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Quote：只算不扣（切换前影子模式的入口）
     // ─────────────────────────────────────────────────────────────
 
@@ -216,11 +285,7 @@ class BillingGrpcIntegrationTest {
         int entriesBefore = countLedgerEntries();
         long availableBefore = availableCredits();
 
-        QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
-                .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
-                .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
-                .setTier("free")
-                .build());
+        QuoteResponse quote = stub.quote(quoteRequest("free"));
 
         assertThat(quote.getCredits()).isEqualTo(100);
         assertThat(quote.getCatalogVersion()).isEqualTo(1);
@@ -271,6 +336,7 @@ class BillingGrpcIntegrationTest {
         QuoteResponse quote = stub.quote(QuoteRequest.newBuilder()
                 .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
                 .setTier("free")
+                .setRuleSnapshot(DEFAULT_RULE)
                 .addUsage(com.bluewhale.contracts.billing.v1.UsageLine.newBuilder()
                         .setModelId(MODEL).setTaskType(TASK)
                         .putQuantities("usage.seconds", 10)
@@ -283,8 +349,9 @@ class BillingGrpcIntegrationTest {
     }
 
     @Test
-    void 报价_未配规则时报UNPRICEABLE() {
-        // 影子期跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单
+    void 报价_未带快照时报UNPRICEABLE() {
+        // 影子期跑出来的 UNPRICEABLE 就是切换前要修掉的漏配清单。
+        // 快照是规则的唯一来源：没有它，报价也算不出价（而不是回落某份老配置）
         assertThatThrownBy(() -> stub.quote(QuoteRequest.newBuilder()
                 .setUserId(USER).setModelId("从未配置过的模型").setTaskType(TASK)
                 .setSpecs(SpecAttrs.newBuilder().build())
@@ -305,6 +372,7 @@ class BillingGrpcIntegrationTest {
                 .setUserId(USER).setModelId(MODEL).setTaskType(TASK)
                 .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
                 .setTier(tier)
+                .setRuleSnapshot(DEFAULT_RULE)
                 .build();
     }
 
@@ -337,7 +405,43 @@ class BillingGrpcIntegrationTest {
                 .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
                 .setTier(tier)
                 .setTitle("视频生成 · " + MODEL + " 1080p")
+                // 规则快照随每次请求来 —— 没有它就算不出价（见 DEFAULT_RULE）
+                .setRuleSnapshot(DEFAULT_RULE)
                 .build();
+    }
+
+    /**
+     * 预扣请求，带上规则快照。
+     *
+     * <p>快照是跨进程的线格式（backend 的能力行把它原样送来），所以这里手写字面量，
+     * 不用序列化生成——形态本身就是被测对象。
+     */
+    private HoldRequest holdWithSnapshot(String commandId, long jobId, String ruleSnapshot) {
+        return HoldRequest.newBuilder()
+                .setUserId(USER)
+                .setCommandId(commandId)
+                .setJobId(jobId)
+                .setModelId(MODEL)
+                .setTaskType(TASK)
+                .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
+                .setTier("free")
+                .setRuleSnapshot(ruleSnapshot)
+                .build();
+    }
+
+    /** 规则快照 JSON：每条按次计价 {@code basePrice} 微积分（形态 = 能力行的 pricing 列）。 */
+    private static String ruleSnapshot(long basePrice) {
+        return """
+                {"baseUnit":"constant:1","basePrice":{"kind":"const","value":%d},
+                 "unitDenominator":1,"minCredits":1}
+                """.formatted(basePrice);
+    }
+
+    /** 预留行上冻的规则快照原文。 */
+    private String ruleSnapshotOf(long jobId) {
+        return jdbc.queryForObject(
+                "SELECT rule_snapshot FROM billing_cost_reservations WHERE generation_job_id = ?",
+                String.class, jobId);
     }
 
     private long availableCredits() {

@@ -1,7 +1,7 @@
 .card {
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
-  border-radius: 8px;
+  border-radius: var(--admin-radius-surface);
   /* 极轻：作用是把白卡片从冷灰底上「托」起来，不是做立体感 */
   box-shadow: var(--admin-shadow-card);
   overflow: hidden;
@@ -18,7 +18,7 @@
 }
 
 .title {
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   font-weight: 600;
   color: var(--admin-text);
 }

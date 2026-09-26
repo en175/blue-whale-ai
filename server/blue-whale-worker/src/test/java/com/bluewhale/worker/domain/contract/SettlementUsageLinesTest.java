@@ -30,7 +30,7 @@ class SettlementUsageLinesTest {
 
     @SuppressWarnings("unchecked")
     private static Map<String, String> specsOf(GenerationJobEntity job) {
-        List<Map<String, Object>> lines = SettlementUsageLines.forJob(job, 1, 12_345L);
+        List<Map<String, Object>> lines = SettlementUsageLines.forJob(job, 1, 12_345L, null);
         assertThat(lines).hasSize(1);
         return (Map<String, String>) lines.get(0).get("specs");
     }
@@ -78,7 +78,7 @@ class SettlementUsageLinesTest {
     @DisplayName("上游真实 token 上报为 usage.c（视频按 token 结算的权威用量）")
     void 上报token() {
         List<Map<String, Object>> lines = SettlementUsageLines.forJob(
-                job("video", "{\"model_id\":\"m\"}"), 1, 50_638L);
+                job("video", "{\"model_id\":\"m\"}"), 1, 50_638L, null);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> quantities = (Map<String, Object>) lines.get(0).get("quantities");
@@ -91,10 +91,61 @@ class SettlementUsageLinesTest {
     @DisplayName("上游没报 token → 整个维度不出现（结算退回按预扣额，不是填 0 伪装成免费）")
     void 无token不填零() {
         List<Map<String, Object>> lines = SettlementUsageLines.forJob(
-                job("video", "{\"model_id\":\"m\"}"), 1, null);
+                job("video", "{\"model_id\":\"m\"}"), 1, null, null);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> quantities = (Map<String, Object>) lines.get(0).get("quantities");
         assertThat(quantities).doesNotContainKey("usage.c");
+    }
+
+    /* ── 音频按产出秒数（usage.seconds）────────────────────────────────────────────
+     *
+     * 火山官方对 Seed Audio 1.0 的口径是「0.3 元/分钟，按模型**原始输出时长**计费、
+     * 精确至秒」。目录里那条规则因此以 usage.seconds 为基准维度 ——
+     * 而 billing 有一条**基准维度守卫**：规则以某维度为基准、worker 却没报它，
+     * 结算侧直接**拒绝计价**（MQ 重投 → 死信 → 红灯），不会按 0 秒白送。
+     * 所以这几条钉的不是「字段有没有出现」，是「钱能不能算出来」。
+     */
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> quantitiesOf(GenerationJobEntity job, Long tokens, Long seconds) {
+        List<Map<String, Object>> lines = SettlementUsageLines.forJob(job, 1, tokens, seconds);
+        assertThat(lines).hasSize(1);
+        return (Map<String, Object>) lines.get(0).get("quantities");
+    }
+
+    @Test
+    @DisplayName("★ 音频上报产出秒数为 usage.seconds（按秒计价的权威用量）")
+    void 上报audio秒数() {
+        Map<String, Object> quantities =
+                quantitiesOf(job("audio", "{\"model_id\":\"seed-audio-1.0\"}"), null, 42L);
+
+        assertThat(quantities).containsEntry("usage.seconds", 42L);
+        // 槽数与参考数照旧恒上报 —— 按秒计价不改变这两个维度的口径
+        assertThat(quantities).containsEntry("usage.succeededSlots", 1);
+        assertThat(quantities).containsEntry("usage.referenceCount", 0);
+    }
+
+    @Test
+    @DisplayName("★ 取不到秒数 → 整个维度不出现（让 billing 拒绝，而不是按 0 秒白送）")
+    void 无秒数不填零() {
+        // 填 0 会被 billing 当成「报过、且真的是 0 秒」——那次生成就是免费的，
+        // 而且账面上看不出任何异常（基准维度的键在、值也合法）。
+        assertThat(quantitiesOf(job("audio", "{\"model_id\":\"m\"}"), null, null))
+                .doesNotContainKey("usage.seconds");
+        // 0 与 null 同待遇：产出存在却报 0 秒，那不是「免费的音频」而是「没量到」
+        assertThat(quantitiesOf(job("audio", "{\"model_id\":\"m\"}"), null, 0L))
+                .doesNotContainKey("usage.seconds");
+    }
+
+    @Test
+    @DisplayName("★ token 与秒数是**两条独立路径**，互不替代也不互相带出")
+    void token与秒数互不干扰() {
+        // 视频按 token、音频按秒 —— 两条规则各取各的基准维度。混在一起报会让
+        // 「这次该报哪个」没人说得清，而报错的后果是拒绝计价或按 0 计价。
+        Map<String, Object> videoOnly =
+                quantitiesOf(job("video", "{\"model_id\":\"m\"}"), 50_638L, null);
+        assertThat(videoOnly).containsEntry("usage.c", 50_638L);
+        assertThat(videoOnly).doesNotContainKey("usage.seconds");
     }
 }

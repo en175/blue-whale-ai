@@ -8,7 +8,7 @@
 
 .info {
   color: var(--admin-text-muted);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
 }
 
 .actions {

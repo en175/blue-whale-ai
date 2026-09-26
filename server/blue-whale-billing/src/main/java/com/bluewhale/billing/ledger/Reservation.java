@@ -12,10 +12,20 @@ import java.util.List;
  * @param actualCredits   实际额（积分）；未结算时为 null
  * @param status          状态机见 {@link Status}
  * @param allocations     预扣分配的批次明细；结算与返还**按同一份**处理
- * @param catalogVersion  冻结的定价版本——改价不影响已提交任务
- * @param discountBp      冻结的折扣系数（万分比）——同理，改折扣也不影响已提交任务。
- *                        与 catalogVersion 是同一件事的两半：一个冻结「用哪套规则算」，
- *                        一个冻结「当时打了多少折」；少任何一半都复现不出预扣时那个价
+ * @param catalogVersion  冻结的定价版本——只作追溯（当时按哪一版目录的换算率/折扣策略）；
+ *                        ⚠️ 它**不再**用于复现规则，规则见下面那条
+ * @param discountBp      冻结的折扣系数（万分比）——改折扣不影响已提交任务。
+ *                        与 catalogVersion 是同一件事的两半：一个冻结「当时是哪一版目录」，
+ *                        一个冻结「当时打了多少折」
+ * @param ruleSnapshot    ★ 冻结的**规则本身**（JSON 文本，形态见 {@code CatalogCompiler
+ *                        #compileRuleSnapshot}）；{@code null} = 本次预扣没带快照。
+ *                        规则已从定价目录搬进模型能力行（backend 的
+ *                        {@code generation_model_capability.pricing}），而 billing 读不到那个库
+ *                        （ADR-0114 不共享库），所以由属主在 Hold 时随请求送来、这里冻下来——
+ *                        它就是结算复现定价的**唯一**来源。
+ *                        <p>⚠️ {@code null} 不是「无需规则」，而是「**算不出价**」：
+ *                        结算会抛出去让 MQ 重投（→ 死信 → 有人看得见），
+ *                        既不按 0 也不按预扣额蒙。
  * @param title           提交时的展示文案快照（{@code HoldRequest.title}），用户流水直接展示。
  *                        存快照而不是引用：模型改名、文案生成规则变化都不该改写历史流水
  * @param releaseNote     释放原因；仅 released 时有值
@@ -30,6 +40,7 @@ public record Reservation(
         List<Allocation> allocations,
         int catalogVersion,
         int discountBp,
+        String ruleSnapshot,
         String title,
         String releaseNote
 ) {

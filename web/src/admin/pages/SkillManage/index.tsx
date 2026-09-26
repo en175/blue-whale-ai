@@ -212,7 +212,7 @@ export default function SkillManage() {
 
       <Card padded={false}>
         {/* 分类条（点击过滤表格） */}
-        <div style={{ padding: 12 }}>
+        <div style={{ padding: 'var(--admin-space-3)' }}>
           <Toolbar>
             <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
               全部
@@ -339,7 +339,7 @@ export default function SkillManage() {
                         src={resolveMediaSrc(s.cover_url)}
                         crossOrigin={remoteImageCrossOrigin(s.cover_url)}
                         alt=""
-                        style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }}
+                        style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 'var(--admin-radius-control)' }}
                       />
                     ) : (
                       <span>—</span>

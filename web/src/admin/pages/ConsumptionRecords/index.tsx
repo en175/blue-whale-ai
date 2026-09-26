@@ -9,6 +9,11 @@
  *    · 翻页状态由**游标栈**维护（`tokens`），而不是一个页码数字
  *    · 不传 `total` 给 Pagination —— 界面不会显示「共 N 条」，因为没有这个数
  *    · 翻页控件仍是同一个组件，观感与 offset 那两页一致
+ *
+ * ⚠️ **预扣额**（§「积分」列）：消费行在 billing 侧就是一条预留，预扣额与结算额都在
+ *    同一行上。结算后 `credits` 已换成实际值，预扣额若不显示，用户余额「先降后回」
+ *    就没有任何一处交代得了（冻 12、实扣 1 的行只会看到 -1）。
+ *    所以这一列**只在两个数不一致时**补一行「预扣 N」——理由见下面的渲染注释。
  * ============================================ */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -23,6 +28,7 @@ import {
   Badge,
   Button,
   Empty,
+  Hint,
   Input,
   Page,
   PageHeader,
@@ -37,6 +43,12 @@ const PAGE_SIZE = 20;
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
+
+/** 金额下方的次要行（预扣额）。字号与颜色取 token，与 Promotions 的「万分比」同一形态。 */
+const SECONDARY_LINE = {
+  fontSize: 'var(--admin-font-xs)',
+  color: 'var(--admin-text-muted)',
+} as const;
 
 /** 契约里的流水类型（billing 的 TransactionType）。空 = 全部 */
 const TYPE_OPTIONS = [
@@ -102,7 +114,22 @@ export default function ConsumptionRecords() {
   return (
     <Page>
       <PageHeader
-        title="消费记录"
+        title={
+          <>
+            消费记录{' '}
+            <Hint title="为什么有的行写着「预扣」">
+              {/* ⚠️ 每个 div 的文字写成**一整行**：JSX 把源码里的换行折成一个空格，
+                  中文句子中途换行会在面板里留下一个「预扣额， 发放」那样的空档。 */}
+              <div>
+                <b>提交任务时先按预计用量冻结，结算时按实际用量扣费，差额自动退回余额。</b>
+                所以余额会先降后回。这一页记的是<b>结算后</b>的账：一行「-1」旁边若不补出「预扣 12」，那 12 冻过、11 退回来这件事就没有任何一处交代得了。
+              </div>
+              <div>
+                只有两个数不一致的行才补这一行；处理中的行显示的金额本身就是预扣额，发放与人工调账没有预扣。
+              </div>
+            </Hint>
+          </>
+        }
         subtitle="全站积分流水（读 billing 账本，与用户端的「我的流水」同一个来源）"
       />
 
@@ -209,6 +236,17 @@ export default function ConsumptionRecords() {
                   <Badge tone={income ? 'success' : 'accent'}>
                     {income ? `+${fmt(row.credits)}` : `-${fmt(row.credits)}`}
                   </Badge>
+                  {/* 预扣额：**只在两个数不一致时**才补这一行。
+                      三个理由，缺一个都会让这行变成噪音：
+                      · 未结算行的 credits 本就是预扣额，再写一遍是同一句话说两次；
+                      · 发放 / 人工调账行没有预扣（null），什么都不该出；
+                      · 一致时（冻 5 扣 5）写出来也只是复读。
+                      于是这一行只在「余额先降后回」的行上出现 —— 它一出现就说明有事发生。
+                      ⚠️ 判空用 === null，不用真值判断：0 是「全额退回」，
+                         那恰恰是最该显示预扣的一行。 */}
+                  {row.reserved_credits !== null && row.reserved_credits !== row.credits && (
+                    <div style={SECONDARY_LINE}>预扣 {fmt(row.reserved_credits)}</div>
+                  )}
                 </td>
                 <td>
                   {/* pending 的金额是**预计消耗**，结算后同一行变成实际消耗 */}

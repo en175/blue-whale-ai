@@ -54,6 +54,7 @@ class PricingEngineTest {
                 new BasePriceResolver.Constant(2_000L),
                 Map.of(UsageDim.COMPLETION_TOKENS, 4_000),
                 Map.of(),
+                Map.of(),
                 1_000_000L, 1L, null, new RoundingPolicy.HalfUp(), null);
     }
 
@@ -190,7 +191,7 @@ class PricingEngineTest {
 
         private CompiledRule free(long minCredits) {
             return new CompiledRule(UsageDim.SUCCEEDED_SLOTS,
-                    new BasePriceResolver.Constant(0L), Map.of(), Map.of(), 1L,
+                    new BasePriceResolver.Constant(0L), Map.of(), Map.of(), Map.of(), 1L,
                     minCredits, null, new RoundingPolicy.HalfUp(), null);
         }
 
@@ -398,7 +399,7 @@ class PricingEngineTest {
         @Test
         void maxCredits_小于_minCredits() {
             assertThatThrownBy(() -> new CompiledRule(
-                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(),
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(), Map.of(),
                     1L, 10L, 5L, new RoundingPolicy.HalfUp(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("maxCredits");
@@ -407,7 +408,7 @@ class PricingEngineTest {
         @Test
         void unitDenominator_必须为正() {
             assertThatThrownBy(() -> new CompiledRule(
-                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(),
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(), Map.of(),
                     0L, 1L, null, new RoundingPolicy.HalfUp(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("unitDenominator");

@@ -243,6 +243,29 @@ public class JobFinalizer {
     @Transactional
     public boolean completeJob(String jobId, List<String> assetIds,
                                String workerId, long fencingToken) {
+        return completeJob(jobId, assetIds, workerId, fencingToken, null);
+    }
+
+    /**
+     * 完成作业，附带**产出音频的真实时长**（结算的权威用量）。
+     *
+     * <p>为什么音频需要它：目录里音频规则以 {@code usage.seconds} 为基准维度
+     * （火山官方「按模型原始输出时长计费、精确至秒」），而**产出多长只有跑完才知道**——
+     * 预扣侧按规则上限（{@code maxCredits}）冻，结算侧按这里传下去的真值收，差额退回。
+     * 不传 = 结算拿不到基准维度 = billing 的基准维度守卫**拒绝计价**（死信 + 红灯），
+     * 那笔预扣会一直冻着等人处理，所以音频这条路径**必须**把它传下去。
+     *
+     * <p>⚠️ 两个 {@code @Transactional} 标在**两个重载**上是有意的：4 参那个自调用 5 参时，
+     * Spring 的代理不生效（自调用），但此时外层事务**已经开着**，行为与改动前逐字相同；
+     * 外部直接调 5 参时，代理生效，事务由 5 参那个注解开。两条路径都落在同一个事务里。
+     * 别把 {@code @Transactional} 只留在 4 参上——那样外部直接调 5 参就没有事务了。
+     *
+     * @param upstreamSeconds 产出音频的真实时长，整秒；{@code null} = 这次没有
+     *                        （图片路径、或上游没返回时长）——此时不报该维度
+     */
+    @Transactional
+    public boolean completeJob(String jobId, List<String> assetIds, String workerId,
+                               long fencingToken, Long upstreamSeconds) {
         Long jobIdLong = Long.parseLong(jobId);
 
         String outputAssetIdsJson = toJson(assetIds.stream().map(Long::parseLong).toList());
@@ -297,7 +320,7 @@ public class JobFinalizer {
                         "source", job.getSource(),
                         "status", job.getStatus(),
                         "progress", job.getProgress(),
-                        "output_asset_ids", assetIds), null);
+                        "output_asset_ids", assetIds), null, upstreamSeconds);
 
         for (int i = 0; i < assetIds.size(); i++) {
             GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
@@ -388,7 +411,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
             for (GenerationOutputSlotEntity slot : slots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -482,7 +505,7 @@ public class JobFinalizer {
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "output_asset_ids", List.of(asset.getId().toString())),
-                    upstreamTotalTokens);
+                    upstreamTotalTokens, null);
         }
 
         GenerationOutputSlotEntity videoSlot = slotMapper.findByJobId(jobIdLong).stream()
@@ -551,7 +574,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
             for (GenerationOutputSlotEntity slot : pendingSlots) {
                 eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
                         "generation_job_output",
@@ -671,7 +694,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", assetIds), null);
+                            "output_asset_ids", assetIds), null, null);
         }
         return true;
     }
@@ -860,7 +883,7 @@ public class JobFinalizer {
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "output_asset_ids", assetIds,
-                            "result", resultPayload), null);
+                            "result", resultPayload), null, null);
         }
         return true;
     }
@@ -970,7 +993,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "output_asset_ids", List.of(asset.getId().toString())), null);
+                            "output_asset_ids", List.of(asset.getId().toString())), null, null);
         }
         return true;
     }
@@ -1028,7 +1051,7 @@ public class JobFinalizer {
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
-                            "error", Map.of("code", errorCode, "message", errorMessage)), null);
+                            "error", Map.of("code", errorCode, "message", errorMessage)), null, null);
         }
         return true;
     }
@@ -1065,13 +1088,17 @@ public class JobFinalizer {
      * @param upstreamTotalTokens 上游返回的真实 token 数（**结算的权威用量**）；
      *                            {@code null} = 这条路径没有（图片/音频/mediakit，
      *                            或视频但上游没报）——结算退回按预扣额计价，不是填 0
+     * @param upstreamSeconds 产出音频的真实时长，整秒（**音频按秒计价的权威用量**）；
+     *                        {@code null} = 这条路径没有（图片 / 视频 / mediakit 一律传 null）。
+     *                        与 token 同一条理由不塞进 payload——把「产出多少秒」写进
+     *                        用户可见的进度事件，等于把内部计价口径暴露到产品面上
      */
     private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload,
-                                      Long upstreamTotalTokens) {
+                                      Long upstreamTotalTokens, Long upstreamSeconds) {
         eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
                 "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
                 payload);
-        settlementPublisher.publishTerminal(job, payload, upstreamTotalTokens);
+        settlementPublisher.publishTerminal(job, payload, upstreamTotalTokens, upstreamSeconds);
     }
 
     /**

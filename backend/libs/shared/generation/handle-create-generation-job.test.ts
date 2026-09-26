@@ -1145,6 +1145,154 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  // 视频输出像素：能力行的像素表按 (resolution, aspect_ratio) 查一次，冻成两个**标量**。
+  // 它是 billing 估 token 的输入（经 specs 随 Hold 过去），也是 `video_dimensions` 那条
+  // 字段裁决表登记的「配置赢」证明。
+  describe("输出像素按能力行冻结（video_dimensions）", () => {
+    const DIMENSIONS = {
+      "resolution=720p|aspect_ratio=16:9": "1280x720",
+      "resolution=720p|aspect_ratio=adaptive": "1280x720",
+    };
+
+    it("配了像素表 → job.input 冻出 output_width / output_height", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.output_width).toBe(1280);
+      expect(cmdArg.input.output_height).toBe(720);
+    });
+
+    it("adaptiver 比例走显式键（配了就有）", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...VIDEO_BODY, parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "adaptive" } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.output_width).toBe(1280);
+    });
+
+    it("能力行没配像素表 → **不写**这两个键（不写 0）", async () => {
+      const { deps, createJob } = buildVideoDeps();
+      const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input).not.toHaveProperty("output_width");
+      expect(cmdArg.input).not.toHaveProperty("output_height");
+    });
+
+    it("配了表但这一格没配 → 也不写（billing 回落目录那份）", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...VIDEO_BODY, parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "9:16" } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input).not.toHaveProperty("output_width");
+    });
+  });
+
+  // 首帧/首尾帧的比例闸：**按模型读能力行**，不再写死「有首帧就必须 adaptive」。
+  //
+  // 官方《创建视频生成任务》「不同模型的取值限制和 adaptive 适配规则」：
+  //   首帧或首尾帧生视频 · Seedance 2.5     = 默认且仅支持 adaptive
+  //   首帧或首尾帧生视频 · Seedance 2.0 系列 = 支持 adaptive 或指定宽高比
+  //
+  // 所以**同一条请求**（首帧 + 16:9）在一个模型上必须 400、在另一个上必须放行，
+  // 而差别**只来自能力行配置**——下面两个用例的能力行只差 `features.task_types` 一项，
+  // 代码里没有任何模型名/前缀判断。
+  describe("首帧/首尾帧比例按能力行判定（不写死）", () => {
+    const FRAME_REF = [{ role: "first_frame", asset_id: "11", type: "image" }];
+    const FRAME_BODY = (aspect: string) => ({
+      ...VIDEO_BODY,
+      references: FRAME_REF,
+      parameters: { ...VIDEO_BODY.parameters, aspect_ratio: aspect },
+    });
+
+    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 400，文案带可用值", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(result.code).toBe(400);
+      expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("同一能力行 + adaptive → 200", async () => {
+      const { deps } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("adaptive"), null, deps);
+      expect(result.code).toBe(200);
+    });
+
+    it("能力行**没有** task_types（2.0 形态）+ 16:9 → 200（修复前这里会被硬规则拒掉）", async () => {
+      const { deps } = buildVideoDeps({ supported_aspect_ratios: ["16:9", "adaptive"] });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(result.code).toBe(200);
+    });
+
+    it("首尾帧两帧查的是 first_last_frame 那一格，不是 first_frame", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: {
+          // 只锁首尾帧；first_frame 未配 → 单帧那条请求应放行
+          task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+        },
+      });
+      const both = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...VIDEO_BODY,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "last_frame", asset_id: "12", type: "image" },
+          ],
+          parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "16:9" },
+        },
+        null,
+        deps,
+      );
+      expect(both.code).toBe(400);
+      expect(both.msg).toContain("first_last_frame");
+      expect(createJob).not.toHaveBeenCalled();
+
+      const single = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(single.code).toBe(200);
+    });
+
+    it("未指定比例由 validateCommon 拦（本闸不重复兜底，故不写不可达分支）", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const body = FRAME_BODY("16:9");
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...body, parameters: { ...body.parameters, aspect_ratio: undefined } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(400);
+      expect(result.msg).toBe("aspect_ratio 无效");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+  });
+
   it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(
@@ -1750,7 +1898,7 @@ const VIDEO_CAPABILITY_ROW = {
   ],
   supported_aspect_ratios: ["16:9", "9:16"],
   supported_durations: { min: 5, max: 10, step: 5 },
-  channel_parser: "seedream",
+  channel: "seedream-image",
   request_mapping: null,
   default_size: "2k",
   default_aspect_ratio: "16:9",
@@ -1932,7 +2080,7 @@ const GPT_IMAGE_CAPABILITY = {
   supported_sizes: [{ id: "1k", api_value: "1024x1024" }],
   supported_aspect_ratios: ["1:1", "16:9"],
   supported_durations: null,
-  channel_parser: "gpt",
+  channel: "gpt-image",
   request_mapping: {
     matrix: { "1k": { "1:1": "1024x1024" } }, // 16:9 交叉格未填
   },

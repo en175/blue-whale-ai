@@ -77,7 +77,6 @@ export interface ActiveCatalog {
   /** 发布时对**提交文本**取的 SHA-256。⚠️ 与下面 `document` 的 hash 不相等，见其注释 */
   documentHash: string;
   /** 本版生效的规则条数 */
-  ruleCount: number;
   /** 1 元 = 多少积分；没有生效目录时 -1 */
   creditsPerYuan: number;
   /**
@@ -100,6 +99,9 @@ type ActiveCatalogResponse = Partial<ActiveCatalog>;
  * 「还没发布过任何目录」并让运营从零建一份 —— 所以这条**不抛**，
  * 把 `catalogVersion = -1` 原样交给调用方判断。
  */
+// ⚠️ 这里**没有** `ruleCount`：目录里曾经装着 13 条模型计价规则，那些规则已搬进模型能力行
+//   （`generation_model_capability.pricing`），目录现在只装 `creditsPerYuan` 与 `discountPolicy`
+//   两项全局配置，没有「规则条数」可报。billing 的响应里也一并删了这个字段。
 export async function fetchActiveCatalog(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ActiveCatalog> {
@@ -110,7 +112,6 @@ export async function fetchActiveCatalog(
   return {
     catalogVersion: data.catalogVersion ?? -1,
     documentHash: data.documentHash ?? "",
-    ruleCount: data.ruleCount ?? 0,
     creditsPerYuan: data.creditsPerYuan ?? -1,
     document: data.document ?? "",
   };
@@ -141,7 +142,6 @@ export async function fetchCreditsPerYuan(
 export interface PublishCatalogResult {
   catalogVersion: number;
   documentHash: string;
-  ruleCount: number;
   creditsPerYuan: number;
 }
 
@@ -191,7 +191,6 @@ export async function publishCatalog(
   return {
     catalogVersion: data.catalogVersion ?? -1,
     documentHash: data.documentHash ?? "",
-    ruleCount: data.ruleCount ?? 0,
     creditsPerYuan: data.creditsPerYuan ?? -1,
   };
 }
@@ -270,6 +269,17 @@ export interface AdminTransactionItem {
   title: string;
   /** **整数积分**，该行唯一的金额（status=pending 时是预计消耗，done 时是实际消耗） */
   amount: number;
+  /**
+   * 该行**当初冻了多少**（整数积分）。**只有消费行有值**，发放行与账本行为 `null`。
+   *
+   * ⚠️ `null` 不是 `0`：`0` 是「冻了 0 分」，`null` 是「这一行没有预扣这回事」。
+   *    所以判空一律用 `== null`，不要用真值判断（`0` 会被误判成「没有」）。
+   *
+   * 为什么要读它：结算后 `amount` 已换成实际值，预扣额就只剩这里能答——用户余额先降后回
+   * 的差额靠它解释。**与用户面无关**：UserTransaction 里没有这个字段，
+   * 用户界面不会因此多出第二个金额。
+   */
+  reservedCredits: number | null;
   status: string;
   createdAt: string;
   /** RFC3339；未结算为空串 */

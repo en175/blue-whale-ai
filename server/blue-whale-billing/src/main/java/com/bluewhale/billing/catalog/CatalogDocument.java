@@ -6,12 +6,21 @@ import java.util.Map;
 /**
  * 定价目录 JSON 的 Java 形态（《计费逻辑详细设计》§2.5.1）。
  *
- * <p>**这是 wire/存储形态，不是领域形态**——编译成 {@code CompiledRule} 后才进引擎。
+ * <p><b>目录里只剩下与「怎么收钱」有关的两件全局配置</b>：元 → 积分的换算率
+ * （{@link #creditsPerYuan}）与折扣叠加策略（{@link #discountPolicy}）。
+ *
+ * <p>⚠️ <b>计价规则不在目录里</b>。它按模型归属，住在模型能力行
+ * （backend 的 {@code generation_model_capability.pricing}），由属主在 Hold / Quote 时
+ * 作为**规则快照**随请求送来（形态见 {@link TaskRule}），预扣时冻进预留行、结算按它复现——
+ * 所以目录不再需要按 (model, task) 索引任何东西，见 {@link CatalogCompiler}。
+ *
+ * <p>**这是 wire/存储形态，不是领域形态**——规则要编译成 {@code CompiledRule} 后才进引擎。
  * 分成两层是因为：JSON 要容忍运营写得不规范（大小写、额外字段），
  * 而领域对象必须严格（构造即校验）。
  *
  * <p>用 record + Jackson 直接反序列化；未知字段由 {@code FAIL_ON_UNKNOWN_PROPERTIES=false}
- * 容忍（向前兼容：运营端先加字段、服务端后升级）。
+ * 容忍——所以**老目录行里那个 {@code models} 段会被直接忽略，不需要数据迁移**，
+ * 见 {@code CatalogRepository} 的注释。
  */
 public record CatalogDocument(
         int schemaVersion,
@@ -25,8 +34,6 @@ public record CatalogDocument(
          *
          *  合法区间见 {@link #MIN_CREDITS_PER_YUAN} ~ {@link #MAX_CREDITS_PER_YUAN}，编译期校验。 */
         int creditsPerYuan,
-        /** modelId → taskType → 规则 */
-        Map<String, Map<String, TaskRule>> models,
         DiscountPolicy discountPolicy
 ) {
 
@@ -43,18 +50,22 @@ public record CatalogDocument(
     public static final int MIN_CREDITS_PER_YUAN = 1;
     public static final int MAX_CREDITS_PER_YUAN = 100_000;
 
-    public CatalogDocument {
-        models = models == null ? Map.of() : Map.copyOf(models);
-    }
-
     /**
-     * 单个 (model, taskType) 的计价规则。
+     * 单个 (model, taskType) 的计价规则 —— **这是一条规则本身，不是目录里的一段**。
+     *
+     * <p>它的唯一来路是：属主（backend）把能力行的 {@code pricing} 列序列化成这一形态，
+     * 随 Hold / Quote 作为**规则快照**送来（{@code HoldCommand#ruleSnapshot}），
+     * 预扣时冻进预留行、结算按它复现。billing 读不到那个库（ADR-0114 不共享库），
+     * 所以这条规则永远以一段 JSON 文本的形式到达，本 record 就是那段文本的形态。
      *
      * @param usageSemantic   仅文本/多模态用：{@code openai} | {@code claude}。本期不启用
      * @param baseUnit        ★ 基准维度键，如 {@code usage.seconds}
      * @param basePrice       ★ 基准单价：常数或按轴查表
      * @param dims            按数量加权的其他维度 → **万分比**（10000 = 1 倍，4000 = 0.4 倍）
      * @param multipliers     整单连乘的倍率 → **万分比**（12000 = 1.2 倍）
+     * @param dimPrices       ★ 按维度的**绝对**加价（见 {@link DimPrice}）；与 dims 的区别是
+     *                        它**不乘 basePrice** —— 所以同一个「每张 0.02 元」在 basePrice
+     *                        有两个档的规则里也是同一个数
      * @param unitDenominator 「每多少个单位多少钱」：1000000 = 每百万 token，1 = 每秒/每张/每次
      * @param minCredits      下限（整数积分）
      * @param maxCredits      上限，null = 不封顶
@@ -68,6 +79,7 @@ public record CatalogDocument(
             BasePrice basePrice,
             Map<String, Integer> dims,
             Map<String, Integer> multipliers,
+            Map<String, DimPrice> dimPrices,
             Long unitDenominator,
             Long minCredits,
             Long maxCredits,
@@ -76,27 +88,54 @@ public record CatalogDocument(
     ) {}
 
     /**
+     * 按维度的**绝对**加价 —— 每个计费单位固定多少钱，**与 {@link #basePrice} 无关**。
+     *
+     * <h2>为什么必须有它（dims 做不到）</h2>
+     *
+     * {@code dims} 是**相对**的：{@code units += 数量 × 万分比}，然后 {@code mc = units × basePrice}。
+     * 于是「每个单位多少钱」= {@code 万分比 × basePrice} —— **它随 basePrice 变**。
+     * 对单价分档的规则（例如 Seedream 5.0 Pro 的输出图按像素分 0.3 / 0.6 两档），
+     * 同一个「参考图每张 0.02 元」在 0.3 档要 667 万分比、在 0.6 档要 333 万分比 ——
+     * **一个字段表达不了**。绝对加价就绕开了这个耦合：{@code 0.02 元 = 300 mc}，两档都是它。
+     *
+     * <p>火山官方对 Seedream 5.0 Pro 的计费正是这个形状：
+     * <i>「输出图按像素档计费 + 输入参考图首张免费、第 2 张起 0.02 元/张」</i>。
+     *
+     * <h2>与另外三个字段的分工</h2>
+     * <ul>
+     *   <li>{@code baseUnit + basePrice} —— 主价：单位数 × 单价</li>
+     *   <li>{@code dims} —— **相对**加量：把别的维度折算成基准单位数</li>
+     *   <li>{@code multipliers} —— **相对**整单倍率</li>
+     *   <li>{@code dimPrices} —— **绝对**加价：计费单位数 × unitMc</li>
+     * </ul>
+     *
+     * <p>它加在基准价之后、上限之前、折扣之前（见
+     * {@code AbstractPricingCalculator#computeDetailed}）——所以它**在封顶之内、受折扣作用**。
+     *
+     * @param unitMc    每个计费单位多少 mc（与 {@code basePrice.value} 同一单位：1 积分 = 1000 mc）
+     * @param firstFree 首单位免费（{@code true} ⇒ 计费单位数取 {@code max(0, n - 1)}）——
+     *                  对应用官方的「首张参考图免费」。{@code null} / 缺省 = 不免费
+     */
+    public record DimPrice(Long unitMc, Boolean firstFree) {}
+
+    /**
      * token 估算参数（火山方舟官方 token 计费公式的系数）。
      *
-     * <p>为什么它必须在目录里而不是代码里：{@code divisor}、{@code fps}、
-     * 「档位 + 比例 → 宽高」与「输入时长的规格键」都是**运营可能改的数**——火山改口径、
-     * 开新档位、某档位换帧率、补上输入时长那一项，都只该是一次目录发布，而不是改代码发版。
+     * <p>为什么它必须在规则里而不是代码里：{@code divisor}、{@code fps}、
+     * {@code minimumTokens} 与「输入时长的规格键」都是**运营可能改的数**——火山改口径、
+     * 某档位换帧率、补上输入时长那一项，都只该改一条规则的配置，而不是改代码发版。
      * 代码只固定公式的形状（见 {@code TokenEstimator}）。
      *
      * <p>⚠️ 它**只服务预扣**。结算按 worker 上报的**上游真实 token** 计价。
      *
      * <p>⚠️ <b>为什么同一个公式要有两条规则（2.0 与 2.5）而不是一条</b>：单价不同，
      * 而单价是 {@code basePrice} —— 它是规则自己的字段。所以「计费方式相同、单价不同」
-     * 在目录里天然就是两条规则，无需另造机制；2.5 的单价火山尚未给出时，
+     * 在配置里天然就是两条规则，无需另造机制；2.5 的单价火山尚未给出时，
      * 它的 {@code basePrice.kind} 写 {@code unset}（空位），提交即拒绝，**不按 0 免费**。
      *
      * @param divisor    除数字：token ≈ 宽 × 高 × 帧率 × (输出时长 + 输入时长) ÷ divisor（官方 1024）
      * @param fps        帧率（官方对照表是 24；生成任务的参数里没有帧率这个轴，
      *                   上游返回的 {@code framespersecond} 也是 24，故取官方默认）
-     * @param dimensions 档位 + 比例 → 输出宽高，值写成 {@code "1248x704"}；
-     *                   键的语法与 {@link BasePrice#table} 完全一致
-     *                   （如 {@code "resolution=720p|aspect_ratio=16:9"}），
-     *                   因而**同一套键语法、同一个管理端编辑器**——运营不必记两套写法
      * @param inputSecondsKey 输入视频**时长（秒）**在规格快照里的键，默认
      *                   {@code video_input_seconds}。配了它，公式就含「输入时长」那一项
      *                   （火山官方：含视频输入时 {@code (输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024}）；
@@ -112,7 +151,7 @@ public record CatalogDocument(
      *                   （走上限冻结或拒绝），不按 0 估——见 {@code TokenEstimator} 的说明。
      * @param minimumTokens **最低 token 用量表**（官方明文规则，可选的配置位）：
      *                   「分辨率 + 宽高比 + 输出时长」→ 最低 token 用量，
-     *                   键的语法与 {@code dimensions} 完全一致
+     *                   键的语法与 {@link BasePrice#table} 完全一致
      *                   （如 {@code "resolution=480p|aspect_ratio=16:9|duration=5"}）。
      *
      *                   <p>火山原文：<i>「对于 Seedance 2.0 系列、Seedance 2.5 模型，
@@ -125,13 +164,18 @@ public record CatalogDocument(
      *
      *                   <p>⚠️ 官方原页只给了两张「最低 token 用量表格」的飞书链接
      *                   （分辨率 × 宽高比 × 输出时长 → 最低用量），**没有公开可抄的形态**——
-     *                   所以这里是个**配置位**：不配 = 本规则不做下限（老目录照旧跑）；
+     *                   所以这里是个**配置位**：不配 = 本规则不做下限；
      *                   配了就必须配全，某格查不到时估算取不到（漏配要吵，不静默少冻）。
+     *
+     *                   <p>⚠️ <b>宽高不在这里</b>：「档位 + 比例 → 输出宽高」是**模型的属性**
+     *                   （像素），住在能力行的 {@code features.video_dimensions} 里，
+     *                   由接纳侧按规格解析后冻成 {@code output_width} / {@code output_height}
+     *                   两个标量随 Hold 过来（见 {@code TokenEstimator}）。
+     *                   本类只装**公式参数**（定价口径），不装像素。
      */
     public record TokenEstimate(
             Integer divisor,
             Integer fps,
-            Map<String, String> dimensions,
             String inputSecondsKey,
             Map<String, Long> minimumTokens
     ) {}
@@ -145,7 +189,7 @@ public record CatalogDocument(
      * @param table {@code table} 时的价格表：规格键 → 单价（mc）
      *
      * <p>⚠️ {@code unset} = **单价待配的空位**：规则其余部分（基准维度、token 估算参数、
-     * 单位分母）都配好了，只差运营填单价。它编译得过（目录能发布），但计价必拒——
+     * 单位分母）都配好了，只差运营填单价。它编译得过（能力行能保存），但计价必拒——
      * 「还没定价」不能等价于「免费」，见 {@code BasePriceResolver.Unset}。
      */
     public record BasePrice(

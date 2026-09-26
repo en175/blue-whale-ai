@@ -3,10 +3,10 @@
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--admin-border);
-  border-radius: 6px;
+  border-radius: var(--admin-radius-control);
   background: var(--admin-surface);
   color: var(--admin-text);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   /* 等宽 + 允许换行：这里装的多半是 JSON / 模板正文，逐行对照比连排好读 */
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.6;

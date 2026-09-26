@@ -70,7 +70,7 @@ public final class DiscountRules {
      *
      * <p>⚠️ 上界必须是 10000 而不是「随便填」：大于 10000 是**加价**，
      * 而两张折扣表在计价侧只有一个语义（乘数），写成 15000 的人以为自己填的是 1.5 折。
-     * 那不是一个折扣，是另一次改价，该去定价目录里改单价。
+     * 那不是一个折扣，是另一次改价，该去能力行的 pricing 里改单价。
      */
     public static int discountBp(Integer raw) {
         if (raw == null) {

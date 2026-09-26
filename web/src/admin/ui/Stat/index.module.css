@@ -1,7 +1,7 @@
 .stat {
   padding: 16px;
   border: 1px solid var(--admin-border);
-  border-radius: 10px;
+  border-radius: var(--admin-radius-surface);
   background: var(--admin-surface);
   box-shadow: var(--admin-shadow-card);
 }
@@ -14,7 +14,7 @@
 }
 
 .label {
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: var(--admin-text-muted);
 }
 
@@ -24,13 +24,13 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--admin-radius-surface);
   flex-shrink: 0;
 }
 
 .value {
   margin-top: 8px;
-  font-size: 22px;
+  font-size: var(--admin-font-xl);
   font-weight: 600;
   line-height: 1.2;
   /* 数字等宽：并排的几张卡里，位数不同时小数点/末位不会错开 */
@@ -40,7 +40,7 @@
 
 .hint {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: var(--admin-text-faint);
 }
 

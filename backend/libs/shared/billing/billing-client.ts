@@ -44,6 +44,10 @@ export interface BillingHoldRequest {
   /** 用户等级：会员折扣与限等级活动要用。由调用方断言（它校验会话时已经拿到） */
   tier: string;
   title?: string;
+  /** 计价规则快照（JSON 文本，形态 = 目录里 `models.<model_id>.<task_type>` 那条）。
+   *  来自能力行的 `pricing` 列。**留空 = billing 回落目录**（过渡期兼容）。
+   *  见 `contracts/proto/billing/v1/billing.proto` 的 `HoldRequest.rule_snapshot`。 */
+  ruleSnapshot?: string;
 }
 
 export interface BillingHoldResult {
@@ -63,6 +67,9 @@ export interface BillingQuoteRequest {
   /** 用户等级。**必须与 Hold 用同一个来源**（`identity.resolveTier`）：
    *  报价传 free 而预扣传 pro，用户就会看到「预览一个价、实扣另一个价」。 */
   tier: string;
+  /** 规则快照；语义与 {@link BillingHoldRequest.ruleSnapshot} 逐条相同。
+   *  预览与实扣必须取到**同一份**规则，否则「预览一个价、实扣另一个价」。 */
+  ruleSnapshot?: string;
 }
 
 /**
@@ -229,6 +236,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
         specs: { attrs: request.specs },
         tier: request.tier,
         title: request.title ?? '',
+        ruleSnapshot: request.ruleSnapshot ?? '',
       } as HoldRequest;
 
       const response = await client.hold(message);
@@ -248,6 +256,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
           taskType: request.taskType,
           specs: { attrs: request.specs },
           tier: request.tier,
+          ruleSnapshot: request.ruleSnapshot ?? '',
         }),
       );
       return {

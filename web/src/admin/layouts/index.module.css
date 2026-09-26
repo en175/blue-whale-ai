@@ -13,7 +13,7 @@
   height: 100vh;
   background: #f7f8fa;
   color: #6b7280;
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
 }
 
 .layout {
@@ -54,20 +54,20 @@
   justify-content: center;
   background: var(--admin-accent-soft);
   border: 1px solid var(--admin-accent-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--admin-radius-surface);
   color: var(--admin-accent);
 }
 
 .brandName {
   color: var(--admin-text);
-  font-size: var(--font-size-md);
+  font-size: var(--admin-font-sm);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .brandSub {
   color: var(--admin-text-faint);
-  font-size: var(--font-size-xs);
+  font-size: var(--admin-font-xs);
   margin-top: 1px;
 }
 
@@ -86,9 +86,9 @@
   align-items: center;
   gap: var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-sm);
-  border-radius: var(--radius-md);
+  border-radius: var(--admin-radius-surface);
   color: var(--admin-text-muted);
-  font-size: var(--font-size-md);
+  font-size: var(--admin-font-sm);
   text-decoration: none;
   transition:
     background-color var(--transition-fast),
@@ -132,9 +132,9 @@
   align-items: center;
   justify-content: center;
   background: var(--admin-accent-soft);
-  border-radius: var(--radius-full);
+  border-radius: var(--admin-radius-pill);
   color: var(--admin-accent);
-  font-size: var(--font-size-sm);
+  font-size: var(--admin-font-xs);
   font-weight: 600;
 }
 
@@ -144,12 +144,12 @@
 
 .footerName {
   color: var(--admin-text);
-  font-size: var(--font-size-sm);
+  font-size: var(--admin-font-xs);
 }
 
 .footerMail {
   color: var(--admin-text-faint);
-  font-size: var(--font-size-xs);
+  font-size: var(--admin-font-xs);
   margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -210,7 +210,7 @@
   height: 26px;
   margin-left: auto;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--admin-radius-control);
   background: transparent;
   color: var(--admin-text-faint);
   cursor: pointer;

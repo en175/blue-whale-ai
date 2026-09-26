@@ -42,19 +42,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfEnvironmentVariable(named = "BILLING_DB_PASSWORD", matches = ".+")
 class AdminApiIntegrationTest {
 
+    /** 一份最小目录：**只有换算率与折扣策略**（规则住在模型能力行，不在这里）。 */
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
-             "models":{"seedance-2.5":{"text2video":{
-               "baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
-               "unitDenominator":1,"minCredits":1}}},
              "discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}
             """;
 
-    /** 改了单价的一份：用来验「发新版本会把旧版本降级」。 */
-    private static final String CATALOG_V2 = CATALOG.replace("100000", "200000");
+    /** 改了换算率的一份：用来验「发新版本会把旧版本降级」。 */
+    private static final String CATALOG_V2 = CATALOG.replace("\"creditsPerYuan\":15",
+            "\"creditsPerYuan\":20");
 
-    /** baseUnit 指向一个不存在的维度 —— 编译期就该被拒。 */
-    private static final String BAD_CATALOG = CATALOG.replace("constant:1", "usage.不存在的维度");
+    /** 换算率 0 —— 校验期就该被拒（「多少元都换不到积分」）。 */
+    private static final String BAD_CATALOG = CATALOG.replace("\"creditsPerYuan\":15",
+            "\"creditsPerYuan\":0");
+
+    /**
+     * 规则快照：一次 100 积分（{@code constant:1} 基准）。
+     *
+     * <p>形态 = 能力行的 {@code pricing} 列，随每次 Hold 请求送来。
+     */
+    private static final String RULE = """
+            {"baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
+             "unitDenominator":1,"minCredits":1}
+            """;
 
     /** 手动结算/返还要造出真实预扣，单独用一个用户，免得和发放类用例互相干扰。 */
     private static final long USER_HOLD = 9306L;
@@ -89,8 +99,7 @@ class AdminApiIntegrationTest {
                         .param("publishedBy", "ops")
                         .param("note", "首版"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.catalogVersion").value(1))
-                .andExpect(jsonPath("$.ruleCount").value(1));
+                .andExpect(jsonPath("$.catalogVersion").value(1));
 
         // ★ 关键：同一进程内马上就能用，不需要重启 —— 这正是把发布做成接口的意义。
         //   假如只写库不调 reload()，这里会是 -1。
@@ -135,7 +144,7 @@ class AdminApiIntegrationTest {
         Integer activeCount = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM billing_pricing_catalogs WHERE status = 'active'", Integer.class);
         assertThat(activeCount).isEqualTo(1);
-        // 旧版必须留着：已提交的 job 冻结了 v1，结算时要按它复现定价
+        // 旧版必须留着：已下单的充值按当时冻结的换算率发积分
         assertThat(statusOf(1)).isEqualTo("retired");
     }
 
@@ -159,22 +168,22 @@ class AdminApiIntegrationTest {
     }
 
     @Test
-    void 编译不过的目录_发不出去() throws Exception {
+    void 校验不过的目录_发不出去() throws Exception {
         int versionBefore = catalog.currentVersion();
 
-        // 编译是发布时**唯一**的验证时机：放过去了，影响的是已经用这个版本计过价的 job
+        // 校验是发布时**唯一**的时机：放过去了，新订单会按一个错的换算率发积分
         mvc.perform(post("/admin/catalogs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BAD_CATALOG))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
 
-        // 一行都没落库 —— 编不过的文档不该留下任何痕迹
+        // 一行都没落库 —— 校验不过的文档不该留下任何痕迹
         assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM billing_pricing_catalogs", Integer.class)).isZero();
         // 生效版本原封不动。⚠️ 这里比对「发布前」而不是断言 -1：
         //   CatalogHolder 是内存态，而 @BeforeEach 只清库；reload() 在「没有 active 版本」时
-        //   刻意保留旧版本（免得一次读库失败让全站算不出价），所以内存里的版本号
+        //   刻意保留旧版本（免得一次读库失败让全站读不到换算率），所以内存里的版本号
         //   不会因为清库而归零。断言「没变化」才是这条路径真正要保证的。
         assertThat(catalog.currentVersion()).isEqualTo(versionBefore);
     }
@@ -281,7 +290,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_500L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-lost", jobId, MODEL, TASK,
-                Map.of(), "free", TITLE, Instant.now()));
+                Map.of(), "free", TITLE, Instant.now(), RULE));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/refund")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -302,7 +311,7 @@ class AdminApiIntegrationTest {
         seedHoldable();
         long jobId = 9_501L;
         billing.hold(new HoldCommand(USER_HOLD, "cmd-stuck", jobId, MODEL, TASK,
-                Map.of(), "free", TITLE, Instant.now()));
+                Map.of(), "free", TITLE, Instant.now(), RULE));
 
         mvc.perform(post("/admin/credits/jobs/" + jobId + "/settle")
                         .contentType(MediaType.APPLICATION_JSON)

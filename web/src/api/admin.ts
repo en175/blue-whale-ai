@@ -422,10 +422,20 @@ export interface AdminModel {
   default_duration: number | null;
   /** 特性开关 JSON 对象 */
   features: Record<string, unknown>;
-  /** 图片渠道解析器：seedream / gpt / banana */
-  channel_parser?: string | null;
+  /** 渠道（`channel` 列，封闭枚举 `<家族>-<媒介>[-<协议>]`）：决定请求怎么解析、出站用哪种线协议。
+   *  取值与标签见 `admin/pages/ModelList/model-form.ts` 的 `CHANNELS`。
+   *  空值按行的 `capability_type` 回落（防御脏数据，正常行恒有值）。 */
+  channel?: string | null;
   /** 图片请求映射（gpt 交叉格 / banana 一维表）；seedream 为 null */
   request_mapping?: unknown;
+  /**
+   * 该模型该能力的**计价规则**（`generation_model_capability.pricing` 列）。
+   *
+   * 形态与定价目录里 `document.models.<model_id>.<capability_type>` 那条**逐字相同**
+   * （解析/换算见 `admin/lib/billing-catalog/catalogDraft.ts` 的 `CatalogRuleView`）。
+   * `null` = 还没搬到能力行上，billing 侧回落到定价目录那份。
+   */
+  pricing?: unknown;
   /** 是否启用：true 在 dock 展示 / false 隐藏 */
   enabled: boolean;
   /** 排序序号，同类型内越小越靠前 */
@@ -459,8 +469,12 @@ export interface CreateAdminModelParams {
   default_aspect_ratio?: string | null;
   default_duration?: number | null;
   features?: Record<string, unknown>;
-  channel_parser?: string | null;
+  /** 渠道（封闭枚举，见 {@link AdminModel.channel}）。解析与出站的唯一来源。 */
+  channel?: string | null;
+  /** 图片请求映射（gpt 交叉格 / banana 一维表）；seedream 为 null */
   request_mapping?: unknown;
+  /** 计价规则（形态见 {@link AdminModel.pricing}）；`undefined` = 不改，`null` = 清空 */
+  pricing?: unknown;
   enabled?: boolean;
   /** 排序序号（编辑部分更新时可调序） */
   sort_order?: number;

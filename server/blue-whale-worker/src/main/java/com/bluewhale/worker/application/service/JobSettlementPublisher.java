@@ -100,7 +100,7 @@ public class JobSettlementPublisher {
      *                      就会出现「事件说的成功、结算看到的失败」
      */
     public void publishTerminal(GenerationJobEntity job, Map<String, Object> statusPayload) {
-        publishTerminal(job, statusPayload, null);
+        publishTerminal(job, statusPayload, null, null);
     }
 
     /**
@@ -115,6 +115,30 @@ public class JobSettlementPublisher {
      */
     public void publishTerminal(GenerationJobEntity job, Map<String, Object> statusPayload,
                                 Long upstreamTotalTokens) {
+        publishTerminal(job, statusPayload, upstreamTotalTokens, null);
+    }
+
+    /**
+     * 终态收口，带**上游返回的全部原始量**。
+     *
+     * <p>两个量各服务一条计价路径，互不替代：{@code upstreamTotalTokens} 是视频按 token 计价的
+     * 基数，{@code upstreamSeconds} 是音频按秒计价的基数。不要为了少一个参数把它们合成一个
+     * 「用量对象」——它们是**两条不同规则**的基准维度，合成之后「这次该报哪个」就没人说得清，
+     * 而报错的后果是 billing 拿到 0 或拒绝。
+     *
+     * @param job           已写入终态的作业行（userId 从其取）
+     * @param statusPayload ★ 与 {@code status_changed} **同一个** payload——
+     *                      结算需要的成功槽数、失败原因都在里面，另起一份数据源
+     *                      就会出现「事件说的成功、结算看到的失败」
+     * @param upstreamTotalTokens 上游返回的真实 token 数（**视频的权威用量**）；
+     *                      {@code null} = 这条路径没有——不报该维度
+     * @param upstreamSeconds 产出音频的真实时长，整秒（**音频的权威用量**）；
+     *                      {@code null} = 这条路径没有——不报该维度。⚠️ 按秒计价的规则
+     *                      因此会被 billing 的基准维度守卫拒绝（死信 + 红灯），
+     *                      这是刻意的：宁可吵出来，也不要按 0 秒白送
+     */
+    public void publishTerminal(GenerationJobEntity job, Map<String, Object> statusPayload,
+                                Long upstreamTotalTokens, Long upstreamSeconds) {
         String status = job.getStatus();
         if (status == null) {
             return;
@@ -131,7 +155,7 @@ public class JobSettlementPublisher {
 
         String topic = settled ? completedTopic : failedTopic;
         String body = settled
-                ? completedBody(job, status, statusPayload, upstreamTotalTokens)
+                ? completedBody(job, status, statusPayload, upstreamTotalTokens, upstreamSeconds)
                 : failedBody(job, statusPayload);
 
         try {
@@ -158,10 +182,10 @@ public class JobSettlementPublisher {
      * 所以打 WARN 让它可观测，而不是默默多收。
      */
     private String completedBody(GenerationJobEntity job, String status, Map<String, Object> payload,
-                                 Long upstreamTotalTokens) {
+                                 Long upstreamTotalTokens, Long upstreamSeconds) {
         int succeededSlots = succeededSlots(payload);
         List<Map<String, Object>> usage =
-                SettlementUsageLines.forJob(job, succeededSlots, upstreamTotalTokens);
+                SettlementUsageLines.forJob(job, succeededSlots, upstreamTotalTokens, upstreamSeconds);
         if (usage.isEmpty()) {
             // 只有一种情形会走到这里：job.input 缺 model_id（或不是合法 JSON），billing 无法查目录。
             // 宁可退回预扣额结算并留一条 WARN，也不要猜一个 modelId —— 猜错就是按别人的价扣钱。

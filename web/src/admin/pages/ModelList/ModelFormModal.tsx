@@ -1,219 +1,111 @@
 /* ============================================
  * ModelFormModal —— 模型新建 / 编辑弹窗
  *
- * 呈现层全部走 ../../ui 的组件（Modal / Input / Select / Checkbox / Alert / Table …），
+ * 呈现层全部走 ../../ui 的组件（Modal / Tabs / Input / Select / Checkbox / Alert / Table …），
  * **本文件没有自己的样式文件**：原先的私有 CSS 已删除，
  * 一个界面元素只有套件里一处定义。行内 style 只剩布局与一次性间距——
  * 颜色、边框、字号一律由套件与设计 token 决定。
+ *
+ * ── 为什么是 tab 而不是一条长滚动（用户口径）─────────────────────────────────
+ *
+ * 「模型列表的配置，可以做一个 table 切换，不要一直往下加内容」。原先约 1000 行的长滚动里，
+ * 改了就会影响出站请求的「高级」项与日常的「展示名」混在一起，越加越难找。现在四块：
+ *
+ *   · 基础        身份字段（只读）+ 类型 / 复制自 / model_id / 展示名 / 图标 / 启用
+ *   · 尺寸与素材  尺寸档位 / 比例 / 出站尺寸映射（渠道类型 + 映射表）/ 输出像素表 /
+ *                 默认值 / 时长 / 格式 / 特性 features / task_types
+ *   · 定价        该行的一条计价规则（原「模型计费」页的定价编辑收进这里）
+ *   · 高级        未识别字段 / 映射兜底的 JSON（逃生舱）
+ *
+ * 每个 tab 各自一个文件（本文件再加就超 `max-lines` 上限）：`BasicsTab` / `SizeMaterialTab` /
+ * `PricingTab` / `AdvancedTab`。**状态仍全部住在这里**（保存要拼一整个提交体），
+ * tab 只负责渲染。
+ *
+ * ── 定价：从「发布整份目录」改成「一次 PUT」──────────────────────────────────
+ *
+ * 定价数据长在能力行上（`generation_model_capability.pricing`）。于是保存就是一次普通的
+ * 能力行更新 —— 没有「目录与能力行两个存储」的半失败问题。
+ * （它**曾经**与定价目录里 `document.models.<model_id>.<capability_type>` 那条逐字相同；
+ *  目录那段已随这次搬迁**整段退场**，现在规则只有能力行这一处。两条纪律：
+ *
+ *   · **没碰过定价 tab 就完全不提交该字段**（`undefined` = 库里那份原样保留）：
+ *     「打开看一眼、点保存」不会用一份从空表单拼出来的规则把已有的价覆盖掉；
+ *   · **单价按「元」填、按 mc 存**，且没改过的价**原值写回**（`MoneyField.originalMc`，
+ *     详见 `lib/billing-catalog/catalogDraft.ts` 文件头第 2 条）——改的是钱，换算的舍入
+ *     一旦落在没动过的栏上，没人看得见。
+ *
+ * ⚠️ 换算率（1 元 = 多少积分）仍住**定价目录**里，这一页只读它：目录还活着，它为全局参数而存在。
  * ============================================ */
-import { useState, type CSSProperties, type ReactNode } from 'react';
-import { Plus, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { AdminModel, CreateAdminModelParams } from '@/api/admin';
+import { billingCatalogOptions } from '@/api/adminBillingCatalog';
 import { isApiError } from '@/api/http';
+import {
+  formFromRule,
+  parseCatalog,
+  readCreditsPerYuan,
+  ruleFormError,
+  ruleFromForm,
+  type CatalogRuleView,
+  type KeyValueRow,
+  type RuleForm,
+} from '../../lib/billing-catalog/catalogDraft';
+import type { ModelCapabilityView } from '../../lib/billing-catalog/sizeCandidates';
+import { dimensionTableCandidates } from '../../lib/billing-catalog/sizeCandidates';
 import {
   DEFAULT_IMAGE_RATIOS,
   DEFAULT_IMAGE_SIZES,
-  GPT_PROVIDER_SIZES,
-  IMAGE_CHANNEL_PARSERS,
-  KNOWN_FEATURE_KEYS,
-  TASK_TYPE_KEYS,
-  TYPE_TABS,
   buildCreateParams,
   buildTaskTypes,
-  camelFeatureKey,
+  channelFromModel,
+  channelOf,
+  defaultChannelFor,
   diffUpdateParams,
   durationsFromModel,
   featureValueTypeOk,
   mergeMatrix,
   parseBananaMaps,
   parseGptMatrix,
-  parserFromModel,
   pickTaskTypeRatios,
   readFeature,
   sizesFromModel,
-  typeName,
+  type ChannelId,
   type FormSnapshot,
   type GptMatrix,
-  type ImageChannelParserId,
   type ModelType,
   type SizeForm,
 } from './model-form';
-import { Alert, Badge, Button, Checkbox, Chip, Input, Modal, Select, Table, Textarea } from '../../ui';
+import {
+  FEATURE_BOOL_LABELS,
+  FEATURE_NUMBER_LABELS,
+  FEATURE_STRING_LABELS,
+  buildVideoDimensions,
+  dropKnownFeatures,
+  featureApplies,
+  omitEmpty,
+  omitEmptyStrings,
+  pickFeatureBooleans,
+  pickFeatureNumbers,
+  pickFeatureStrings,
+  pickVideoDimensions,
+  pretty,
+  readTaskTypesBase,
+} from './feature-fields';
+import { Alert, Button, Modal, Tabs } from '../../ui';
+import BasicsTab from './BasicsTab';
+import SizeMaterialTab from './SizeMaterialTab';
+import PricingTab from './PricingTab';
+import AdvancedTab from './AdvancedTab';
 
-/* ============ 布局常量（只有布局与一次性间距，零色值、零字号） ============ */
-/** 两列字段栅格（原 .grid2）。 */
-const GRID2: CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', marginBottom: 18 };
-/** 三列字段栅格（时长范围的最小 / 最大 / 步长）。 */
-const GRID3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 };
-/** 字段标签：套件暂无 Label 基元，照 TemplateManage 用一次性间距排布。 */
-const LABEL: CSSProperties = { marginBottom: 6 };
-/** 分节标题（尺寸选项 / 图片解析器 / 时长范围 …）。 */
-const SECTION: CSSProperties = { margin: '24px 0 8px' };
-/** 尺寸行：id / label / api_value 三个输入 + 删除按钮。 */
-const SIZE_ROW: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr 1fr auto',
-  gap: 8,
-  alignItems: 'center',
-  marginBottom: 8,
-};
-/** 任务类型行：任务名 / 已配比例 / 输入 / 添加。 */
-const TASK_ROW: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '120px 1fr 1fr auto',
-  gap: 10,
-  alignItems: 'center',
-  marginBottom: 8,
-};
-/** 输入 + 动作按钮的一排（比例草稿、格式草稿）。 */
-const INLINE_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 };
-const CHIP_LIST: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 };
-const FULL: CSSProperties = { width: '100%' };
+const TAB_ITEMS = [
+  { key: 'basics', label: '基础' },
+  { key: 'size', label: '尺寸与素材' },
+  { key: 'pricing', label: '定价' },
+  { key: 'advanced', label: '高级' },
+] as const;
 
-/** 说明性文字（原 .hint）：套件口径是 Alert tone="info"，不再是自定义灰字小段。 */
-function Hint({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ margin: '8px 0 14px' }}>
-      <Alert tone="info">{children}</Alert>
-    </div>
-  );
-}
-
-const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
-  reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
-  watermark: { label: '水印 watermark', types: ['image', 'video'] },
-  stream: { label: '流式输出 stream', types: ['image'] },
-  sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
-  first_frame: { label: '首帧 first_frame', types: ['video'] },
-  last_frame: { label: '尾帧 last_frame', types: ['video'] },
-  first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
-  audio: { label: '音频 audio', types: ['video'] },
-  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。 */
-  video_reference: { label: '视频素材参考 video_reference', types: ['video'] },
-  /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
-  audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
-  /** IKHBDO：模型是否开放工具调用（web_search 等）。写侧闸门对四种类型都收布尔值。 */
-  tools: { label: '工具调用 tools' },
-};
-
-const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
-  quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
-  // IKHBDO：补上 text——TextGenDialog 就是按 `features.max_prompt_length ?? 缺省` 卡文本输入长度的，
-  // 而表单只对 image / video 渲染这个键，文本行因此永远配不了自己的提示词上限。
-  max_prompt_length: {
-    label: '提示词上限 max_prompt_length',
-    types: ['image', 'video', 'text'],
-    placeholder: '如 32000',
-  },
-  /** ADR-0086：视频生成普通参考中的视频素材上限。 */
-  video_reference_max: { label: '视频参考上限 video_reference_max', types: ['video'], placeholder: '如 3' },
-  /** ADR-0086：视频 / 音频生成中的音频素材参考上限。 */
-  audio_reference_max: { label: '音频参考上限 audio_reference_max', types: ['audio', 'video'], placeholder: '如 3' },
-  /** 图片 / 视频 / 音频三种生成共用的图参考上限。
-   *  IKHEXG：合并了旧的 `max_reference_images`——两者字面几乎一样、语义却不同
-   *  （旧键当时管图片/视频生成、本键管音频生成），运营与研发都误判过。
-   *  现在键名只表达媒介，作用域由行的 capability_type 决定，故三种类型都可编辑。 */
-  image_reference_max: { label: '图片参考上限 image_reference_max', types: ['image', 'video', 'audio'], placeholder: '如 10' },
-  /** ADR-0086：输入参考素材总时长上限（秒；2.0=15 / 2.5=30；空=不限）。
-   *  IKHEXG：音频链路此前漏读该键，本次已补上校验（见 model-reference-limits.ts / reference-limits.ts）。 */
-  max_reference_duration_sec: { label: '参考素材总时长上限秒 max_reference_duration_sec', types: ['video', 'audio'], placeholder: '如 15（留空 = 不限）' },
-};
-
-/** ADR-0085（IKESD9）：字符串型能力键——i2i_model_name 存的是上游模型名，非行 id。 */
-const FEATURE_STRING_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
-  i2i_model_name: {
-    label: '图生图上游模型名 i2i_model_name',
-    types: ['image'],
-    placeholder: '如 gpt-image-2-edit（留空 = 不分流）',
-  },
-  /** IKHBDO：出站图片协议（worker-java 分支：openai-images / inline-image）。
-   *  用自由文本而非下拉：写侧只卡「非空字符串」，认不出时 worker 告警回落 inline-image——
-   *  下拉会把库里已有的未知取值读成空白，保存时又把它删掉。 */
-  image_protocol: {
-    label: '出站图片协议 image_protocol',
-    types: ['image'],
-    placeholder: 'openai-images / inline-image（留空 = inline-image）',
-  },
-};
-
-/** camelCase → snake_case 反查表：读侧优先认 camelCase，表单只认 snake_case 时必须双向对齐。 */
-const FEATURE_KEY_BY_CAMEL = new Map(KNOWN_FEATURE_KEYS.map((key) => [camelFeatureKey(key), key]));
-
-const pretty = (raw: unknown) => {
-  try {
-    return JSON.stringify(raw ?? {}, null, 2);
-  } catch {
-    return '{}';
-  }
-};
-
-const pickFeatureBooleans = (features: Record<string, unknown> = {}): Record<string, boolean> => {
-  const out: Record<string, boolean> = {};
-  for (const key of Object.keys(FEATURE_BOOL_LABELS)) out[key] = readFeature(features, key) === true;
-  return out;
-};
-
-const pickFeatureNumbers = (features: Record<string, unknown> = {}): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const key of Object.keys(FEATURE_NUMBER_LABELS)) {
-    const v = readFeature(features, key);
-    out[key] = typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
-  }
-  return out;
-};
-
-const pickFeatureStrings = (features: Record<string, unknown> = {}): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const key of Object.keys(FEATURE_STRING_LABELS)) {
-    const v = readFeature(features, key);
-    out[key] = typeof v === 'string' ? v : '';
-  }
-  return out;
-};
-
-/** 非结构化键 → 高级 JSON。已知键（含 camelCase 写法）且取值类型正常 / 为 null 时归结构化控件，
- *  其余（未知键、类型不符的脏值）原样留在 JSON 里：整包提交时静默删掉一个键，比让运营在
- *  JSON 里看到它危险得多（写侧闸门会给出可读报错）。 */
-const dropKnownFeatures = (features: Record<string, unknown> = {}): Record<string, unknown> => {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(features)) {
-    const known = (KNOWN_FEATURE_KEYS as readonly string[]).includes(k) ? k : FEATURE_KEY_BY_CAMEL.get(k);
-    if (known === 'task_types') {
-      // 合法对象由结构化控件承载；非对象脏值留在 JSON 里（后端闸门会拒）
-      if (v == null || (typeof v === 'object' && !Array.isArray(v))) continue;
-    } else if (known && (v == null || featureValueTypeOk(known, v))) {
-      continue;
-    }
-    out[k] = v;
-  }
-  return out;
-};
-
-const readTaskTypesBase = (features?: Record<string, unknown>): Record<string, unknown> => {
-  const raw = readFeature(features, 'task_types');
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-};
-
-const omitEmptyStrings = (strs: Record<string, string>): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(strs)) {
-    if (v.trim() !== '') out[k] = v.trim();
-  }
-  return out;
-};
-
-const omitEmpty = (nums: Record<string, string>): Record<string, number> => {
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(nums)) {
-    if (v.trim() === '') continue;
-    const n = Number(v);
-    if (Number.isFinite(n)) out[k] = n;
-  }
-  return out;
-};
-
-/** 该能力类型是否展示某个结构化特性键（未标 types = 所有类型都展示）。 */
-const featureApplies = (meta: { types?: ModelType[] }, type: ModelType) => !meta.types || meta.types.includes(type);
+type TabKey = (typeof TAB_ITEMS)[number]['key'];
 
 interface ModelFormModalProps {
   initial?: AdminModel;
@@ -224,6 +116,7 @@ interface ModelFormModalProps {
 }
 
 export default function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: ModelFormModalProps) {
+  const [tab, setTab] = useState<TabKey>('basics');
   const [type, setType] = useState<ModelType>(initial?.capability_type ?? defaultType);
   const [copyFrom, setCopyFrom] = useState('');
   const [modelId, setModelId] = useState(initial?.model_id ?? '');
@@ -257,6 +150,10 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [taskTypesBase, setTaskTypesBase] = useState<Record<string, unknown>>(() =>
     readTaskTypesBase(initial?.features),
   );
+  /** 输出像素表 `features.video_dimensions`（键从本行的档位 × 比例派生，值由运营填）。 */
+  const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
+    pickVideoDimensions(initial?.features),
+  );
   const [extraFeatures, setExtraFeatures] = useState(
     initial ? pretty(dropKnownFeatures(initial.features)) : '{}',
   );
@@ -267,8 +164,12 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     initial?.default_duration != null ? String(initial.default_duration) : '',
   );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
-  const originalParser = parserFromModel(initial);
-  const [parser, setParser] = useState<ImageChannelParserId>(originalParser);
+  /** 渠道（能力行 `channel` 列）：表单上只有一个控件。映射表怎么读、出站走哪种协议都由它决定，
+   *  解析器只是它的一格展开（`channelOf(channel).parser`）。 */
+  const originalChannel = channelFromModel(initial);
+  const [channel, setChannel] = useState<ChannelId>(originalChannel);
+  const parser = channelOf(channel).parser ?? 'seedream';
+  const originalParser = channelOf(originalChannel).parser ?? 'seedream';
   const [gptMatrix, setGptMatrix] = useState(() => parseGptMatrix(initial?.request_mapping, sizes, ratios));
   // seedream 矩阵只在「打开时就是该行的解析器」时回填：从 gpt 行切到 seedream 时若把 gpt 的
   // 矩阵预填进来，运营一保存就把上一族的矩阵当 seedream 尺寸表写回去了（正是后端注释里
@@ -285,6 +186,41 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  /* ── 定价（`pricing` 列）────────────────────────────────────────────────────── */
+  /** 库里那条规则（`null` = 还没配）。它是「不编辑的字段原样带回去」的来源。 */
+  const originalPricing = (initial?.pricing ?? null) as CatalogRuleView | null;
+  const [pricingForm, setPricingForm] = useState<RuleForm>(() =>
+    formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}, null),
+  );
+  /** 用户动过定价 tab 没有。**没动过就完全不提交该字段**——库里那份原样保留。 */
+  const [pricingTouched, setPricingTouched] = useState(false);
+
+  /**
+   * 换算率来自**定价目录**（它还为全局参数而存在）：单价按元填、写回 mc，换算就在这一层。
+   * 读不到时**不阻塞本弹窗**（定价 tab 会说明并拦住填价）——目录接口抖动不该让「改个展示名」也做不成。
+   */
+  const catalog = useQuery(billingCatalogOptions());
+  const creditsPerYuan = useMemo(() => {
+    if (catalog.data === undefined) return null;
+    try {
+      return readCreditsPerYuan(parseCatalog(catalog.data.document));
+    } catch {
+      return null;
+    }
+  }, [catalog.data]);
+  const rateNotice = catalog.isError
+    ? isApiError(catalog.error)
+      ? catalog.error.message
+      : '获取定价目录失败'
+    : '';
+
+  // 换算率是异步到的：把「元」重新渲染一遍。⚠️ **用户已经动过定价就绝不覆盖**——
+  // 那会把正在填的价冲掉。没动过时重建是恒等的（`formFromRule` 带上 originalMc，见文件头）。
+  useEffect(() => {
+    if (pricingTouched) return;
+    setPricingForm(formFromRule(initial?.model_id ?? '', type, originalPricing ?? {}, creditsPerYuan));
+  }, [pricingTouched, creditsPerYuan, initial, type, originalPricing]);
+
   const copyOptions = models.filter((m) => m.capability_type === type);
   const showSizeRatio = type === 'image' || type === 'video';
   // IKG4UR：时长**范围**只对视频可配。音频上游是 TTS 式接口（请求无 duration），
@@ -298,6 +234,36 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     ...Object.values(FEATURE_NUMBER_LABELS),
     ...Object.values(FEATURE_STRING_LABELS),
   ].some((meta) => featureApplies(meta, type));
+
+  /**
+   * 本行的能力视图（尺寸 × 比例）—— 定价 tab 用它派生**规格键候选集**。
+   *
+   * <p>取的是**表单里正在编辑的那份**（不是库里的行）：运营刚加的一个档位，就应该立刻能在
+   * 价格表里配价，而不是先保存一次、再打开定价 tab 才看得到。矩阵用表单里的映射表，
+   * 好让价格表那行标出「本行尺寸：2048x2048（419 万像素）」。
+   */
+  const capabilityView = useMemo<ModelCapabilityView>(
+    () => ({
+      modelId: modelId.trim(),
+      capabilityType: type,
+      sizes: sizes
+        .filter((size) => size.id.trim())
+        .map((size) => ({
+          id: size.id.trim(),
+          label: (size.label ?? '').trim(),
+          apiValue: (size.apiValue ?? '').trim(),
+          width: null,
+          height: null,
+        })),
+      ratios: ratios.filter(Boolean),
+      defaultRatio: defaultRatio.trim(),
+      matrix: parser === 'seedream' ? seedreamMatrix : parser === 'gpt' ? gptMatrix : {},
+    }),
+    [modelId, type, sizes, ratios, defaultRatio, parser, seedreamMatrix, gptMatrix],
+  );
+
+  /** 输出像素表的候选键：本行的「档位 × 比例」笛卡尔积（与定价 tab 的尺寸表同源，不手敲）。 */
+  const dimensionCandidates = useMemo(() => dimensionTableCandidates(capabilityView), [capabilityView]);
 
   const applySource = (src: AdminModel, nextType: ModelType) => {
     const srcSizes = sizesFromModel(src.supported_sizes);
@@ -319,13 +285,15 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setFeatureStrings(pickFeatureStrings(src.features));
     setTaskTypeRatios(pickTaskTypeRatios(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
+    setVideoDimensions(pickVideoDimensions(src.features));
     setExtraFeatures(pretty(dropKnownFeatures(src.features)));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
     setDefaultFormat(src.default_format ?? '');
     setDefaultDuration(src.default_duration != null ? String(src.default_duration) : '');
-    const nextParser = parserFromModel(src);
-    setParser(nextParser);
+    const nextChannel = channelFromModel(src);
+    setChannel(nextChannel);
+    const nextParser = channelOf(nextChannel).parser ?? 'seedream';
     setGptMatrix(parseGptMatrix(src.request_mapping, nextSizes, nextRatios));
     setSeedreamMatrix(nextParser === 'seedream' ? parseGptMatrix(src.request_mapping, nextSizes, nextRatios) : {});
     const banana = parseBananaMaps(src.request_mapping);
@@ -337,6 +305,16 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setCopyFrom(id);
     const src = models.find((m) => m.id === id);
     if (src) applySource(src, type);
+  };
+
+  const handleType = (next: ModelType) => {
+    setType(next);
+    setCopyFrom('');
+    // 换类型 = 换媒介，渠道必须跟着换：渠道的媒介与行的 capability_type 绑死（后端媒体闸门），
+    // 留着上一个媒介的渠道会让这次新建**保存必然 400**。
+    setChannel((prev) => (channelOf(prev).media === next ? prev : defaultChannelFor(next)));
+    if (next === 'image' && !sizes.length) setSizes(DEFAULT_IMAGE_SIZES);
+    if (next === 'image' && !ratios.length) setRatios(DEFAULT_IMAGE_RATIOS);
   };
 
   const addSizeRow = () => {
@@ -398,6 +376,13 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setTaskRatioDraft((prev) => ({ ...prev, [taskType]: '' }));
   };
 
+  const removeTaskRatio = (taskType: string, ratio: string) => {
+    setTaskTypeRatios((prev) => ({
+      ...prev,
+      [taskType]: (prev[taskType] ?? []).filter((x) => x !== ratio),
+    }));
+  };
+
   const snapshot = (): FormSnapshot => {
     let extra: Record<string, unknown> = {};
     try {
@@ -406,6 +391,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       extra = {};
     }
     const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios);
+    const dimensions = buildVideoDimensions(videoDimensions);
     return {
       type,
       modelId,
@@ -439,10 +425,12 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             return stored !== undefined && (stored === null || featureValueTypeOk(k, stored));
           }),
         ),
+        // 输出像素表：**一行都没填就整个不写这个键**（留空 = 不做这张表，不是「配了张空表」）
+        ...(dimensions !== undefined ? { video_dimensions: dimensions } : {}),
         ...(Object.keys(taskTypes).length ? { task_types: taskTypes } : {}),
       },
-      parser,
-      originalParser,
+      channel,
+      originalChannel,
       originalHadRequestMapping: initial?.request_mapping != null,
       gptMatrix,
       seedreamMatrix,
@@ -457,12 +445,31 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       JSON.parse(extraFeatures || '{}');
     } catch {
       setError('其他特性 JSON 解析失败，请检查格式。');
+      setTab('advanced');
       return;
     }
     const built = buildCreateParams(snapshot());
     if (!built.ok) {
       setError(built.error);
       return;
+    }
+    // 定价：**只在动过这一页时**才校验与提交。没动过 = 库里那份原样保留（`undefined`）。
+    if (pricingTouched) {
+      // 模型 / 任务类型就是这一行的身份（一个能力行恰好对应一条规则），校验前现填进去
+      const effective: RuleForm = { ...pricingForm, modelId: modelId.trim(), taskType: type };
+      const message = ruleFormError(effective, creditsPerYuan);
+      if (message !== null) {
+        setError(message);
+        setTab('pricing');
+        return;
+      }
+      try {
+        built.value.pricing = ruleFromForm(effective, originalPricing ?? {}, creditsPerYuan);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '定价规则不合法');
+        setTab('pricing');
+        return;
+      }
     }
     setError('');
     setSaving(true);
@@ -500,471 +507,108 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
         </>
       }
     >
-      {initial && (
-        <Alert tone="info">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 32 }}>
-            <div>
-              <div style={LABEL}>模型 ID（不可改）</div>
-              <div>{initial.model_id}</div>
-            </div>
-            {/* IKHBDO：类型与供应商是身份字段（后端不接受更新），编辑态只读展示——
-                原先编辑态整块不渲染，运营看不到这一行属于哪个供应商。 */}
-            <div>
-              <div style={LABEL}>类型（不可改）</div>
-              <div>{typeName(type)}</div>
-            </div>
-            <div>
-              <div style={LABEL}>供应商 provider_id（不可改）</div>
-              <div>{initial.provider_id}</div>
-            </div>
-          </div>
-        </Alert>
-      )}
-
-      {!initial && (
-        <div style={GRID2}>
-          <div>
-            <div style={LABEL}>类型</div>
-            <Select
-              aria-label="类型"
-              options={TYPE_TABS.map((t) => ({ value: t.key, label: t.label }))}
-              value={type}
-              onChange={(next) => {
-                setType(next as ModelType);
-                setCopyFrom('');
-                if (next === 'image' && !sizes.length) setSizes(DEFAULT_IMAGE_SIZES);
-                if (next === 'image' && !ratios.length) setRatios(DEFAULT_IMAGE_RATIOS);
-              }}
-            />
-          </div>
-          <div>
-            <div style={LABEL}>
-              复制自某模型 <span>（选填）</span>
-            </div>
-            <Select
-              aria-label="复制自某模型"
-              options={[
-                { value: '', label: '空白新建' },
-                ...copyOptions.map((m) => ({ value: m.id, label: `${m.model_label}（${m.model_id}）` })),
-              ]}
-              value={copyFrom}
-              onChange={handleCopy}
-            />
-          </div>
-        </div>
-      )}
-
-      <div style={GRID2}>
-        <div>
-          <div style={LABEL}>模型 ID model_id</div>
-          <Input
-            placeholder="如 seed-audio-1.0"
-            value={modelId}
-            disabled={!!initial}
-            onChange={(e) => setModelId(e.target.value)}
-            style={FULL}
-          />
-        </div>
-        <div>
-          <div style={LABEL}>展示名 model_label</div>
-          <Input
-            placeholder="如 豆包 Seed Audio 1.0"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            style={FULL}
-          />
-        </div>
+      <div style={{ marginBottom: 18 }}>
+        <Tabs items={TAB_ITEMS} value={tab} onChange={(key) => setTab(key as TabKey)} />
       </div>
 
-      <div>
-        <div style={LABEL}>
-          图标 icon <span>（选填）</span>
-        </div>
-        <Input placeholder="URL 或图标名" value={icon} onChange={(e) => setIcon(e.target.value)} style={FULL} />
-      </div>
-
-      {showSizeRatio && (
-        <>
-          <h3 style={SECTION}>尺寸选项</h3>
-          <Hint>id 是能力行内部标识；api_value 是**出站实际提交给上游**的档位值（如 4k），留空则回落用 id。</Hint>
-          {sizes.map((size, index) => (
-            <div style={SIZE_ROW} key={index}>
-              <Input
-                placeholder="id，如 1K"
-                value={size.id}
-                onChange={(e) => updateSize(index, { id: e.target.value })}
-                style={FULL}
-              />
-              <Input
-                placeholder="展示名"
-                value={size.label ?? ''}
-                onChange={(e) => updateSize(index, { label: e.target.value })}
-                style={FULL}
-              />
-              <Input
-                placeholder="上游值 api_value，如 4k"
-                value={size.apiValue ?? ''}
-                onChange={(e) => updateSize(index, { apiValue: e.target.value })}
-                style={FULL}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                title="删除尺寸行"
-                icon={<X size={14} strokeWidth={2} />}
-                onClick={() => removeSize(index)}
-              />
-            </div>
-          ))}
-          <div style={{ marginBottom: 18 }}>
-            <Button icon={<Plus size={14} strokeWidth={2} />} onClick={addSizeRow}>
-              加一个尺寸行
-            </Button>
-          </div>
-
-          <h3 style={SECTION}>比例选项</h3>
-          <div style={CHIP_LIST}>
-            {ratios.map((ratio) => (
-              <Chip key={ratio} onClick={() => removeRatio(ratio)}>
-                {ratio} ×
-              </Chip>
-            ))}
-          </div>
-          <div style={INLINE_ROW}>
-            <Input
-              placeholder="如 16:9"
-              value={ratioDraft}
-              onChange={(e) => setRatioDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addChip(ratioDraft, ratios, setRatios, setRatioDraft, 'ratio');
-                }
-              }}
-              style={FULL}
-            />
-            <Button onClick={() => addChip(ratioDraft, ratios, setRatios, setRatioDraft, 'ratio')}>添加比例</Button>
-          </div>
-        </>
-      )}
-
-      {type === 'image' && (
-        <>
-          <h3 style={SECTION}>图片解析器</h3>
-          <Select
-            aria-label="图片解析器"
-            options={IMAGE_CHANNEL_PARSERS.map((id) => ({ value: id, label: id }))}
-            value={parser}
-            onChange={(next) => setParser(next as ImageChannelParserId)}
-          />
-
-          {/* IKHU8P：矩阵转置成「行=比例、列=尺寸」。原方向是行=尺寸、列=比例，而 gpt 的比例最多 13 个，
-              14 列把单元格压到约 40px——下拉框左右 padding 加原生箭头就把正文吃光，值看着是空的。 */}
-          {parser === 'gpt' && (
-            <div style={{ margin: '12px 0 20px' }}>
-              <Hint>行=比例选项，列=尺寸选项，格子填官方 size（含 auto）。1K × 16:9 / 9:16 可留空。</Hint>
-              <Table>
-                <thead>
-                  <tr>
-                    <th>比例</th>
-                    {sizes.map((size) => (
-                      <th key={size.id || size.label}>{size.label || size.id || '—'}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ratios.map((ratio) => (
-                    <tr key={ratio}>
-                      <td>{ratio}</td>
-                      {sizes.map((size) => (
-                        <td key={size.id || size.label}>
-                          <Select
-                            size="sm"
-                            aria-label={`${ratio} 行 ${size.label || size.id} 列`}
-                            options={[
-                              { value: '', label: '留空' },
-                              ...GPT_PROVIDER_SIZES.map((item) => ({ value: item, label: item })),
-                            ]}
-                            value={gptMatrix[size.id]?.[ratio] ?? ''}
-                            onChange={(next) =>
-                              setGptMatrix((prev) => ({
-                                ...prev,
-                                [size.id]: { ...(prev[size.id] ?? {}), [ratio]: next },
-                              }))
-                            }
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          )}
-
-          {parser === 'banana' && (
-            <div style={{ margin: '12px 0 20px' }}>
-              <Hint>一维映射：尺寸选项 → quality；比例选项 → size（如 1x1）。不要填像素交叉格。</Hint>
-              <div style={GRID2}>
-                <div>
-                  <div style={LABEL}>尺寸 → quality</div>
-                  {sizes.map((size) => (
-                    <div style={INLINE_ROW} key={size.id}>
-                      <Badge tone="neutral">{size.label || size.id}</Badge>
-                      <Input
-                        placeholder="调用值，如 1k"
-                        value={bananaQuality[size.id] ?? ''}
-                        onChange={(e) => setBananaQuality((prev) => ({ ...prev, [size.id]: e.target.value }))}
-                        style={FULL}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <div style={LABEL}>比例 → size</div>
-                  {ratios.map((ratio) => (
-                    <div style={INLINE_ROW} key={ratio}>
-                      <Badge tone="neutral">{ratio}</Badge>
-                      <Input
-                        placeholder="调用值，如 1x1"
-                        value={bananaSize[ratio] ?? ''}
-                        onChange={(e) => setBananaSize((prev) => ({ ...prev, [ratio]: e.target.value }))}
-                        style={FULL}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* IKHU8P：与 gpt 同因同改——转置成「行=比例、列=尺寸」，免得比例一多就把格子压到看不见。 */}
-          {parser === 'seedream' && (
-            <div style={{ margin: '12px 0 20px' }}>
-              <Hint>
-                行=比例选项，列=尺寸选项，格子填出站像素尺寸（如 2048x2048）。worker 按「分辨率 × 宽高比」查这张表换算尺寸；
-                整张清空会让出站尺寸回落成 provider 原值（上游会 400），所以至少保留一格。
-              </Hint>
-              <Table>
-                <thead>
-                  <tr>
-                    <th>比例</th>
-                    {sizes.map((size) => (
-                      <th key={size.id || size.label}>{size.label || size.id || '—'}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ratios.map((ratio) => (
-                    <tr key={ratio}>
-                      <td>{ratio}</td>
-                      {sizes.map((size) => (
-                        <td key={size.id || size.label}>
-                          <Input
-                            size="sm"
-                            aria-label={`${ratio} 行 ${size.label || size.id} 列`}
-                            placeholder="留空"
-                            value={seedreamMatrix[size.id]?.[ratio] ?? ''}
-                            onChange={(e) =>
-                              setSeedreamMatrix((prev) => ({
-                                ...prev,
-                                [size.id]: { ...(prev[size.id] ?? {}), [ratio]: e.target.value },
-                              }))
-                            }
-                            style={FULL}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          )}
-        </>
-      )}
-
-      {showDuration && (
-        <>
-          <h3 style={SECTION}>时长范围</h3>
-          <div style={GRID3}>
-            <div>
-              <div style={LABEL}>最小秒</div>
-              <Input value={durationMin} onChange={(e) => setDurationMin(e.target.value)} style={FULL} />
-            </div>
-            <div>
-              <div style={LABEL}>最大秒</div>
-              <Input value={durationMax} onChange={(e) => setDurationMax(e.target.value)} style={FULL} />
-            </div>
-            <div>
-              <div style={LABEL}>步长（选填）</div>
-              <Input value={durationStep} onChange={(e) => setDurationStep(e.target.value)} style={FULL} />
-            </div>
-          </div>
-        </>
-      )}
-
-      {showDefaultDuration && (
-        <div style={GRID2}>
-          <div>
-            <div style={LABEL}>默认时长（秒）</div>
-            <Input value={defaultDuration} onChange={(e) => setDefaultDuration(e.target.value)} style={FULL} />
-          </div>
-        </div>
-      )}
-
-      {showFormat && (
-        <>
-          <h3 style={SECTION}>格式</h3>
-          <div style={CHIP_LIST}>
-            {formats.map((item) => (
-              <Chip key={item} onClick={() => setFormats(formats.filter((x) => x !== item))}>
-                {item} ×
-              </Chip>
-            ))}
-          </div>
-          <div style={INLINE_ROW}>
-            <Input
-              placeholder="如 mp3"
-              value={formatDraft}
-              onChange={(e) => setFormatDraft(e.target.value)}
-              style={FULL}
-            />
-            <Button onClick={() => addChip(formatDraft, formats, setFormats, setFormatDraft, 'format')}>
-              添加格式
-            </Button>
-          </div>
-          <div>
-            <div style={LABEL}>默认格式</div>
-            <Input value={defaultFormat} onChange={(e) => setDefaultFormat(e.target.value)} style={FULL} />
-          </div>
-        </>
-      )}
-
-      {showSizeRatio && (
-        <div style={GRID2}>
-          <div>
-            <div style={LABEL}>默认尺寸</div>
-            <Input value={defaultSize} onChange={(e) => setDefaultSize(e.target.value)} style={FULL} />
-          </div>
-          <div>
-            <div style={LABEL}>默认比例</div>
-            <Input value={defaultRatio} onChange={(e) => setDefaultRatio(e.target.value)} style={FULL} />
-          </div>
-        </div>
-      )}
-
-      {/* IKHBDO：结构化 features 对所有类型开放。此前 audio / text 被排除在结构化块之外，
-          而高级 JSON 兜底又只对 image / video 渲染——两种条件互相抵消，音频行连 JSON 出口都没有。 */}
-      <h3 style={SECTION}>特性 features（结构化）</h3>
-      {!hasStructuredFeature && <Hint>该类型没有专属的结构化特性键，可直接用下方高级 JSON 配置。</Hint>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-        {Object.entries(FEATURE_BOOL_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Checkbox
-              key={key}
-              checked={!!featureFlags[key]}
-              onChange={() => setFeatureFlags((p) => ({ ...p, [key]: !p[key] }))}
-              label={meta.label}
-            />
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_NUMBER_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <div key={key}>
-              <div style={LABEL}>
-                {meta.label} <span>（留空不写入）</span>
-              </div>
-              <Input
-                type="number"
-                min={0}
-                placeholder={meta.placeholder}
-                value={featureNumbers[key] ?? ''}
-                onChange={(e) => setFeatureNumbers((p) => ({ ...p, [key]: e.target.value }))}
-                style={FULL}
-              />
-            </div>
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_STRING_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <div key={key}>
-              <div style={LABEL}>
-                {meta.label} <span>（留空不写入）</span>
-              </div>
-              <Input
-                placeholder={meta.placeholder}
-                value={featureStrings[key] ?? ''}
-                onChange={(e) => setFeatureStrings((p) => ({ ...p, [key]: e.target.value }))}
-                style={FULL}
-              />
-            </div>
-          ))}
-      </div>
-
-      {/* ADR-0086：按任务类型的比例约束——原先只能在整个 features 的 JSON 里手写。 */}
-      {type === 'video' && (
-        <>
-          <h3 style={SECTION}>任务类型比例约束 task_types</h3>
-          <Hint>留空 = 该任务类型沿用基础「比例选项」。只编辑 allowed_ratios，行内其它子键原样保留。</Hint>
-          {TASK_TYPE_KEYS.map((taskType) => (
-            <div style={TASK_ROW} key={taskType}>
-              <Badge tone="neutral">{taskType}</Badge>
-              <div style={CHIP_LIST}>
-                {(taskTypeRatios[taskType] ?? []).map((ratio) => (
-                  <Chip
-                    key={ratio}
-                    onClick={() =>
-                      setTaskTypeRatios((prev) => ({
-                        ...prev,
-                        [taskType]: (prev[taskType] ?? []).filter((x) => x !== ratio),
-                      }))
-                    }
-                  >
-                    {ratio} ×
-                  </Chip>
-                ))}
-              </div>
-              <Input
-                size="sm"
-                placeholder="如 16:9，回车添加"
-                value={taskRatioDraft[taskType] ?? ''}
-                onChange={(e) => setTaskRatioDraft((prev) => ({ ...prev, [taskType]: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addTaskRatio(taskType);
-                  }
-                }}
-                style={FULL}
-              />
-              <Button onClick={() => addTaskRatio(taskType)}>添加</Button>
-            </div>
-          ))}
-        </>
-      )}
-
-      <details style={{ marginBottom: 18 }}>
-        <summary>高级 JSON（未识别字段 / 映射兜底）</summary>
-        <Textarea
-          value={extraFeatures}
-          onChange={(e) => setExtraFeatures(e.target.value)}
-          style={{ marginTop: 8 }}
+      {tab === 'basics' && (
+        <BasicsTab
+          initial={initial}
+          type={type}
+          onType={handleType}
+          channel={channel}
+          setChannel={setChannel}
+          copyFrom={copyFrom}
+          onCopy={handleCopy}
+          copyOptions={copyOptions}
+          modelId={modelId}
+          onModelId={setModelId}
+          label={label}
+          onLabel={setLabel}
+          icon={icon}
+          onIcon={setIcon}
+          enabled={enabled}
+          onEnabled={setEnabled}
         />
-      </details>
+      )}
 
-      <div style={{ marginTop: 4 }}>
-        <Checkbox checked={enabled} onChange={setEnabled} label="启用" />
-      </div>
+      {tab === 'size' && (
+        <SizeMaterialTab
+          type={type}
+          channel={channel}
+          gpt={{ matrix: gptMatrix, setCell: (sizeId, ratio, value) => setGptMatrix((prev) => ({ ...prev, [sizeId]: { ...(prev[sizeId] ?? {}), [ratio]: value } })) }}
+          seedream={{ matrix: seedreamMatrix, setCell: (sizeId, ratio, value) => setSeedreamMatrix((prev) => ({ ...prev, [sizeId]: { ...(prev[sizeId] ?? {}), [ratio]: value } })) }}
+          banana={{
+            quality: bananaQuality,
+            setQuality: setBananaQuality,
+            size: bananaSize,
+            setSize: setBananaSize,
+          }}
+          visible={{ sizeRatio: showSizeRatio, duration: showDuration, defaultDuration: showDefaultDuration, format: showFormat, structuredFeature: hasStructuredFeature }}
+          sizes={{ rows: sizes, add: addSizeRow, update: updateSize, remove: removeSize }}
+          ratios={{
+            rows: ratios,
+            remove: removeRatio,
+            draft: ratioDraft,
+            setDraft: setRatioDraft,
+            add: () => addChip(ratioDraft, ratios, setRatios, setRatioDraft, 'ratio'),
+          }}
+          dimensions={{ rows: videoDimensions, candidates: dimensionCandidates, set: setVideoDimensions }}
+          defaults={{
+            size: defaultSize,
+            setSize: setDefaultSize,
+            ratio: defaultRatio,
+            setRatio: setDefaultRatio,
+            format: defaultFormat,
+            setFormat: setDefaultFormat,
+            duration: defaultDuration,
+            setDuration: setDefaultDuration,
+          }}
+          durations={{ min: durationMin, max: durationMax, step: durationStep, setMin: setDurationMin, setMax: setDurationMax, setStep: setDurationStep }}
+          formats={{
+            rows: formats,
+            remove: (item) => setFormats(formats.filter((x) => x !== item)),
+            draft: formatDraft,
+            setDraft: setFormatDraft,
+            add: () => addChip(formatDraft, formats, setFormats, setFormatDraft, 'format'),
+          }}
+          features={{
+            flags: featureFlags,
+            toggle: (key) => setFeatureFlags((p) => ({ ...p, [key]: !p[key] })),
+            numbers: featureNumbers,
+            setNumber: (key, value) => setFeatureNumbers((p) => ({ ...p, [key]: value })),
+            strings: featureStrings,
+            setString: (key, value) => setFeatureStrings((p) => ({ ...p, [key]: value })),
+          }}
+          taskTypes={{
+            ratios: taskTypeRatios,
+            draft: taskRatioDraft,
+            setDraft: setTaskRatioDraft,
+            add: addTaskRatio,
+            remove: removeTaskRatio,
+          }}
+        />
+      )}
 
-      <div style={{ marginTop: 12 }}>
-        <Hint>供应商由系统写死为 new-api，无需填写。文本类型不展示尺寸 / 比例 / 时长。</Hint>
-      </div>
+      {tab === 'pricing' && (
+        <PricingTab
+          rule={originalPricing}
+          creditsPerYuan={creditsPerYuan}
+          rateNotice={rateNotice}
+          modelId={modelId.trim() || (initial?.model_id ?? '')}
+          taskType={type}
+          channel={channel}
+          capability={capabilityView}
+          form={pricingForm}
+          onChange={(next) => {
+            setPricingTouched(true);
+            setPricingForm(next);
+          }}
+        />
+      )}
+
+      {tab === 'advanced' && <AdvancedTab extraFeatures={extraFeatures} setExtraFeatures={setExtraFeatures} />}
+
       {error && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="danger">{error}</Alert>

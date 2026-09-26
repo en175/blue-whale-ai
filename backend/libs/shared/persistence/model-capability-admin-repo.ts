@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { invalidateModelCapabilityCache } from "./model-capability-cache.js";
+import { defaultChannelFor } from "../generation/image-channel-parser.js";
 
 /** generation_model_capability 管理端 repo（Prisma-backed，IK6T46）。
  *  与消费端 model-capability-repo（listEnabledByType，只管启用展示）互补：
@@ -24,8 +25,12 @@ export interface AdminModelCapabilityRow {
   default_aspect_ratio: string;
   default_duration: number | null;
   features: unknown;
-  channel_parser: string;
+  /** 渠道（`<家族>-<媒介>[-<协议>]`，封闭枚举）。**本行解析与出站行为的唯一来源**。 */
+  channel: string | null;
   request_mapping: unknown;
+  /** 该模型该能力的**计价规则**：形态与定价目录里 `models.<model_id>.<capability_type>`
+   *  那条逐字相同。NULL = 还没搬（billing 侧回落到目录那份）。 */
+  pricing: unknown;
   enabled: boolean;
   sort_order: number;
   /** 该 capability_type 的显式默认模型（IKE0VX）；每类至多一条，由 setDefault 单点保证。 */
@@ -49,8 +54,10 @@ export interface CreateModelCapabilityInput {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
-  channel_parser?: string;
+  channel?: string;
   request_mapping?: unknown;
+  /** 计价规则；见 {@link AdminModelRow.pricing}。`undefined`=不改，`null`=清空。 */
+  pricing?: unknown | null;
   enabled?: boolean;
 }
 
@@ -67,8 +74,10 @@ export interface UpdateModelCapabilityInput {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
-  channel_parser?: string;
+  channel?: string;
   request_mapping?: unknown;
+  /** 计价规则；见 {@link AdminModelRow.pricing}。`undefined`=不改，`null`=清空。 */
+  pricing?: unknown | null;
   enabled?: boolean;
   sort_order?: number;
 }
@@ -124,11 +133,12 @@ function toRow(row: any): AdminModelCapabilityRow {
     default_aspect_ratio: row.default_aspect_ratio,
     default_duration: row.default_duration,
     features: row.features,
-    channel_parser:
-      typeof row.channel_parser === "string" && row.channel_parser.length > 0
-        ? row.channel_parser
-        : "seedream",
+    // 空串当「没配」传出去，**不在本层替读侧决定该归哪个渠道**——缺省按媒介回落是
+    // `parseStoredChannel(raw, capability_type)` 的事，那一处才同时拿得到 capability_type。
+    // 在本层硬塞一个 `seedream-image` 会让 video 行读到图片渠道。
+    channel: typeof row.channel === "string" && row.channel.length > 0 ? row.channel : null,
     request_mapping: row.request_mapping ?? null,
+    pricing: row.pricing ?? null,
     enabled: row.enabled,
     sort_order: row.sort_order,
     is_default: row.is_default === true,
@@ -220,8 +230,10 @@ export function createModelCapabilityAdminRepo(
             default_aspect_ratio: input.default_aspect_ratio ?? "",
             default_duration: input.default_duration ?? null,
             features: (input.features ?? {}) as Prisma.InputJsonValue,
-            channel_parser: input.channel_parser ?? "seedream",
+            // 渠道是必填列。写闸门对 create 恒能定下来，这里的缺省只为兜住直接调 repo 的调用方。
+            channel: input.channel ?? defaultChannelFor(input.capability_type),
             request_mapping: nullableJson(input.request_mapping),
+            pricing: nullableJson(input.pricing),
             enabled: input.enabled ?? true,
             sort_order: nextSort,
           },
@@ -258,9 +270,10 @@ export function createModelCapabilityAdminRepo(
       if (input.default_duration !== undefined)
         data.default_duration = input.default_duration;
       if (input.features !== undefined) data.features = input.features;
-      if (input.channel_parser !== undefined) data.channel_parser = input.channel_parser;
+      if (input.channel !== undefined) data.channel = input.channel;
       if (input.request_mapping !== undefined)
         data.request_mapping = nullableJson(input.request_mapping);
+      if (input.pricing !== undefined) data.pricing = nullableJson(input.pricing);
       if (input.enabled !== undefined) data.enabled = input.enabled;
       if (input.sort_order !== undefined) data.sort_order = input.sort_order;
 

@@ -1,18 +1,19 @@
 package com.bluewhale.billing.config;
 
-import com.bluewhale.billing.catalog.CatalogHolder;
+import com.bluewhale.billing.pricing.AbstractPricingCalculator;
 import com.bluewhale.billing.pricing.DiscountResolver;
-import com.bluewhale.billing.pricing.PricingEngine;
+import com.bluewhale.billing.pricing.MediaPricingCalculator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * 计价引擎的装配。
  *
- * <p>为什么显式写这个 Bean，而不是让 {@link PricingEngine} 自己带 {@code @Component}：
- * 引擎的构造需要一个**策略**（折扣解析器）。用注解装配就得在该字段上挂
- * {@code @Autowired(required = false)} 之类的兜底，那等于把「忘了接线」变成一个
- * 静默降级——引擎照常工作，只是永远不打折。
+ * <p>这里只装配**算法**（骨架 + 折扣策略）；规则来源不在这里——
+ * 计价规则住在模型能力行，由属主随 Hold / Quote 作为快照送来，
+ * {@code BillingApplicationService} 拿它与下面这个算法实例拼出一次性引擎
+ * （见 {@code BillingApplicationService#engineFor}）。所以**没有一个长期持有的
+ * PricingEngine Bean**：那种 Bean 只有在「规则从某个常驻目录里查」时才成立。
  *
  * <p>放在 @Configuration 里，依赖缺失时**启动即失败**（Spring 找不到 bean 直接报错），
  * 而不是等某个用户发现「我是会员却没打折」。
@@ -20,10 +21,19 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class PricingConfig {
 
+    /**
+     * 计价算法（骨架 + 折扣策略）。
+     *
+     * <p>为什么它单独是一个 Bean、而不是只藏在引擎装配里：
+     * 「算得对不对」与「规则从哪来」是两件事，需要分开装配。
+     * 预扣/报价收下**规则快照**（随请求带来的那一条）时，换的只是规则来源，
+     * 算法必须**完全同一个实例**——否则同一笔钱在两条路上按两套算法算，
+     * 影子对账（拿 Quote 的结果比对上游实际扣费）就再也说明不了问题。
+     *
+     * <p>⚠️ 换个算法（比如将来图片也有了层级 usage）只改这里一处。
+     */
     @Bean
-    public PricingEngine pricingEngine(CatalogHolder catalog, DiscountResolver discounts) {
-        // ⚠️ 必须把 discounts 传进去。PricingEngine.forMedia 的第一个参数是规则查询、
-        //    第二个是折扣策略，漏传会编译不过（刻意没有单参数重载，理由见该方法注释）。
-        return PricingEngine.forMedia(catalog, discounts);
+    public AbstractPricingCalculator pricingCalculator(DiscountResolver discounts) {
+        return new MediaPricingCalculator(discounts);
     }
 }

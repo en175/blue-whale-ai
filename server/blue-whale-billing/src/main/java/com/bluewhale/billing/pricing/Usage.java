@@ -192,7 +192,7 @@ public record Usage(
         private static String describeSource(ContractSource source) {
             return switch (source) {
                 case ContractSource.SpecKey specKey -> "读规格键 " + specKey.key();
-                case ContractSource.Estimated ignored -> "按目录的 tokenEstimate 估算";
+                case ContractSource.Estimated ignored -> "按规则的 tokenEstimate 估算";
             };
         }
 

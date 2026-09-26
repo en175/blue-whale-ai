@@ -38,6 +38,18 @@ public class TransactionRow {
     /** 整数积分，恒正。 */
     private Long amount;
 
+    /**
+     * 这行预留**当初冻了多少**（整数积分，恒正）。
+     *
+     * <p>只有消费行（{@code kind='consume'}，id 形如 {@code res:7}）有值——那一行的身份
+     * 就是 {@code billing_cost_reservations} 的一条预留，预扣额与结算额都在同一张表上。
+     * 发放行与账本行没有「预扣」这回事，为 {@code null}（**不是 0**：0 是「冻了 0 分」）。
+     *
+     * <p>为什么要读出来：结算后 {@link #amount} 已换成实际值，预扣额就只剩这里能答；
+     * 而用户余额先降后回的差额要靠它解释。
+     */
+    private Long reservedCredits;
+
     /** pending | done。 */
     private String status;
 
@@ -64,6 +76,8 @@ public class TransactionRow {
     public void setTitle(String title) { this.title = title; }
     public Long getAmount() { return amount; }
     public void setAmount(Long amount) { this.amount = amount; }
+    public Long getReservedCredits() { return reservedCredits; }
+    public void setReservedCredits(Long reservedCredits) { this.reservedCredits = reservedCredits; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

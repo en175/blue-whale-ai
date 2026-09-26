@@ -12,7 +12,7 @@
 }
 
 .label {
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   color: var(--admin-text);
   /* 类型名可能很长（中文名 + 兜底的原始 key），截断而不是把数字挤出去 */
   overflow: hidden;
@@ -30,7 +30,7 @@
 }
 
 .value {
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   font-weight: 600;
   color: var(--admin-text);
 }
@@ -40,13 +40,13 @@
      4 个字符放得下「100.0%」，短的那些也就不用各自居中 */
   min-width: 48px;
   text-align: right;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
   color: var(--admin-text-muted);
 }
 
 .track {
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--admin-radius-control);
   /* 轨道用 border 色而不是 surface-sunken：后者在白卡片上几乎看不出来，
      没有轨道的条会让人把「条长」读成绝对值而不是比例 */
   background: var(--admin-border);
@@ -55,6 +55,6 @@
 
 .fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--admin-radius-control);
   background: var(--admin-accent);
 }

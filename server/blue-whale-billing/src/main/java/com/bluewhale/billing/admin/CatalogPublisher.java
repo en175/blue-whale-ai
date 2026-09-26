@@ -23,13 +23,15 @@ import java.util.HexFormat;
 /**
  * 发布定价目录（《架构设计》§12 管理 API）。
  *
- * <h2>发布 = 编译通过 + 整版生效</h2>
+ * <h2>发布 = 校验通过 + 整版生效</h2>
  *
  * 目录是**整体发布、整体回滚**的：发布时先把当前 active 降为 retired，再插入新版本，
  * 两步在同一个事务里。中间态（两条 active）绝不会被别的读方看到。
  *
- * <p>为什么不做「只改某个模型的价」这种增量发布：增量发布没有版本边界，
- * job 冻结的 catalog_version 就复现不出当时的价——改价影响已提交任务，正是这套版本机制要避免的。
+ * <p>⚠️ 目录里装的是**全局的两项配置**：换算率（元 → 积分）与折扣叠加策略。
+ * 计价规则**不在其中**——它按模型归属，住在模型能力行，随 Hold / Quote 以快照进出 billing。
+ * 所以发布目录不再影响任何模型的价格，也就不存在「增量发布某个模型的价」这回事
+ * （那现在是一次能力行保存）。
  *
  * <h2>内容相同不重复发版</h2>
  *
@@ -62,14 +64,14 @@ public class CatalogPublisher {
      * @param documentJson 目录 JSON 原文。存原文而不是反序列化后再序列化——
      *                     保证 hash 与运营提交的内容逐字节对应，出问题时可原样比对
      * @return 本次生效的版本号
-     * @throws IllegalArgumentException 文档不是合法 JSON，或编译失败（**校验的唯一时机就在这里**）
+     * @throws IllegalArgumentException 文档不是合法 JSON，或校验不过（**校验的唯一时机就在这里**）
      */
     @Transactional
     public int publish(String documentJson, String publishedBy, String note) {
         CatalogDocument document = parse(documentJson);
-        // ★ 编译是唯一的验证时机：编不过就发不出去。published 之后再发现配置错，
+        // ★ 校验是唯一的验证时机：不通过就发不出去。published 之后再发现配置错，
         //   影响的是已经用这个版本计过价的 job。
-        CatalogCompiler.compile(document);
+        CatalogCompiler.validate(document);
 
         String hash = sha256(documentJson);
 
@@ -99,7 +101,8 @@ public class CatalogPublisher {
         mapper.insert(entity);
 
         holder.reload();   // 热生效：不等重启
-        log.info("已发布定价目录 v{}（{} 条规则）by {}", version, document.models().size(), publishedBy);
+        log.info("已发布定价目录 v{}（换算率 1 元 = {} 积分）by {}",
+                version, document.creditsPerYuan(), publishedBy);
         return version;
     }
 

@@ -943,17 +943,23 @@ public class VideoJobProcessor implements JobProcessor {
         return null;
     }
 
-    /** IKFPYX：编辑意图关键词（官方：「编辑视频、增加/加上、删除/去掉、修改/替换/改成」）。 */
+    /** IKFPYX：编辑意图关键词。官方原文「编辑视频、增加/加上、删除/去掉、修改/替换/改成」——
+     *  斜杠是同义项，展开即这 8 个词。**没有裸「编辑」**（官方那条是「编辑视频」两字连写）。
+     *  两端逐字相同，理由见 backend `capability-param-validation.ts` 同名字段的注释。 */
     private static final List<String> EDIT_INTENT_KEYWORDS = List.of(
-            "编辑视频", "编辑", "增加", "加上", "删除", "去掉", "修改", "替换", "改成");
+            "编辑视频", "增加", "加上", "删除", "去掉", "修改", "替换", "改成");
 
-    /** IKFPYX：延长意图关键词（官方：「向前/向后延长、延续、续写」）。 */
+    /** IKFPYX：延长意图关键词。官方原文「向前/向后延长、延续、续写」——斜杠是方向二选一，
+     *  展开即「向前延长」「向后延长」加「延续」「续写」。**没有裸「延长」，也没有裸「向前」「向后」**
+     *  （后者会命中「镜头向前推进」这种运镜描述）。 */
     private static final List<String> PROLONG_INTENT_KEYWORDS = List.of(
-            "延长", "延续", "续写", "向前", "向后");
+            "向前延长", "向后延长", "延续", "续写");
 
     /** IKFPYX：判定视频任务类型（与 backend `contracts/capability-param-validation.ts`
      *  resolveVideoTaskType 同源口径，两端不得各自发明）。
-     *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。 */
+     *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。
+     *  「必须至少有一个参考视频」是**官方明文**（API 文档 `omni_reference_task_type` 的 edit/extend 说明）。
+     *  按模型分叉的约束（2.5 编辑/延长/首尾帧仅支持 adaptive；2.0 可指定）走能力行配置，不写在这里。 */
     static String resolveVideoTaskType(Object referencesRaw, String prompt) {
         boolean hasFirst = false;
         boolean hasLast = false;

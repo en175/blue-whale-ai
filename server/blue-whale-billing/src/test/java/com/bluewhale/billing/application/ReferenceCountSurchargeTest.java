@@ -1,9 +1,5 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.catalog.CatalogDocument;
-import com.bluewhale.billing.catalog.CatalogHolder;
-import com.bluewhale.billing.catalog.CatalogRepository;
 import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
@@ -12,12 +8,9 @@ import com.bluewhale.billing.ledger.LedgerRepository;
 import com.bluewhale.billing.ledger.Reservation;
 import com.bluewhale.billing.ledger.ReservationRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
-import com.bluewhale.billing.pricing.BasePriceResolver;
-import com.bluewhale.billing.pricing.CompiledRule;
 import com.bluewhale.billing.pricing.ContractSource;
 import com.bluewhale.billing.pricing.DiscountResolver;
-import com.bluewhale.billing.pricing.PricingEngine;
-import com.bluewhale.billing.pricing.RoundingPolicy;
+import com.bluewhale.billing.pricing.MediaPricingCalculator;
 import com.bluewhale.billing.pricing.UsageDim;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,7 +36,7 @@ import static org.mockito.Mockito.when;
  *
  * <h2>为什么这一刀必须存在</h2>
  *
- * 目录可以把参考素材配成整单倍率（{@code multipliers} 里的 {@code usage.referenceCount}），
+ * 规则可以把参考素材配成整单倍率（{@code multipliers} 里的 {@code usage.referenceCount}），
  * 而倍率按**数量**取值（{@code AbstractPricingCalculator#multiplierPermille}：
  * 数量 ≤ 0 恒返回 10000 = ×1.0）。这个数量两侧各有来源，且来源**完全不同**：
  *
@@ -78,9 +71,17 @@ class ReferenceCountSurchargeTest {
     private static final long USER = 44L;
     private static final String CMD = "cmd-9001";
 
-    /** 每槽 3 积分、下限 1 积分、参考素材每个 ×1.2（12000 万分比）。 */
-    private static final CompiledRule RULE = perSlotRule(3_000L, 1L)
-            .withMultiplier(UsageDim.REFERENCE_COUNT, 12_000);
+    /**
+     * 规则快照：每槽 3 积分、下限 1 积分、参考素材每个 ×1.2（12000 万分比）。
+     *
+     * <p>手写字面量（形态 = 能力行的 {@code pricing} 列）。
+     */
+    private static final String RULE = """
+            {"baseUnit":"usage.succeededSlots",
+             "basePrice":{"kind":"const","value":3000},
+             "multipliers":{"usage.referenceCount":12000},
+             "unitDenominator":1,"minCredits":1}
+            """;
 
     /**
      * 建任务侧 {@code extractSpecs} 会送来的规格：2 张图 + **2 个参考素材**。
@@ -92,37 +93,29 @@ class ReferenceCountSurchargeTest {
             "expected_output_count", "2", "size", "2k", "reference_count", "2");
 
     private final CreditService credits = mock(CreditService.class);
-    private final CatalogHolder holder = mock(CatalogHolder.class);
-    private final CatalogRepository catalogs = mock(CatalogRepository.class);
     private final ReservationRepository reservations = mock(ReservationRepository.class);
 
     private final BillingApplicationService billing;
     private final SettlementService settlement;
 
     ReferenceCountSurchargeTest() {
-        when(holder.lookup(MODEL, TASK)).thenReturn(RULE);
-        when(holder.currentVersion()).thenReturn(1);
-        when(credits.hold(anyLong(), anyString(), anyLong(), anyLong(), anyInt(), anyInt(), any()))
+        when(credits.hold(anyLong(), anyString(), anyLong(), anyLong(), anyInt(), anyInt(),
+                any(), any()))
                 .thenAnswer(invocation -> HoldResult.fresh(invocation.getArgument(3),
                         invocation.getArgument(4)));
 
+        // 与生产同一份装配（PricingConfig）：算法实例只有一个，规则来源在调用点拼
         billing = new BillingApplicationService(
-                PricingEngine.forMedia(holder, DiscountResolver.NONE),
+                new MediaPricingCalculator(DiscountResolver.NONE),
                 credits,
                 mock(CreditLotRepository.class),
                 mock(LedgerRepository.class),
-                holder,
+                mock(com.bluewhale.billing.catalog.CatalogHolder.class),
                 new GrantPolicy(),
                 mock(TransactionRepository.class),
                 mock(ReservationRepository.class));
 
-        CatalogDocument document = new CatalogDocument(
-                1, "CNY", 15, Map.of(MODEL, Map.of(TASK, taskRule())), null);
-        // 第三个参数是落库原文：只有管理端读它，本用例不碰，占位即可
-        when(catalogs.loadVersion(1)).thenReturn(new CatalogRepository.LoadedCatalog(
-                1, "hash", "{}", document, CatalogCompiler.compile(document), Instant.now()));
-
-        settlement = new SettlementService(catalogs, reservations, credits);
+        settlement = new SettlementService(reservations, credits);
     }
 
     // ========== 本单存在的全部理由 ==========
@@ -176,19 +169,23 @@ class ReferenceCountSurchargeTest {
     /** 走**真的**提交路径预扣一次，取回实际冻住的积分（不是手写的期望值）。 */
     private long frozenCredits() {
         billing.hold(new HoldCommand(USER, CMD, JOB, MODEL, TASK, SPECS, "free",
-                "生成任务", Instant.now()));
+                "生成任务", Instant.now(), RULE));
 
         ArgumentCaptor<Long> amount = ArgumentCaptor.forClass(Long.class);
         verify(credits).hold(eq(USER), eq(CMD), eq(JOB), amount.capture(),
-                anyInt(), anyInt(), anyString());
+                anyInt(), anyInt(), anyString(), anyString());
         return amount.getValue();
     }
 
-    /** 一笔未决预留：冻结 {@code reservedCredits}，折扣 10000（原价）、目录版本 1。 */
+    /**
+     * 一笔未决预留：冻结 {@code reservedCredits}，折扣 10000（原价）。
+     *
+     * <p>带着上面那条规则快照 —— 结算复现定价**只有**这一个来源。
+     */
     private void reservation(long reservedCredits) {
         when(reservations.findByJobId(JOB)).thenReturn(Optional.of(new Reservation(
                 1L, JOB, USER, reservedCredits, null, Reservation.Status.HELD,
-                List.of(), 1, 10_000, "测试任务", null)));
+                List.of(), 1, 10_000, RULE, "测试任务", null)));
     }
 
     /** 完成事件：用量行报的是 worker 真的会上报的那几个维度。 */
@@ -204,21 +201,5 @@ class ReferenceCountSurchargeTest {
         ArgumentCaptor<Long> amount = ArgumentCaptor.forClass(Long.class);
         verify(credits).settle(eq(JOB), amount.capture());
         return amount.getValue();
-    }
-
-    /** 目录文档形态的规则 —— 与 {@link #RULE} 逐字段同值（结算从文档重新编译）。 */
-    private static CatalogDocument.TaskRule taskRule() {
-        return new CatalogDocument.TaskRule(
-                null, "usage.succeededSlots",
-                new CatalogDocument.BasePrice("const", 3_000L, null, null),
-                null, Map.of("usage.referenceCount", 12_000), 1L, 1L, null, null, null);
-    }
-
-    /** 按成功槽计价：每槽 {@code mc} 微积分。 */
-    private static CompiledRule perSlotRule(long mc, long minCredits) {
-        return new CompiledRule(
-                UsageDim.SUCCEEDED_SLOTS,
-                new BasePriceResolver.Constant(mc),
-                Map.of(), Map.of(), 1L, minCredits, null, new RoundingPolicy.HalfUp(), null);
     }
 }

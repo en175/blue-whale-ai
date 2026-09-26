@@ -1,5 +1,6 @@
 package com.bluewhale.billing.application;
 
+import com.bluewhale.billing.catalog.CatalogCompiler;
 import com.bluewhale.billing.catalog.CatalogHolder;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.ledger.Account;
@@ -10,6 +11,7 @@ import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.LedgerRepository;
 import com.bluewhale.billing.ledger.ReservationRepository;
 import com.bluewhale.billing.ledger.TransactionRepository;
+import com.bluewhale.billing.pricing.AbstractPricingCalculator;
 import com.bluewhale.billing.pricing.CompiledRule;
 import com.bluewhale.billing.pricing.PricingEngine;
 import com.bluewhale.billing.pricing.PricingRequest;
@@ -58,7 +60,7 @@ public class BillingApplicationService {
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
 
-    private final PricingEngine pricing;
+    private final AbstractPricingCalculator calculator;
     private final CreditService credits;
     private final CreditLotRepository lots;
     private final LedgerRepository ledger;
@@ -67,7 +69,7 @@ public class BillingApplicationService {
     private final TransactionRepository transactions;
     private final ReservationRepository reservations;
 
-    public BillingApplicationService(PricingEngine pricing,
+    public BillingApplicationService(AbstractPricingCalculator calculator,
                                      CreditService credits,
                                      CreditLotRepository lots,
                                      LedgerRepository ledger,
@@ -75,7 +77,7 @@ public class BillingApplicationService {
                                      GrantPolicy grantPolicy,
                                      TransactionRepository transactions,
                                      ReservationRepository reservations) {
-        this.pricing = pricing;
+        this.calculator = calculator;
         this.credits = credits;
         this.lots = lots;
         this.ledger = ledger;
@@ -133,6 +135,8 @@ public class BillingApplicationService {
      *         该规格组合查不到价——同样拒绝（漏配不是免费），**契约量取不到也不豁免这一条**
      * @throws Usage.ContractQuantityUnavailableException 基准维度的契约量取不到、
      *         而规则又没配 {@code maxCredits}——没有上限可依，拒绝而不是冻下限
+     * @throws CatalogCompiler.CompileException 请求没带规则快照，或带了却编不过——**拒绝提交**
+     *         （规则快照是唯一的规则来源，见 {@link #requireSnapshot}）
      * @throws com.bluewhale.billing.ledger.InsufficientCreditsException 余额不足
      */
     public HoldResult hold(HoldCommand command) {
@@ -140,19 +144,26 @@ public class BillingApplicationService {
                 command.userId(), command.modelId(), command.taskType(),
                 command.specs(), command.tier());
 
-        PricingResult priced = priceAtSubmit(request, command.submittedAt());
+        // ★ 规则只从快照来：计价规则住在模型能力行（billing 读不到那个库），
+        //   属主在 Hold 时必须把它随请求送来。没带 = 算不出价 = 拒单。
+        CompiledRule snapshot = requireSnapshot(command.ruleSnapshot());
+        PricingEngine engine = engineFor(snapshot);
+
+        PricingResult priced = priceAtSubmit(request, engine, snapshot, command.submittedAt());
         int catalogVersion = catalog.currentVersion();
 
         if (priced.credits() == 0) {
             // 明确配成 0 价的模型（免费额度）——没有钱要冻，也**不建预留**：
-            // 建了反而会让结算侧去解冻一笔不存在的钱。漏配走的是上面两个异常，不会到这里。
+            // 建了反而会让结算侧去解冻一笔不存在的钱。漏配走的是上面那个异常，不会到这里。
             log.info("计价为 0，不冻结：user={} {}/{} specs={}",
                     command.userId(), command.modelId(), command.taskType(), command.specs());
             return HoldResult.fresh(0, catalogVersion);
         }
 
         return credits.hold(command.userId(), command.commandId(), command.jobId(),
-                priced.credits(), catalogVersion, priced.discount().factorBp(), command.title());
+                priced.credits(), catalogVersion, priced.discount().factorBp(),
+                // 快照随预留一起冻下来：结算按它复现，**不必**再回读任何东西
+                command.ruleSnapshot(), command.title());
     }
 
     /** 当前生效的目录版本；影子对账与价格预览要按它复现。 */
@@ -180,12 +191,61 @@ public class BillingApplicationService {
     public PricingResult quote(QuoteQuery query) {
         PricingRequest request = new PricingRequest(
                 query.userId(), query.modelId(), query.taskType(), query.specs(), query.tier());
+        // 与 hold 同一个规则来源：都只认快照——预览与实扣取到不同规则，
+        // 用户看到的就是「预览一个价、实扣另一个价」
+        CompiledRule snapshot = requireSnapshot(query.ruleSnapshot());
+        PricingEngine engine = engineFor(snapshot);
         // 带了用量（结算 / 影子对账）就按真实用量算，不替它补契约量。
         if (!query.usage().quantities().isEmpty()) {
-            return pricing.compute(request, query.usage(), query.pricedAt());
+            return engine.compute(request, query.usage(), query.pricedAt());
         }
         // 留空 = 调用方还没有用量（提交前预览）：契约用量是此刻唯一已知的量。
-        return priceAtSubmit(request, query.pricedAt());
+        return priceAtSubmit(request, engine, snapshot, query.pricedAt());
+    }
+
+    /**
+     * 取请求带来的规则快照并编译；**空快照直接拒**。
+     *
+     * <p>★ 快照是规则的**唯一**来源。计价规则按模型归属，住在模型能力行
+     * （backend 的 {@code generation_model_capability.pricing}），而 billing 读不到那个库
+     * （ADR-0114 不共享库）——所以属主在 Hold / Quote 时把规则随请求送来，
+     * 预扣时冻进预留行、结算按它复现。没有快照 = 这次交易**算不出价**，只能拒。
+     *
+     * <p>⚠️ 拒绝（而不是「回落到某个缓存/默认值」）是刻意的：
+     * <ul>
+     *   <li>带上了却编不过，是「能力行里这条规则已经坏了」——放过去等于让这次按另一份价
+     *       静默成交：钱照扣，谁都看不出用的不是能力行里那条规则。</li>
+     *   <li>压根没带，是调用方漏了（billing 侧没有任何可回落的地方）——
+     *       拒单会在调用方那一侧当场变成 UNPRICEABLE，比默认一个价强。</li>
+     * </ul>
+     * 写侧闸门（backend 保存能力行时校验）拦的是「脏配置存不进去」，
+     * 这里拦的是「脏配置已经在库里了」——两者拦的不是同一件事，都要在。
+     *
+     * <p>两种拒绝都抛 {@link CatalogCompiler.CompileException}：gRPC 层把它映射成
+     * INVALID_ARGUMENT / UNPRICEABLE，调用方据此 fail closed。
+     */
+    private static CompiledRule requireSnapshot(String ruleSnapshot) {
+        if (ruleSnapshot == null || ruleSnapshot.isBlank()) {
+            throw new CatalogCompiler.CompileException(
+                    "缺少规则快照（rule_snapshot）：计价规则住在模型能力行里，"
+                            + "billing 读不到那个库，没有快照就算不出价 —— 拒绝，不回落");
+        }
+        return CatalogCompiler.compileRuleSnapshot(ruleSnapshot);
+    }
+
+    /**
+     * 装配本次计价的引擎：规则只认快照那一条。
+     *
+     * <p>⚠️ 算法（{@link AbstractPricingCalculator}）是**注入的同一个实例**，不另造——
+     * 影子对账（拿 Quote 的结果比对上游实际扣费）要成立，报价与实扣就必须按同一套算法算。
+     *
+     * <p>快照那条 lookup 忽略 (modelId, taskType)：一次 Hold / Quote 只问一个 (model,
+     * taskType)，而快照**就是**那一条规则的规则体——它没有携带自己的键
+     * （形态与能力行的 {@code pricing} 列逐字相同，键在能力行上）。
+     * 多行用量的 Quote 由调用方逐行筛过快照（见 {@code BillingGrpcService#quote}）。
+     */
+    private PricingEngine engineFor(CompiledRule snapshot) {
+        return new PricingEngine((modelId, taskType) -> snapshot, calculator);
     }
 
     /**
@@ -195,15 +255,16 @@ public class BillingApplicationService {
      *
      * <p>规则缺失时不在这里报错：那是 {@link PricingEngine} 的职责
      * （抛 {@code RuleNotFoundException}），同一个错误不报第二遍。
+     *
+     * @param rule 本次请求带来的规则快照（已编译，**必非空**）。
+     *             <p>⚠️ 这里与 {@code engine} 必须取到**同一条**规则：{@code rule}
+     *             负责推契约量（基准维度是谁、token 怎么估），{@code engine} 负责按它算钱。
+     *             两者错位就是「按 A 的契约量冻钱、按 B 的单价算」。
      */
-    private PricingResult priceAtSubmit(PricingRequest request, Instant at) {
-        CompiledRule rule = catalog.lookup(request.modelId(), request.taskType());
-        if (rule == null) {
-            // 没有规则就没有「契约量」可推，用量传什么都一样
-            return pricing.compute(request, Usage.empty(), at);
-        }
+    private PricingResult priceAtSubmit(PricingRequest request, PricingEngine engine,
+                                        CompiledRule rule, Instant at) {
         try {
-            return pricing.compute(request, Usage.contractFrom(rule, request.specs()), at);
+            return engine.compute(request, Usage.contractFrom(rule, request.specs()), at);
         } catch (Usage.ContractQuantityUnavailableException e) {
             if (e.baseUnit().contractSource() == null || rule.maxCredits() == null) {
                 // ① 该维度**压根没有**契约量来源（如 TTS 的字符数）：那是结构性的推不出，
@@ -212,7 +273,7 @@ public class BillingApplicationService {
                 // 两条都照原样拒绝（见 Usage#contractFrom 的立场）。
                 throw e;
             }
-            return priceAtCap(request, e, at);
+            return priceAtCap(request, engine, e, at);
         }
     }
 
@@ -228,14 +289,32 @@ public class BillingApplicationService {
      * <p>⚠️ 只开这一个口子，别的推不出照原样拒绝：规格组合查不到价、未配规则都不在这里兜
      * （见 {@link #priceAtSubmit} 与 {@link PricingEngine#computeAtCap}）。
      *
-     * <p>⚠️ 冻结额会**明显高于实际**（用户看到的「预计消耗」偏高），所以打 WARN：
-     * 运营据此知道哪个模型走上了这条路（配了按秒价而契约时长取不到），
-     * 再决定是给规则补上限、还是别让这类任务按秒计价。
+     * <h2>这里为什么是 INFO 而不是 WARN</h2>
+     *
+     * <p><b>能走到这一行走的是「已配上限」的规则</b> —— 从 {@link #priceAtSubmit} 的判据
+     * （{@code contractSource != null && maxCredits != null}）就能读出来。也就是说：
+     * 运营**已经**就这个模型做过一次明确的决定（「这个量提交时取不到，那就冻上限、按实际收」）。
+     * 把它打成 WARN，等于对一件**已经被批准的事**反复报警。
+     *
+     * <p>这条口径是音频按秒计价上线后才看清的（2026-09-26）：音频的时长**结构性**地取不到
+     * （TTS 由文案决定，请求里没有 duration），于是**每一条**音频单都会走到这里。
+     * 一天几千条 WARN 的效果不是「运营注意到异常」，而是**所有人学会忽略 WARN**——
+     * 那会让真正该看的告警一起被忽略。日志级别的成本从来不是磁盘，是注意力。
+     *
+     * <p>真正该报警的是**另一件事**，而它已经是硬失败：没配上限的规则在这条路径上
+     * 直接抛 {@code ContractQuantityUnavailableException}（提交被拒 + 4xx），
+     * 不需要日志帮忙。所以这里只留 INFO + 完整上下文（模型 / 任务 / 基准维度 / 规格 / 冻了多少），
+     * 排查时 grep 得到，平时不吵。
+     *
+     * <p>⚠️ 若将来出现「**不该走上限冻结的模型**也走到了这里」（例如某条按量规则本该读得到契约量，
+     * 却因为上游少传一个字段而落到这里），那说明契约量的来源边界破了 —— 那时应当按
+     * {@code baseUnit} 或按其来源**分档**报警，而不是把这条整体升回 WARN：
+     * 音频这个常态会把信号再次淹掉。
      */
-    private PricingResult priceAtCap(PricingRequest request,
+    private PricingResult priceAtCap(PricingRequest request, PricingEngine engine,
                                      Usage.ContractQuantityUnavailableException cause, Instant at) {
-        PricingResult priced = pricing.computeAtCap(request, at);
-        log.warn("契约用量取不到，改按规则上限冻结：{}/{} 的基准维度 {} 在本次规格里取不到"
+        PricingResult priced = engine.computeAtCap(request, at);
+        log.info("契约用量取不到，改按规则上限冻结：{}/{} 的基准维度 {} 在本次规格里取不到"
                         + "（specs={}）→ 冻结上限 {} 积分。"
                         + "按实际上报用量结算、多冻的退回；未配上限的模型在这条路径上会直接拒绝提交",
                 request.modelId(), request.taskType(), cause.baseUnit().key(),

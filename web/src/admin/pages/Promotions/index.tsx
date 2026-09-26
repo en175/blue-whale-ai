@@ -56,6 +56,7 @@ import {
   Checkbox,
   Empty,
   Field,
+  Hint,
   Input,
   Modal,
   Page,
@@ -63,6 +64,7 @@ import {
   Select,
   Table,
   TagInput,
+  formGrid,
 } from '../../ui';
 
 /** 表单状态：数值与时间都是**文字**（`datetime-local` / `time` 的原生值形态）。 */
@@ -264,7 +266,19 @@ export default function Promotions() {
   return (
     <Page>
       <PageHeader
-        title="限时活动"
+        title={
+          <>
+            限时活动{' '}
+            <Hint title="这一页最容易被误解的地方">
+              <div>
+                <b>改活动不影响已提交未结算的任务。</b>
+                任务提交时会把当时命中的折扣冻结进预留行，结算按冻结的那个系数复现，不会重新读这张表
+                —— 所以「把活动停了 / 改成 5 折，怎么那笔还按老的算」的答案，是那笔在改动之前就提交了。
+              </div>
+              <div>改活动、提前结束、停用、删除，都只对之后提交的任务生效。</div>
+            </Hint>
+          </>
+        }
         subtitle="按时间窗 / 时段 / 模型 / 等级配折扣；保存即生效（下次预扣就命中）"
         extra={
           <>
@@ -288,13 +302,6 @@ export default function Promotions() {
 
       {actionError && <Alert tone="danger">{actionError}</Alert>}
       {saved && <Alert tone="success">{saved}</Alert>}
-
-      {/* ⚠️ 这一页最容易被误解的地方，放在最上面 */}
-      <Alert tone="info" title="改活动不影响已提交未结算的任务">
-        任务提交时会把<b>当时命中的折扣</b>冻结进预留行，结算按冻结的那个系数复现，不会重新读这张表。
-        所以「把活动停了 / 改成 5 折，怎么那笔还按老的算」的答案是：那笔在改动之前就提交了。
-        改活动、提前结束、停用、删除，都只对<b>之后</b>提交的任务生效。
-      </Alert>
 
       <DiscountPolicyNotice />
 
@@ -348,22 +355,22 @@ export default function Promotions() {
               <tr key={row.id}>
                 <td>
                   <div>{row.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>{row.code}</div>
+                  <div style={{ fontSize: 'var(--admin-font-xs)', }}>{row.code}</div>
                 </td>
                 <td>
                   <b>{formatDiscount(row.discountBp)}</b>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>万分比 {row.discountBp}</div>
+                  <div style={{ fontSize: 'var(--admin-font-xs)', }}>万分比 {row.discountBp}</div>
                 </td>
                 <td>
                   <div>{describePatterns(row.modelIds, '（空 = 全部模型）')}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  <div style={{ fontSize: 'var(--admin-font-xs)', }}>
                     任务：{describePatterns(row.taskTypes, '不限')}
                   </div>
                 </td>
                 <td>{describeTiers(row.tierScope)}</td>
                 <td>
                   <div>{shortDateTime(row.startAt)}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  <div style={{ fontSize: 'var(--admin-font-xs)', }}>
                     至 {shortDateTime(row.endAt)}（不含）
                   </div>
                 </td>
@@ -493,7 +500,7 @@ function PromotionEditorModal({
     >
       {error && <Alert tone="danger">{error}</Alert>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px 24px' }}>
+      <div style={formGrid(3)}>
         <Field
           label="活动标识"
           hint="小写字母/数字/下划线/连字符，唯一。审计与排查靠它定位；改它不会改历史任务快照里记下的那个码"
@@ -530,7 +537,7 @@ function PromotionEditorModal({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px', marginTop: 16 }}>
+      <div style={{ ...formGrid(2), marginTop: 16 }}>
         <Field
           label="模型范围（至少一个）"
           hint="* = 全部；seedance-* = 前缀通配；或精确 model_id。⚠️ 中间带 * 匹配不到任何东西"
@@ -569,7 +576,7 @@ function PromotionEditorModal({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px 24px', marginTop: 16 }}>
+      <div style={{ ...formGrid(3), marginTop: 16 }}>
         <Field label="起始时间（含）" hint="按活动时区的墙钟填写，不是浏览器时区">
           <Input
             type="datetime-local"
@@ -596,7 +603,7 @@ function PromotionEditorModal({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px 24px', marginTop: 16 }}>
+      <div style={{ ...formGrid(3), marginTop: 16 }}>
         <Field label="每日时段起" hint="留空 = 全天。可跨天：22:00 → 06:00">
           <Input
             type="time"

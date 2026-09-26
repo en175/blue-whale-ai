@@ -16,6 +16,7 @@ import {
   type GenerationJobType,
   type QuoteJobParameters,
 } from '@/api/generationQuote';
+import type { GenerationRefItem } from '@/api/jobs';
 import styles from './index.module.css';
 
 interface GenerationQuoteBadgeProps {
@@ -24,6 +25,11 @@ interface GenerationQuoteBadgeProps {
   type: GenerationJobType;
   /** 定价维度（model_id + 规格）；必须与面板发送时组装的参数同源 */
   parameters: QuoteJobParameters;
+  /** 参考素材（与面板发送时**同一份**列表，不是另数一遍的个数）：
+   *  参考图是定价维度（Seedream 5.0 Pro「首张免费、第 2 张起按张加价」），
+   *  张数交后端 `resolveReferenceAssets` 去重后自己数，前端只负责如实带上「哪些参考」。
+   *  缺省 = 这次没有参考（价格同旧口径）。 */
+  references?: GenerationRefItem[];
 }
 
 export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
@@ -34,7 +40,7 @@ export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
   return <QuoteBadge {...props} />;
 }
 
-function QuoteBadge({ projectId, type, parameters }: GenerationQuoteBadgeProps) {
+function QuoteBadge({ projectId, type, parameters, references }: GenerationQuoteBadgeProps) {
   const { data } = useQuery({
     ...generationQuoteOptions(projectId, {
       type,
@@ -42,6 +48,9 @@ function QuoteBadge({ projectId, type, parameters }: GenerationQuoteBadgeProps) 
       // 画布三个生成面板都只生成一个产物（多图按张计价的场景还没进画布）；
       // 这里必须与提交时那个 expected_output_count 是同一个数，否则价就不是那个价。
       expected_output_count: 1,
+      // 空列表视为「没有参考」：与创建任务同口径（那边也是 length > 0 才带这个键），
+      // 免得报价请求带上一个后端不认的参考字段。
+      ...(references && references.length > 0 ? { references } : {}),
     }),
     // 模型还没定下来之前不问价：它是定价的输入之一，缺了问不出有意义的结果
     enabled: parameters.model_id !== '',

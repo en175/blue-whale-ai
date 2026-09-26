@@ -209,8 +209,19 @@ model generation_model_capability {
   default_aspect_ratio    String   @db.VarChar(16)
   default_duration        Int?
   features                Json
-  channel_parser          String   @default("seedream") @db.VarChar(32)
+  /// 渠道（`<家族>-<媒介>[-<协议>]`，**封闭枚举**）：这个模型走哪个渠道 ——
+  /// 决定请求怎么解析、出站用哪种线协议。**本行解析与出站行为的唯一来源**。
+  /// 取代了 `channel_parser`（列）与 `features.image_protocol`（JSON 键）—— 那两个已被
+  /// 040 迁移删掉/清空，代码里也没有读方了。
+  channel                 String   @db.VarChar(32)
   request_mapping         Json?
+  /// 该模型该能力的计价规则，JSON 形态与定价目录 `document.models.<model_id>.<capability_type>`
+  /// 那条逐字相同（baseUnit / basePrice{kind,value?,by?,table?} / unitDenominator / minCredits /
+  /// maxCredits? / rounding? / dims? / multipliers? / tokenEstimate?）。
+  /// 原住 billing 的 `billing_pricing_catalogs.document`，因「它本质上是模型的属性」而搬来；
+  /// billing 生成任务时随 Hold 请求带走并存进自己的预留行，结算用预留行快照，故不反查本库。
+  /// 过渡期可为 NULL = 尚未搬迁，billing 侧回落定价目录。
+  pricing                 Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
   is_default              Boolean  @default(false)
@@ -642,6 +653,14 @@ model recharge_orders {
   gmt_modified     DateTime  @default(now()) @db.DateTime(0)
   version          Int       @default(0)
   is_delete        Int       @default(0) @db.TinyInt
+
+  /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
+  /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
+  /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
+  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
+  /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
+  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
 }
 
 // ===== 系统设置（管理端可配；按模块整行存一份快照） =====

@@ -149,7 +149,7 @@ export default function SiteConfig() {
           <img
             src={auroraPoster}
             alt="首页默认兜底背景"
-            style={{ width: 128, height: 72, flex: '0 0 auto', objectFit: 'cover', borderRadius: 8 }}
+            style={{ width: 128, height: 72, flex: '0 0 auto', objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
           />
           <div>
             <p style={{ margin: 0 }}>
@@ -233,7 +233,7 @@ export default function SiteConfig() {
                       src={resolveMediaSrc(thumb)}
                       crossOrigin={remoteImageCrossOrigin(thumb)}
                       alt=""
-                      style={{ width: 72, height: 40, objectFit: 'cover', borderRadius: 6, display: 'block' }}
+                      style={{ width: 72, height: 40, objectFit: 'cover', borderRadius: 'var(--admin-radius-control)', display: 'block' }}
                     />
                   ) : (
                     <span>—</span>
@@ -455,7 +455,7 @@ function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: Her
             src={resolveMediaSrc(coverUrl)}
             crossOrigin={remoteImageCrossOrigin(coverUrl)}
             alt="封面图预览"
-            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10 }}
+            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
           />
         </div>
       )}
@@ -496,7 +496,7 @@ function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: Her
             muted
             playsInline
             preload="metadata"
-            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10 }}
+            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
           >
             当前浏览器不支持视频预览。
           </video>

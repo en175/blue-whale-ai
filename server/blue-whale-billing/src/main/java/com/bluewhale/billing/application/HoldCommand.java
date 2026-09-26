@@ -19,6 +19,14 @@ import java.util.Map;
  * @param submittedAt ★ 计价时刻。**必须由调用方在入口取一次**，不能在深处各自取
  *                    {@code Instant.now()}——那会让「同一请求内的时间」出现多个值，
  *                    而它同时决定营销活动是否命中与批次过期判定
+ * @param ruleSnapshot ★ 本条规则的**快照**（JSON 文本，形态 = 能力行的
+ *                    {@code generation_model_capability.pricing} 那一列）。
+ *                    规则本身住在模型能力行，billing 读不到那个库
+ *                    （ADR-0114 不共享库），所以由属主在 Hold 时一并送来，
+ *                    冻进预留——结算于是不必回读任何东西。
+ *                    <p>⚠️ **必填**：空 = 这次交易算不出价，**直接拒单**（没有可回落的地方）。
+ *                    <p>⚠️ 带上了就必须**编译得过**——编不过同样当场拒单（理由见
+ *                    {@code BillingApplicationService#requireSnapshot}）。
  */
 public record HoldCommand(
         long userId,
@@ -29,7 +37,8 @@ public record HoldCommand(
         Map<String, String> specs,
         String tier,
         String title,
-        Instant submittedAt
+        Instant submittedAt,
+        String ruleSnapshot
 ) {
 
     public HoldCommand {
@@ -43,5 +52,8 @@ public record HoldCommand(
         tier = tier == null || tier.isBlank() ? "free" : tier;
         // 文案只是展示，缺了不该拦住一次预扣：统一成空串，库里只有一种「没提供」写法
         title = title == null ? "" : title;
+        // 「没带快照」也统一成空串（而不是 null）：往下只有一处判据（isBlank），
+        // 两种写法就得判两次，而漏判一次就是「拿一份没有规则的东西去算价」
+        ruleSnapshot = ruleSnapshot == null ? "" : ruleSnapshot;
     }
 }

@@ -71,6 +71,24 @@ message HoldRequest {
   // ⚠️ 这是**由调用方断言**的输入：传错档位就能拿到不该有的折扣。
   //    所以 Hold 只对该调用方（backend）开放，**不可由公网直达**。
   string tier              = 8;
+
+  // ★ 本条规则的**快照**（JSON 文本，形态 = 定价目录里 `models.<model_id>.<task_type>` 那一条）。
+  //
+  // 为什么随请求带过来、而不是让 billing 去查：
+  //   这条规则本来就是**模型的属性**（单价 / 计价方式 / 单位分母 / 上下限 / token 公式参数），
+  //   住在 backend 的 `generation_model_capability.pricing`。而 billing 读不到那个库
+  //   （ADR-0114：不共享库），所以由它的属主在 Hold 时一并送来。
+  //
+  // ⚠️ **必填**。留空 = billing 算不出价，直接拒单（INVALID_ARGUMENT / UNPRICEABLE）。
+  //    这里**没有**「回落去查目录」那条路：目录里的模型规则已经退场，它现在只装
+  //    `creditsPerYuan` 与 `discountPolicy` 两项全局配置。
+  //    （曾经有过一个过渡期的回落到目录的分支，随目录规则一起删了——那套从未上线，
+  //     留兼容分支没有保护对象。）
+  //
+  // ⚠️ billing 收到后会用 `CatalogCompiler` 编译它——**编译不过就拒单**（UNPRICEABLE）。
+  //    写侧闸门（backend 的 `constants.ts`）是第一道，这里编译是最后一道：
+  //    两者拦的不是同一件事——前者拦「脏配置存不进去」，后者拦「脏配置已经在库里了」。
+  string rule_snapshot     = 9;
 }
 
 message HoldResponse {
@@ -92,6 +110,9 @@ message QuoteRequest {
   // 用量。留空 = 按契约用量报价（提交前预览）；
   // 带上 = 按真实用量报价（结算、影子对账）。
   repeated UsageLine usage = 6;
+  // 规则快照，语义与字段与 {@code HoldRequest.rule_snapshot} 逐条相同（**同样必填**）。
+  // 预览必须与实扣取到**同一份**规则——否则「预览一个价、实扣另一个价」。
+  string rule_snapshot     = 7;
 }
 
 message QuoteResponse {

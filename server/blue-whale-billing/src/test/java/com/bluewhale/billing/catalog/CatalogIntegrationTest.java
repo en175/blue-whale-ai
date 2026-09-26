@@ -16,14 +16,18 @@ import java.time.Instant;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 定价目录的**真库集成测试** —— 「配 JSON → 引擎算价」的端到端。
+ * 定价目录的**真库集成测试**。
  *
- * <p>为什么必须真库跑：单测里 {@code CompiledRule} 是手工构造的，跳过了
- * **JSON 反序列化 + 表键规范化 + Flyway 建表**这一整段。而那一段恰恰是
- * 「运营改配置」到「引擎算得出价」之间唯一会出错的地方。
+ * <p>为什么必须真库跑：目录文档要经 MySQL 的 JSON 列往返（读回来是它自己的规范化文本），
+ * 而老行里还留着规则搬走之前的 {@code models} 段——那一段能不能被容错解析、
+ * 表建得对不对，单测覆盖不到。
+ *
+ * <p>⚠️ <b>目录里没有计价规则</b>（规则住在模型能力行，随 Hold / Quote 以快照进出 billing），
+ * 所以本类考的是「目录读得出来、校验得了、老行不用迁移」；
+ * 「规则 JSON → 引擎算得出价」在 {@link CatalogCompilerTest} 与
+ * {@code TokenEstimatorTest} 里考（规则不再经过库）。
  *
  * <p>门控：未设 {@code BILLING_DB_PASSWORD} 时整体跳过（与仓库里
  * {@code *_DATABASE_URL} 门控的既有做法一致）。本地跑：
@@ -48,16 +52,12 @@ class CatalogIntegrationTest {
     @Autowired
     private CatalogHolder holder;
 
-    private PricingEngine engine;
-
     @BeforeEach
     void setUp() {
         // 清成已知状态。用 DELETE 不用 TRUNCATE：TRUNCATE 在 Flyway 管的表上会隐式提交，
         // 且与测试事务语义冲突。
         jdbc.update("DELETE FROM billing_pricing_catalogs");
-        holder.reload();  // 清空后 reload → 无 active 版本，lookup 返回 null
-        // 本用例考的是「目录读出来能不能算价」，折扣不是考点，显式声明不做折扣
-        engine = PricingEngine.forMedia(holder, DiscountResolver.NONE);
+        holder.reload();  // 清空后 reload → 无 active 版本，换算率读成 -1
     }
 
     private void publish(int version, String document, String status) {
@@ -69,9 +69,35 @@ class CatalogIntegrationTest {
                 """, version, status, document, version + ":" + document);
     }
 
-    /** 一份覆盖三种模态的最小目录。 */
-    private static String catalogJson() {
+    /** 一份最小目录：只有换算率与折扣策略。 */
+    private static String catalogJson(int creditsPerYuan) {
         return """
+                {
+                  "schemaVersion": 1,
+                  "currency": "CNY",
+                  "creditsPerYuan": %d,
+                  "discountPolicy": { "stackMode": "multiply", "floorFactorBp": 3000 }
+                }
+                """.formatted(creditsPerYuan);
+    }
+
+    @Test
+    void 从库加载目录_版本换算率与折扣策略都可读() {
+        publish(1, catalogJson(15), "active");
+
+        assertThat(holder.reload()).isTrue();
+        assertThat(holder.currentVersion()).isEqualTo(1);
+        // ★ 管理端与充值都靠它：换算率只能从目录读，不能硬编码
+        assertThat(holder.currentCreditsPerYuan()).isEqualTo(15);
+        assertThat(holder.currentDiscountPolicy().stackModeOrDefault()).isEqualTo("multiply");
+        assertThat(holder.currentDiscountPolicy().floorFactorBpOrDefault()).isEqualTo(3_000);
+    }
+
+    @Test
+    void 老目录行里的models段被忽略_不需要数据迁移() {
+        // 规则搬进模型能力行之前发布的目录行就长这样：带一个 models 段。
+        // 它必须能被照常解析（FAIL_ON_UNKNOWN_PROPERTIES=false），否则线上老行一读就炸。
+        publish(1, """
                 {
                   "schemaVersion": 1,
                   "currency": "CNY",
@@ -80,147 +106,82 @@ class CatalogIntegrationTest {
                     "seedream-4.0": {
                       "text2image": {
                         "baseUnit": "usage.succeededSlots",
-                        "basePrice": {
-                          "kind": "table",
-                          "by": ["size"],
-                          "table": { "Size=1K": 2000, "size=2k": 5000, "size=4k": 10000 }
-                        },
-                        "unitDenominator": 1,
-                        "minCredits": 1
-                      }
-                    },
-                    "seedance-2.5": {
-                      "text2video": {
-                        "baseUnit": "usage.seconds",
-                        "basePrice": {
-                          "kind": "table",
-                          "by": ["size"],
-                          "table": { "size=1024x1024": 2000 }
-                        },
-                        "multipliers": { "usage.referenceCount": 12000 },
-                        "unitDenominator": 1,
-                        "minCredits": 2
-                      }
-                    },
-                    "mediakit-cutout": {
-                      "cutout": {
-                        "baseUnit": "constant:1",
-                        "basePrice": { "kind": "const", "value": 3000 },
-                        "unitDenominator": 1,
-                        "minCredits": 3
+                        "basePrice": { "kind": "const", "value": 5000 },
+                        "unitDenominator": 1
                       }
                     }
                   },
                   "discountPolicy": { "stackMode": "multiply", "floorFactorBp": 3000 }
                 }
-                """;
-    }
-
-    @Test
-    void 从库加载目录后_引擎能算出价() {
-        publish(1, catalogJson(), "active");
+                """, "active");
 
         assertThat(holder.reload()).isTrue();
         assertThat(holder.currentVersion()).isEqualTo(1);
-
-        // 图片：2k × 3 张 = 5000mc × 3 = 15 积分
-        assertThat(engine.compute(
-                new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("size", "2k"), "free"),
-                Usage.of(UsageDim.SUCCEEDED_SLOTS, 3), T).credits())
-                .isEqualTo(15);
-
-        // 视频：1024x1024 每秒 2000mc × 5 秒 = 10000mc；
-        //       参考素材**每单位** ×1.2（12000 万分比），2 个 → 2.4×
-        //       10000 × 24000/10000 = 24000mc = 24 积分
-        assertThat(engine.compute(
-                new PricingRequest(42L, "seedance-2.5", "text2video", Map.of("size", "1024x1024"), "free"),
-                new Usage(null, null, Map.of(UsageDim.SECONDS, 5L, UsageDim.REFERENCE_COUNT, 2L)), T).credits())
-                .isEqualTo(24);
-
-        // 按次：CONSTANT_ONE 恒为 1，不依赖 usage 上报
-        assertThat(engine.compute(
-                new PricingRequest(42L, "mediakit-cutout", "cutout", Map.of(), "free"),
-                Usage.empty(), T).credits())
-                .isEqualTo(3);
+        assertThat(holder.currentCreditsPerYuan()).isEqualTo(15);
     }
 
     @Test
-    void 表键大小写被规范化_运营写Size等于1K也能查到() {
-        publish(1, catalogJson(), "active");
-        holder.reload();
-
-        // JSON 里故意写了 "Size=1K"（未规范化）；编译期重拼成 "size=1k"
-        long credits = engine.compute(
-                new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("SIZE", "1k"), "free"),
-                Usage.of(UsageDim.SUCCEEDED_SLOTS, 1), T).credits();
-
-        assertThat(credits).isEqualTo(2);
-    }
-
-    @Test
-    void 改价发布新版本_老版本仍可按冻结版本复现() {
-        publish(1, catalogJson(), "active");
+    void 改换算率发布新版本_老版本仍可按冻结版本读回() {
+        publish(1, catalogJson(15), "active");
         holder.reload();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 运营调价：2k 从 5 积分涨到 8 积分
-        publish(2, catalogJson().replace("\"size=2k\": 5000", "\"size=2k\": 8000"), "active");
+        // 运营改口径：1 元 = 20 积分
+        publish(2, catalogJson(20), "active");
         jdbc.update("UPDATE billing_pricing_catalogs SET status='retired' WHERE catalog_version=1");
 
         assertThat(holder.reload()).isTrue();
         assertThat(holder.currentVersion()).isEqualTo(2);
-
-        var request = new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("size", "2k"), "free");
-        var usage = Usage.of(UsageDim.SUCCEEDED_SLOTS, 1);
-
-        // 新提交：按新价
-        assertThat(engine.compute(request, usage, T).credits()).isEqualTo(8);
-
-        // ★ 已提交任务：按冻结的 v1 复现 —— retired 版本必须仍可读，这是「改价不影响在途任务」的实现
-        var frozenV1 = repository.loadVersion(1);
-        assertThat(frozenV1).isNotNull();
-        assertThat(PricingEngine.forMedia(
-                (m, t) -> frozenV1.index().get(CatalogCompiler.indexKey(m, t)), DiscountResolver.NONE)
-                .compute(request, usage, T).credits())
-                .isEqualTo(5);
+        assertThat(holder.currentCreditsPerYuan()).isEqualTo(20);
     }
 
     @Test
-    void 目录编不过时_保持旧版本而不是清空() {
-        publish(1, catalogJson(), "active");
+    void 目录校验不过时_保持旧版本而不是清空() {
+        publish(1, catalogJson(15), "active");
         holder.reload();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 发布一份坏目录：baseUnit 是拼错的维度键
-        publish(2, catalogJson().replace("\"usage.seconds\"", "\"usage.secondz\""), "active");
+        // 发布一份坏目录：换算率 0 —— 那是「多少元都换不到积分」
+        publish(2, catalogJson(0), "active");
         jdbc.update("UPDATE billing_pricing_catalogs SET status='retired' WHERE catalog_version=1");
 
         // reload 失败 → 保持 v1，而非清空
         assertThat(holder.reload()).isFalse();
         assertThat(holder.currentVersion()).isEqualTo(1);
 
-        // 计价仍可用（用旧版本）—— 一次配置错误不该放大成全站不可用
-        assertThat(engine.compute(
-                new PricingRequest(42L, "mediakit-cutout", "cutout", Map.of(), "free"),
-                Usage.empty(), T).credits())
-                .isEqualTo(3);
+        // 换算率仍可用（用旧版本）—— 一次配置错误不该放大成全站不可用
+        assertThat(holder.currentCreditsPerYuan()).isEqualTo(15);
     }
 
     @Test
-    void 没有生效目录时_拒绝计价而不是算成零() {
+    void 没有生效目录时_换算率读成负一而不是编一个数() {
         // ⚠️ 必须用**全新的 holder**：@SpringBootTest 的 holder 是单例，
         //    而它的 reload() 失败时**保持旧版本**（这正是设计要的行为）——
         //    共用它会带着上一个测试加载的版本，测不到「从未加载过」这个分支。
         var freshHolder = new CatalogHolder(repository);
-        var freshEngine = PricingEngine.forMedia(freshHolder, DiscountResolver.NONE);
 
         assertThat(freshHolder.currentVersion()).isEqualTo(-1);
-        assertThat(freshHolder.lookup("seedream-4.0", "text2image")).isNull();
+        assertThat(freshHolder.currentCreditsPerYuan()).isEqualTo(-1);
+        assertThat(freshHolder.currentDocumentJson()).isEmpty();
+    }
 
-        // 降级为 0 会让「还没配价」变成「免费」——必须炸
-        assertThatThrownBy(() -> freshEngine.compute(
-                new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("size", "2k"), "free"),
-                Usage.of(UsageDim.SUCCEEDED_SLOTS, 1), T))
-                .isInstanceOf(PricingEngine.RuleNotFoundException.class);
+    @Test
+    void 规则快照_表键大小写被规范化后能算出价() {
+        // 本仓的定价轴写法是「轴=值」，运营常写成 "Size=2K"；编译期重拼成 "size=2k"。
+        // 这条钉的是「配 JSON → 引擎算价」这一段——规则不再经过库，快照直接编译。
+        var rule = CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.succeededSlots",
+                 "basePrice":{"kind":"table","by":["size"],
+                   "table":{"Size=1K":2000,"size=2k":5000,"size=4k":10000}},
+                 "unitDenominator":1,"minCredits":1}
+                """);
+        var engine = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE);
+
+        // 规格里故意写 "SIZE"/"1k"（未规范化），值取自那条 Size=1K（即 2000 mc = 2 积分）
+        long credits = engine.compute(
+                new PricingRequest(42L, "seedream-4.0", "text2image", Map.of("SIZE", "1k"), "free"),
+                Usage.of(UsageDim.SUCCEEDED_SLOTS, 1), T).credits();
+
+        assertThat(credits).isEqualTo(2);
     }
 }

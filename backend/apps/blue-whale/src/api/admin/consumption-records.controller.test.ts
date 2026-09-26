@@ -29,6 +29,8 @@ const ITEM = {
   direction: "out",
   title: "视频生成 · seedance-2.5",
   amount: 30,
+  // 「冻 12、实扣 1」那种情形：amount 是结算后的实际值，预扣额另有一列
+  reservedCredits: 100,
   status: "done",
   createdAt: "2026-09-25T10:00:00+08:00",
   settledAt: "2026-09-25T10:01:00+08:00",
@@ -79,6 +81,7 @@ describe("AdminConsumptionRecordsController.list", () => {
             direction: "out",
             title: "视频生成 · seedance-2.5",
             credits: 30,
+            reserved_credits: 100,
             status: "done",
             created_at: "2026-09-25T10:00:00+08:00",
             settled_at: "2026-09-25T10:01:00+08:00",
@@ -86,6 +89,28 @@ describe("AdminConsumptionRecordsController.list", () => {
         ],
         next_page_token: "next-tok",
       },
+    });
+  });
+
+  it("billing 没回预扣额（发放 / 账本行）→ reserved_credits 为 null，不是 undefined", async () => {
+    // 契约里只能有一种「没有」：多一种空值，界面就要判两次，而少判的那次会渲染成
+    // 「预扣 undefined」或干脆不渲染——两种都不会报错。
+    // 这里的发放行刻意**没有 reservedCredits 这个键**，模拟老版 billing 的回包。
+    const grantRow = {
+      id: "lot:12",
+      userId: 42,
+      type: "recharge",
+      direction: "in",
+      title: "充值到账",
+      amount: 1000,
+      status: "done",
+      createdAt: "2026-09-25T10:00:00+08:00",
+      settledAt: "2026-09-25T10:00:00+08:00",
+    };
+    listAdminTransactions.mockResolvedValue(page([grantRow]));
+
+    await expect(controller.list({})).resolves.toMatchObject({
+      data: { items: [{ reserved_credits: null }] },
     });
   });
 

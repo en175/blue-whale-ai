@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 /* ============================================
  * SystemConfig 系统设置：上游凭证·支付凭证安全配置·充值政策文案·限流参数
  * 数据源 GET/PUT /api/admin/settings
@@ -18,6 +19,7 @@ import {
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import {
+  Hint,
   Alert,
   Badge,
   Button,
@@ -28,6 +30,7 @@ import {
   PageHeader,
   Tabs,
   Textarea,
+  formGrid,
 } from '../../ui';
 
 const TABS = [
@@ -130,15 +133,22 @@ export default function SystemConfig() {
 const UPSTREAM_FIELDS: {
   key: keyof SystemUpstream;
   label: string;
+  /** 字段级微文案：一行说清「保存后怎样」 */
   hint: string;
+  /** 段落级解释：这一把 key 在系统里的位置，收进标题旁的 `?` */
+  info: ReactNode;
   secret: boolean;
 }[] = [
   {
     key: 'new_api_key',
     label: '项目统一 key',
-    hint:
-      '全项目调用 new-api 共用这一把（登录后回注请求头、技能格式化、worker 素材跟进）。' +
-      '保存后立即生效，无需重启。',
+    hint: '保存后立即生效，无需重启。',
+    info: (
+      <Hint>
+        <div>全项目共用这一把：backend 与 worker-java 都从这里取，改一处即全项目生效。</div>
+        <div>用途包括登录后回注请求头、技能格式化、worker 素材跟进。</div>
+      </Hint>
+    ),
     secret: true,
   },
 ];
@@ -152,14 +162,12 @@ function UpstreamTab({
 }) {
   return (
     <div style={tabBodyStyle}>
-      <Alert tone="info">
-        这一把 key 是全项目共用的：backend 与 worker-java 都从这里取，改一处即全项目生效。
-      </Alert>
       {UPSTREAM_FIELDS.map((f) => (
         <CredCard
           key={f.key}
           label={f.label}
           hint={f.hint}
+          info={f.info}
           secret={f.secret}
           value={upstream?.[f.key] ?? ''}
           onSave={(v) => onSave(f.key, v)}
@@ -230,13 +238,16 @@ function CredTab({
 function CredCard({
   label,
   hint,
+  info,
   secret,
   value,
   onSave,
 }: {
   label: string;
-  /** 该字段说明（可省）。卡片标题下的一行散文，用来讲清「这玩意儿是给谁用的」。 */
+  /** **字段级微文案**：一行说清「保存后怎样」。渲染在值下方，一眼可见。 */
   hint?: string;
+  /** **段落级解释**：收进标题旁的 `?`（见 `ui/Hint` 的两层口径）。 */
+  info?: ReactNode;
   /** 是否密文：决定脱敏回显、输入框类型与眼睛切换，以及加密存储提示 */
   secret: boolean;
   value: string;
@@ -271,7 +282,11 @@ function CredCard({
 
   return (
     <Card
-      title={label}
+      title={
+        <>
+          {label} {info}
+        </>
+      }
       extra={
         <Button
           size="sm"
@@ -282,8 +297,13 @@ function CredCard({
         </Button>
       }
     >
-      <div>{value || '未配置'}</div>
-      {hint && <p style={{ margin: '8px 0 0' }}>{hint}</p>}
+      {/* 「现在是什么」保持可见：没配就明写「未配置」，不留一片空白让人以为页面坏了 */}
+      <div style={value ? undefined : { color: 'var(--admin-text-faint)' }}>{value || '未配置'}</div>
+      {hint && (
+        <div style={{ marginTop: 'var(--admin-space-1)', fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          {hint}
+        </div>
+      )}
 
       {editing && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
@@ -312,7 +332,7 @@ function CredCard({
               {saving ? '保存中…' : '保存'}
             </Button>
           </div>
-          {secret && <Alert tone="info">保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Alert>}
+          {secret && <Hint>保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Hint>}
         </div>
       )}
     </Card>
@@ -435,7 +455,7 @@ function RateTab({
 
   return (
     <div style={tabBodyStyle}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '24px 40px' }}>
+      <div style={formGrid(2)}>
         <div>
           <div style={{ marginBottom: 10 }}>每分钟请求上限</div>
           <Input type="number" value={perMin} style={{ width: '100%' }} onChange={(e) => setPerMin(e.target.value)} />

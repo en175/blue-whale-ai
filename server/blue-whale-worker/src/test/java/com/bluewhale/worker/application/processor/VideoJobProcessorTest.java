@@ -1206,6 +1206,37 @@ class VideoJobProcessorTest {
                     .isEqualTo("default");
         }
 
+        // 关键词表逐字对齐火山方舟 Seedance 2.5 提示词指南。以下两条钉住**曾经放宽过的词**：
+        // 放宽会让「用户没要求编辑/延长」的提示词也落进 edit/prolong，进而被按编辑任务的锁定额处理。
+        // 与 backend capability-param-validation.test.ts 逐条对应。
+
+        @Test
+        @DisplayName("裸「编辑」不算编辑意图（官方那条是「编辑视频」）")
+        void bareEditIsNotEditIntent() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "编辑一下这个镜头"))
+                    .isEqualTo("default");
+        }
+
+        @Test
+        @DisplayName("裸「向前」不算延长意图（用户说的是运镜，不是要延长视频）")
+        void bareDirectionIsNotProlongIntent() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "镜头向前推进"))
+                    .isEqualTo("default");
+        }
+
+        @Test
+        @DisplayName("官方延长词是完整词组「向前延长 / 向后延长」，「延续 / 续写」保留")
+        void officialProlongPhrases() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "向前延长 3 秒"))
+                    .isEqualTo("prolong");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "续写这段"))
+                    .isEqualTo("prolong");
+        }
+
         @Test
         @DisplayName("非 edit/prolong 任务传 duration=-1 → invalid_input（收窄后不再通用放行）")
         void autoDurationRejectedForNonEdit() {

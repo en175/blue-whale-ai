@@ -78,13 +78,11 @@ const ROWS = [
 const CATALOG = {
   catalogVersion: 3,
   documentHash: 'abc',
-  ruleCount: 1,
   creditsPerYuan: 15,
   document: JSON.stringify({
     schemaVersion: 1,
     currency: 'CNY',
     creditsPerYuan: 15,
-    models: {},
     discountPolicy: { stackMode: 'best', floorFactorBp: 3000 },
   }),
 };
@@ -190,20 +188,26 @@ describe('会员折扣页', () => {
   it('★ 冻结语义写在最上面：改折扣不影响已提交未结算的任务', async () => {
     await renderPage();
 
-    // 不说清这一条，运营会把「那笔还按老的算」反复当成 bug 报上来
-    expect(document.body.textContent).toContain('改折扣不影响已提交未结算的任务');
-    expect(document.body.textContent).toContain('之后');
+    // 不说清这一条，运营会把「那笔还按老的算」反复当成 bug 报上来。
+    // ⚠️ 但**形态**是全管理端统一的「?」：它仍在最上面（页面第一块内容就是那个图标），
+    //    只是不再铺满整屏 —— 解释该在需要时展开，而不是一直在场。
+    const help = document.body.querySelector('button[aria-label="说明"]');
+    expect(help, '页面顶部应有一个「?」').not.toBeNull();
+    expect(document.body.textContent).not.toContain('改折扣不影响已提交未结算的任务');
+    expect(help!.compareDocumentPosition(document.body.querySelector('table')!) &
+      Node.DOCUMENT_POSITION_FOLLOWING, '「?」应在表格之前（最上面）').toBeTruthy();
   });
 
   it('★ 叠加方式与底线只读展示（当前目录是 best / 3000）', async () => {
     await renderPage();
 
+    // 「现在是什么」可见：两个值直接用 MetaRow 摆在页面上
     expect(document.body.textContent).toContain('best');
     expect(document.body.textContent).toContain('3 折（3000）');
-    expect(document.body.textContent).toContain('目录级配置');
-    // 算例把两种方式各自的结果都算出来：运营要判断「配多少」，看的就是这个
-    expect(document.body.textContent).toContain('同时命中 →');
-    expect(document.body.textContent).toContain('6.3 折');
+    // 解释与算例收进 `?`（全管理端统一口径），默认不在 DOM 里
+    expect(document.body.textContent).not.toContain('目录级配置');
+    expect(document.body.textContent).not.toContain('同时命中 →');
+    expect(document.body.querySelectorAll('button[aria-label="说明"]').length).toBeGreaterThan(0);
   });
 
   it('读不到定价目录时提示去模型计费页，而不是装作没这回事', async () => {

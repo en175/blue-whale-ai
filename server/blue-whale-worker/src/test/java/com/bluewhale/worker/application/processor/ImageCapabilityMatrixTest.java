@@ -86,7 +86,7 @@ class ImageCapabilityMatrixTest {
         void matrixHit() {
             String mappingJson = "{\"matrix\":{\"1K\":{\"1:1\":\"1024x1024\",\"4:3\":\"1152x864\"}}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "gpt", mappingJson, "1K", "1:1");
+                    ImageChannel.GPT_IMAGE, mappingJson, "1K", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "1K", "4:3");
             assertThat(result.ok()).isTrue();
@@ -98,7 +98,7 @@ class ImageCapabilityMatrixTest {
         void matrixFallbackToDefault() {
             String mappingJson = "{\"matrix\":{\"1K\":{\"1:1\":\"1024x1024\"}}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "gpt", mappingJson, "1K", "1:1");
+                    ImageChannel.GPT_IMAGE, mappingJson, "1K", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "2K", "4:3"); // 2K 不在矩阵
             assertThat(result.ok()).isTrue();
@@ -110,7 +110,7 @@ class ImageCapabilityMatrixTest {
         void matrixAndDefaultMiss() {
             String mappingJson = "{\"matrix\":{}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "gpt", mappingJson, "x", "y");
+                    ImageChannel.GPT_IMAGE, mappingJson, "x", "y");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "1K", "1:1");
             assertThat(result.ok()).isFalse();
@@ -121,7 +121,7 @@ class ImageCapabilityMatrixTest {
         void caseInsensitive() {
             String mappingJson = "{\"matrix\":{\"1k\":{\"1:1\":\"1024x1024\"}}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "gpt", mappingJson, "1k", "1:1");
+                    ImageChannel.GPT_IMAGE, mappingJson, "1k", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "1K", "1:1");
             assertThat(result.ok()).isTrue();
@@ -140,7 +140,7 @@ class ImageCapabilityMatrixTest {
         void bothHit() {
             String mappingJson = "{\"quality\":{\"1K\":\"hd\",\"2K\":\"auto\"},\"size\":{\"1:1\":\"1024x1024\",\"4:3\":\"1152x864\"}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "banana", mappingJson, "1K", "1:1");
+                    ImageChannel.BANANA_IMAGE, mappingJson, "1K", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "2K", "4:3");
             assertThat(result.ok()).isTrue();
@@ -153,7 +153,7 @@ class ImageCapabilityMatrixTest {
         void qualityFallback() {
             String mappingJson = "{\"quality\":{\"1K\":\"hd\"},\"size\":{\"1:1\":\"1024x1024\"}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "banana", mappingJson, "1K", "1:1");
+                    ImageChannel.BANANA_IMAGE, mappingJson, "1K", "1:1");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "2K", "1:1");
             assertThat(result.ok()).isTrue();
@@ -165,7 +165,7 @@ class ImageCapabilityMatrixTest {
         void bothMiss() {
             String mappingJson = "{\"quality\":{},\"size\":{}}";
             var mapping = ImageChannelMapper.parseStoredMapping(
-                    "banana", mappingJson, "x", "y");
+                    ImageChannel.BANANA_IMAGE, mappingJson, "x", "y");
             var result = ImageChannelMapper.mapImageChannelRequest(
                     mapping, "1K", "1:1");
             assertThat(result.ok()).isFalse();

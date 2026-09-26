@@ -39,6 +39,7 @@ import {
   Table,
   Textarea,
   Toolbar,
+  Hint,
 } from '../../ui';
 
 /** 渲染形态：layout code ↔ 展示名 */
@@ -158,7 +159,7 @@ export default function TemplateManage() {
 
       <Card padded={false}>
         {/* 标签 tabs：点标签即筛选，标签右侧是改名与隐藏开关 */}
-        <div style={{ padding: 12 }}>
+        <div style={{ padding: 'var(--admin-space-3)' }}>
           <Toolbar>
             <Chip active={activeTab === 'all'} onClick={() => setActiveTab('all')}>
               全部
@@ -379,7 +380,12 @@ function RenameTagModal({
   return (
     <Modal
       open
-      title={`重命名标签（${tag.tag_code}）`}
+      title={
+        <>
+          重命名标签（{tag.tag_code}）{' '}
+          <Hint>tag_code 与顺序固定不可改，仅可修改显示名称。</Hint>
+        </>
+      }
       width={560}
       onClose={onClose}
       footer={
@@ -391,8 +397,6 @@ function RenameTagModal({
         </>
       }
     >
-      {/* 说明性文字用 info 调子，不用 danger —— 这条不是出错 */}
-      <Alert tone="info">tag_code 与顺序固定不可改，仅可修改显示名称。</Alert>
       <Input
         maxLength={128}
         value={label}

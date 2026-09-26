@@ -21,6 +21,7 @@ import {
 } from '@/lib/prompt-max-length';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
+import { buildImageJobReferences } from '../../videoJobReferences';
 import {
   PROMPT_DOC_VERSION,
   docHasAnyRef,
@@ -301,6 +302,12 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
     return out;
   }, [edgeRefs, files, mixedStrip.order]);
   const orderedAssetIds = useMemo(() => orderedImageRefs.map((r) => r.assetId), [orderedImageRefs]);
+  /** 报价用的参考（与提交同源）：就是上面 `orderedAssetIds` —— 提交时 `collectImageInputAssetIds`
+   *  在连线模式读同一份 `mergedImageRefsOf` 推导（父级传入的 mediaRefs 即它），本地模式读面板 `files`。
+   *  **参考图是定价维度**（Seedream 5.0 Pro 首张免费、第 2 张起按张加价），漏了它预览价就少算。
+   *  ⚠️ 本地模式下还没上传（无 assetId）的文件不计入——它的 assetId 要等提交时才产生，
+   *     预览期不可能知道（不为报价去传一次文件）。 */
+  const quoteReferences = useMemo(() => buildImageJobReferences(orderedAssetIds), [orderedAssetIds]);
   /** IKFA1P：文本附件标签映射（唯一口径）——附件顺序 = 画布连入边序（与服务端 text_attachments 同源） */
   const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
   const refsLabels = useMemo(
@@ -874,7 +881,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
-            {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 档位 + 比例。
+            {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 档位 + 比例 + 参考图。
                 没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
             {projectId ? (
               <GenerationQuoteBadge
@@ -885,6 +892,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                   ...(selectedResolution ? { size: selectedResolution } : {}),
                   ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
                 }}
+                references={quoteReferences}
               />
             ) : null}
             {/* 字数统计 */}

@@ -3,8 +3,8 @@
   align-items: center;
   gap: 5px;
   padding: 1px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--admin-radius-control);
+  font-size: var(--admin-font-xs);
   line-height: 1.7;
   white-space: nowrap;
 }
@@ -13,7 +13,7 @@
 .dot {
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--admin-radius-pill);
   background: currentColor;
   flex-shrink: 0;
 }

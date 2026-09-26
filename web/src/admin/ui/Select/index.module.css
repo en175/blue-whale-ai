@@ -15,10 +15,10 @@
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--admin-border);
-  border-radius: 6px;
+  border-radius: var(--admin-radius-control);
   background: var(--admin-surface);
   color: var(--admin-text);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.15s ease;
@@ -67,15 +67,15 @@
   list-style: none;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
-  border-radius: 8px;
+  border-radius: var(--admin-radius-pop);
   box-shadow: var(--admin-shadow-pop);
 }
 
 .option {
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--admin-radius-control);
   color: var(--admin-text);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -97,5 +97,5 @@
 
 .sm {
   height: 26px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
 }

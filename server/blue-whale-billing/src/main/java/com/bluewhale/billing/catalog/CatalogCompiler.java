@@ -6,59 +6,95 @@ import com.bluewhale.billing.pricing.PricingKeys;
 import com.bluewhale.billing.pricing.RoundingPolicy;
 import com.bluewhale.billing.pricing.TokenEstimator;
 import com.bluewhale.billing.pricing.UsageDim;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * 把目录 JSON 编译成引擎能用的 {@link CompiledRule}。
+ * 把规则 JSON 编译成引擎能用的 {@link CompiledRule}，并校验定价目录文档。
  *
  * <p><b>编译期是唯一的校验时机</b>：维度键拼错、价格表空、上下限倒置——全在这里炸。
  * 放到运行时炸的代价是「某个模型第一次被调用时才失败」，而那时用户已经在等了。
  *
  * <p>这也是 §4.5.8「运行时消费」里那句「加载失败 → 拒绝加载，保持旧版本 + 告警」
  * 能够成立的前提：编译要么全过、要么全不过，不存在「加载了一半」。
+ *
+ * <p>⚠️ <b>规则不在这里按 (model, task) 索引</b>：计价规则住在模型能力行，由属主随
+ * Hold / Quote 作为快照送来（{@link #compileRuleSnapshot}）。目录只装换算率与折扣策略，
+ * 见 {@link CatalogDocument}。所以本类只剩两件事：校验目录（{@link #validate}）、
+ * 编译一条规则（{@link #compileRuleSnapshot}）。
  */
 public final class CatalogCompiler {
+
+    /**
+     * 读单条规则快照用的解析器。
+     *
+     * <p>与 {@code CatalogRepository} 那份同口径：**容忍未知字段**。规则快照由属主
+     * （backend 的能力行）产生，它可能先我们一步多写一个字段——那是向前兼容，不是脏数据。
+     * 方向不能反：服务端认识而 JSON 里缺的必填字段，由 {@link #compileRule} 的构造校验兜住。
+     */
+    private static final ObjectMapper SNAPSHOT_JSON = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private CatalogCompiler() {}
 
     /**
-     * 编译整份目录。
+     * 校验整份目录 —— 发布与加载两条路上的**同一处**闸门。
      *
-     * @throws CompileException 任何一条规则编不过——**整份拒绝**，不部分加载
+     * <p>目录里只剩两项：换算率（{@link #compileCreditsPerYuan} 校验）与折扣策略
+     * （它有 {@code orDefault} 兜底，配错不会算出错价，故不做校验）。
+     * 校验不通过就抛，**整份拒绝**，不部分生效。
+     *
+     * @throws CompileException schemaVersion 不认识，或换算率不合法
      */
-    public static Map<String, CompiledRule> compile(CatalogDocument doc) {
+    public static void validate(CatalogDocument doc) {
         if (doc.schemaVersion() != CatalogDocument.SUPPORTED_SCHEMA_VERSION) {
             throw new CompileException("不支持的 schemaVersion=" + doc.schemaVersion()
                     + "（本服务支持 " + CatalogDocument.SUPPORTED_SCHEMA_VERSION + "）");
         }
         compileCreditsPerYuan(doc.creditsPerYuan());
-
-        Map<String, CompiledRule> index = new LinkedHashMap<>();
-        for (var modelEntry : doc.models().entrySet()) {
-            String modelId = modelEntry.getKey();
-            for (var taskEntry : modelEntry.getValue().entrySet()) {
-                String taskType = taskEntry.getKey();
-                String key = indexKey(modelId, taskType);
-                try {
-                    index.put(key, compileRule(taskEntry.getValue()));
-                } catch (RuntimeException e) {
-                    // 带上 (model, task) 上下文——否则运营面对「baseUnit 必填」不知道改哪一行
-                    throw new CompileException("编译 " + key + " 失败：" + e.getMessage(), e);
-                }
-            }
-        }
-        if (index.isEmpty()) {
-            throw new CompileException("目录里没有任何规则");
-        }
-        return Map.copyOf(index);
     }
 
-    /** 引擎用的索引键。与 {@code DbCatalogLookup} 的查询键必须一致。 */
-    public static String indexKey(String modelId, String taskType) {
-        return modelId + "/" + taskType;
+    /**
+     * 编译**单条规则的 JSON 快照** —— 随 Hold / Quote 请求送来的那一份。
+     *
+     * <p>形态与能力行的 {@code generation_model_capability.pricing} 列**逐字相同**
+     * （就是 {@link CatalogDocument.TaskRule} 的 JSON），所以这里走的是
+     * {@link #compileRule}，规则在两条来路上被同一套校验——不会出现
+     * 「一处发得出来的规则，从另一处却能进来」。
+     *
+     * <p>它也是**规则唯一的编译入口**：规则不再从目录里按 (model, task) 取，
+     * 「哪一版」这个问题由预留行的 {@code catalog_version} / {@code rule_snapshot} 那一列回答。
+     *
+     * <p>⚠️ 调用方必须把 {@link CompileException} 当作**拒单**（gRPC 的
+     * INVALID_ARGUMENT / UNPRICEABLE），**不能静默放过**：写侧闸门（属主保存能力行时校验）
+     * 拦的是「脏配置存不进去」，这里拦的是「脏配置已经在库里了」——两者拦的不是同一件事。
+     * 放过去等于把「这个模型的规则被改坏了」变成「按另一份价静默成交」。
+     *
+     * @throws CompileException JSON 读不出来，或规则本身不合规（缺 baseUnit、价表空、上下限倒置…）
+     */
+    public static CompiledRule compileRuleSnapshot(String ruleJson) {
+        CatalogDocument.TaskRule rule;
+        try {
+            rule = SNAPSHOT_JSON.readValue(ruleJson, CatalogDocument.TaskRule.class);
+        } catch (Exception e) {
+            // 读不出来 = 送来的东西不是一条规则（不是 JSON、或 JSON 但不是对象）。
+            // 与「规则内容写错」不同，但处理方式一样：拒绝。只带解析器的消息，不回显原文
+            // —— 快照可能很长，且它是调用方的数据（对账靠预留行里存下来的那一列）
+            throw new CompileException("规则快照解析失败（它应当是一条规则的 JSON 对象）："
+                    + e.getMessage(), e);
+        }
+        try {
+            return compileRule(rule);
+        } catch (CompileException e) {
+            // 已经是「哪一条错了」级别的消息，不再包一层
+            throw e;
+        } catch (RuntimeException e) {
+            // UnknownUsageDimException 这类：维度键拼错
+            throw new CompileException("规则快照编译失败：" + e.getMessage(), e);
+        }
     }
 
     /**
@@ -67,13 +103,13 @@ public final class CatalogCompiler {
      * <p>它是**元 → 积分的换算率**（这个值意味着「1 元等于多少积分」）。
      *
      * <p>⚠️ 它参与的是**充值**：到账积分 = 档位原价（元）× 本值（backend 的
-     * {@code deriveCredits}）。**生成任务的计价不读它** —— 目录里的单价本来就是 mc，
+     * {@code deriveCredits}）。**生成任务的计价不读它** —— 规则里的单价本来就是 mc，
      * 出口按固定的「1 积分 = 1000 mc」换算（{@code RoundingPolicy}），与元无关；
      * 所以改它不会动到任何一次生成的价格，也就不会影响已提交的任务。
      *
      * <p>写错的后果不是「某个模型算错价」，而是**充值口径错**（用户付同样的钱拿到的积分变了），
      * 且已下单的订单按冻结值发、新订单按新值发——所以放在编译期拒绝，
-     * 与其它配置错误同一个时机、同一个粒度（整份拒绝，不部分加载）。
+     * 与其它配置错误同一个时机、同一个粒度（整份拒绝，不部分生效）。
      *
      * <p>合法区间 {@link CatalogDocument#MIN_CREDITS_PER_YUAN} ~
      * {@link CatalogDocument#MAX_CREDITS_PER_YUAN}；上界的理由是「大到明显不合理」，
@@ -103,6 +139,7 @@ public final class CatalogCompiler {
                 basePrice,
                 compileDims(rule.dims()),
                 compileDims(rule.multipliers()),
+                compileDimPrices(rule.dimPrices()),
                 rule.unitDenominator() == null ? 1L : rule.unitDenominator(),
                 rule.minCredits() == null ? 1L : rule.minCredits(),
                 rule.maxCredits(),
@@ -111,10 +148,45 @@ public final class CatalogCompiler {
     }
 
     /**
+     * 编译「按维度的绝对加价」（参考图按张收费这类）。
+     *
+     * <p>缺省（绝大多数规则）返回空 map —— 那是**合法的**，也是这套改动「金额不变」的根据：
+     * 空 map 时计价管线里那一行循环一次都不执行，算术与没有这个字段时逐字相同。
+     *
+     * <p>三条都当场拒绝，理由与 {@link #compileBasePrice} 同：编译期是唯一的校验时机，
+     * 放到运行时炸的代价是「某个模型第一次被调用时才失败」，而那时用户已经在等了。
+     * <ul>
+     *   <li>维度键不认识 → {@link UsageDim#of} 抛（字面键拼错）</li>
+     *   <li>{@code unitMc} 缺失或非正 → 拒绝。**不接受 0**：0 等于「这个维度免费」，
+     *       而免费应当由「不写这个维度」表达——写一个 0 出来读的人只会当成配漏了</li>
+     *   <li>{@code firstFree} 缺失 = false（不免费）。这是**唯一**允许缺省的一项，
+     *       因为它有明确且安全的默认语义</li>
+     * </ul>
+     */
+    static Map<UsageDim, CompiledRule.DimPrice> compileDimPrices(Map<String, CatalogDocument.DimPrice> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Map.of();
+        }
+        Map<UsageDim, CompiledRule.DimPrice> compiled = new LinkedHashMap<>();
+        for (Map.Entry<String, CatalogDocument.DimPrice> e : raw.entrySet()) {
+            UsageDim dim = UsageDim.of(e.getKey());
+            CatalogDocument.DimPrice price = e.getValue();
+            if (price == null || price.unitMc() == null || price.unitMc() <= 0) {
+                throw new CompileException("dimPrices." + e.getKey() + " 的 unitMc 必填且为正："
+                        + "它表示「每个计费单位多少 mc」，单位与 basePrice.value 相同（1 积分 = 1000 mc）。"
+                        + "要让某个维度不计费，请整个不写这个维度（写 0 会被读成配漏了）");
+            }
+            compiled.put(dim, new CompiledRule.DimPrice(
+                    price.unitMc(), Boolean.TRUE.equals(price.firstFree())));
+        }
+        return Map.copyOf(compiled);
+    }
+
+    /**
      * 编译 token 估算参数。
      *
      * <p>缺省（运营没配）返回 {@code null} —— 那是**合法的**：绝大多数规则不按 token 计价。
-     * 配了就必须整块配全：缺 divisor / fps / 空尺寸表都当场拒绝，
+     * 配了就必须整块配全：缺 divisor / fps 都当场拒绝，
      * 因为半配的估算会算出一个「像那么回事」的数，而它是钱。
      *
      * <p>{@code inputSecondsKey} 是**可选的**：不配 = 公式不含输入时长那一项。
@@ -124,12 +196,16 @@ public final class CatalogCompiler {
      *
      * <p>{@code minimumTokens}（官方的最低 token 用量）也是**可选的**，理由同
      * {@code CatalogDocument.TokenEstimate#minimumTokens}：官方表没有公开可抄的形态，
-     * 目录里留个配置位，不配 = 不做下限。配了就逐格校验（键必须规范、值必须是正整数）——
+     * 规则里留个配置位，不配 = 不做下限。配了就逐格校验（键必须规范、值必须是正整数）——
      * 半配的下限会让「官方按下限收、我们按估算收」的差额静默落进平台账。
      *
+     * <p>⚠️ 宽高**不在这里**，也不该在这里：「档位 + 比例 → 输出宽高」是模型的像素属性
+     * （能力行的 {@code features.video_dimensions}），由接纳侧解析后冻成
+     * {@code output_width} / {@code output_height} 随 Hold 过来。本方法只管公式参数。
+     *
      * <p>⚠️ 校验放在编译期（与 {@link #normalizeTable} 同一个立场）：
-     * 尺寸表写错一个档位，运行时表现是「某个档位查不到 → 预扣推不出 → 拒绝提交」，
-     * 那时用户已经在等了；这里拒绝则发布当场失败。
+     * 参数写错一个数，运行时表现是「某个档位算不出 → 预扣推不出 → 拒绝提交」，
+     * 那时用户已经在等了；这里拒绝则保存能力行时当场失败。
      */
     private static TokenEstimator compileTokenEstimate(CatalogDocument.TokenEstimate estimate) {
         if (estimate == null) {
@@ -141,17 +217,13 @@ public final class CatalogCompiler {
         if (estimate.fps() == null) {
             throw new CompileException("tokenEstimate.fps 必填（官方对照表是 24）");
         }
-        if (estimate.dimensions() == null || estimate.dimensions().isEmpty()) {
-            throw new CompileException("tokenEstimate.dimensions 必填且非空"
-                    + "（「档位 + 比例 → 宽高」是火山的知识，不配就估不出 token）");
-        }
         if (estimate.inputSecondsKey() != null && estimate.inputSecondsKey().isBlank()) {
             throw new CompileException("tokenEstimate.inputSecondsKey 不能是空白串"
                     + "（留空等于配了个查不到的键；要「不加输入时长那一项」就整个别写这个字段）");
         }
         try {
             return TokenEstimator.from(estimate.divisor(), estimate.fps(),
-                    estimate.dimensions(), estimate.inputSecondsKey(), estimate.minimumTokens());
+                    estimate.inputSecondsKey(), estimate.minimumTokens());
         } catch (IllegalArgumentException e) {
             throw new CompileException("tokenEstimate 不合法：" + e.getMessage(), e);
         }
@@ -176,7 +248,7 @@ public final class CatalogCompiler {
                 }
                 yield new BasePriceResolver.Table(normalizeTable(price.table()));
             }
-            // 单价待配：目录里显式留的空位。**编译期合法**（能发布、能整份回滚），
+            // 单价待配：规则里显式留的空位。**编译期合法**（能力行存得进去），
             // 但计价时拒绝——见 BasePriceResolver.Unset 的注释（按 0 等于免费，比拒绝更坏）。
             case "unset" -> new BasePriceResolver.Unset();
             default -> throw new CompileException(
@@ -211,7 +283,7 @@ public final class CatalogCompiler {
         }
         Map<UsageDim, Integer> dims = new LinkedHashMap<>();
         for (var entry : raw.entrySet()) {
-            // UsageDim.of 在键拼错时抛 UnknownUsageDimException —— 加载期拒绝，不进运行期
+            // UsageDim.of 在键拼错时抛 UnknownUsageDimException —— 编译期拒绝，不进运行期
             dims.put(UsageDim.of(entry.getKey()), entry.getValue());
         }
         return Map.copyOf(dims);
@@ -244,13 +316,5 @@ public final class CatalogCompiler {
         public CompileException(String message, Throwable cause) {
             super(message, cause);
         }
-    }
-
-    /** 供测试与文档用：这份目录声明的全部 (model, task)。 */
-    public static List<String> declaredKeys(CatalogDocument doc) {
-        return doc.models().entrySet().stream()
-                .flatMap(m -> m.getValue().keySet().stream().map(t -> indexKey(m.getKey(), t)))
-                .sorted()
-                .toList();
     }
 }

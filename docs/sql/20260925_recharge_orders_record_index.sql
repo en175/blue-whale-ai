@@ -1,0 +1,55 @@
+-- recharge_orders 补两条列表索引（管理端「充值记录」页）。
+--
+-- ── 为什么需要它 ──────────────────────────────────────────────────────────────
+-- 管理端充值记录页走 RechargeOrderRepo.list()：
+--
+--   WHERE is_delete = 0 [AND user_id = ?] [AND status = ?] [AND trade_no = ?]
+--   ORDER BY gmt_create DESC, id DESC LIMIT ? OFFSET ?
+--
+-- 而本表此前只有 PRIMARY 与两条唯一索引（trade_no / pay_order_id）——
+-- `user_id` 与 `gmt_create` 上什么都没有。于是这一页每翻一页都要扫全表再排序，
+-- 订单越积越多，页面就越慢。
+--
+-- ── 两条访问路径 → 两条索引 ───────────────────────────────────────────────────
+-- ① 「全站列表」（不带 user_id）：`ORDER BY gmt_create DESC` 只有在
+--    「前导列是等值、次列是 gmt_create」的索引上才能按索引顺序取，
+--    取够 LIMIT 行就停 —— 这就是 idx_recharge_orders__is_delete_gmt_create。
+-- ② 「按用户筛选」（user_id = ?）：①的第二列是 gmt_create，user_id 排在它后面，
+--    等值条件收窄不到一个人头上（只能当过滤用）—— 所以另给一条把 user_id
+--    放在 gmt_create 之前的 idx_recharge_orders__is_delete_user_gmt_create。
+--
+-- 合不成一条：一条索引里 user_id 只能有一个位置，而这两个查询一个要
+-- 「不带 user_id 的全局顺序」，一个要「user_id 定死后的个人顺序」。
+-- 也**没有第三条**：详见下面 status 那段。
+--
+-- ── 列顺序：等值列在前、排序列在后 ────────────────────────────────────────────
+-- `is_delete` 放最前，因为它在**每一条**读路径上都是等值条件（仓储层恒定过滤
+-- is_delete = 0，见 035 建表时它的默认值 0）。等值列在前、排序列在后，索引才能被
+-- 「前导列等值 + 次列有序扫描」利用到；反过来把排序列放前面，等值条件会退化成
+-- 逐行过滤，索引基本白建 —— 而 EXPLAIN 看起来仍然"用上了索引"，没人会发现。
+--
+-- ── 排序键带 id，索引里却不写 id ──────────────────────────────────────────────
+-- 排序键必须是 (gmt_create DESC, id DESC)：DATETIME 只到秒，同一秒下单两笔是常态，
+-- 只按时间排序时翻页会跳行或重复行（仓储层同一处注释说的是同一件事）。
+-- 但索引里不必显式补 id：InnoDB 的二级索引内部本就会带上主键，MySQL 8.0 的优化器
+-- 判断「索引能否提供该顺序」时也把这段后缀算在内 —— 所以 (is_delete, gmt_create)
+-- 就能按 (gmt_create DESC, id DESC) 顺序产出，不多一次 filesort。
+--
+-- ── ⚠️ status 筛选刻意不覆盖 ──────────────────────────────────────────────────
+-- `status` 是等值筛选，但**不给它索引**：
+--   · 低基数列（pending / paid / expired / failed 四值），单独建索引选择性差；
+--   · 要覆盖它就得再加 (is_delete, status, ...) 与 (is_delete, user_id, status, ...) 两条，
+--     为一个可选筛选条件把写放大到四条索引，不值。
+-- 代价说清楚：带 status 筛选时，MySQL 仍走上面两条索引的顺序扫描（结果顺序不乱、
+-- 也不需要 filesort），但 status 只能在索引上逐条过滤 —— 查 paid / pending 这类
+-- 常见值几乎无感，查 expired / failed 这类罕见值可能要把索引扫到很靠后
+-- 才凑够一页；`count(*)` 同理，找不到 range 可走。trade_no 不在其列：
+-- 它已有唯一索引 uk_recharge_orders__trade_no。
+--
+-- ⚠️ 大表加索引会锁写。本表当前量级（万级以下）是秒级操作；
+--    若线上已到百万级，需要走在线 DDL（pt-online-schema-change / gh-ost）。
+SET NAMES utf8mb4;
+
+ALTER TABLE `recharge_orders`
+    ADD INDEX `idx_recharge_orders__is_delete_gmt_create` (`is_delete`, `gmt_create`),
+    ADD INDEX `idx_recharge_orders__is_delete_user_gmt_create` (`is_delete`, `user_id`, `gmt_create`);

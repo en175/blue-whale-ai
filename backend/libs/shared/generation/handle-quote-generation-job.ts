@@ -21,6 +21,7 @@ import {
   projectQuoteInput,
   type CreateGenerationJobBody,
   type GenerationType,
+  serializePricingRule,
 } from "./handle-create-generation-job.js";
 
 export interface QuoteGenerationJobDeps {
@@ -75,6 +76,16 @@ export async function handleQuoteGenerationJob(
   const input = projectQuoteInput(type, body, capability);
   if (input === null) return ok({ credits: null });
 
-  const quote = await deps.quote({ userId, modelId, taskType: type, input });
+  // 规则快照与 Hold 同源：预览与实扣必须取到**同一份**规则，
+  // 否则用户看到的是「预览一个价、实扣另一个价」。序列化在 `handle-create-generation-job`
+  // 的同名助手处，两边共用一条实现（那一个函数导出于此）。
+  const ruleSnapshot = serializePricingRule(capability);
+  const quote = await deps.quote({
+    userId,
+    modelId,
+    taskType: type,
+    input,
+    ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+  });
   return ok({ credits: quote === null ? null : Number(quote.credits) });
 }

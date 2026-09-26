@@ -127,19 +127,18 @@ class JobSettlementPublisherTest {
     }
 
     @Test
-    @DisplayName("★ 参考素材数按 references 数组长度上报 —— 与预扣侧的 reference_count 同一口径")
-    void 参考素材数按references长度上报() throws Exception {
-        // 这个 job 的 input 里**同时**有单数组 references（2 项）和旧分字段路径的参考
-        // （input_asset_ids 5 项 + reference_asset_ids 2 项 + 首尾帧 1 项）。
-        // 预扣侧 billing-specs.ts 的 extractSpecs 只把 `references` 的长度折算成
-        // reference_count（旧字段不进那个数），结算侧必须**只有同一个数**——
-        // 统计得更宽就会出现「预扣按 2 个参考加价、结算按 10 个收回」，比不加价更糟。
+    @DisplayName("★ 视频：参考素材数只认 references —— 旧分字段路径一律不计入")
+    void 视频参考素材数只认references() throws Exception {
+        // 这个 job 的 input 里**同时**有单数组 references（2 项）与旧分字段路径的参考
+        // （reference_asset_ids 2 项 + 首尾帧 1 项）。预扣侧 billing-specs.ts 的
+        // extractSpecs 对**视频**只把 `references` 的长度折算成 reference_count
+        // （旧字段不进那个数），结算侧必须**只有同一个数**——
+        // 统计得更宽就会出现「预扣按 2 个参考加价、结算按 5 个收回」，比不加价更糟。
         publisher.publishTerminal(
                 job(106, 42, "succeeded", "video",
                         "{\"model_id\":\"m\",\"references\":["
                                 + "{\"role\":\"first_frame\",\"asset_id\":\"11\",\"type\":\"image\"},"
                                 + "{\"role\":\"reference\",\"asset_id\":\"12\",\"type\":\"image\"}],"
-                                + "\"input_asset_ids\":[1,2,3,4,5],"
                                 + "\"reference_asset_ids\":[\"21\",\"22\"],"
                                 + "\"first_frame_asset_id\":\"31\"}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
@@ -156,15 +155,45 @@ class JobSettlementPublisherTest {
     }
 
     @Test
-    @DisplayName("没有 references 时参考素材数报 0 —— 与预扣侧折算出的 reference_count=0 同口径")
-    void 无参考素材时报零() throws Exception {
-        // 旧分字段路径建出来的 job：input 里没有 references 键。
-        // 预扣侧同样只认这一个数组 ⇒ reference_count = "0" ⇒ 倍率 ×1.0；
-        // 结算侧报 0（而不是**不报**）让账面上看得出「这个量我们算过，就是 0」，
-        // 与 UsageDim.quantityOf「取不到也是 0」两不冲突。
+    @DisplayName("★ 图片：参考素材数认 input_asset_ids（图片的参考落这个键，不是 references）")
+    void 图片参考素材数认inputAssetIds() throws Exception {
+        // 建任务时 imageStrategy.composeInput 把合并去重后的参考图落 input.input_asset_ids，
+        // 图片路径**从不写** input.references（执行期的 ImageJobProcessor 读的也是这个键）。
+        // 改造前这里只数 references ⇒ **所有图片单的参考数一直是 0**。
+        // 而 Seedream 5.0 Pro 的参考图按张收费（首张免费、第 2 张起 0.02 元/张），
+        // 那个 0 会让加价永远不生效 —— 一次 10 张参考图的单子少收 0.18 元。
         publisher.publishTerminal(
                 job(107, 42, "succeeded", "image",
-                        "{\"model_id\":\"m\",\"input_asset_ids\":[1,2,3]}"),
+                        "{\"model_id\":\"doubao-seedream-5-0-pro-260628\","
+                                + "\"input_asset_ids\":[\"996217\",\"996218\",\"996219\"]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        assertThat(body(0).get("usage").get(0).get("quantities")
+                .get("usage.referenceCount").asLong()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("★ 视频不认 input_asset_ids —— 那个键对视频不是参考列表")
+    void 视频不认inputAssetIds() throws Exception {
+        // 若哪天有人把媒介分支去掉（两个媒介都数 input_asset_ids），这条会红。
+        // 后果是把老客户端（走 reference_asset_ids 等旧字段）的单子突然算上参考费。
+        publisher.publishTerminal(
+                job(109, 42, "succeeded", "video",
+                        "{\"model_id\":\"m\",\"input_asset_ids\":[\"1\",\"2\",\"3\"]}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
+
+        assertThat(body(0).get("usage").get(0).get("quantities")
+                .get("usage.referenceCount").asLong()).isZero();
+    }
+
+    @Test
+    @DisplayName("参考素材数恒上报（含 0）—— 账面上看得出「这个量我们算过，就是 0」")
+    void 无参考素材时报零() throws Exception {
+        // 没有参考的图片单：两个键都不存在 ⇒ 0。
+        // 报 0（而不是**不报**）与预扣侧折算出的 reference_count="0" 一致，
+        // 也与 UsageDim.quantityOf「取不到也是 0」两不冲突。
+        publisher.publishTerminal(
+                job(110, 42, "succeeded", "image", "{\"model_id\":\"m\",\"size\":\"2k\"}"),
                 Map.of("status", "succeeded", "output_asset_ids", List.of("1")));
 
         assertThat(body(0).get("usage").get(0).get("quantities")
@@ -195,6 +224,40 @@ class JobSettlementPublisherTest {
         assertThat(body(0).get("usage")).isEmpty();
         // 槽数照发：标量本身不依赖模型
         assertThat(body(0).get("succeededSlots").asInt()).isEqualTo(1);
+    }
+
+    // ========== 音频按产出秒数计价：上游真实时长 ==========
+
+    @Test
+    @DisplayName("★ 音频上报产出秒数（usage.seconds）—— 官方「0.3 元/分钟、精确至秒」的权威用量")
+    void 上报音频秒数() throws Exception {
+        publisher.publishTerminal(
+                job(121, 42, "succeeded", "audio", "{\"model_id\":\"seed-audio-1.0\"}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")),
+                null, 42L);
+
+        JsonNode quantities = body(0).get("usage").get(0).get("quantities");
+        // 键名是字面量，必须与 UsageDim.SECONDS.key() 逐字一致：
+        // 写错一个字母 billing 会以 UnknownUsageDimException 拒绝计价，整单结算不出去
+        assertThat(quantities.get("usage.seconds").asLong()).isEqualTo(42L);
+        assertThat(quantities.get("usage.succeededSlots").asLong()).isEqualTo(1);
+        // 音频不按 token 计价 —— 不要顺手把 usage.c 也带上（那是视频的基准维度）
+        assertThat(quantities.has("usage.c")).isFalse();
+    }
+
+    @Test
+    @DisplayName("★ 音频取不到时长时**整个维度不出现** —— billing 会因此拒绝计价（吵，不是白送）")
+    void 音频无时长不报该维度() throws Exception {
+        publisher.publishTerminal(
+                job(122, 42, "succeeded", "audio", "{\"model_id\":\"seed-audio-1.0\"}"),
+                Map.of("status", "succeeded", "output_asset_ids", List.of("1")),
+                null, null);
+
+        JsonNode quantities = body(0).get("usage").get(0).get("quantities");
+        assertThat(quantities.has("usage.seconds")).isFalse();
+        // ⚠️ 这条与上面那条的区别是**钱的去向**：这里 billing 的基准维度守卫会拒单
+        //    （MQ 重投 → 死信 → 红灯），那笔预扣一直冻着等人处理；
+        //    而如果这里填 0，billing 会当成「报过、且真的是 0 秒」→ 这次生成免费，且静默。
     }
 
     // ========== 视频按 token 计价：上游真值 + 单价档 ==========

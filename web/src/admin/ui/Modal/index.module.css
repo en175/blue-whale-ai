@@ -7,12 +7,27 @@
   justify-content: center;
   /* 浅色主题的遮罩用冷灰调半透明，不用纯黑——纯黑压在白底上偏脏 */
   background: rgb(17 24 39 / 0.45);
+
+  /* ⚠️ **门户根必须声明前景色**，否则面板里「继承来的」文字是白字压白底。
+     完整理由见下方 `.modal` 的注释；这条是**边界**：本元素是 `createPortal` 渲染出的
+     最外层节点，它的颜色是整个弹窗子树文字的起点。 */
+  color: var(--admin-text);
 }
 
 .modal {
   background: var(--admin-surface);
+  /* ⚠️ 本面板是浅色的，而它的文字色**只能来自上面的门户根 `.overlay`**，
+     不能靠 body 继承——本面板经 `createPortal` 挂到 `document.body`，
+     而 body 的文字色是**产品前台的深色主题** `--color-text-primary: #ffffff`。
+     于是面板里任何**没有自己设颜色**的文字（模型的「类型」「模型 ID model_id」、
+     分节标题「尺寸选项」…）都会渲染成白字压白底：**字还在、能选中、读屏也念，就是看不见**。
+
+     同样的坑此前在 token 上踩过一次（`--admin-*` 当时只挂 `.adminRoot`，弹窗取不到 →
+     编辑框透明底）。那次把 token 提到了 `:root`；但**颜色还有一处是继承来的**，
+     提 token 治不了它——所以必须在门户根上再声明一次，把这条路径焊死。
+     谁往这个面板里加不带颜色的文字，都靠上面那行接住。 */
   border: 1px solid var(--admin-border);
-  border-radius: 12px;
+  border-radius: var(--admin-radius-pop);
   box-shadow: var(--admin-shadow-pop);
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 96px);
@@ -32,7 +47,7 @@
 
 .title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--admin-font-md);
   font-weight: 600;
   color: var(--admin-text);
 }
@@ -44,7 +59,7 @@
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--admin-radius-control);
   background: transparent;
   color: var(--admin-text-muted);
   cursor: pointer;

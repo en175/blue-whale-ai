@@ -127,6 +127,46 @@ class AdminTransactionApiTest {
                 .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
     }
 
+    /**
+     * 预扣额随消费行一起出（**管理面独用**）。
+     *
+     * <p>为什么要这一列：结算之后 {@code amount} 已经换成实际值，「当初冻了多少」就再也
+     * 无处可读——而用户余额先降后回的差额恰恰要靠它解释（实测任务 1943：冻 12、实扣 1，
+     * 流水上只有一行 -1，那 11 的来回无人交代）。
+     *
+     * <p>同时钉住三条：消费行**带得出**预扣额；未结算行的两个数是同一个值（amount 本就是
+     * 预扣额，由调用方决定要不要重复展示）；发放行**为 null 而不是 0**——0 是「冻了 0 分」，
+     * 与「没有预扣这回事」是两回事。
+     */
+    @Test
+    void 消费行带出预扣额_发放行为null() throws Exception {
+        seedTwoUsers();
+        insertReservation(9701L, "held", null, "2026-09-25 11:00:00");
+        insertReservation(9702L, "settled", 30L, "2026-09-25 12:00:00");
+
+        // 时间倒序：[0] 是 settled 那条，[1] 是 held 那条。两条的预扣额都是 100
+        mvc.perform(get("/admin/transactions").param("type", "consume"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                // 已结算：金额是实际值 30，预扣额仍是 100 —— 界面上的两个数就是这一对
+                .andExpect(jsonPath("$.items[0].status").value("done"))
+                .andExpect(jsonPath("$.items[0].amount").value(30))
+                .andExpect(jsonPath("$.items[0].reservedCredits").value(100))
+                // 未结算：金额**就是**预扣额，两个数相同
+                .andExpect(jsonPath("$.items[1].status").value("pending"))
+                .andExpect(jsonPath("$.items[1].amount").value(100))
+                .andExpect(jsonPath("$.items[1].reservedCredits").value(100));
+
+        // 发放行没有预扣：null，不是 0
+        mvc.perform(get("/admin/transactions").param("type", "recharge"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].reservedCredits")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.items[1].reservedCredits")
+                        .value(org.hamcrest.Matchers.nullValue()));
+    }
+
     /* ───────────────── 区间消耗合计（/admin/transactions/consumed-credits） ─────────────────
      *
      * 仪表盘的「总使用积分」用它。钉住三件事：**只算 settled**、**半开区间**、
@@ -193,7 +233,7 @@ class AdminTransactionApiTest {
     @Test
     void 消耗合计_真结算的那笔落在当下区间() throws Exception {
         billing.grant(USER_A, CreditSource.PURCHASED, 1000, "recharge", "a-9", "purchased:a-9", null);
-        credits.hold(USER_A, "cmd-cc-1", 9901L, 100, 1, 10000, "生成任务");
+        credits.hold(USER_A, "cmd-cc-1", 9901L, 100, 1, 10000, null, "生成任务");
         credits.settle(9901L, 30);
 
         String now = java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))

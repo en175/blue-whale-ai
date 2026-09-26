@@ -44,6 +44,8 @@ import {
   Select,
   Stat,
   Table,
+  Hint,
+  formGrid,
 } from '../../ui';
 
 /** 档位数据（列表源 GET /api/admin/topup-tiers） */
@@ -476,7 +478,7 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
       }
     >
       {/* 字段标签是「一行说明 + 控件」，套件暂无对应基元，这里只用一次性间距排布 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 24px' }}>
+      <div style={formGrid(2)}>
         <div>
           <div style={{ marginBottom: 6 }}>档位名称 （选填）</div>
           <Input
@@ -497,7 +499,13 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
           />
         </div>
         <div>
-          <div style={{ marginBottom: 6 }}>积分数 (派生)</div>
+          <div style={{ marginBottom: 6 }}>
+            积分数 (派生){' '}
+            <Hint>
+              <div>积分 = 原价 × 500000（只读派生，对应 Go 充值配额 QuotaPerUnit）。</div>
+              <div>实付 = 原价 × 折扣；折扣 = 1 表示无折扣。</div>
+            </Hint>
+          </div>
           {/* 派生值只读展示：用 readOnly Input 而不是自绘灰框，样式仍由套件定义 */}
           <Input
             readOnly
@@ -526,22 +534,14 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <Alert tone="info">
-          积分 = 原价 × 500000（只读派生，对应 Go 充值配额 QuotaPerUnit）。实付 = 原价 × 折扣，折扣 = 1 表示无折扣。
-        </Alert>
-      </div>
-
       <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '20px 24px',
-          marginTop: 16,
-        }}
+        style={{ ...formGrid(2), marginTop: 16 }}
       >
         <div>
-          <div style={{ marginBottom: 6 }}>生效时间 （选填）</div>
+          <div style={{ marginBottom: 6 }}>
+            生效时间 （选填）{' '}
+            <Hint>设限时范围后，到生效时间自动上架、到失效时间自动下架。留空 = 永久有效。</Hint>
+          </div>
           <Input
             type="datetime-local"
             value={start}
@@ -560,12 +560,6 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
             style={{ width: '100%' }}
           />
         </div>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <Alert tone="info">
-          设限时范围后，到生效时间自动上架、到失效时间自动下架。留空 = 永久有效。
-        </Alert>
       </div>
 
       {/* 推荐档位：原来的自绘开关在套件里没有对应基元，改用勾选框（语义相同：一个布尔量） */}
@@ -607,10 +601,17 @@ function PreviewModal({ onClose }: { onClose: () => void }) {
   useEffect(() => load(), [load]);
 
   return (
-    <Modal open title="用户端充值页效果预览" width={720} onClose={onClose}>
-      <Alert tone="info">
-        以下展示当前已上架且未失效的档位在用户端充值页的真实排列效果。
-      </Alert>
+    <Modal
+      open
+      width={720}
+      onClose={onClose}
+      title={
+        <>
+          用户端充值页效果预览{' '}
+          <Hint>以下展示当前已上架且未失效的档位在用户端充值页的真实排列效果。</Hint>
+        </>
+      }
+    >
       {error && (
         <div style={{ marginTop: 12 }}>
           <Empty message={error} extra={<Button onClick={load}>重试</Button>} />

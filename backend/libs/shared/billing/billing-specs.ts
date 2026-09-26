@@ -85,8 +85,16 @@ function hasVideoInput(input: Record<string, unknown>): boolean {
  *
  * <p>约定：catalog 里配了 table 的规格键，必须出现在 job 的冻结 input 上。
  * 漏键的后果是 `UNPRICEABLE`（拒绝提交）而不是按 0 计价 —— 这是刻意的。
+ *
+ * @param taskType ★ 必须传：参考素材数（{@code reference_count}）的**来源键按媒介不同**
+ *                 —— 图片是 {@code input_asset_ids}，视频/音频是 {@code references}。
+ *                 这里做成**必填**而不是可选，正是为了让「忘记传」变成编译错误：
+ *                 漏传会让图片单的参考数静默退回 0（而它今天正在被按张收费）。
  */
-export function extractSpecs(input: Record<string, unknown>): Record<string, string> {
+export function extractSpecs(
+  input: Record<string, unknown>,
+  taskType: string,
+): Record<string, string> {
   const specs: Record<string, string> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value === null || value === undefined) continue;
@@ -95,13 +103,13 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
       specs[key.toLowerCase()] = String(value).toLowerCase();
     }
   }
-  // ⚠️ 参考素材数：`references` 是**数组**，数组进不了规格，但定价要的正是它的**长度**
-  //    （catalog 用 `usage.referenceCount` 做加价倍率）。所以在这里折算成一个标量键，
-  //    键名与 UsageDim.REFERENCE_COUNT 的 contractSpecKey 一致。
+  // ⚠️ 参考素材数：参考素材是**数组**，数组进不了规格，但定价要的正是它的**长度**
+  //    （catalog 用 `usage.referenceCount` 做加价：整单倍率，或 Seedream 5.0 Pro 那种
+  //    「首张免费、第 2 张起每张 0.02 元」的按张绝对加价）。
   //    放在这份共用的归一里而不是各调用点：Hold 与 Quote 必须取到同一个数 —— 少取一处，
   //    预览价就比实冻价少了加价那部分（也就是「预览一个价、实扣另一个价」）。
   //    只取长度：**数组本身不进规格**（有测试钉住这条，混进去会让 catalog 查不到规格）。
-  specs.reference_count = String(Array.isArray(input.references) ? input.references.length : 0);
+  specs.reference_count = String(referenceList(input, taskType).length);
   // ⚠️ 视频输入档：视频按 token 计价的**单价**分两档（火山官方：输入不含视频 / 输入包含视频），
   //    而「有没有视频参考」是 `references` 数组里的**元素类型**，同样进不了规格。
   //    与 reference_count 同一处、同一套理由折算成标量键，两个调用点取到同一个值。
@@ -120,6 +128,36 @@ export function extractSpecs(input: Record<string, unknown>): Record<string, str
   const videoInputSeconds = sumVideoInputSeconds(input.references);
   if (videoInputSeconds !== null) specs.video_input_seconds = String(videoInputSeconds);
   return specs;
+}
+
+/**
+ * 本次生成的**参考素材列表** —— 取哪个键**按媒介**，这就是「参考数」的唯一口径。
+ *
+ * <h2>为什么图片与视频取的不是同一个键</h2>
+ *
+ * 建任务时两条路各写各的（`handle-create-generation-job.ts`）：
+ * <ul>
+ *   <li><b>图片</b>：合并去重后的参考图落 {@code input.input_asset_ids}
+ *       （{@code imageStrategy.composeInput}，「image 参考图统一落 input_asset_ids」）。
+ *       图片**从不写** {@code input.references}。</li>
+ *   <li><b>视频 / 音频</b>：落 {@code input.references}（单数组契约，保序）。</li>
+ * </ul>
+ * 所以在改造前，图片单的 {@code reference_count} 恒为 **0** —— 不是「没有参考」，
+ * 是**取错了键**。而 Seedream 5.0 Pro 的参考图是要按张收费的，那个 0 会让加价永远不生效。
+ *
+ * <p>⚠️ **视频/音频刻意保持只认 `references`**：它们的旧分字段路径
+ * （{@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段）从来不计入，
+ * 现在放开会把老客户端的单子突然算上参考费。改图片是因为图片**只有**这一个键 —— 不存在
+ * 「新老两条路」的问题。
+ *
+ * <p>取值口径与 worker 侧 {@code SettlementUsageLines.referenceList} **逐条相同**：
+ * 同一个媒介分支、同一个键。两边漂一点就是「预扣按 2 张冻、结算按 5 张收」。
+ */
+export function referenceList(input: Record<string, unknown>, taskType: string): unknown[] {
+  if (taskType === 'image' && Array.isArray(input.input_asset_ids)) {
+    return input.input_asset_ids;
+  }
+  return Array.isArray(input.references) ? input.references : [];
 }
 
 /**

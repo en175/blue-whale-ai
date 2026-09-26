@@ -67,10 +67,14 @@ public class CreditService {
      *                       否则「提交后被停掉的营销活动」会让结算按原价扣
      * @param title          展示文案快照，随预留一起存下来供用户流水展示（见 V6 迁移）。
      *                       预扣是唯一同时见到「这次任务是什么」与「预留行」的一刻
+     * @param ruleSnapshot   本次计价用的**规则本身**（JSON 文本，见 V8 迁移）。
+     *                       它是结算复现定价的**唯一**来源（规则住在模型能力行，billing 读不到
+     *                       那个库），所以必须与 catalogVersion / discountBp 一起冻进预留
      */
     @Transactional
     public HoldResult hold(long userId, String commandId, long jobId,
-                           long amount, int catalogVersion, int discountBp, String title) {
+                           long amount, int catalogVersion, int discountBp,
+                           String ruleSnapshot, String title) {
 
         String idempotencyKey = "hold:" + commandId;
         if (ledger.existsByVoucherBase(idempotencyKey)) {
@@ -118,7 +122,8 @@ public class CreditService {
             throw new IllegalStateException("冻结金额不足，剩余 " + rest + "（可用 " + available + "，需 " + amount + "）");
         }
 
-        reservations.insert(jobId, userId, amount, catalogVersion, discountBp, title, allocations);
+        reservations.insert(jobId, userId, amount, catalogVersion, discountBp,
+                ruleSnapshot, title, allocations);
 
         // 复式分录（§3 分录 5）：钱从「可用」转为「受限」，两边都要记
         ledger.insert(Voucher.base(idempotencyKey, userId, BizType.HOLD, String.valueOf(jobId))

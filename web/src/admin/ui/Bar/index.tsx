@@ -38,9 +38,9 @@ export default function Bar({ label, value, ratio }: BarProps) {
         <span className={styles.meta}>
           <span className={styles.value}>{value}</span>
           {/*
-            ⚠️ 各条占比四舍五入后**之和不一定是 100%**（三条 33.3% 加起来 99.9%）。
+            ⚠️ 各条占比四舍五入后<b>之和不一定是 100%</b>（三条 33.3% 加起来 99.9%）。
                这是四舍五入的常态，不要去凑数——把某一条 +0.1 让它凑成 100 是伪造，
-               它会让那一条的数**多于**真实值，而读者无从分辨哪一条被动过。
+               它会让那一条的数<b>多于</b>真实值，而读者无从分辨哪一条被动过。
           */}
           <span className={styles.percent}>{(safeRatio * 100).toFixed(PERCENT_DIGITS)}%</span>
         </span>

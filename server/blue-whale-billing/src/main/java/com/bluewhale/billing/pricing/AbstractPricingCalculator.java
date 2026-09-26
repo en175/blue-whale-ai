@@ -1,5 +1,7 @@
 package com.bluewhale.billing.pricing;
 
+import java.util.Map;
+
 /**
  * 计价管线骨架 —— **模板方法**（《计费逻辑详细设计》§4.6.2）。
  *
@@ -7,19 +9,22 @@ package com.bluewhale.billing.pricing;
  * 为什么钉死顺序：计费顺序被某个模态改乱 = 算错钱，而且极难发现——
  * 用户看到的数字仍然「像那么回事」，只是算错了。
  *
- * <p>七步：
+ * <p>八步：
  * <ol>
  *   <li>{@link #normalize} 归一化用量（文本需减掉被单独定价的子类；媒介类 no-op）</li>
  *   <li>{@link #aggregateUnits} 等效数量 = 基准数量 + Σ(其他维度数量 × 相对倍率)</li>
  *   <li>× 基准单价 ÷ unitDenominator</li>
+ *   <li>{@link #dimPriceMc} 加**绝对**的按维度加价（不乘基准单价；空 = 一行不执行）</li>
  *   <li>{@link #applyMultipliers} 整单倍率连乘</li>
  *   <li>{@link #clamp} 上下限（**在折扣之前**——封顶是对定价的封顶，不是对折后价）</li>
  *   <li>折扣</li>
  *   <li>★ **出口唯一一次舍入**，在写账本之前</li>
  * </ol>
  *
- * <p>另有一条**旁路** {@link #capDetailed}：契约量取不到时按规则上限计价。它只跳过
- * ①~④（上限与用量无关），⑤~⑦ 一步不少 —— 旁路存在不是因为流程可以各写一份。
+ * <p>另有一条**旁路** {@link #capDetailed}：契约量取不到时按规则上限计价。它跳过
+ * ①~④（上限与用量无关），⑤~⑧ 一步不少 —— 旁路存在不是因为流程可以各写一份。
+ * ⚠️ 跳过 ④ 意味着**上限冻结算不到绝对加价**，所以 {@code maxCredits} 与
+ * {@code dimPrices} 不允许同时配（见 {@link CompiledRule} 的构造校验）。
  */
 public abstract class AbstractPricingCalculator {
 
@@ -50,6 +55,7 @@ public abstract class AbstractPricingCalculator {
         Usage usage = normalize(ctx);
         long units = aggregateUnits(ctx, usage);
         long mc = units * resolveBasePrice(ctx) / ctx.rule().unitDenominator();
+        mc += dimPriceMc(ctx, usage);
         mc = applyMultipliers(ctx, usage, mc);
         mc = clamp(ctx, mc);
 
@@ -57,9 +63,48 @@ public abstract class AbstractPricingCalculator {
     }
 
     /**
+     * 按维度的**绝对**加价 —— 与 {@link #aggregateUnits} 的区别是它**不乘 basePrice**。
+     *
+     * <p>为什么这一步不能并进 {@code aggregateUnits}：那里产出的是「等效单位数」，
+     * 之后统一乘基准单价。于是「每个单位多少钱」= 万分比 × basePrice —— **随笔单价变**。
+     * 对单价分档的规则（Seedream 5.0 Pro 的输出图按像素分 0.3 / 0.6 两档），
+     * 同一个「参考图每张 0.02 元」在两档下要两个不同的万分比，一个字段表达不了。
+     * 绝对加价直接以 mc 计价，与 basePrice 解耦。
+     *
+     * <p><b>位置在基准价之后、上限之前、折扣之前</b>，三处都有理由：
+     * <ul>
+     *   <li>在上限之前 —— 上限是对**整单**的封顶，加价也在其内（封顶是对用户的保护，
+     *       不该被加价绕过）</li>
+     *   <li>在折扣之前 —— 会员折扣对全部金额一致作用，不让加价成为折扣的例外</li>
+     *   <li>在舍入之前 —— {@link #settle} 的出口仍然只舍入一次</li>
+     * </ul>
+     *
+     * <p>⚠️ {@link #capDetailed} **不走这里**（它跳过用量计算，用 {@code Usage.empty()}），
+     * 所以上限冻结算不到这份加价，而结算会把它算进去 ⇒ 超出预扣记应收。
+     * 因此 {@link CompiledRule} 的构造与 TS 写闸门**都禁止** {@code maxCredits} 与
+     * {@code dimPrices} 同时出现。这里再兜一句：真同时出现时按加价算，宁可结算超出被记应收，
+     * 也不要静默少收 —— 但那种配置根本不该存在。
+     *
+     * <p>空 map（绝大多数规则）= 这个循环一次都不执行 = 算术与没有这个字段时逐字相同。
+     */
+    protected long dimPriceMc(PricingContext ctx, Usage usage) {
+        long mc = 0L;
+        for (Map.Entry<UsageDim, CompiledRule.DimPrice> e : ctx.rule().dimPrices().entrySet()) {
+            // 负数量一律当 0：worker 今天报不出负数，但 `multiplierPermille` 对同样的情形
+            // 也做了防御（见那里「quantity <= 0」）。不夹这一下的后果是**减钱**，
+            // 而且负到下限之后被 minCredits 兜住 —— 静默接近免费。
+            long quantity = Math.max(0L, usage.quantityOf(e.getKey()));
+            // firstFree：官方的「首张参考图免费」就是这一步（线性公式只能给 n，给不了 n-1）
+            long billable = e.getValue().firstFree() ? Math.max(0L, quantity - 1L) : quantity;
+            mc += billable * e.getValue().unitMc();
+        }
+        return mc;
+    }
+
+    /**
      * 按**规则上限**计价 —— 「契约量取不到」时的兜底（见 {@link PricingEngine#computeAtCap}）。
      *
-     * <p>只跳过前四步：上限是目录里配的一个常数，**与用量、基准单价、倍率都无关**。
+     * <p>只跳过前四步：上限是规则里配的一个常数，**与用量、基准单价、倍率都无关**。
      * 封顶 → 折扣 → 舍入仍走 {@link #settle}，与常规计价同一条通道 ——
      * 折扣解析只做一次、舍入只做一次这两条不变式不因为兜底而破。
      *

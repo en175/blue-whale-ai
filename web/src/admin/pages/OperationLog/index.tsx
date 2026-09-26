@@ -9,8 +9,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import { fetchOperationLogs, type OperationLog } from '@/api/admin';
 import { isApiError } from '@/api/http';
-import { formatLogIp } from '@/admin/formatLogIp';
 import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
+
+/** 长 token（模型 ID、无空格的 JSON）允许在列内断行 —— 否则固定列宽下它会撑破单元格 */
+const BREAK_ANY = { overflowWrap: 'anywhere' } as const;
 
 /** 类别 code → 展示名（筛选下拉与表格徽章共用） */
 const CATEGORY_OPTIONS: { code: string; label: string }[] = [
@@ -141,30 +143,34 @@ export default function OperationLog() {
       </Toolbar>
 
       {/* 日志表格 */}
-      <Table>
+      <Table fixed>
+        {/* ⚠️ **列宽必须显式分配**，否则宽度由内容决定：详情列的文字最长，它会把宽度全抢走，
+            目标列被压到 76px、「doubao-seedream-5-0-pro-260628」折成四行（行高因此暴涨），
+            最右的列**直接被挤出视口**（外壳是 overflow-x: auto，只在横向滚动后才出现）。
+            固定列加起来 ~700px，剩下的留给详情 —— 常见屏宽下不再出现横向滚动。
+            「操作人」放最前：看日志先问「谁干的」，它比时间更常是第一眼要找的东西。 */}
         <thead>
           <tr>
-            <th>时间</th>
-            <th>类别</th>
-            <th>操作</th>
-            <th>目标</th>
+            <th style={{ width: 104 }}>操作人</th>
+            <th style={{ width: 152 }}>时间</th>
+            <th style={{ width: 92 }}>类别</th>
+            <th style={{ width: 132 }}>操作</th>
+            <th style={{ width: 220 }}>目标</th>
             <th>详情</th>
-            <th>IP</th>
-            <th>操作人</th>
           </tr>
         </thead>
         <tbody>
           {/* 三态统一走 Empty：加载中 / 加载失败（可重试）/ 空数据 */}
           {loading && (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={6}>
                 <Empty message="加载中…" />
               </td>
             </tr>
           )}
           {!loading && loadError && (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={6}>
                 <Empty
                   message={loadError}
                   extra={
@@ -178,7 +184,7 @@ export default function OperationLog() {
           )}
           {!loading && !loadError && logs.length === 0 && (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={6}>
                 <Empty message="暂无日志" />
               </td>
             </tr>
@@ -189,15 +195,20 @@ export default function OperationLog() {
               const detailText = formatDetail(l.detail);
               return (
                 <tr key={l.id}>
-                  <td>{fmtTime(l.createdAt)}</td>
+                  <td>{l.operator}</td>
+                  {/* 时间**不许换行**：折成「日期 / 时分秒」两行会让每一行都变高，
+                      而它只是定位用的坐标，不该占两行的视觉重量 */}
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(l.createdAt)}</td>
                   <td>
                     <Badge tone="neutral">{categoryLabel(l.category)}</Badge>
                   </td>
                   <td title={l.action}>{actionLabel(l.action)}</td>
-                  <td title={l.target}>{l.target || '—'}</td>
-                  <td title={l.detail}>{detailText}</td>
-                  <td title={l.ipAddress ?? undefined}>{formatLogIp(l.ipAddress)}</td>
-                  <td>{l.operator}</td>
+                  <td title={l.target} style={BREAK_ANY}>
+                    {l.target || '—'}
+                  </td>
+                  <td title={l.detail} style={BREAK_ANY}>
+                    {detailText}
+                  </td>
                 </tr>
               );
             })}

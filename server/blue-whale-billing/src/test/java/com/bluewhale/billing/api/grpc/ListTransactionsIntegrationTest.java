@@ -72,13 +72,24 @@ class ListTransactionsIntegrationTest {
     private static final String TASK = "text2video";
     private static final String TITLE = "视频生成 · seedance-2.5 1080p 5s";
 
-    /** 单价 100000 mc → 100 积分（mc 只在计价管线内部）。 */
+    /**
+     * 目录：只有换算率与折扣策略（**规则不在目录里**——它随每次 Hold 请求送来）。
+     *
+     * <p>仍然要发一份：预扣要把 {@code catalog_version} 冻进预留行。
+     */
     private static final String CATALOG = """
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
-             "models":{"seedance-2.5":{"text2video":{
-               "baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
-               "unitDenominator":1,"minCredits":1}}},
              "discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}
+            """;
+
+    /**
+     * 规则快照：单价 100000 mc → 100 积分（mc 只在计价管线内部）。
+     *
+     * <p>形态 = 能力行的 {@code pricing} 列，随每次 Hold 请求送来。
+     */
+    private static final String RULE = """
+            {"baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
+             "unitDenominator":1,"minCredits":1}
             """;
 
     /**
@@ -466,6 +477,8 @@ class ListTransactionsIntegrationTest {
                 .setSpecs(SpecAttrs.newBuilder().putAttrs("resolution", "1080p").build())
                 .setTier("free")
                 .setTitle(TITLE)
+                // 规则快照随每次请求来 —— 没有它就算不出价（规则住在能力行，billing 读不到）
+                .setRuleSnapshot(RULE)
                 .build();
     }
 

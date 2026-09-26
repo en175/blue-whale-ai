@@ -1,0 +1,48 @@
+-- billing_cost_reservations 补 (user_id, gmt_create) 索引（流水「消费」分支按用户取数）。
+--
+-- 版本号从 V7 起（V5 空号见 V6__reservation_title.sql 的说明：跑过 V5 的库在
+-- flyway_schema_history 里留着那一行，版本号不随文件回收）。
+--
+-- ── 为什么需要它 ──────────────────────────────────────────────────────────────
+-- 用户可见流水（TransactionMapper.selectPage）的「消费」分支是：
+--
+--   FROM billing_cost_reservations r
+--   WHERE r.status != 'released' [AND r.user_id = ?]
+--
+-- 本表此前只有 PRIMARY(id)、uk_reservation__job(generation_job_id)、
+-- idx_reservation__status(status, gmt_modified) —— **`user_id` 上什么都没有**。
+-- 于是「某人看自己的流水」每翻一页都要把这**整张预留表**扫一遍，再把这一支的结果
+-- 并进 UNION 里排序（EXPLAIN ANALYZE 实测，1 万行：2.74ms / 扫 10000 行）。
+-- 这不是新问题：AdminTransactionController 的类注释里已经把这笔账记着——
+-- 「要真正优化得先给预留表补 user_id 索引，那是另一次迁移」，这就是那一次。
+--
+-- ── 为什么这两列、这个顺序 ────────────────────────────────────────────────────
+-- `user_id` 在前：它是这一支唯一能收窄范围的等值条件（带 userId 时），
+-- 索引靠它把扫描范围从"全表"变成"这个人"（实测同一查询：10000 行 → 20 行）。
+-- `gmt_create` 在后：与同库姊妹表 billing_ledger_entries 的
+-- idx_ledger__user_time(user_id, gmt_create) 同形 —— 两张来源表口径一致，
+-- 且「某人的预留按时间序」在索引里就是一次顺序取数，不必回表排序。
+--   ⚠️ 这一列**不负责**省掉这条流水查询的排序：ORDER BY/LIMIT 在外层 UNION 之后，
+--   三条分支的结果要先物化再全局排序（MySQL 不给 UNION 分支下推 LIMIT）。
+--   它的价值是「同形」与「有序取数」这两件，别指望它去掉那个 sort。
+--
+-- 列顺序反过来（gmt_create 在前）不行：等值列被挤到第二列，
+-- user_id 只能当过滤用，索引收窄不到一个人头上，等于白建。
+--
+-- ── ⚠️ status 筛选不覆盖 ─────────────────────────────────────────────────────
+-- 不给 status 建索引，理由不是"不等值就用不上索引"（那话不准确：
+-- 已有的 idx_reservation__status 会被拆成 `status < 'released' OR status > 'released'`
+-- 两段 range 用上，只是这两段合起来仍覆盖 3/4 的表）。真正的理由是这一支
+-- **没有自己的 LIMIT**：要凑出这一页，它必须把**所有**匹配行都交出来物化。
+-- 所以：
+--   · 带 userId（用户面 / 管理面点名某个用户）：走本索引，全表 → 一个人的行；
+--   · 不带 userId（管理面全站）：**加索引前后都是全表扫描**（实测 1 万行两遍，
+--     计划都是 Table scan on r）。加索引解决不了这一支，要动就得改查询形态。
+-- 把 status 塞进本索引（`user_id, status, gmt_create`）也换不到东西：
+-- 至多少读那 1/4 已释放的行，却让「按时间序取某人的预留」这条顺序被 status 切断，
+-- 还把索引加宽一列 —— 不值。
+--
+-- ⚠️ 大表加索引会锁写。本表随任务增长，当前量级下是秒级操作；
+--    若线上已到百万级，需要走在线 DDL（pt-online-schema-change / gh-ost）。
+ALTER TABLE billing_cost_reservations
+  ADD KEY idx_reservation__user_time (user_id, gmt_create);

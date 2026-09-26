@@ -291,16 +291,17 @@ public class ImageJobProcessor implements JobProcessor {
 
         // 6. 渠道映射（generation-worker.ts:521-553）
         String aspectRatio = input.get("aspect_ratio") instanceof String s ? s : null;
-        String channelParser = (cap.getChannelParser() != null && !cap.getChannelParser().isEmpty())
-                ? cap.getChannelParser() : "seedream";
+        // 渠道是解析与出站的**唯一来源**（取代原先各读各的 channel_parser 列 + features.image_protocol）。
+        ImageChannel channel = ImageChannelMapper.parseChannel(cap.getChannel(), cap.getCapabilityType());
+        String parser = channel.parser() != null ? channel.parser() : "seedream";
 
         String finalSize = providerSize;
         String finalQuality = null;
 
-        if ("gpt".equals(channelParser) || "banana".equals(channelParser)) {
+        if ("gpt".equals(parser) || "banana".equals(parser)) {
             ImageChannelMapper.ImageRequestMapping mapping =
                     ImageChannelMapper.parseStoredMapping(
-                            channelParser, cap.getRequestMapping(),
+                            channel, cap.getRequestMapping(),
                             cap.getDefaultSize(), cap.getDefaultAspectRatio());
             ImageChannelMapper.MappedRequest mapped =
                     ImageChannelMapper.mapImageChannelRequest(mapping, sizeId, aspectRatio);
@@ -337,13 +338,17 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 9. 调用 provider（generation-worker.ts:583-598 批量循环）
-        // 契约 §11（IKF4LI）：出站形态由能力行 features 声明，不按模型名特判。
-        //  - image_protocol=openai-images：无参考图走 generations(JSON)、有参考图走 edits(multipart)；
+        // 契约 §12：出站形态由**渠道**声明，不按模型名特判。
+        //  - gpt-image-openai（协议 openai-images）：无参考图走 generations(JSON)、有参考图走 edits(multipart)；
         //    模型名恒为 model_id，文生图/图生图同一档位，**不换名**。
-        //  - image_protocol=inline-image（缺省 = 现状）：恒 generations + body.image；
+        //  - 其余渠道（协议 inline-image）：恒 generations + body.image；
         //    仅此形态下，行配了 i2i_model_name 且本 job 带参考图时换上游模型名（ADR-0085，banana）。
         // 无论哪种形态，job.input.model_id 恒为 canonical（计费/重试/恢复不受影响）。
-        ImageProtocol protocol = ImageChannelMapper.parseImageProtocol(cap.getFeatures());
+        //
+        // ⚠️ 非图片渠道的 protocol() 为 null（它们的请求不走本链路）。本进程只跑图片任务，
+        //    真拿到 null 说明渠道配错了媒介——按最保守的内联形态走，行为与迁移前一致。
+        ImageProtocol protocol = channel.protocol() != null
+                ? channel.protocol() : ImageProtocol.INLINE_IMAGE;
         String i2iAlias = ImageChannelMapper.parseI2iModelName(cap.getFeatures());
         String requestModel = (protocol == ImageProtocol.INLINE_IMAGE
                 && i2iAlias != null && !sourceImageUrls.isEmpty())

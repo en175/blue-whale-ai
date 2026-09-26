@@ -4,10 +4,10 @@
   gap: 6px;
   padding: 5px 12px;
   border: 1px solid var(--admin-border);
-  border-radius: var(--radius-full);
+  border-radius: var(--admin-radius-pill);
   background: var(--admin-surface);
   color: var(--admin-text-muted);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   font-family: inherit;
   cursor: pointer;
   transition:

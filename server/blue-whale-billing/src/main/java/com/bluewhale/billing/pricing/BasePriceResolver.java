@@ -6,7 +6,7 @@ import java.util.Map;
  * 基准单价解析（《计费逻辑详细设计》§4.6.4 策略）。
  *
  * <p>三种形态覆盖全部模态：**常数**（文本 / 按次）、**按轴查表**（图片按尺寸档、视频按分辨率）
- * 与**待配**（运营还没填这个模型的单价——目录里的一个空位）。
+ * 与**待配**（运营还没填这个模型的单价——规则里的一个空位）。
  *
  * <p>sealed：新增形态必须显式登记，编译器会强制所有 switch 处理它——
  * 「加了实现却漏了分支」这类静默出错在 sealed 下不可能发生。
@@ -59,7 +59,7 @@ public sealed interface BasePriceResolver
     }
 
     /**
-     * 单价**待配** —— 目录里显式留的空位，运营还没填这个模型的数。
+     * 单价**待配** —— 规则里显式留的空位，运营还没填这个模型的数。
      *
      * <h2>为什么要有这一档，而不是「干脆不写这条规则」</h2>
      *
@@ -83,13 +83,13 @@ public sealed interface BasePriceResolver
         @Override
         public long resolve(Map<String, String> specs) {
             throw new UnpriceableSpecException(
-                    "<单价待配>", "该模型的单价还没在定价目录里填 —— 目录里这条规则是空位"
-                            + "（basePrice.kind=unset）。请运营在管理端的「模型计费」页填上单价后重新发布；"
+                    "<单价待配>", "该模型的单价还没填 —— 能力行里这条规则的 basePrice 是空位"
+                            + "（kind=unset）。请运营在管理端的「模型计费」页填上单价并保存；"
                             + "在此之前本模型的提交会被拒绝，**不会**按 0 免费");
         }
     }
 
-    /** 该规格组合没有配置价格——说明目录漏配，是配置错误不是用户错误。 */
+    /** 该规格组合没有配置价格——说明规则漏配，是配置错误不是用户错误。 */
     class UnpriceableSpecException extends RuntimeException {
         private final String normalizedKey;
 

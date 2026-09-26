@@ -8,7 +8,7 @@
 
 .message {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   color: var(--admin-text-faint);
 }
 

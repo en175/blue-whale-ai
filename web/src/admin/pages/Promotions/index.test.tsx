@@ -74,13 +74,11 @@ const NIGHT = {
 const CATALOG = {
   catalogVersion: 3,
   documentHash: 'abc',
-  ruleCount: 1,
   creditsPerYuan: 15,
   document: JSON.stringify({
     schemaVersion: 1,
     currency: 'CNY',
     creditsPerYuan: 15,
-    models: {},
     discountPolicy: { stackMode: 'multiply', floorFactorBp: 3000 },
   }),
 };
@@ -186,16 +184,19 @@ describe('限时活动页', () => {
   it('★ 冻结语义写在最上面：改活动不影响已提交未结算的任务', async () => {
     await renderPage();
 
-    expect(document.body.textContent).toContain('改活动不影响已提交未结算的任务');
+    // ⚠️ 形态与全管理端统一：收进「?」，仍放在最上面（页面第一块内容就是那个图标）
+    const help = document.body.querySelector('button[aria-label="说明"]');
+    expect(help, '页面顶部应有一个「?」').not.toBeNull();
+    expect(document.body.textContent).not.toContain('改活动不影响已提交未结算的任务');
   });
 
   it('★ 叠加方式（multiply）只读展示 —— 活动配多少要看它', async () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('multiply');
-    expect(document.body.textContent).toContain('目录级配置');
-    // 当前是 multiply：9 折会员 × 7 折活动 = 6.3 折（另一种 best 是 7 折）
-    expect(document.body.textContent).toContain('6.3 折');
+    // 解释与算例收进 `?`
+    expect(document.body.textContent).not.toContain('目录级配置');
+    expect(document.body.querySelectorAll('button[aria-label="说明"]').length).toBeGreaterThan(0);
   });
 
   it('没有活动时给空态（而不是让人以为页面坏了）', async () => {

@@ -24,6 +24,7 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import RatioIcon from '@/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
+import { buildVideoJobReferences } from '../../videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   docHasAnyRef,
@@ -380,6 +381,12 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   /** 附件栏空态派生（IKGB1X）：普通参考模式下无普通参考且无文本附件时整条不渲染，不引入新的持久状态；
    *  首尾帧模式槽位常显不吃空态规则（契约 §1/§4） */
   const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
+
+  /** 报价用的参考（与提交同源）：就是面板拿到的这份 `videoMediaRefs` —— 父级提交时用的是
+   *  `buildVideoJobReferences` 对同一份推导（草稿=连线合并、自由=暂存参考），这里不另立一套「选了什么」。
+   *  参考视频的**时长**也是定价输入（token 公式在含视频输入时算进输入时长），所以整项带过去，
+   *  不能只带个数（个数由后端按这份列表自己数）。 */
+  const quoteReferences = useMemo(() => buildVideoJobReferences(videoMediaRefs), [videoMediaRefs]);
 
   const mixedStrip = useMixedRefStrip(
     isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
@@ -1240,7 +1247,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
-          {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 分辨率 + 比例 + 时长 + 带音频。
+          {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 分辨率 + 比例 + 时长 + 带音频 + 参考。
               没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
           {projectId ? (
             <GenerationQuoteBadge
@@ -1253,6 +1260,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                 ...(duration ? { duration } : {}),
                 generate_audio: generateAudio,
               }}
+              references={quoteReferences}
             />
           ) : null}
           {/* 字数统计 */}

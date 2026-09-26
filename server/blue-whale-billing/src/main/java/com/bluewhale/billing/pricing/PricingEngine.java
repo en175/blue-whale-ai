@@ -59,7 +59,7 @@ public final class PricingEngine {
      * **按规则上限**计价 —— 契约量取不到时的兜底（调用方见
      * {@code BillingApplicationService#priceAtCap}）。
      *
-     * <p>上限是目录里配的一个常数，**与用量无关**：这里传 {@link Usage#empty()} 而不是
+     * <p>上限是规则里配的一个常数，**与用量无关**：这里传 {@link Usage#empty()} 而不是
      * 编一个用量出来——编出来的数量会进加权和与倍率，而上限本来就是「不管用量多少都封到这里」。
      *
      * @throws RuleNotFoundException 该 (model, taskType) 未配规则——与 {@link #compute} 同一立场

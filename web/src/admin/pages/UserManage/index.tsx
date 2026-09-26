@@ -29,6 +29,7 @@ import {
   PageHeader,
   Select,
   Stat,
+  MetaRow,
   Table,
   Tabs,
   Toolbar,
@@ -498,15 +499,14 @@ function AdjustModal({
         </>
       }
     >
-      {/* 账号摘要：说明性文字走 Alert info（原来是灰色小卡，语义相同） */}
-      <Alert tone="info">
-        <div>
-          用户：<b>{user.nickname}</b>
-        </div>
-        <div>
-          当前余额：<b>{fmt(user.balance)}</b> 积分
-        </div>
-      </Alert>
+      {/* 账号摘要：只读状态，用 MetaRow 而不是蓝色色块 */}
+      <MetaRow
+        items={[
+          { label: '用户', value: user.nickname },
+          { label: '当前余额', value: `${fmt(user.balance)} 积分` },
+        ]}
+        tone="sunken"
+      />
 
       {/* 表单标签只用一次性外边距，字号/颜色交给套件默认值 */}
       <div style={{ margin: '16px 0 6px' }}>调整金额（正数增加，负数扣减）</div>

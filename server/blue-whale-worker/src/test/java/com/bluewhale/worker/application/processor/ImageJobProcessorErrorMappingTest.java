@@ -163,7 +163,7 @@ class ImageJobProcessorErrorMappingTest {
         mockClaim(input);
 
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
-        cap.setChannelParser("gpt");
+        cap.setChannel("gpt-image");
         cap.setRequestMapping("{\"matrix\":{}}");
         cap.setDefaultSize("default-size");
         cap.setDefaultAspectRatio("1:1");
@@ -426,7 +426,8 @@ class ImageJobProcessorErrorMappingTest {
         cap.setApiSize("1024x1024");
         cap.setWidth(1024);
         cap.setHeight(1024);
-        cap.setChannelParser("seedream");
+        cap.setCapabilityType("image");
+        cap.setChannel("seedream-image");
         cap.setFeatures("{\"imageReferenceMax\": 10}");
         return cap;
     }

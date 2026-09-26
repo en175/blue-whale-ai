@@ -44,6 +44,9 @@ public class AdminCatalogController {
      *      -H 'Content-Type: application/json' --data-binary @catalog.json
      * </pre>
      *
+     * <p>⚠️ 目录里**不含任何计价规则**（规则住在模型能力行），只有换算率与折扣策略。
+     * 老目录行里那个 {@code models} 段会被忽略，不需要清理。
+     *
      * @return 本次生效的版本号，以及本版生效的换算率 {@code creditsPerYuan}（1 元 = 多少积分）——
      *         发布是改口径的唯一入口，回包里带上它，运营不必再查一次库才知道发对了没有
      */
@@ -55,7 +58,6 @@ public class AdminCatalogController {
         return Map.of(
                 "catalogVersion", version,
                 "documentHash", holder.currentDocumentHash(),
-                "ruleCount", holder.currentIndex().size(),
                 "creditsPerYuan", holder.currentCreditsPerYuan());
     }
 
@@ -79,7 +81,6 @@ public class AdminCatalogController {
         return Map.of(
                 "catalogVersion", holder.currentVersion(),
                 "documentHash", String.valueOf(holder.currentDocumentHash()),
-                "ruleCount", holder.currentIndex().size(),
                 "creditsPerYuan", holder.currentCreditsPerYuan(),
                 "document", holder.currentDocumentJson());
     }

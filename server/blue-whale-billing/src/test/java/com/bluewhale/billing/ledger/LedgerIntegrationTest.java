@@ -44,6 +44,11 @@ class LedgerIntegrationTest {
     private static final int NO_DISCOUNT = 10_000;
     /** 展示文案快照。本测试考的是账本，文案不参与断言，给个非空值即可。 */
     private static final String TITLE = "视频生成 · 测试";
+    /**
+     * 规则快照。本测试考的是账本本身，**直接调账本层的 {@code credits.hold}**（不经过计价），
+     * 所以这里不需要规则；结算侧读不到快照时的处置是另一回事（见 SettlementServiceTest）。
+     */
+    private static final String NO_SNAPSHOT = null;
 
     /** 明天到期——扣减顺序的第一级（先过期先扣）会优先吃掉它。 */
     private static final Instant SOON = Instant.now().plus(1, ChronoUnit.DAYS);
@@ -74,7 +79,7 @@ class LedgerIntegrationTest {
         long daily = grant(CreditSource.DAILY, 100, SOON, "d1");
         long purchased = grant(CreditSource.PURCHASED, 1_000, null, "p1");
 
-        credits.hold(USER, "cmd-1", JOB, 120, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-1", JOB, 120, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         // 第一级 tie-break：expires_at ASC —— 快到期的那批先被吃完，付费批次只动零头
         assertThat(frozenOf(daily)).isEqualTo(100);
@@ -90,7 +95,7 @@ class LedgerIntegrationTest {
         long gift = grant(CreditSource.GIFT, 100, null, "g1");
         long purchased = grant(CreditSource.PURCHASED, 1_000, null, "p2");
 
-        credits.hold(USER, "cmd-2", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-2", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         // 第二级 tie-break：source_priority ASC（gift=30 < purchased=80）。
         // 两级有效期都相同（都是永久）时才轮到这里生效。
@@ -104,7 +109,7 @@ class LedgerIntegrationTest {
         long expired = grant(CreditSource.DAILY, 100, PAST, "e1");
         long purchased = grant(CreditSource.PURCHASED, 100, null, "p3");
 
-        credits.hold(USER, "cmd-3", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-3", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         assertThat(frozenOf(expired)).isZero();
         assertThat(frozenOf(purchased)).isEqualTo(60);
@@ -121,7 +126,7 @@ class LedgerIntegrationTest {
     void 预扣_只冻结不动remaining() {
         long lot = grant(CreditSource.GIFT, 100, null, "g2");
 
-        credits.hold(USER, "cmd-4", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-4", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         // 钱还没花掉，只是不能用了 —— remaining 原封不动
         assertThat(remainingOf(lot)).isEqualTo(100);
@@ -135,7 +140,7 @@ class LedgerIntegrationTest {
     void 预扣_余额不足_抛异常且不留痕迹() {
         grant(CreditSource.GIFT, 10, null, "g3");
 
-        assertThatThrownBy(() -> credits.hold(USER, "cmd-5", JOB, 11, CATALOG_VERSION, NO_DISCOUNT, TITLE))
+        assertThatThrownBy(() -> credits.hold(USER, "cmd-5", JOB, 11, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE))
                 .isInstanceOf(InsufficientCreditsException.class)
                 .hasMessageContaining("还差 1");
 
@@ -150,8 +155,8 @@ class LedgerIntegrationTest {
     void 预扣_幂等_重复命令不二次冻结() {
         long lot = grant(CreditSource.GIFT, 100, null, "g4");
 
-        HoldResult first = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
-        HoldResult second = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        HoldResult first = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        HoldResult second = credits.hold(USER, "cmd-6", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         // ★ 重放要能被识别出来。「返回了相同的数字」不足以区分「刚扣的」与「上次就扣过的」，
         //   而调用方可能需要据此决定要不要再写一次自己的副作用。
@@ -172,7 +177,7 @@ class LedgerIntegrationTest {
     @Test
     void 结算_实际小于预扣_差额回到可用余额() {
         long lot = grant(CreditSource.GIFT, 100, null, "g5");
-        credits.hold(USER, "cmd-7", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-7", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         credits.settle(JOB, 30);
 
@@ -193,7 +198,7 @@ class LedgerIntegrationTest {
         //   「理论不该发生」。当时 settle 抛 `借贷不平：借 28 / 贷 27` → 事件被 MQ 无限重投，
         //   用户的钱永远冻着。
         long lot = grant(CreditSource.PURCHASED, 100, null, "g-over");
-        credits.hold(USER, "cmd-over", JOB, 27, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-over", JOB, 27, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         credits.settle(JOB, 28);
 
@@ -213,7 +218,7 @@ class LedgerIntegrationTest {
         long gift = grant(CreditSource.GIFT, 20, null, "g6");            // priority 30，先扣
         long purchased = grant(CreditSource.PURCHASED, 100, null, "p4"); // priority 80，后扣
 
-        credits.hold(USER, "cmd-8", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);   // gift 20 + purchased 20
+        credits.hold(USER, "cmd-8", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);   // gift 20 + purchased 20
         credits.settle(JOB, 35);                                 // gift 20 + purchased 15
 
         assertThat(remainingOf(gift)).isZero();
@@ -239,7 +244,7 @@ class LedgerIntegrationTest {
         long lot = grant(CreditSource.DAILY, 100, LATER, "g7");
         Instant expiresBefore = expiresOf(lot);
 
-        credits.hold(USER, "cmd-9", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-9", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
         credits.refund(JOB, "上游任务失败");
 
         assertThat(remainingOf(lot)).isEqualTo(100);
@@ -257,7 +262,7 @@ class LedgerIntegrationTest {
     @Test
     void 结算之后再返还_无操作() {
         long lot = grant(CreditSource.GIFT, 100, null, "g8");
-        credits.hold(USER, "cmd-10", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-10", JOB, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
         credits.settle(JOB, 40);
         int entriesAfterSettle = ledgerEntryCount();
 
@@ -295,7 +300,7 @@ class LedgerIntegrationTest {
         long expiring = grant(CreditSource.GIFT, 100, Instant.now().plus(1, ChronoUnit.HOURS), "tz-a");
         long expired = grant(CreditSource.GIFT, 100, Instant.now().minus(1, ChronoUnit.HOURS), "tz-b");
 
-        credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, TITLE);
+        credits.hold(USER, "cmd-tz", JOB, 60, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
 
         assertThat(frozenOf(expiring)).isEqualTo(60);
         assertThat(frozenOf(expired)).isZero();

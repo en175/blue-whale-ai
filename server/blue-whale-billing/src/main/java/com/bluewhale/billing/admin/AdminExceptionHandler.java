@@ -43,7 +43,7 @@ public class AdminExceptionHandler {
     @ExceptionHandler({PricingEngine.RuleNotFoundException.class,
             BasePriceResolver.UnpriceableSpecException.class})
     public ResponseEntity<ErrorBody> unpriceable(RuntimeException e) {
-        // 这两个是**运行期**算不出价：请求本身合法，是目录里没覆盖到这个组合。
+        // 这两个是**运行期**算不出价：请求本身合法，是规则里没覆盖到这个组合。
         // 对调用方而言这次提交不该继续（fail closed），对运维是一条「去补配置」的信号。
         return ResponseEntity.badRequest().body(new ErrorBody(CODE_UNPRICEABLE, e.getMessage()));
     }

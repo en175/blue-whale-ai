@@ -19,6 +19,8 @@ export interface BillingHoldContext {
   modelId: string;
   taskType: string;
   input: Record<string, unknown>;
+  /** 能力行的 `pricing` 快照（JSON 文本）。缺省 = 不传，billing 回落目录那份。 */
+  ruleSnapshot?: string;
 }
 
 /** 预扣依赖的成品形状（装配层注入给 handler 的那个回调）。 */
@@ -65,8 +67,9 @@ export function createBillingHold(deps: BillingHoldDeps): BillingHold {
         jobId: ctx.jobId,
         modelId: ctx.modelId,
         taskType: ctx.taskType,
-        specs: extractSpecs(ctx.input),
+        specs: extractSpecs(ctx.input, ctx.taskType),
         tier,
+        ...(ctx.ruleSnapshot !== undefined && { ruleSnapshot: ctx.ruleSnapshot }),
       });
     } catch (error) {
       deps.logger?.warn(

@@ -32,6 +32,8 @@ const ITEM = {
   direction: 'out',
   title: '视频生成 · seedance-2.5',
   credits: 30,
+  // 冻 100、实扣 30 —— 余额先降后回的那种行，预扣额必须出得来
+  reserved_credits: 100,
   status: 'done',
   created_at: '2026-09-25T10:00:00+08:00',
   settled_at: '2026-09-25T10:01:00+08:00',
@@ -116,6 +118,52 @@ describe('ConsumptionRecords 消费记录（游标分页）', () => {
     expect(document.body.textContent).toContain('9001');
     expect(document.body.textContent).toContain('视频生成 · seedance-2.5');
     expect(document.body.textContent).toContain('-30');
+  });
+
+  it('预扣与实扣不一致时，金额下方补一行预扣', async () => {
+    // 「冻 100、实扣 30」：只显示 -30 的话，用户余额那 70 的来回在界面上没有交代
+    await renderPage();
+
+    expect(document.body.textContent).toContain('预扣 100');
+  });
+
+  it('两个数一致时**不**显示预扣 —— 写出来只是复读', async () => {
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, credits: 5, reserved_credits: 5 }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    expect(document.body.textContent).toContain('-5');
+    expect(document.body.textContent).not.toContain('预扣');
+  });
+
+  it('没有预扣的行（发放 / 人工调账）不显示预扣', async () => {
+    // null 不是 0：0 是「冻了 0 分」，null 是「这一行没有预扣这回事」
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, id: 'lot:12', type: 'recharge', direction: 'in', credits: 500, reserved_credits: null }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    expect(document.body.textContent).toContain('+500');
+    expect(document.body.textContent).not.toContain('预扣');
+  });
+
+  it('预扣为 0（结算时全额退回）仍要显示 —— 那正是最该解释的一行', async () => {
+    // 判空若写成 `if (row.reserved_credits)`，0 会被当成「没有预扣」而整行消失，
+    // 恰好漏掉「冻了 12、最后全退回来」这种最需要交代的行
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, credits: 0, reserved_credits: 12 }],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    expect(document.body.textContent).toContain('-0');
+    expect(document.body.textContent).toContain('预扣 12');
   });
 
   it('点「下一页」把上一页给的游标原样带上；「上一页」回到**当初那一页的**游标', async () => {

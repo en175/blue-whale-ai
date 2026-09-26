@@ -20,6 +20,8 @@ import {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoTaskType,
+  taskTypeAllowedRatios,
+  resolveOutputPixels,
   type VideoTaskType,
   videoRefLabel,
   buildReferenceMarkerLabels,
@@ -72,9 +74,33 @@ import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 
 import {
+  channelOf,
   mapImageChannelRequest,
+  parseStoredChannel,
   parseStoredImageRequestMapping,
 } from "./image-channel-parser.js";
+
+/** 能力行的 `pricing` 序列化成 Hold 要的 JSON 文本；未配返回 `undefined`。
+ *
+ *  <p>**为什么在这里序列化一次**：proto 的 `rule_snapshot` 是 `string`（一整条 JSON 文本），
+ *  而不是结构化消息——规则的形状是**定价域的知识**（kind 有 const/table/unset 三种、
+ *  table 的键是规格组合），把它摊成 proto 消息等于让契约去追一个还在演进的配置形态。
+ *  传文本，billing 那边照样用 `CatalogCompiler` 编译校验，语义一点不少。
+ *
+ *  <p>⚠️ 未配（`null`）时返回 `undefined` 而不是空串：proto3 里空串与「没设」不可区分，
+ *  传空串会让 billing 分不清「这次没有规则」与「规则是空的」，只能一并回落目录。
+ *  两者行为恰好一样，但显式地不传更诚实。 */
+export function serializePricingRule(capability: ModelCapabilityView | undefined): string | undefined {
+  const pricing = capability?.pricing;
+  if (pricing === undefined || pricing === null) return undefined;
+  try {
+    return JSON.stringify(pricing);
+  } catch {
+    // 循环引用等在库里的 JSON 不可能出现（Prisma 读出来的是普通对象），
+    // 真出现也只当「没配」——回落目录，不让一次序列化失败挡住用户的提交。
+    return undefined;
+  }
+}
 
 export interface GenerationParameters {
   prompt?: unknown;
@@ -405,15 +431,13 @@ function validateImageSingleRefs(
 /** 视频特有校验：首尾帧 / 普通参考 asset 互斥 + 素材库引用（asset∨material 并集互斥/配对）。
  *  ADR-0086：普通参考按类型分类上限改读能力行（video_reference / video_reference_max /
  *  audio_reference / audio_reference_max / max_reference_duration_sec），旧「参考素材最多 12」退役。
- *  capability 传入时以其 supported_aspect_ratios 判定「模型是否支持自适应比例」（首尾帧强制 adaptive）。 */
+ *  首帧/首尾帧的**比例**限制同样只认能力行（`features.task_types[...].allowed_ratios`）——
+ *  2.5 锁 adaptive、2.0 不限，见下方那条闸的注释。 */
 function validateVideo(
   body: CreateGenerationJobBody,
   capability?: ModelCapabilityView,
 ): { code: string; message: string } | null {
   const features = capability?.features;
-  const supportsAdaptive =
-    Array.isArray(capability?.supported_aspect_ratios) &&
-    capability.supported_aspect_ratios.includes("adaptive");
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -492,18 +516,35 @@ function validateVideo(
       );
       if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
     }
-    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，输出跟随首帧图）。
-    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时强制（2.0/2.5 均含；未配 adaptive 的第三方档位不适用）。
-    if (
-      supportsAdaptive &&
-      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame")
-    ) {
-      const params = body.parameters as GenerationParameters | undefined;
-      if (!isStr(params?.aspect_ratio) || params.aspect_ratio !== "adaptive") {
-        return {
-          code: ERROR_INVALID_INPUT,
-          message: "首帧/首尾帧模式仅支持自适应比例（adaptive）",
-        };
+    // 首帧/首尾帧的比例闸：**按模型读能力行**，不写死。
+    //
+    // 官方《创建视频生成任务》的「不同模型的取值限制和 adaptive 适配规则」表：
+    //   首帧或首尾帧生视频 · Seedance 2.5     = 默认且仅支持 adaptive
+    //   首帧或首尾帧生视频 · Seedance 2.0 系列 = 支持 adaptive 或指定宽高比
+    // 这里原先写死「有首帧就必须 adaptive（只要能力行含 adaptive）」，等于把 2.5 的规则套到
+    // 2.0 上——把 2.0 明确允许的提交拒在门外。唯一事实源改回能力行
+    // `features.task_types[first_frame|first_last_frame].allowed_ratios`：
+    // 配了 `["adaptive"]`（2.5）才锁，未配（2.0）就不限。
+    //
+    // 判定复用 `resolveVideoTaskType` 而不是自己数 role：首尾帧分支排在关键词分支**之前**
+    // 且只看 role，故传空提示词也能得到正确结果，不会与提交侧那一处判定分叉。
+    if (features) {
+      const hasFrame = parsed.items.some(
+        (r) => r.role === "first_frame" || r.role === "last_frame",
+      );
+      const frameTaskType = hasFrame ? resolveVideoTaskType(parsed.items, "") : undefined;
+      const allowedRatios = taskTypeAllowedRatios(features.task_types, frameTaskType);
+      if (allowedRatios) {
+        // 走到这里 aspect_ratio 一定是合法字符串：validateCommon 对非音频类型的
+        // 缺失/非法比例已经 400 了（见上方 `aspect_ratio 无效`）。所以这里**不写**
+        // 「未指定」兜底分支——那种分支不可达，写了只会让下一个人以为这里防住了什么。
+        const ratio = (body.parameters as GenerationParameters | undefined)?.aspect_ratio as string;
+        if (!allowedRatios.includes(ratio)) {
+          return {
+            code: ERROR_INVALID_INPUT,
+            message: `当前任务类型（${frameTaskType}）不支持 比例 ${ratio}，可用：${allowedRatios.join(" / ")}`,
+          };
+        }
       }
     }
     return null;
@@ -657,6 +698,25 @@ const videoStrategy: GenerationTypeStrategy = {
     if (capability?.features) {
       input.reference_limits = freezeReferenceLimits(capability.features);
     }
+    // 视频输出像素：按规格查能力行的像素表，冻成**两个标量**随快照走。
+    //
+    // 为什么是标量而不是整张表：billing 算 token 只需要这一次的宽高，而 `extractSpecs`
+    // 只收标量（`billing-specs.ts`）——一张表进不了 specs。所以在这里解析完再冻。
+    //
+    // 为什么查不到就**不写**而不是写 0：billing 侧「specs 里有宽高就用、没有就回落目录」
+    // 是过渡期的双向兼容（见 `TokenEstimator`）。写 0 会让回落失效、把一次「没配」变成
+    // 一次「宽高是 0 的计算」——那是另一个意思，且会算出离谱的 token 数。
+    if (capability?.features && isStr(params.resolution) && isStr(params.aspect_ratio)) {
+      const pixels = resolveOutputPixels(
+        capability.features.video_dimensions,
+        params.resolution,
+        params.aspect_ratio,
+      );
+      if (pixels !== null) {
+        input.output_width = pixels.width;
+        input.output_height = pixels.height;
+      }
+    }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") {
@@ -747,6 +807,20 @@ export function projectQuoteInput(
   const params = body.parameters as GenerationParameters | undefined;
   if (!strategy || typeof params !== "object" || params === null) return null;
 
+  // ★ 参考素材必须参与报价投影 —— 它**是**定价维度（Seedream 5.0 Pro：首张免费、
+  //   第 2 张起 0.02 元/张）。这里原先写死 `referenceAssetIds: []`，那时它还不是；
+  //   现在再写死，报价就会比实扣低一截（而「预览价 = 实扣价」正是这条投影的全部意义）。
+  //
+  //   走**与建任务同一个** `resolveReferenceAssets`（同一个去重、同一个超限判定），
+  //   而不是让调用方自己数一个张数传进来：数出来的张数只要在去重口径上差一点
+  //   （例如前端把重复素材算了两遍），报价就与实扣对不上。
+  //
+  //   超限时按空数组报价：那种请求建任务时本来就会 400，报价这里没必要跟着报错 ——
+  //   它会退化成「不含参考费」的价，偏保守且不会被真的扣到。
+  const imageReferenceMax =
+    capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
+  const referenceAssets = resolveReferenceAssets(body, type, imageReferenceMax);
+
   const input = strategy.composeInput({
     body,
     params,
@@ -754,7 +828,7 @@ export function projectQuoteInput(
     promptText: isStr(params.prompt) ? params.prompt : "",
     targetNodeId: null,
     textAttachments: [],
-    referenceAssetIds: [],
+    referenceAssetIds: referenceAssets.ok ? referenceAssets.value.referenceAssetIds : [],
     ...(capability ? { capability } : {}),
   });
   delete input.prompt;
@@ -1554,7 +1628,7 @@ export async function handleCreateGenerationJob(
   // 在接纳当下 400（invalid_reference_type，与 worker mapImageChannelRequest 同码同文案），不拖到执行期。
   if (type === "image" && capability) {
     const mapping = parseStoredImageRequestMapping(
-      capability.channel_parser,
+      channelOf(parseStoredChannel(capability.channel, "image")).parser,
       capability.request_mapping,
       { sizeId: capability.default_size, ratioId: capability.default_aspect_ratio },
     );
@@ -1832,6 +1906,8 @@ export async function handleCreateGenerationJob(
   // ★ 新计费：预扣 + 失败补偿一起交给 repo —— 它在**建 job 的事务内**（job 行插入后、
   //   提交前）调 hold，并在事务失败时调 release 把那笔冻结退掉（幂等键与等级的说明见
   //   GenerationDeps.billing）。两者都不进 cmdInput：那个对象是要落库的数据。
+  // 序列化一次，给下面那个 hold 闭包用（`exactOptionalPropertyTypes` 下不能在展开里现算）。
+  const ruleSnapshot = serializePricingRule(capability);
   const billingDep = deps.billing;
   const billing: JobBilling | undefined = billingDep
     ? {
@@ -1843,6 +1919,10 @@ export async function handleCreateGenerationJob(
             modelId: resolvedModelId,
             taskType: type,
             input: input as unknown as Record<string, unknown>,
+            // 计价规则随 Hold 送过去：它本质上是**模型的属性**（住在能力行的 pricing 列），
+            // 而 billing 读不到 blue_whale（ADR-0114 不共享库）——由它的属主在 Hold 时一并送。
+            // 未配（列还是 NULL）就不传，billing 侧回落到定价目录那份。
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
           }),
         release: (jobId, reason) =>
           billingDep.release({ userId: String(userId), jobId, reason }),

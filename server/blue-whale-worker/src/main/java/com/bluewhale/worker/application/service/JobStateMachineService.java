@@ -177,6 +177,17 @@ public class JobStateMachineService {
         return finalizer.completeJob(jobId, assetIds, workerId, fencingToken);
     }
 
+    /**
+     * 完成作业，附带**产出音频的真实时长**（音频按秒计价的权威用量，见
+     * {@code JobFinalizer#completeJob} 的说明）。
+     *
+     * @param upstreamSeconds 产出音频的真实时长，整秒；{@code null} = 这次没有
+     */
+    public boolean completeJob(String jobId, List<String> assetIds, String workerId,
+                               long fencingToken, Long upstreamSeconds) {
+        return finalizer.completeJob(jobId, assetIds, workerId, fencingToken, upstreamSeconds);
+    }
+
     public boolean failJob(String jobId, String errorCode, String errorMessage,
                            Map<String, Object> details, String workerId, long fencingToken) {
         return finalizer.failJob(jobId, errorCode, errorMessage, details, workerId, fencingToken);

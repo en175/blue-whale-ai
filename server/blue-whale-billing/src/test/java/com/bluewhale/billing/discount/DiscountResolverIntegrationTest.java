@@ -51,12 +51,13 @@ class DiscountResolverIntegrationTest {
         jdbc.update("DELETE FROM billing_member_discounts");
         jdbc.update("DELETE FROM billing_promotions");
         jdbc.update("DELETE FROM billing_pricing_catalogs");
-        // 装一份最小目录：折扣策略从它取（stackMode + 底线）
+        // 装一份最小目录：折扣策略从它取（stackMode + 底线）。
+        // 目录里没有规则——规则住在模型能力行，与折扣解析无关
         jdbc.update("""
                 INSERT INTO billing_pricing_catalogs
                   (catalog_version, status, document, schema_version, document_hash,
                    published_by, published_at, note)
-                VALUES (1, 'active', '{"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,"models":{"m":{"t":{"baseUnit":"constant:1","basePrice":{"kind":"const","value":10000},"unitDenominator":1,"minCredits":1}}},"discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}',
+                VALUES (1, 'active', '{"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,"discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}',
                         1, SHA2('v1', 256), 'test', NOW(), '')
                 """);
         catalog.reload();

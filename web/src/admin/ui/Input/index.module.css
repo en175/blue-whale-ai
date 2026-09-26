@@ -2,10 +2,10 @@
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--admin-border);
-  border-radius: 6px;
+  border-radius: var(--admin-radius-control);
   background: var(--admin-surface);
   color: var(--admin-text);
-  font-size: 13px;
+  font-size: var(--admin-font-sm);
   font-family: inherit;
   transition:
     border-color 0.15s ease,
@@ -44,5 +44,5 @@
 
 .sm {
   height: 26px;
-  font-size: 12px;
+  font-size: var(--admin-font-xs);
 }

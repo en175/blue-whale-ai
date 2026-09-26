@@ -22,6 +22,18 @@ export interface AdminConsumptionRecord {
   title: string;
   /** **整数积分**，该行唯一的金额：pending 时是预计消耗，done 时是实际消耗 */
   credits: number;
+  /**
+   * 该行**当初冻了多少**（整数积分）。**只有消费行有值**，发放行与账本行为 `null`。
+   *
+   * ⚠️ `null` 不是 `0`：`0` 是「冻了 0 分」，`null` 是「这一行没有预扣这回事」。
+   *    所以判空一律用 `== null`（或 `=== null`），**不要**写成 `if (reserved)`——
+   *    那样 `0` 会被当成「没有预扣」而不显示，恰好漏掉「全额退回」那一行。
+   *
+   * 为什么要有它：done 之后 `credits` 已经是实际值，「当初冻了多少」就只剩这里能读。
+   * 用户余额先降后回的差额靠它解释（实测某任务冻 12、实扣 1，流水上只有一行 -1）。
+   * 未结算行（pending）的 `credits` 本就是预扣额，两个数相同。
+   */
+  reserved_credits: number | null;
   /** pending | done */
   status: string;
   created_at: string;

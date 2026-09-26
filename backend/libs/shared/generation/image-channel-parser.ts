@@ -1,9 +1,134 @@
-/** 图片生成渠道解析器：从能力行目录映射 GPT / banana 请求字段。
- *  Seedream 不走本模块查表——尺寸由能力行 `request_mapping.matrix` 承载（IK629：原代码表
+/** 渠道解析：一个模型走哪个渠道，渠道决定请求怎么解析、出站用哪种线协议。
+ *
+ *  <p>本模块现在是**渠道表的单一事实源**（{@link CHANNELS}）＋它派生出的解析算术。
+ *  Seedream 不走映射查表——尺寸由能力行 `request_mapping.matrix` 承载（IK629：原代码表
  *  seedream-image-size.ts 已删，见 worker ImageChannelMapper.resolveSeedreamSize）。 */
 
 export const IMAGE_CHANNEL_PARSERS = ["seedream", "gpt", "banana"] as const;
 export type ImageChannelParserId = (typeof IMAGE_CHANNEL_PARSERS)[number];
+
+/** 出站线协议（原 `features.image_protocol`）。缺省 `inline-image`——未声明的图片行行为不变。 */
+export const IMAGE_PROTOCOLS = ["inline-image", "openai-images"] as const;
+export type ImageProtocol = (typeof IMAGE_PROTOCOLS)[number];
+
+/* ── 渠道表 ────────────────────────────────────────────────────────────────────
+ *
+ * 元素 `{id, media, parser, protocol}`：**`id` 就是库里 `channel` 列的字面值**，
+ * 加渠道 = 往这张表加一条，别处不新增分支（对账测试钉住两端集合相等）。
+ *
+ * <h2>为什么合成一列，而不是「解析器 + 协议」两个字段</h2>
+ *
+ * 原先它们是两个字段两个形态：`channel_parser`（**列**：seedream / gpt / banana，请求字段
+ * 怎么映射）× `features.image_protocol`（**JSON 键**：内联 / 官方 openai images，出站怎么发）。
+ * 于是「同一个渠道」被拆成两半，运营在界面上看到两个像重复的控件，而「解析器 → 读
+ * `request_mapping` 哪一部分」这层映射在两个语言里被写了多遍。
+ *
+ * <p>⚠️ **换协议 = 新渠道**（用户口径：「通渠道换协议，就做成新渠道」）。`gpt-image`（内联）
+ * 与 `gpt-image-openai`（官方协议）是**两个渠道**，不是同一个渠道的两个开关 —— 否则就退化回
+ * 「两个字段自由组合」，能配出 `parser=banana × openai-images` 这种必然 400 的组合
+ * （官方协议只认 low/medium/high/auto，banana 会把 `1k` 原样发出去）。
+ *
+ * <h2>为什么非图片媒介也要有渠道</h2>
+ *
+ * 用户口径：「视频也可以用 seedream-video 这种」。video / audio / text 行上，`channel_parser`
+ * 一直是个**无意义的默认值** —— 渠道就是媒介本身，没有解析器与协议之分。给它们一个渠道取值，
+ * 「一个模型一个渠道」这条不变量才对所有行成立，读侧也就不用再按类型分叉。
+ *
+ * <p>⚠️ **非图片渠道的 `parser` / `protocol` 必须是 `null`**（对账测试机械保证）。
+ * 否则将来一定有人给视频行配一张「映射表」，而 video 链路根本不读它 —— 配了等于没配，
+ * 界面上还看不出来。
+ *
+ * <p>⚠️ 表名不是 `IMAGE_CHANNELS`：它现在含 video / audio / text，叫 IMAGE_ 是撒谎。 */
+export const CHANNEL_MEDIA = ["image", "video", "audio", "text"] as const;
+export type ChannelMedia = (typeof CHANNEL_MEDIA)[number];
+
+export interface ChannelSpec {
+  readonly id: string;
+  readonly media: ChannelMedia;
+  /** 请求字段的映射策略；非图片媒介为 `null`（它们的请求不做映射）。 */
+  readonly parser: ImageChannelParserId | null;
+  /** 出站线协议；非图片媒介为 `null`。 */
+  readonly protocol: ImageProtocol | null;
+}
+
+export const CHANNELS = [
+  { id: "seedream-image", media: "image", parser: "seedream", protocol: "inline-image" },
+  { id: "gpt-image", media: "image", parser: "gpt", protocol: "inline-image" },
+  { id: "gpt-image-openai", media: "image", parser: "gpt", protocol: "openai-images" },
+  { id: "banana-image", media: "image", parser: "banana", protocol: "inline-image" },
+  { id: "seedream-video", media: "video", parser: null, protocol: null },
+  { id: "seedream-audio", media: "audio", parser: null, protocol: null },
+  { id: "seedream-text", media: "text", parser: null, protocol: null },
+] as const satisfies readonly ChannelSpec[];
+
+export type ChannelId = (typeof CHANNELS)[number]["id"];
+
+export const CHANNEL_IDS = CHANNELS.map((channel) => channel.id);
+
+/** 唯一「认不认这个取值」的判定点 —— 写闸门与读侧共用，别处不要再写一份成员判断。 */
+export function isChannelId(value: unknown): value is ChannelId {
+  return typeof value === "string" && CHANNELS.some((channel) => channel.id === value);
+}
+
+/** 渠道 → 完整定义。`?? CHANNELS[0]` 只为消掉 `.find` 的 `undefined`：
+ *  {@link ChannelId} 就是本表 id 的联合，查不到在类型上不可达。 */
+export function channelOf(id: ChannelId): ChannelSpec {
+  return CHANNELS.find((channel) => channel.id === id) ?? CHANNELS[0];
+}
+
+/** 该媒介的缺省渠道：**新建**行（还没提交渠道）与该写缺省时的取值。
+ *
+ *  <p>**按媒介分**而不是恒回落 `seedream-image` —— 一个 video 行若落成 `seedream-image`，
+ *  媒体闸门会在下一次保存时把它判成非法，而运营什么都没改。 */
+export function defaultChannelFor(capabilityType: unknown): ChannelId {
+  switch (capabilityType) {
+    case "video":
+      return "seedream-video";
+    case "audio":
+      return "seedream-audio";
+    case "text":
+      return "seedream-text";
+    default:
+      return "seedream-image";
+  }
+}
+
+/** 库里 `channel` 原始值 → 渠道。
+ *
+ *  <p>读侧宽容：空值/认不出的取值都按 {@link defaultChannelFor} 回落。列是 NOT NULL，
+ *  所以这不是为存量兜底，而是**防御直接改库/手写 INSERT 造出的脏值**——读侧不该因为
+ *  一行脏数据整条链路抛错。**归一（trim + 小写）只用于比对，不写回**。 */
+export function parseStoredChannel(raw: unknown, capabilityType: unknown): ChannelId {
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (isChannelId(normalized)) return normalized;
+  }
+  return defaultChannelFor(capabilityType);
+}
+
+/** 写侧形态闸门：取值必须是本表的 id，且**媒体必须与该行的 `capability_type` 一致**。
+ *
+ *  <p>媒体一致性是这条闸门的主要价值：漏了它，一个视频行可以配成 `gpt-image`，
+ *  而 video 链路根本不读渠道 —— 存得进去、跑起来照旧，界面上看不出任何异常。 */
+export function validateChannel(channel: unknown, capabilityType: unknown): string | null {
+  if (!isChannelId(channel)) {
+    return `渠道(channel)只支持 ${CHANNEL_IDS.join(" / ")}`;
+  }
+  if (!isChannelMedia(capabilityType)) {
+    // 判不了就拒绝，不静默放行：调用方（写闸门）总是拿得到已校验的 capability_type，
+    // 拿不到说明少传了参数，静默通过只会让这条闸门形同虚设。
+    return `渠道(channel)无法校验：行的类型(capability_type)缺失或不认识（${String(capabilityType)}）`;
+  }
+  const spec = channelOf(channel);
+  if (spec.media !== capabilityType) {
+    return `渠道「${channel}」是 ${spec.media} 的，不能配在 ${capabilityType} 类型的行上`;
+  }
+  return null;
+}
+
+export function isChannelMedia(value: unknown): value is ChannelMedia {
+  return typeof value === "string" && (CHANNEL_MEDIA as readonly string[]).includes(value);
+}
 
 export const GPT_PROVIDER_SIZES = [
   "1024x1024",

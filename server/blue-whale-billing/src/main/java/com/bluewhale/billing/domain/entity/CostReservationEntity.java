@@ -40,6 +40,14 @@ public class CostReservationEntity {
     /** 预扣时的折扣系数（万分比）——结算按它复现，不重新解析（见 V4 迁移）。 */
     private Integer discountBp;
 
+    /**
+     * 冻结的计价规则快照（JSON 文本，见 V8 迁移）。
+     *
+     * <p>{@code null} = 本次预扣没带快照 —— 结算**算不出价**（规则住在模型能力行，
+     * 只有预扣这一次机会随请求冻下来），会抛出去让 MQ 重投。
+     */
+    private String ruleSnapshot;
+
     /** 提交时的展示文案快照（见 V6 迁移）；空串 = 提交方未提供。 */
     private String title;
 
@@ -70,6 +78,8 @@ public class CostReservationEntity {
     public void setCatalogVersion(Integer catalogVersion) { this.catalogVersion = catalogVersion; }
     public Integer getDiscountBp() { return discountBp; }
     public void setDiscountBp(Integer discountBp) { this.discountBp = discountBp; }
+    public String getRuleSnapshot() { return ruleSnapshot; }
+    public void setRuleSnapshot(String ruleSnapshot) { this.ruleSnapshot = ruleSnapshot; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getReleaseNote() { return releaseNote; }

@@ -5,6 +5,7 @@ import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.HoldCommand;
 import com.bluewhale.billing.application.QuoteQuery;
 import com.bluewhale.billing.application.TransactionView;
+import com.bluewhale.billing.catalog.CatalogCompiler;
 import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.ledger.HoldResult;
 import com.bluewhale.billing.ledger.InsufficientCreditsException;
@@ -79,7 +80,11 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                     request.getTier(),
                     // 展示文案快照：随预留落库，ListTransactions 的消费行直接展示它
                     request.getTitle(),
-                    submittedAt));
+                    submittedAt,
+                    // 规则快照：本条规则的规则体（来自 backend 的能力行）。
+                    // **必填**——它是规则的唯一来源（billing 读不到能力行那个库）；
+                    // 没带或编不过都是拒单，见 proto 注释
+                    request.getRuleSnapshot()));
 
             observer.onNext(HoldResponse.newBuilder()
                     .setReservedCredits(result.reservedCredits())
@@ -124,10 +129,15 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
      * 投影逻辑与「为什么不漏也不重」见 {@code TransactionRepository} 与
      * {@code TransactionMapper.xml}。
      *
-     * <p>⚠️ 金额只有一个字段（{@code amount}），刻意不含预扣额：
+     * <p>⚠️ 金额只有一个字段（{@code amount}），**刻意不投影预扣额**：
      * 落实「任何用户可见界面永远只出现一个金额」。未结算行（{@code status=pending}）
      * 的 {@code amount} 是预扣时算出的**预计消耗**，结算后同一行变成实际消耗——
      * 两个数先后占同一个字段，见 {@link TransactionView}。
+     *
+     * <p>⚠️ {@code TransactionView} 上**有** {@code reservedCredits}（管理面读它来解释
+     * 「余额为什么先降后回」），但这里**一个字都不带**：用户面契约 {@code UserTransaction}
+     * 里没有这个字段，加进去等于改一条冻结的契约，用户界面也会出现第二个金额。
+     * 与 {@code userId} 同一种处理——上游读得到、这一层不投影。
      */
     @Override
     public void listTransactions(ListTransactionsRequest request,
@@ -185,7 +195,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                 priced = billing.quote(new QuoteQuery(
                         request.getUserId(), request.getModelId(), request.getTaskType(),
                         Map.copyOf(request.getSpecs().getAttrsMap()), request.getTier(),
-                        Usage.empty(), pricedAt));
+                        Usage.empty(), pricedAt, request.getRuleSnapshot()));
                 credits = priced.credits();
             } else {
                 // 结算 / 影子对账：按真实用量逐条算再求和
@@ -195,7 +205,7 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                     PricingResult one = billing.quote(new QuoteQuery(
                             request.getUserId(), line.getModelId(), line.getTaskType(),
                             Map.copyOf(line.getSpecs().getAttrsMap()), request.getTier(),
-                            toUsage(line), pricedAt));
+                            toUsage(line), pricedAt, ruleSnapshotForLine(request, line)));
                     if (first == null) first = one;
                     total += one.credits();
                 }
@@ -226,6 +236,26 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
     }
 
     /**
+     * 多行用量时，这一行该不该套用请求头部的规则快照。
+     *
+     * <p>快照是**请求头部那一对 (modelId, taskType)** 的规则体（见 proto：字段在
+     * {@code QuoteRequest} 上，不在 {@code UsageLine} 上）。多行用量里若出现别的模型，
+     * 拿 A 的规则去算 B 的价会算出一个「看起来合理」的错数，且没有任何信号——
+     * 所以只在行与请求头部同键时套用；其余行拿不到快照，**会被拒**（算不出价），
+     * 而不是被算成 0 或按别的规则算。
+     *
+     * <p>⚠️ 实际调用方（backend）发多行用量时（结算 / 影子对账）每条用量行都属于同一个 job、
+     * 因而是同一个 (model, taskType)，本判断不会触发出拒单；
+     * 它是为「将来一次请求里出现多个模型」留的护栏——那时调用方要逐行发 Quote。
+     */
+    private static String ruleSnapshotForLine(QuoteRequest request,
+                                              com.bluewhale.contracts.billing.v1.UsageLine line) {
+        boolean sameKey = line.getModelId().equals(request.getModelId())
+                && line.getTaskType().equals(request.getTaskType());
+        return sameKey ? request.getRuleSnapshot() : "";
+    }
+
+    /**
      * 异常 → gRPC status。
      *
      * <p>判断顺序从具体到宽泛：{@link InsufficientCreditsException} 是
@@ -240,7 +270,12 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         }
         if (e instanceof PricingEngine.RuleNotFoundException
                 || e instanceof BasePriceResolver.UnpriceableSpecException
-                || e instanceof Usage.ContractQuantityUnavailableException) {
+                || e instanceof Usage.ContractQuantityUnavailableException
+                // 请求带来的规则快照编不过（能力行里那条规则坏了）：与「规则漏配」同一立场——
+                // **不能当作免费放行**，要拒绝提交并让运维去修那条规则。
+                // 这是第二道闸门：写侧（backend 保存能力行时）拦的是「脏配置存不进去」，
+                // 这里拦的是「脏配置已经在库里了」。
+                || e instanceof CatalogCompiler.CompileException) {
             // 计价配置缺失 = 这次提交算不出价。调用方须**拒绝提交**（fail closed），
             // 不能当作免费放行。对运维是一条明确的「补配置」信号。
             return Status.INVALID_ARGUMENT

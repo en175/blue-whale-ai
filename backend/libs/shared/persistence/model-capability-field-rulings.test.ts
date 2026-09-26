@@ -189,6 +189,17 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/persistence/scene-card-generation-repo.test.ts",
   },
+  video_dimensions: {
+    consumer:
+      "backend/libs/contracts/capability-param-validation.ts（resolveOutputPixels：按 resolution+aspect_ratio 查宽高）" +
+      "经 handle-create-generation-job 的 composeInput 冻成 job.input.output_width / output_height，" +
+      "随 Hold 到 billing 的 specs 后被 TokenEstimator（server/blue-whale-billing/.../pricing/TokenEstimator.java）消费。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback:
+      "null（未配 = 不冻结宽高）；此时 billing 回落目录里那份 tokenEstimate.dimensions（过渡期双向兼容）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
 };
 
 /** 能力行里存在、但 `toFeatures` 不产出的字段：上面的枚举机制**看不见**它们，改动不会被拦。

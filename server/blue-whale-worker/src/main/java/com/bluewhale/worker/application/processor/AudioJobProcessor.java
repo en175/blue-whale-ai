@@ -180,7 +180,32 @@ public class AudioJobProcessor implements JobProcessor {
         StoredMedia stored = persistAudioData(audio.data(), audio.url(), job.user_id());
         log.info("[audio] 转存完成 jobId={} storageKey={} size={}", job.id(), stored.storageKey(), stored.size());
 
-        // 7. createAsset（generation-worker.ts:412-425）
+        // 7. 产出音频的真实时长 —— **两个落点共用这一个数，不许各自算一遍**
+        //
+        //    · assets.duration_ms：产物的属性（毫秒），播放/展示用
+        //    · 结算用量 usage.seconds：音频按秒计价的**权威量**（火山官方口径
+        //      「按模型原始输出时长计费、精确至秒折算」）
+        //
+        // ⚠️ 为什么结算侧必须拿到它：音频的定价规则以 usage.seconds 为基准维度，
+        //    而 billing 有一条基准维度守卫——**没报就是拒绝计价**（MQ 重投 → 死信 → 红灯），
+        //    那笔预扣会一直冻着等人处理。所以这里不是「有就带上」的可选项，
+        //    是这条路径的必交作业；真取不到时下面的 WARN 就是唯一的信号。
+        Long audioSeconds = null;
+        Integer durationMs = null;
+        if (audio.duration() != null && audio.duration() > 0) {
+            // 向上兜到 1 秒：Math.round 对 <0.5s 会给出 0，而 0 秒会被 billing 当成
+            // 「报过、且真的是 0 秒」→ 白送一次。产物既然存在，它至少值 1 秒。
+            audioSeconds = Math.max(1L, Math.round(audio.duration()));
+            durationMs = (int) Math.round(audio.duration() * 1000);
+        } else {
+            // 上游没回 duration。不是崩溃，但**必须吵**：这次结算会被 billing 拒绝，
+            // 结果是「用户的钱冻着 + 一条死信」。把 jobId 打出来，人工用
+            // billing 的 POST /admin/jobs/{id}/settle 兜底（见 JobSettlementPublisher 类注释）。
+            log.warn("[audio] 上游未返回 duration，结算将缺少 usage.seconds 而被拒：jobId={} —— "
+                    + "可用 billing 的 POST /admin/jobs/{id}/settle 人工补", job.id());
+        }
+
+        // 8. createAsset（generation-worker.ts:412-425）
         String assetId = stateMachine.createAsset(new JobStateMachineService.CreateAssetInput(
                 job.user_id(),
                 job.project_id(),
@@ -193,7 +218,7 @@ public class AudioJobProcessor implements JobProcessor {
                 stored.md5(),
                 null, // width
                 null, // height
-                audio.duration() != null ? (int) Math.round(audio.duration() * 1000) : null,
+                durationMs,
                 workerId,
                 job.fencingToken()
         ));
@@ -202,9 +227,9 @@ public class AudioJobProcessor implements JobProcessor {
             return; // 守卫失败 → 退出
         }
 
-        // 8. completeJob（generation-worker.ts:445 finishJob）
+        // 9. completeJob（generation-worker.ts:445 finishJob）—— 带上按秒计价的权威量
         boolean completed = stateMachine.completeJob(
-                job.id(), List.of(assetId), workerId, job.fencingToken());
+                job.id(), List.of(assetId), workerId, job.fencingToken(), audioSeconds);
         if (completed) {
             log.info("[audio] 发布成功 jobId={} assetId={}", job.id(), assetId);
             stateMachine.appendLog(job.id(), "succeeded", "succeeded",

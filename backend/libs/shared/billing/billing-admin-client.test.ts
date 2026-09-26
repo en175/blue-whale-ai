@@ -119,7 +119,6 @@ describe("billing-admin-client", () => {
     const calls = stub({
       catalogVersion: 3,
       documentHash: "abc",
-      ruleCount: 1,
       creditsPerYuan: 15,
       document: '{"schemaVersion":1}',
     });
@@ -127,7 +126,6 @@ describe("billing-admin-client", () => {
     await expect(fetchActiveCatalog()).resolves.toEqual({
       catalogVersion: 3,
       documentHash: "abc",
-      ruleCount: 1,
       creditsPerYuan: 15,
       document: '{"schemaVersion":1}',
     });
@@ -140,7 +138,6 @@ describe("billing-admin-client", () => {
     await expect(fetchActiveCatalog()).resolves.toEqual({
       catalogVersion: -1,
       documentHash: "",
-      ruleCount: 0,
       creditsPerYuan: -1,
       document: "",
     });
@@ -152,7 +149,6 @@ describe("billing-admin-client", () => {
     const calls = stub({
       catalogVersion: 4,
       documentHash: "def",
-      ruleCount: 1,
       creditsPerYuan: 15,
     });
 
@@ -162,7 +158,6 @@ describe("billing-admin-client", () => {
     ).resolves.toEqual({
       catalogVersion: 4,
       documentHash: "def",
-      ruleCount: 1,
       creditsPerYuan: 15,
     });
 

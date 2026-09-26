@@ -50,9 +50,18 @@ public enum UsageDim {
      * （{@code references}），数组进不了 specs，所以 {@code billing-specs.ts} 在提取规格时
      * 把它的**长度**写成一个标量键——Hold 与 Quote 共用那一份归一，两边取到同一个数。
      *
-     * <p>⚠️ 只统计 {@code references} 这一个数组：走旧分字段路径提交的参考素材（视频的
-     * {@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段、图片的
-     * {@code input_asset_ids}）冻结的是别的规格键，不在这个数里 —— 那些路径下本维度为 0。
+     * <p>⚠️ **取哪个数组按媒介**（口径三处逐条相同：{@code billing-specs.ts} 的
+     * {@code referenceList}、{@code SettlementUsageLines.referenceList}、这里）：
+     * <ul>
+     *   <li><b>图片</b>：{@code input.input_asset_ids}（{@code imageStrategy.composeInput}
+     *       把参考图统一落这个键，图片**从不写** {@code references}）</li>
+     *   <li><b>视频 / 音频</b>：{@code input.references}。走旧分字段路径
+     *       （{@code reference_asset_ids} / {@code reference_materials} / 首尾帧字段）时
+     *       那个数组整键缺失 ⇒ 本维度为 0 —— 这是**刻意**的，放开会把老客户端的单子
+     *       突然算上参考费</li>
+     * </ul>
+     * 改造前只认 {@code references}，于是**图片单的本维度恒为 0** —— 而 Seedream 5.0 Pro
+     * 的参考图按张收费，那个 0 会让加价永远不生效。
      */
     REFERENCE_COUNT("usage.referenceCount", new ContractSource.SpecKey("reference_count")),
 
@@ -71,7 +80,7 @@ public enum UsageDim {
      * 所以共用本维度，而不是为视频另开一个键（{@code usage.proto} 已冻结，不动）。
      *
      * <p>契约量来源是 {@link ContractSource.Estimated}：提交时刻 specs 里**没有** token 键，
-     * 只能按目录里登记的官方公式估一个上限（{@link TokenEstimator}）。
+     * 只能按规则里登记的官方公式估一个上限（{@link TokenEstimator}）。
      * 结算仍用 worker 上报的上游真值——**估算只服务预扣**。
      */
     COMPLETION_TOKENS("usage.c", new ContractSource.Estimated()),
@@ -106,7 +115,7 @@ public enum UsageDim {
     /**
      * 提交时刻本维度**契约量**的来源；{@code null} = 提交时刻结构性取不到。
      *
-     * <p>两种来源（直读规格键 / 按目录参数估算）见 {@link ContractSource}。
+     * <p>两种来源（直读规格键 / 按规则参数估算）见 {@link ContractSource}。
      * ⚠️ 与 {@code null} 的区别不是「有没有值」，而是「有没有来源」——
      * 直读可能这次的值不在 specs 里（{@code duration=-1} 的自动时长），
      * 估算也可能这次推不出来（档位 + 比例没配）。这两种都**有**来源，

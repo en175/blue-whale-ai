@@ -48,12 +48,14 @@ import {
   Card,
   Empty,
   Field,
+  Hint,
   Input,
   Modal,
   Page,
   PageHeader,
   Select,
   Table,
+  formGrid,
 } from '../../ui';
 
 /** 表单状态：数字与折都存**文字**，提交时才解析成整数。 */
@@ -172,7 +174,23 @@ export default function MemberDiscounts() {
   return (
     <Page>
       <PageHeader
-        title="会员折扣"
+        title={
+          <>
+            会员折扣{' '}
+            <Hint title="这一页的两条规矩">
+              <div>
+                <b>改折扣不影响已提交未结算的任务。</b>
+                任务提交时会把当时命中的折扣冻结进预留行，结算按冻结的那个系数复现，不会重新读这张表
+                —— 所以「刚把 pro 改成 8 折，怎么那笔还按 9 折算」的答案，是那笔在改动之前就提交了。
+              </div>
+              <div>
+                <b>同一等级命中多条时取最优惠，不叠加。</b>
+                一个等级可以配多条（例如「所有模型 9 折」+「seedance 系 8 折」），
+                命中多条时取折扣最大的那一条；「优先级」只影响这一页的显示顺序，不参与优惠比较。
+              </div>
+            </Hint>
+          </>
+        }
         subtitle="按会员等级配置长期折扣；保存即生效（下次预扣就命中）"
         extra={
           <>
@@ -197,18 +215,9 @@ export default function MemberDiscounts() {
       {actionError && <Alert tone="danger">{actionError}</Alert>}
       {saved && <Alert tone="success">{saved}</Alert>}
 
-      {/* ⚠️ 这是这一页最容易被误解的地方，所以放在最上面而不是藏进说明文档 */}
-      <Alert tone="info" title="改折扣不影响已提交未结算的任务">
-        任务提交时会把<b>当时命中的折扣</b>冻结进预留行，结算按冻结的那个系数复现，不会重新读这张表。
-        所以「刚把 pro 改成 8 折，怎么那笔还按 9 折算」的答案是：那笔在改动之前就提交了。
-        改动只对<b>之后</b>提交的任务生效。
-      </Alert>
-
-      <Alert tone="info" title="同一等级命中多条时取最优惠，不叠加">
-        一个等级可以配多条（例如「所有模型 9 折」+「seedance 系 8 折」），命中多条时取折扣最大的那一条。
-        「优先级」只影响这一页的显示顺序，不参与优惠比较。
-      </Alert>
-
+      {/* 两条页面级规矩收在标题旁的一个 ? 里。
+          ⚠️ 之前它们是两个**独立成行**的 ?，悬在标题下方各占一行 —— 图标没有锚点，
+          读者根本不知道它在说哪一块。说明挂在它说明的东西旁边，不是排在页面里。 */}
       <DiscountPolicyNotice />
 
       <Card padded={false}>
@@ -266,7 +275,7 @@ export default function MemberDiscounts() {
                 <td>{row.taskPattern}</td>
                 <td>
                   <b>{formatDiscount(row.discountBp)}</b>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>万分比 {row.discountBp}</div>
+                  <div style={{ fontSize: 'var(--admin-font-xs)', }}>万分比 {row.discountBp}</div>
                 </td>
                 <td>{row.priority}</td>
                 <td>
@@ -382,7 +391,7 @@ function DiscountEditorModal({
     >
       {error && <Alert tone="danger">{error}</Alert>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px' }}>
+      <div style={formGrid(2)}>
         <Field label="会员等级" hint="认不出的等级会被当成免费用户 —— 所以这里只能选，不能填">
           <Select
             aria-label="会员等级"

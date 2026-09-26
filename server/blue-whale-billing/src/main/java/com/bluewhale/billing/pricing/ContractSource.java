@@ -8,7 +8,7 @@ package com.bluewhale.billing.pricing;
  *
  * <ul>
  *   <li>{@link SpecKey}：值就在规格快照里（张数 / 时长 / 参考素材数）——**直读**。</li>
- *   <li>{@link Estimated}：规格里**没有这个键**，但按目录登记的估算参数能从别的规格推出来
+ *   <li>{@link Estimated}：规格里**没有这个键**，但按规则登记的估算参数能从别的规格推出来
  *       （视频 token：上游返回真值，提交时刻只能按官方公式估详见 {@link TokenEstimator}）。</li>
  * </ul>
  *

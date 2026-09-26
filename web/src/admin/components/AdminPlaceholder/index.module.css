@@ -3,7 +3,7 @@
  * ============================================ */
 .title {
   margin: 0;
-  font-size: var(--font-size-xl);
+  font-size: var(--admin-font-lg);
   font-weight: 700;
   color: var(--admin-text);
 }
@@ -11,7 +11,7 @@
 .subtitle {
   margin: 10px 0 0;
   color: var(--admin-text-muted);
-  font-size: var(--font-size-md);
+  font-size: var(--admin-font-sm);
 }
 
 .box {
@@ -19,8 +19,8 @@
   padding: 100px 0;
   text-align: center;
   color: var(--admin-text-faint);
-  font-size: var(--font-size-md);
+  font-size: var(--admin-font-sm);
   background-color: var(--admin-surface);
   border: 1px dashed var(--admin-border);
-  border-radius: 12px;
+  border-radius: var(--admin-radius-surface);
 }

@@ -9,12 +9,8 @@ import java.util.List;
  *
  * <h2>为什么只有一个金额</h2>
  *
- * ⚠️ 本类型**刻意不含预扣额字段**——落实「任何用户可见界面永远只出现一个金额」
- * （《计费逻辑详细设计》§2.3.1）。预扣与实际的差额、分配了哪些批次，
- * 只对客服/运营后台可见（{@code billing_cost_reservations} 不暴露给用户端）。
- *
- * <p>于是未结算的行该怎么显示，只有一种合法写法：{@code amount} 放**那一行要展示的
- * 唯一金额**，由 {@code status} 表达它是不是最终值：
+ * ⚠️ 用户可见界面**永远只出现一个金额**（《计费逻辑详细设计》§2.3.1）：{@code amount}
+ * 放**那一行要展示的唯一金额**，由 {@code status} 表达它是不是最终值：
  * <ul>
  *   <li>{@code pending} —— 该任务是「处理中」，{@code amount} 是预扣时按契约用量
  *       算出的**预计消耗**，与用户当时在提交界面看到的数一致</li>
@@ -23,6 +19,18 @@ import java.util.List;
  * 这正是《计费逻辑详细设计》§2.3 的原文口径：「用户只看到一行『处理中 · 预计消耗 40』
  * 变成『已完成 · 消耗 30』」（同见 {@code CreditService} / {@code Reservation} 的类注释）。
  * 两个数**不会同时出现**——它们先后占同一个字段。
+ *
+ * <h2>那 {@code reservedCredits} 算什么</h2>
+ *
+ * <p>它是**管理面独用**的一列：预扣与实际之间的差额、以及分配了哪些批次，只对客服/运营
+ * 后台可见（{@code billing_cost_reservations} 不暴露给用户端）。用户面契约
+ * {@code UserTransaction} 里**没有**这个字段，{@link com.bluewhale.billing.api.grpc.BillingGrpcService}
+ * **刻意不投影它**——与 {@code userId} 完全同一种处理，所以「用户界面只出现一个金额」
+ * 这条硬规则由适配器守住，而不是靠上游少读一列。
+ *
+ * <p>为什么管理端非要这一列：结算后 {@code amount} 换成了实际值，预扣额就再也无处可读。
+ * 用户看到余额先降 12、后回来 11，流水上只有一行「-1」——没有这一列就没人交代得了
+ * 那 11 的来回（实测任务 1943：冻 12、实扣 1）。
  *
  * @param id        流水 id（{@code lot:} / {@code res:} / {@code led:} 前缀 + 该来源的主键）。
  *                  前缀不是装饰：三类来源的 id 各自独立自增，不带前缀就会撞
@@ -34,6 +42,9 @@ import java.util.List;
  * @param direction {@code in}（进账）| {@code out}（出账）——由 {@code TransactionMapper.xml} 判定
  * @param title     展示文案快照（消费行是提交时的任务标题；发放类由来源决定）
  * @param amount    整数积分，**该行唯一的金额**（语义随 status，见上）
+ * @param reservedCredits 该行预留当初冻了多少（整数积分，恒正）；**只有消费行有值**，
+ *                  发放行与账本行为 {@code null}（不是 0——0 是「冻了 0 分」）。
+ *                  只读不参与任何计算：它不改变 amount，也不参与结算
  * @param status    {@code pending} | {@code done}
  * @param createdAt 记账/提交时刻
  * @param settledAt 结算时刻；未结算（{@code pending}）为 null
@@ -45,6 +56,7 @@ public record TransactionView(
         String direction,
         String title,
         long amount,
+        Long reservedCredits,
         String status,
         Instant createdAt,
         Instant settledAt

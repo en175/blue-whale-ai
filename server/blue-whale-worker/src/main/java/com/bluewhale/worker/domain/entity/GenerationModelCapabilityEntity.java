@@ -53,9 +53,14 @@ public class GenerationModelCapabilityEntity {
     /** 特性 JSON（含 imageReferenceMax / image_reference_max） */
     private String features; // JSON
 
-    @TableField("channel_parser")
-    /** 渠道解析器（seedream / gpt / banana；缺省 seedream，asset-ops.ts:143） */
-    private String channelParser;
+    @TableField("capability_type")
+    /** 媒介（image / video / text / audio）。渠道列为 NULL 时的回落口径要看它。 */
+    private String capabilityType;
+
+    @TableField("channel")
+    /** 渠道（`<家族>-<媒介>[-<协议>]`，封闭枚举，见 {@link com.bluewhale.worker.application.processor.ImageChannel}）。
+     *  取值认不出时按媒介回落，见 ImageChannelMapper.parseChannel。 */
+    private String channel;
 
     @TableField("request_mapping")
     /** 请求映射 JSON（gpt: {matrix}; banana: {quality, size}） */
@@ -96,8 +101,10 @@ public class GenerationModelCapabilityEntity {
     public void setSupportedSizes(String supportedSizes) { this.supportedSizes = supportedSizes; }
     public String getFeatures() { return features; }
     public void setFeatures(String features) { this.features = features; }
-    public String getChannelParser() { return channelParser; }
-    public void setChannelParser(String channelParser) { this.channelParser = channelParser; }
+    public String getCapabilityType() { return capabilityType; }
+    public void setCapabilityType(String capabilityType) { this.capabilityType = capabilityType; }
+    public String getChannel() { return channel; }
+    public void setChannel(String channel) { this.channel = channel; }
     public String getRequestMapping() { return requestMapping; }
     public void setRequestMapping(String requestMapping) { this.requestMapping = requestMapping; }
     public String getDefaultSize() { return defaultSize; }

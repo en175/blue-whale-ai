@@ -71,6 +71,11 @@ export class AdminConsumptionRecordsController {
             direction: item.direction,
             title: item.title,
             credits: item.amount,
+            // 该行当初冻了多少（**只有消费行有**；发放 / 账本行是 null）。
+            // ⚠️ 显式 `?? null` 而不是透传：billing 若哪天不回这个键，前端会拿到
+            //    `undefined`，而 `undefined == null` 为真、`undefined !== null` 也为真——
+            //    让契约里只有一种「没有」，界面才不需要判两种空。
+            reserved_credits: item.reservedCredits ?? null,
             status: item.status,
             created_at: item.createdAt,
             settled_at: item.settledAt,
