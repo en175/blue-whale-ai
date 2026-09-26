@@ -748,7 +748,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1050 轮询超时，文案不变不写 http_status（无 cause 不推断，IKIN6X）")
     void pollTransientErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -757,13 +757,20 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键；
+        // 本族预算耗尽文案不附上游摘要，与 processing 超限同文案
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
+                eq("智能抠像轮询超时（超过 " + VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS + " 次）"),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1050 + details.http_status=429，文案与原文案完全一致（IKIN6X）")
     void pollTransientServerErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         VideoMattingError rateLimited = new VideoMattingError(
@@ -773,7 +780,19 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：本族文案不附上游摘要——
+        // message 与原文案完全一致，仅 details 多出 http_status
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue())
+                .isEqualTo("智能抠像轮询超时（超过 " + VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS + " 次）")
+                .doesNotContain("429");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 429);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

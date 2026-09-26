@@ -263,9 +263,17 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_VIDEO_ENHANCE_POLLS) {
                     log.warn("[video_enhance] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段（上游原因保留），无 cause 不写键。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "画质增强轮询超时（超过 " + MAX_VIDEO_ENHANCE_POLLS
+                            + " 次），上游持续错误: " + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
                     failClaimed(claim, VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED,
-                            "画质增强轮询超时（超过 " + MAX_VIDEO_ENHANCE_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                            message, httpStatus);
                     return;
                 }
                 log.warn("[video_enhance] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",

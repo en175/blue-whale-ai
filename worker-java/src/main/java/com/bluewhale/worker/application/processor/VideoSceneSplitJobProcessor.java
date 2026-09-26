@@ -286,9 +286,17 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_SCENE_SPLIT_POLLS) {
                     log.warn("[video_scene_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段（上游原因保留），无 cause 不写键。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS
+                            + " 次），上游持续错误: " + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
                     failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
-                            "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                            message, httpStatus);
                     return;
                 }
                 log.warn("[video_scene_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
@@ -543,8 +551,9 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
     /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
      *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
-     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）与轮询预算耗尽路径
-     *  （语义是预算耗尽，走三参重载）不写该键。 */
+     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
+     *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
+     *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
     private void failClaimed(ClaimedVideoSceneSplitJobDto claim, String code, String msg,
                              Integer httpStatus) {
         log.warn("video_scene_split job 失败 jobId={} code={} message={}", claim.id(), code, msg);
