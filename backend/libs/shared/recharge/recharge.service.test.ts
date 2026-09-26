@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  freshGrpcUrl,
+  grpcActiveCatalog,
+  grpcStubTransport,
+} from "@lib/shared/billing/billing-admin-grpc-stub.testlib.js";
+import {
   SYSTEM_SETTINGS_SECRET_ENV,
   SystemSettingsService,
 } from "@lib/shared/system-settings/index.js";
@@ -11,7 +16,19 @@ import { deriveCredits, RechargeService } from "./recharge.service.js";
  *
  * 用内存假 Prisma 而不是 vi.fn 桩：条件更新（`status != paid`、查单名额）正是幂等的实现本身，
  * 桩掉它等于把要测的东西测没。
+ *
+ * ⚠️ 换算率（`fetchCreditsPerYuan`）读的是**定价目录的 gRPC 接口**，不再是 HTTP ——
+ *    所以它由 `grpcActiveCatalog()` 桩，HTTP 那套只剩发放（`grantCredits` 尚未迁）。
  * ============================================ */
+
+// 只做转发，「装哪个 router」在 billing-admin-grpc-stub.testlib.ts 里（三个测试文件同一套）。
+vi.mock("@connectrpc/connect-node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@connectrpc/connect-node")>();
+  return {
+    ...actual,
+    createGrpcTransport: () => grpcStubTransport(),
+  };
+});
 
 const APP_SECRET = "s3cret";
 const NOTIFY_URL = "https://api.example.com/api/recharge/notify/pay";
@@ -101,20 +118,16 @@ function makePrisma() {
   return { prisma, orders };
 }
 
-/** 网关 + billing 管理端的 HTTP 桩，按 URL 分流并记录调用。 */
+/** 网关 + 发放（HTTP）的桩，按 URL 分流并记录调用。目录与余额都走 gRPC，不在这里。 */
 function makeHttp(gatewayState = 1) {
   const granted: { amount: number; bizId: string }[] = [];
   const calls: { url: string; body: Record<string, unknown> }[] = [];
-  let creditsPerYuan = 15;
 
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = String(url);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     calls.push({ url: target, body });
 
-    if (target.endsWith("/admin/catalogs/active")) {
-      return json({ catalogVersion: 1, creditsPerYuan });
-    }
     if (target.endsWith("/admin/credits/grants")) {
       const bizId = String(body.bizId);
       if (granted.some((g) => g.bizId === bizId)) {
@@ -149,9 +162,6 @@ function makeHttp(gatewayState = 1) {
   return {
     granted,
     calls,
-    setCreditsPerYuan: (v: number) => {
-      creditsPerYuan = v;
-    },
     setGatewayState: (v: number) => {
       gatewayState = v;
     },
@@ -224,6 +234,7 @@ describe("RechargeService — 下单", () => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
     vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -232,6 +243,7 @@ describe("RechargeService — 下单", () => {
 
   it("金额单位是分、积分按原价×换算率冻结，收银台链接原样返回", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
 
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
@@ -256,13 +268,14 @@ describe("RechargeService — 下单", () => {
   });
 
   it("换算率改成 20 后：新档位展示跟着变，已下订单仍按冻结的 15 发", async () => {
-    const http = makeHttp();
+    makeHttp();
+    const catalog = grpcActiveCatalog();
     const { service, orders } = await makeService();
 
     const before = await service.createOrder({ userId: 9001, tierId: TIER.id });
     expect(before.credits).toBe(1500);
 
-    http.setCreditsPerYuan(20);
+    catalog.setCreditsPerYuan(20);
     expect((await service.listTiers()).tiers[0]?.amount).toBe(2000);
     expect((await service.listTiers()).creditsPerYuan).toBe(20);
 
@@ -273,6 +286,7 @@ describe("RechargeService — 下单", () => {
 
   it("档位下架 → 拒绝下单", async () => {
     makeHttp();
+    grpcActiveCatalog();
     const { prisma } = makePrisma();
     const settings = new SystemSettingsService({ client: prisma } as never);
     await settings.update({
@@ -294,6 +308,7 @@ describe("RechargeService — 下单", () => {
 
   it("商户凭证没配全 → 拒绝下单，不带着半份配置去调用网关", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { prisma } = makePrisma();
     const settings = new SystemSettingsService({ client: prisma } as never);
     await settings.update({
@@ -317,6 +332,7 @@ describe("RechargeService — 回调到账", () => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
     vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -325,6 +341,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("首次回调：发放积分并置为 paid", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
@@ -339,6 +356,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("重复回调（网关重投）：积分只发一次，且仍应答 SUCCESS", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     const params = await signed(notifyParams(created.tradeNo));
@@ -357,6 +375,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("回调金额与订单不符：不发放、不应答 SUCCESS（让网关重投并留痕）", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
@@ -369,6 +388,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("验签失败：不发放、不应答 SUCCESS", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
@@ -387,6 +407,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("非终态通知：不应答 SUCCESS（契约说只通知终态，来了就是异常）", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     const params = await signed(notifyParams(created.tradeNo, { state: "1" }));
@@ -396,6 +417,7 @@ describe("RechargeService — 回调到账", () => {
 
   it("渠道不符 / 支付方式不符：拒绝（这条通道只认杭州银行）", async () => {
     const http = makeHttp();
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
@@ -410,17 +432,19 @@ describe("RechargeService — 回调到账", () => {
 
   it("发放失败（billing 不可用）：不应答 SUCCESS，但订单不置 paid", async () => {
     makeHttp();
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
-    // 换掉 fetch：发放接口 500，其余照常
+    // 换掉 fetch：发放接口 500。目录与余额都走 gRPC，不经过这里 —— 所以除了发放
+    // 之外的请求一律抛，避免把「多打了一个 HTTP」当成通过
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
         if (String(url).endsWith("/admin/credits/grants")) {
           return new Response("boom", { status: 500 });
         }
-        return json({ catalogVersion: 1, creditsPerYuan: 15 });
+        throw new Error(`未预期的请求：${String(url)}`);
       }),
     );
 
@@ -434,7 +458,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
     vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
-    vi.stubEnv("BILLING_GRPC_URL", "http://billing.invalid:4004");
+    freshGrpcUrl();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -443,10 +467,11 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
   it("网关侧已支付而回调丢了 → 用户查单时补发积分", async () => {
     const http = makeHttp(2); // 网关查单返回「支付成功」
+    // 只装目录（下单要换算率），**不装**查余额那条：余额查不到不该让查单整体失败
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
-    // 余额查不到（这里没有 gRPC 服务）不该让查单整体失败，只影响 credits_after
     const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
 
     expect(state.status).toBe("paid");
@@ -457,6 +482,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
   it("查单补偿有限流：同一笔订单 30 秒内不重复问网关", async () => {
     const http = makeHttp(1);
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
@@ -470,6 +496,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
   it("令牌过期且网关未成功 → 置过期（给用户明确终态，不让轮询一直转）", async () => {
     makeHttp(1); // 网关侧仍是「支付中」
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     // 把建单时间拨到 31 分钟前（银行收银台令牌已失效）
@@ -483,6 +510,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
   it("网关说成功时，即使本地已过令牌期也以到账为准（钱比时钟权威）", async () => {
     const http = makeHttp(2);
+    grpcActiveCatalog();
     const { service, orders } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     orders.get(created.tradeNo)!.gmt_create = new Date(Date.now() - 31 * 60 * 1000);
@@ -495,6 +523,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
   it("别人的订单当作不存在：不泄漏「这个单号存在」", async () => {
     makeHttp();
+    grpcActiveCatalog();
     const { service } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     await expect(

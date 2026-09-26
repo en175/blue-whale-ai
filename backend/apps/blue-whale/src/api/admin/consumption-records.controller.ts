@@ -23,9 +23,13 @@ function parsePageSize(raw: string | undefined): number {
  *
  * <p>⚠️ **没有复用用户面那条 gRPC `ListTransactions`**：它的契约里 `user_id` 必填，
  *    语义是「把我的账给我」。管理端要的是「某个人的 / 所有人一起看」——
- *    给用户面契约加「userId 可不填」等于给每个持 token 的调用者开了拉全站流水的口子。
- *    所以消费记录的**管理面是 billing 新增的一条 HTTP**（`GET /admin/transactions`），
- *    `contracts/proto/` 一个字没动。本控制器是它的 BFF。
+ *    给**用户面契约**加「userId 可不填」等于给每个持 token 的调用者开了拉全站流水的口子。
+ *    所以在 proto 里另开了**独立的一条服务**（`BillingAdminService`），用户面那条一个字没动。
+ *    本控制器是它的 BFF。
+ *
+ * <p>（这段论证曾经用来支持「管理面是 billing 新增的一条 HTTP」。它反驳的是**复用用户面
+ *    那条 rpc**，不是「用 gRPC」—— 独立服务同样满足它，还免掉两套协议。2026-09-26 迁到
+ *    gRPC 时把这段留在 proto 与这里，防止后来的人照着旧结论回滚。）
  *
  * <p>⚠️ **分页是游标、没有总数**（账本持续追加，要准确总数就得扫全表，而扫完那一刻
  *    它又变了）。所以这里**不返回 total**，前端也只能给「上一页/下一页」。

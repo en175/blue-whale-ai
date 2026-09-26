@@ -1,4 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import {
+  AdminListTransactionsResponseSchema,
+  AdminTransactionItemSchema,
+} from "../../contracts/gen/billing/v1/billing_pb.js";
+import {
+  freshGrpcUrl,
+  grpcActiveCatalog,
+  grpcAdminService,
+  grpcStubTransport,
+} from "./billing-admin-grpc-stub.testlib.js";
 import {
   BillingAdminConfigError,
   BillingAdminError,
@@ -12,6 +23,7 @@ import {
   fetchActiveCatalog,
   fetchCreditsPerYuan,
   grantCredits,
+  listAdminTransactions,
   listMemberDiscounts,
   listPromotions,
   publishCatalog,
@@ -40,6 +52,17 @@ function stub(body: unknown, status = 200) {
   );
   return calls;
 }
+
+/* ---------- gRPC 侧：内存 transport ---------- */
+
+// 只做转发，「装哪个 router」在 billing-admin-grpc-stub.testlib.ts 里（三个测试文件同一套）。
+vi.mock("@connectrpc/connect-node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@connectrpc/connect-node")>();
+  return {
+    ...actual,
+    createGrpcTransport: () => grpcStubTransport(),
+  };
+});
 
 /** 一个完整的活动写请求体：PUT 是整条覆盖，每一列都要给。 */
 const PROMOTION_INPUT = {
@@ -74,12 +97,14 @@ describe("billing-admin-client", () => {
   });
 
   it("换算率从定价目录读，不是代码常量", async () => {
-    stub({ catalogVersion: 3, creditsPerYuan: 15 });
+    freshGrpcUrl();
+    grpcActiveCatalog({ version: 3, creditsPerYuan: 15 });
     await expect(fetchCreditsPerYuan()).resolves.toBe(15);
   });
 
   it("没有生效目录（version=-1 / creditsPerYuan=-1）→ 抛，不回退默认值", async () => {
-    stub({ catalogVersion: -1, creditsPerYuan: -1 });
+    freshGrpcUrl();
+    grpcActiveCatalog({ version: -1, creditsPerYuan: -1 });
     await expect(fetchCreditsPerYuan()).rejects.toThrow(BillingAdminConfigError);
   });
 
@@ -116,24 +141,28 @@ describe("billing-admin-client", () => {
   /* ---------- 定价目录：读 / 发布 ---------- */
 
   it("读当前目录：连文档原文一起带回来（管理端页面的编辑起点）", async () => {
-    const calls = stub({
-      catalogVersion: 3,
+    freshGrpcUrl();
+    grpcActiveCatalog({
+      version: 3,
       documentHash: "abc",
       creditsPerYuan: 15,
-      document: '{"schemaVersion":1}',
+      documentJson: '{"schemaVersion":1}',
     });
 
+    // 逐字段对：proto 侧的名字（version / documentJson / documentHash / creditsPerYuan）
+    // 与这里返回的 HTTP 时代命名（catalogVersion / document）**不一样**，
+    // 映射错了管理端就会拿到一个「看着对但读不到」的目录
     await expect(fetchActiveCatalog()).resolves.toEqual({
       catalogVersion: 3,
       documentHash: "abc",
       creditsPerYuan: 15,
       document: '{"schemaVersion":1}',
     });
-    expect(calls[0]?.url).toBe("http://billing.internal:4003/admin/catalogs/active");
   });
 
   it("读当前目录：没有生效版本时不抛（管理端要能显示「还没发布过」并从零建一份）", async () => {
-    stub({ catalogVersion: -1, creditsPerYuan: -1 });
+    freshGrpcUrl();
+    grpcActiveCatalog({ version: -1, creditsPerYuan: -1 });
 
     await expect(fetchActiveCatalog()).resolves.toEqual({
       catalogVersion: -1,
@@ -141,8 +170,70 @@ describe("billing-admin-client", () => {
       creditsPerYuan: -1,
       document: "",
     });
-    // 同一端点，充值那条路径仍然必须抛 —— 换算率取不到就不该给用户报价
+    // 同一份数据，充值那条路径仍然必须抛 —— 换算率取不到就不该给用户报价
     await expect(fetchCreditsPerYuan()).rejects.toThrow(BillingAdminConfigError);
+  });
+
+  /* ---------- 流水：presence 与全站哨兵 ---------- */
+
+  it("流水：预扣额没设 → null（**不是 0，也不是 undefined**）", async () => {
+    // ⚠️ 这条钉的是 2026-09-26 那次整页白屏的根：
+    //    proto3 `optional` 没设 ⇒ protobuf-es 给 `undefined`，而本文件的契约是 `null`。
+    //    不收敛成一种形态，前端 `!== null` 就会把「没有预扣」当成「有值」渲染。
+    //    `0n` 与「没设」在**这条路上**必须能分开：0 是「冻了 0 分」。
+    freshGrpcUrl();
+    grpcAdminService({
+      adminListTransactions: () =>
+        create(AdminListTransactionsResponseSchema, {
+          items: [
+            // 发放行：**不设** reservedCredits
+            create(AdminTransactionItemSchema, {
+              id: "lot:1",
+              userId: 7n,
+              type: "gift",
+              direction: "in",
+              title: "运营赠送",
+              amount: 100n,
+              status: "done",
+              createdAt: "2026-09-26T10:00:00+08:00",
+            }),
+            // 消费行：设了预扣额
+            create(AdminTransactionItemSchema, {
+              id: "res:9",
+              userId: 7n,
+              type: "consume",
+              direction: "out",
+              title: "生成消费",
+              amount: 30n,
+              reservedCredits: 100n,
+              status: "done",
+              createdAt: "2026-09-26T10:01:00+08:00",
+            }),
+          ],
+        }),
+    });
+
+    const page = await listAdminTransactions({ pageSize: 50 });
+
+    expect(page.items[0]?.reservedCredits).toBeNull();
+    expect(page.items[1]?.reservedCredits).toBe(100);
+  });
+
+  it("流水：userId 不传 = **全站**（发的是 0 这个哨兵值，不是「用户 0」）", async () => {
+    freshGrpcUrl();
+    const seen: bigint[] = [];
+    grpcAdminService({
+      adminListTransactions: (req) => {
+        seen.push(req.userId);
+        return create(AdminListTransactionsResponseSchema, {});
+      },
+    });
+
+    await listAdminTransactions({});
+    await listAdminTransactions({ userId: 42 });
+
+    // 用户 id 从 1 起，0 占用不到 —— 服务端据此判断「不过滤」
+    expect(seen).toEqual([0n, 42n]);
   });
 
   it("发布：请求体就是文档文本本身，不包一层 {document: ...}", async () => {

@@ -1,10 +1,10 @@
 /* ============================================
- * billing 的**管理端 HTTP 面**客户端（发放积分 / 读定价目录）
+ * billing 的**管理端客户端**（发放积分 / 读定价目录 / 读流水）
  *
- * 与 `billing-client.ts` 的区别：那个走 gRPC，是**用户等待路径**（预扣、报价、查余额）；
- * 这个走 billing 的 HTTP 管理端口，做的是**改账本**（发放）与**读配置**（换算率）。
- * 两条面协议不同、端口不同、权限也不同（HTTP 管理面**没有鉴权**，只在内部网络），
- * 所以是两个客户端而不是一个。
+ * ⚠️ **协议正在迁移中，本文件此刻是两种并存**：
+ *   · **读**走 gRPC（`BillingAdminService`，与产品面同一个服务、同一个端口）
+ *   · **写**仍走 HTTP（`BILLING_ADMIN_URL`）—— 发放 / 发布目录 / 折扣 / 促销尚未迁
+ *   两者并存是**刻意的中间态**，不是遗留：迁移分两步，每一步都能独立编译、独立验证。
  *
  * ⚠️ **发放幂等靠 billing，不靠我们**：同一个 `grantKey`（= `purchased:{bizId}`）重复发放
  *    会被唯一索引拦下并返回 409。这条比「我们自己记得发过没有」强——进程重启、回调重投、
@@ -13,7 +13,17 @@
  * ⚠️ `BILLING_ADMIN_URL` 未配置即抛：发放配不出地址时若静默跳过，用户付了钱而账没进，
  *    且没有任何报错——那是直接的资金事故。
  * ============================================ */
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
 import { TRACE_ID_HEADER, getCurrentTraceId } from "@lib/core/logging";
+import {
+  AdminConsumedCreditsRequestSchema,
+  AdminGetActiveCatalogRequestSchema,
+  AdminListTransactionsRequestSchema,
+  BillingAdminService,
+} from "../../contracts/gen/billing/v1/billing_pb.js";
+import { BillingConfigError, billingEndpoint } from "./billing-client.js";
 
 export const BILLING_ADMIN_URL_ENV = "BILLING_ADMIN_URL";
 
@@ -64,6 +74,58 @@ export function billingAdminUrl(env: NodeJS.ProcessEnv = process.env): string {
   return raw.replace(/\/+$/, "");
 }
 
+/* ---------- gRPC：运营面**读**接口（BillingAdminService） ---------- */
+
+/**
+ * 运营面读接口的 gRPC 客户端。
+ *
+ * <p>与 `billing-client.ts` 的 `sharedBillingClient` **同一个地址**（`BILLING_GRPC_URL`）：
+ * billing 把 `BillingService` 与 `BillingAdminService` 挂在同一个 server 上
+ * （见 `GrpcServerConfig`），运营面单开一个端口只会多一个要配的地址。
+ *
+ * <p>按地址缓存而不是缓存「一个客户端」：本文件每个函数都收 `env`（调用方与测试靠它注入
+ * 配置），缓存单个客户端就等于让第一次调用定死地址、后面的 `env` 被静默忽略。
+ * 按解析后的地址缓存，既保住连接复用，也不吃掉那个参数。
+ */
+const adminClients = new Map<string, Client<typeof BillingAdminService>>();
+
+function adminClient(env: NodeJS.ProcessEnv): Client<typeof BillingAdminService> {
+  // billingEndpoint 未配置即抛（BillingConfigError）——与用户面同一条纪律：
+  // 没有「没有客户端」这个状态
+  const baseUrl = billingEndpoint(env);
+  let client = adminClients.get(baseUrl);
+  if (!client) {
+    client = createClient(BillingAdminService, createGrpcTransport({ baseUrl }));
+    adminClients.set(baseUrl, client);
+  }
+  return client;
+}
+
+/**
+ * gRPC 调用失败 → 本文件既有的两个错误类型。
+ *
+ * <p>⚠️ **刻意沿用 `BillingAdminError` / `BillingAdminConfigError`，而不是把 `ConnectError`
+ *    原样抛出去**：调用方（`consumption-records.controller.ts`、`dashboard` 等）已经按这两个
+ *    类型分出了 503/502。放行 ConnectError 会让它们全部落进「未知错误」分支退化成 500 ——
+ *    而 503（等 billing 恢复）与 500（去查代码）对值班的人是两句完全不同的话。
+ *
+ * <p>⚠️ **不透传 gRPC 原始文案**：那是内部地址、proto 细节。原始错误只进日志。
+ *
+ * <p>返回而不抛：调用点写成 `throw asAdminError(...)`，控制流对读代码的人才是明确的。
+ */
+function asAdminError(what: string, error: unknown): BillingAdminError | BillingAdminConfigError {
+  if (error instanceof BillingConfigError) {
+    return new BillingAdminConfigError(error.message);
+  }
+  if (error instanceof ConnectError) {
+    const unavailable = error.code === Code.Unavailable || error.code === Code.DeadlineExceeded;
+    return new BillingAdminError(
+      `billing 管理端${what}失败：${unavailable ? "服务不可用" : error.code}`,
+    );
+  }
+  return error instanceof Error ? error : new BillingAdminError(String(error));
+}
+
 /* ---------- 定价目录：读 / 发布 ---------- */
 
 /**
@@ -88,13 +150,10 @@ export interface ActiveCatalog {
   document: string;
 }
 
-/** 回包的宽容形态：对面是另一个进程，字段缺了不该在解析处炸，交给调用方按口径兜。 */
-type ActiveCatalogResponse = Partial<ActiveCatalog>;
-
 /**
  * 读当前生效的定价目录（含文档文本）。
  *
- * <p>与 {@link fetchCreditsPerYuan} 打同一个端点，区别只在**没有生效目录时怎么办**：
+ * <p>与 {@link fetchCreditsPerYuan} 打同一份数据，区别只在**没有生效目录时怎么办**：
  * 充值路径取不到换算率就必须停（报不出价就别收钱），而管理端页面要能显示
  * 「还没发布过任何目录」并让运营从零建一份 —— 所以这条**不抛**，
  * 把 `catalogVersion = -1` 原样交给调用方判断。
@@ -105,16 +164,22 @@ type ActiveCatalogResponse = Partial<ActiveCatalog>;
 export async function fetchActiveCatalog(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ActiveCatalog> {
-  const data = await request<ActiveCatalogResponse>("/admin/catalogs/active", {
-    method: "GET",
-    env,
-  });
-  return {
-    catalogVersion: data.catalogVersion ?? -1,
-    documentHash: data.documentHash ?? "",
-    creditsPerYuan: data.creditsPerYuan ?? -1,
-    document: data.document ?? "",
-  };
+  try {
+    // 四个字段与 HTTP 面逐字同口径：version/creditsPerYuan 都是 **-1 = 没有生效目录**
+    // （不是 0，也不是缺值）—— 见 `AdminGetActiveCatalogResponse` 的注释
+    const active = await adminClient(env).adminGetActiveCatalog(
+      create(AdminGetActiveCatalogRequestSchema, {}),
+    );
+    return {
+      // int64 在 protobuf-es 里是 bigint；版本号与换算率都是小整数，Number 折算无损
+      catalogVersion: Number(active.version),
+      documentHash: active.documentHash,
+      creditsPerYuan: Number(active.creditsPerYuan),
+      document: active.documentJson,
+    };
+  } catch (error) {
+    throw asAdminError("读定价目录", error);
+  }
 }
 
 /**
@@ -303,12 +368,16 @@ export interface AdminTransactionsQuery {
 }
 
 /**
- * 读全站/按用户流水（`GET /admin/transactions`）。
+ * 读全站/按用户流水（`AdminListTransactions`）。
  *
- * <p>⚠️ **不复用 gRPC 的 `ListTransactions`**：那条契约里 `user_id` 是必填的，
+ * <p>⚠️ **不复用用户面的 `ListTransactions`**：那条契约里 `user_id` 是必填的，
  *    语义是「把我的账给我」。管理端要的「某个人的 / 所有人一起看」它答不了，
- *    而给用户面契约加「userId 可不填」等于给每个持 token 的调用者开了拉全站流水的口子。
- *    所以管理面另开一条 HTTP，proto 一个字没动。
+ *    而给**用户面契约**加「userId 可不填」等于给每个持 token 的调用者开了拉全站流水的口子。
+ *    所以管理面是一条**独立**的服务（`BillingAdminService`）——用户面那条一个字没动。
+ *
+ * <p>（这段论证曾经用来支持「管理面另开一条 HTTP」。它反驳的是**复用用户面那条 rpc**，
+ *    不是「用 gRPC」——独立服务同样满足它，还免掉两套协议。2026-09-26 迁到 gRPC 时
+ *    把这段留在 proto 里，防止后来的人照着旧结论回滚。）
  *
  * <p>⚠️ 分页是**游标**、**没有总数**（账本持续追加，要准确总数就得扫全表，
  *    而扫完那一刻它又变了）。所以「上一页」得靠调用方自己存游标栈，
@@ -318,27 +387,48 @@ export async function listAdminTransactions(
   query: AdminTransactionsQuery = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AdminTransactionPage> {
-  const params = new URLSearchParams();
-  if (query.userId !== undefined) params.set("userId", String(query.userId));
-  if (query.type) params.set("type", query.type);
-  if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
-  if (query.pageToken) params.set("pageToken", query.pageToken);
-  const qs = params.toString();
-  return request<AdminTransactionPage>(
-    `/admin/transactions${qs ? `?${qs}` : ""}`,
-    { method: "GET", env },
-  );
+  try {
+    const page = await adminClient(env).adminListTransactions(
+      create(AdminListTransactionsRequestSchema, {
+        // ★ 0 = **全站**（不是「用户 0」）。本仓用户 id 从 1 起，0 是个占用不到的哨兵值——
+        //   这条自由度只有管理面有，用户面的 ListTransactions 里 userId 是必填的。
+        userId: BigInt(query.userId ?? 0),
+        type: query.type ?? "",
+        // 0 = 服务端默认页大小
+        pageSize: query.pageSize ?? 0,
+        pageToken: query.pageToken ?? "",
+      }),
+    );
+
+    return {
+      items: page.items.map((item) => ({
+        id: item.id,
+        userId: Number(item.userId),
+        type: item.type,
+        direction: item.direction,
+        title: item.title,
+        amount: Number(item.amount),
+        // ★ **presence → null**：proto 那边 `optional` 没设就是 `undefined`，
+        //   而本文件的契约是「没有预扣 = null」。这一步把「缺值」收敛成**唯一一种**形态。
+        //   ⚠️ 漏了它，前端会拿到第三种形态（`undefined`）：`undefined !== null` 为真，
+        //   于是「没有预扣」的行被当成「有值」送进渲染 —— 2026-09-26 消费记录页整页白屏
+        //   就是这么来的（当时后端旧构建压根不投影这一列，键整个消失）。
+        reservedCredits: item.reservedCredits === undefined ? null : Number(item.reservedCredits),
+        status: item.status,
+        createdAt: item.createdAt,
+        settledAt: item.settledAt,
+      })),
+      nextPageToken: page.page?.nextPageToken ?? "",
+    };
+  } catch (error) {
+    throw asAdminError("读流水", error);
+  }
 }
 
 /* ---------- 账本：读聚合（管理端） ---------- */
 
-/** `GET /admin/transactions/consumed-credits` 的回包。 */
-interface ConsumedCreditsResponse {
-  consumedCredits?: number;
-}
-
 /**
- * 读区间内**已结算的实际消耗积分合计**（`GET /admin/transactions/consumed-credits`）。
+ * 读区间内**已结算的实际消耗积分合计**（`AdminConsumedCredits`）。
  *
  * <p>⚠️ **不复用逐行的 {@link listAdminTransactions} 再自己累加**，理由三条：
  * <ol>
@@ -363,20 +453,24 @@ export async function fetchConsumedCredits(
   to: Date,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  const params = new URLSearchParams({ from: rfc3339(from), to: rfc3339(to) });
-  const data = await request<ConsumedCreditsResponse>(
-    `/admin/transactions/consumed-credits?${params.toString()}`,
-    { method: "GET", env },
-  );
-  const credits = data.consumedCredits;
-  if (typeof credits !== "number" || !Number.isFinite(credits)) {
-    // 缺字段 / 非数字一律当失败：回落到 0 会得到一句「这段时间没人消费」的假话
-    throw new BillingAdminError(
-      `billing 管理端 /admin/transactions/consumed-credits 回包缺 consumedCredits：` +
-        JSON.stringify(data),
+  try {
+    const response = await adminClient(env).adminConsumedCredits(
+      create(AdminConsumedCreditsRequestSchema, {
+        // ⚠️ 带上 +08:00 偏移的 RFC3339（见 rfc3339 的注释）——区间是**北京日界**，
+        //   换成 toISOString 会让「今天」变成前一天的 UTC 16:00
+        from: rfc3339(from),
+        to: rfc3339(to),
+      }),
     );
+    // ⚠️ 这里**不再有**「回包缺字段」的守卫，因为换了协议：proto3 的 int64 没有
+    //   「缺值」这个状态（没设就是 0），而 0 恰恰是个合法答案（这段时间真的没消费）。
+    //   HTTP 时代那个守卫针对的是 JSON 键可能整个消失，那在 gRPC 下不存在。
+    //   服务端缺参数的区间会走 INVALID_ARGUMENT（上面 asAdminError 翻成 BillingAdminError），
+    //   而不是静默回一个 0。
+    return Number(response.consumedCredits);
+  } catch (error) {
+    throw asAdminError("读消耗合计", error);
   }
-  return credits;
 }
 
 /**
@@ -654,20 +748,7 @@ async function discountRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-/* ---------- 传输 ---------- */
-
-async function request<T>(
-  path: string,
-  init: RequestInit & { env: NodeJS.ProcessEnv },
-): Promise<T> {
-  const response = await send(path, init);
-  if (!response.ok) {
-    throw new BillingAdminError(
-      `billing 管理端 ${path} 返回 HTTP ${response.status}${await errorDetail(response)}`,
-    );
-  }
-  return (await response.json()) as T;
-}
+/* ---------- 传输（**只剩写的那些接口在用**） ---------- */
 
 /**
  * 取错误响应体里的 `message` 拼成 `：xxx`（billing 的 AdminExceptionHandler 统一回 `{code,message}`）。
