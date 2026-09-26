@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
@@ -594,6 +595,58 @@ class AudioVideoMuxStreamingTransferTest {
         var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
         verify(tosClient).preSignedURL(uploaded.capture());
         assertThat(tosObjects).containsKey(uploaded.getValue().getKey());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    // ========== IKIN91：转存成功返回后、发布尝试前，取消状态查询异常的安全收口（真实 relay） ==========
+
+    @Test
+    @Timeout(30)
+    @DisplayName("真实转存返回唯一键后取消状态查询异常（DB 断连）：对象被清理（真删）、不发布不产生 Asset，异常走既有 fail 终态")
+    void realTransferThenCancelQueryErrorCleansUpTheUploadedTosObject() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        // fullyTransferredFixture 同款前置，但取消检查改为链式打桩（夹具打桩会被覆盖，触发严格模式）
+        TOSV2 tosClient = tosStandin();
+        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
+                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        // 转存前三段取消检查未命中；转存返回后首次取消状态查询抛异常（发布调用尚未发出）
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
+                .thenReturn(false, false, false)
+                .thenThrow(new RuntimeException("取消状态查询 DB 断连"));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", sourceUrl,
+                        227.0, "1920x1080", null, null, null));
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        var deleted = ArgumentCaptor.forClass(DeleteObjectInput.class);
+        verify(tosClient).deleteObject(deleted.capture());
+        // 清理精确指向本次上传的唯一对象键，且确实删除（有状态替身真删）
+        assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+        assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
+        assertThat(tosObjects).doesNotContainKey(uploaded.getValue().getKey());
+        assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
+        // 不产生引用该键的 Asset：发布从未开始；未尝试发布 → 单次核实即删，不走在飞事务保守探测
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine).hasPublishedAsset("70", uploaded.getValue().getKey());
+        verify(stateMachine, never()).hasInFlightJobWriteTransaction(anyString());
+        // 原 DB 异常按既有语义上抛走 fail（不吞、不伪装主动取消），本地临时文件由 relay finally 清理
+        ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(failure.capture());
+        assertThat(failure.getValue().code()).isEqualTo("audio_video_mux_failed");
+        assertThat(failure.getValue().message()).contains("取消状态查询 DB 断连");
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 }

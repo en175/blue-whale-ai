@@ -84,9 +84,17 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         } catch (Exception error) {
             String code = error instanceof MediaExtractError domain && PRESERVED_CODES.contains(domain.getCode())
                     ? domain.getCode() : AudioVideoMuxContract.ERROR_AUDIO_VIDEO_MUX_FAILED;
-            if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音视频合成失败")) {
-                // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
-                log.info("[audio_video_mux] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
+            try {
+                if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音视频合成失败")) {
+                    // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
+                    log.info("[audio_video_mux] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
+                }
+            } catch (Exception failError) {
+                // fail 落库自身失败（DB 持续不可用）：不声称已写入终态——对象清理已在放弃路径
+                // 尽力完成，任务收口交既有恢复扫描与消息重投；留可定位的未完成事实（IKIN91）。
+                log.warn("[audio_video_mux] 失败终态落库未完成，任务收口交由恢复扫描/重投 jobId={} token={} reason={}",
+                        job.id(), job.fencingToken(), failError.getMessage());
+                throw error;
             }
         }
     }
@@ -240,7 +248,18 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         // 转存成功返回后的每一步放弃路径（取消 / 失租 / 续租异常）都要清理该次上传的未发布
         // 对象（IKIN03）：storageKey 含每次执行独有的随机 uuid，删除不会波及接管者或重试的
         // 新产物；清理前先核实权威状态（见 discardUnpublishedTransfer）。
-        if (abortHandle.aborted() || cancelIfRequested(job)) {
+        boolean cancelRequested;
+        try {
+            cancelRequested = abortHandle.aborted() || cancelIfRequested(job);
+        } catch (Exception error) {
+            // 取消状态查询异常（DB 断连等）≠ 主动取消：发布尚未尝试（本判定先于发布调用，
+            // 与发布已开始的保守规则严格区分），该次上传对象已成无引用孤儿——核实未引用即
+            // 安全收口，原异常继续上抛按既有 fail/重试语义收口；不吞异常、不伪装成取消的
+            // 静默退出（IKIN91，与转存返回后续租异常路径对等）。
+            discardUnpublishedTransfer(job, stored);
+            throw error;
+        }
+        if (cancelRequested) {
             discardUnpublishedTransfer(job, stored);
             return;
         }
