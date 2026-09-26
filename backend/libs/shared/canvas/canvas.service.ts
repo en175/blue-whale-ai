@@ -58,6 +58,11 @@ function canvasVersionConflict(version: number | null) {
   return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
 
+/** save() 可能返回的冲突信封码（412 版本冲突 / 422 空覆盖防护 IKIIWN / 428 确认清空缺
+ *  If-Match IKIMQJ）：canvases.controller 把命中本集合的信封按自身 code 透传 HTTP 状态码
+ *  而非回落 200，此处是「哪些信封码需透传」的单一权威源——save() 新增冲突信封时在此登记。 */
+export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([412, 422, 428]);
+
 @Injectable()
 export class CanvasService {
   private repoInstance?: ReturnType<typeof createCanvasRepo>;

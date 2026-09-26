@@ -3009,19 +3009,17 @@ export default function CanvasPage() {
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
-      // IKILUE：空文档保存的显式确认标记（本会话成功确认过非空画布时授予：水合基线非空，
-      // 或本会话成功保存非空文档并取得新版本——IKIMQK 空基线新增后再删光的合法例外）；
+      // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear）；
       // 412 后据此区分「清空待复核」与普通版本冲突
-      const confirmEmpty = nodes.length === 0 && confirmedNonEmptyRef.current;
+      const confirmEmpty = shouldConfirmEmptyClear(nodes);
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       trackCanvasSave(
         saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
           .then((saved) => {
             versionRef.current = saved.version;
-            // IKIMQK：成功保存非空文档并取得新版本——授予确认清空资格（空保存的 If-Match
-            // 即用该版本，缺版本时服务端按 428 拒绝）
-            if (nodes.length > 0) confirmedNonEmptyRef.current = true;
+            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
+            registerConfirmedNonEmpty(nodes);
             setSaveBlocked(false);
             emptyOverwriteRejectedRef.current = false; // IKILTB：保存成功解除 422 阻断标记
             pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
@@ -10689,6 +10687,19 @@ export default function CanvasPage() {
     else showToast('error', '保存失败，请重试');
   };
 
+  /** IKIMPQ：空文档保存的 confirmEmpty 授予判定（自动保存与 flush 两条路径原为逐字重复的口径，
+   *  收拢于此）：仅当待发文档为空且本会话成功确认过非空画布（水合基线非空，或本会话成功保存
+   *  非空文档并取得新版本——IKIMQK 空基线新增后再删光的合法例外，依据详见 confirmedNonEmptyRef
+   *  头注释）时授予；412 后据此区分「清空待复核」与普通版本冲突。 */
+  const shouldConfirmEmptyClear = (nodes: Node[]): boolean =>
+    nodes.length === 0 && confirmedNonEmptyRef.current;
+
+  /** IKIMPQ：成功保存非空文档并取得新版本——登记确认清空资格（空保存的 If-Match 即用该版本，
+   *  缺版本时服务端按 428 拒绝）；口径收拢，自动保存与 flush 共用。 */
+  const registerConfirmedNonEmpty = (nodes: Node[]): void => {
+    if (nodes.length > 0) confirmedNonEmptyRef.current = true;
+  };
+
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
    *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
@@ -10707,9 +10718,10 @@ export default function CanvasPage() {
       if (emptyClearConflictRef.current && nodes.length === 0) return false;
       const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
       if (signature !== lastSavedRef.current) {
-        // IKILUE：空文档保存的显式确认标记（本会话成功确认过非空画布时授予，口径同自动保存），412 后据此登记清空待复核闸门
+        // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear），
+        // 412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
-        const confirmEmpty = nodes.length === 0 && confirmedNonEmptyRef.current;
+        const confirmEmpty = shouldConfirmEmptyClear(nodes);
         try {
           const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
           if (activeProjectRef.current !== projectId) {
@@ -10718,8 +10730,8 @@ export default function CanvasPage() {
             return false;
           }
           versionRef.current = saved.version;
-          // IKIMQK：成功保存非空文档并取得新版本——授予确认清空资格（口径同自动保存路径）
-          if (nodes.length > 0) confirmedNonEmptyRef.current = true;
+          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
+          registerConfirmedNonEmpty(nodes);
           lastSavedRef.current = signature;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
