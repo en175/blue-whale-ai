@@ -152,6 +152,37 @@ describe('ConsumptionRecords 消费记录（游标分页）', () => {
     expect(document.body.textContent).not.toContain('预扣');
   });
 
+  it('后端比前端旧、**整个键都不回**时不崩 —— 「没有」的第二种形态', async () => {
+    // ⚠️ 2026-09-26 实测：前端先上、后端后上（3100 上跑的是 4 小时前的构建，
+    //    压根没投影这一列）时，回包里**根本没有 reserved_credits 这个键**，
+    //    拿到的是 `undefined` 而不是 `null`。
+    //    当时页面写 `!== null`，而 `undefined !== null` 为真 ⇒ 把「没有」当成「有」
+    //    送进渲染 ⇒ `fmt(undefined)` 撞 `toLocaleString of undefined` ⇒ **整页白屏**。
+    //    所以这条测试故意**不写那个键**（而不是写成 null）—— 上面那条只覆盖了 null。
+    const oldBackendRow = {
+      id: 'res:9',
+      user_id: 9001,
+      type: 'consume',
+      direction: 'out',
+      title: '视频生成 · seedance-2.5',
+      credits: 30,
+      status: 'done',
+      created_at: '2026-09-25T10:00:00+08:00',
+      settled_at: '2026-09-25T10:01:00+08:00',
+    };
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [oldBackendRow],
+      next_page_token: '',
+    });
+
+    await renderPage();
+
+    // 行本身照常渲染，只是没有预扣那一行小字 —— 旧后端下这是唯一正确的呈现
+    expect(document.body.textContent).toContain('-30');
+    expect(document.body.textContent).not.toContain('预扣');
+    expect(document.body.textContent).not.toContain('Unexpected Application Error');
+  });
+
   it('预扣为 0（结算时全额退回）仍要显示 —— 那正是最该解释的一行', async () => {
     // 判空若写成 `if (row.reserved_credits)`，0 会被当成「没有预扣」而整行消失，
     // 恰好漏掉「冻了 12、最后全退回来」这种最需要交代的行

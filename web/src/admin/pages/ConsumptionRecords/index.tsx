@@ -242,9 +242,13 @@ export default function ConsumptionRecords() {
                       · 发放 / 人工调账行没有预扣（null），什么都不该出；
                       · 一致时（冻 5 扣 5）写出来也只是复读。
                       于是这一行只在「余额先降后回」的行上出现 —— 它一出现就说明有事发生。
-                      ⚠️ 判空用 === null，不用真值判断：0 是「全额退回」，
-                         那恰恰是最该显示预扣的一行。 */}
-                  {row.reserved_credits !== null && row.reserved_credits !== row.credits && (
+                      ⚠️ 判空只能写 `!= null`（**不能**写 `!== null`）：缺值有两种形态，
+                         `null` 是后端按契约回的，**键不存在**是后端版本比前端旧时的形态
+                         （老构建压根没投影这一列）。漏掉后者，`undefined` 会被当成
+                         「有值」进来渲染，`fmt` 一碰就 `toLocaleString` of undefined ——
+                         整页白屏（2026-09-26 实测，见 adminConsumptionRecords.ts 的类型注释）。
+                      也**不能**用真值判断：0 是「全额退回」，那恰恰是最该显示预扣的一行。 */}
+                  {row.reserved_credits != null && row.reserved_credits !== row.credits && (
                     <div style={SECONDARY_LINE}>预扣 {fmt(row.reserved_credits)}</div>
                   )}
                 </td>
