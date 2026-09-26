@@ -44,8 +44,24 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 金额下方的次要行（预扣额）。字号与颜色取 token，与 Promotions 的「万分比」同一形态。 */
-const SECONDARY_LINE = {
+/**
+ * 金额格：金额徽标与预扣额**并排一行，不换行**。
+ *
+ * <p>为什么并排而不是另起一行：预扣是**同一个数的另一半解释**（冻了 N、实扣 M）。
+ * 拆成上下两行后，视觉上像是两条独立信息，读的时候还要把它们重新对起来；
+ * 并排 + nowrap 让这一格始终是「一个金额 + 一句注解」。
+ *
+ * <p>列宽交给表格自适应：内容变宽时这一列变宽，而不是把字挤成两行。
+ */
+const AMOUNT_CELL = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--admin-space-2)',
+  whiteSpace: 'nowrap',
+} as const;
+
+/** 次要文本（预扣额）。字号与颜色取 token，与 Promotions 的「万分比」同一形态。 */
+const SECONDARY_TEXT = {
   fontSize: 'var(--admin-font-xs)',
   color: 'var(--admin-text-muted)',
 } as const;
@@ -232,25 +248,27 @@ export default function ConsumptionRecords() {
                 </td>
                 <td>{row.title}</td>
                 <td>
-                  {/* 金额恒正，正负由 direction 表达 —— 与账本口径一致 */}
-                  <Badge tone={income ? 'success' : 'accent'}>
-                    {income ? `+${fmt(row.credits)}` : `-${fmt(row.credits)}`}
-                  </Badge>
-                  {/* 预扣额：**只在两个数不一致时**才补这一行。
-                      三个理由，缺一个都会让这行变成噪音：
-                      · 未结算行的 credits 本就是预扣额，再写一遍是同一句话说两次；
-                      · 发放 / 人工调账行没有预扣（null），什么都不该出；
-                      · 一致时（冻 5 扣 5）写出来也只是复读。
-                      于是这一行只在「余额先降后回」的行上出现 —— 它一出现就说明有事发生。
-                      ⚠️ 判空只能写 `!= null`（**不能**写 `!== null`）：缺值有两种形态，
-                         `null` 是后端按契约回的，**键不存在**是后端版本比前端旧时的形态
-                         （老构建压根没投影这一列）。漏掉后者，`undefined` 会被当成
-                         「有值」进来渲染，`fmt` 一碰就 `toLocaleString` of undefined ——
-                         整页白屏（2026-09-26 实测，见 adminConsumptionRecords.ts 的类型注释）。
-                      也**不能**用真值判断：0 是「全额退回」，那恰恰是最该显示预扣的一行。 */}
-                  {row.reserved_credits != null && row.reserved_credits !== row.credits && (
-                    <div style={SECONDARY_LINE}>预扣 {fmt(row.reserved_credits)}</div>
-                  )}
+                  <div style={AMOUNT_CELL}>
+                    {/* 金额恒正，正负由 direction 表达 —— 与账本口径一致 */}
+                    <Badge tone={income ? 'success' : 'accent'}>
+                      {income ? `+${fmt(row.credits)}` : `-${fmt(row.credits)}`}
+                    </Badge>
+                    {/* 预扣额：**只在两个数不一致时**才补这一句。
+                        三个理由，缺一个都会让它变成噪音：
+                        · 未结算行的 credits 本就是预扣额，再写一遍是同一句话说两次；
+                        · 发放 / 人工调账行没有预扣（null），什么都不该出；
+                        · 一致时（冻 5 扣 5）写出来也只是复读。
+                        于是它只在「余额先降后回」的行上出现 —— 一出现就说明有事发生。
+                        ⚠️ 判空只能写 `!= null`（**不能**写 `!== null`）：缺值有两种形态，
+                           `null` 是后端按契约回的，**键不存在**是后端版本比前端旧时的形态
+                           （老构建压根没投影这一列）。漏掉后者，`undefined` 会被当成
+                           「有值」进来渲染，`fmt` 一碰就 `toLocaleString` of undefined ——
+                           整页白屏（2026-09-26 实测，见 adminConsumptionRecords.ts 的类型注释）。
+                        也**不能**用真值判断：0 是「全额退回」，那恰恰是最该显示预扣的一行。 */}
+                    {row.reserved_credits != null && row.reserved_credits !== row.credits && (
+                      <span style={SECONDARY_TEXT}>预扣 {fmt(row.reserved_credits)}</span>
+                    )}
+                  </div>
                 </td>
                 <td>
                   {/* pending 的金额是**预计消耗**，结算后同一行变成实际消耗 */}

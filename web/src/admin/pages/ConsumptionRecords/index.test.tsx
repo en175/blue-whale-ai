@@ -197,6 +197,24 @@ describe('ConsumptionRecords 消费记录（游标分页）', () => {
     expect(document.body.textContent).toContain('预扣 12');
   });
 
+  it('预扣与金额在**同一个单元格**里 —— 并排，不另起一行、也不单开一列', async () => {
+    // ⚠️ 这条守的是**形态**不是文案：上面几条只断言「页面上有这几个字」，
+    //    把预扣挪到金额下方另起一行、或者单开一列，它们照样全绿。
+    //    而这是用户明确提过的观感要求（「预扣不要换行」）——所以钉在 DOM 结构上：
+    //    两段文本必须落在同一个 <td> 内。
+    api.fetchAdminConsumptionRecords.mockResolvedValue({ items: [ITEM], next_page_token: '' });
+
+    await renderPage();
+
+    // ITEM：credits 30 / reserved 100 —— 恰好是两个数不一致、该显示预扣的那种行
+    const holdCells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
+      td.textContent?.includes('预扣'),
+    );
+    expect(holdCells).toHaveLength(1);
+    expect(holdCells[0]?.textContent).toContain('-30');
+    expect(holdCells[0]?.textContent).toContain('预扣 100');
+  });
+
   it('点「下一页」把上一页给的游标原样带上；「上一页」回到**当初那一页的**游标', async () => {
     api.fetchAdminConsumptionRecords
       .mockResolvedValueOnce({ items: [ITEM], next_page_token: 'tok-1' })
