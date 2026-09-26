@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1038,5 +1040,39 @@ class TosVideoMediaRelayTest {
                 peer.cancel(true);
             }
         }
+    }
+
+    /**
+     * 裸取消路径（IKIN01 二轮复审）：{@code CompletableFuture.cancel} 之后的 {@code join()}
+     * 按规范直接抛裸 {@link java.util.concurrent.CancellationException}（不包 CompletionException）
+     * ——当前 JDK HttpClient sendAsync 实测走包装形态，但这是实现细节非规范保证；一旦 JDK 行为
+     * 落到裸抛路径，只接包装形态的 await() 会让取消逃逸成未归因异常，中止语义（外部中止 →
+     * TransferAbortedException / 任务截止归因）被破坏。本用例绕开 HttpClient 直接构造已取消的
+     * future 钉住裸抛路径的两条归因。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("裸 CancellationException（cancel 后 join 的规范路径）：按外部中止/任务截止归因，不逃逸")
+    void headerWait_bareCancellation_attributedNotEscaped() {
+        // 场景一：外部中止取消 → 裸抛归因为 TransferAbortedException，原因透传
+        CompletableFuture<HttpResponse<InputStream>> aborted = new CompletableFuture<>();
+        var handle = new TosVideoMediaRelay.TransferAbortHandle();
+        TosVideoMediaRelay.HeaderWait abortWait = new TosVideoMediaRelay.HeaderWait(aborted, handle, null);
+        handle.abort("结果转存租约丢失");
+        // 前提钉死：本用例的 cancel 后 join() 抛的是裸 CancellationException（非包装形态）
+        assertThatThrownBy(aborted::join)
+                .isInstanceOf(java.util.concurrent.CancellationException.class);
+        assertThatThrownBy(abortWait::await)
+                .isInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
+                .hasMessageContaining("结果转存租约丢失");
+
+        // 场景二：任务截止到点取消 → 裸抛归因为「任务执行截止时间已到」，不误报网络失败
+        CompletableFuture<HttpResponse<InputStream>> expired = new CompletableFuture<>();
+        TosVideoMediaRelay.HeaderWait deadlineWait =
+                new TosVideoMediaRelay.HeaderWait(expired, null, java.time.Instant.now().plusMillis(100));
+        assertThatThrownBy(deadlineWait::await)
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessageContaining("任务执行截止时间已到")
+                .hasMessageNotContaining("转存网络失败");
     }
 }

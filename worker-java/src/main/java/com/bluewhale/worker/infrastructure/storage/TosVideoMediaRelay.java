@@ -518,9 +518,10 @@ public class TosVideoMediaRelay {
      * 归因为普通下载失败。响应头正常返回后 StreamWatchdog 的 wire 覆盖本类 wire 的取消
      * 动作（watchdog 接管正文与上传段的中止）；异常退出时残留的取消动作指向已终结的
      * future（cancel 为 no-op），无害。JDK HttpClient 的 future cancel 会关闭底层连接，
-     * 服务端可观察到请求真正停止。
+     * 服务端可观察到请求真正停止。包级可见：测试直接构造 HeaderWait 钉裸取消归因路径
+     * （不依赖 HttpClient 的取消到达形态）。
      */
-    private static final class HeaderWait {
+    static final class HeaderWait {
         private final CompletableFuture<HttpResponse<InputStream>> pending;
         private final TransferAbortHandle handle;
         private volatile ScheduledFuture<?> deadlineTask;
@@ -546,12 +547,17 @@ public class TosVideoMediaRelay {
             pending.cancel(true);
         }
 
-        /** 等待响应头：取消类完成按「外部中止 → 任务截止」归因（与看门狗同优先级），其余包供应商错误。 */
+        /**
+         * 等待响应头：取消类完成按「外部中止 → 任务截止」归因（与看门狗同优先级），其余包供应商
+         * 错误。取消的到达形态两种都要接：裸 {@link CancellationException}（cancel 后 join 的
+         * 规范行为，非实现细节保证）与 {@link CompletionException} 包装（当前 JDK HttpClient
+         * sendAsync 实际路径）——只接后者会让裸抛路径的取消逃逸成未归因异常。
+         */
         HttpResponse<InputStream> await() {
             try {
                 return pending.join();
-            } catch (CompletionException e) {
-                if (e.getCause() instanceof CancellationException) {
+            } catch (CompletionException | CancellationException e) {
+                if (isCancellation(e)) {
                     // 请求取消只来自本类的两个动作：外部中止（优先）或任务截止到点
                     if (handle != null && handle.aborted()) {
                         throw new TransferAbortedException(handle.reason());
@@ -570,6 +576,12 @@ public class TosVideoMediaRelay {
                 ScheduledFuture<?> task = deadlineTask;
                 if (task != null) task.cancel(false);
             }
+        }
+
+        /** join 的取消到达形态判定：裸抛（cancel 后 join 的规范行为）或 CompletionException 包装。 */
+        private static boolean isCancellation(Throwable e) {
+            return e instanceof CancellationException
+                    || (e instanceof CompletionException && e.getCause() instanceof CancellationException);
         }
     }
 
