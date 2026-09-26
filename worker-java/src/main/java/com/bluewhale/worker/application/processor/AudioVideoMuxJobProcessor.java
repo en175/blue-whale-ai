@@ -234,12 +234,60 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         } finally {
             heartbeat.cancel(false);
         }
-        if (abortHandle.aborted() || cancelIfRequested(job) || !renewLease(job)) return;
-        boolean published = stateMachine.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
-                job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
-                stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
-                observed.durationSec(), observed.resolution(), snapshot.videoAssetId()));
-        if (!published) log.warn("[audio_video_mux] 结果发布守卫未命中 jobId={}", job.id());
+        // 转存成功返回后的每一步放弃路径（取消 / 失租 / 续租异常）都要清理该次上传的未发布
+        // 对象（IKIN03）：storageKey 含每次执行独有的随机 uuid，删除不会波及接管者或重试的
+        // 新产物；清理前先核实权威状态（见 discardUnpublishedTransfer）。
+        if (abortHandle.aborted() || cancelIfRequested(job)) {
+            discardUnpublishedTransfer(job, stored);
+            return;
+        }
+        try {
+            if (!renewLease(job)) {
+                discardUnpublishedTransfer(job, stored);
+                return;
+            }
+        } catch (Exception error) {
+            // 转存成功返回后续租异常：该次上传已成无引用孤儿，核实未发布后清理再上抛。
+            discardUnpublishedTransfer(job, stored);
+            throw error;
+        }
+        boolean published;
+        try {
+            published = stateMachine.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+                    job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
+                    stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
+                    observed.durationSec(), observed.resolution(), snapshot.videoAssetId()));
+        } catch (Exception error) {
+            // 发布异常 ≠ 未发布（发布事务可能已提交后才断网）：不能凭本地异常直接删——
+            // 先核实权威状态，未被 Asset 引用才清理；异常继续上抛走既有 fail 终态路径
+            // （守卫仍 fencing，语义不变）。
+            discardUnpublishedTransfer(job, stored);
+            throw error;
+        }
+        if (!published) {
+            log.warn("[audio_video_mux] 结果发布守卫未命中 jobId={}", job.id());
+            // 守卫拒绝无法区分「被拒」与「新执行者已发布」：同样先核实权威状态再清理。
+            discardUnpublishedTransfer(job, stored);
+        }
+    }
+
+    /** 转存已成功返回但本次执行不再发布（取消 / 失租 / 续租异常 / 守卫拒绝 / 发布异常）时，
+     * 清理该次上传的未发布对象（IKIN03）。删除前先核实权威状态：assets 已有
+     * generation_job_id + storage_key 匹配行即已被引用（如发布事务提交后才断网），保留不删；
+     * 核实或删除自身失败只记日志（含对象身份），不改变主语义、不落额外终态。 */
+    private void discardUnpublishedTransfer(ClaimedMediaExtractJobDto job,
+                                            TosVideoMediaRelay.StoredVideo stored) {
+        try {
+            if (stateMachine.hasPublishedAsset(job.id(), stored.storageKey())) {
+                log.warn("[audio_video_mux] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
+                        job.id(), stored.storageKey());
+                return;
+            }
+            relay.deleteUnpublishedObject(stored.storageKey());
+        } catch (Exception error) {
+            log.warn("[audio_video_mux] 未发布对象清理异常 jobId={} storageKey={} err={}",
+                    job.id(), stored.storageKey(), error.getMessage());
+        }
     }
 
     private boolean renewLease(ClaimedMediaExtractJobDto job) {
