@@ -120,6 +120,25 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                            @Param("fencingToken") Long fencingToken,
                            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 
+    /**
+     * 探测 generation_jobs 行写锁是否空闲（IKIN8Z，SELECT … FOR UPDATE NOWAIT，读到即瞬时
+     * 持锁并在本语句结束时释放，不改任何数据）。
+     * <p>
+     * 守卫写事务（publishResultGuard / failMediaExtractGuard / 续租 / 取消 CAS）的第一条语句
+     * 就是对本行的 CAS UPDATE，行 X 锁自那一刻起持有至事务提交/回滚结束——「可能发布某次
+     * 转存对象键的事务」若仍在服务端进行（如 commit 窗口断连后的未决事务），本行锁必被其
+     * 占用。行锁空闲即该类事务已全部结束。
+     * <p>
+     * 返回行 id（锁空闲）；行不存在返回 null（无从发布，同视为空闲）；行锁被其他事务持有时
+     * 抛 MySQL 3572（NOWAIT）/ 1205（锁等待超时），由调用方按「事务仍在进行」识别。
+     */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE id = #{jobId}
+            FOR UPDATE NOWAIT
+            """)
+    Long probeJobRowWriteLock(@Param("jobId") Long jobId);
+
     /** 音视频合成大产物转存期续租（IKIHPJ）：仅当前未过期的 owner/fence 可延期。 */
     @Update("""
             UPDATE generation_jobs

@@ -12,12 +12,17 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoCl
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -54,6 +59,42 @@ class AudioVideoMuxJobProcessorTest {
     private ClaimedMediaExtractJobDto claim(String providerTaskId) {
         return new ClaimedMediaExtractJobDto("70", "5", "9", input(), providerTaskId,
                 "worker-1", 3L, 0, 0);
+    }
+
+    /** 发布异常系列共用前置：领取→轮询观察 succeeded→转存返回→续租命中，直接推进到发布调用。 */
+    private AudioVideoMuxJobProcessor transferCompletedProcessor() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        processor.publishSettleProbeDelayMs = 5;
+        return processor;
+    }
+
+    /** 捕获 processor WARN 日志（结构化待处理记录断言用）。 */
+    private static List<ILoggingEvent> captureProcessorLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(AudioVideoMuxJobProcessor.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+            return appender.list;
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    private static List<String> formatted(List<ILoggingEvent> events) {
+        return events.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
 
     @Test
@@ -593,6 +634,121 @@ class AudioVideoMuxJobProcessorTest {
 
         verify(relay, never()).deleteUnpublishedObject(anyString());
         verify(stateMachine).failMediaExtractJob(any());
+    }
+
+    // ========== IKIN8Z：发布结果不明（发布调用抛异常）的清理决策系列 ==========
+
+    @Test
+    void publishExceptionWaitsForInFlightPublishTransactionThenKeepsObjectWhenAssetAppears() {
+        var processor = transferCompletedProcessor();
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("commit 窗口断连"));
+        // 首次核实：可能发布该键的事务仍在服务端进行（行锁被占，Asset 行对查询不可见）；
+        // 短延时重查后事务已提交结束 → 权威查询命中 Asset 引用
+        when(stateMachine.hasInFlightJobWriteTransaction("70")).thenReturn(true, false);
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(true);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        processor.handle("70");
+
+        // 受控交错：首次查询尚未看到 Asset、事务随后提交成功 → 不删除该对象
+        verify(stateMachine, times(2)).hasInFlightJobWriteTransaction("70");
+        verify(stateMachine, times(1)).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+        // 异常仍上抛走既有 fail 终态路径（守卫仍 fencing）
+        verify(stateMachine).failMediaExtractJob(any());
+    }
+
+    @Test
+    void publishExceptionDeletesOnlyAfterTransactionSettledWithoutReference() {
+        var processor = transferCompletedProcessor();
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("发布事务结果不明"));
+        // 事务已结束（行锁空闲）且权威查询确认无 Asset 引用 → 判定不会再被提交，安全删除
+        when(stateMachine.hasInFlightJobWriteTransaction("70")).thenReturn(false);
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(false);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        processor.handle("70");
+
+        verify(stateMachine, times(1)).hasInFlightJobWriteTransaction("70");
+        verify(stateMachine, times(1)).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay, times(1)).deleteUnpublishedObject("generated/9/video/out.mp4");
+        verify(stateMachine).failMediaExtractJob(any());
+    }
+
+    @Test
+    void publishExceptionKeepsObjectWithPendingRecordWhenAuthorityUnreachable() {
+        var processor = transferCompletedProcessor();
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("发布事务结果不明"));
+        // 权威核实自身异常（DB 断连）：暂不可确认 → 保留对象 + 结构化待处理记录，不删
+        when(stateMachine.hasInFlightJobWriteTransaction("70")).thenThrow(new RuntimeException("核实查询断连"));
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        List<String> logs = formatted(captureProcessorLogs(() -> processor.handle("70")));
+
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+        verify(stateMachine).failMediaExtractJob(any());
+        assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
+                .anySatisfy(message -> {
+                    assertThat(message).contains("jobId=70");
+                    assertThat(message).contains("storageKey=generated/9/video/out.mp4");
+                    assertThat(message).contains("resolution=retain-pending");
+                });
+    }
+
+    @Test
+    void publishExceptionKeepsObjectWithPendingRecordWhenTransactionNeverSettles() {
+        var processor = transferCompletedProcessor();
+        processor.publishSettleProbeAttempts = 2;
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("发布事务结果不明"));
+        // 有界重查窗口内事务始终未结束（行锁一直被占）→ 保守保留 + 待处理记录，不删
+        when(stateMachine.hasInFlightJobWriteTransaction("70")).thenReturn(true);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        List<String> logs = formatted(captureProcessorLogs(() -> processor.handle("70")));
+
+        verify(stateMachine, times(2)).hasInFlightJobWriteTransaction("70");
+        verify(stateMachine, never()).hasPublishedAsset(anyString(), anyString());
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+        assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
+                .anySatisfy(message -> assertThat(message).contains("jobId=70")
+                        .contains("storageKey=generated/9/video/out.mp4")
+                        .contains("resolution=retain-pending"));
+    }
+
+    @Test
+    void takeoverPublishingAnotherKeyCleansOnlyTheOldKeyDespiteJobSuccess() {
+        var processor = transferCompletedProcessor();
+        // 接管者已用另一对象键发布成功（GenerationJob 已成功），旧执行者发布守卫被拒
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+        // GenerationJob 成功不作判据：按对象键核实——旧键无 Asset 引用 → 删旧键
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(false);
+
+        processor.handle("70");
+
+        // 旧键清理；「新键留」由决策单位=对象键保证（新键不在本执行者清理面内）
+        verify(relay, times(1)).deleteUnpublishedObject("generated/9/video/out.mp4");
+        verify(relay, times(1)).deleteUnpublishedObject(anyString());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void cleanupFailureLeavesStructuredPendingRecordWithoutTurningIntoJobFailure() {
+        var processor = transferCompletedProcessor();
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("发布事务结果不明"));
+        when(stateMachine.hasInFlightJobWriteTransaction("70")).thenReturn(false);
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(false);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+        // 删除动作自身失败：不得记为成功——对象保留 + 结构化待处理记录；发布异常仍按既有语义上抛 fail
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+
+        List<String> logs = formatted(captureProcessorLogs(() -> processor.handle("70")));
+
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+        verify(stateMachine).failMediaExtractJob(any());
+        assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
+                .anySatisfy(message -> assertThat(message).contains("jobId=70")
+                        .contains("storageKey=generated/9/video/out.mp4")
+                        .contains("resolution=retain-pending"));
     }
 
     @Test

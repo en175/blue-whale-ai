@@ -163,6 +163,41 @@ public class JobFinalizer {
         return assetId != null;
     }
 
+    /**
+     * 确认「可能发布该对象键的事务」是否仍未结束（IKIN8Z）：发布事务的第一条语句是对
+     * generation_jobs 行的 {@code publishResultGuard} CAS UPDATE，行 X 锁自那一刻起持有至
+     * 提交/回滚完成——以 NOWAIT 探测该行锁即可判断事务是否仍在服务端进行（如 commit 窗口
+     * 断连后的未决事务，对并发 Asset 查询在 REPEATABLE READ 下不可见）。
+     * <p>
+     * 锁被占用返回 true（保守视为可能有事务即将提交该键——占用者也可能是其他守卫写，如
+     * 接管者 claim / 续租，无法区分时不删除即正确取舍）；锁空闲返回 false = 可能发布该键
+     * 的事务已结束，随后的 {@link #hasPublishedAsset} 查询即权威结论（提交则命中 Asset 行，
+     * 回滚/未插入则查无）。行不存在同样返回 false（无从发布该键）。
+     * <p>
+     * 仅锁冲突（MySQL 3572/1205，识别经 cause 链，兼容 MyBatis 直抛与 Spring 翻译两种包装）
+     * 转为 true；其余异常原样上抛——数据库不可用 ≠ 事务进行中，由调用方按「暂不可确认」
+     * 保守保留对象并留待处理记录。
+     */
+    public boolean hasInFlightJobWriteTransaction(String jobId) {
+        try {
+            jobMapper.probeJobRowWriteLock(Long.parseLong(jobId));
+            return false;
+        } catch (RuntimeException error) {
+            if (isRowLockConflict(error)) return true;
+            throw error;
+        }
+    }
+
+    private static boolean isRowLockConflict(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof java.sql.SQLException sql
+                    && (sql.getErrorCode() == 3572 || sql.getErrorCode() == 1205)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
     //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========

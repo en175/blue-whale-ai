@@ -268,6 +268,11 @@ public class JobStateMachineService {
         return finalizer.hasPublishedAsset(jobId, storageKey);
     }
 
+    /** 委托「可能发布该对象键的事务已结束」核实（IKIN8Z）：generation_jobs 行写锁被占 = 仍可能提交。 */
+    public boolean hasInFlightJobWriteTransaction(String jobId) {
+        return finalizer.hasInFlightJobWriteTransaction(jobId);
+    }
+
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
         return finalizer.failMediaExtractJob(
                 input.jobId(), input.code(), input.message(), input.details(),

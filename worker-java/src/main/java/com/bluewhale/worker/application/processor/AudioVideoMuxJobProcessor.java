@@ -55,6 +55,9 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
     private final GenerationMessageProducer producer;
     private final String workerId;
     long leaseRenewIntervalMs = 60_000;
+    /** 发布结果不明时的有界核实参数（IKIN8Z）：总探测轮数（含首次）与轮间延时。 */
+    int publishSettleProbeAttempts = 3;
+    long publishSettleProbeDelayMs = 500;
 
     public AudioVideoMuxJobProcessor(JobStateMachineService stateMachine,
                                      GenerationCredentialService credentials,
@@ -258,10 +261,11 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                     stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                     observed.durationSec(), observed.resolution(), snapshot.videoAssetId()));
         } catch (Exception error) {
-            // 发布异常 ≠ 未发布（发布事务可能已提交后才断网）：不能凭本地异常直接删——
-            // 先核实权威状态，未被 Asset 引用才清理；异常继续上抛走既有 fail 终态路径
+            // 发布异常 ≠ 未发布（发布事务可能已提交后才断网，也可能仍在服务端提交中）：
+            // 删除前必须先确认「可能发布该键的事务」已结束并核实无 Asset 引用（IKIN8Z
+            // 有界核实，见 discardUnpublishedTransfer）；异常继续上抛走既有 fail 终态路径
             // （守卫仍 fencing，语义不变）。
-            discardUnpublishedTransfer(job, stored);
+            discardUnpublishedTransfer(job, stored, true);
             throw error;
         }
         if (!published) {
@@ -271,23 +275,104 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         }
     }
 
-    /** 转存已成功返回但本次执行不再发布（取消 / 失租 / 续租异常 / 守卫拒绝 / 发布异常）时，
-     * 清理该次上传的未发布对象（IKIN03）。删除前先核实权威状态：assets 已有
-     * generation_job_id + storage_key 匹配行即已被引用（如发布事务提交后才断网），保留不删；
-     * 核实或删除自身失败只记日志（含对象身份），不改变主语义、不落额外终态。 */
+    /** 转存已成功返回但本次执行不再发布（取消 / 失租 / 续租异常 / 守卫拒绝）时的清理入口：
+     *  发布事务从未开始或已同步结束，单次权威核实未被 Asset 引用即删（IKIN03 口径保持）。 */
     private void discardUnpublishedTransfer(ClaimedMediaExtractJobDto job,
                                             TosVideoMediaRelay.StoredVideo stored) {
+        discardUnpublishedTransfer(job, stored, false);
+    }
+
+    /**
+     * 清理该次上传的未发布对象（IKIN03；IKIN8Z 扩发布结果不明路径）。删除是需要证据的动作：
+     * <ul>
+     *   <li>{@code publishOutcomeUncertain=false}（取消 / 失租 / 续租异常 / 守卫拒绝）：发布
+     *       事务从未开始或已同步结束（守卫拒绝 = 发布方法已返回），单次
+     *       {@code hasPublishedAsset} 核实——assets 已有 generation_job_id + storage_key 匹配
+     *       行即已被引用（如接管者已发布同 key），保留不删；查无即删。</li>
+     *   <li>{@code publishOutcomeUncertain=true}（发布调用抛异常，结果不明）：发布事务可能
+     *       已提交后才断网，也可能仍在服务端提交中——单次查无 Asset 不能证明后续提交不会
+     *       引用该键（REPEATABLE READ 下进行中的事务对并发查询不可见）。走
+     *       {@link #awaitPublishSettledAndUnreferenced}：确认事务已结束且无引用才删；事务
+     *       未落定或权威状态暂不可确认一律保守保留。</li>
+     * </ul>
+     * 核实或删除自身异常只留结构化待处理记录（含对象身份），不改变主语义、不落额外终态。
+     */
+    private void discardUnpublishedTransfer(ClaimedMediaExtractJobDto job,
+                                            TosVideoMediaRelay.StoredVideo stored,
+                                            boolean publishOutcomeUncertain) {
         try {
-            if (stateMachine.hasPublishedAsset(job.id(), stored.storageKey())) {
+            if (publishOutcomeUncertain) {
+                switch (awaitPublishSettledAndUnreferenced(job.id(), stored.storageKey())) {
+                    case REFERENCED -> {
+                        log.warn("[audio_video_mux] 发布结果不明但对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
+                                job.id(), stored.storageKey());
+                        return;
+                    }
+                    case UNCONFIRMED -> {
+                        logPendingTransferCleanup(job.id(), stored.storageKey(),
+                                "发布结果不明：有界重查内可能发布该键的事务仍未结束");
+                        return;
+                    }
+                    case SETTLED_UNREFERENCED -> { /* 事务已结束且无引用，向下删除 */ }
+                }
+            } else if (stateMachine.hasPublishedAsset(job.id(), stored.storageKey())) {
                 log.warn("[audio_video_mux] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
                         job.id(), stored.storageKey());
                 return;
             }
             relay.deleteUnpublishedObject(stored.storageKey());
         } catch (Exception error) {
-            log.warn("[audio_video_mux] 未发布对象清理异常 jobId={} storageKey={} err={}",
-                    job.id(), stored.storageKey(), error.getMessage());
+            // 权威状态暂不可确认（核实查询异常）或删除链路异常：保留对象（删除失败不得记为
+            // 成功），留可定位的待处理清理记录；清理失败不转成任务失败（IKIN03 语义保持）。
+            logPendingTransferCleanup(job.id(), stored.storageKey(),
+                    "权威状态核实或删除异常: " + error.getMessage());
         }
+    }
+
+    /** 发布结果不明路径的核实结论。 */
+    private enum UnpublishedTransferCheck {
+        /** 权威数据确认对象已被 Asset 引用（发布事务已提交）→ 保留成品。 */
+        REFERENCED,
+        /** 可能发布该键的事务已结束且无 Asset 引用 → 可安全删除（该键含本次执行独有 uuid，不会再有新事务引用）。 */
+        SETTLED_UNREFERENCED,
+        /** 有界重查内事务仍未结束，或权威状态暂不可确认 → 保守保留并留待处理记录。 */
+        UNCONFIRMED
+    }
+
+    /**
+     * 发布结果不明时的删除前核实（IKIN8Z）：每轮先探测 generation_jobs 行写锁（守卫写事务
+     * 的第一条语句即 CAS UPDATE，行锁持有至提交/回滚——锁被占 = 仍有事务可能提交该键），
+     * 占用则短延时后重查（有界，防未决事务久拖阻塞 worker 线程）；锁空闲即「可能发布该键
+     * 的事务已结束」，此时查 Asset 引用即权威结论：命中 = 已发布（保留），查无 = 已回滚/
+     * 未插入（删除）。窗口耗尽仍被占 → UNCONFIRMED 保守保留（待处理记录可定位，交由
+     * 状态恢复后的下一次决策或人工核账收口）。
+     */
+    private UnpublishedTransferCheck awaitPublishSettledAndUnreferenced(String jobId, String storageKey) {
+        for (int attempt = 1; ; attempt++) {
+            if (stateMachine.hasInFlightJobWriteTransaction(jobId)) {
+                if (attempt >= publishSettleProbeAttempts) return UnpublishedTransferCheck.UNCONFIRMED;
+                try {
+                    Thread.sleep(publishSettleProbeDelayMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("发布落定核实等待被中断", interrupted);
+                }
+                continue;
+            }
+            return stateMachine.hasPublishedAsset(jobId, storageKey)
+                    ? UnpublishedTransferCheck.REFERENCED
+                    : UnpublishedTransferCheck.SETTLED_UNREFERENCED;
+        }
+    }
+
+    /**
+     * 结构化待处理清理记录（IKIN8Z；父规格明确不新增数据库表，以可检索日志形态承载）：
+     * 固定 tag + jobId / storageKey / reason / resolution 字段，供日志检索定位遗留对象的
+     * 清理责任，状态恢复后可据权威结果完成保留或安全清理。
+     */
+    private static void logPendingTransferCleanup(String jobId, String storageKey, String reason) {
+        log.warn("[audio_video_mux][pending-cleanup] 未发布对象保守保留待处理 jobId={} storageKey={} reason={} resolution=retain-pending",
+                jobId, storageKey, reason);
     }
 
     private boolean renewLease(ClaimedMediaExtractJobDto job) {
