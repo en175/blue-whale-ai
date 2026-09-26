@@ -514,6 +514,14 @@ function cropSpaceOf(node: Node, bounds: CropRect): CropCoordinateSpace | null {
   };
 }
 
+/** IKILUE：带 confirmEmpty 的清空保存被 412 拒绝后的复核指引——另一会话已改写画布，
+ *  刷新重新水合后 confirmEmpty 才会按新基线重新授予，直接重试只会用旧空文档覆盖对方成果。 */
+const EMPTY_CLEAR_CONFLICT_TOAST = '画布已被其他会话更新，本次清空未保存，请刷新页面复核';
+
+/** IKILUG：空保存被服务端 422 拒（本地空状态与服务端非空事实不一致，重试必然再拒）——
+ *  防抖自动保存/项目切换强制保存/手动「重试保存」三个入口共用的刷新复核指引。 */
+const EMPTY_OVERWRITE_REJECTED_TOAST = '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核';
+
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -2178,7 +2186,17 @@ export default function CanvasPage() {
         { replace: true, state: location.state });
       return;
     }
+    // IKIN8A：整文档待复核期间，同页路由（前进/后退/外部 navigate 改 ?project=）请求打开另一
+    // Project 时中止切换并把地址恢复到当前项目——不走项目选择器落盘闸门的这条路径若放行，
+    // 水合 doc 先置 null 会静默复位待复核标记，随后新项目水合再覆盖本地工作副本，
+    // 等于把未保存内容当作已落盘丢弃。同项目其他 query 变化（fromQuery 相同）不受影响。
+    if (fromQuery && activeProjectRef.current && fromQuery !== activeProjectRef.current && blockedByPendingCanvasReview()) {
+      navigate({ pathname: location.pathname, search: canvasLocationSearch(new URLSearchParams(location.search), activeProjectRef.current) },
+        { replace: true, state: location.state });
+      return;
+    }
     if (fromQuery) setCurrentId(fromQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedByPendingCanvasReview 每次渲染重建，判定仅读跨渲染稳定的 ref
   }, [location.search, location.pathname, location.state, navigate]);
 
   /** 当前画布写入 ?project=，刷新后回到同一张画布；保留其它 query 与 location.state */
@@ -2639,6 +2657,21 @@ export default function CanvasPage() {
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
   const hydratedProjectRef = useRef<string | null>(null);
+  /** IKIIWN/IKIMQK：本会话是否成功确认过非空画布。空保存的 confirmEmpty 授予依据有二：
+   *  成功水合非空基线（用户显式删光场景），或本会话成功保存非空文档并取得新版本
+   *  （IKIMQK 合法例外：空水合 → 新增 → 非空保存成功 → 再明确删除）；水合进来即为空
+   *  且从未成功保存过非空文档（服务端返回空/内容丢失/新建未保存即删）的空保存不带标记，
+   *  由服务端 422 拦下。 */
+  const confirmedNonEmptyRef = useRef(false);
+  /** IKILUE：清空命令待复核——带 confirmEmpty 的空保存被 412 拒绝（另一会话已改写画布）后置位。
+   *  IKIN23 起升级为整文档待复核：生效期间本会话一切整文档 PUT 均被阻断（无论待发节点数），
+   *  冲突响应带回的新 version 仅供提示，不构成重发旧工作副本的许可；
+   *  仅在当前项目成功重新水合（加载失败的兜底不算）或项目卸载/切换重置时解除。 */
+  const emptyClearConflictRef = useRef(false);
+  /** IKILTB：空覆盖被服务端 422 拒后置位。IKIN23 起与 emptyClearConflictRef 同为整文档待复核：
+   *  生效期间本会话一切整文档 PUT 均被阻断，入口统一提示刷新复核（重发必再拒且会覆盖另一
+   *  会话刚保存的布局）；解除点同 emptyClearConflictRef。 */
+  const emptyOverwriteRejectedRef = useRef(false);
   /** 调速重试属于发起项目；页面内切项目时保留受理结果，回到原项目再接续原卡。 */
   const audioSpeedRetriesRef = useRef(new Map<string, { patch: Record<string, unknown> }>());
   /** 首次调速提交的迟到受理结果归原项目；回到原项目后补建卡并落盘。 */
@@ -2663,6 +2696,9 @@ export default function CanvasPage() {
       lastSavedRef.current = '';
       hydratedDocRef.current = null;
       hydratedProjectRef.current = null;
+      confirmedNonEmptyRef.current = false;
+      emptyClearConflictRef.current = false; // IKILUE：项目卸载/切换重置，清空待复核闸门一并复位
+      emptyOverwriteRejectedRef.current = false; // IKILTB：422 阻断标记同步复位
       setSaveStatus('idle');
       return;
     }
@@ -2680,6 +2716,13 @@ export default function CanvasPage() {
       return;
     }
     hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
+    confirmedNonEmptyRef.current = doc.nodes.length > 0;
+    // IKIN23：仅成功重新水合才解除整文档待复核——加载失败的兜底空文档不算
+    //（否则一次失败的刷新会被误判为「已看到服务端最新布局」）
+    if (!canvasLoadFailed) {
+      emptyClearConflictRef.current = false; // IKILUE：重新水合即解除清空待复核（confirmEmpty 按新基线重新授予）
+      emptyOverwriteRejectedRef.current = false; // IKILTB：重新水合解除 422 阻断（空覆盖按新基线重新判定）
+    }
     const t: Node[] = [];
     const m: Node[] = [];
     const p: Node[] = [];
@@ -2965,23 +3008,33 @@ export default function CanvasPage() {
     if (!currentId || !doc || applyingRef.current) return;
     const timer = window.setTimeout(() => {
       if (applyingRef.current || savePromiseRef.current) return;
+      // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不得自动保存——初始空状态无权覆盖服务端事实
+      if (hydratedProjectRef.current === null) return;
       if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
       const contentNodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
       // 组伪节点随 nodes 持久化（IKD0JT A3）：水合时剥离还原
       const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
       const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
+      // IKIN23：整文档待复核（清空 412 / 空覆盖 422）期间阻断一切整文档保存——无论待发
+      // 节点数多少，本会话旧工作副本都不得覆盖另一会话刚保存的布局；保留本地编辑等待刷新复核
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return;
       if (import.meta.env.DEV) {
         console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
+      // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear）；
+      // 412 后据此区分「清空待复核」与普通版本冲突
+      const confirmEmpty = shouldConfirmEmptyClear(nodes);
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       trackCanvasSave(
-        saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
+        saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
           .then((saved) => {
             versionRef.current = saved.version;
+            // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
+            registerConfirmedNonEmpty(nodes);
             setSaveBlocked(false);
             pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
             setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
@@ -2994,6 +3047,13 @@ export default function CanvasPage() {
             const hadPendingAdds = pendingSnapshot.size > 0;
             const aligned = adoptCanvasConflictVersion(e);
             if (aligned) {
+              // IKILUE：带 confirmEmpty 的清空保存被 412 拒绝——另一会话已改写画布，重发旧空文档
+              // 会覆盖对方成果。登记清空待复核闸门（保留本地编辑、阻止空文档再次自动/手动发出），
+              // 直至重新水合服务端最新画布
+              if (confirmEmpty) {
+                emptyClearConflictRef.current = true;
+                showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+              }
               setSaveBlocked(true);
               setSaveStatus('error');
               return;
@@ -3002,6 +3062,13 @@ export default function CanvasPage() {
             if (isApiError(e) && e.status === 412) {
               setSaveStatus('error');
               showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
+            } else if (isApiError(e) && e.status === 422) {
+              // IKIIWN：空覆盖被服务端拒绝（本地空状态与服务端非空事实不一致）——重试必然再拒，引导刷新复核
+              // IKILUG：文案提取为共享常量，项目切换强制保存/手动重试同口径（见 EMPTY_OVERWRITE_REJECTED_TOAST）
+              // IKILTB：登记 422 阻断——saveBlocked 期间项目切换/返回首页提示刷新复核而非笼统重试
+              emptyOverwriteRejectedRef.current = true;
+              setSaveStatus('error');
+              showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
             } else {
               if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
               setSaveStatus('error');
@@ -5454,6 +5521,8 @@ export default function CanvasPage() {
       showToast('warn', '正在保存并提交，请稍候');
       return false;
     }
+    // IKIN23：整文档待复核（清空 412 / 空覆盖 422）期间中止切换——未保存的本地编辑不得被误认为已落盘
+    if (blockedByPendingCanvasReview()) return false;
     if (saveBlocked) {
       showToast('warn', '保存失败，请重试');
       return false;
@@ -5469,7 +5538,8 @@ export default function CanvasPage() {
       }
       return saved;
     } catch (e) {
-      showToast('error', '保存失败，请重试');
+      // IKILTB：412 闸门/422/笼统三分叉提示统一走 helper（口径见 showCanvasSaveFailureToast）
+      showCanvasSaveFailureToast(e);
       console.warn('项目切换前画布落盘失败:', e);
       return false;
     } finally {
@@ -10603,6 +10673,43 @@ export default function CanvasPage() {
     return source ? [`${source.revisionId}#${source.shotNo}`] : [];
   })), [textNodes]);
 
+  /** IKIN23：整文档待复核（清空保存 412 / 空覆盖 422 后置位）统一拦截保存/切换入口——
+   *  弹对应刷新复核提示并返回 true；当前项目成功重新水合后解除，confirmEmpty 按新基线重新授予。
+   *  （原 IKILTB blockedByPendingEmptyClear 仅拦「仍为空」的清空待复核，IKIN23 起覆盖一切整文档保存。） */
+  const blockedByPendingCanvasReview = (): boolean => {
+    if (emptyClearConflictRef.current) {
+      showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+      return true;
+    }
+    if (emptyOverwriteRejectedRef.current) {
+      showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
+      return true;
+    }
+    return false;
+  };
+
+  /** IKILTB：保存失败 toast 三分叉统一（项目切换强制保存与手动重试保存两个 catch 原为逐字
+   *  重复的级联）：412 已登记清空待复核闸门 → 刷新复核；422 空覆盖被拒 → 刷新复核（重试注定再拒）；
+   *  否则笼统重试。 */
+  const showCanvasSaveFailureToast = (e: unknown) => {
+    if (emptyClearConflictRef.current) showToast('warn', EMPTY_CLEAR_CONFLICT_TOAST);
+    else if (isApiError(e) && e.status === 422) showToast('warn', EMPTY_OVERWRITE_REJECTED_TOAST);
+    else showToast('error', '保存失败，请重试');
+  };
+
+  /** IKIMPQ：空文档保存的 confirmEmpty 授予判定（自动保存与 flush 两条路径原为逐字重复的口径，
+   *  收拢于此）：仅当待发文档为空且本会话成功确认过非空画布（水合基线非空，或本会话成功保存
+   *  非空文档并取得新版本——IKIMQK 空基线新增后再删光的合法例外，依据详见 confirmedNonEmptyRef
+   *  头注释）时授予；412 后据此区分「清空待复核」与普通版本冲突。 */
+  const shouldConfirmEmptyClear = (nodes: Node[]): boolean =>
+    nodes.length === 0 && confirmedNonEmptyRef.current;
+
+  /** IKIMPQ：成功保存非空文档并取得新版本——登记确认清空资格（空保存的 If-Match 即用该版本，
+   *  缺版本时服务端按 428 拒绝）；口径收拢，自动保存与 flush 共用。 */
+  const registerConfirmedNonEmpty = (nodes: Node[]): void => {
+    if (nodes.length > 0) confirmedNonEmptyRef.current = true;
+  };
+
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
    *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
@@ -10610,20 +10717,32 @@ export default function CanvasPage() {
   const flushCanvasSave = (projectId: string): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
+      // IKIIWN：未成功水合（加载失败/切换中，ref 被置 null）不保存——返回 false 语义同项目切换，调用方中止后续动作
+      if (hydratedProjectRef.current === null) return false;
       if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
       const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
       // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
       const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
+      // IKIN23：整文档待复核期间一律静默返回 false 不发请求——无论待发节点数；排队中的
+      // flush 在实际执行时同样走到此复查（flush 多为后台链路 .catch(()=>{})，用户可见提示
+      // 由重试保存/项目切换入口给出）
+      if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current) return false;
       const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
       if (signature !== lastSavedRef.current) {
+        // IKILUE：空文档保存的显式确认标记（授予口径见 shouldConfirmEmptyClear），
+        // 412 后据此登记清空待复核闸门
+        // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
+        const confirmEmpty = shouldConfirmEmptyClear(nodes);
         try {
-          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
           if (activeProjectRef.current !== projectId) {
             // 旧项目的保存结束后重启当前项目的自动保存防抖。
             setSaveEpoch((value) => value + 1);
             return false;
           }
           versionRef.current = saved.version;
+          // IKIMQK：成功保存非空文档并取得新版本——登记确认清空资格（口径见 registerConfirmedNonEmpty）
+          registerConfirmedNonEmpty(nodes);
           lastSavedRef.current = signature;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
@@ -10631,7 +10750,16 @@ export default function CanvasPage() {
             setSaveEpoch((value) => value + 1);
             throw error;
           }
-          adoptCanvasConflictVersion(error);
+          const aligned = adoptCanvasConflictVersion(error);
+          // IKILUE：带 confirmEmpty 的清空保存 412——登记闸门；flush 链路不 toast（后台调用方多），
+          // 用户可见提示由入口（重试保存/项目切换）给出
+          if (aligned && confirmEmpty) {
+            emptyClearConflictRef.current = true;
+          }
+          // IKILTB：空覆盖被 422 拒——登记阻断标记，saveBlocked 期间项目切换/返回首页提示刷新复核
+          if (isApiError(error) && error.status === 422) {
+            emptyOverwriteRejectedRef.current = true;
+          }
           setSaveBlocked(true);
           setSaveStatus('error');
           throw error;
@@ -10669,14 +10797,17 @@ export default function CanvasPage() {
 
   const handleRetryCanvasSave = async () => {
     if (!currentId || applyingRef.current) return;
+    // IKIN23：整文档待复核期间不发请求，引导刷新复核（当前项目成功重新水合后才恢复保存）
+    if (blockedByPendingCanvasReview()) return;
     applyingRef.current = true;
     setSaveStatus('saving');
     try {
       if (!(await flushCanvasSave(currentId))) setSaveStatus('error');
       else setSaveEpoch(value => value + 1);
-    } catch {
+    } catch (e) {
       setSaveStatus('error');
-      showToast('error', '保存失败，请重试');
+      // IKILTB：412 闸门/422/笼统三分叉提示统一走 helper（口径见 showCanvasSaveFailureToast）
+      showCanvasSaveFailureToast(e);
     } finally {
       applyingRef.current = false;
     }
