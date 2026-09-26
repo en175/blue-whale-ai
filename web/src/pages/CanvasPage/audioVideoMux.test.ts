@@ -255,7 +255,7 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
       ['a1', 'audio-video-mux-73', AUDIO_VIDEO_MUX_EDGE_ORIGIN],
       ['v1', 'audio-video-mux-73', AUDIO_VIDEO_MUX_EDGE_ORIGIN],
     ]);
-    expect(first.pollJobIds).toEqual(['73']);
+    expect(first.polls).toEqual([{ jobId: '73', cardId: 'audio-video-mux-73' }]);
     const again = planAudioVideoMuxRecovery(first.nodes, first.edges, [pending]);
     expect(again.nodes).toHaveLength(3);
     expect(again.edges).toHaveLength(2);
@@ -288,12 +288,42 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
     expect(requeued.nodes.find((node) => node.id === 'audio-video-mux-73')?.data).toMatchObject({
       jobId: '73', genStatus: 'generating', errorText: undefined,
     });
-    expect(requeued.pollJobIds).toEqual(['73']);
+    expect(requeued.polls).toEqual([{ jobId: '73', cardId: 'audio-video-mux-73' }]);
     // 任务已终态：不补状态（终态由轮询回填），只补轮询
     const succeededJob = job({ status: 'succeeded', input: frozenInput });
     const settled = planAudioVideoMuxRecovery([readyAudio('a1'), failed], [], [succeededJob]);
-    expect(settled.pollJobIds).toEqual(['73']);
+    expect(settled.polls).toEqual([{ jobId: '73', cardId: 'audio-video-mux-73' }]);
     expect(settled.nodes.find((node) => node.id === 'audio-video-mux-73')?.data.genStatus).toBe('failed');
+  });
+
+  it('重试排队后刷新：已持久化的失败草稿卡按原卡 id 续轮询，不补虚拟占位卡（IKILVG）', () => {
+    const failed = muxDraft('mux-draft-1', {
+      genStatus: 'failed', jobId: '73', errorText: '上次失败：供应商超时',
+    });
+    const result = planAudioVideoMuxRecovery([readyAudio('a1'), failed], [], [pending]);
+    // 原卡原地转生成中：不补 audio-video-mux-73 占位卡、不复制卡
+    expect(result.nodes.map((node) => node.id)).toEqual(['a1', 'mux-draft-1']);
+    expect(result.nodes.find((node) => node.id === 'mux-draft-1')?.data).toMatchObject({
+      genStatus: 'generating', errorText: undefined,
+    });
+    // 轮询配对挂原卡 id（画布上确实无卡时才用 audioVideoMuxNodeId(jobId)）
+    expect(result.polls).toEqual([{ jobId: '73', cardId: 'mux-draft-1' }]);
+  });
+
+  it('重试刷新前已再次失败：失败卡同步服务端最新错误文案，不再轮询（IKILVG）', () => {
+    const failedJob = job({ status: 'failed', input: frozenInput, error: { msg: '重试后最新失败原因' } });
+    const failed = muxDraft('mux-draft-1', {
+      genStatus: 'failed', jobId: '73', errorText: '上次失败：供应商超时',
+    });
+    const result = planAudioVideoMuxRecovery([readyAudio('a1'), failed], [], [failedJob]);
+    expect(result.nodes.find((node) => node.id === 'mux-draft-1')?.data).toMatchObject({
+      genStatus: 'failed', errorText: '重试后最新失败原因',
+    });
+    expect(result.polls).toEqual([]);
+    // 同步后幂等：再次规划不再改动
+    const again = planAudioVideoMuxRecovery(result.nodes, result.edges, [failedJob]);
+    expect(again.nodes).toBe(result.nodes);
+    expect(again.nodes.find((node) => node.id === 'mux-draft-1')?.data.errorText).toBe('重试后最新失败原因');
   });
 
   it('卡已落盘的任务不重复补卡与来源线（幂等），畸形任务跳过', () => {
@@ -310,6 +340,6 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
     const result = planAudioVideoMuxRecovery(existing, edges, [present, job({ job_id: '74', input: { sync: 'trim' } })]);
     expect(result.nodes.map((node) => node.id)).toEqual(['a1', 'v1', 'audio-video-mux-73']);
     expect(result.edges).toHaveLength(2);
-    expect(result.pollJobIds).toEqual([]);
+    expect(result.polls).toEqual([]);
   });
 });

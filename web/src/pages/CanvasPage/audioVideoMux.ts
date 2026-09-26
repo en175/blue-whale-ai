@@ -276,16 +276,19 @@ export function buildAudioVideoMuxPlaceholderNode(
 /** 以服务端任务为准恢复画布（同 planAudioMixRecovery 同构）：任务卡缺失且任务仍在
  *  进行中时补占位卡（进行中无卡即「卡尚未落盘」——生成中卡删除会连带取消任务，
  *  故不会与用户主动移除相撞）；卡在画布上时按任务态续轮询；来源线按冻结输入补画
- *  （已删节点不复活、不建悬空线）；返回的 pollJobIds 去重。 */
+ *  （已删节点不复活、不建悬空线）。
+ *  轮询按「任务 → 承接卡」配对返回（IKILVG）：正常发送是草稿卡原地转生成中、卡 id
+ *  与任务号无关，已持久化的失败草稿卡必须按原卡 id 续轮询（刷新后原卡原地显示生成中
+ *  与终态回填），仅补占位卡时 cardId 才是 audioVideoMuxNodeId(jobId) 虚拟卡 id。 */
 export function planAudioVideoMuxRecovery(
   nodes: Node[],
   edges: Edge[],
   jobs: JobRecord[],
   occupied: Node[] = nodes,
-): { nodes: Node[]; edges: Edge[]; pollJobIds: string[] } {
+): { nodes: Node[]; edges: Edge[]; polls: Array<{ jobId: string; cardId: string }> } {
   let nextNodes = nodes;
   let nextEdges = edges;
-  const pollJobIds: string[] = [];
+  const pollCardByJob = new Map<string, string>();
   for (const job of jobs) {
     if (job.type !== 'audio_video_mux' || !/^[1-9][0-9]*$/.test(String(job.job_id))) continue;
     const frozen = frozenAudioVideoMuxInput(job);
@@ -303,7 +306,7 @@ export function planAudioVideoMuxRecovery(
         jobId, audioVideoMuxIdentityFromFrozen(frozen, nextNodes), position,
       );
       nextNodes = [...nextNodes, card];
-      pollJobIds.push(jobId);
+      pollCardByJob.set(jobId, card.id);
     }
     if (!card) continue;
     const cardId = card.id;
@@ -311,10 +314,20 @@ export function planAudioVideoMuxRecovery(
       nextNodes = nextNodes.map((node) => node.id === cardId
         ? { ...node, data: { ...node.data, genStatus: 'generating', progress: job.progress, errorText: undefined } }
         : node);
-      pollJobIds.push(jobId);
-    } else if ((job.status === 'failed' && card.data.genStatus !== 'failed')
-      || (job.status === 'succeeded' && card.data.genStatus != null)) {
-      pollJobIds.push(jobId);
+      pollCardByJob.set(jobId, cardId);
+    } else if (job.status === 'failed') {
+      const latestError = audioVideoMuxErrorText(job.error);
+      if (card.data.genStatus !== 'failed') {
+        pollCardByJob.set(jobId, cardId);
+      } else if (card.data.errorText !== latestError) {
+        // 重试刷新前已再次失败（IKILVG）：卡上是上次尝试的旧文案，按服务端最新错误
+        // 同步展示（同步后幂等，不重启轮询）
+        nextNodes = nextNodes.map((node) => node.id === cardId
+          ? { ...node, data: { ...node.data, errorText: latestError } }
+          : node);
+      }
+    } else if (job.status === 'succeeded' && card.data.genStatus != null) {
+      pollCardByJob.set(jobId, cardId);
     }
     const liveIds = new Set(nextNodes.map((node) => node.id));
     for (const input of [frozen.audio, frozen.video]) {
@@ -328,5 +341,5 @@ export function planAudioVideoMuxRecovery(
       }];
     }
   }
-  return { nodes: nextNodes, edges: nextEdges, pollJobIds: [...new Set(pollJobIds)] };
+  return { nodes: nextNodes, edges: nextEdges, polls: [...pollCardByJob].map(([jobId, cardId]) => ({ jobId, cardId })) };
 }

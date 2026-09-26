@@ -119,7 +119,6 @@ import {
   AUDIO_VIDEO_MUX_TITLE,
   audioVideoMuxErrorText,
   audioVideoMuxIdentityOf,
-  audioVideoMuxNodeId,
   audioVideoMuxResultName,
   audioVideoMuxSourceError,
   audioVideoMuxVideoError,
@@ -2965,7 +2964,9 @@ export default function CanvasPage() {
 
   /** 音视频合成恢复（IKIHPM，同 planAudioMixRecovery 同构）：进行中而卡不在画布上的任务
    *  补视频型占位卡（保存一条含卡快照，刷新后不再补）、卡在画布上的任务按任务态续轮询、
-   *  来源线按冻结输入补画（已删输入卡不复活、不建悬空线）。 */
+   *  来源线按冻结输入补画（已删输入卡不复活、不建悬空线）。轮询按规划返回的「任务 →
+   *  承接卡」配对挂到真实卡 id（IKILVG）：已持久化的失败草稿卡在原卡原地显示生成中与
+   *  终态回填，不改用任务号构造的虚拟卡 id。 */
   useEffect(() => {
     if (!doc || !audioVideoMuxJobsQuery.data || !currentId) return;
     const projectId = currentId;
@@ -2990,7 +2991,7 @@ export default function CanvasPage() {
         edgesRef.current = recovered.edges;
         setEdges(recovered.edges);
       }
-      recovered.pollJobIds.forEach((jobId) => pollJobRef.current(audioVideoMuxNodeId(jobId), jobId));
+      recovered.polls.forEach(({ cardId, jobId }) => pollJobRef.current(cardId, jobId));
     }, 0);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

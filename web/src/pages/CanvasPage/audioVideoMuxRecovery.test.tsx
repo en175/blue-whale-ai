@@ -191,3 +191,93 @@ describe('IKIHPM 刷新恢复：进行中任务补占位卡与冻结来源线', 
     expect(edges()).toEqual([]);
   });
 });
+
+/* IKILVG 失败重试后原草稿卡刷新恢复：正常发送是草稿卡原地转生成中、卡 id 与任务号无关，
+   已持久化的失败草稿卡（data.jobId 命中同一重试任务）刷新后必须按原卡 ID 轮询并在原卡
+   显示生成中 / 成品 / 最新失败——不改用 audio-video-mux-${jobId} 虚拟卡 ID，也不补占位卡、
+   不复制卡与来源线（卡 id/位置/冻结输入/语义边全部保留）。progress 取值区分来源：规划只写
+   任务列表的 40，55 只能来自轮询响应——按原卡 ID 轮询的直接可见证据。 */
+describe('IKILVG 失败重试后原草稿卡刷新恢复', () => {
+  const failedDraftCard = {
+    id: 'mux-draft-1', type: 'mediaNode', position: { x: 800, y: 0 },
+    data: {
+      src: '', mediaType: 'video', fileName: '音视频合成', genStatus: 'failed',
+      jobId: '73', errorText: '上次失败：供应商超时',
+      audioVideoMux: {
+        sourceNodeId: 'a1', sourceAssetId: '8', reserveAudio: true, sync: 'none',
+        video: { assetId: '5', nodeId: 'v1', name: '城市夜景.mp4', width: 1280, height: 720, duration: 12 },
+      },
+    },
+  };
+  const draftEdges = () => [
+    { id: 'e1', source: 'a1', target: 'mux-draft-1', data: { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN } },
+    { id: 'e2', source: 'v1', target: 'mux-draft-1', data: { origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN } },
+  ];
+  const draftData = () => mediaNodes().find((node) => node.id === 'mux-draft-1')!.data as Record<string, unknown>;
+
+  it('重试进行中刷新：原卡原地转生成中并按原卡 ID 轮询，不补虚拟占位卡、不复制卡与来源线', async () => {
+    seed([audioCard, videoCard, failedDraftCard], draftEdges());
+    apiMocks.fetchJobs.mockResolvedValue({ records: [jobRecord({ status: 'processing', progress: 40 })], total: 1, size: 100, current: 1 });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '73', status: 'processing', progress: 55, asset: null });
+    await renderPage();
+
+    await vi.waitFor(() => expect(draftData().progress).toBe(55));
+    expect(draftData().genStatus).toBe('generating');
+    expect(draftData().errorText).toBeUndefined();
+    // 卡名单不变：不补 audio-video-mux-73 占位卡、不复制草稿卡
+    expect(cardIds()).toEqual(['a1', 'v1', 'mux-draft-1']);
+    // 来源线保持原样（原卡 ID/位置/冻结输入/语义边不动，不复制不重建）
+    expect(edges().map((edge) => `${edge.source}->${edge.target}`).sort())
+      .toEqual(['a1->mux-draft-1', 'v1->mux-draft-1']);
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('73');
+  });
+
+  it('重试在刷新前已成功：原卡回填为可播放的视频成品，命名与尺寸回落冻结视频身份', async () => {
+    seed([audioCard, videoCard, failedDraftCard], draftEdges());
+    apiMocks.fetchJobs.mockResolvedValue({ records: [jobRecord({ status: 'succeeded', progress: 100 })], total: 1, size: 100, current: 1 });
+    apiMocks.fetchJobStatus.mockResolvedValue({
+      job_id: '73', status: 'succeeded', progress: 100,
+      asset: { id: '88', url: 'http://vid/out.mp4', type: 'video' },
+    });
+    await renderPage();
+
+    await vi.waitFor(() => expect(draftData().genStatus).toBeUndefined());
+    expect(draftData().src).toBe('http://vid/out.mp4');
+    expect(draftData().fileName).toBe('城市夜景(音视频合成).mp4');
+    expect(draftData().width).toBe(1280);
+    expect(draftData().duration).toBe(12);
+    expect(draftData().audioVideoMux).toBeUndefined();
+    // 原卡原地回填：不新建卡、不复制来源线
+    expect(cardIds()).toEqual(['a1', 'v1', 'mux-draft-1']);
+    expect(edges().filter((edge) => edge.target === 'mux-draft-1')).toHaveLength(2);
+  });
+
+  it('重试进行中刷新后任务再次失败：原卡显示最新错误', async () => {
+    seed([audioCard, videoCard, failedDraftCard], draftEdges());
+    apiMocks.fetchJobs.mockResolvedValue({ records: [jobRecord({ status: 'processing', progress: 40 })], total: 1, size: 100, current: 1 });
+    apiMocks.fetchJobStatus.mockResolvedValue({
+      job_id: '73', status: 'failed', progress: 0, asset: null, error: { msg: '重试后最新失败原因' },
+    });
+    await renderPage();
+
+    await vi.waitFor(() => expect(draftData().errorText).toBe('重试后最新失败原因'));
+    expect(draftData().genStatus).toBe('failed');
+    expect(cardIds()).toEqual(['a1', 'v1', 'mux-draft-1']);
+  });
+
+  it('重试在刷新前已再次失败：原卡同步服务端最新失败文案，不重启轮询', async () => {
+    seed([audioCard, videoCard, failedDraftCard], draftEdges());
+    apiMocks.fetchJobs.mockResolvedValue({
+      records: [jobRecord({ status: 'failed', error: { msg: '刷新前已失败的新原因' } })],
+      total: 1, size: 100, current: 1,
+    });
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '73', status: 'failed', progress: 0, asset: null });
+    await renderPage();
+
+    await vi.waitFor(() => expect(draftData().errorText).toBe('刷新前已失败的新原因'));
+    expect(draftData().genStatus).toBe('failed');
+    expect(cardIds()).toEqual(['a1', 'v1', 'mux-draft-1']);
+    // 终态已按任务列表同步，无需再拉任务详情
+    expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+  });
+});
