@@ -5,6 +5,7 @@ import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import com.volcengine.tos.comm.common.ACLType;
+import com.volcengine.tos.model.object.DeleteObjectInput;
 import com.volcengine.tos.model.object.ObjectMetaRequestOptions;
 import com.volcengine.tos.model.object.PutObjectACLInput;
 import com.volcengine.tos.model.object.PutObjectInput;
@@ -28,6 +29,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -63,16 +65,23 @@ public class TosVideoMediaRelay {
     /**
      * 流式转存的响应头等待超时 60s（同字节数组路径值）。探针实证：{@code BodyHandlers.ofInputStream}
      * 语义下 {@code HttpRequest.timeout} 只覆盖到响应头（1s 超时 + 4s 慢 body 实测正常读完），
-     * 故此值不约束大文件下载本身，body 段由 {@link #STREAM_COPY_DEADLINE} 兜底。
+     * 故此值不约束大文件下载本身，body 段由 {@link #STREAM_STALL_TIMEOUT} 兜底。
      */
     private static final Duration STREAM_HEADER_TIMEOUT = Duration.ofSeconds(60);
 
     /**
-     * 流式下载整段兜底时限 10 分钟：流式 body 不受 request timeout 约束，对端「连上但不吐数据」
-     * 必须由 {@link StreamWatchdog} 到点主动 close 响应流中止（截止检查只在 read 返回后执行，
-     * 停流时永远走不到）；同时给 1GiB 级结果留出 ≥1.7MB/s 的可用带宽。
+     * 停流超时 60s（IKILVH）：以「上次有进度」为基准，连续 60 秒无任何字节到达即中止——与
+     * 响应头等待 60s（{@link #STREAM_HEADER_TIMEOUT}）同口径（对端已连上，60s 不吐一个字节
+     * 即判停流；正常慢传输只要持续有字节就不会触发）。取代旧的固定 10 分钟总时限：10 GiB
+     * 上限下总时限要求 ≥17.1MiB/s 才能在窗内完成，合法慢传输会被误杀；新模型只拦「完全
+     * 无进度」，持续有字节的传输不限总时长，改由调用方注入的任务截止时间
+     * （{@link #persistStreaming(String, String, long, TransferAbortHandle, Instant)}）与
+     * {@code maxBytes} 容量上限分别限界。受控测试（TosVideoMediaRelayTest 慢流用例注入
+     * 缩比参数）实测持续 ~0.6MiB/s 且总时长 2 倍于旧时限缩比值仍能完成；线上能否在任务
+     * 截止时间内完成 10 GiB 取决于实际吞吐（10GiB@2MiB/s ≈ 85 分钟），本类不对未实测的
+     * 线上速率做任何「任意速率均可完成」的承诺。
      */
-    private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
+    static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
 
     /**
      * 错误响应正文读取截止 60s（IKHSFC）：错误体至多读 4096 字节，正常毫秒级完成；此前
@@ -232,7 +241,7 @@ public class TosVideoMediaRelay {
      * @throws RuntimeException 下载 / 校验 / 上传失败（同 {@link #persist} 的错误类型）
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes) {
-        return persistStreaming(sourceUrl, userId, maxBytes, null);
+        return persistStreaming(sourceUrl, userId, maxBytes, null, null);
     }
 
     /**
@@ -242,17 +251,36 @@ public class TosVideoMediaRelay {
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
                                         TransferAbortHandle abortHandle) {
-        return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle,
-                STREAM_COPY_DEADLINE, STREAM_ERROR_BODY_TIMEOUT);
+        return persistStreaming(sourceUrl, userId, maxBytes, abortHandle, null);
     }
 
     /**
-     * 全参内部版（IKHSFC）：截止时间可注入，测试用短截止验证停流主动中止（不真等 10 分钟）。
+     * 流式转存（带外部中止句柄 + 任务截止时间，IKILVH）：时限模型为「停流超时（默认
+     * {@link #STREAM_STALL_TIMEOUT}，无进度才计时）+ 任务截止时间（到点即中止）+ 容量上限
+     * （边读边判）」三限界，不再有固定总时限——持续有进度的慢传输不受总时长约束。调用方
+     * （processor）把 {@code execution_deadline_at} 传入：截止到点由 {@link StreamWatchdog}
+     * 主动 close 响应流 / 取消上传，以「任务执行截止时间已到」的供应商错误退出（属普通
+     * 失败口径，与停流、容量超限、外部中止的文案分别命名，运维可定位）。截止时间可为
+     * null（无任务截止约束）。
+     */
+    public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
+                                        TransferAbortHandle abortHandle, Instant taskDeadline) {
+        return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle, taskDeadline,
+                STREAM_STALL_TIMEOUT, STREAM_ERROR_BODY_TIMEOUT);
+    }
+
+    /**
+     * 全参内部版（IKHSFC 起可注入截止；IKILVH 起 {@code stallTimeout} 语义改为停流超时——
+     * 以「上次有进度」为基准，测试用亚秒级值做确定性回归，不真等 60s；任务截止时间
+     * {@code taskDeadline} 可为 null）。
      */
     StoredVideo persistStreamingInternal(String sourceUrl, String userId, long maxBytes,
-                                         TransferAbortHandle abortHandle,
-                                         Duration copyDeadline, Duration errorBodyTimeout) {
+                                         TransferAbortHandle abortHandle, Instant taskDeadline,
+                                         Duration stallTimeout, Duration errorBodyTimeout) {
         Path tempFile = null;
+        // 已向上游发起 PUT 的对象 key：中止退出时对象可能已落地（body 发完、仅响应未回的
+        // 窗口），无 Asset 引用即孤儿——catch 里 deleteObject 清理（幂等，未落地也不报错）。
+        String uploadedKey = null;
         try {
             tempFile = Files.createTempFile("video-relay-", ".part");
 
@@ -268,14 +296,14 @@ public class TosVideoMediaRelay {
             String contentType = resp.headers().firstValue("content-type").orElse(null);
             String mime = contentType != null ? contentType.split(";", 2)[0].trim() : "video/mp4";
             try (InputStream body = resp.body();
-                 StreamWatchdog watchdog = new StreamWatchdog(body, abortHandle)) {
+                 StreamWatchdog watchdog = new StreamWatchdog(body, abortHandle, stallTimeout)) {
                 if (resp.statusCode() >= 400) {
                     watchdog.armTimeout(errorBodyTimeout);
                     String errBody;
                     try {
                         errBody = new String(body.readNBytes(4096), java.nio.charset.StandardCharsets.UTF_8);
                     } catch (IOException e) {
-                        throw watchdog.translateReadFailure(e, true, errorBodyTimeout);
+                        throw watchdog.translateReadFailure(e, errorBodyTimeout);
                     }
                     String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -285,13 +313,16 @@ public class TosVideoMediaRelay {
                 if (!mime.startsWith("video/")) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成结果不是视频");
                 }
-                watchdog.armTimeout(copyDeadline);
+                // 停流超时以「上次有进度」为基准计时（每块字节到达即重置）；任务截止时间
+                // 全程布防（含上传段），到点由看门狗主动打断。
+                watchdog.armStall();
+                watchdog.armDeadline(taskDeadline);
                 try {
-                    size = copyToFile(body, tempFile, maxBytes, sourceUrl, copyDeadline);
+                    size = copyToFile(body, tempFile, maxBytes, sourceUrl, watchdog);
                 } catch (IOException e) {
-                    throw watchdog.translateReadFailure(e, false, copyDeadline);
+                    throw watchdog.translateReadFailure(e, errorBodyTimeout);
                 }
-                watchdog.disarm();
+                watchdog.disarmStall();
                 if (size == 0) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
                 }
@@ -301,6 +332,7 @@ public class TosVideoMediaRelay {
                 String extension = videoExtension(mime);
                 String uuid = UUID.randomUUID().toString().replace("-", "");
                 String storageKey = "generated/" + userId + "/video/" + uuid + "." + extension;
+                uploadedKey = storageKey;
                 watchdog.requireNotAborted();
                 Map<String, String> headers = Map.of(
                         "Content-Type", mime, "x-tos-acl", "public-read");
@@ -319,6 +351,11 @@ public class TosVideoMediaRelay {
                 return new StoredVideo(publicUrl, storageKey, mime, size, md5);
             }
         } catch (RuntimeException e) {
+            // 外部中止（取消/失租/续租异常）且 PUT 已发起 → 清理可能已落地的未发布对象；
+            // 清理失败只记日志，中止路径主语义（及时退出、不发布）不因清理失败而变。
+            if (e instanceof TransferAbortedException && uploadedKey != null) {
+                deleteUnpublishedObject(uploadedKey);
+            }
             throw e;
         } catch (Exception e) {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -334,10 +371,14 @@ public class TosVideoMediaRelay {
         }
     }
 
-    /** 分块落盘：边读边判上限与截止（上限语义同字节数组路径——等于上限通过；停流的阻塞中止由看门狗兜）。 */
+    /**
+     * 分块落盘：边读边判上限（上限语义同字节数组路径——等于上限通过）；每块到达即向看门狗
+     * 上报进度（重置停流基准；任务截止到点直接中止）。停流的阻塞中止由看门狗兜——read
+     * 返回后才发现停流是常态，阻塞中的打断只能靠看门狗 close 响应流。持续有进度即不再有
+     * 总时长约束（IKILVH：10 GiB 上限与固定总时限互斥，慢传输由任务截止时间限界）。
+     */
     private long copyToFile(InputStream in, Path target, long maxBytes, String sourceUrl,
-                            Duration copyDeadline) throws IOException {
-        long deadlineNanos = System.nanoTime() + copyDeadline.toNanos();
+                            StreamWatchdog watchdog) throws IOException {
         long total = 0;
         byte[] buffer = new byte[64 * 1024];
         try (OutputStream out = Files.newOutputStream(target)) {
@@ -348,14 +389,21 @@ public class TosVideoMediaRelay {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                             "生成视频超过转存上限（> " + (maxBytes / (1024 * 1024)) + "MB）: " + sourceUrl);
                 }
-                if (System.nanoTime() > deadlineNanos) {
-                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                            "生成视频下载超时（超过 " + describeDuration(copyDeadline) + "）");
-                }
                 out.write(buffer, 0, read);
+                watchdog.progress();
             }
         }
         return total;
+    }
+
+    /** 中止后清理未发布 TOS 对象（IKILVH）：deleteObject 幂等（对象未落地也不报错），失败仅记日志。 */
+    private void deleteUnpublishedObject(String storageKey) {
+        try {
+            client.deleteObject(new DeleteObjectInput().setBucket(bucket).setKey(storageKey));
+            log.info("转存中止后清理未发布 TOS 对象 storageKey={}", storageKey);
+        } catch (Exception e) {
+            log.warn("转存中止后清理未发布 TOS 对象失败 storageKey={} err={}", storageKey, e.getMessage());
+        }
     }
 
     /**
@@ -417,44 +465,93 @@ public class TosVideoMediaRelay {
     }
 
     /**
-     * 传输看门狗（IKHSFC）：截止到期或外部句柄触发时主动 close 正在读取的响应流，打断阻塞中的
-     * read（JDK HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read
-     * 返回后执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
-     * {@link #translateReadFailure} 归因；上传侧经逐请求 Call.cancel 与外部中止状态检查
-     * 同口径中止。每个 {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
+     * 传输看门狗（IKHSFC 建通道，IKILVH 扩时限模型）：停流超时（以「上次有进度」为基准，
+     * {@link #progress()} 重置）/ 任务截止时间 / 错误体读取截止 / 外部句柄四类信号到点或
+     * 触发时主动 close 正在读取的响应流、取消进行中的上传，打断阻塞中的 read（JDK
+     * HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read 返回后
+     * 执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
+     * {@link #translateReadFailure} 归因（外部中止 → 停流 → 任务截止 → 错误体截止 →
+     * 供应商错误，文案分别命名）；上传侧经逐请求 Call.cancel 与外部中止状态检查同口径
+     * 中止。每个 {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
      */
     private static final class StreamWatchdog implements AutoCloseable {
         private final InputStream body;
         private final TransferAbortHandle handle;
+        private final Duration stallTimeout;
+        private volatile long lastProgressNanos;
+        private volatile ScheduledFuture<?> stallTask;
         private volatile ScheduledFuture<?> timeoutTask;
+        private volatile ScheduledFuture<?> deadlineTask;
+        private volatile Long deadlineNanos;
+        private volatile boolean stallAbort;
         private volatile boolean timeoutAbort;
+        private volatile boolean deadlineAbort;
         private volatile boolean externalAbort;
         private volatile Call activeUpload;
 
-        StreamWatchdog(InputStream body, TransferAbortHandle handle) {
+        StreamWatchdog(InputStream body, TransferAbortHandle handle, Duration stallTimeout) {
             this.body = body;
             this.handle = handle;
+            this.stallTimeout = stallTimeout;
             if (handle != null) {
                 handle.wire(this::abortFromExternal);
             }
         }
 
-        /** 布防截止（错误体 / 正文拷贝阶段各自布防；重复布防替换旧任务）。 */
+        /** 布防错误体读取截止（一次性：错误体至多 4096 字节，毫秒级读完，无需进度重置）。 */
         void armTimeout(Duration deadline) {
-            ScheduledFuture<?> previous = timeoutTask;
-            if (previous != null) previous.cancel(false);
             timeoutTask = WATCHDOG_SCHEDULER.schedule(this::abortFromTimeout,
                     deadline.toNanos(), TimeUnit.NANOSECONDS);
         }
 
-        /** 撤防（下载正常完成后取消定时；外部中止通道保持接通直到 {@link #close()}）。 */
-        void disarm() {
-            ScheduledFuture<?> task = timeoutTask;
+        /** 布防停流超时（IKILVH）：基准 = 上次进度；有进度经 {@link #progress()} 重置定时。 */
+        void armStall() {
+            ScheduledFuture<?> previous = stallTask;
+            if (previous != null) previous.cancel(false);
+            lastProgressNanos = System.nanoTime();
+            stallTask = WATCHDOG_SCHEDULER.schedule(this::abortFromStall,
+                    stallTimeout.toNanos(), TimeUnit.NANOSECONDS);
+        }
+
+        /**
+         * 布防任务截止时间（IKILVH）：null 不布防；全程保持布防（含上传段），到点 close
+         * 响应流 / 取消上传。nanoTime 单调钟与墙钟截止换算只在布防时做一次。
+         */
+        void armDeadline(Instant deadline) {
+            if (deadline == null) return;
+            long nanos = System.nanoTime() + Duration.between(Instant.now(), deadline).toNanos();
+            deadlineNanos = nanos;
+            deadlineTask = WATCHDOG_SCHEDULER.schedule(this::abortFromDeadline,
+                    Math.max(0, nanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+        }
+
+        /** 撤防停流定时（下载正常完成后；任务截止与外部通道保持接通直到 {@link #close()}）。 */
+        void disarmStall() {
+            ScheduledFuture<?> task = stallTask;
             if (task != null) task.cancel(false);
         }
 
         private void abortFromTimeout() {
             timeoutAbort = true;
+            closeBodyQuietly();
+        }
+
+        private void abortFromStall() {
+            long idleNanos = System.nanoTime() - lastProgressNanos;
+            if (idleNanos < stallTimeout.toNanos()) {
+                // 定时器触发与 progress() 重排之间的竞态兜底：进度未停够时限只重排剩余窗口
+                stallTask = WATCHDOG_SCHEDULER.schedule(this::abortFromStall,
+                        stallTimeout.toNanos() - idleNanos, TimeUnit.NANOSECONDS);
+                return;
+            }
+            stallAbort = true;
+            closeBodyQuietly();
+        }
+
+        private void abortFromDeadline() {
+            deadlineAbort = true;
+            Call upload = activeUpload;
+            if (upload != null) upload.cancel();
             closeBodyQuietly();
         }
 
@@ -477,15 +574,33 @@ public class TosVideoMediaRelay {
             return handle != null ? handle.reason() : null;
         }
 
-        /** 读取侧 IOException 归因：外部中止优先 → 超时 → 其余包供应商错误。 */
-        RuntimeException translateReadFailure(IOException e, boolean errorBodyPhase, Duration deadline) {
+        /** 每块字节到达即调用：重置停流基准；任务截止到点直接抛（read 返回后无需等定时器）。 */
+        void progress() {
+            lastProgressNanos = System.nanoTime();
+            Long deadline = deadlineNanos;
+            if (deadline != null && System.nanoTime() >= deadline) {
+                deadlineAbort = true;
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "任务执行截止时间已到，中止结果转存");
+            }
+        }
+
+        /** 读取侧 IOException 归因：外部中止 → 任务截止 → 停流 → 错误体截止 → 其余包供应商错误。 */
+        RuntimeException translateReadFailure(IOException e, Duration errorBodyTimeout) {
             if (externalAbort) {
                 return new TransferAbortedException(externalReason());
             }
-            if (timeoutAbort) {
-                String phase = errorBodyPhase ? "错误响应正文读取超时" : "生成视频下载超时";
+            if (deadlineAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        phase + "（超过 " + describeDuration(deadline) + "）", e);
+                        "任务执行截止时间已到，中止结果转存", e);
+            }
+            if (stallAbort) {
+                return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频下载停流（连续 " + describeDuration(stallTimeout) + " 无进度）", e);
+            }
+            if (timeoutAbort) {
+                return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "错误响应正文读取超时（超过 " + describeDuration(errorBodyTimeout) + "）", e);
             }
             return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "生成视频下载失败: " + e.getMessage(), e);
@@ -518,7 +633,11 @@ public class TosVideoMediaRelay {
 
         @Override
         public void close() {
-            disarm();
+            disarmStall();
+            ScheduledFuture<?> timeout = timeoutTask;
+            if (timeout != null) timeout.cancel(false);
+            ScheduledFuture<?> deadline = deadlineTask;
+            if (deadline != null) deadline.cancel(false);
             if (handle != null) handle.unwire();
         }
     }

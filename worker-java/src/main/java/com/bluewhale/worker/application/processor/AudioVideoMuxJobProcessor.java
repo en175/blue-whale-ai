@@ -30,7 +30,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /** audio_video_mux 独立 MQ 步进：提交（sync 档映射 + client_token 幂等键）、持久化 task_id、
  * 查询、视频转存（10 GiB 上限）、发布长期视频 Asset（迁移契约 §20）。 */
@@ -196,27 +195,46 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
             return;
         }
         if (cancelIfRequested(job) || !renewLease(job)) return;
-        AtomicBoolean lostLease = new AtomicBoolean();
+        // 转存全程心跳续租 + 失租/取消中止（IKILVH，VideoMatting 同款接线）：下载 + 上传可
+        // 远超单次租约窗，心跳保持所有权；取消、续租未命中（已被接管/终态）或续租异常即经
+        // 中止句柄停下正在进行的传输——取消与失租共用 abort 通道，原因串区分（取消已落
+        // cancelled 终态，失租由接管方/recovery 兜底，本执行者都不再落普通失败终态）。
+        TosVideoMediaRelay.TransferAbortHandle abortHandle = new TosVideoMediaRelay.TransferAbortHandle();
         ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
-                if (!lostLease.get() && (cancelIfRequested(job) || !renewLease(job))) lostLease.set(true);
+                if (cancelIfRequested(job)) {
+                    abortHandle.abort("音视频合成任务已被用户取消");
+                } else if (!renewLease(job)) {
+                    abortHandle.abort("音视频合成结果转存期租约未命中（已被接管/终态）");
+                }
             } catch (Exception error) {
-                lostLease.set(true);
+                abortHandle.abort("音视频合成结果转存续租异常: " + error.getMessage());
                 log.warn("[audio_video_mux] 结果转存续租异常 jobId={}", job.id(), error);
             }
         }, leaseRenewIntervalMs, leaseRenewIntervalMs, TimeUnit.MILLISECONDS);
         TosVideoMediaRelay.StoredVideo stored;
         try {
-            stored = relay.persistStreaming(observed.videoUrl(), job.userId(), AudioVideoMuxContract.MAX_RESULT_BYTES);
+            // 10 GiB 上限保留；时限模型（IKILVH）：停流超时（无进度才计时）+ 任务截止时间
+            // （execution_deadline_at 到点中止）+ 容量上限，不再有固定总时限——受控慢流
+            // 只要持续有进度且未过截止时间即可完成，供应商临时链接不充当最终产物。
+            stored = relay.persistStreaming(observed.videoUrl(), job.userId(),
+                    AudioVideoMuxContract.MAX_RESULT_BYTES, abortHandle,
+                    job.executionDeadlineAt() == null ? null
+                            : job.executionDeadlineAt().toInstant(WorkerClock.BEIJING));
+        } catch (TosVideoMediaRelay.TransferAbortedException e) {
+            // 中止（取消/失租/续租异常）≠ 普通失败：取消路径已落 cancelled 终态；失租路径
+            // failMediaExtractJob 的旧 fencing token 也会被守卫拒绝，任务由新执行者/recovery
+            // 继续——均静默退出，不把失租误写成失败终态。
+            log.warn("[audio_video_mux] 结果转存被中止，本执行者静默退出 jobId={}: {}", job.id(), e.getMessage());
+            return;
         } catch (MediaExtractError error) {
-            if (lostLease.get()) return;
             String requestId = observed.requestId();
             if (requestId == null || requestId.isBlank()) throw error;
             throw new MediaExtractError(error.getCode(), error.getMessage() + " request_id=" + requestId, error);
         } finally {
             heartbeat.cancel(false);
         }
-        if (lostLease.get() || cancelIfRequested(job) || !renewLease(job)) return;
+        if (abortHandle.aborted() || cancelIfRequested(job) || !renewLease(job)) return;
         boolean published = stateMachine.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
                 job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
