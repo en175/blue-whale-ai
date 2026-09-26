@@ -15,7 +15,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { textInputSignatureOf, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE } from "@lib/contracts";
 
 // 入队函数在测试中被 stub（对齐 audio-draft.integration.test.ts 先例）：任务停在 queued，
@@ -143,7 +142,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const canvasService = new CanvasService(prisma, projects);
     const jobsService = new JobsService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
@@ -155,7 +154,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       { provide: JobsService, useValue: jobsService },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });

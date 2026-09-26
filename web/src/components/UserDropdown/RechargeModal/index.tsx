@@ -1,31 +1,25 @@
 /* ============================================
- * RechargeModal 积分充值弹窗：档位选择/支付方式/扫码支付/充值协议
- * 对接真实后端：拉档位 → 创建订单 → 渲染真实支付码 → 轮询支付结果
+ * RechargeModal 积分充值弹窗：档位选择 / 扫码支付 / 轮询到账 / 充值协议
+ * 拉起档位 → 创建订单 → 渲染真实收银台二维码 → 轮询支付结果
+ *
+ * ⚠️ 只有一个支付渠道（杭州银行聚合主扫）：二维码指向银行统一收银台，
+ *    微信/支付宝/云闪付由**用户在银行页面上自选**，我们这边没有渠道可切。
  * ============================================ */
 import { useEffect, useState } from 'react';
-import {
-  Check,
-  CreditCard,
-  Smartphone,
-  CheckCircle2,
-  XCircle,
-  Clock,
-} from 'lucide-react';
+import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 import Modal from '@/components/Modal';
 import styles from './index.module.css';
-import { quotaToPoints } from '@/api/auth';
+import { fetchCredits } from '@/api/auth';
 import {
-  cancelRechargeOrder,
   createRechargeOrder,
   fetchRechargeOrderStatus,
-  fetchRechargeTiers,
+  fetchRechargeTierCatalog,
   type RechargeOrder,
-  type RechargeTier,
+  type RechargeTierCatalog,
 } from '@/api/recharge';
 import { useAuthStore } from '@/stores/auth';
-import { refreshQuotaAfterPayment, syncQuotaFromUsageToken } from '@/utils/refreshQuota';
 
 interface RechargeModalProps {
   onClose: () => void;
@@ -61,40 +55,52 @@ function fmtExpiry(iso: string) {
   return `${hh}:${mm} 后过期`;
 }
 
-/** 下单失败文案：档位窗口失效用明确提示，其余透传接口错误 */
-function formatOrderError(error: unknown): string {
-  const msg = error instanceof Error ? error.message : '';
-  if (msg.includes('已过期') || msg.includes('已下架')) {
-    return '该套餐已结束，请选择其他套餐';
+/**
+ * 拉一次余额写回全局 store（顶栏与其它页面读的就是它）。
+ *
+ * ⚠️ 必须 `fresh`：`/api/usage/token` 是 GET，http 层对在途同路径请求去重，
+ *    而支付成功那一刻很可能还有一次旧请求在途——把旧值拿回来，
+ *    用户就会看到「+1000 积分已到账」而顶栏余额纹丝不动。
+ *    余额只是展示值，拉取失败不覆盖支付结果提示，下次进页面会自行纠正。
+ */
+async function refreshCredits() {
+  try {
+    const d = await fetchCredits({ fresh: true });
+    useAuthStore.getState().setCredits(d.credits);
+  } catch {
+    /* 保持原余额，不打断成功提示 */
   }
-  return msg || '创建订单失败';
 }
 
 export default function RechargeModal({ onClose }: RechargeModalProps) {
-  const [tiers, setTiers] = useState<RechargeTier[]>([]);
+  const [catalog, setCatalog] = useState<RechargeTierCatalog | null>(null);
   const [tiersLoading, setTiersLoading] = useState(true);
   const [tiersError, setTiersError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [payMethod, setPayMethod] = useState<'wechat' | 'alipay'>('wechat');
   const [phase, setPhase] = useState<Phase>('idle');
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
-  const [cancelling, setCancelling] = useState(false);
 
-  const quota = useAuthStore((s) => s.quota);
+  /** 可用余额（billing 账本的整数积分）；未拉取到为 null，显示 -- */
+  const credits = useAuthStore((s) => s.credits);
 
+  const tiers = catalog?.tiers ?? [];
   const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
   /** 仅 order 成功后出右侧支付码；下单中不出「正在创建订单…」 */
   const showQrPanel =
     phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
 
-  // 打开弹窗拉取真实档位（按 sort_order 升序）
+  // 打开弹窗拉取档位目录（按 sort_order 升序；服务端顺序不做承诺，客户端定一次）
   useEffect(() => {
     let alive = true;
-    fetchRechargeTiers()
-      .then((list) => {
-        if (alive) setTiers([...list].sort((a, b) => a.sort_order - b.sort_order));
+    fetchRechargeTierCatalog()
+      .then((data) => {
+        if (!alive) return;
+        setCatalog({
+          credits_per_yuan: data.credits_per_yuan,
+          tiers: [...data.tiers].sort((a, b) => a.sort_order - b.sort_order),
+        });
       })
       .catch((e) => {
         if (alive) setTiersError(e instanceof Error ? e.message : '档位加载失败');
@@ -107,7 +113,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, []);
 
-  // 待支付态轮询订单状态（立即一次 + 每 3s）；paid 后强制刷新 /api/usage/token
+  // 待支付态轮询订单状态（立即一次 + 每 3s），直到落成 paid / expired / failed
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
     let alive = true;
@@ -118,9 +124,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           if (st.status === 'paid') {
             setPhase('paid');
             toast.success('支付成功，积分已到账');
-            void refreshQuotaAfterPayment({
-              previousQuota: useAuthStore.getState().quota,
-            });
+            void refreshCredits();
           } else if (st.status === 'expired' || st.status === 'failed') {
             setPhase(st.status);
           }
@@ -135,49 +139,28 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, [phase, order]);
 
-  /** 确认支付 / 重新支付：接口成功后再展开二维码；失败 toast，不出码区 */
+  /** 确认支付 / 重新支付：接口成功后再展开二维码；失败就地提示，不出码区 */
   const handleConfirm = () => {
     if (!selected || paying || phase === 'paid') return;
     setOrderError('');
     setPhase('creating');
-    createRechargeOrder(selected.id, payMethod)
+    createRechargeOrder(selected.id)
       .then((o) => {
         setOrder(o);
         setPhase('waiting');
       })
       .catch((e) => {
-        const message = formatOrderError(e);
-        setOrderError(message);
+        setOrderError(e instanceof Error ? e.message : '创建订单失败');
         setPhase('idle');
       });
   };
 
-  /** 关闭：未支付订单调用取消（幂等 no-op）；支付中/已支付再拉一次余额，避免顶栏仍为 0 */
+  /** 关闭弹窗。
+   *  ⚠️ 不撤单：支付网关侧没有关单接口，本地订单自然过期（撤单只会是个骗人的空壳）。
+   *  waiting 态下用户可能刚扫完码付掉，补拉一次余额，免得关掉弹窗后顶栏还是旧值。 */
   const handleClose = () => {
-    if (order && phase === 'waiting') {
-      cancelRechargeOrder(order.trade_no).catch(() => undefined);
-    }
-    if (phase === 'paid' || phase === 'waiting') {
-      void syncQuotaFromUsageToken();
-    }
+    if (phase === 'waiting') void refreshCredits();
     onClose();
-  };
-
-  /** 取消当前订单并留在充值弹窗内，以便用户重新选择或再次支付。 */
-  const handleCancelPayment = async () => {
-    if (!order || phase !== 'waiting' || cancelling) return;
-    setCancelling(true);
-    setOrderError('');
-    try {
-      await cancelRechargeOrder(order.trade_no);
-      setOrder(null);
-      setPhase('idle');
-    } catch (e) {
-      const message = e instanceof Error ? e.message : '取消支付失败，请稍后重试';
-      setOrderError(message);
-    } finally {
-      setCancelling(false);
-    }
   };
 
   const confirmLabel = !selected
@@ -192,216 +175,183 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
   return (
     <Modal
-        open
-        footer={null}
-        onCancel={handleClose}
-        width={showQrPanel ? 'min(1600px, calc(100vw - 48px))' : 'min(1200px, calc(100vw - 48px))'}
-        ariaLabel="积分充值"
-        classNames={{
-          container: styles.modal,
-          body: styles.body,
-        }}
-      >
-        <div className={styles.content}>
-          {/* 左侧主区域 */}
-          <div className={styles.main}>
-            <h2 className={styles.title}>积分充值</h2>
-            <p className={styles.subtitle}>请选择充值套餐</p>
-            <p className={styles.unitHint}>1 元 = 10 积分 · 充值到账后长期有效</p>
+      open
+      footer={null}
+      onCancel={handleClose}
+      width={showQrPanel ? 'min(1600px, calc(100vw - 48px))' : 'min(1200px, calc(100vw - 48px))'}
+      ariaLabel="积分充值"
+      classNames={{
+        container: styles.modal,
+        body: styles.body,
+      }}
+    >
+      <div className={styles.content}>
+        {/* 左侧主区域 */}
+        <div className={styles.main}>
+          <h2 className={styles.title}>积分充值</h2>
+          <p className={styles.subtitle}>请选择充值套餐</p>
+          {/* 换算率来自 billing 定价目录（运营可调），不能写死成常量 */}
+          {catalog && (
+            <p className={styles.unitHint}>
+              1 元 = {catalog.credits_per_yuan} 积分 · 充值到账后长期有效
+            </p>
+          )}
 
-            {/* 套餐卡片（真实档位） */}
-            {tiersLoading ? (
-              <div className={styles.emptyHint}>
-                <span className={styles.emptyBold}>档位加载中…</span>
-              </div>
-            ) : tiersError ? (
-              <div className={styles.emptyHint}>
-                <span className={styles.emptyBold}>{tiersError}</span>
+          {/* 套餐卡片（真实档位） */}
+          {tiersLoading ? (
+            <div className={styles.emptyHint}>档位加载中…</div>
+          ) : tiersError ? (
+            <div className={styles.emptyHint}>{tiersError}</div>
+          ) : (
+            <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
+              {tiers.map((t) => {
+                const discount = fmtDiscount(t.discount);
+                return (
+                  <button
+                    key={t.id}
+                    className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''}`}
+                    onClick={() => {
+                      if (!paying) setSelectedId(t.id);
+                    }}
+                  >
+                    {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
+                    {t.id === selectedId && (
+                      <span className={styles.selectedBadge}>
+                        <Check size={12} strokeWidth={3} />
+                        已选
+                      </span>
+                    )}
+                    <span className={styles.planTitle}>{t.amount.toLocaleString()} 积分</span>
+                    <span className={styles.planPriceRow}>
+                      <span className={styles.planPrice}>¥{fmtPrice(t.price)}</span>
+                      {discount && <span className={styles.discountTag}>{discount}</span>}
+                    </span>
+                    {t.original_price != null && (
+                      <span className={styles.planOriginal}>
+                        原价 ¥{fmtPrice(t.original_price)}
+                      </span>
+                    )}
+                    <div className={styles.perkList}>
+                      {PERKS.map((perk) => (
+                        <span key={perk} className={styles.perkItem}>
+                          <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
+                          {perk}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 底部结算栏 */}
+          <div className={styles.bottomBar}>
+            {!selected ? (
+              <div className={styles.barLeft}>
+                <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
+                <span className={styles.emptyHintText}>请先选择上方套餐</span>
               </div>
             ) : (
-              <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
-                {tiers.map((t) => {
-                  const discount = fmtDiscount(t.discount);
-                  return (
-                    <button
-                      key={t.id}
-                      className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''}`}
-                      onClick={() => {
-                        if (!paying) setSelectedId(t.id);
-                      }}
-                    >
-                      {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
-                      {t.id === selectedId && (
-                        <span className={styles.selectedBadge}>
-                          <Check size={12} strokeWidth={3} />
-                          已选
-                        </span>
-                      )}
-                      <span className={styles.planTitle}>
-                        {t.amount.toLocaleString()} 积分
-                      </span>
-                      <span className={styles.planPriceRow}>
-                        <span className={styles.planPrice}>¥{fmtPrice(t.price)}</span>
-                        {discount && <span className={styles.discountTag}>{discount}</span>}
-                      </span>
-                      {t.original_price != null && (
-                        <span className={styles.planOriginal}>
-                          原价 ¥{fmtPrice(t.original_price)}
-                        </span>
-                      )}
-                      <div className={styles.perkList}>
-                        {PERKS.map((perk) => (
-                          <span key={perk} className={styles.perkItem}>
-                            <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
-                            {perk}
-                          </span>
-                        ))}
-                      </div>
-                    </button>
-                  );
-                })}
+              <div className={styles.barLeft}>
+                <span className={styles.balance}>
+                  {credits === null ? '--' : credits.toLocaleString()} 积分
+                </span>
+                <span className={styles.selectedInfo}>
+                  {selected.amount.toLocaleString()} 积分&nbsp;&nbsp;¥
+                  {fmtPrice(selected.price)}
+                </span>
+                {selected.original_price != null && (
+                  <span className={styles.barOriginal}>
+                    ¥{fmtPrice(selected.original_price)}
+                  </span>
+                )}
+                {fmtDiscount(selected.discount) && (
+                  <span className={styles.barDiscount}>{fmtDiscount(selected.discount)}</span>
+                )}
+                {orderError && <span className={styles.barError}>{orderError}</span>}
+              </div>
+            )}
+            <div className={styles.barRight}>
+              {/* 确认支付（未选套餐时禁用）。渠道没法选：银行收银台统一收单 */}
+              <button
+                className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
+                onClick={handleConfirm}
+                disabled={!selected || paying || phase === 'paid'}
+              >
+                {confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 右侧二维码面板：仅 order 成功后出现 */}
+        {showQrPanel && (
+          <div className={styles.qrPanel}>
+            {order && phase === 'waiting' && (
+              <>
+                <div className={styles.qrBox}>
+                  {order.qr_code_url ? (
+                    <QRCodeSVG value={order.qr_code_url} size={192} />
+                  ) : (
+                    <span className={styles.qrPlaceholder}>二维码不可用</span>
+                  )}
+                </div>
+                <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
+                {/* 银行统一收银台：渠道由用户在银行页面上选，我们这边提示到「都能扫」为止 */}
+                <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
+                <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
+                <span className={styles.qrPoints}>
+                  获得 {order.points.toLocaleString()} 积分
+                </span>
+                <div className={styles.dots}>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <span className={styles.waiting}>等待支付结果...</span>
+              </>
+            )}
+
+            {phase === 'paid' && order && (
+              <div className={styles.payState}>
+                <CheckCircle2 size={56} strokeWidth={2} className={styles.payStateOk} />
+                <span className={styles.payStateTitle}>支付成功</span>
+                <span className={styles.qrPoints}>
+                  +{order.points.toLocaleString()} 积分已到账
+                </span>
               </div>
             )}
 
-            {/* 底部结算栏 */}
-            <div className={styles.bottomBar}>
-              {!selected ? (
-                <div className={styles.barLeft}>
-                  <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
-                  <span className={styles.emptyHintText}>请先选择上方套餐</span>
-                </div>
-              ) : (
-                <>
-                  <div className={styles.barLeft}>
-                    <span className={styles.balance}>
-                      {quota === null ? '--' : quotaToPoints(quota)}积分
-                    </span>
-                    <span className={styles.selectedInfo}>
-                      {selected.amount.toLocaleString()} 积分&nbsp;&nbsp;¥
-                      {fmtPrice(selected.price)}
-                    </span>
-                    {selected.original_price != null && (
-                      <span className={styles.barOriginal}>
-                        ¥{fmtPrice(selected.original_price)}
-                      </span>
-                    )}
-                    {fmtDiscount(selected.discount) && (
-                      <span className={styles.barDiscount}>
-                        {fmtDiscount(selected.discount)}
-                      </span>
-                    )}
-                    {orderError && <span className={styles.barError}>{orderError}</span>}
-                  </div>
-                </>
-              )}
-              <div className={styles.barRight}>
-                {/* 支付方式切换 */}
-                <div className={styles.paySegment}>
-                  <button
-                    className={`${styles.payOption} ${payMethod === 'wechat' ? styles.payOptionActive : ''}`}
-                    onClick={() => setPayMethod('wechat')}
-                    disabled={paying}
-                  >
-                    <Smartphone size={14} strokeWidth={2} />
-                    <span>微信支付</span>
-                  </button>
-                  <button
-                    className={`${styles.payOption} ${payMethod === 'alipay' ? styles.payOptionActive : ''}`}
-                    onClick={() => setPayMethod('alipay')}
-                    disabled={paying}
-                  >
-                    <Smartphone size={14} strokeWidth={2} />
-                    <span>支付宝</span>
-                  </button>
-                </div>
-                {/* 确认支付（未选套餐时禁用） */}
-                <button
-                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
-                  onClick={handleConfirm}
-                  disabled={!selected || paying || phase === 'paid'}
-                >
-                  {confirmLabel}
-                </button>
+            {(phase === 'expired' || phase === 'failed') && (
+              <div className={styles.payState}>
+                {phase === 'expired' ? (
+                  <Clock size={56} strokeWidth={2} className={styles.payStateBad} />
+                ) : (
+                  <XCircle size={56} strokeWidth={2} className={styles.payStateBad} />
+                )}
+                <span className={styles.payStateTitle}>
+                  {phase === 'expired' ? '二维码已过期' : '支付失败'}
+                </span>
+                <span className={styles.qrHint}>请点击「重新支付」创建新订单</span>
               </div>
-            </div>
+            )}
           </div>
+        )}
+      </div>
 
-          {/* 右侧二维码面板：仅 order 成功后出现 */}
-          {showQrPanel && (
-            <div className={styles.qrPanel}>
-              {order && phase === 'waiting' && (
-                <>
-                  <div className={styles.qrBox}>
-                    {order.qr_code_url ? (
-                      <QRCodeSVG value={order.qr_code_url} size={192} />
-                    ) : (
-                      <span className={styles.qrPlaceholder}>二维码不可用</span>
-                    )}
-                  </div>
-                  <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
-                  <span className={styles.qrHint}>
-                    {payMethod === 'wechat' ? '请用微信扫码支付' : '请用支付宝扫码支付'}
-                  </span>
-                  <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
-                  <span className={styles.qrPoints}>
-                    获得 {order.points.toLocaleString()} 积分
-                  </span>
-                  <div className={styles.dots}>
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <span className={styles.waiting}>等待支付结果...</span>
-                  <button
-                    className={styles.cancelPaymentButton}
-                    type="button"
-                    onClick={handleCancelPayment}
-                    disabled={cancelling}
-                  >
-                    {cancelling ? '取消中…' : '取消支付'}
-                  </button>
-                </>
-              )}
-
-              {phase === 'paid' && order && (
-                <div className={styles.payState}>
-                  <CheckCircle2 size={56} strokeWidth={2} className={styles.payStateOk} />
-                  <span className={styles.payStateTitle}>支付成功</span>
-                  <span className={styles.qrPoints}>
-                    +{order.points.toLocaleString()} 积分已到账
-                  </span>
-                </div>
-              )}
-
-              {(phase === 'expired' || phase === 'failed') && (
-                <div className={styles.payState}>
-                  {phase === 'expired' ? (
-                    <Clock size={56} strokeWidth={2} className={styles.payStateBad} />
-                  ) : (
-                    <XCircle size={56} strokeWidth={2} className={styles.payStateBad} />
-                  )}
-                  <span className={styles.payStateTitle}>
-                    {phase === 'expired' ? '二维码已过期' : '支付失败'}
-                  </span>
-                  <span className={styles.qrHint}>请点击「重新支付」创建新订单</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 协议 */}
-        <div className={styles.agreement}>
-          <span>充值即视为同意</span>
-          <a
-            className={styles.agreementLink}
-            href={RECHARGE_AGREEMENT_HREF}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            《充值协议》
-          </a>
-        </div>
-      </Modal>
+      {/* 协议 */}
+      <div className={styles.agreement}>
+        <span>充值即视为同意</span>
+        <a
+          className={styles.agreementLink}
+          href={RECHARGE_AGREEMENT_HREF}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          《充值协议》
+        </a>
+      </div>
+    </Modal>
   );
 }

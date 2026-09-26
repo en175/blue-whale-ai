@@ -146,7 +146,7 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
@@ -181,7 +181,7 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 
@@ -651,6 +651,22 @@ describe('IKFYH6 Esc 优先级链', () => {
     await pressEscape();
 
     expect(imageOpen()).toBe(false);
+  });
+
+  it('时长滑杆（原生 range）聚焦按 Esc 关闭视频底部对话框（IKI61N：组件内自闭环，不被 INPUT 豁免吞键）', async () => {
+    await renderPage();
+    await openVideoDraftPanel();
+    // 时长滑杆在「配置」面板内（showConfig 展开才渲染）
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => {
+      configBtn.click();
+    });
+    const slider = container.querySelector<HTMLInputElement>('input[type="range"]')!;
+    expect(slider).toBeTruthy();
+
+    await pressEscape(slider);
+
+    expect(videoOpen()).toBe(false);
   });
 
   it('@ 菜单开着时按 Esc 不关闭面板（菜单自行处理 Esc）', async () => {

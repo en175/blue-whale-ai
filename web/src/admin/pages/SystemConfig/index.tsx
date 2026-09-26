@@ -1,6 +1,10 @@
+import type { ReactNode } from 'react';
 /* ============================================
- * SystemConfig 系统设置：支付凭证安全配置·充值政策文案·限流参数
- * 数据源 GET/PUT /api/admin/settings（规划接口，后端暂未实现，按规范预接入）
+ * SystemConfig 系统设置：上游凭证·支付凭证安全配置·充值政策文案·限流参数
+ * 数据源 GET/PUT /api/admin/settings
+ *
+ * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
+ * 与 SkillManage 同一条纪律：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
 import { useCallback, useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
@@ -11,11 +15,26 @@ import {
   type SystemPolicy,
   type SystemRateLimit,
   type SystemSettings,
+  type SystemUpstream,
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
-import styles from './index.module.css';
+import {
+  Hint,
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Empty,
+  Input,
+  Page,
+  PageHeader,
+  Tabs,
+  Textarea,
+  formGrid,
+} from '../../ui';
 
 const TABS = [
+  { key: 'upstream', label: '上游凭证' },
   { key: 'cred', label: '支付凭证' },
   { key: 'policy', label: '充值政策文案' },
   { key: 'rate', label: '限流配置' },
@@ -25,19 +44,28 @@ type TabKey = (typeof TABS)[number]['key'];
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
+/** tab 内容区的统一版式：一列、限宽（原来由 .tabBody 给，随私有样式文件删除后内联） */
+const tabBodyStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 20,
+  maxWidth: 980,
+} as const;
+
 export default function SystemConfig() {
-  const [tab, setTab] = useState<TabKey>('cred');
+  const [tab, setTab] = useState<TabKey>('upstream');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
-  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）；规划接口阶段失败不提示 */
+  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）。
+   *  失败提示由 http 层默认 toast 承担，这里只负责收掉 loading，避免卡在「加载中…」。 */
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchAdminSettings();
       setSettings(data);
     } catch {
-      /* 后端未实现，静默降级 */
+      /* 已 toast，收掉 loading 露出「未配置」即可 */
     } finally {
       setLoading(false);
     }
@@ -53,6 +81,12 @@ export default function SystemConfig() {
     await loadSettings();
   };
 
+  /** 上游凭证按 key 增量更新（与支付凭证同一条合并语义） */
+  const saveUpstream = async (key: keyof SystemUpstream, value: string) => {
+    await updateAdminSettings({ upstream: { [key]: value } });
+    await loadSettings();
+  };
+
   const savePolicy = async (policy: SystemPolicy) => {
     await updateAdminSettings({ policy });
     await loadSettings();
@@ -64,47 +98,112 @@ export default function SystemConfig() {
   };
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>系统设置</h1>
-          <p className={styles.subtitle}>支付凭证安全配置 · 充值政策文案 · 限流参数</p>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="系统设置"
+        subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数"
+      />
 
-      {/* tabs */}
-      <div className={styles.tabs}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`${styles.tab} ${tab === t.key ? styles.tabActive : ''}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs items={TABS} value={tab} onChange={(key) => setTab(key as TabKey)} />
 
       {loading && !settings ? (
-        <div className={styles.loadingBox}>加载中…</div>
+        <Empty message="加载中…" />
       ) : (
         <>
+          {tab === 'upstream' && (
+            <UpstreamTab upstream={settings?.upstream ?? null} onSave={saveUpstream} />
+          )}
           {tab === 'cred' && <CredTab credentials={settings?.credentials ?? null} onSave={saveCredential} />}
           {tab === 'policy' && <PolicyTab policy={settings?.policy ?? null} onSave={savePolicy} />}
           {tab === 'rate' && <RateTab rateLimit={settings?.rateLimit ?? null} onSave={saveRateLimit} />}
         </>
       )}
+    </Page>
+  );
+}
+
+/* ============ 上游凭证（new-api） ============ */
+
+/** 上游字段清单。
+ *  ⚠️ 只有 `new_api_key` 一项，且是**密**字段：它是全项目共用的一把 key，
+ *    backend 与 worker 都从这里取——改一处即全项目生效，不需要重新部署。
+ *
+ *  ⚠️ Agent 计费面的 `bwsvc_` 服务令牌**不在这里配**：它不是「我们发给上游的我们是谁」，
+ *    是服务之间的身份，走 new-api 另一套鉴权模型（按前缀分流），并进统一 key 会静默错账。 */
+const UPSTREAM_FIELDS: {
+  key: keyof SystemUpstream;
+  label: string;
+  /** 字段级微文案：一行说清「保存后怎样」 */
+  hint: string;
+  /** 段落级解释：这一把 key 在系统里的位置，收进标题旁的 `?` */
+  info: ReactNode;
+  secret: boolean;
+}[] = [
+  {
+    key: 'new_api_key',
+    label: '项目统一 key',
+    hint: '保存后立即生效，无需重启。',
+    info: (
+      <Hint>
+        <div>全项目共用这一把：backend 与 worker-java 都从这里取，改一处即全项目生效。</div>
+        <div>用途包括登录后回注请求头、技能格式化、worker 素材跟进。</div>
+      </Hint>
+    ),
+    secret: true,
+  },
+];
+
+function UpstreamTab({
+  upstream,
+  onSave,
+}: {
+  upstream: SystemUpstream | null;
+  onSave: (key: keyof SystemUpstream, value: string) => Promise<void>;
+}) {
+  return (
+    <div style={tabBodyStyle}>
+      {UPSTREAM_FIELDS.map((f) => (
+        <CredCard
+          key={f.key}
+          label={f.label}
+          hint={f.hint}
+          info={f.info}
+          secret={f.secret}
+          value={upstream?.[f.key] ?? ''}
+          onSave={(v) => onSave(f.key, v)}
+        />
+      ))}
     </div>
   );
 }
 
 /* ============ 支付凭证 ============ */
-const CRED_FIELDS: { key: keyof SystemCredentials; section: string; label: string }[] = [
-  { key: 'wechat_mch_id', section: '微信支付', label: '商户号 (Merchant ID)' },
-  { key: 'wechat_api_key', section: '微信支付', label: 'API Key' },
-  { key: 'alipay_app_id', section: '支付宝', label: '应用 ID (App ID)' },
-  { key: 'alipay_private_key', section: '支付宝', label: '应用私钥 (Private Key)' },
+
+/** 凭证字段清单。
+ *  ⚠️ `secret` 只对**真的密文**为真：密字段走脱敏回显 + 密码框 + 眼睛切换，
+ *    非密字段（商户号 / App ID / 回调地址）必须明文回显 + 明文输入框——
+ *    它们是拿去和网关后台核对的标识和地址，显示成 **** 只会让人没法核对。
+ *
+ *  ⚠️ 这四个字段都是**支付网关那一侧**的「我们是谁」，不是杭州银行发给我们的商户参数。
+ *    杭州银行的 `merId` / `certId` / 银行签名证书标识 / 商户证书(.pfx) 与密码住在
+ *    支付网关自己的库（渠道配置页），**不在这个页面配**——这里再存一份就变成两处会漂的
+ *    真相：银行换证时改了一处，另一处静静地错着，而报错会出在远离原因的「验签失败」上。 */
+const CRED_SECTION = '杭州银行聚合主扫 · 支付网关商户信息';
+const CRED_FIELDS: {
+  key: keyof SystemCredentials;
+  section: string;
+  label: string;
+  secret: boolean;
+}[] = [
+  { key: 'hccb_mch_no', section: CRED_SECTION, label: '商户号 (mchNo)', secret: false },
+  { key: 'hccb_app_id', section: CRED_SECTION, label: '应用 ID (appId)', secret: false },
+  { key: 'hccb_app_secret', section: CRED_SECTION, label: '商户密钥 (appSecret)', secret: true },
+  {
+    key: 'hccb_notify_url',
+    section: CRED_SECTION,
+    label: '异步通知地址 (notifyUrl · 须公网可达)',
+    secret: false,
+  },
 ];
 
 function CredTab({
@@ -116,15 +215,16 @@ function CredTab({
 }) {
   const sections = [...new Set(CRED_FIELDS.map((f) => f.section))];
   return (
-    <div className={styles.tabBody}>
+    <div style={tabBodyStyle}>
       {sections.map((sec) => (
-        <div key={sec}>
-          <h3 className={styles.sectionTitle}>{sec}</h3>
+        <div key={sec} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h3 style={{ margin: 0 }}>{sec}</h3>
           {CRED_FIELDS.filter((f) => f.section === sec).map((f) => (
             <CredCard
               key={f.key}
               label={f.label}
-              maskedValue={credentials?.[f.key] ?? ''}
+              secret={f.secret}
+              value={credentials?.[f.key] ?? ''}
               onSave={(v) => onSave(f.key, v)}
             />
           ))}
@@ -134,14 +234,23 @@ function CredTab({
   );
 }
 
-/** 单个凭证卡片：回显服务端脱敏值，编辑态密码输入 + 眼睛切换，保存走增量更新 */
+/** 单个凭证卡片：回显服务端值（密字段为脱敏值），编辑态输入 + 保存走增量更新 */
 function CredCard({
   label,
-  maskedValue,
+  hint,
+  info,
+  secret,
+  value,
   onSave,
 }: {
   label: string;
-  maskedValue: string;
+  /** **字段级微文案**：一行说清「保存后怎样」。渲染在值下方，一眼可见。 */
+  hint?: string;
+  /** **段落级解释**：收进标题旁的 `?`（见 `ui/Hint` 的两层口径）。 */
+  info?: ReactNode;
+  /** 是否密文：决定脱敏回显、输入框类型与眼睛切换，以及加密存储提示 */
+  secret: boolean;
+  value: string;
   onSave: (v: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -172,43 +281,61 @@ function CredCard({
   };
 
   return (
-    <div className={styles.card}>
-      <div className={styles.cardHead}>
-        <div>
-          <div className={styles.cardLabel}>{label}</div>
-          <div className={styles.cardValue}>{maskedValue || '未配置'}</div>
-        </div>
-        <button className={styles.editBtn} onClick={() => (editing ? setEditing(false) : startEdit())} disabled={saving}>
+    <Card
+      title={
+        <>
+          {label} {info}
+        </>
+      }
+      extra={
+        <Button
+          size="sm"
+          disabled={saving}
+          onClick={() => (editing ? setEditing(false) : startEdit())}
+        >
           {editing ? '取消' : '编辑'}
-        </button>
-      </div>
+        </Button>
+      }
+    >
+      {/* 「现在是什么」保持可见：没配就明写「未配置」，不留一片空白让人以为页面坏了 */}
+      <div style={value ? undefined : { color: 'var(--admin-text-faint)' }}>{value || '未配置'}</div>
+      {hint && (
+        <div style={{ marginTop: 'var(--admin-space-1)', fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          {hint}
+        </div>
+      )}
 
       {editing && (
-        <>
-          <div className={styles.secretWrap}>
-            <input
-              className={styles.secretInput}
-              type={visible ? 'text' : 'password'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Input
+              type={secret && !visible ? 'password' : 'text'}
               placeholder="请输入新值"
               value={draft}
+              style={{ flex: 1 }}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <button
-              className={styles.eyeBtn}
-              title={visible ? '隐藏' : '显示'}
-              onClick={() => setVisible((v) => !v)}
-            >
-              {visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-            </button>
+            {secret && (
+              <Button
+                size="sm"
+                variant="ghost"
+                title={visible ? '隐藏' : '显示'}
+                aria-label={visible ? '隐藏' : '显示'}
+                icon={visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
+                onClick={() => setVisible((v) => !v)}
+              />
+            )}
           </div>
-          {error && <div className={styles.formError}>{error}</div>}
-          <button className={styles.saveBtn} onClick={() => void save()} disabled={saving || !draft.trim()}>
-            {saving ? '保存中…' : '保存'}
-          </button>
-          <p className={styles.hint}>保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</p>
-        </>
+          {error && <Alert tone="danger">{error}</Alert>}
+          <div>
+            <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void save()}>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </div>
+          {secret && <Hint>保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Hint>}
+        </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -251,21 +378,25 @@ function PolicyTab({
   };
 
   return (
-    <div className={styles.tabBody}>
-      <div className={styles.label}>退款政策文案</div>
-      <p className={styles.labelSub}>展示在用户端充值页底部。变更即时生效，无需发版。</p>
-      <textarea className={styles.textarea} value={refund} onChange={(e) => setRefund(e.target.value)} />
+    <div style={tabBodyStyle}>
+      <div>
+        <div>退款政策文案</div>
+        <p style={{ margin: '6px 0 10px' }}>展示在用户端充值页底部。变更即时生效，无需发版。</p>
+        <Textarea value={refund} onChange={(e) => setRefund(e.target.value)} />
+      </div>
 
-      <div className={styles.label}>发票政策文案</div>
-      <p className={styles.labelSub}>展示在用户端充值页底部。</p>
-      <textarea className={styles.textarea} value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+      <div>
+        <div>发票政策文案</div>
+        <p style={{ margin: '6px 0 10px' }}>展示在用户端充值页底部。</p>
+        <Textarea value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+      </div>
 
-      {error && <div className={styles.formError}>{error}</div>}
-      <div className={styles.saveRow}>
-        <button className={styles.saveBtn} onClick={() => void save()} disabled={saving}>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
           {saving ? '保存中…' : '保存文案'}
-        </button>
-        {saved && <span className={styles.savedTip}>已保存 ✓</span>}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
       </div>
     </div>
   );
@@ -323,36 +454,36 @@ function RateTab({
   };
 
   return (
-    <div className={styles.tabBody}>
-      <div className={styles.grid2}>
+    <div style={tabBodyStyle}>
+      <div style={formGrid(2)}>
         <div>
-          <div className={styles.label}>每分钟请求上限</div>
-          <input className={styles.input} type="number" value={perMin} onChange={(e) => setPerMin(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>每分钟请求上限</div>
+          <Input type="number" value={perMin} style={{ width: '100%' }} onChange={(e) => setPerMin(e.target.value)} />
         </div>
         <div>
-          <div className={styles.label}>每小时请求上限</div>
-          <input className={styles.input} type="number" value={perHour} onChange={(e) => setPerHour(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>每小时请求上限</div>
+          <Input type="number" value={perHour} style={{ width: '100%' }} onChange={(e) => setPerHour(e.target.value)} />
         </div>
         <div>
-          <div className={styles.label}>并发上限</div>
-          <input
-            className={styles.input}
+          <div style={{ marginBottom: 10 }}>并发上限</div>
+          <Input
             type="number"
             value={concurrency}
+            style={{ width: '100%' }}
             onChange={(e) => setConcurrency(e.target.value)}
           />
         </div>
         <div>
-          <div className={styles.label}>突发倍数</div>
-          <input className={styles.input} type="number" value={burst} onChange={(e) => setBurst(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>突发倍数</div>
+          <Input type="number" value={burst} style={{ width: '100%' }} onChange={(e) => setBurst(e.target.value)} />
         </div>
       </div>
-      {error && <div className={styles.formError}>{error}</div>}
-      <div className={styles.saveRow}>
-        <button className={styles.saveBtn} onClick={() => void save()} disabled={saving}>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
           {saving ? '保存中…' : '保存'}
-        </button>
-        {saved && <span className={styles.savedTip}>已保存 ✓</span>}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
       </div>
     </div>
   );

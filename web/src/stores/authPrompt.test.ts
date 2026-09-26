@@ -13,7 +13,7 @@ const sampleUser = {
 
 afterEach(() => {
   useAuthPromptStore.getState().reset();
-  useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+  useAuthStore.setState({ user: null, isNewUser: false, credits: null });
 });
 
 describe('authPrompt 会话过期门', () => {

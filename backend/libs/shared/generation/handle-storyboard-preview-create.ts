@@ -11,10 +11,8 @@ import {
   storyboardPreviewCreateRequestSchema,
 } from "@lib/contracts";
 import type { StoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@lib/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 
 function isDecimalId(value: string): boolean {
   return /^[1-9][0-9]*$/.test(value);
@@ -48,8 +46,6 @@ export async function handleStoryboardPreviewCreate(
   options?: {
     providerCredential?: string;
     quotaCheck?: () => Promise<{ sufficient: boolean }>;
-    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
-    costEstimator?: GenerationCostEstimator;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -75,17 +71,6 @@ export async function handleStoryboardPreviewCreate(
     return fail(PARAM_MISSING_CODE, "缺少生成凭证");
   }
 
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  let costReservation: CostReservationSnapshot | undefined;
-  if (options?.costEstimator) {
-    costReservation =
-      (await options.costEstimator({
-        modelId: parsed.data.parameters.model_id,
-        type: "image",
-        expectedOutputCount: parsed.data.parameters.count,
-      })) ?? undefined;
-  }
-
   const result = await deps.createStoryboardPreview({
     userId,
     projectId,
@@ -97,7 +82,6 @@ export async function handleStoryboardPreviewCreate(
     capability_snapshot_version: parsed.data.capability_snapshot_version,
     provider_credential: options.providerCredential,
     ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
-    ...(costReservation ? { costReservation } : {}),
   });
   switch (result.kind) {
     case "applied":

@@ -88,10 +88,29 @@ export const ERROR_VOCAL_SPLIT_FAILED = "vocal_split_failed";
 /** IKHB6F：音频截取（audio_trim，火山 MediaKit trim-audio）执行兜底失败码（父单 IKHB08
  *  ——网关分类链外的火山任务失败与转存失败统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_AUDIO_TRIM_FAILED = "audio_trim_failed";
+/** IKI68N：音频混合上游失败或临时结果转存失败。 */
+export const ERROR_AUDIO_MIX_FAILED = "audio_mix_failed";
 /** IKH8BH：视频场景切分（video_scene_split，火山 MediaKit segment-scenes）执行兜底失败码
  *  （父规格 IKH86V——网关分类链外的火山任务 failed 与逐段转存失败〔任一段失败即整体失败〕
  *  统一归并，异步任务轮询失败终态，无 worker 级重试）。 */
 export const ERROR_VIDEO_SCENE_SPLIT_FAILED = "video_scene_split_failed";
+/** IKHK7F：智能抠像（video_matting，火山 MediaKit matte-portrait-video /
+ *  matte-greenscreen-video 双端点）执行兜底失败码（父规格 IKHJRC——网关分类链外的火山
+ *  任务 failed 与转存失败〔result.video_url 24h 临时链接 → 自家 TOS〕统一归并，双模式
+ *  共享一码，异步任务轮询失败终态，无 worker 级重试）。 */
+export const ERROR_VIDEO_MATTING_FAILED = "video_matting_failed";
+/** IKHLK3：视频插帧（video_frame_interpolation，火山 MediaKit video-frame-interpolation）执行兜底
+ *  失败码（父需求 IKHLES——网关分类链外的火山任务失败〔轮询 status=failed，含入口未前置判定的
+ *  官方门槛拒绝：目标帧率越界、输入规格不符、文件大小/时长超上游限制〕与转存失败统一归并，
+ *  异步任务轮询失败终态，无 worker 级重试；契约 = backend/libs/contracts/video-frame-interpolation.ts）。
+ *  入队失败不走本码，落 ERROR_ENQUEUE_FAILED（同家族口径）。 */
+export const ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = "video_frame_interpolation_failed";
+/** IKHW48：音频调速（audio_speed，火山 MediaKit adjust-audio-speed）执行兜底失败码（父单
+ *  IKHVYO——网关分类链外的火山任务失败〔轮询 status=failed，含 speed 越界等供应商侧官方
+ *  约束拒绝〕与转存失败〔result.audio_url 24h 临时链接 → 自家 TOS〕统一归并，异步任务
+ *  轮询失败终态，无 worker 级重试；契约 = backend/libs/contracts/audio-speed.ts）。
+ *  入队失败不走本码，落 ERROR_ENQUEUE_FAILED（同家族口径）。 */
+export const ERROR_AUDIO_SPEED_FAILED = "audio_speed_failed";
 
 export const ERROR_VIDEO_HAS_NO_AUDIO_TRACK = "video_has_no_audio_track";
 export const ERROR_VIDEO_DOWNLOAD_FAILED = "video_download_failed";
@@ -176,6 +195,14 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_VIDEO_SCENE_SPLIT_FAILED]: 1046,
   // IKHA2C 注：1046 已由场景切分占用（与 !789 并行开发撞号），人声背景分离兜底码让号取 1047（契约 = vocal-split.ts）。
   [ERROR_VOCAL_SPLIT_FAILED]: 1047,
+  // IKHLK3 注：1045-1048 已由 HD 高清 / 场景切分 / 人声背景分离 / 音频截取占用
+  // （落码前全仓 grep 1049 零命中，无并行分支撞号），插帧兜底码取下一空号 1049（父需求 IKHLES）。
+  [ERROR_VIDEO_FRAME_INTERPOLATION_FAILED]: 1049,
+  // IKHK7F 注：1049 已由 !820 插帧先行合入占用，智能抠像兜底码让号取下一空号 1050。
+  [ERROR_VIDEO_MATTING_FAILED]: 1050,
+  [ERROR_AUDIO_MIX_FAILED]: 1051,
+  // IKHW48 注：1051 已由音频混合先行合入 release 占用，音频调速兜底码取下一空号 1052（父单 IKHVYO）。
+  [ERROR_AUDIO_SPEED_FAILED]: 1052,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -462,6 +489,10 @@ export const ERROR_CODES: Record<number, string> = {
   1046: "场景切分失败，请重试", // video_scene_split_failed（火山 MediaKit segment-scenes）
   1047: "人声背景分离失败，请重试", // vocal_split_failed（火山 MediaKit 人声背景音分离）
   1048: "音频截取失败，请重试", // audio_trim_failed（火山 MediaKit trim-audio；1046 场景切分/1047 人声分离已占，让位取 1048）
+  1049: "视频插帧失败，请重试", // video_frame_interpolation_failed（火山 MediaKit video-frame-interpolation）
+  1050: "智能抠像失败，请重试", // video_matting_failed（火山 MediaKit matte-portrait/greenscreen-video 双端点；1049 已由 !820 插帧占用，让位取 1050）
+  1051: "音频混合失败，请重试", // audio_mix_failed
+  1052: "音频调速失败，请重试", // audio_speed_failed（火山 MediaKit adjust-audio-speed；1051 已由音频混合占用）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
@@ -483,6 +514,7 @@ export const ERROR_CODES: Record<number, string> = {
   100406: "版本冲突，请刷新后重试",
   100407: "覆盖目标已变化，请生成新计划",
   100408: "空参数卡片不可保存，请补全参考图或描述",
+  100409: "幂等键冲突：同键异载荷",
   100410: "共享资产类型不支持",
 };
 
@@ -561,6 +593,8 @@ export const PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE = 100405;
 export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406;
 export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407;
 export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
+/** 同一把 Idempotency-Key 配了不同的载荷：建任务与重试共用同一个处置（拒绝，不取首次结果）。 */
+export const IDEMPOTENCY_CONFLICT_CODE = 100409;
 export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
 
 // ═══════════════════════════════════════════════════════════════
@@ -570,15 +604,29 @@ export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
 
 
 /**
- * Java SystemCode 系那几个码该用哪个 HTTP 状态。
+ * 数值码该用哪个 HTTP 状态（Java SystemCode 系为主，另有生成域的余额不足）。
  *
  * **只列本仓真的会经过统一投影的那些**，不做一张假装完备的大表——没走投影的调用点写在
  * 这里也不会生效，那种表只会让人以为已经对齐了。
+ *
+ * 生成域的 `quota_exhausted`（1001）此前只出现在**失败任务投影**的信封里（`errorCodeToNumeric`
+ * 算出来的 code，不是抛出来的 DomainError），所以一直没进这张表；现在提交口的计费预扣被拒也用
+ * 它了（billing 契约：余额不足 → FAILED_PRECONDITION / INSUFFICIENT_CREDITS），于是它也走投影。
  */
 const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   [PARAM_MISSING_CODE]: 400,
   [RESOURCE_NOT_FOUND_CODE]: 404,
   [ASSET_UNAVAILABLE_CODE]: 503,
+  // 余额不足回 **402**（Payment Required），不是默认的 400：前端的余额门正是按
+  // `status === 402` 决定「弹充值框」（web/src/utils/creditsGate.ts），而 400 只会被
+  // 当成一次普通的参数错误 toast 出去——用户不会知道该去充值。
+  // 键写数值字面量：本文件里这个码有两处（name→数值在 GENERATION_ERROR_NUMERIC_CODES，
+  // 这里是数值→状态），而按名字取会受 noUncheckedIndexedAccess 影响。域内改码时两处一起改。
+  [1001]: 402,
+  // 同键异载荷是**冲突**（同一把钥匙配了不同载荷），不是参数写错：409 让客户端一眼分辨
+  // 「重试没带上原样的载荷」与「载荷本身不合法」。走这条投影的是建任务端点
+  // （重试端点目前不抛 DomainError，不经过这里）。
+  [IDEMPOTENCY_CONFLICT_CODE]: 409,
 };
 
 const SPEC_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(

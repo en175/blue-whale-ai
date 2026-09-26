@@ -19,7 +19,7 @@ import { PrismaClient } from "@prisma/client";
  *
  *   1. 下面的 `timezone: "+08:00"` —— 管【DB 端求值】：NOW()、CURRENT_TIMESTAMP(0)、
  *      以及 DDL 的 DEFAULT CURRENT_TIMESTAMP(0)。驱动据此发 SET time_zone='+08:00'。
- *   2. patches/@prisma__adapter-mariadb@7.9.0.patch —— 管【字面量读写】：
+ *   2. backend/patches/@prisma__adapter-mariadb@7.9.0.patch —— 管【字面量读写】：
  *      adapter 在每条查询上强制 dateStrings: true 并硬编码 UTC（读 `new Date(\`${v}Z\`)`、
  *      写 getUTC*），且无配置项。补丁把它改成按 +08:00 读写。
  *
@@ -55,7 +55,46 @@ export function buildPoolConfig(databaseUrl: string) {
   };
 }
 
+/** 真环境的库名（开发库 / 测试站 / 生产**同名**，所以按名字一条就够）。
+ *  `blue_whale_*` 是历史遗留的变体（web / server / default）。 */
+const REAL_ENV_DATABASE = /^blue_whale(_|$)/;
+
+/**
+ * 测试期的**库名闸门**：跑在 vitest 下、且连的是真环境的库 → 直接抛。
+ *
+ * <p>为什么需要：这批集成测试连**真 MySQL**，会给测试造数据、跑完还 `DELETE`。
+ * 一旦那个 `*_DATABASE_URL` 门被指到开发库，就是一次**静默的数据清空**——
+ * billing 侧为此丢过两次数据（那边已有三层护栏），而 backend 侧此前**没有任何检查**：
+ * `vitest run backend` 时门控变量没设就整组 skip，设了就照连不误。
+ *
+ * <p>⚠️ **为什么是按名字拒绝、而不是「只放行测试库」的白名单**：
+ * 白名单会在下一个合法的门出现时挡住人（本地那些库叫 `bw_gate_<工单号>`，
+ * 但 `IKHJ0Q` 用的是 `tz_caliber`，还有若干 testcontainers 动态建名的）。
+ * 我们要拦的东西只有一个 —— **那个真的库**。所以只拒它。
+ *
+ * <p>只在 `VITEST` 下生效，**不碰产品路径**：生产/测试站的进程里这个变量不是 `"true"`。
+ *
+ * <p>导出是为了让回归测试能直接调两个方向（拒绝 / 放行）——`getPrismaClient` 会把客户端
+ * 缓存在全局 holder 上，用它测「放行」那条路会污染同进程里后面的用例。
+ */
+export function assertNotRealEnvironment(databaseUrl: string): void {
+  if (process.env.VITEST !== "true") return;
+  let name: string;
+  try {
+    name = new URL(databaseUrl).pathname.replace(/^\//, "");
+  } catch {
+    return; // 解析不出来就不猜（连不上自然会在别处炸）
+  }
+  if (REAL_ENV_DATABASE.test(name)) {
+    throw new Error(
+      `拒绝在测试里连接真环境的库「${name}」：这批集成测试会写数据、跑完还会 DELETE。` +
+        `把它们指向专用测试库（本地约定 bw_gate_<工单号>，见各测试文件头部的跑法注释）。`,
+    );
+  }
+}
+
 export function getPrismaClient(databaseUrl: string): PrismaClient {
+  assertNotRealEnvironment(databaseUrl);
   if (holder.prisma) return holder.prisma;
   holder.prisma = new PrismaClient({ adapter: new PrismaMariaDb(buildPoolConfig(databaseUrl)) });
   return holder.prisma;

@@ -294,7 +294,7 @@ describe('操作条（唯一选中、非编辑）', () => {
     expect(bar.querySelector(`.${styles.addToChatBtn}`)).not.toBeNull();
   });
 
-  it('素材标签卡（promptMentions 绑定、非 promptSource）：新增素材标签 select 列画布素材 + 添加到对话', async () => {
+  it('素材标签卡操作条与普通文本卡一致：仅「添加到对话」，无顶部新增/删除标签', async () => {
     await renderTextNode({
       selected: true,
       data: {
@@ -302,28 +302,31 @@ describe('操作条（唯一选中、非编辑）', () => {
         promptMaterials: [],
       },
     });
-    const select = layer()!.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]');
-    expect(select).toBeTruthy();
-    const options = [...select!.querySelectorAll('option')].map(o => o.textContent);
-    expect(options[0]).toBe('新增素材标签');
-    expect(options).toContain('素材图一');
-    expect(layer()!.textContent).toContain('添加到对话');
+    expect(layer()!.querySelector('select')).toBeNull();
+    const buttons = [...(layer()!.querySelectorAll('button') ?? [])];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('添加到对话');
   });
 
-  it('点击卡内素材标签后出现「删除标签 #n」（selectedMention 联动）', async () => {
+  it('点击卡内素材标签弹出定位/替换/删除，不出现顶部「删除标签 #n」', async () => {
     await renderTextNode({
       selected: true,
       data: {
         text: '素材#1',
         promptMentions: [{ start: 0, end: 4, assetId: 'a1', index: 1 }],
         promptMaterials: [{ assetId: 'a1', mediaType: 'image', url: 'http://img/m1.png', name: '素材图一' }],
+        mediaMentions: [{ start: 0, end: 4, nodeId: 'm1', assetId: 'a1' }],
+        mediaRefs: [{ nodeId: 'm1', assetId: 'a1', mediaType: 'image', name: '素材图一', url: 'http://img/m1.png' }],
       },
     });
     const chip = container.querySelector<HTMLElement>('[data-prompt-index="1"]');
     expect(chip).toBeTruthy();
     await act(async () => chip!.click());
-    const delBtn = [...(layer()!.querySelectorAll('button') ?? [])].find(b => b.textContent?.includes('删除标签 #1'));
-    expect(delBtn).toBeTruthy();
+    expect([...(layer()!.querySelectorAll('button') ?? [])].some(b => b.textContent?.includes('删除标签 #1'))).toBe(false);
+    const menu = document.querySelector('[data-testid="media-chip-menu"]');
+    expect(menu).toBeTruthy();
+    const labels = [...menu!.querySelectorAll('button')].map(b => b.textContent);
+    expect(labels).toEqual(['定位来源', '替换来源', '删除标签']);
   });
 
   it('「添加到对话」携带节点 id 回调', async () => {

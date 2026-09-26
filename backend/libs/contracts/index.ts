@@ -2,6 +2,12 @@ export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoTaskType,
+  taskTypeAllowedRatios,
+  parseSpecKey,
+  specKeyOf,
+  normalizeSpecKey,
+  parsePixels,
+  resolveOutputPixels,
   type CapabilityLimitInput,
   type CapabilityParamFailure,
   type GenerationParamCheckInput,
@@ -46,7 +52,9 @@ export {
   // ── 生成任务域错误码（字符串契约 + 数值表 + 信号 + 类型）──
   ERROR_ALL_OUTPUTS_FAILED,
   ERROR_AUDIO_GENERATION_FAILED,
+  ERROR_AUDIO_SPEED_FAILED,
   ERROR_AUDIO_TRIM_FAILED,
+  ERROR_AUDIO_MIX_FAILED,
   ERROR_CONTENT_REJECTED,
   ERROR_CONTENT_REVIEW_UNAVAILABLE,
   ERROR_ENQUEUE_FAILED,
@@ -56,6 +64,7 @@ export {
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_MEDIA_EXTRACT_PROVIDER_FAILED,
   ERROR_VIDEO_ENHANCE_FAILED,
+  ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
   ERROR_VOCAL_SPLIT_FAILED,
   ERROR_VIDEO_SCENE_SPLIT_FAILED,
   ERROR_MODEL_UNAVAILABLE,
@@ -126,6 +135,7 @@ export {
   SCENE_CARD_VERSION_CONFLICT_CODE,
   PLAN_APPLICATION_TARGET_STALE_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,
+  IDEMPOTENCY_CONFLICT_CODE,
   SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
   // ── 素材域错误码（2xxx）+ 码 → HTTP 状态 ──
   ASSET_ERROR_SPECS,
@@ -231,6 +241,16 @@ export {
   type MediaExtractInput,
 } from "./media-extract.js";
 export {
+  AUDIO_MIX_JOB_TYPE,
+  AUDIO_MIX_SOURCE,
+  AUDIO_MIX_OUTPUT_FORMATS,
+  AUDIO_MIX_DEFAULT_OUTPUT_FORMAT,
+  AUDIO_MIX_SUBMIT_PATH,
+  AUDIO_MIX_POLL_PATH_PREFIX,
+  audioMixCreateSchema,
+  type AudioMixCreate,
+} from "./audio-mix.js";
+export {
   VIDEO_ENHANCE_JOB_TYPE,
   VIDEO_ENHANCE_SOURCE,
   VIDEO_ENHANCE_INPUT_KEYS,
@@ -248,6 +268,23 @@ export {
   type VideoEnhanceInput,
 } from "./video-enhance.js";
 export {
+  VIDEO_FRAME_INTERPOLATION_JOB_TYPE,
+  VIDEO_FRAME_INTERPOLATION_SOURCE,
+  VIDEO_FRAME_INTERPOLATION_INPUT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_FPS_VALUES,
+  VIDEO_FRAME_INTERPOLATION_DEFAULT_FPS,
+  VIDEO_FRAME_INTERPOLATION_SUBMIT_PATH,
+  VIDEO_FRAME_INTERPOLATION_POLL_PATH_PREFIX,
+  VIDEO_FRAME_INTERPOLATION_RESULT_KEYS,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_ROUTE_SEGMENT,
+  VIDEO_FRAME_INTERPOLATION_RECOVERY_RESPONSE_KEYS,
+  videoFrameInterpolationInputSchema,
+  videoFrameInterpolationRecoveryQuerySchema,
+  type VideoFrameInterpolationFps,
+  type VideoFrameInterpolationInput,
+  type VideoFrameInterpolationRecoveryQuery,
+} from "./video-frame-interpolation.js";
+export {
   AUDIO_TRIM_JOB_TYPE,
   AUDIO_TRIM_SOURCE,
   AUDIO_TRIM_INPUT_KEYS,
@@ -263,6 +300,25 @@ export {
   type AudioTrimInput,
   type AudioTrimTimeRange,
 } from "./audio-trim.js";
+export {
+  AUDIO_SPEED_JOB_TYPE,
+  AUDIO_SPEED_SOURCE,
+  AUDIO_SPEED_INPUT_KEYS,
+  AUDIO_SPEED_MIN_SPEED,
+  AUDIO_SPEED_MAX_SPEED,
+  AUDIO_SPEED_STEP,
+  AUDIO_SPEED_SLIDER_MIN_POS,
+  AUDIO_SPEED_SLIDER_MID_POS,
+  AUDIO_SPEED_SLIDER_MAX_POS,
+  AUDIO_SPEED_SUBMIT_PATH,
+  AUDIO_SPEED_POLL_PATH_PREFIX,
+  roundAudioSpeed,
+  posToSpeed,
+  speedToPos,
+  audioSpeedInputSchema,
+  buildAudioSpeedInput,
+  type AudioSpeedInput,
+} from "./audio-speed.js";
 export {
   VOCAL_SPLIT_JOB_TYPE,
   VOCAL_SPLIT_SOURCE,
@@ -303,6 +359,32 @@ export {
   type VideoSceneSplitResult,
   type VideoSceneSplitSegment,
 } from "./video-scene-split.js";
+export {
+  VIDEO_MATTING_JOB_TYPE,
+  VIDEO_MATTING_SOURCE,
+  VIDEO_MATTING_MODES,
+  VIDEO_MATTING_SUBMIT_PATHS,
+  VIDEO_MATTING_POLL_PATH_PREFIX,
+  VIDEO_MATTING_MODEL_NAMES,
+  VIDEO_MATTING_FORMATS,
+  VIDEO_MATTING_DEFAULT_FORMAT,
+  VIDEO_MATTING_BACKGROUND_COLORS,
+  VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
+  VIDEO_MATTING_CLIENT_TOKEN_PATTERN,
+  VIDEO_MATTING_INPUT_KEYS,
+  VIDEO_MATTING_MAX_DURATION_MS,
+  VIDEO_MATTING_SUBMIT_KEYS,
+  VIDEO_MATTING_RESULT_KEYS,
+  videoMattingInputSchema,
+  videoMattingSubmitSchema,
+  videoMattingResultSchema,
+  type VideoMattingMode,
+  type VideoMattingFormat,
+  type VideoMattingBackgroundColor,
+  type VideoMattingInput,
+  type VideoMattingSubmit,
+  type VideoMattingResult,
+} from "./video-matting.js";
 export {
   DomainError,
   assetError,
@@ -459,4 +541,4 @@ export {
   type AddSharedAssetToProjectResult,
 } from "./shared-asset.js";
 
-export { releaseRemovedPromptSources, promptBindingList, promptReferenceRequestSchema, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";
+export { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";

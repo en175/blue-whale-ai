@@ -51,7 +51,7 @@ function imageView(
     },
     version: 1,
     digest: "sha256:abc",
-    channel_parser: "gpt",
+    channel: "gpt-image",
     request_mapping: {
       matrix: {
         "1k": { "1:1": "1024x1024", "3:2": "1536x1024" },
@@ -81,7 +81,7 @@ describe("handleListModels 消费端剥调用值", () => {
         api_value?: unknown;
       }>;
       request_mapping?: unknown;
-      channel_parser?: unknown;
+      channel?: unknown;
     };
     expect(gpt.supported_sizes[0]).toEqual({
       id: "1k",
@@ -93,7 +93,7 @@ describe("handleListModels 消费端剥调用值", () => {
       "16:9",
     ]);
     expect(gpt.request_mapping).toBeUndefined();
-    expect(gpt.channel_parser).toBeUndefined();
+    expect(gpt.channel).toBeUndefined();
   });
 
   // IKESD6 / ADR-0085：消费端透出 max_prompt_length（前端动态上限用），
@@ -162,7 +162,7 @@ describe("handleListModels 消费端剥调用值", () => {
         listEnabledByType: vi.fn().mockResolvedValue([
           imageView({
             model_id: "nano-banana",
-            channel_parser: "banana",
+            channel: "banana-image",
             request_mapping: {
               quality: { "1k": "1k", "2k": "2k" },
               size: { "1:1": "1x1", "16:9": "16x9" },

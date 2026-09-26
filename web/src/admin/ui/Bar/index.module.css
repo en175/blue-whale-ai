@@ -1,0 +1,60 @@
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.label {
+  font-size: var(--admin-font-sm);
+  color: var(--admin-text);
+  /* 类型名可能很长（中文名 + 兜底的原始 key），截断而不是把数字挤出去 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+  /* 等宽数字：并排几行的数值与百分号不会因位数不同而错位 */
+  font-variant-numeric: tabular-nums;
+}
+
+.value {
+  font-size: var(--admin-font-sm);
+  font-weight: 600;
+  color: var(--admin-text);
+}
+
+.percent {
+  /* 固定宽度 + 右对齐：几条的百分号落在同一条竖线上。
+     4 个字符放得下「100.0%」，短的那些也就不用各自居中 */
+  min-width: 48px;
+  text-align: right;
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-muted);
+}
+
+.track {
+  height: 8px;
+  border-radius: var(--admin-radius-control);
+  /* 轨道用 border 色而不是 surface-sunken：后者在白卡片上几乎看不出来，
+     没有轨道的条会让人把「条长」读成绝对值而不是比例 */
+  background: var(--admin-border);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-accent);
+}

@@ -15,12 +15,33 @@ import {
   getCurrentTraceId,
 } from "@lib/core/logging";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import {
+  NEW_API_BASE_URL_ENV,
+  newApiBaseUrl,
+  newApiFetch,
+} from "@lib/shared/upstream/new-api-egress.js";
+
+/** 上游地址配了没有（不抛，供 503 分支判断）。 */
+function newApiConfigured(): boolean {
+  try {
+    newApiBaseUrl();
+    return true;
+  } catch {
+    return false;
+  }
+}
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 
-/** NewAPI 上游（OpenAI 兼容 /v1）。空值时本控制器对每个请求返回 503。 */
-const NEW_API_BASE_URL = process.env.NEW_API_BASE_URL?.trim() || "";
+/**
+ * NewAPI 上游（OpenAI 兼容 /v1）**不在模块顶层读**。
+ *
+ * <p>原来这里是一句 `const NEW_API_BASE_URL = process.env.NEW_API_BASE_URL?.trim() || ""`，
+ * 两个问题：模块加载时读一次（此后改环境变量不生效、测试也没法注入），
+ * 以及在 new-api 的六处出站里又添了一份自己的地址解析。
+ * 现在统一走 `@lib/shared/upstream/new-api-egress`，每个请求现取。
+ */
 /**
  * 上游**空闲**超时：多久没有新字节才算死，不是总共跑了多久（IKD7AS）。
  *
@@ -250,8 +271,10 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
       res.status(401).json({ code: 401, msg: "服务凭证无效", data: null });
       return;
     }
-    if (!NEW_API_BASE_URL) {
-      res.status(503).json({ code: 503, msg: "模型网关未配置 NEW_API_BASE_URL", data: null });
+    if (!newApiConfigured()) {
+      res
+        .status(503)
+        .json({ code: 503, msg: `模型网关未配置 ${NEW_API_BASE_URL_ENV}`, data: null });
       return;
     }
     const billingToken = process.env.NEW_API_AGENT_BILLING_TOKEN?.trim();
@@ -304,7 +327,7 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
     const upstreamPath = req.originalUrl.startsWith(ROUTE_PREFIX)
       ? req.originalUrl.slice(ROUTE_PREFIX.length)
       : req.originalUrl;
-    const upstreamUrl = `${NEW_API_BASE_URL}${upstreamPath}`;
+
 
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
@@ -398,7 +421,8 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
     try {
       const init: RequestInit = { method: req.method, headers, signal: idle.signal };
       if (!["GET", "HEAD"].includes(req.method)) init.body = rawBody;
-      upstream = await fetch(upstreamUrl, init);
+      // 走上游唯一出口（路径拼接 + X-Trace-Id 统一由它负责）
+      upstream = await newApiFetch(upstreamPath, init);
     } catch (error) {
       idle.clear();
       unregister();

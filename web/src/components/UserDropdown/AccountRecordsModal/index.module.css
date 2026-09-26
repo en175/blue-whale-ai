@@ -94,6 +94,26 @@
   font-size: var(--font-size-md);
 }
 
+/* 充值页签的「暂未开放」说明：与 .empty 区分——这是有意的状态说明，不是「没数据」 */
+.placeholder {
+  padding: 40px 0;
+  text-align: center;
+}
+
+.placeholderTitle {
+  display: block;
+  margin-bottom: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: var(--font-size-md);
+}
+
+.placeholderDesc {
+  color: #888;
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
 .item {
   display: flex;
   align-items: flex-start;
@@ -130,17 +150,6 @@
   margin-top: 8px;
   color: #888;
   font-size: var(--font-size-sm);
-}
-
-.status {
-  color: #3e8efc;
-}
-
-.meta {
-  margin-top: 4px;
-  color: #888;
-  font-size: var(--font-size-sm);
-  word-break: break-all;
 }
 
 .time {

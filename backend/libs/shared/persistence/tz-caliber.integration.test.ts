@@ -3,7 +3,7 @@
 // 为什么必须有这一层：时区口径由**两处互不相干的机制**共同保证，而这个仓库此前没有任何测试
 // 覆盖它们中的任何一个——
 //   ① db.ts poolConfig 的 `timezone: "+08:00"`   → 管 DB 端求值（NOW() / DEFAULT CURRENT_TIMESTAMP）
-//   ② patches/@prisma__adapter-mariadb@7.9.0.patch → 管 DATETIME 字面量的读写偏移
+//   ② backend/patches/@prisma__adapter-mariadb@7.9.0.patch → 管 DATETIME 字面量的读写偏移
 // 任一处被删掉，「同一行内 gmt_create 与 gmt_modified 差 8 小时」都不会让任何现有测试变红，
 // 而表现是「接口时间看着没错、但库里一看就对不上」——最难排查的那类。
 //

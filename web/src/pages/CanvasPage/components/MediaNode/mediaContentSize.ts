@@ -19,10 +19,10 @@ export interface MediaContentBox {
   height: number;
 }
 
-/** 浏览器量得的真实媒体尺寸（时长仅视频/音频可测得） */
+/** 浏览器量得的真实媒体尺寸（宽高、时长均可缺，只回填测到的字段） */
 export interface MediaDims {
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
   duration?: number;
 }
 

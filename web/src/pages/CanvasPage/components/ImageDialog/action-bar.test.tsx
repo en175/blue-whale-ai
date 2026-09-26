@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type UploadedFile } from './index';
 import AttachmentActionBar, {
@@ -51,13 +52,17 @@ async function renderDialog(props: Partial<Parameters<typeof ImageDialog>[0]> = 
   const onPickFromAssets = vi.fn();
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        onPickFromCanvas,
-        onPickFromAssets,
-        ...props,
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          onPickFromCanvas,
+          onPickFromAssets,
+          ...props,
+        })
+      ),
     );
   });
   // 等模型能力加载完成（maxImages 依赖 currentGen）

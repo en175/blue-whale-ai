@@ -52,7 +52,7 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(
@@ -83,7 +83,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 vi.mock('@/api/assets', () => ({
@@ -248,7 +248,7 @@ describe('IKH28X 音视频分离发送落盘', () => {
     expect(audio.position).toEqual({ x: 958, y: 0 });
     expect((audio.data as Record<string, unknown>).fileName).toBe('素材视频(audio).m4a');
     // 建任务带所选格式（默认 m4a）
-    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' });
+    expect(apiMocks.createMediaExtraction).toHaveBeenCalledWith('p1', { source_asset_id: 'a9', output_format: 'm4a' }, { silent: true });
   });
 
   it('flush 在途时 800ms 防抖自动保存跳过，不并发第二个 PUT', async () => {

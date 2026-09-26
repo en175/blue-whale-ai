@@ -91,7 +91,7 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
@@ -127,7 +127,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 vi.mock('@/api/assets', () => ({
@@ -367,6 +367,31 @@ describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () =
     expect(cutoutToolbar()).toBeTruthy();
     expect(soloToolbarHidden('i1')).toBe(true);
     await pressEscape();
+    expect(cutoutToolbar()).toBeNull();
+    expect(soloToolbarHidden('i1')).toBe(false);
+  });
+
+  it('描边宽度滑杆（原生 range）聚焦按 Esc 退出抠图会话（IKI61N：组件内自闭环，不被 INPUT 豁免吞键）', async () => {
+    await renderPage();
+    await enterSession('cutout');
+    expect(cutoutToolbar()).toBeTruthy();
+    // 人像场景 → 打开描边上拉 → 启用描边（滑杆转可用）
+    const toolbarClick = async (testId: string) => {
+      await act(async () => {
+        (document.body.querySelector(`[data-testid="${testId}"]`) as HTMLButtonElement).click();
+      });
+    };
+    await toolbarClick('cutout-scene-trigger');
+    await toolbarClick('cutout-scene-human');
+    await toolbarClick('cutout-contour-trigger');
+    await toolbarClick('cutout-contour-toggle');
+    const slider = document.body.querySelector<HTMLInputElement>('[data-testid="cutout-contour-size"]')!;
+    expect(slider.disabled).toBe(false);
+
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
     expect(cutoutToolbar()).toBeNull();
     expect(soloToolbarHidden('i1')).toBe(false);
   });

@@ -6,12 +6,15 @@ import { TransformInterceptor } from "@lib/infra/interceptors/transform.intercep
 import { AccountModule } from "@lib/shared/account/account.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
+import { DashboardModule } from "@lib/shared/dashboard/index.js";
 import { GenerationModule } from "@lib/shared/generation/generation.module.js";
 import { HomepageHeroModule } from "@lib/shared/homepage-hero/homepage-hero.module.js";
 import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
 import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
+import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
+import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
@@ -27,6 +30,7 @@ import { AdminModule } from "./api/admin/admin.module.js";
 import { AgentAssetsModule } from "./api/agent-assets/agent-assets.module.js";
 import { AgentSkillsModule } from "./api/agent-skills/agent-skills.module.js";
 import { AssetsApiModule } from "./api/assets/assets.module.js";
+import { AudioSpeedsApiModule } from "./api/audio-speeds/audio-speeds.module.js";
 import { AudioTrimsApiModule } from "./api/audio-trims/audio-trims.module.js";
 import { AuthModule } from "./api/auth/auth.module.js";
 import { CanvasApiModule } from "./api/canvases/canvases.module.js";
@@ -39,6 +43,7 @@ import { ImageOutpaintsApiModule } from "./api/image-outpaints/image-outpaints.m
 import { JobsApiModule } from "./api/jobs/jobs.module.js";
 import { MaterialApiModule } from "./api/material/material.module.js";
 import { MediaExtractionsApiModule } from "./api/media-extractions/media-extractions.module.js";
+import { AudioMixesApiModule } from "./api/audio-mixes/audio-mixes.module.js";
 import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
@@ -50,11 +55,14 @@ import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
 import { VideoEnhancementsApiModule } from "./api/video-enhancements/video-enhancements.module.js";
+import { VideoFrameInterpolationsApiModule } from "./api/video-frame-interpolations/video-frame-interpolations.module.js";
 import { VideoSubtitleErasuresApiModule } from "./api/video-subtitle-erasures/video-subtitle-erasures.module.js";
 import { VocalSplitsApiModule } from "./api/vocal-splits/vocal-splits.module.js";
 import { VideoSceneSplitsApiModule } from "./api/video-scene-splits/video-scene-splits.module.js";
+import { VideoMattingsApiModule } from "./api/video-mattings/video-mattings.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
+import { IdentityModule } from "@lib/shared/identity/index.js";
 
 @Module({
   imports: [
@@ -69,6 +77,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     ProjectModule,
     JobsModule,
     CanvasModule,
+    DashboardModule,
     GenerationModule,
     SkillModule,
     SceneCardModule,
@@ -82,22 +91,28 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AgentAssetsModule,
     AgentSkillsModule,
     GenerationApiModule,
+    RechargeLibModule,
     RechargeModule,
+    SystemSettingsModule,
     UsageModule,
     AdminModule,
     JobsApiModule,
     CanvasApiModule,
     MaterialApiModule,
     MediaExtractionsApiModule,
+    AudioMixesApiModule,
     AudioTrimsApiModule,
+    AudioSpeedsApiModule,
     ImageEnhancementsApiModule,
     ImageErasuresApiModule,
     ImageCutoutsApiModule,
     ImageOutpaintsApiModule,
     VideoEnhancementsApiModule,
+    VideoFrameInterpolationsApiModule,
     VideoSubtitleErasuresApiModule,
     VocalSplitsApiModule,
     VideoSceneSplitsApiModule,
+    VideoMattingsApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,
@@ -109,6 +124,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AgentV1Module,
     CostSettlementModule,
     HealthModule,
+    IdentityModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

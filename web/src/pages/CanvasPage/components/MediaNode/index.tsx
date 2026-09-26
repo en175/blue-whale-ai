@@ -9,12 +9,16 @@ import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import { isAudioTrimNodeId } from '../../audioTrim';
+import { isAudioMixNodeId } from '../../audioMix';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
+import type { ImageCropIdentity } from '../../imageCrop';
 import type { VideoEnhanceIdentity } from '../../videoEnhance';
+import type { FrameInterpolationIdentity } from '../../frameInterpolation';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
 import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
 import type { VideoSubtitleEraseMode } from '../../videoSubtitleErase';
+import type { SmartMattingMode } from '../../smartMatting';
 import EraseMaskLayer from './EraseMaskLayer';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
 import AudioTrimOverlay from './AudioTrimOverlay';
@@ -25,6 +29,7 @@ import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generation
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
@@ -54,12 +59,75 @@ function HandlePlus() {
 const durationLabel = (duration?: number) =>
   typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
 
+/** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
+const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
+
+/** 生成 MP4 常把 moov 放在文件尾，preload=metadata 只拿到时长，画面停在黑底。
+ *  暂停时微调 currentTime 逼解码器吐出一帧；解码完成（seeked）再回调回填宽高。 */
+function paintVideoFirstFrame(
+  video: HTMLVideoElement | null,
+  onSeeked?: (video: HTMLVideoElement) => void,
+) {
+  if (!video) return;
+  if (video.readyState < 1) return;
+  if (!video.paused) return;
+  const duration = video.duration;
+  const epsilon = Number.isFinite(duration) && duration > 0 ? Math.min(0.04, duration / 4) : 0.04;
+  if (video.currentTime >= epsilon) {
+    onSeeked?.(video);
+    return;
+  }
+  if (pendingFirstFrameSeek.has(video)) return;
+  pendingFirstFrameSeek.add(video);
+  const handleSeeked = () => {
+    pendingFirstFrameSeek.delete(video);
+    video.removeEventListener('seeked', handleSeeked);
+    onSeeked?.(video);
+  };
+  video.addEventListener('seeked', handleSeeked, { once: true });
+  try {
+    video.currentTime = epsilon;
+  } catch {
+    pendingFirstFrameSeek.delete(video);
+    video.removeEventListener('seeked', handleSeeked);
+  }
+}
+
 /** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
 export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
+
+/** <video> 双源列表项：type 带 codecs 时浏览器才能精确判定解码能力 */
+export interface VideoSourceOption {
+  src: string;
+  type: string;
+}
+
+/** 双源列表：主源编码未知不标 codecs（canPlayType 至少 "maybe" 被选中，解码失败浏览器
+ *  自动落到次选）；H.264 兜底标 avc1。次选与主源相同则去重。 */
+export function videoSourceList(src?: string, srcH264?: string): VideoSourceOption[] {
+  const list: VideoSourceOption[] = [];
+  if (src) list.push({ src, type: 'video/mp4' });
+  if (srcH264 && srcH264 !== src) list.push({ src: srcH264, type: 'video/mp4; codecs="avc1"' });
+  return list;
+}
+
+/** 视频加载失败文案（MediaError.code 分类；HTMLMediaElement.error 见各平台实现） */
+export function videoLoadErrorMessage(code?: number): string {
+  switch (code) {
+    case 4: return '浏览器不支持该视频编码，请更换浏览器';
+    case 3: return '视频解码失败';
+    case 2: return '视频加载失败';
+    default: return '视频无法播放';
+  }
+}
 
 /** 媒体节点 data 契约（IKGYYD 起悬浮工具条迁出为 MediaNodeToolbar，本接口供其与 CanvasPage 共用） */
 export interface MediaNodeData {
   src?: string;
+  /** H.264 兜底地址（双源播放）：生成 MP4 编码未知（较长产物可能为 H.265/HEVC，
+   *  Windows/Edge 无 HEVC 解码扩展时黑屏），提供时渲染为 <source> 次选——主源解码
+   *  失败浏览器自动回退次选。后端转码落地前可选缺失，缺省行为与单源一致。 */
+  srcH264?: string;
   fileName?: string;
   mediaType?: 'image' | 'video' | 'audio';
   toolMode?: 'drag' | 'select';
@@ -79,9 +147,15 @@ export interface MediaNodeData {
   /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
    *  据此分流 HD 面板（不进视频生成面板），lastParams 随面板切换即时写卡 */
   videoEnhance?: VideoEnhanceIdentity;
+  /** 视频插帧身份标记（IKHLKR）：本卡由「高清 ▾」下拉第二项创建；点卡据此分流插帧面板
+   *  （不进视频生成面板），lastParams.fps 随面板切换即时写卡并同步卡名 */
+  frameInterpolation?: FrameInterpolationIdentity;
   /** 抠图身份标记（IKGXMT）：本卡由「抠图」结果链创建（建卡时随 data 持久化）——成品内容区
    *  据此垫棋盘格底纹（透明 png 可辨识，规格故事 21）；lastInput 供失败重试原样重发创建接口 */
   imageCutout?: ImageCutoutIdentity;
+  /** 裁切身份标记：本卡由「裁切」结果链创建（客户端裁切无服务端任务）。成品态仍需渲染
+   *  左侧 target Handle 接收来源边，故以本标记识别为生成宿主（非草稿占位，图片正常展示）。 */
+  imageCrop?: ImageCropIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -170,6 +244,13 @@ export interface MediaNodeData {
     duration: number;
     onSelectionChange: (selection: { start: number; end: number }) => void;
   };
+  /** 音频调速编辑态标记（IKHW5C 骨架 / IKHW5S 闭环，渲染期派生注入，不持久化）：本卡为
+   *  调速会话源音频卡时由 CanvasPage 注入——true（IKHW5C 骨架形态）或携带倍速对象
+   *  { speed }（IKHW5S）：进入即暂停+播放头归零（AudioPlayer 承担）、试听按倍速播放
+   *  （playbackRate + preservesPitch）且卡内时间行按倍速折算，退出标记移除即恢复 1.0
+   *  与源时长；源卡悬浮工具条隐藏由 CanvasPage 会话模态（editSessionActive）承担，
+   *  波形区不加遮罩（调速无选区）；发送条（AudioSpeedBar）由 CanvasPage 浮出。 */
+  speedEditing?: true | { speed: number };
   /** 音视频分离结果卡身份标记（IKH28X，建卡时随 data 持久化）：lastInput（源素材 + 所选
    *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
    *  失败卡无身份不渲染，口径同家族身份分流先例） */
@@ -206,6 +287,9 @@ export interface MediaNodeData {
   /** 视频 HD 高清（IKH3VG）：在源卡右侧建 HD 草稿卡并弹出 HD 面板（视频卡工具条「HD」徽标
    *  按钮派发；置灰门槛见 videoEnhance.ts，发送任务接通归 IKH3VH） */
   onVideoEnhance?: (id: string) => void;
+  /** 视频插帧（IKHLKR，父单 IKHLES）：在源卡右侧建插帧草稿卡并弹出插帧面板
+   *  （「高清 ▾」下拉第二项派发；置灰门槛见 frameInterpolation.ts，发送闭环归 IKHLKX） */
+  onFrameInterpolation?: (id: string) => void;
   /** 音视频分离（IKH28U 入口 / IKHA2E 改下拉触发钮）：进入音视频分离编辑态（「音视频分离 ▾」
    *  下拉首项与触发钮直启派发，原单按钮链路不变；置灰门槛见 audioVideoSplit.ts，发送闭环归 IKH28X） */
   onAudioVideoSplit?: (id: string) => void;
@@ -213,6 +297,11 @@ export interface MediaNodeData {
    *  编辑态归 IKHB7A，本票只透出回调；置灰门槛见 audioTrim.ts——音频 URL 缺失或时长
    *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
   onTrimAudio?: (id: string) => void;
+  onMixAudio?: (id: string) => void;
+  /** 音频调速（IKHW5C，父单 IKHVYO）：音频卡工具条第二钮「调速」入口点亮派发（进入
+   *  调速编辑态骨架归本票，编辑态本体——滑杆/发送条/提交——归 IKHW5S；置灰门槛见
+   *  audioSpeed.ts——音频 URL 或资产 ID 缺失即置灰，时长缺失不拦） */
+  onAudioSpeed?: (id: string) => void;
   /** 人声背景分离（IKHA2E 挂接点）：进入人声背景分离编辑态（「音视频分离 ▾」下拉第二项派发）；
    *  本票仅交付点击派发挂接点，编辑态本体由后续票实现——未注入时点击安全 no-op；
    *  置灰门槛同源整卡（audioVideoSplit.ts，未关联资产唯一置灰） */
@@ -220,6 +309,10 @@ export interface MediaNodeData {
   /** 场景切分（IKH8BJ）：进入场景切分编辑态（视频卡工具条「场景切分」按钮派发，
    *  置灰门槛见 sceneSplit.ts；编辑态本体由 IKH8BR 交付，本票只接通入口事件） */
   onSceneSplit?: (id: string) => void;
+  /** 智能抠像（IKHK7N）：进入抠像编辑态（视频卡工具条「智能抠像 ▾」下拉菜单项与触发钮
+   *  直启首项派发，mode 由菜单项决定：portrait=人像抠像、greenscreen=绿幕抠像）；
+   *  置灰门槛见 smartMatting.ts；编辑态本体由 IKHK9N 交付，本票只接通入口事件 */
+  onSmartMatting?: (id: string, mode: SmartMattingMode) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -235,6 +328,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const shellFileRef = useRef<HTMLInputElement>(null);
   /** 源视频元素引用：去字幕编辑态注入时暂停在当前帧（IKGZ83，本期无播放控制） */
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** 未选中时用首帧画布占位，避免铺满的 <video> 合成层把工具栏点击偷走 */
+  const videoPosterRef = useRef<HTMLCanvasElement | null>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -248,6 +343,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  subtitleErasePaused 注入）两模式都要停帧并关掉原生播放/进度条控件——智能模式不再
    *  注入框层，没有 inset:0 覆盖层替视频挡控件，controls 必须自己关；指针一并交还画布。 */
   const subtitleEraseLocked = data.subtitleEraseEditing != null || data.subtitleErasePaused === true;
+  /** 原生控件只给「当前选中」的视频卡。选择工具下所有卡都开 controls 时，
+   *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
+  const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
+  const [videoControlsArmed, setVideoControlsArmed] = useState(false);
+  useEffect(() => {
+    if (!videoInteractive) {
+      setVideoControlsArmed(false);
+      videoRef.current?.pause();
+      return;
+    }
+    const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
+    return () => window.clearTimeout(timer);
+  }, [videoInteractive]);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -320,7 +428,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     || data.genStatus === 'generating'
     || data.genStatus === 'failed'
     || data.genStatus === 'cancelled'
-    || data.jobId != null;
+    || data.jobId != null
+    || data.imageCrop != null;
   /** 上传素材只作出源，左侧不加号；生成节点（含图片草稿）一律接收入边。
    *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
   const showTargetHandle = !isEmptyShell && isGenHost;
@@ -373,16 +482,113 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onMediaDims?.(id, { width: w, height: h });
   }, [data, id]);
 
-  const handleVideoMetadata = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const { videoWidth: w, videoHeight: h, duration } = e.currentTarget;
-    if (!w || !h) return;
-    const dims: MediaDims = { width: w, height: h };
+  const syncVideoDims = useCallback((video: HTMLVideoElement) => {
+    const { videoWidth: w, videoHeight: h, duration } = video;
+    const dims: MediaDims = {};
+    if (w > 0) dims.width = w;
+    if (h > 0) dims.height = h;
     if (Number.isFinite(duration) && duration > 0 && typeof data.duration !== 'number') {
       dims.duration = duration;
     }
-    if (data.width === w && data.height === h && dims.duration === undefined) return;
+    const widthUnchanged = dims.width === undefined || data.width === dims.width;
+    const heightUnchanged = dims.height === undefined || data.height === dims.height;
+    if (widthUnchanged && heightUnchanged && dims.duration === undefined) return;
     data.onMediaDims?.(id, dims);
   }, [data, id]);
+
+  /** 视频播放失败兜底（双源全部失败/解码失败）：错误态替换黑屏为明确提示 +
+   *  新窗口打开入口；src 任一变化即复位重试 */
+  const [videoError, setVideoError] = useState<{ code?: number } | null>(null);
+  useEffect(() => {
+    setVideoError(null);
+  }, [data.src, data.srcH264]);
+
+  /** 元数据/首帧/缓存命中共用：立刻回填已能量到的时长，seek 完成后再补宽高。
+   *  静默解码失败形态（Windows/Edge 无 HEVC 解码实测）：数据齐（readyState≥2）
+   *  但视频轨量不出尺寸且不派发 error 事件——videoWidth=0 视为编码不支持，走兜底。 */
+  const drawVideoPoster = useCallback((video: HTMLVideoElement) => {
+    const canvas = videoPosterRef.current;
+    if (!canvas) return;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) return;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, width, height);
+  }, []);
+
+  const hydratePausedVideo = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    if (video.readyState >= 2 && video.videoWidth === 0 && video.videoHeight === 0) {
+      setVideoError({ code: 4 });
+      return;
+    }
+    syncVideoDims(video);
+    paintVideoFirstFrame(video, (ready) => {
+      syncVideoDims(ready);
+      drawVideoPoster(ready);
+    });
+  }, [drawVideoPoster, syncVideoDims]);
+
+  const handleVideoReady = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    hydratePausedVideo(e.currentTarget);
+  }, [hydratePausedVideo]);
+
+  /** 未选中时不把 <video> 放进卡片：Chromium 合成层会穿透工具栏。解码挂到 body，只往画布画首帧。 */
+  useEffect(() => {
+    if (videoControlsArmed) {
+      hydratePausedVideo(videoRef.current);
+      return;
+    }
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;left:-240px;top:-240px;width:8px;height:8px;overflow:hidden;pointer-events:none;opacity:0';
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.controls = false;
+    video.disablePictureInPicture = true;
+    videoRef.current = video;
+    for (const source of videoSourceList(data.src, data.srcH264)) {
+      const el = document.createElement('source');
+      el.src = source.src;
+      el.type = source.type;
+      video.appendChild(el);
+    }
+    const onReady = () => hydratePausedVideo(video);
+    video.addEventListener('loadedmetadata', onReady);
+    video.addEventListener('loadeddata', onReady);
+    // 离屏解码也要接住 error：404/编码不支持在未选中卡上同样需要兜底占位（!832 合同），
+    // 口径与选中态 onError 一致——code 1（换源主动中止）不算失败
+    const onError = () => {
+      const code = video.error?.code;
+      if (code === 1) return;
+      setVideoError({ code });
+    };
+    video.addEventListener('error', onError);
+    host.appendChild(video);
+    document.body.appendChild(host);
+    video.load();
+    return () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      video.removeEventListener('loadeddata', onReady);
+      video.removeEventListener('error', onError);
+      host.remove();
+      if (videoRef.current === video) videoRef.current = null;
+    };
+  }, [data.src, data.srcH264, hydratePausedVideo, videoControlsArmed]);
+
+  const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const code = e.currentTarget.error?.code;
+    // code 1（MEDIA_ERR_ABORTED）多为换源主动中止，不算失败
+    if (code === 1) return;
+    setVideoError({ code });
+  }, []);
 
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
@@ -411,8 +617,17 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isMediaExtraction = isMediaExtractNodeId(id);
   /** 截取占位卡（IKHB7A）：audio-trim-{jobId} 前缀；重试钮按 audioTrim 身份分流（同族先例） */
   const isAudioTrimCard = isAudioTrimNodeId(id);
+  const isAudioMixCard = isAudioMixNodeId(id);
+  /** 插帧草稿卡（IKHLKX）：插帧卡与 HD 卡共用 media-draft- 前缀，无法按 id 分流，故按身份判定
+   *  ——失败重试须带冻结源素材（frameInterpolation.sourceAssetId），重试据此原样重发创建接口；
+   *  身份残缺的失败卡不渲染重试钮（同 media_extract / audio_trim 身份守卫口径）。 */
+  const frameInterpolationIdentity = data.frameInterpolation as { sourceAssetId?: string } | undefined;
+  const frameInterpolationRetryable =
+    frameInterpolationIdentity == null
+    || (typeof frameInterpolationIdentity.sourceAssetId === 'string' && frameInterpolationIdentity.sourceAssetId !== '');
   const hideCancel = isMediaExtraction
     || isAudioTrimCard
+    || isAudioMixCard
     || isCanvasToolGeneration(data as Record<string, unknown>);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction, hideCancel);
   const failHeadline = mediaNodeFailHeadline({
@@ -446,11 +661,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       const isVideoDraft = data.mediaType === 'video';
       // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
       // 视频 HD 高清草稿（IKH3VG）同款专属占位；面板由本票接入
+      // 视频插帧草稿（IKHLKR）同款专属占位（父单指定文案）；面板由本票接入
       const draftHint = isImageDraft && data.imageEnhance
         ? '配置参数生成高清图像'
         : isVideoDraft && data.videoEnhance
           ? '配置参数生成高清视频'
-          : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
+          : isVideoDraft && data.frameInterpolation
+            ? '配置参数生成插帧视频'
+            : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
@@ -491,10 +709,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (isGenDone) {
       /* 失败/已取消：错误提示 + 重试（重试钮按身份分流：媒体提取卡带 mediaExtract 身份
           才可重试——IKH28X 编辑态发送的失败卡原参数重发；截取卡带 audioTrim 身份才可
-          重试——IKHB7A lastInput 原参数重发；存量无身份失败卡不渲染） */
+          重试——IKHB7A lastInput 原参数重发；插帧卡带冻结源素材才可重试——IKHLKX 原 fps
+          重发创建接口；存量无身份失败卡不渲染） */
       const canRetry = data.genStatus === 'failed'
         && (!isMediaExtraction || data.mediaExtract != null)
-        && (!isAudioTrimCard || data.audioTrim != null);
+        && (!isAudioTrimCard || data.audioTrim != null)
+        && (!isAudioMixCard || data.jobId != null)
+        && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
@@ -674,6 +895,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             fileName={data.fileName}
             duration={typeof data.duration === 'number' ? data.duration : undefined}
             onDownload={() => data.onDownload?.(id)}
+            speedEditing={data.speedEditing != null}
+            speedFactor={data.speedEditing && data.speedEditing !== true ? data.speedEditing.speed : undefined}
             trimSelection={data.trimEditing ? data.trimEditing.selection : null}
             trimOverlay={
               data.trimEditing ? (
@@ -690,18 +913,69 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           />
         ) : data.mediaType === 'video' ? (
           <>
-            <video
-              ref={videoRef}
-              className={styles.mediaVideo}
-              src={data.src}
-              controls={isSelect && !subtitleEraseLocked}
-              preload="metadata"
-              disablePictureInPicture
-              disableRemotePlayback
-              controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
-              onLoadedMetadata={handleVideoMetadata}
-              style={isSelect && !subtitleEraseLocked ? undefined : { pointerEvents: 'none' }}
-            />
+            {/* 透明结果卡棋盘格垫底层（IKHKAC）：垫在 video 之下的静态棋盘格，透明 WebM 的
+                透明区域透出格纹，一眼认出这是可合成的透明素材（视觉语言沿用图片抠图结果卡
+                imageCutout 先例）；仅 transparentOutput 标记卡渲染——标记在任务完成回填时
+                按产物格式冻结（WEBM 透明=true，MP4 纯色不设），aria-hidden 纯视觉 */}
+            {data.transparentOutput === true && (
+              <div className={styles.cutoutCheckerboard} aria-hidden data-testid="video-transparent-checkerboard" />
+            )}
+            {videoError ? (
+              /* 播放失败兜底：双源全部失败（如 Windows/Edge 无 HEVC 扩展）或解码错误时，
+                 以明确提示 + 新窗口打开替代无声黑屏；src 变化即复位（见 setVideoError 重置 effect） */
+              <div className={styles.genBox} data-testid="video-error-box">
+                <span className={styles.genFailText} title={videoLoadErrorMessage(videoError.code)}>
+                  {videoLoadErrorMessage(videoError.code)}
+                </span>
+                {data.src && (
+                  <a
+                    className={styles.genBtn}
+                    href={data.src}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: 'none', display: 'inline-block' }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    新窗口打开
+                  </a>
+                )}
+              </div>
+            ) : (
+              /* 双源播放：主源编码未知不标 codecs，H.264 兜底标 avc1——主源解码失败
+                 （如 H.265 遇无 HEVC 扩展的 Windows/Edge）浏览器自动落到次选 source。
+                 合成层放在包裹层：直接打在 <video> 上会穿透画布工具栏/小地图的命中。 */
+              <div className={styles.mediaVideoLayer}>
+                {videoControlsArmed ? (
+                  <video
+                    ref={videoRef}
+                    className={`${styles.mediaVideo} nodrag nopan`}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    disablePictureInPicture
+                    disableRemotePlayback
+                    controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
+                    onLoadedMetadata={handleVideoReady}
+                    onLoadedData={handleVideoReady}
+                    onError={handleVideoError}
+                  >
+                    {videoSourceList(data.src, data.srcH264).map((source) => (
+                      <source key={source.src} src={source.src} type={source.type} />
+                    ))}
+                  </video>
+                ) : (
+                  <canvas ref={videoPosterRef} className={styles.mediaVideoPoster} aria-hidden />
+                )}
+              </div>
+            )}
+            {/* 智能抠像透明结果卡角标（IKHKAC，形态取交互验收基准原型 done 态）：视频区
+                左下角半透明胶囊标注「透明背景 · WEBM」，与棋盘格一起标识透明产物；
+                仅 transparentOutput 标记卡渲染，MP4 纯色结果不渲染 */}
+            {data.transparentOutput === true && (
+              <span className={styles.transparentTag} data-testid="video-transparent-tag">
+                透明背景 · WEBM
+              </span>
+            )}
             {/* 去字幕编辑态框层（IKGZ83）：半透明矩形描边渲染 + 拉框指针接管，
                 仅正常视频内容区叠加（编辑态存在即视频已在当前帧暂停） */}
             {data.subtitleEraseEditing && (
@@ -735,7 +1009,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
             <img
               className={styles.mediaImage}
-              src={data.src}
+              src={resolveMediaSrc(data.src)}
+              crossOrigin={remoteImageCrossOrigin(data.src)}
               alt={data.fileName || 'image'}
               draggable={false}
               onLoad={handleImageLoad}
@@ -775,7 +1050,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
             {data.genStatus === 'failed'
               && (!isMediaExtraction || data.mediaExtract != null)
-              && (!isAudioTrimCard || data.audioTrim != null) && (
+              && (!isAudioTrimCard || data.audioTrim != null)
+              && frameInterpolationRetryable && (
               <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
                 重试
               </button>

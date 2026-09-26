@@ -1,0 +1,101 @@
+/* 自绘下拉。所有颜色走 token，因此**与操作系统主题无关**——
+   这正是它相对原生 select 的唯一意义。 */
+.root {
+  position: relative;
+  display: inline-block;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 140px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--admin-border-strong);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+.trigger:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder {
+  color: var(--admin-text-faint);
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--admin-text-faint);
+}
+
+.menu {
+  position: absolute;
+  z-index: 300;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-pop);
+  box-shadow: var(--admin-shadow-pop);
+}
+
+.option {
+  padding: 6px 10px;
+  border-radius: var(--admin-radius-control);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--admin-row-hover);
+}
+
+.optionActive {
+  color: var(--admin-accent);
+  font-weight: 500;
+  background: var(--admin-accent-soft);
+}
+
+.optionDisabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.sm {
+  height: 26px;
+  font-size: var(--admin-font-xs);
+}

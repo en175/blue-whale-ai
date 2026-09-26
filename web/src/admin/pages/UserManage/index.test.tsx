@@ -3,7 +3,6 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import UserManage from './index';
-import styles from './index.module.css';
 
 const adminApi = vi.hoisted(() => ({
   fetchAdminUsers: vi.fn(),
@@ -56,19 +55,35 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
+/**
+ * 断言口径说明：本页已迁到 @/admin/ui 且**没有私有 CSS 文件**，
+ * 测试不能再靠 `index.module.css` 的类名定位元素——改为按**可见文案与结构**定位，
+ * 这样断言的仍是「渲染出来的内容」，而不是某个样式类是否存在。
+ */
 describe('UserManage 用户 ID 展示', () => {
   it('列表用户 ID 与接口字段一致，不带 # 前缀', async () => {
     await renderPage();
-    expect(document.body.querySelector(`.${styles.cellId}`)?.textContent).toBe('42');
+    const row = [...document.body.querySelectorAll('tbody tr')].find((tr) =>
+      tr.textContent?.includes('Alice'),
+    );
+    expect(row?.querySelector('td')?.textContent).toBe('42');
   });
 
   it('详情里的用户 ID 同样不带 #', async () => {
     await renderPage();
     await act(async () => {
-      document.body.querySelector<HTMLButtonElement>(`.${styles.nickLink}`)?.click();
+      [...document.body.querySelectorAll('button')]
+        .find((b) => b.textContent === 'Alice')
+        ?.click();
     });
-    const labels = [...document.body.querySelectorAll(`.${styles.infoLabel}`)];
-    const idLabel = labels.find((el) => el.textContent === '用户ID');
-    expect(idLabel?.nextElementSibling?.textContent).toBe('42');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // 基本信息用 Stat 基元：label 在 .top 里，value 是其兄弟节点，
+    // 所以取 label 的上两层容器文本 = 「用户ID」+ 值
+    const idLabel = [...document.body.querySelectorAll('span')].find(
+      (el) => el.textContent === '用户ID',
+    );
+    expect(idLabel?.parentElement?.parentElement?.textContent).toBe('用户ID42');
   });
 });

@@ -10,7 +10,6 @@ import {
   referenceModeToRequiredFeature,
   validateVideoReferenceConfiguration,
 } from "@lib/contracts";
-import type { CostReservationSnapshot } from "@lib/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
@@ -48,8 +47,6 @@ export interface RegenerateSceneCardInput {
   capability_snapshot_version: CapabilitySnapshotVersion;
   /** 明文供应商 sk token（修正四：去密，与 Dock 生成链路一致）；worker 直接取用调网关。 */
   provider_credential?: string;
-  /** IK7G9X：建新 job 时的记账快照（真实预估金额 + 定价口径版本）。 */
-  costReservation?: CostReservationSnapshot;
   /**
    * IKF YHJ（ADR-0087）：素材校验门。
    * <p>
@@ -662,7 +659,6 @@ async function regenerateSceneCardInTransaction(
         ? { provider_credential: input.provider_credential }
         : {}),
     },
-    ...(input.costReservation ? { costReservation: input.costReservation } : {}),
   });
   let cursor = createdJob.cursor;
 

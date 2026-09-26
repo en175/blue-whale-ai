@@ -5,6 +5,7 @@
 import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -70,19 +71,24 @@ async function renderDialog(props: MountProps = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(AudioDialog, {
-        onClose: () => {},
-        onSend: () => {},
-        canvasMedia: [],
-        externalPick: { ts: 1, item: CANVAS_REF },
-        attachments: props.attachments,
-        onRemoveAttachment: props.onRemoveAttachment,
-        mentionItems: props.onMentionCanvas ? ([] as AtMentionItem[]) : undefined,
-        onMentionCanvas: props.onMentionCanvas,
-        draftBinding: props.readOnly
-          ? { status: 'generating', onParamsChange: () => {} }
-          : undefined,
-      }),
+      
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(AudioDialog, {
+                    onClose: () => {},
+                    onSend: () => {},
+                    canvasMedia: [],
+                    externalPick: { ts: 1, item: CANVAS_REF },
+                    attachments: props.attachments,
+                    onRemoveAttachment: props.onRemoveAttachment,
+                    mentionItems: props.onMentionCanvas ? ([] as AtMentionItem[]) : undefined,
+                    onMentionCanvas: props.onMentionCanvas,
+                    draftBinding: props.readOnly
+                      ? { status: 'generating', onParamsChange: () => {} }
+                      : undefined,
+                  })
+        ),
     );
   });
 }
@@ -168,12 +174,17 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     await renderDialog();
     await act(async () => {
       root.render(
-        createElement(AudioDialog, {
-          onClose: () => {},
-          onSend: () => {},
-          canvasMedia: [],
-          externalPick: { ts: 2, item: second },
-        }),
+        
+          createElement(
+            QueryClientProvider,
+            { client: new QueryClient() },
+            createElement(AudioDialog, {
+                        onClose: () => {},
+                        onSend: () => {},
+                        canvasMedia: [],
+                        externalPick: { ts: 2, item: second },
+                      })
+          ),
       );
     });
     expect(audioThumbs()).toHaveLength(2);
@@ -193,12 +204,17 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        createElement(AudioDialog, {
-          onClose: () => {},
-          onSend,
-          canvasMedia: [],
-          externalPick: { ts: 1, item: CANVAS_REF },
-        }),
+        
+          createElement(
+            QueryClientProvider,
+            { client: new QueryClient() },
+            createElement(AudioDialog, {
+                        onClose: () => {},
+                        onSend,
+                        canvasMedia: [],
+                        externalPick: { ts: 1, item: CANVAS_REF },
+                      })
+          ),
       );
     });
     await typePromptRefText(container, '生成深夜城市白噪音');
@@ -219,7 +235,12 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     expect(atButton('旁白文案')).not.toBeNull();
     await act(async () => atButton('旁白文案')!.click());
     expect(readPromptRefText(container)).toBe('文本1');
-    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), attachments: [] })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), attachments: [] })
+      )));
     expect(readPromptRefText(container)).toContain('已失效');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
   });
@@ -227,11 +248,16 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     const b = { ...CANVAS_REF, id: 'b', assetId: '602', name: '风声' };
     const onSend = vi.fn();
-    await act(async () => root.render(createElement(AudioDialog, {
-      onClose: vi.fn(), onSend, initialText: '参考', initialRefs: [CANVAS_REF, b],
-      stripOrder: ['media:canvas:b', 'media:canvas:n1'],
-      initialDoc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
-    } as Parameters<typeof AudioDialog>[0])));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, {
+                onClose: vi.fn(), onSend, initialText: '参考', initialRefs: [CANVAS_REF, b],
+                stripOrder: ['media:canvas:b', 'media:canvas:n1'],
+                initialDoc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+              } as Parameters<typeof AudioDialog>[0])
+      )));
     expect(audioThumbs().map(n => n.title)).toEqual(['风声', '雨声白噪音']);
     expect(audioThumbs().map(n => n.querySelector('[data-testid="ref-thumb-badge"]')!.textContent)).toEqual(['1', '2']);
     expect(readPromptRefText(container)).toBe('音频2');
@@ -260,7 +286,12 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
   });
   it('本地未落库项没有可插入身份', async () => {
     await renderDialog();
-    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), externalPick: { ts: 2, item: { ...CANVAS_REF, id: 'local', source: 'local', assetId: undefined, name: '本地音频' } } })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), externalPick: { ts: 2, item: { ...CANVAS_REF, id: 'local', source: 'local', assetId: undefined, name: '本地音频' } } })
+      )));
     expect(atButton('本地音频')).toBeNull();
   });
  });
@@ -278,7 +309,12 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
  describe('IKFCJG 画布列表选择身份', () => {
   it('从面板画布列表选择已落库音频后能插入正文标签', async () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])
+      )));
     // IKGB82：操作条「+ 参考」直达（等价旧菜单项「从节点添加素材」），面板内画布列表照常打开
     await act(async () => container.querySelector<HTMLButtonElement>('[title="从节点添加素材"]')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声')!.click());
@@ -297,7 +333,12 @@ describe('IKFCJG 异步失效换绑', () => {
     const props = { onClose: vi.fn(), onSend, initialRefs: [CANVAS_REF], initialDoc: {
       version: 1 as const, segments: [{ kind: 'text' as const, text: '前' }, { kind: 'asset_ref' as const, asset_id: '601', label: '音频1' }, { kind: 'text' as const, text: '后' }],
     }, mentionItems: [{ id: 'b', kind: 'audio' as const, name: '风声', assetId: '602', thumbUrl: b.src }], onMentionCanvas };
-    await act(async () => root.render(createElement(AudioDialog, props)));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, props)
+      )));
     await act(async () => removeButton('雨声白噪音')!.click());
     await act(async () => container.querySelector<HTMLElement>('[data-testid="asset-ref-invalid"]')!.click());
     const search = document.querySelector<HTMLInputElement>('input[placeholder="搜索"]')!;
@@ -308,7 +349,12 @@ describe('IKFCJG 异步失效换绑', () => {
     await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(n => n.textContent === '风声')!.click());
     expect(onMentionCanvas).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')).not.toBeNull();
-    await act(async () => root.render(createElement(AudioDialog, { ...props, externalPick: { ts: 1, item: b } })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { ...props, externalPick: { ts: 1, item: b } })
+      )));
     expect(readPromptRefText(container)).toBe('前音频1后');
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
     expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(false);
@@ -328,14 +374,29 @@ describe('IKFE8V 自由音频面板资产接纳', () => {
     const selected = { ...CANVAS_REF, id: 'asset-601' };
     const consumed = vi.fn();
     const props = { onClose: vi.fn(), onSend: vi.fn(), onAssetPickConsumed: consumed };
-    await act(async () => root.render(createElement(AudioDialog, { ...props, externalAssetPick: { ts: 1, items: [selected, selected] } })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { ...props, externalAssetPick: { ts: 1, items: [selected, selected] } })
+      )));
     expect(audioThumbs()).toHaveLength(1);
     expect(consumed).toHaveBeenCalledTimes(1);
-    await act(async () => root.render(createElement(AudioDialog, { ...props, externalAssetPick: null, externalPick: { ts: 2, item: CANVAS_REF } })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { ...props, externalAssetPick: null, externalPick: { ts: 2, item: CANVAS_REF } })
+      )));
     expect(audioThumbs()).toHaveLength(1);
     await act(async () => removeButton('雨声白噪音')!.click());
     expect(audioThumbs()).toHaveLength(0);
-    await act(async () => root.render(createElement(AudioDialog, { ...props, key: 'reopen' })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, { ...props, key: 'reopen' })
+      )));
     expect(audioThumbs()).toHaveLength(0);
   });
 });
@@ -348,9 +409,14 @@ describe('IKFR51 音频文本参考', () => {
 
   async function mountRefs(draftRefs: AudioRefItem[], onSend = vi.fn(), onLocateTextSource = vi.fn()) {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-    await act(async () => root.render(createElement(AudioDialog, {
-      onClose: vi.fn(), onSend, onLocateTextSource, draftRefs, initialText: '生成环境音',
-    })));
+    await act(async () => root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, {
+                onClose: vi.fn(), onSend, onLocateTextSource, draftRefs, initialText: '生成环境音',
+              })
+      )));
     return onSend;
   }
 

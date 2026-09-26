@@ -49,7 +49,7 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(
@@ -80,7 +80,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 vi.mock('@/api/assets', () => ({

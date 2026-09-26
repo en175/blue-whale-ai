@@ -15,7 +15,6 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 // IKFA8X「卡片名称编辑、持久保存与生成保留」验收（父规格 IKFA8U A01–A18、A23）：
@@ -52,7 +51,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -67,7 +66,6 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         { provide: JobsService, useValue: new JobsService(prisma, projects) },
         { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-        { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
       ],
     })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });

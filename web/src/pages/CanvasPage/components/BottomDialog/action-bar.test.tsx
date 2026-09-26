@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
@@ -123,17 +124,21 @@ async function renderDialog({ mediaRefs, attachments, mode, status, submitting, 
   fetchGenerationModels.mockResolvedValue(models ?? [fullModel]);
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        initialParams: mode ? { mode } : undefined,
-        attachments,
-        onPickFromCanvas,
-        onPickFromAssets,
-        pickMode: pickMode ?? null,
-        videoMediaRefs: mediaRefs ?? { reference: [] },
-        videoDraftBinding: { status, submitting, onParamsChange: vi.fn() },
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          initialParams: mode ? { mode } : undefined,
+          attachments,
+          onPickFromCanvas,
+          onPickFromAssets,
+          pickMode: pickMode ?? null,
+          videoMediaRefs: mediaRefs ?? { reference: [] },
+          videoDraftBinding: { status, submitting, onParamsChange: vi.fn() },
+        })
+      ),
     );
   });
   // 等模型能力加载完成（能力位/上限依赖 currentModel）
@@ -203,13 +208,17 @@ describe('IKGB7W 操作条渲染与位置（三段布局）', () => {
     // 删光后重新隐藏：videoMediaRefs 为父级受控推导，rerender 为空参考模拟父级断线结果
     await act(async () => {
       root.render(
-        createElement(BottomDialog, {
-          onClose: vi.fn(),
-          onSend: vi.fn(),
-          initialParams: { mode: 'all' },
-          videoMediaRefs: { reference: [] },
-          videoDraftBinding: { onParamsChange: vi.fn() },
-        }),
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(BottomDialog, {
+            onClose: vi.fn(),
+            onSend: vi.fn(),
+            initialParams: { mode: 'all' },
+            videoMediaRefs: { reference: [] },
+            videoDraftBinding: { onParamsChange: vi.fn() },
+          })
+        ),
       );
     });
     expect(attachmentStrip()).toBeNull();

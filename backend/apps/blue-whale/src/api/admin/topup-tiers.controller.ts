@@ -12,11 +12,13 @@ import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { TierAuditService } from "@lib/shared/topup-tier/tier-audit.service.js";
 import {
-  deriveTierAmount,
+  displayTierName,
   parseTierDiscount,
   parseTierOriginalPrice,
 } from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { deriveCredits } from "@lib/shared/recharge/recharge.service.js";
+import { fetchCreditsPerYuan } from "@lib/shared/billing/billing-admin-client.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
 
@@ -32,7 +34,19 @@ export class AdminTopupTiersController {
   async list() {
     try {
       const tiers = await this.topupTier.listAll();
-      return { success: true, data: tiers };
+      // ⚠️ **读的时候重新派生，不信库里那一列**：`topup_tiers.amount` 的存量行是
+      // new-api 记账时代写进去的 quota（原价 × 500_000），即 ¥100 档存着 5,000,000，
+      // 而用户端卡片现在显示 1,500。只在写入时改成新公式的话，**老数据永远是错的**——
+      // 管理员看到一个数、用户看到另一个数，正是这次要消掉的那种不一致。
+      // 派生是幂等的，与写入侧用的是同一个 deriveCredits（同一条公式、同一处来源）。
+      const creditsPerYuan = await fetchCreditsPerYuan();
+      return {
+        success: true,
+        data: tiers.map((t) => {
+          const amount = deriveCredits(t.originalPrice, creditsPerYuan);
+          return { ...t, amount, name: displayTierName(t.name, amount) };
+        }),
+      };
     } catch (error) {
       throw toAdminError(error);
     }
@@ -87,7 +101,7 @@ export class AdminTopupTiersController {
     const name = typeof body.name === "string" ? body.name : "";
     try {
       const tier = await this.topupTier.create({
-        amount: deriveTierAmount(originalPrice),
+        amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
         originalPrice,
         discount,
         ...(name ? { name } : {}),
@@ -181,7 +195,7 @@ export class AdminTopupTiersController {
       const tier = await this.topupTier.update(id, {
         ...(originalPrice !== null && {
           originalPrice,
-          amount: deriveTierAmount(originalPrice),
+          amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
         }),
         ...(discount !== undefined && { discount }),
         ...(typeof body.name === "string" && { name: body.name }),

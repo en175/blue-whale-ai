@@ -2,7 +2,7 @@
  * assets 接口：资产库列表（分页 + 筛选）
  * ============================================ */
 import { infiniteQueryOptions, queryOptions, skipToken, type QueryClient } from '@tanstack/react-query';
-import { apiRequest, type ApiRequestInit } from './http';
+import { apiRequest, silentInit, type ApiRequestInit } from './http';
 
 /** 资产类型 */
 export type AssetType = 'image' | 'video' | 'audio' | 'character';
@@ -13,6 +13,8 @@ export interface AssetRecord {
   id: number | string;
   /** 资产类型，决定预览渲染方式 */
   type: AssetType;
+  /** 服务端入库状态；只有 normal 可作为音频混合输入。 */
+  status?: string | null;
   /** 资产访问 URL：image→<img>，video→<video>，audio→<audio> */
   url: string;
   /** 图片/视频宽度（像素），null 表示未知 */
@@ -164,10 +166,10 @@ export function fetchAssetReferences(id: AssetRecord['id']) {
  * 把资产库素材挂到指定项目，使其进入该项目 snapshot 资产字典，
  * 画布引用跨项目素材后刷新不会被判定为"素材已被删除"。
  */
-export function linkAssetToProject(projectId: string, assetId: AssetRecord['id']) {
+export function linkAssetToProject(projectId: string, assetId: AssetRecord['id'], init?: ApiRequestInit) {
   return apiRequest<{ projectId: string; assetId: string }>(
     `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(String(assetId))}/link`,
-    { method: 'POST' },
+    { ...init, method: 'POST' },
   );
 }
 
@@ -191,11 +193,17 @@ export interface PresignData {
   expires_in: number;
 }
 
-/** 上传第一步：获取对象存储预签名 URL（mime 必须以 {type}/ 开头） */
-export function fetchUploadPresign(params: { type: AssetType; mime: string; size: number }) {
+/** 上传第一步：获取对象存储预签名 URL（mime 必须以 {type}/ 开头）。
+ *  init.silent 透传 apiRequest（IKI8L4 错误提示归属）：工具会话内的上传由持有发送
+ *  身份的调用方决定是否提示，迟到失败不在 http 层抢弹；缺省口径（toast）不变。 */
+export function fetchUploadPresign(
+  params: { type: AssetType; mime: string; size: number },
+  init?: { silent?: boolean },
+) {
   return apiRequest<PresignData>('/api/agent/assets/uploads/presign', {
     method: 'POST',
     body: JSON.stringify(params),
+    ...silentInit(init),
   });
 }
 
@@ -254,11 +262,13 @@ export interface UploadCompleteData {
   size: number;
 }
 
-/** 上传第三步：确认上传完成，后端校验并创建资产记录 */
-export function completeUpload(params: UploadCompleteParams) {
+/** 上传第三步：确认上传完成，后端校验并创建资产记录。
+ *  init.silent 透传同 fetchUploadPresign（IKI8L4 错误提示归属）。 */
+export function completeUpload(params: UploadCompleteParams, init?: { silent?: boolean }) {
   return apiRequest<UploadCompleteData>('/api/agent/assets/uploads/complete', {
     method: 'POST',
     body: JSON.stringify(params),
+    ...silentInit(init),
   });
 }
 

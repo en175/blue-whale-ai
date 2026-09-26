@@ -275,7 +275,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
             autoFocus
           />
           <PasswordField
-            placeholder="密码（8-20位）"
+            placeholder="密码（8 位以上）"
             value={password}
             visible={passwordVisible}
             onChange={setPassword}
@@ -285,7 +285,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
           />
           {passwordRuleError && (
             <div id="register-password-error" className={styles.error}>
-              密码长度需为 8-20 个字符
+              密码至少 8 位（最长 72 字节，一个汉字算 3 字节）
             </div>
           )}
           <PasswordField

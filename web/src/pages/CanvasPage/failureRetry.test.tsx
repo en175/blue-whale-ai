@@ -45,10 +45,10 @@ vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => nu
 const apiMocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  createGenerationJob: vi.fn(async (_projectId: string, _body: Record<string, unknown>) => ({ generation_job_id: 'j8', cursor: 1 })),
+  createGenerationJob: vi.fn(async (_projectId: string, _body: Record<string, unknown>, _key: string) => ({ generation_job_id: 'j8', cursor: 1 })),
   fetchJobStatus: vi.fn(async () => ({
     job_id: 'j9',
     status: 'succeeded',
@@ -56,7 +56,7 @@ const apiMocks = vi.hoisted(() => ({
     asset: { id: 'a9', url: 'http://img/out.png', type: 'image' },
   })),
   cancelGenerationJob: vi.fn(),
-  retryGenerationJob: vi.fn(async (_projectId: string, _jobId: number | string) => ({ generation_job_id: 'j9', cursor: 2 })),
+  retryGenerationJob: vi.fn(async (_projectId: string, _jobId: number | string, _key: string) => ({ generation_job_id: 'j9', cursor: 2 })),
   createVideoEnhancement: vi.fn(),
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
@@ -93,7 +93,7 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 
@@ -274,9 +274,10 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
 
     await clickRetry('f1');
 
-    // retry 以原任务 id 调用；create（修改后新生成路径）不被触碰；保存也不发生（快照冻结，无需落盘）
+    // retry 以原任务 id 调用（并带调用方持有的幂等键）；create（修改后新生成路径）不被触碰；
+    // 保存也不发生（快照冻结，无需落盘）
     expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1);
-    expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j1');
+    expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j1', expect.any(String));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
 
@@ -313,10 +314,43 @@ describe('IKDMQV 直接重试：沿用失败任务冻结快照', () => {
 
     await clickRetry('g1');
 
-    expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j1');
+    expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j1', expect.any(String));
     await vi.waitFor(() => expect(nodeOf('g1').data.src).toBe('http://img/out.png'));
     expect(nodeOf('g1').data.jobId).toBe('j9');
     expect(flowProps.current.mediaNodes).toHaveLength(2);
+  });
+
+  it('重试失败后再点重试复用同一把幂等键：响应丢了不会变成两个新任务两笔钱', async () => {
+    apiMocks.retryGenerationJob.mockRejectedValueOnce(new Error('网络中断'));
+    await renderPage();
+
+    await clickRetry('f1');
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('failed'));
+
+    // 原样再点一次：同一次意图（同一张卡、同一个被重试的任务），必须复用同一把钥匙
+    await clickRetry('f1');
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(2));
+
+    const keyOf = (index: number) => apiMocks.retryGenerationJob.mock.calls[index]![2];
+    expect(keyOf(1)).toBe(keyOf(0));
+  });
+
+  it('签名随被重试的任务走：卡换到新任务后再重试拿的是新钥匙', async () => {
+    await renderPage();
+
+    await clickRetry('f1');
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(1));
+    // 首轮受理成功：f1 承接 j9 —— 再重试重试的是 j9 而不是 j1，签名变了，钥匙必须换新
+    await vi.waitFor(() => expect(nodeOf('f1').data.jobId).toBe('j9'));
+
+    apiMocks.retryGenerationJob.mockResolvedValueOnce({ generation_job_id: 'j10', cursor: 3 });
+    await clickRetry('f1');
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledTimes(2));
+    expect(apiMocks.retryGenerationJob).toHaveBeenLastCalledWith('p1', 'j9', expect.any(String));
+
+    const keyOf = (index: number) => apiMocks.retryGenerationJob.mock.calls[index]![2];
+    expect(keyOf(1)).not.toBe(keyOf(0));
   });
 });
 
@@ -369,8 +403,49 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await vi.waitFor(() => expect(nodeOf('g1').data.src).toBe('http://img/out.png'));
   });
 
-  it('保存失败保护：落盘失败中止发送，不创建任务', async () => {
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new Error('save failed'));
+  it('同参数再次发送复用同一把幂等键：响应丢了原样重发不会建出第二个任务第二笔钱', async () => {
+    apiMocks.createGenerationJob.mockRejectedValueOnce(new Error('网络中断'));
+    await renderPage();
+
+    await clickNode('f1');
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
+    await typePrompt('同一句提示词');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('failed'));
+
+    // 原样再发：同一张卡、同一份载荷 = 同一次意图，钥匙必须复用（服务端据此重放首次结果）
+    await clickNode('f1');
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('同一句提示词'));
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(2));
+
+    const keyOf = (index: number) => apiMocks.createGenerationJob.mock.calls[index]![2];
+    expect(keyOf(1)).toBe(keyOf(0));
+  });
+
+  it('改了提示词再发送换新钥匙：那是新意图，沿用旧键会撞服务端「同键异载荷」判 409', async () => {
+    apiMocks.createGenerationJob.mockRejectedValueOnce(new Error('网络中断'));
+    await renderPage();
+
+    await clickNode('f1');
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
+    await typePrompt('第一版提示词');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(nodeOf('f1').data.genStatus).toBe('failed'));
+
+    await clickNode('f1');
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('第一版提示词'));
+    await typePrompt('第二版提示词');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(2));
+
+    const keyOf = (index: number) => apiMocks.createGenerationJob.mock.calls[index]![2];
+    expect(keyOf(1)).not.toBe(keyOf(0));
+  });
+
+  it('保存失败保护：落盘失败中止发送，不创建任务', async () => {    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new Error('save failed'));
     await renderPage();
 
     await clickNode('f1');

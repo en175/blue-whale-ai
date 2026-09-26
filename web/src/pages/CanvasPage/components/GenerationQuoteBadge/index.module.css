@@ -1,0 +1,12 @@
+/* ---- 价格预览徽标：底栏里「模型与规格选好 → 点发送之前」那一段的右侧 ----
+   视觉沿用原 .costText（同一位置的历史形态）+ 积分图标：小字、弱化色，
+   不抢发送钮的注意力（价格是提示，不是主操作）。 */
+.badge {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  user-select: none;
+}

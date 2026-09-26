@@ -1,14 +1,10 @@
 import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import {
-  NewApiError,
-  type NewApiLoginResult,
-} from "@lib/core";
+import { NewApiError } from "@lib/core";
 import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
-import { createAuthRepo, createUserInfoRepo } from "@lib/shared/persistence/index.js";
+import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
 import {
@@ -21,6 +17,13 @@ import {
   LoginFailureTracker,
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
+import {
+  IdentityService,
+  InvalidCredentialsError,
+  PasswordPolicyError,
+  UsernameTakenError,
+  type LocalLoginResult,
+} from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -30,7 +33,7 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
-function loginData(result: NewApiLoginResult, isNewUser: boolean) {
+function loginData(result: LocalLoginResult, isNewUser: boolean) {
   return {
     // 登录态走 HttpOnly 会话 cookie，响应不下发任何令牌给 JS。
     user_id: result.userId,
@@ -69,11 +72,11 @@ export class AuthController {
   private smsInstance?: SmsProvider;
 
   constructor(
-    private readonly account: AccountService,
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
+    private readonly identity: IdentityService,
   ) {}
 
   private get sms(): SmsProvider {
@@ -94,40 +97,37 @@ export class AuthController {
     );
   }
 
-  /** 会话签发：new-api sk- 明文入 Redis（修正四：去密），浏览器只拿 HttpOnly 会话 cookie。 */
-  private async establishSession(result: NewApiLoginResult): Promise<string> {
+  /**
+   * 会话签发：**只记身份，不记上游凭证**。
+   *
+   * <h2>这里存过什么</h2>
+   *
+   * 最早存用户自己的 `sk-`（一用户一把）。new-api 改成项目级统一 key 之后，这里变成
+   * **给每个用户存同一把 key**：既是一份 7 天不过期的密钥副本，也是「管理端改了 key
+   * 对已登录用户不生效」的来源——会话是登录那一刻的快照。现在会话不再带凭证，
+   * 上游 key 由 AuthGuard 按**当前配置**回注（`SystemSettingsService.requireUpstreamKey()`），
+   * 轮换对全部在线会话立即生效。
+   *
+   * <p>⚠️ **登录不再依赖上游配置**。以前缺 key 时这里抛 503，于是「还没配 key 的部署
+   * 谁也登不进去」——**包括要进去配它的管理员**，成死锁。凭证缺失的 fail-closed 落在
+   * 真正打上游的地方（AuthGuard 不注入 → 下游 `parseBearerToken` 拿到 null 即 401，
+   * 直接调用点抛 `UpstreamCredentialMissingError`），不在「进门」这一步。
+   *
+   * <p>⚠️ **过渡期的已知后果**：new-api 的 per-user 数据（消费流水、充值记录）
+   * 返回的是**项目维度**的数。这不是 bug，是「上游不再认识我们的用户」的必然结果，
+   * 也正是必须建自己计费体系的原因。计费域接过来之后，这些接口改走 billing。
+   */
+  private establishSession(result: LocalLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
-    try {
-      const token = await this.sessions.createSession({
-        userId: result.userId,
-        username: result.username,
-        role: result.role,
-        status: result.status,
-        email: result.email ?? null,
-        sk: result.token,
-      });
-      // IKF YHJ：登录成功即刷新网关侧执行凭证，供 worker-java 的素材状态定时兜底按 userId 取用
-      // （网关无服务级查询入口，素材接口只能以用户身份调用，见 ADR-0087）。
-      // 失败只告警不阻断登录：缺行/旧行只会让该用户的素材状态停止跟进，登录与生成都不受影响。
-      try {
-        await createUserInfoRepo(this.prisma.client).upsertCredential(
-          String(result.userId),
-          result.token,
-        );
-      } catch (error) {
-        logger.error(
-          `auth establishSession: upsert user_info failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-      return token;
-    } catch (error) {
-      // 修正四：createSession 不再 seal sk（明文存 Redis），无 GenerationCredentialConfigurationError。
-      throw error;
-    }
+    return this.sessions.createSession({
+      userId: result.userId,
+      username: result.username,
+      role: result.role,
+      status: result.status,
+      email: result.email ?? null,
+    });
   }
 
   @Public()
@@ -136,14 +136,22 @@ export class AuthController {
   async login(
     @Body() body: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    // 只取第一跳：x-forwarded-for 可被客户端伪造，末尾几跳才是可信代理加上的。
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+
     if (!username || !password) {
+      // 空凭据也算一次尝试——它同样可能来自撞库脚本，不留痕就看不见这条路径
+      await this.recordLogin({ username, ip, userAgent, success: false, reason: "凭据为空" });
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
     if (await this.limiter.isBlocked(LOGIN_LOCK_SCOPE, username)) {
       // 失败锁定期内（IKDR4J）：直接 429，跳过对 new-api 的无效调用。
+      await this.recordLogin({ username, ip, userAgent, success: false, reason: "账号锁定" });
       throw new NewApiError(
         "尝试次数过多，账号已锁定，请稍后再试",
         429,
@@ -151,20 +159,73 @@ export class AuthController {
       );
     }
     try {
-      const result = await this.account.login({ username, password });
-      // 凭证已被上游接受（IKDR4J）：清零失败计数与锁定，会话签发失败不回退。
+      // ★ 口令校验在**我们自己的库**（identity_users.password，bcrypt）。
+      //   登录结果里没有上游凭证——new-api 已经不是我们的用户体系了。
+      const result = await this.identity.login({ username, password });
+      // 凭证已被接受（IKDR4J）：清零失败计数与锁定，会话签发失败不回退。
       await this.loginFailures.clear(username);
       const sessionToken = await this.establishSession(result);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+      await this.recordLogin({
+        userId: String(result.userId),
+        username,
+        ip,
+        userAgent,
+        success: true,
+      });
       return ok(loginData(result, false));
     } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        // 与「上游业务失败」分开：这里根本没有上游。计数与留痕口径与旧路径一致，
+        // 因为对撞库者来说两条路径没有区别，防护也不该有区别。
+        await this.loginFailures.recordFailure(username);
+        await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
+        // 文案与 InvalidCredentialsError 一致：不区分「用户不存在」和「密码错」
+        throw new NewApiError(error.message, 401, "invalid_credentials");
+      }
       const projected = projectAccountBusinessFailure(error, 401);
       if (projected) {
         // 仅账密错误计数（IKDR4J）：上游 5xx/超时是服务问题，不是撞库信号。
         await this.loginFailures.recordFailure(username);
+        await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw projected;
       }
       throw toAuthError(error);
+    }
+  }
+
+  /**
+   * 记一条登录日志。
+   *
+   * <p>⚠️ **吞掉异常只记 error**：日志是旁路，写不进去不该让用户登不上。
+   * 但也不能静默——一个坏掉的日志表若表现为「一切正常」，
+   * 那它在真正被需要的那天（查撞库、查「我明明登录成功了」）同样是空的。
+   */
+  private async recordLogin(entry: {
+    // ⚠️ 可选属性显式带 `| undefined`：本仓开了 `exactOptionalPropertyTypes`，
+    //    不加的话调用方传一个可能为 undefined 的 @Headers 值就编译不过。
+    userId?: string | null | undefined;
+    username: string;
+    ip: string;
+    userAgent?: string | undefined;
+    success: boolean;
+    reason?: string | undefined;
+  }): Promise<void> {
+    try {
+      await this.identity.recordLogin({
+        userId: entry.userId ?? null,
+        username: entry.username,
+        ip: entry.ip,
+        userAgent: entry.userAgent ?? "",
+        success: entry.success,
+        reason: entry.reason,
+      });
+    } catch (error) {
+      logger.error(
+        `登录日志写入失败（username=${entry.username} success=${entry.success}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -181,25 +242,24 @@ export class AuthController {
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
     try {
-      const result = await this.account.register({
+      // ★ 注册也落我们自己的库。只切登录不切注册的话，新用户注册进 new-api、
+      //   而登录查 identity_users——**注册完立刻登不上**。
+      const result = await this.identity.register({
         username,
         password,
         ...(typeof body.email === "string" && body.email.trim()
           ? { email: body.email.trim() }
-          : {}),
-        ...(typeof body.verification_code === "string"
-          ? { verificationCode: body.verification_code }
           : {}),
       });
       const sessionToken = await this.establishSession(result);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       return ok(loginData(result, true));
     } catch (error) {
-      // 上游业务失败（用户名重复/密码不合规）HTTP 200+success:false，透传原文，
-      // 避免 toAuthError 未命中映射吞成 502「账户服务响应异常」。HTTP 用 400（非 200），
-      // 否则前端 code===200 会当成功读到 null data。
-      const projected = projectAccountBusinessFailure(error, FAILURE_CODE);
-      if (projected) throw projected;
+      // 用户名占用 / 口令超长：都是用户能自己改的输入问题，走 HTTP 400 + 原文案。
+      // 用 400 而非 200，否则前端 code===200 会把 data:null 当成功读。
+      if (error instanceof UsernameTakenError || error instanceof PasswordPolicyError) {
+        throw new NewApiError(error.message, 400, FAILURE_CODE);
+      }
       throw toAuthError(error);
     }
   }
@@ -222,15 +282,14 @@ export class AuthController {
   @Public()
   @Get("capabilities")
   async capabilities() {
-    try {
-      const capabilities = await this.account.getAccountCapabilities();
-      return ok({
-        password_login: capabilities.passwordLogin,
-        password_register: capabilities.passwordRegister,
-        email_verification: capabilities.emailVerification,
-      });
-    } catch (error) {
-      throw toAuthError(error);
-    }
+    // ★ 本地常量，不再探测 new-api 的 /api/status 开关。
+    //   口令登录与口令注册现在都由我们自己的库承载（identity_users + bcrypt），
+    //   能力不该再取决于上游配置：上游挂了也不该让登录入口从页面上消失。
+    //   email_verification（邮箱验证码注册）我们尚未实现，恒为 false。
+    return ok({
+      password_login: true,
+      password_register: true,
+      email_verification: false,
+    });
   }
 }

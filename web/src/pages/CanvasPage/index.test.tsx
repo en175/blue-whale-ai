@@ -55,7 +55,7 @@ const apiMocks = vi.hoisted(() => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
   pinProject: vi.fn(async () => undefined),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
 }));
 
@@ -73,7 +73,7 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 
@@ -163,6 +163,13 @@ async function renderPage(initialEntry = '/canvas?project=p1') {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  // !834 起 CanvasToolbar 布局期用 ResizeObserver 跟随画布舞台定位；jsdom 无此 API，
+  // 按仓库先例（textNodeCard / edgesControl）补桩，本页接线测试不需要真实回调
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
   localStorage.clear();
   sessionStorage.clear();
 });
@@ -170,6 +177,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
+  vi.unstubAllGlobals();
 });
 
 describe('CanvasPage Agent 面板接线（IKDLD4）', () => {

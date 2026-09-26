@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
-  it('音频卡只显五功能占位（audioTools），mention/画质/视频工具全隐（IKH8Q3）', () => {
+  it('音频卡只显五功能工具（audioTools），mention/画质/视频工具全隐（IKH8Q3）', () => {
     expect(mediaNodeToolbarVisibility('audio')).toEqual({
       mention: false,
       imageQuality: false,

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_ERROR_SPECS,
   ERROR_CODES,
+  ERROR_QUOTA_EXHAUSTED,
   RESOURCE_NOT_FOUND_CODE,
+  errorCodeToNumeric,
   httpStatusForCode,
   messageOf,
 } from "./error-codes.js";
@@ -59,6 +61,13 @@ describe("httpStatusForCode", () => {
 
   it("全局业务码查表：资源不存在是 404，不是 400", () => {
     expect(httpStatusForCode(RESOURCE_NOT_FOUND_CODE)).toBe(404);
+  });
+
+  it("生成域的余额不足（quota_exhausted）投影成 402，不是兜底的 400", () => {
+    // 400 只会被当成一次普通的参数错误；402 才让前端的余额门弹出充值框
+    // （web/src/utils/creditsGate.ts 按 `status === 402` 判）。这条同时钉住了
+    // 「name→数值」与「数值→状态」两张表对同一个码的结论一致。
+    expect(httpStatusForCode(errorCodeToNumeric(ERROR_QUOTA_EXHAUSTED))).toBe(402);
   });
 
   it("认不出的码兜底 400——**绝不能兜到 2xx**", () => {

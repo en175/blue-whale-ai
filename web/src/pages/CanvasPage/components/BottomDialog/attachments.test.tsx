@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -88,15 +89,19 @@ async function renderDialog(props: RenderProps = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose: vi.fn(),
-        onSend,
-        attachments: props.attachments,
-        onRemoveAttachment: props.onRemoveAttachment,
-        syncingPlan: props.syncingPlan,
-        videoMediaRefs: props.mediaRefs ?? { reference: [] },
-        videoDraftBinding: { status: props.status, onParamsChange: vi.fn() },
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          onSend,
+          attachments: props.attachments,
+          onRemoveAttachment: props.onRemoveAttachment,
+          syncingPlan: props.syncingPlan,
+          videoMediaRefs: props.mediaRefs ?? { reference: [] },
+          videoDraftBinding: { status: props.status, onParamsChange: vi.fn() },
+        })
+      ),
     );
   });
   // 等模型能力加载完成（发送门依赖 currentModel）
@@ -243,14 +248,18 @@ describe('IKFCKQ 文本附件进参考栏', () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        createElement(BottomDialog, {
-          onClose: vi.fn(),
-          onSend: vi.fn(),
-          attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }],
-          videoMediaRefs: { reference: [], first: IMG_REF },
-          enabledModes: ['keyframe'],
-          videoDraftBinding: { onParamsChange: vi.fn() },
-        }),
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(BottomDialog, {
+            onClose: vi.fn(),
+            onSend: vi.fn(),
+            attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }],
+            videoMediaRefs: { reference: [], first: IMG_REF },
+            enabledModes: ['keyframe'],
+            videoDraftBinding: { onParamsChange: vi.fn() },
+          })
+        ),
       );
     });
     await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));

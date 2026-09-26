@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
 import styles from './index.module.css';
@@ -40,7 +41,13 @@ async function renderDialog() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(ImageDialog, { onClose: vi.fn(), onSend: vi.fn() }));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, { onClose: vi.fn(), onSend: vi.fn() })
+      ),
+    );
   });
   // 等模型能力加载完成（底栏参数摘要按钮依赖 currentModel）
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));

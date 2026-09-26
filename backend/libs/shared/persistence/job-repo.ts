@@ -20,6 +20,7 @@ export interface JobListItem {
   input: unknown;
   created_at: string;
   output_assets: JobOutputAsset[];
+  canvas_card_state?: string;
   /** Node handler projects this internal field into a public error envelope. */
   stored_error?: Record<string, unknown> | null;
 }
@@ -39,7 +40,7 @@ export interface JobStatusView {
   status: string;
   progress: number;
   /** 成功时的首个产出资源；无则 null。 */
-  asset: { id: string; url: string; type: string } | null;
+  asset: { id: string; url: string; type: string; duration?: number } | null;
   /** 成功时的全部产出资源（按 output_asset_ids 顺序）；一对一工具与 asset 首元素等价，
    *  一对多工具（场景切分扇出）按序消费（IKH8C1）。 */
   output_assets: JobOutputAsset[];
@@ -83,6 +84,73 @@ export interface JobListFilter {
 export interface JobRepo {
   listByUser(userId: string, filter: JobListFilter): Promise<JobPage>;
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
+  /** 管理端列表（offset 分页，全站）。**不供用户端使用**——那条路是 listByUser。 */
+  listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
+}
+
+/**
+ * 管理端任务记录的一行。
+ *
+ * <p>与 {@link JobListItem} 的差别只有三处，都是有意的：
+ * <ul>
+ *   <li>带 {@code user_id} / {@code project_id}——管理端必须能回答「这是谁的任务」，
+ *       用户端不需要（他自己就是那个人）</li>
+ *   <li>带 {@code model_id} / {@code model_label}——见下方字段注释</li>
+ *   <li>**不带产出资料**——管理端看的是任务的状态，去拉一遍 assets 只是多一轮
+ *       查询与 N+1，而列表里那一列缩略图没人看。要看产出请按 job_id 走详情。</li>
+ * </ul>
+ */
+export interface AdminJobListItem {
+  job_id: string;
+  user_id: string;
+  project_id: string;
+  type: string;
+  status: string;
+  progress: number;
+  provider: string | null;
+  /**
+   * 这次任务用的模型（`generation_jobs.input.model_id`）。
+   *
+   * <p>⚠️ **只取 input 里的这一个键**，不把整份 input 搬上列表：input 里有提示词、素材 id、
+   * 规格参数，列表一次 20 行，为了一列把它整份带出去，接口体积会随 input 的结构一起长。
+   *
+   * <p>为空是**正常情况**：免费工具族（抠图、混音一类）没有模型，历史任务用的模型也可能已下架。
+   */
+  model_id: string | null;
+  /**
+   * 模型的展示名（`generation_model_capability.model_label`）。
+   *
+   * <p>`null` = 能力表里查不到这个 model_id —— 由调用方决定怎么显示，**不要在这里编一个名字**。
+   * 前端的口径是「有展示名用展示名，否则原样显示 {@link #model_id}」。
+   */
+  model_label: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+  /**
+   * 库里存的原始 error map。**本层不投影**——投影（→ {@code {code,message}}）在
+   * `JobsService` 那一层做，因为投影器住在 jobs 模块，persistence 反向引它会成环。
+   * 与 `listByUser` 的 `stored_error` 同一口径。
+   */
+  stored_error: Record<string, unknown> | null;
+}
+
+export interface AdminJobPage {
+  records: AdminJobListItem[];
+  total: number;
+  size: number;
+  current: number;
+}
+
+/** 管理端任务列表的筛选条件。 */
+export interface AdminJobListFilter {
+  /** 按用户过滤；不传 = 全部用户 */
+  userId?: string;
+  projectId?: string;
+  type?: string;
+  status?: string;
+  page: number;
+  size: number;
 }
 
 type AssetRow = {
@@ -100,6 +168,47 @@ function parseAssetIds(json: unknown): bigint[] {
   return json
     .map((v) => (typeof v === "number" || typeof v === "string" ? BigInt(v) : null))
     .filter((v): v is bigint => v !== null);
+}
+
+/**
+ * 任务 input 里的模型 id；没有就是 `null`。
+ *
+ * <p>宽容读取（不是 strict schema）：老任务、免费工具族的 input 形态各不相同，
+ * 管理端列表要能显示它们，不该因为一个字段的形状不认识就整页报错。
+ * `null` 的语义是「这个任务没有模型」——**不等于**「读不出来」。
+ */
+function modelIdOf(input: unknown): string | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  const raw = (input as { model_id?: unknown }).model_id;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+/**
+ * 一批 model_id → 展示名。
+ *
+ * <p>一次批量查，不逐行查（列表 20 行就是 20 次往返，正是这种 N+1 让列表页越用越慢）。
+ *
+ * <p>⚠️ **不过滤 `enabled` / `is_delete`**：与用户面（`asset-repo` 只认在架模型）不同，
+ *    管理端看的是**已经发生过的事**——一个模型下架了、停用了，历史任务那一列仍该显示
+ *    「当时用的是哪个模型」，退化成内部 id 只会让人更看不懂。
+ *    `model_id` 在能力表里按 (provider, model_id) 唯一，同一 model_id 可能有多个 provider
+ *    各给一个名字；按 id 升序取第一条，让同一批数据每次显示同一个名字。
+ */
+async function loadModelLabels(
+  prisma: PrismaClient,
+  modelIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (modelIds.length === 0) return new Map();
+  const caps = await prisma.generation_model_capability.findMany({
+    where: { model_id: { in: [...modelIds] } },
+    select: { model_id: true, model_label: true },
+    orderBy: { id: "asc" },
+  });
+  const labelByModel = new Map<string, string>();
+  for (const cap of caps) {
+    if (!labelByModel.has(cap.model_id)) labelByModel.set(cap.model_id, cap.model_label);
+  }
+  return labelByModel;
 }
 
 export function createJobRepo(prisma: PrismaClient): JobRepo {
@@ -125,7 +234,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         prisma.generation_jobs.count({ where }),
         prisma.generation_jobs.findMany({
           where,
-          orderBy: { gmt_create: "desc" },
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
           take: filter.size,
         }),
@@ -141,6 +250,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         status: r.status,
         progress: r.progress,
         input: publicGenerationInput(r.input ?? null),
+        ...(r.type === "audio_mix" ? { canvas_card_state: r.canvas_card_state } : {}),
         created_at: r.gmt_create.toISOString(),
         output_assets: parseAssetIds(r.output_asset_ids)
           .map((id) => assetMap.get(id.toString()))
@@ -161,6 +271,64 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       return { records, total, size: filter.size, current: filter.page };
     },
 
+    async listForAdmin(filter) {
+      const where = {
+        is_delete: false,
+        ...(filter.userId !== undefined ? { user_id: BigInt(filter.userId) } : {}),
+        ...(filter.projectId !== undefined ? { project_id: BigInt(filter.projectId) } : {}),
+        ...(filter.type !== undefined ? { type: filter.type } : {}),
+        ...(filter.status !== undefined ? { status: filter.status } : {}),
+      };
+      const [total, rows] = await Promise.all([
+        prisma.generation_jobs.count({ where }),
+        prisma.generation_jobs.findMany({
+          where,
+          // 次级键 id 与 listByUser 同款：DATETIME 只到秒，同一秒建多个任务很常见，
+          // 只按时间排序时翻页会跳行或重复行。
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (filter.page - 1) * filter.size,
+          take: filter.size,
+        }),
+      ]);
+
+      // 先把这一页用到的 model_id 收齐再一次性查展示名（见 loadModelLabels 的注释）
+      const modelIds = new Set<string>();
+      for (const r of rows) {
+        const modelId = modelIdOf(r.input);
+        if (modelId !== null) modelIds.add(modelId);
+      }
+      const labelByModel = await loadModelLabels(prisma, [...modelIds]);
+
+      return {
+        records: rows.map((r) => {
+          const modelId = modelIdOf(r.input);
+          return {
+            job_id: r.id.toString(),
+            user_id: r.user_id.toString(),
+            project_id: r.project_id?.toString() ?? "",
+            type: r.type,
+            status: r.status,
+            progress: r.progress,
+            provider: r.provider,
+            model_id: modelId,
+            // 查得到展示名就给展示名（中文名是能力表里维护的，别在这里另造一个）；
+            // 查不到就给 null，由前端原样显示 model_id
+            model_label: modelId === null ? null : (labelByModel.get(modelId) ?? null),
+            retry_count: r.retry_count,
+            created_at: r.gmt_create.toISOString(),
+            updated_at: r.gmt_modified.toISOString(),
+            stored_error:
+              r.error && typeof r.error === "object" && !Array.isArray(r.error)
+                ? (r.error as Record<string, unknown>)
+                : null,
+          };
+        }),
+        total,
+        size: filter.size,
+        current: filter.page,
+      };
+    },
+
     async findByIdForUser(jobId, userId) {
       const row = await prisma.generation_jobs.findFirst({
         where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
@@ -168,9 +336,13 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       if (!row) return null;
 
       let outputAssets: JobOutputAsset[] = [];
+      let audioMixDurationMs: number | null = null;
       if (row.status === "succeeded") {
         const ids = parseAssetIds(row.output_asset_ids);
         const assetMap = await loadAssets(ids);
+        if (row.type === "audio_mix" && ids[0] !== undefined) {
+          audioMixDurationMs = assetMap.get(ids[0].toString())?.duration_ms ?? null;
+        }
         outputAssets = ids
           .map((id) => assetMap.get(id.toString()))
           .filter((a): a is AssetRow => a !== undefined)
@@ -184,7 +356,12 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       }
       const firstAsset = outputAssets[0];
       const asset = firstAsset
-        ? { id: firstAsset.id, url: firstAsset.url, type: firstAsset.type }
+        ? {
+            id: firstAsset.id,
+            url: firstAsset.url,
+            type: firstAsset.type,
+            ...(audioMixDurationMs != null ? { duration: audioMixDurationMs / 1000 } : {}),
+          }
         : null;
 
       // 一对多 result（IKH8C1 场景切分扇出）：终态日志 payload 承载 duration + segments，

@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AtSign, AudioLines, Crosshair, FileText, X } from 'lucide-react';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 import type { StripDragItemProps } from './strip-dnd';
 
@@ -85,7 +86,8 @@ export function RefPreviewOverlay({ kind, url, name, audioDuration, textPreview,
       {kind === 'image' && url ? (
         <img
           className={styles.previewMedia}
-          src={url}
+          src={resolveMediaSrc(url)}
+          crossOrigin={remoteImageCrossOrigin(url)}
           style={{ maxWidth: PREVIEW_MAX, maxHeight: PREVIEW_MAX }}
           alt={name}
         />
@@ -93,7 +95,7 @@ export function RefPreviewOverlay({ kind, url, name, audioDuration, textPreview,
         // 静音是自动播放的硬前提（浏览器策略），循环便于确认内容
         <video
           className={styles.previewMedia}
-          src={url}
+          src={resolveMediaSrc(url)}
           style={{ maxWidth: PREVIEW_MAX, maxHeight: PREVIEW_MAX }}
           autoPlay
           muted
@@ -210,8 +212,8 @@ export function RefThumbnail({
       {...dragProps}
     >
       {/* draggable=false：图片/视频原生拖拽会劫持手势（拖出图片 ghost 而非缩略图项），统一由根节点承载 */}
-      {kind === 'image' && url ? <img src={url} alt={name} draggable={false} /> : null}
-      {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" draggable={false} disablePictureInPicture /> : null}
+      {kind === 'image' && url ? <img src={resolveMediaSrc(url)} crossOrigin={remoteImageCrossOrigin(url)} alt={name} draggable={false} /> : null}
+      {kind === 'video' && url ? <video src={resolveMediaSrc(url)} muted playsInline preload="metadata" draggable={false} disablePictureInPicture /> : null}
       {kind === 'audio' ? <AudioLines className={styles.kindIcon} aria-hidden="true" /> : null}
       {kind === 'text' ? <FileText className={styles.kindIcon} aria-hidden="true" /> : null}
       {(badgeText ?? number) != null && (

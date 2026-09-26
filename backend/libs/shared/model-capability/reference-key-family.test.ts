@@ -43,14 +43,17 @@ function stripComments(source: string): string {
 
 const backendGate = read("./constants.ts");
 const webFormKeys = read("../../../../web/src/admin/pages/ModelList/model-form.ts");
+// ⚠️ 标签表原在 `ModelFormModal.tsx`；该文件按 tab 拆开后，标签搬进了 `feature-fields.ts`。
+//    拆文件本身是好事，但**这条守卫是靠解析文件内容工作的**——搬了不跟着改，它会解析到 0 个键，
+//    而 `应至少解析出一个键` 那条正是为这种情况留的（否则整个 describe 静默空转）。
 const webFormLabels = read(
-  "../../../../web/src/admin/pages/ModelList/ModelFormModal.tsx",
+  "../../../../web/src/admin/pages/ModelList/feature-fields.ts",
 );
 
 const SOURCES = {
   "backend 写闸门 constants.ts": backendGate,
   "web 可编辑键白名单 model-form.ts": webFormKeys,
-  "web 表单标签表 ModelFormModal.tsx": webFormLabels,
+  "web 表单标签表 feature-fields.ts": webFormLabels,
 };
 
 describe("IKHEXG 参考上限键族守卫", () => {

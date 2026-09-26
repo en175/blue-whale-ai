@@ -1,13 +1,8 @@
+import { resolveMediaSrc } from '@/utils/remoteImageCors';
+
 /** 开发模式把跨域 TOS 地址转到 Vite 同域代理，避免本地直连被 CORS 拦截 */
 export function remoteMediaFetchUrl(src: string): string {
-  if (
-    import.meta.env.DEV &&
-    /^https?:\/\//.test(src) &&
-    (typeof window === 'undefined' || !src.startsWith(window.location.origin))
-  ) {
-    return `/__tos-fetch?url=${encodeURIComponent(src)}`;
-  }
-  return src;
+  return resolveMediaSrc(src);
 }
 
 /**

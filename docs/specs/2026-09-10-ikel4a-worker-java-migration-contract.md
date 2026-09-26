@@ -543,3 +543,37 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - **IKH28W（worker 执行）**：`NewApiMediaKitExtractAudioClient`（SUBMIT/POLL 用 §18.3 常量，`result.audio_url`/`duration` 消费）、`MediaExtractJobProcessor` 切异步轮询骨架、音频转存件（`TosVideoMediaRelay` 的 audio/ 变体）、错误映射按 §18.4 三类口径落。
 - **IKH28Y（网关）**：确认经 new-api 网关的实际提交/查询路由，回写 §18.3 两常量（有出入只改常量）。
 - **前端票**：格式选择面（五值 + 默认 m4a）、`(audio).mp3` 派生命名按格式扩展、失败文案按 1044 映射。
+
+## 19. 冻结增量（2026-09-23，IKI68N）：audio_mix 跨进程契约
+
+需求与用户交互依据为 `docs/specs/2026-09-23-audio-mix-mediakit.md`（提交 `c80c005fd`）。本节是 NestJS、Java Worker 与后续画布接线的**唯一跨进程字段基准**；字段名均为 JSON 传输用 snake_case。常量分别落在 `backend/libs/contracts/audio-mix.ts`、`backend/libs/shared/generation/queue.constants.ts` 与 `worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioMixContract.java`，`audio-mix.test.ts`、`mq-route-parity.test.ts` 和 `StartupContractTest` 逐值对账。
+
+### 19.1 任务与队列
+
+| 字段 | 冻结值 / 规则 |
+|---|---|
+| `generation_jobs.type` / RocketMQ tag | `audio_mix`；topic `generation-task`，消息体恒 `{"jobId":"<十进制字符串>"}` |
+| `generation_jobs.source` / claim 白名单 | `dock`；领取与恢复扫描均仅匹配该值 |
+| 消费者组 | `generation-audio-mix-worker` |
+| 状态与产出 | 初始 `queued`，单槽 `expected_output_count=1`；免费，无预留、结算或余额拦截；成功写一份 `type=audio`、`source=generated` 的长期 Asset 后置 `succeeded` |
+| 兜底失败码 | `audio_mix_failed` → 数值 `1051`；额度/内容政策信号沿用 §5 原码 |
+
+业务创建入口 `POST /projects/:projectId/audio-mixes` 接收 `{"source_node_id":"node-source","inputs":[{"asset_id":"11","node_id":"node-source"},{"asset_id":"12"}],"output_format":"mp3"}`。必须有 2–100 个不同 `asset_id`；首项 `node_id` 必须等于 `source_node_id`；`output_format` 仅 `mp3/m4a/ogg/flac/wav`，省略时也显式冻结 `mp3`。成功信封 `{"code":200,"msg":null,"data":{"job_id":"70","status":"queued"}}`。创建期复核项目/资产归属、音频类型和存储对象真实可读；从存储 key 或本仓 TOS 桶的历史公网 URL 还原 key，核实对象存在后再做公网 Range GET。最多 8 路并发、整批 15 秒截止；客户端 URL 不入任务。
+
+### 19.2 `generation_jobs.input` 冻结快照
+
+| 键 | 类型 / 语义 |
+|---|---|
+| `source_node_id` | 非空画布节点 ID，等于 `inputs[0].node_id` |
+| `inputs` | **按提交顺序**保存 2–100 项 `{asset_id: string, node_id?: string, url: string}`；每个 `asset_id` 唯一，`node_id` 只标记画布来源；`url` 由服务端对归属对象验证后解析为网关可公开读取的长期地址 |
+| `output_format` | 五值之一；默认也落 `mp3` |
+| `estimated_duration_ms` | 全部输入 Asset 时长已知且非负时取最大毫秒值；任一未知时为 `null`。仅供发送条/生成中展示，成功时以供应商真实 `result.duration` 覆盖 |
+| `provider_credential` | 请求方凭证的服务端冻结值（有凭证时写入），仅 Worker 使用，不对浏览器回传 |
+
+重试与恢复读取原 `input`，不重新读取当前选中态或资产行 URL。`provider_task_id`、`poll_count`、`next_action_at` 属 `generation_jobs` 独立列，不混入 input；`fencing_token`/租约遵守附录 C 的单一参数化生命周期，守卫未命中表示陈旧执行者，不应作为业务失败重投。
+
+### 19.3 网关与结果
+
+- Worker 以冻结顺序提交 `POST /v1/mediakit/mix-audio`：`{"model":"mediakit-mix-audio","audio_urls":["https://.../a.mp3","https://.../b.mp3"],"format":"mp3"}`。出站键恒为 **`format`**，不是 `output_format`。提交成功取 `task_id` 持久化，查询 `GET /v1/mediakit/tasks/{task_id}`；提交同步失败即使有 `request_id` 而无 `task_id` 也须将 `request_id` 留在错误中，不得进入轮询。
+- 查询 `status=completed` 时读取 `result.audio_url` 与 `result.duration`（秒）；结果 URL 先安全下载并转存我方 TOS、设置公开 ACL，再创建 Asset、以 `round(duration * 1000)` 写 `duration_ms`、发布终态。临时供应商 URL 不写成长期资产。验收须对 Asset URL 做实际 GET 并核验媒体字节；失败保留上游可读原因与 `request_id`。
+- 现有 1 GiB 内存式音频转存上限及 RecoveryService 全局 2 小时扫描窗口仍是上线前容量/长任务验收项，由 IKI696 制定扩容与超时/退避口径；本节不改全局策略。

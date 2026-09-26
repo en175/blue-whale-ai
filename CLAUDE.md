@@ -12,7 +12,7 @@
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
 | 前端工作流（碰 `web/` 产品实现：页面、组件、API 客户端、TanStack Query） | `.claude/skills/frontend-delivery/SKILL.md`（缺陷走 `references/bugfix.md`；新服务端状态读写走 `references/request.md`） |
 | PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
-| 文档直改 master（`CONTEXT.md` / `docs` 散文） | `docs/adr/0025-doc-on-master-allowlist.md` + `scripts/commit-spec-on-master.sh` |
+| 散文文档改动（`CONTEXT.md` / `docs` 散文；与代码同路） | `docs/agents/git-workflow.md`「Task Worktree」节 + `docs/adr/0025-doc-on-master-allowlist.md`（修正一：直提入口已废止） |
 | 产品文档/技能资产归位（docs/projects、docs/skills） | `docs/README.md`（渐进式，新建产品文档前读） |
 
 ## Gitee ID 兜底常量
@@ -34,13 +34,13 @@
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。
 2. **发布须用户授权** — 未经明确授权禁止 push/PR/merge/release。
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
-4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行**开工入口**（唯一入口）：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。例外（散文文档 ADR-0025、本地个人配置 ADR-0010）见「写入前自检」末节。
+4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行**开工入口**（唯一入口）：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。散文文档（ADR-0025）无直改例外，与代码同路；唯一例外是本地个人配置（ADR-0010），见「写入前自检」末节。
 5. **master 只被已验证代码推进** — 多人各自上线 + 共享 staging：产品影响路径的 feature/fix PR target 当次 `release/*` 批次分支（提 PR 前 `manage-release-branch.sh list` 选批次或 `create` 开新批），批次部署 staging 测试通过后才合入 master + tag 上生产；没进批次的产品代码碰不到 master。工程面 docs/chore 改动与 hotfix 例外直进 master。**PR 审合前不合入 master，本地集成区同理不提前吃未审代码**——确认 commit 后直接推送+提 PR，本地 master 在服务端合并后由开工入口同步。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
 6. **Worktree 基于同步后的本地 master** — 开工入口负责同步（fetch 融合本地/远程、冲突自动 abort）并从同步后的精确 SHA 建中文任务分支；细则见 `docs/agents/git-workflow.md`。
 7. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 8. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
 9. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
-10. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；generation 执行服务为 `worker-java/`（Java 直连 DB 运行时：claim/fencing/终态写入由 Java 权威实现，与 backend 仅经 DB+MQ 交互，金标套件对账——见 ADR-0084 修正二；系批准新建服务，非已退役 `blue_whale_server` 复活）；其余服务端与 Worker 进程使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。除 `worker-java` 外禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
+10. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；generation 执行服务为 `server/blue-whale-worker/`（Java 直连 DB 运行时：claim/fencing/终态写入由 Java 权威实现，与 backend 仅经 DB+MQ 交互，金标套件对账——见 ADR-0084 修正二；系批准新建服务，非已退役 `blue_whale_server` 复活）；**计费服务为 `server/blue-whale-billing/`（同为 Java 例外，见 ADR-0114 决策 6：账本是钱路径，必须能被逐行 review，与 worker 同款的防漂移约束）**；其余服务端与 Worker 进程使用 Node.js LTS；共享领域、契约与持久化能力位于跨语言 `contracts/` 契约与 TypeScript packages。除 `worker-java` 与 `billing-svc` 外禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
 11. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
 12. **验证按影响面与阶段分层** — 任务收口与创建/更新 PR 前都由选择器按影响面决定验证层级；PR 前必须运行 `--stage pr` 并通过发布门禁，但普通治理、Hook、Git、worktree、PR 和运维工具改动保持定向验证，只有产品影响路径或显式高风险进入全量。纯文档保持文档验证。同一 HEAD 的有效凭证直接复用，代码、基线或影响面变化后重新验证。细则见 `docs/agents/testing-strategy.md`。
 13. **点名技能按其规范执行** — 用户点名调用技能/工作流时，流程与产出形态（子代理数量、报告份数等）以该技能文件为准，不得沿用历史会话或先前任务的编排口径自行扩展；确需偏离，先向用户声明偏离点并等确认。
@@ -63,14 +63,14 @@
 
 **摘要是约束声明，自检是执行机制。** 在调用 Edit、Write 或任何会改变 Git 状态的操作前，必须逐项完成以下检查：
 
-1. **确认当前分支** — 读取当前分支；可写任务必须位于由开工入口创建的结构化中文工单分支，不得在 `master` / `main` 执行（**散文文档例外见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)**）。
+1. **确认当前分支** — 读取当前分支；可写任务必须位于由开工入口创建的结构化中文工单分支，不得在 `master` / `main` 执行（散文文档同样如此，见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）。
 2. **确认 Agent 任务区** — 确认已从主 checkout 通过开工入口创建并进入独立 task worktree。
 3. **确认目标路径** — 对每个写入目标确认其所属 Work Tree；目标路径不得指向用户本地集成区（master 主检出区）。
 4. **确认 Git 写入区域** — 任何会改变 Git 状态的操作只在正确的 Agent 任务区及其工单分支执行。
 
 任一项不满足，尤其可写任务尚未进入工单分支或目标路径指向 master 主检出区，立即停止写入，先通过开工入口创建并进入任务 Work Tree。
 
-**例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：若写入目标仅是散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），不适用上述 worktree 自检——AI 可在本地 master 直改，落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`。`.claude/`（规则源）、代码、`docs/**/*.json` 契约仍适用自检。
+**散文文档（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）**：根 `CONTEXT.md` + `docs/**/*.md` 曾可在本地 master 直改并由 `scripts/commit-spec-on-master.sh` 落盘；该直提通道 **2026-09-10 已废止**（与「PR 审合前不合入 master」红线冲突，且未推送的 master 直提会被开工入口卷进后续任务分支）。散文文档现**与代码同路**，全程适用上述自检：`scripts/start-task-worktree.sh --type docs --no-issue --summary <6–15字中文简述>` → 工单分支内编辑后 `bash scripts/commit-task-for-review.sh -m "docs: <描述>"` → 用户授权后 `scripts/publish-review-package.sh --user-authorized --create-pr`（工程面 docs PR 目标为 master）。`docs/**/*.json` 契约、fixtures 一向如此。
 
 **本地个人配置例外（[ADR-0010](docs/adr/0010-local-master-is-user-integration-zone.md)）**：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时不适用上述 worktree 自检。Agent 必须保持文件未跟踪、不得输出其中凭证；路径不精确、未被忽略或属于其他本地文件时仍按普通写入任务处理。
 

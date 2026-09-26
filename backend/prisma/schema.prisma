@@ -179,6 +179,7 @@ model generation_jobs {
   gmt_modified             DateTime  @default(now()) @db.DateTime(0)
   version                  Int       @default(0)
   is_delete                Boolean   @default(false)
+  canvas_card_state        String    @default("pending") @db.VarChar(16)
   input                    Json?
 
   @@index([project_id], map: "idx_project_id")
@@ -186,6 +187,9 @@ model generation_jobs {
   @@index([status, next_poll_at], map: "idx_status_next_poll")
   @@index([user_id], map: "idx_user_id")
   @@index([next_action_at], map: "idx_generation_next_action")
+  /// 仪表盘区间统计：WHERE is_delete = 0 AND gmt_create ∈ [from, to)。
+  /// `is_delete` 在前做等值前缀、`gmt_create` 走区间 —— 反过来放会让等值条件退化成过滤。
+  @@index([is_delete, gmt_create], map: "idx_generation_jobs__is_delete_gmt_create")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -205,8 +209,19 @@ model generation_model_capability {
   default_aspect_ratio    String   @db.VarChar(16)
   default_duration        Int?
   features                Json
-  channel_parser          String   @default("seedream") @db.VarChar(32)
+  /// 渠道（`<家族>-<媒介>[-<协议>]`，**封闭枚举**）：这个模型走哪个渠道 ——
+  /// 决定请求怎么解析、出站用哪种线协议。**本行解析与出站行为的唯一来源**。
+  /// 取代了 `channel_parser`（列）与 `features.image_protocol`（JSON 键）—— 那两个已被
+  /// 040 迁移删掉/清空，代码里也没有读方了。
+  channel                 String   @db.VarChar(32)
   request_mapping         Json?
+  /// 该模型该能力的计价规则，JSON 形态与定价目录 `document.models.<model_id>.<capability_type>`
+  /// 那条逐字相同（baseUnit / basePrice{kind,value?,by?,table?} / unitDenominator / minCredits /
+  /// maxCredits? / rounding? / dims? / multipliers? / tokenEstimate?）。
+  /// 原住 billing 的 `billing_pricing_catalogs.document`，因「它本质上是模型的属性」而搬来；
+  /// billing 生成任务时随 Hold 请求带走并存进自己的预留行，结算用预留行快照，故不反查本库。
+  /// 过渡期可为 NULL = 尚未搬迁，billing 侧回落定价目录。
+  pricing                 Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
   is_default              Boolean  @default(false)
@@ -553,9 +568,17 @@ model creative_skill_version {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model users {
+/// 账号主体（自建用户体系）。改到 identity_ 前缀、username 唯一、phone 可空，
+/// 理由与 pre-flight 见 migration 20260924180000。
+/// ⚠️ `username` 是**登录凭据**；`phone` 只是「多一种登录方式」，存量用户没有它。
+model identity_users {
   id           BigInt   @id @default(autoincrement())
-  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
+  /// 邮箱。设计 §6.2 要求；与 username 一样是登录方式之一（email + password）。
+  /// ⚠️ 唯一：登录按 `username = ? OR email = ?` 一次查出主体，邮箱不唯一时会命中
+  /// **任意一行**——等于能用别人的邮箱登进来。NULL 可多行，空串不可
+  /// （MySQL 唯一索引对 NULL 互不相等，对空串不是）。见 migration 20260925120000。
+  email        String?  @unique(map: "uk_identity_users__email") @db.VarChar(50)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
@@ -563,10 +586,16 @@ model users {
   version      Int      @default(1)
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
+  /// bcrypt 哈希（cost 10，与 new-api 一致）。**可空**：手机号注册、以及刚从
+  /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
+  /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
+
+  @@unique([username], map: "uk_identity_users__username")
 }
 
-model verification_codes {
+/// 短信验证码。手机号登录是**后续**能力（发码已通、登录未接，`loginWithCode` 零调用者）。
+model identity_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
   code       String   @db.VarChar(6)
@@ -600,6 +629,51 @@ model topup_tiers {
   is_delete      Int       @default(0) @db.TinyInt
 
   @@index([status, sort_order], map: "idx_tier_status_sort")
+}
+
+// ===== 充值订单（blue_whale 侧；支付执行在 blue-whale-pay 的杭州银行聚合主扫渠道） =====
+//
+// 到账积分在下单时刻冻结（credits/credits_per_yuan）：换算率是定价目录的配置项、可改，
+// 用户按「N 积分」付了钱之后改口径不能反悔。status=paid 是「积分已发放」的唯一判据。
+model recharge_orders {
+  id               BigInt    @id @default(autoincrement())
+  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  user_id          BigInt
+  tier_id          BigInt
+  amount_fen       BigInt
+  credits          BigInt
+  credits_per_yuan Int
+  status           String    @default("pending") @db.VarChar(16)
+  paid_at          DateTime? @db.DateTime(0)
+  grant_lot_id     BigInt?
+  last_query_at    DateTime? @db.DateTime(0)
+  notify_count     Int       @default(0)
+  gmt_create       DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified     DateTime  @default(now()) @db.DateTime(0)
+  version          Int       @default(0)
+  is_delete        Int       @default(0) @db.TinyInt
+
+  /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
+  /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
+  /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
+  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
+  /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
+  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+}
+
+// ===== 系统设置（管理端可配；按模块整行存一份快照） =====
+//
+// is_secret=1 的行必须是密文（AES-256-GCM），密钥只在进程环境变量里——
+// 库与密钥分开存放，只拿到库也读不出凭证。
+model system_settings {
+  setting_key   String   @id @db.VarChar(64)
+  setting_value String   @db.Text
+  is_secret     Boolean  @default(false)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
 }
 
 // ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
@@ -834,4 +908,77 @@ model legacy_card_history {
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, node_id], map: "uk_legacy_card_history")
+}
+
+/// 会员周期（identity_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
+/// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
+/// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。
+model identity_memberships {
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  tier         String    @db.VarChar(16)
+  status       String    @default("active") @db.VarChar(16)
+  started_at   DateTime  @db.DateTime(0)
+  expires_at   DateTime? @db.DateTime(0)
+  source       String    @db.VarChar(24)
+  biz_id       String    @db.VarChar(128)
+  grant_key    String    @db.VarChar(190)
+  gmt_create   DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified DateTime  @default(now()) @db.DateTime(0)
+  version      Int       @default(0)
+  is_delete    Boolean   @default(false)
+
+  @@unique([grant_key], map: "uk_identity_memberships__grant_key")
+  @@index([user_id, status, expires_at], map: "idx_identity_memberships__user_status_expiry")
+}
+
+/// 角色（identity_roles）。替代 `auth.guard.ts` 里 `role >= 10` 的魔数——
+/// 判断管理员是「持不持有 admin 类角色」的**集合成员**问题，不是数值比较问题。
+/// 内置三行由 migration 20260924200000 播种。
+model identity_roles {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @db.VarChar(32)
+  name         String   @db.VarChar(64)
+  description  String   @default("") @db.VarChar(255)
+  is_builtin   Boolean  @default(false)
+  sort_order   Int      @default(0)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([code], map: "uk_identity_roles__code")
+}
+
+/// 用户 ↔ 角色（identity_user_roles）。存 role_id 而非 code：角色改名只改一行，
+/// 不散落成几十条待更新的关联行。
+model identity_user_roles {
+  id           BigInt   @id @default(autoincrement())
+  user_id      BigInt
+  role_id      BigInt
+  granted_by   String   @default("system") @db.VarChar(64)
+  grant_key    String   @db.VarChar(190)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([grant_key], map: "uk_identity_user_roles__grant_key")
+  @@index([user_id, is_delete], map: "idx_identity_user_roles__user")
+}
+
+/// 登录日志（identity_login_logs）。`user_id` 可空——登录失败时用户可能压根不存在，
+/// 而这些恰恰是最需要留痕的尝试。
+model identity_login_logs {
+  id         BigInt   @id @default(autoincrement())
+  user_id    BigInt?
+  username   String   @db.VarChar(50)
+  ip         String   @db.VarChar(50)
+  user_agent String   @default("") @db.VarChar(255)
+  success    Boolean
+  reason     String   @default("") @db.VarChar(64)
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@index([user_id, gmt_create], map: "idx_identity_login_logs__user_time")
+  @@index([ip, gmt_create], map: "idx_identity_login_logs__ip_time")
 }

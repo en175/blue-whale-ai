@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 
 import {
   resolvePromptMaxLength,
+  IDEMPOTENCY_CONFLICT_CODE,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
@@ -19,6 +20,8 @@ import {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoTaskType,
+  taskTypeAllowedRatios,
+  resolveOutputPixels,
   type VideoTaskType,
   videoRefLabel,
   buildReferenceMarkerLabels,
@@ -54,21 +57,50 @@ import {
 } from "@lib/core";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
+  CREATE_GENERATION_JOB_OPERATION,
   type CanvasRepo,
+  type CreateJobIdempotency,
   type CreateJobInput,
+  type CreateJobResult,
   type GenerationCommandRepo,
+  type JobBilling,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelFeatures,
   type ProjectRepo,
   type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
+import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
+import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 import {
+  channelOf,
   mapImageChannelRequest,
+  parseStoredChannel,
   parseStoredImageRequestMapping,
 } from "./image-channel-parser.js";
+
+/** 能力行的 `pricing` 序列化成 Hold 要的 JSON 文本；未配返回 `undefined`。
+ *
+ *  <p>**为什么在这里序列化一次**：proto 的 `rule_snapshot` 是 `string`（一整条 JSON 文本），
+ *  而不是结构化消息——规则的形状是**定价域的知识**（kind 有 const/table/unset 三种、
+ *  table 的键是规格组合），把它摊成 proto 消息等于让契约去追一个还在演进的配置形态。
+ *  传文本，billing 那边照样用 `CatalogCompiler` 编译校验，语义一点不少。
+ *
+ *  <p>⚠️ 未配（`null`）时返回 `undefined` 而不是空串：proto3 里空串与「没设」不可区分，
+ *  传空串会让 billing 分不清「这次没有规则」与「规则是空的」，只能一并回落目录。
+ *  两者行为恰好一样，但显式地不传更诚实。 */
+export function serializePricingRule(capability: ModelCapabilityView | undefined): string | undefined {
+  const pricing = capability?.pricing;
+  if (pricing === undefined || pricing === null) return undefined;
+  try {
+    return JSON.stringify(pricing);
+  } catch {
+    // 循环引用等在库里的 JSON 不可能出现（Prisma 读出来的是普通对象），
+    // 真出现也只当「没配」——回落目录，不让一次序列化失败挡住用户的提交。
+    return undefined;
+  }
+}
 
 export interface GenerationParameters {
   prompt?: unknown;
@@ -238,7 +270,8 @@ function uniqueAssetIds(ids: string[]): string[] {
   return ids.filter((id, index) => ids.indexOf(id) === index);
 }
 
-type GenerationType = "image" | "video" | "audio";
+/** 生成类型（job.type）。建任务与价格预览共用这一个 —— 报价的任务类型必须与创建一致。 */
+export type GenerationType = "image" | "video" | "audio";
 
 /** 全类型公共校验：type 已由策略分派保证合法；此处校验 target_node_id / prompt /
  *  aspect_ratio（audio 跳过）/ model_id / expected_output_count。
@@ -398,15 +431,13 @@ function validateImageSingleRefs(
 /** 视频特有校验：首尾帧 / 普通参考 asset 互斥 + 素材库引用（asset∨material 并集互斥/配对）。
  *  ADR-0086：普通参考按类型分类上限改读能力行（video_reference / video_reference_max /
  *  audio_reference / audio_reference_max / max_reference_duration_sec），旧「参考素材最多 12」退役。
- *  capability 传入时以其 supported_aspect_ratios 判定「模型是否支持自适应比例」（首尾帧强制 adaptive）。 */
+ *  首帧/首尾帧的**比例**限制同样只认能力行（`features.task_types[...].allowed_ratios`）——
+ *  2.5 锁 adaptive、2.0 不限，见下方那条闸的注释。 */
 function validateVideo(
   body: CreateGenerationJobBody,
   capability?: ModelCapabilityView,
 ): { code: string; message: string } | null {
   const features = capability?.features;
-  const supportsAdaptive =
-    Array.isArray(capability?.supported_aspect_ratios) &&
-    capability.supported_aspect_ratios.includes("adaptive");
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -485,18 +516,35 @@ function validateVideo(
       );
       if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
     }
-    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，输出跟随首帧图）。
-    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时强制（2.0/2.5 均含；未配 adaptive 的第三方档位不适用）。
-    if (
-      supportsAdaptive &&
-      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame")
-    ) {
-      const params = body.parameters as GenerationParameters | undefined;
-      if (!isStr(params?.aspect_ratio) || params.aspect_ratio !== "adaptive") {
-        return {
-          code: ERROR_INVALID_INPUT,
-          message: "首帧/首尾帧模式仅支持自适应比例（adaptive）",
-        };
+    // 首帧/首尾帧的比例闸：**按模型读能力行**，不写死。
+    //
+    // 官方《创建视频生成任务》的「不同模型的取值限制和 adaptive 适配规则」表：
+    //   首帧或首尾帧生视频 · Seedance 2.5     = 默认且仅支持 adaptive
+    //   首帧或首尾帧生视频 · Seedance 2.0 系列 = 支持 adaptive 或指定宽高比
+    // 这里原先写死「有首帧就必须 adaptive（只要能力行含 adaptive）」，等于把 2.5 的规则套到
+    // 2.0 上——把 2.0 明确允许的提交拒在门外。唯一事实源改回能力行
+    // `features.task_types[first_frame|first_last_frame].allowed_ratios`：
+    // 配了 `["adaptive"]`（2.5）才锁，未配（2.0）就不限。
+    //
+    // 判定复用 `resolveVideoTaskType` 而不是自己数 role：首尾帧分支排在关键词分支**之前**
+    // 且只看 role，故传空提示词也能得到正确结果，不会与提交侧那一处判定分叉。
+    if (features) {
+      const hasFrame = parsed.items.some(
+        (r) => r.role === "first_frame" || r.role === "last_frame",
+      );
+      const frameTaskType = hasFrame ? resolveVideoTaskType(parsed.items, "") : undefined;
+      const allowedRatios = taskTypeAllowedRatios(features.task_types, frameTaskType);
+      if (allowedRatios) {
+        // 走到这里 aspect_ratio 一定是合法字符串：validateCommon 对非音频类型的
+        // 缺失/非法比例已经 400 了（见上方 `aspect_ratio 无效`）。所以这里**不写**
+        // 「未指定」兜底分支——那种分支不可达，写了只会让下一个人以为这里防住了什么。
+        const ratio = (body.parameters as GenerationParameters | undefined)?.aspect_ratio as string;
+        if (!allowedRatios.includes(ratio)) {
+          return {
+            code: ERROR_INVALID_INPUT,
+            message: `当前任务类型（${frameTaskType}）不支持 比例 ${ratio}，可用：${allowedRatios.join(" / ")}`,
+          };
+        }
       }
     }
     return null;
@@ -650,6 +698,25 @@ const videoStrategy: GenerationTypeStrategy = {
     if (capability?.features) {
       input.reference_limits = freezeReferenceLimits(capability.features);
     }
+    // 视频输出像素：按规格查能力行的像素表，冻成**两个标量**随快照走。
+    //
+    // 为什么是标量而不是整张表：billing 算 token 只需要这一次的宽高，而 `extractSpecs`
+    // 只收标量（`billing-specs.ts`）——一张表进不了 specs。所以在这里解析完再冻。
+    //
+    // 为什么查不到就**不写**而不是写 0：billing 侧「specs 里有宽高就用、没有就回落目录」
+    // 是过渡期的双向兼容（见 `TokenEstimator`）。写 0 会让回落失效、把一次「没配」变成
+    // 一次「宽高是 0 的计算」——那是另一个意思，且会算出离谱的 token 数。
+    if (capability?.features && isStr(params.resolution) && isStr(params.aspect_ratio)) {
+      const pixels = resolveOutputPixels(
+        capability.features.video_dimensions,
+        params.resolution,
+        params.aspect_ratio,
+      );
+      if (pixels !== null) {
+        input.output_width = pixels.width;
+        input.output_height = pixels.height;
+      }
+    }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") {
@@ -714,6 +781,61 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
   video: videoStrategy,
   audio: audioStrategy,
 };
+
+/**
+ * 报价（价格预览）用的规格投影 —— 喂给 billing 的 `Quote`，只算不扣。
+ *
+ * ⚠️ **走的就是上面这一个 `composeInput`**（建任务冻结 input 的同一份），不是另写一份
+ *    「挑几个定价键」的投影。定价维度（模型 + 任务类型 + 规格 + 等级）只要有一处漂，
+ *    用户就会看到「预览一个价、实扣另一个价」—— 那是会被当成扣错了的一类不一致。
+ *    所以这里连能力位（features.audio ⇒ generate_audio 冻不冻）都交回给 composeInput 判，
+ *    不在本函数里重写一遍。
+ *
+ * ⚠️ 只喂面板给得出的那部分：无画布目标、无参考素材。它们的差别进不了 specs —— 数组
+ *    （references / input_asset_ids）被 `extractSpecs` 丢掉，scalar 的那几个快照键
+ *    （target_node_id / first_frame_asset_id）不是定价维度。**prompt 单独删掉**：提示词是
+ *    创作内容，不是定价维度，而带上它会让前端的查询键随每一次打字变化（每敲一个字重新报价）。
+ *
+ * 类型不支持、或请求体里没有可用的 parameters → 返回 null（调用方按「无报价」处置，不报错）。
+ */
+export function projectQuoteInput(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability?: ModelCapabilityView,
+): Record<string, unknown> | null {
+  const strategy = strategies[type];
+  const params = body.parameters as GenerationParameters | undefined;
+  if (!strategy || typeof params !== "object" || params === null) return null;
+
+  // ★ 参考素材必须参与报价投影 —— 它**是**定价维度（Seedream 5.0 Pro：首张免费、
+  //   第 2 张起 0.02 元/张）。这里原先写死 `referenceAssetIds: []`，那时它还不是；
+  //   现在再写死，报价就会比实扣低一截（而「预览价 = 实扣价」正是这条投影的全部意义）。
+  //
+  //   走**与建任务同一个** `resolveReferenceAssets`（同一个去重、同一个超限判定），
+  //   而不是让调用方自己数一个张数传进来：数出来的张数只要在去重口径上差一点
+  //   （例如前端把重复素材算了两遍），报价就与实扣对不上。
+  //
+  //   超限时按空数组报价：那种请求建任务时本来就会 400，报价这里没必要跟着报错 ——
+  //   它会退化成「不含参考费」的价，偏保守且不会被真的扣到。
+  const imageReferenceMax =
+    capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
+  const referenceAssets = resolveReferenceAssets(body, type, imageReferenceMax);
+
+  const input = strategy.composeInput({
+    body,
+    params,
+    resolvedModelId: resolveModelId(type, params.model_id),
+    promptText: isStr(params.prompt) ? params.prompt : "",
+    targetNodeId: null,
+    textAttachments: [],
+    referenceAssetIds: referenceAssets.ok ? referenceAssets.value.referenceAssetIds : [],
+    ...(capability ? { capability } : {}),
+  });
+  delete input.prompt;
+  // 与建任务同口径：输出数也是定价维度（多图按张计价），它在建任务那边同样冻在 input 上。
+  input.expected_output_count = Number(body.expected_output_count);
+  return input;
+}
 
 // ---- pipeline 阶段 ----
 
@@ -1244,8 +1366,43 @@ interface GenerationDeps {
   canvas: Pick<CanvasRepo, "getByProject">;
   /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
-  /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
-  costEstimator?: GenerationCostEstimator;
+  /**
+   * ★ 新计费（billing-svc）：**预扣**与它的**失败补偿**。由装配层注入 —— 它负责解析
+   * 用户等级、提取规格、调 billing 客户端；本函数只把「哪个用户、哪个 job、什么模型/
+   * 任务」交给它。
+   *
+   * <p>调用时机在**建 job 的同一个事务里、job 行插入之后**（见 generation-command-repo）：
+   * 预扣失败整体回滚，不产生垃圾 job；而预扣**成功之后**事务才失败时，由 release 把这笔
+   * 冻结退掉 —— billing 是外部服务，不跟我们的数据库回滚走。两者成对：缺了 release 就会
+   * 留下一笔没有对应任务的冻结（永远冻着）。
+   *
+   * <p>实现抛出的异常（余额不足 / billing 不可用）会原样冒泡，由上层翻成对用户的响应
+   * （fail closed —— 扣不动就不要开始干活）。
+   *
+   * <p>⚠️ **同一 Idempotency-Key 重复提交不会重复 Hold**：第二次提交在第 2 步的幂等查询就
+   * 重放首次结果并返回，根本走不到这里。并发同键由唯一索引只放一个事务进，输家整体回滚
+   * （含它那笔预扣，由下面的补偿退掉），回读赢家结果——两个请求同一个 job、同一笔预扣。
+   * <p>两点不要弄反：
+   * <ul>
+   *   <li>`actionIdentity`（commandId 的来源）里**必须**带 `Date.now()`，即同一把 key 的
+   *       两次提交本就不同。⚠️ **不能**把它改成「同键恒定」：billing 的幂等记录是**永久**的
+   *       （`hold:{commandId}` 进账本），而它的重放分支按 **job_id** 找预留
+   *       （CreditService.hold → `reservations.findByJobId(jobId)`）。在「预扣成功、事务
+   *       随后回滚（已被补偿退掉）」这条路径上，事务连同幂等行一起没了，重试会建一个新
+   *       job；此时若 commandId 恒定，billing 命中永久幂等记录却找不到新 job 的预留 ⇒ 抛
+   *       IllegalStateException，那把 key 此后**永远**提交不了。</li>
+   *   <li>「重试不重复扣」这条保证落在**幂等表 + 补偿**上，不落在 commandId 的稳定性上：
+   *       命中幂等的那次不扣钱（走不到这里），交易失败的那次由 release 退钱。</li>
+   * </ul>
+   * <p>⚠️ billing 契约里 `HoldRequest.command_id` 那条注释（「客户端生成的幂等键，让 Hold 能
+   * 发生在写 job 之前」）在本仓落不了地：billing 的预留与结算都以 job_id 为准，而 job id 只有
+   * 行插进去之后才存在（见 job-billing 的说明）。本仓走的是另一条等价的路——幂等表复用同一个
+   * job 行，重放不发生新的预扣。
+   */
+  billing?: {
+    hold: BillingHold;
+    release: BillingRelease;
+  };
   /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
    *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
    *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
@@ -1275,11 +1432,65 @@ function videoRefItemsOf(v: unknown): VideoRefItem[] {
     : [];
 }
 
+/** Idempotency-Key 长度上限，对齐 `command_idempotency.idempotency_key` 的列宽 VarChar(128)：
+ *  超长在这里明确拒（400），而不是拖到落库那一刻以 MySQL 截断/报错的形式变成 500。
+ *  截断尤其不能接受——它会把两把不同的钥匙并成一把。 */
+const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+
+/** 摘要用的规范化 JSON：对象**按键名排序**递归展开。
+ *
+ *  ⚠️ 不能直接用 `JSON.stringify(body)`：那保留客户端序列化时的键序，于是「同一份载荷、
+ *  两次发送时键序不同」会被摘要判成**同键异载荷**，把一个正常的重试拒成冲突。
+ *  要的是「摘要只取决于请求语义」——键序是传输细节，不是语义。与先例同一条口径
+ *  （video-scene-splits 的 requestHashOf「显式定序拼接、规避 JSON 键序漂移」、
+ *  scene-cards.controller 的 method:path:content）；那边键少可以逐个拼，建任务的载荷是
+ *  一整个生成参数对象、键还随类型变，所以这里用「排序后序列化」达到同一效果。
+ *  （重试端点摘要的是**原始 body 字符串**，天然没这个问题；建任务拿到的是已解析对象。） */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      // undefined 属性在 JSON.stringify 里会被丢掉，这里同口径，免得两者摘要分叉。
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** 建任务请求摘要（method + operation + 资源路径 + 规范化 body），sha256 hex 定长 64。
+ *  与 {@link generationRetryRequestHash} 同形同源：两个入口的「同键异载荷」判定必须一套口径。 */
+export function generationCreateRequestHash(
+  projectId: string,
+  body: CreateGenerationJobBody,
+): string {
+  return createHash("sha256")
+    .update(
+      `POST:${CREATE_GENERATION_JOB_OPERATION}:/projects/${projectId}/generation-jobs:${canonicalJson(body)}`,
+    )
+    .digest("hex");
+}
+
+/** 建任务结果 → 响应信封。
+ *
+ *  「同键异载荷」（同一把钥匙配了不同的载荷）判**冲突并报错**，不静默返回首次结果：
+ *  静默重放会把「用户改了参数再提交」悄悄变成「又拿到那个旧任务」——他以为提交的是新参数，
+ *  拿到的却是另一个任务，这比报错难查得多。同键同载荷的重放走 `ok(result)`，
+ *  响应体与第一次完全一致（含 `generation_job_id`）。与重试端点同码同文案。 */
+function createJobEnvelope(result: CreateJobResult) {
+  return "kind" in result
+    ? fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷")
+    : ok(result);
+}
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
- *  简化模型：无幂等表、单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
- *  IKDZI1：流水线化——项目校验 → 类型校验（策略分派）→ 模型白名单 → 参考图语义统一 →
- *  画布目标快照 → 组装 input（策略分派）→ 预留点数 → 建任务。 */
+ *  单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
+ *  幂等（`command_idempotency`，operation=generation.create）：同键同载荷重放首次结果，
+ *  同键异载荷判冲突——见下面第 2 步与 {@link createJobEnvelope}。
+ *  IKDZI1：流水线化——项目校验 → **幂等重放** → 类型校验（策略分派）→ 模型白名单 →
+ *  参考图语义统一 → 画布目标快照 → 组装 input（策略分派）→ 预留点数 → 建任务。 */
 export async function handleCreateGenerationJob(
   userId: string,
   projectId: string,
@@ -1292,7 +1503,34 @@ export async function handleCreateGenerationJob(
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-  // 2. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
+  // 2. 幂等（command_idempotency，operation=generation.create）。
+  //
+  // ⚠️ 位置在**任何依赖当前状态的校验之前**：模型白名单、素材状态门、画布目标快照都可能
+  // 在两次提交之间变了，而重放的是**既有结果**，不该被此刻的状态改写——「同一个请求被重试」
+  // 这件事的答案在第一次提交时就已经定了。与 retryJob 的 `guardInput` 位置约定同源。
+  //
+  // 客户端没带（或只发了空白）Idempotency-Key → 完全不接幂等，行为与加幂等表之前一致：
+  // 每次提交都是新任务，不强制要求这个头（老客户端不受影响）。
+  const normalizedKey = (idempotencyKey ?? "").trim();
+  if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    return fail(400, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
+  }
+  const idempotency: CreateJobIdempotency | null =
+    normalizedKey === ""
+      ? null
+      : {
+          key: normalizedKey,
+          requestHash: generationCreateRequestHash(projectId, body),
+        };
+  if (idempotency) {
+    const replayed = await deps.command.lookupCreateIdempotency(
+      projectId,
+      idempotency,
+    );
+    if (replayed) return createJobEnvelope(replayed);
+  }
+
+  // 3. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
   //    以旧默认值运行，白名单解析后以 capability.features 重跑一次）
   const type = body.type as GenerationType;
   const strategy = strategies[type];
@@ -1303,7 +1541,7 @@ export async function handleCreateGenerationJob(
   const validateErr = strategy.validate(body);
   if (validateErr) return fail(400, validateErr.message, { code: validateErr.code });
 
-  // 3. 模型白名单（别名解析 + 能力目录命中）
+  // 4. 模型白名单（别名解析 + 能力目录命中）
   const params = body.parameters as GenerationParameters;
   const expectedOutputCount = Number(body.expected_output_count);
   let promptText = isStr(params.prompt) ? params.prompt : "";
@@ -1315,7 +1553,7 @@ export async function handleCreateGenerationJob(
     });
   }
 
-  // 4. 参考图语义统一 + image 上限（IKA72G）
+  // 5. 参考图语义统一 + image 上限（IKA72G）
   // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在）；
   // 图片/视频链路的缺省是 DEFAULT_IMAGE_REFERENCE_MAX = 10（音频链路的 1 是另一个常量）。
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
@@ -1390,7 +1628,7 @@ export async function handleCreateGenerationJob(
   // 在接纳当下 400（invalid_reference_type，与 worker mapImageChannelRequest 同码同文案），不拖到执行期。
   if (type === "image" && capability) {
     const mapping = parseStoredImageRequestMapping(
-      capability.channel_parser,
+      channelOf(parseStoredChannel(capability.channel, "image")).parser,
       capability.request_mapping,
       { sizeId: capability.default_size, ratioId: capability.default_aspect_ratio },
     );
@@ -1441,7 +1679,10 @@ export async function handleCreateGenerationJob(
   const referenceAssetIds = textIndexRefs.value.merged;
   // IKFM3W §10 / IKFM41 §11：视频/音频目标以合并后的 references 供 composeInput 与正文标签
   // 复核统一消费（文本带入追加项已含；references 缺失且画布有文本带入时为新建的单数组）。
-  const effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
+  // ⚠️ let 而非 const：视频参考的时长在下方的素材复核段被补进 references（见 IKARVx 段），
+  //    那里替换的是整个 references 数组而不是原地改元素（`body` 可能是调用方传进来的对象，
+  //    原地改会连带改到调用方）。
+  let effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
     ? { ...body, references: textIndexRefs.value.videoReferences }
     : body;
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
@@ -1514,6 +1755,30 @@ export async function handleCreateGenerationJob(
           code: ERROR_INVALID_REFERENCE_TYPE,
         });
       }
+      // ⚠️ 输入视频的**时长**冻结进快照 —— 火山按 token 计价的公式在含视频输入时要把
+      //    「输入时长」加进 token 估算（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），
+      //    而时长是 references **元素上**的标量、数组本身进不了规格。所以在这里写进元素，
+      //    由 billing 侧（billing-specs.ts 预扣 / SettlementUsageLines 结算）折算成标量键。
+      //
+      //    来源优先级：调用方带的 duration → 本地素材的 assets.duration（**权威**，
+      //    由 resolveInputAssets 一并查出，省一次查询）。两者都没有就**不写这个字段**——
+      //    宁可让 billing 判「含视频输入却量不到输入时长」而拒绝，也不按 0 估（少冻＝平台垫钱）。
+      //    素材库引用（material_id，本地零表）只能靠调用方带；画布提交时会带。
+      if (type === "video" && parsedTextRefs.kind === "ok") {
+        const secondsByAssetId = new Map(
+          localIds.map((id, i) => [id, resolvedRefs[i]!.duration]),
+        );
+        effectiveBody = {
+          ...effectiveBody,
+          references: textRefItems.map((item) => {
+            if (item.type !== "video" || item.duration !== undefined || item.asset_id === undefined) {
+              return item;
+            }
+            const seconds = secondsByAssetId.get(String(item.asset_id));
+            return typeof seconds === "number" && seconds > 0 ? { ...item, duration: seconds } : item;
+          }),
+        };
+      }
     }
   }
   // IKG6EK / ADR-0088：`parameters.prompt` **一律权威**，doc 的正文编译与身份校验都不再需要。
@@ -1543,7 +1808,7 @@ export async function handleCreateGenerationJob(
     ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))
     : videoRefItemsOf(effectiveBody.references);
   promptText = transferReferenceMarkers(promptText, buildReferenceMarkerLabels(markerItems));
-  // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
+  // 6. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
     ...(textIndexRefs.value.canvas ? { canvas: textIndexRefs.value.canvas } : {}),
     type,
@@ -1568,7 +1833,7 @@ export async function handleCreateGenerationJob(
         inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : referenceAssetIds.map(String), prompt: promptText, attachments: target.value.textAttachments,
         model: capability, userId, projectId, assets: deps.assets }) : undefined;
 
-  // 6. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
+  // 7. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
   const input = strategy.composeInput({
     body: effectiveBody,
     params,
@@ -1593,8 +1858,17 @@ export async function handleCreateGenerationJob(
   }
   if (planSnapshot) input.prompt_plan_snapshot = planSnapshot;
 
-  // 7. 幂等派生 actionIdentity + 事件类型
-  const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;
+  // 8. actionIdentity 派生 + 事件类型
+  //
+  // ⚠️ 这里**必须**带 Date.now()，即同一把 Idempotency-Key 的两次提交本就得到不同的
+  // actionIdentity。理由在 billing 那边：它拿它当预扣的幂等键（`hold:{commandId}`），而那条
+  // 幂等记录是**永久**的、重放时按 job_id 找那笔预留（CreditService.hold）。若把它改成
+  // 「同键恒定」，那么在「预扣成功但事务随后回滚（已被补偿退掉）」这条路径上，重试会带着
+  // 同一把 commandId 去冻一笔新 job，billing 命中永久幂等记录却找不到新 job 的预留，
+  // 直接抛 IllegalStateException —— 那把 key 从此**永久**提交不了。
+  // 「同一个请求被重试不重复扣钱」这条保证落在**幂等表 + 补偿**上（见第 2 步与 billing 说明），
+  // 不落在 commandId 的稳定性上。
+  const actionSeed = `${projectId}\0${normalizedKey}\0${Date.now()}`;
   // 须 ≤ correlation_id VarChar(64);勿再加前缀(曾用 `bottom-dock:` 撑到 76 触发 Prisma P2000 → 生成任务 500)。
   // 来源由 event_type/aggregate_type 记录,前缀无代码消费。
   const actionIdentity = createHash("sha256").update(actionSeed).digest("hex");
@@ -1619,7 +1893,7 @@ export async function handleCreateGenerationJob(
     }
   }
 
-  // 8. 建任务（含预留点数）
+  // 9. 建任务（含预留点数）
   const cmdInput: CreateJobInput = {
     projectId,
     userId,
@@ -1629,17 +1903,37 @@ export async function handleCreateGenerationJob(
     actionIdentity,
     actionType,
   };
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  if (deps.costEstimator) {
-    const snapshot = await deps.costEstimator({
-      modelId: resolvedModelId,
-      type,
-      expectedOutputCount,
-    });
-    if (snapshot) {
-      cmdInput.costReservation = snapshot;
-    }
-  }
-  const created = await deps.command.createJob(cmdInput);
-  return ok(created);
+  // ★ 新计费：预扣 + 失败补偿一起交给 repo —— 它在**建 job 的事务内**（job 行插入后、
+  //   提交前）调 hold，并在事务失败时调 release 把那笔冻结退掉（幂等键与等级的说明见
+  //   GenerationDeps.billing）。两者都不进 cmdInput：那个对象是要落库的数据。
+  // 序列化一次，给下面那个 hold 闭包用（`exactOptionalPropertyTypes` 下不能在展开里现算）。
+  const ruleSnapshot = serializePricingRule(capability);
+  const billingDep = deps.billing;
+  const billing: JobBilling | undefined = billingDep
+    ? {
+        hold: (jobId) =>
+          billingDep.hold({
+            userId: String(userId),
+            jobId,
+            commandId: actionIdentity,
+            modelId: resolvedModelId,
+            taskType: type,
+            input: input as unknown as Record<string, unknown>,
+            // 计价规则随 Hold 送过去：它本质上是**模型的属性**（住在能力行的 pricing 列），
+            // 而 billing 读不到 blue_whale（ADR-0114 不共享库）——由它的属主在 Hold 时一并送。
+            // 未配（列还是 NULL）就不传，billing 侧回落到定价目录那份。
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          }),
+        release: (jobId, reason) =>
+          billingDep.release({ userId: String(userId), jobId, reason }),
+      }
+    : undefined;
+  const created = await deps.command.createJob(cmdInput, {
+    ...(billing ? { billing } : {}),
+    ...(idempotency ? { idempotency } : {}),
+  });
+  // 并发同键（两个请求同时过了第 2 步的快路径）：唯一索引只放一个事务进，我们这侧的事务
+  // 连同那笔预扣已整体回滚（billing 补偿已把钱退掉），repo 回读到赢家那一行就交回这里。
+  // 于是两个请求拿到**同一个** generation_job_id，只留一笔预扣。
+  return createJobEnvelope(created);
 }

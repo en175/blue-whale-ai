@@ -19,6 +19,7 @@ import {
 } from '@floating-ui/react';
 import { X } from 'lucide-react';
 import { useAssetLookup } from './useAssetLookup';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export interface AssetChipProps {
@@ -71,10 +72,10 @@ export function AssetChip({ assetId, label, mediaType, onRemove, className }: As
         {...getReferenceProps()}
       >
         {asset?.url && kind === 'image' ? (
-          <img className={styles.chipThumb} src={asset.url} alt="" loading="lazy" />
+          <img className={styles.chipThumb} src={resolveMediaSrc(asset.url)} crossOrigin={remoteImageCrossOrigin(asset.url)} alt="" loading="lazy" />
         ) : asset?.url && kind === 'video' ? (
           // 视频缩略图直接用首帧：preload="metadata" 只拉元数据，不下整段。
-          <video className={styles.chipThumb} src={asset.url} muted playsInline preload="metadata" />
+          <video className={styles.chipThumb} src={resolveMediaSrc(asset.url)} muted playsInline preload="metadata" />
         ) : (
           <span className={styles.chipThumbFallback} aria-hidden="true" />
         )}
@@ -105,7 +106,7 @@ export function AssetChip({ assetId, label, mediaType, onRemove, className }: As
               // 静音是硬约束不是选择：浏览器会拦截带声音的自动播放，带声音则整个自动播放失效。
               <video
                 className={styles.previewMedia}
-                src={asset.url}
+                src={resolveMediaSrc(asset.url)}
                 style={{ maxWidth: PREVIEW_MAX, maxHeight: PREVIEW_MAX }}
                 autoPlay
                 muted
@@ -115,7 +116,8 @@ export function AssetChip({ assetId, label, mediaType, onRemove, className }: As
             ) : (
               <img
                 className={styles.previewMedia}
-                src={asset.url}
+                src={resolveMediaSrc(asset.url)}
+                crossOrigin={remoteImageCrossOrigin(asset.url)}
                 style={{ maxWidth: PREVIEW_MAX, maxHeight: PREVIEW_MAX }}
                 alt={label}
               />

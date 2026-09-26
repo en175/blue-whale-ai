@@ -1,8 +1,12 @@
 import type { ModelCapabilityRepo } from "@lib/shared/persistence/index.js";
+import { newApiBaseUrl, newApiFetch } from "@lib/shared/upstream/new-api-egress.js";
 
 /** 文生文接口（IK6ZEH）：OpenAI 兼容薄代理。
  *  后端只做登录鉴权 + text 白名单闸，body 全透传 Go /v1/chat/completions。
- *  白名单源 = generation_model_capability 的启用 text 行（listEnabledByType("text")）。 */
+ *  白名单源 = generation_model_capability 的启用 text 行（listEnabledByType("text")）。
+ *
+ *  ⚠️ base URL **不在这里读**：new-api 只有一个出口（`@lib/shared/upstream/new-api-egress`）。
+ *  这里曾经自己读一遍 `NEW_API_BASE_URL`，是那六处各读各的其中一处。 */
 
 export interface TextCompletionsConfig {
   baseUrl: string;
@@ -13,11 +17,21 @@ export const TEXT_UPSTREAM_TIMEOUT_MS = 60_000;
 /** 请求体最大字节数（content-length 校验）：防鉴权用户推超大 payload。 */
 export const TEXT_MAX_BODY_BYTES = 1_000_000;
 
+/**
+ * 上游是否已配置。
+ *
+ * @returns 未配置时 null（调用方回 503，而不是崩）——保留这个容忍度是因为
+ *          文生文是**可选能力**，不跑它的部署仍要能起来。
+ *          ⚠️ 但地址本身从出口取，不在这里再读一遍环境变量。
+ */
 export function loadTextCompletionsConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): TextCompletionsConfig | null {
-  const baseUrl = env.NEW_API_BASE_URL;
-  return baseUrl ? { baseUrl } : null;
+  try {
+    return { baseUrl: newApiBaseUrl(env as NodeJS.ProcessEnv) };
+  } catch {
+    return null;
+  }
 }
 
 export type ResolveTextModelResult =

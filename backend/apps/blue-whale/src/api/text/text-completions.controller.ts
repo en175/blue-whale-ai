@@ -10,6 +10,7 @@ import {
 import type { Request, Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { newApiFetch } from "@lib/shared/upstream/new-api-egress.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import {
   TEXT_MAX_BODY_BYTES,
@@ -74,7 +75,8 @@ export class TextCompletionsController {
     const isStream = record.stream === true;
     let upstream: globalThis.Response;
     try {
-      upstream = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+      // 走上游唯一出口：base URL 拼接与 X-Trace-Id 由它统一负责
+      upstream = await newApiFetch("/v1/chat/completions", {
         method: "POST",
         headers: {
           "content-type": "application/json",

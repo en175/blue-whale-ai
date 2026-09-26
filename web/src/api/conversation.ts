@@ -6,7 +6,7 @@
  * - 新版 NDJSON 流式返回（每行一个 JSON 帧：init/delta/result/system，回复直接随响应体流式下发）
  * ============================================ */
 import { apiRequest } from './http';
-import { newIdempotencyKey } from './jobs';
+import { newIdempotencyKey } from './idempotencyKey';
 import { handleUnauthorized } from '@/utils/auth';
 
 /** @提及项（发送时可携带） */

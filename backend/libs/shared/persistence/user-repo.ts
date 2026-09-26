@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** 用户信息 repo（Prisma-backed），复用 users 表。
+/** 用户信息 repo（Prisma-backed），读 identity_users 表。
  *  对齐 Java UserController.me：{userId, username, phone, hasPassword}。 */
 
 export interface UserInfoView {
@@ -17,7 +17,7 @@ export interface UserRepo {
 export function createUserRepo(prisma: PrismaClient): UserRepo {
   return {
     async findInfoById(userId) {
-      const u = await prisma.users.findFirst({
+      const u = await prisma.identity_users.findFirst({
         where: { id: BigInt(userId) },
         select: { id: true, username: true, phone: true, password: true },
       });
@@ -25,7 +25,9 @@ export function createUserRepo(prisma: PrismaClient): UserRepo {
       return {
         user_id: u.id.toString(),
         username: u.username,
-        phone: u.phone,
+        // phone 现在可空（存量用户没有手机号），而对外视图仍是字符串——
+        // 空串与 NULL 在**这一层**归一，免得每个调用方各判一次。
+        phone: u.phone ?? "",
         has_password: u.password != null && u.password !== "",
       };
     },

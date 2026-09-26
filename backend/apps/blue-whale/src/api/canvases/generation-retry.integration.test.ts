@@ -15,7 +15,6 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
 // IKDMQV「失败重试与修改后重新生成」公开接口集成（契约沿用 IKDMQQ/QR/QS/QT）：
 // 直接重试沿用失败任务冻结快照（来源正文变化不隐式替换原输入、历史任务不被改写）；
@@ -85,7 +84,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -98,7 +97,6 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json({ limit: "16mb" }));

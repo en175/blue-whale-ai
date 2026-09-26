@@ -1,0 +1,18 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.info {
+  color: var(--admin-text-muted);
+  font-size: var(--admin-font-sm);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

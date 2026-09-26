@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { fileToAssetType, uploadAssetFile } from './upload';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 function envelope(body: unknown) {
   return new Response(JSON.stringify({ code: 200, data: body }), {
@@ -66,7 +71,10 @@ describe('uploadAssetFile', () => {
       },
     );
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+  });
 
   it('runs dedup → presign → PUT → complete and echoes the presigned identity back (IKAL46/IKCNLS)', async () => {
     const fetchMock = stubUploadFlow();
@@ -176,6 +184,72 @@ describe('uploadAssetFile', () => {
     // Agent 面板要把失败原因显示出来：用户刚选完文件，静默失败会让他以为图已经带上了。
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
     await expect(uploadAssetFile(new File([pngBytes()], 'a.png', { type: 'image/png' }))).rejects.toBeTruthy();
+  });
+
+  /* IKI8L4 上传链错误提示归属：工具会话（擦除遮罩上传/裁切成品上传）由持有发送身份的
+     页面 catch 决定是否提示——uploadAssetFile opts.silent 透传 presign/complete 两条
+     HTTP 传输（dedup 已 silent、PUT 直传不经 http 层），迟到失败不在 http 层抢弹。 */
+  it('opts.silent: presign business failure does not pop a toast at the http layer (IKI8L4)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(envelope({ dedup: false })).mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 1, msg: '上传服务繁忙，请稍后重试', data: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(
+      uploadAssetFile(new File([pngBytes()], '遮罩.png', { type: 'image/png' }), { silent: true }),
+    ).rejects.toThrow('上传服务繁忙，请稍后重试');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('opts.silent: complete business failure does not pop a toast at the http layer (IKI8L4)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(envelope({ dedup: false }))
+        .mockResolvedValueOnce(
+          envelope({
+            storage_key: 'uploads/7/image/a.png',
+            upload_url: 'https://tos.example.test/put?sig=secret',
+            headers: { 'Content-Type': 'image/png' },
+            expires_in: 600,
+          }),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ code: 1, msg: '登记资产失败', data: null }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+    );
+
+    await expect(
+      uploadAssetFile(new File([pngBytes()], '遮罩.png', { type: 'image/png' }), { silent: true }),
+    ).rejects.toThrow('登记资产失败');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('missing silent: default toast behavior of the upload chain remains unchanged (IKI8L4)', async () => {
+    // Non-tool-session upload callers (e.g., asset page uploads) still enjoy the http layer's default toast
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(envelope({ dedup: false })).mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 1, msg: '上传服务繁忙，请稍后重试', data: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(uploadAssetFile(new File([pngBytes()], 'a.png', { type: 'image/png' }))).rejects.toThrow(
+      '上传服务繁忙，请稍后重试',
+    );
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
 

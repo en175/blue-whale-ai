@@ -3,6 +3,7 @@ import { parseMarkdownBlocks, renderMarkdownInline } from '@lib/contracts/text-n
 import { deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import chipStyles from '../mediaChip.module.css';
 import textNodeStyles from './index.module.css';
+import { resolveMediaSrc } from '@/utils/remoteImageCors';
 
 /* IKFM3L 统一文本卡正文契约 v1：正文是受限 Markdown 源（data.text），
    mention 区间 [start,end) 锚定 Markdown 源字符串下标（契约 §3）。
@@ -80,9 +81,12 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
     thumb.append(icon);
   } else if (/^https?:\/\//.test(identity.url)) {
     const media = document.createElement(identity.mediaType === 'image' ? 'img' : 'video');
-    media.src = identity.url;
+    media.src = resolveMediaSrc(identity.url);
     media.className = chipStyles.mediaChipThumb;
-    if (media instanceof HTMLImageElement) media.alt = '';
+    if (media instanceof HTMLImageElement) {
+      media.alt = '';
+      media.crossOrigin = 'anonymous';
+    }
     else { media.preload = 'metadata'; media.muted = true; }
     thumb.append(media);
   }
@@ -122,9 +126,12 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
     chip.append(icon);
   } else if (material && /^https?:\/\//.test(material.url)) {
     const media = document.createElement(material.mediaType === 'image' ? 'img' : 'video');
-    media.src = material.url;
+    media.src = resolveMediaSrc(material.url);
     media.className = chipStyles.mediaChipThumb;
-    if (media instanceof HTMLImageElement) media.alt = '';
+    if (media instanceof HTMLImageElement) {
+      media.alt = '';
+      media.crossOrigin = 'anonymous';
+    }
     else { media.preload = 'metadata'; media.muted = true; }
     chip.append(media);
   }

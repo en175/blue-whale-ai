@@ -18,7 +18,7 @@ import {
   parseModelCreateBody,
   parseModelUpdateBody,
 } from "@lib/shared/model-capability/constants.js";
-import { invalidateModelCapabilityCache } from "@lib/shared/persistence/model-capability-cache.js";
+import { invalidateModelCapabilityCache } from "@lib/shared/persistence/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
@@ -136,7 +136,7 @@ export class AdminModelsController {
   ) {
     try {
       // IKH BDO：先读库中那一行，再做请求体校验——更新是 diff 提交，没改过的
-      // channel_parser 不在 body 里，映射表校验必须按库中的解析器判定。
+      // channel 不在 body 里，映射表校验与**计价形状的渠道判定**都必须按库中那一行。
       // 这里必须读库、不得读缓存：拿旧值校验等于没校验。
       const before = await this.modelCapability.getById(id);
       if (!before) throw new AdminException(404, "模型不存在");

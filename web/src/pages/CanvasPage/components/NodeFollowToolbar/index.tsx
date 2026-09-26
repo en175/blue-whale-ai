@@ -18,6 +18,7 @@ import type { ReactNode } from 'react';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../followDialog';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
+import { shouldSuppressCanvasSelection } from '../Canvas/chromeHitGuard';
 import styles from './index.module.css';
 
 export interface NodeFollowToolbarProps {
@@ -52,6 +53,7 @@ export default function NodeFollowToolbar({
   const position = node?.internals?.positionAbsolute;
   const nodeWidth = node?.measured?.width;
   if (!show) return null;
+  if (shouldSuppressCanvasSelection()) return null;
   if (!soloSelected && !hovered) return null;
   if (!position || nodeWidth == null || containerWidth <= 0) return null;
 
@@ -68,6 +70,7 @@ export default function NodeFollowToolbar({
   return (
     <div
       className={styles.toolbarLayer}
+      data-canvas-chrome
       data-gen-panel-territory
       style={{ left: anchor.left, top: anchor.top }}
     >

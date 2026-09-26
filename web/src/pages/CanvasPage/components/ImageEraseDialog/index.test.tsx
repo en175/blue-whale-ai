@@ -8,12 +8,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageEraseDialog from './index';
+import type { EraseMaskSendSession } from '../../imageErase';
 import type { MaskOp } from '../../eraseMask';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 const sendTextMock = vi.fn((): boolean => true);
-const sendMaskMock = vi.fn(async (_file: File | null): Promise<boolean> => true);
+const SESSION: EraseMaskSendSession = { nodeId: 'i1', sourceAssetId: '5', sessionEpoch: 3 };
+const captureSessionMock = vi.fn((): EraseMaskSendSession | null => SESSION);
+const sendMaskMock = vi.fn(async (_session: EraseMaskSendSession, _file: File | null): Promise<boolean> => true);
 const toolChangeMock = vi.fn();
 const brushChangeMock = vi.fn();
 const undoMock = vi.fn();
@@ -33,6 +36,7 @@ function renderDialog(props: Partial<Parameters<typeof ImageEraseDialog>[0]> = {
       createElement(ImageEraseDialog, {
         onClose: closeMock,
         onSendTextErase: sendTextMock,
+        onCaptureSendSession: captureSessionMock,
         onSendMask: sendMaskMock,
         tool: 'brush',
         onToolChange: toolChangeMock,
@@ -154,7 +158,7 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     expect(btn('erase-send-btn').getAttribute('title')).toContain('分辨率未知');
   });
 
-  it('涂抹发送：栅格化遮罩为 PNG File 上抛给 onSendMask（canvas 尺寸=自然分辨率）', async () => {
+  it('涂抹发送：先同步捕获会话快照再栅格化，PNG File 与快照一起上抛（canvas 尺寸=自然分辨率）', async () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
     renderDialog({ hasPaint: true, ops: OPS_WITH_PAINT });
     expect(btn('erase-send-btn').disabled).toBe(false);
@@ -162,13 +166,26 @@ describe('IKGOTB 发送门与两条发送路径', () => {
     expect(btn('erase-send-btn').className).toMatch(/sendBtnActive/);
     await click(btn('erase-send-btn'));
     expect(sendMaskMock).toHaveBeenCalledTimes(1);
-    const [file] = sendMaskMock.mock.calls[0] as [File];
+    const [session, file] = sendMaskMock.mock.calls[0] as [EraseMaskSendSession, File];
+    // 上抛的是捕获时刻的会话快照（IKI8L7）：编码回调返回后父级只用它判定归属
+    expect(session).toBe(SESSION);
+    expect(captureSessionMock).toHaveBeenCalledTimes(1);
     expect(file).toBeInstanceOf(File);
     expect(file.type).toBe('image/png');
     // 栅格化画布尺寸 = 源图自然分辨率（火山接口硬性要求遮罩与原图同分辨率）
     const canvas = getContext.mock.instances[0] as unknown as HTMLCanvasElement;
     expect(canvas.width).toBe(1600);
     expect(canvas.height).toBe(900);
+  });
+
+  it('会话捕获返回 null（父级校验未过）：不栅格化、不上抛 onSendMask（IKI8L7）', async () => {
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob');
+    captureSessionMock.mockReturnValueOnce(null);
+    renderDialog({ hasPaint: true, ops: OPS_WITH_PAINT });
+    await click(btn('erase-send-btn'));
+    expect(captureSessionMock).toHaveBeenCalledTimes(1);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(sendMaskMock).not.toHaveBeenCalled();
   });
 
   it('发送中（submitting）：发送与清除文字置灰，工具只读', () => {

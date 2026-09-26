@@ -6,6 +6,7 @@ import {
   selectPlayableHeroSlides,
   type HeroSlide,
 } from '@/api/homepageHeroes';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export const HERO_TRANSITION_MS = 600;
@@ -403,7 +404,8 @@ export function HeroCarouselView({
     <section ref={rootRef} className={styles.carousel} data-testid="hero-video-carousel">
       <img
         className={styles.poster}
-        src={posterSrc}
+        src={resolveMediaSrc(posterSrc)}
+        crossOrigin={remoteImageCrossOrigin(posterSrc)}
         alt=""
         width={1920}
         height={1080}
@@ -423,7 +425,8 @@ export function HeroCarouselView({
               key={`img-${slotIndex}`}
               ref={(node) => { mediaRefs.current[slotIndex] = node; }}
               className={layerClass}
-              src={slide.src}
+              src={resolveMediaSrc(slide.src)}
+              crossOrigin={remoteImageCrossOrigin(slide.src)}
               alt=""
               decoding="async"
               aria-hidden="true"

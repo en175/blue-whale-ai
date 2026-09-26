@@ -135,9 +135,14 @@ beforeEach(() => {
   });
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800);
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-    x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800,
-    toJSON: () => ({}),
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    // !834 chromeHitGuard 用矩形判定指针是否压在画布上层控件（data-canvas-chrome）上：
+    // jsdom 无布局，全量 1000×800 的替身会让「任意点都在控件上」成立，节点拖动的
+    // mousedown 被当穿透吞掉。控件子树保持零矩形（不含手势坐标），测量仍用大矩形。
+    if (this.closest('[data-canvas-chrome], .react-flow__minimap')) {
+      return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
+    }
+    return { x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, toJSON: () => ({}) };
   });
   // jsdom 未实现富文本命令；替身只放在这一层浏览器能力边界。
   (document as Document & { execCommand: (...args: unknown[]) => boolean }).execCommand = vi.fn(() => true);

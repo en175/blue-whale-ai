@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
 import { tierFormError } from './tierForm';
 import { ApiError } from '@/api/http';
-import styles from './index.module.css';
 
 const adminApi = vi.hoisted(() => ({
   fetchTopupTiers: vi.fn(),
@@ -37,8 +36,7 @@ function nativeInput(input: HTMLInputElement, next: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function renderPage() {
-  mountNode = document.createElement('div');
+async function renderPage() {  mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
@@ -125,7 +123,8 @@ describe('RechargePlans 档位边界值 toast', () => {
     await fillAndSave('0', '1');
     expect(toastApi.error).toHaveBeenCalledWith('原价须为正整数');
     expect(adminApi.createTopupTier).not.toHaveBeenCalled();
-    expect(document.body.querySelector(`.${styles.formError}`)).toBeNull();
+    // 校验错误只走 toast，不落到表单里（本页已无私有样式类，改为断言文案未渲染）
+    expect(document.body.textContent).not.toContain('原价须为正整数');
   });
 
   it('原价负数保存时 toast 且不发创建请求', async () => {
@@ -168,6 +167,7 @@ describe('RechargePlans 档位边界值 toast', () => {
       await Promise.resolve();
     });
     expect(toastApi.error).not.toHaveBeenCalled();
-    expect(document.body.querySelector(`.${styles.formError}`)).toBeNull();
+    // 上游错误文案不渲染到表单里（本页已无私有样式类，改为断言文案未渲染）
+    expect(document.body.textContent).not.toContain('每个原价只能有一个档位');
   });
 });

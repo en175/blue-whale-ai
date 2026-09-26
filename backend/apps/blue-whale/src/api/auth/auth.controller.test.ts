@@ -55,12 +55,17 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { NewApiError, type NewApiLoginResult } from "@lib/core";
+import { NewApiError } from "@lib/core";
+import { afterEach, beforeEach } from "vitest";
 import { ACCOUNT_LOCKED } from "@lib/contracts";
 import type { Response } from "express";
-import type { AccountService } from "@lib/shared/account/account.service.js";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
+import {
+  InvalidCredentialsError,
+  type IdentityService,
+  type LocalLoginResult,
+} from "@lib/shared/identity/index.js";
 import {
   RATE_LIMIT_KEY,
   type RateLimitBucket,
@@ -69,14 +74,13 @@ import { LoginFailureTracker } from "@lib/shared/rate-limit/login-failure-tracke
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import { AuthController } from "./auth.controller.js";
 
-/** 上游 new-api 账密错误的真实形状：HTTP 200 + success:false → NewApiError(status=200)。 */
-function credentialFailure(): NewApiError {
-  return new NewApiError("用户名或密码错误", 200, "account_error");
+/** 口令校验失败。登录已经切到我们自己的库，所以不再是「上游 200 + success:false」那种形状。 */
+function credentialFailure(): InvalidCredentialsError {
+  return new InvalidCredentialsError();
 }
 
-function loginResult(): NewApiLoginResult {
+function loginResult(): LocalLoginResult {
   return {
-    token: "sk-test",
     userId: 42,
     username: "alice",
     email: null,
@@ -88,27 +92,33 @@ function loginResult(): NewApiLoginResult {
 function setup() {
   const limiter = new RateLimiter();
   const tracker = new LoginFailureTracker(limiter);
-  const account = { login: vi.fn(), register: vi.fn() };
   const sessions = { createSession: vi.fn(async () => "session-token") };
-  // IKF YHJ：登录成功后写 user_info（执行凭证）；缺 mock 时旁路抛错被吞，不影响登录。
-  const prisma = { client: { user_info: { upsert: vi.fn(async () => ({})) } } };
+  const prisma = { client: {} };
+  // 登录日志同样走旁路（写失败不阻断登录），所以它必须是**可注入的 mock**——
+  // 否则「日志到底写没写」这件事在测试里永远看不出来。
+  const identity = {
+    recordLogin: vi.fn(async () => undefined),
+    // ★ 口令校验现在在这里，不在 account 上
+    login: vi.fn(),
+    register: vi.fn(),
+  };
   const controller = new AuthController(
-    account as unknown as AccountService,
     prisma as unknown as PrismaService,
     sessions as unknown as SessionService,
     limiter,
     tracker,
+    identity as unknown as IdentityService,
   );
   const res = { cookie: vi.fn() } as unknown as Response;
-  return { controller, account, sessions, res, limiter, tracker, prisma };
+  return { controller, identity, sessions, res, limiter, tracker, prisma };
 }
 
 const LOGIN_BODY = { username: "alice", password: "wrong-pass" };
 
 describe("AuthController 登录失败锁定（IKDR4J）", () => {
   it("连续 5 次密码失败后锁定：第 6 次 429 account_locked 且跳过 new-api 调用", async () => {
-    const { controller, account, res } = setup();
-    account.login.mockRejectedValue(credentialFailure());
+    const { controller, identity, res } = setup();
+    identity.login.mockRejectedValue(credentialFailure());
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
@@ -116,7 +126,7 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
         status: 401,
       });
     }
-    expect(account.login).toHaveBeenCalledTimes(5);
+    expect(identity.login).toHaveBeenCalledTimes(5);
 
     await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
       name: "NewApiError",
@@ -124,12 +134,12 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
       code: ACCOUNT_LOCKED,
     });
     // 锁定期内不再打 new-api
-    expect(account.login).toHaveBeenCalledTimes(5);
+    expect(identity.login).toHaveBeenCalledTimes(5);
   });
 
   it("登录成功清零失败计数：成功前后各自的失败不累计到锁定", async () => {
-    const { controller, account, res } = setup();
-    account.login
+    const { controller, identity, res } = setup();
+    identity.login
       .mockRejectedValueOnce(credentialFailure())
       .mockRejectedValueOnce(credentialFailure())
       .mockRejectedValueOnce(credentialFailure())
@@ -139,7 +149,7 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
       .mockRejectedValueOnce(credentialFailure())
       .mockRejectedValueOnce(credentialFailure());
 
-    for (const attempt of [1, 2, 3]) {
+    for (const _ of [1, 2, 3]) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
         status: 401,
       });
@@ -153,17 +163,17 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
     expect(res.cookie).toHaveBeenCalledTimes(1);
 
     // 成功后再连败 4 次（未达阈值 5）：全部 401，不得出现 429
-    for (const attempt of [1, 2, 3, 4]) {
+    for (const _ of [1, 2, 3, 4]) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
         status: 401,
       });
     }
-    expect(account.login).toHaveBeenCalledTimes(8);
+    expect(identity.login).toHaveBeenCalledTimes(8);
   });
 
-  it("上游 5xx 等非账密错误不计入锁定：连败 6 次仍逐次透传且不锁账号", async () => {
-    const { controller, account, res } = setup();
-    account.login.mockRejectedValue(
+  it("非账密错误（DB 挂了等）不计入锁定：连败 6 次仍逐次透传且不锁账号", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockRejectedValue(
       new NewApiError("账户服务暂不可用", 503, "account_service_unavailable"),
     );
 
@@ -174,7 +184,7 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
       });
     }
     // 每次都要真实打到上游（未被锁定跳过）
-    expect(account.login).toHaveBeenCalledTimes(6);
+    expect(identity.login).toHaveBeenCalledTimes(6);
   });
 });
 
@@ -218,27 +228,151 @@ describe("AuthController 限流声明（IKDR4J）", () => {
   });
 });
 
-describe("AuthController IKF YHJ 执行凭证落库", () => {
-  it("登录成功：把 sk- 按 new-api userId 写入 user_info", async () => {
-    const { controller, account, prisma, res } = setup();
-    account.login.mockResolvedValue(loginResult());
+describe("AuthController 会话内容（凭证已移出会话）", () => {
+  it("★ 会话只记身份，**不带**上游 key —— 带上就是一份 7 天不过期的密钥副本", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
 
     await controller.login(LOGIN_BODY, res);
 
-    expect(prisma.client.user_info.upsert).toHaveBeenCalledWith({
-      where: { user_id: BigInt(42) },
-      update: expect.objectContaining({ provider_credential: "sk-test" }),
-      create: { user_id: BigInt(42), provider_credential: "sk-test" },
+    expect(sessions.createSession).toHaveBeenCalledWith({
+      userId: 42,
+      username: "alice",
+      role: 1,
+      status: 1,
+      email: null,
     });
+    // 断言的是「没有任何额外的密钥字段」：createSession 的入参就是上面那五个，
+    // 上游 key 由 AuthGuard 按当前配置回注（见 auth.guard.test.ts）。
+    expect(Object.keys(sessions.createSession.mock.calls[0]![0])).toEqual([
+      "userId",
+      "username",
+      "role",
+      "status",
+      "email",
+    ]);
   });
 
-  it("落库失败：只告警，不阻断登录（会话 cookie 照发）", async () => {
-    const { controller, account, prisma, res } = setup();
-    account.login.mockResolvedValue(loginResult());
-    prisma.client.user_info.upsert.mockRejectedValue(new Error("db down"));
+  it("★ 登录**不依赖**上游配置 —— 否则「还没配 key」就把要进去配它的人挡在门外", async () => {
+    // 以前缺 key 时这里抛 503：key 要在管理端填，管理端要先登得进来，而登录又要求先有 key，
+    // 新部署谁也进不去。凭证缺失的 fail-closed 现在落在真正打上游的地方。
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+    const before = process.env.NEW_API_UPSTREAM_KEY;
+    delete process.env.NEW_API_UPSTREAM_KEY;
+
+    try {
+      await expect(controller.login(LOGIN_BODY, res)).resolves.toBeDefined();
+      expect(res.cookie).toHaveBeenCalled();
+    } finally {
+      if (before !== undefined) process.env.NEW_API_UPSTREAM_KEY = before;
+    }
+  });
+});
+
+describe("AuthController 登录日志", () => {
+  it("登录成功记一条 success=true，并带上 userId", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9", "vitest-agent");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "42",
+        username: "alice",
+        ip: "203.0.113.9",
+        userAgent: "vitest-agent",
+        success: true,
+      }),
+    );
+  });
+
+  it("账密错误记一条 success=false 并带原因", async () => {
+    const { controller, identity, res } = setup();
+    // ⚠️ status 必须是 200：上游「HTTP 200 + success:false」才算业务失败
+    // （projectAccountBusinessFailure 判的就是这个），401 会被归到「服务异常」分支，
+    // 那条路径不记失败日志——上游挂了不是撞库信号。
+    identity.login.mockRejectedValue(
+      new NewApiError("用户名或密码错误", 200, "invalid_credentials"),
+    );
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, reason: "账密错误" }),
+    );
+  });
+
+  it("非账密错误不记为账密错误——服务问题不是撞库信号", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockRejectedValue(
+      new NewApiError("账户服务暂不可用", 503, "account_service_unavailable"),
+    );
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
+
+    expect(identity.recordLogin).not.toHaveBeenCalled();
+  });
+
+  it("空凭据也留痕——撞库脚本同样会发空请求", async () => {
+    const { controller, identity, res } = setup();
+
+    await controller.login({ username: "", password: "" }, res, "203.0.113.9");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, reason: "凭据为空" }),
+    );
+  });
+
+  it("x-forwarded-for 有多跳时只取第一跳", async () => {
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+
+    await controller.login(LOGIN_BODY, res, "203.0.113.9, 10.0.0.1, 10.0.0.2");
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ ip: "203.0.113.9" }),
+    );
+  });
+
+  it("日志写失败不阻断登录", async () => {
+    // 日志是旁路：一个坏掉的日志表不该让所有人都登不上。
+    const { controller, identity, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
+    identity.recordLogin.mockRejectedValue(new Error("db down"));
+
+    await expect(controller.login(LOGIN_BODY, res)).resolves.toMatchObject({ data: expect.anything() });
+    expect(res.cookie).toHaveBeenCalled();
+  });
+});
+
+describe("AuthController capabilities（本地常量）", () => {
+  it("口令登录/注册恒支持、邮箱验证恒不支持——不再探测上游开关", async () => {
+    // 这两种能力现在都由我们自己的库承载，上游挂了也不该让登录入口从页面消失。
+    const { controller } = setup();
+    await expect(controller.capabilities()).resolves.toEqual({
+      code: 200,
+      msg: null,
+      data: {
+        password_login: true,
+        password_register: true,
+        email_verification: false,
+      },
+    });
+  });
+});
+
+describe("AuthController 上游凭证缺失", () => {
+  it("★ 再没人写 user_info 凭证行 —— 全仓零读取者的写入已随本轮删除", async () => {
+    // 那行是「登录即把统一 key 按 userId 写一份」的遗留：全项目共用一把 key 之后它
+    // 只是把同一个密文抄 N 份，而且 **Java 侧从来不读 user_info**（迁移后素材跟进走
+    // job 凭证 + 配置表）。没有读取者的密钥副本不该继续产生。
+    const { controller, identity, prisma, res } = setup();
+    identity.login.mockResolvedValue(loginResult());
 
     await controller.login(LOGIN_BODY, res);
 
-    expect(res.cookie).toHaveBeenCalled();
+    expect(prisma.client.user_info?.upsert).toBeUndefined();
   });
 });

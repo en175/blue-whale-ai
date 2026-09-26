@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -64,14 +65,18 @@ async function renderDialog(props: Partial<Parameters<typeof AudioDialog>[0]> = 
   const onPickFromAssets = vi.fn();
   await act(async () => {
     root.render(
-      createElement(AudioDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        canvasMedia: [],
-        onPickFromCanvas,
-        onPickFromAssets,
-        ...props,
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AudioDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          canvasMedia: [],
+          onPickFromCanvas,
+          onPickFromAssets,
+          ...props,
+        })
+      ),
     );
   });
   // 等面板就绪：常规路径等模型能力加载完成（maxAudioRefs 依赖 currentModel）；

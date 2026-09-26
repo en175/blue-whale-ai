@@ -121,7 +121,7 @@ describe('apiRequest 401', () => {
     vi.unstubAllGlobals();
     vi.mocked(toast.error).mockClear();
     useAuthPromptStore.getState().reset();
-    useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+    useAuthStore.setState({ user: null, isNewUser: false, credits: null });
   });
 
   it('已登录业务 401 弹过期登录门、保留本地用户、不 toast', async () => {
