@@ -311,7 +311,7 @@ describe('planAudioVideoMuxRecovery 恢复规划', () => {
   });
 
   it('重试刷新前已再次失败：失败卡同步服务端最新错误文案，不再轮询（IKILVG）', () => {
-    const failedJob = job({ status: 'failed', input: frozenInput, error: { msg: '重试后最新失败原因' } });
+    const failedJob = job({ status: 'failed', input: frozenInput, error: { code: 1053, msg: '重试后最新失败原因' } });
     const failed = muxDraft('mux-draft-1', {
       genStatus: 'failed', jobId: '73', errorText: '上次失败：供应商超时',
     });

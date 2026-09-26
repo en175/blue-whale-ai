@@ -283,7 +283,7 @@ describe('IKILVG 失败重试后原草稿卡刷新恢复', () => {
   it('重试在刷新前已再次失败：原卡同步服务端最新失败文案，不重启轮询', async () => {
     seed([audioCard, videoCard, failedDraftCard], draftEdges());
     apiMocks.fetchJobs.mockResolvedValue({
-      records: [jobRecord({ status: 'failed', error: { msg: '刷新前已失败的新原因' } })],
+      records: [jobRecord({ status: 'failed', error: { code: 1053, msg: '刷新前已失败的新原因' } })],
       total: 1, size: 100, current: 1,
     });
     apiMocks.fetchJobStatus.mockResolvedValue({ job_id: '73', status: 'failed', progress: 0, asset: null });
