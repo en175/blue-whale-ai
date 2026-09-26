@@ -12,7 +12,7 @@ import type { JobRecord } from '@/api/jobs';
 import MediaNode from './components/MediaNode';
 import { AUDIO_VIDEO_MUX_EDGE_ORIGIN } from './audioVideoMux';
 import {
-  apiMocks, canvasDocMock, enableReactActEnvironment, flowProps, mediaNodes, renderPage, unmountPage,
+  apiMocks, canvasDocMock, enableReactActEnvironment, flowProps, mediaNodes, navigateRef, renderPage, unmountPage,
 } from './testing/canvasPageTestHarness';
 
 const frozenInput = {
@@ -215,6 +215,21 @@ describe('IKILVG 失败重试后原草稿卡刷新恢复', () => {
   ];
   const draftData = () => mediaNodes().find((node) => node.id === 'mux-draft-1')!.data as Record<string, unknown>;
 
+  /** 项目二画布：一张就绪音频卡 b1——旧项目的迟到轮询响应不得往这里写任何东西 */
+  function seedProjectB() {
+    canvasDocMock.current = {
+      doc: {
+        id: 22, version: 7, viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [{
+          id: 'b1', type: 'mediaNode', position: { x: 100, y: 100 },
+          data: { src: 'http://aud/b1.mp3', mediaType: 'audio', fileName: '项目二音频.mp3', assetId: '9', duration: 20 },
+        }],
+        edges: [],
+      },
+      assets: {}, refetch: () => Promise.resolve([]), acceptDoc: vi.fn(),
+    };
+  }
+
   it('重试进行中刷新：原卡原地转生成中并按原卡 ID 轮询，不补虚拟占位卡、不复制卡与来源线', async () => {
     seed([audioCard, videoCard, failedDraftCard], draftEdges());
     apiMocks.fetchJobs.mockResolvedValue({ records: [jobRecord({ status: 'processing', progress: 40 })], total: 1, size: 100, current: 1 });
@@ -279,5 +294,37 @@ describe('IKILVG 失败重试后原草稿卡刷新恢复', () => {
     expect(cardIds()).toEqual(['a1', 'v1', 'mux-draft-1']);
     // 终态已按任务列表同步，无需再拉任务详情
     expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+  });
+
+  /* IKILVG 跨项目隔离（activeProjectRef / 画布节点双检口径）：恢复轮询已发出、响应在途时
+     切项目，旧项目的迟到轮询响应只能丢弃——当前画布（项目二）没有原卡，回填 / 续链 /
+     补卡任何一路都会把旧项目任务写进新画布。 */
+  it('恢复轮询在途时切项目：旧项目迟到轮询响应不更新当前画布、不续链', async () => {
+    // 任务列表按项目分流：p1 有进行中的重试任务 73，p2 无音视频合成任务
+    apiMocks.fetchJobs.mockImplementation(async (params?: { projectId?: string }) =>
+      params?.projectId === 'p1'
+        ? { records: [jobRecord({ status: 'processing', progress: 40 })], total: 1, size: 100, current: 1 }
+        : { records: [], total: 0, size: 100, current: 1 });
+    // 首次轮询挂起：恢复 effect 已按原卡 ID 发出 fetchJobStatus('73')、响应尚未返回
+    let resolveLate!: (value: { job_id: string; status: string; progress: number; asset: null }) => void;
+    apiMocks.fetchJobStatus.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
+    seed([audioCard, videoCard, failedDraftCard], draftEdges());
+    await renderPage();
+    await vi.waitFor(() => expect(apiMocks.fetchJobStatus).toHaveBeenCalledWith('73'));
+
+    // 轮询在途时切到项目二（先进入加载态再交付新项目快照，同 audioSpeedRetryRecovery 手法）
+    await act(async () => { canvasDocMock.current = { ...canvasDocMock.current, doc: null }; navigateRef!('/canvas?project=p2'); });
+    await act(async () => { seedProjectB(); navigateRef!('/canvas?project=p2'); });
+
+    // 旧项目的迟到轮询响应（processing 55）返回
+    await act(async () => { resolveLate({ job_id: '73', status: 'processing', progress: 55, asset: null }); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+
+    // 当前画布不被写入：不回填原卡、不补占位卡、不建来源线
+    expect(cardIds()).toEqual(['b1']);
+    expect(edges()).toEqual([]);
+    // 迟到响应被丢弃后不续链：超过轮询周期（2500ms）后旧任务不再被轮询
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2700)); });
+    expect(apiMocks.fetchJobStatus).toHaveBeenCalledTimes(1);
   });
 });
