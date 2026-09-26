@@ -63,9 +63,6 @@ interface Plan {
   sort: number; // sortOrder，越小越靠前
 }
 
-/** Go 充值配额锚点：原价 × 500000 = quota（网关公式，不动）。本地展示派生：展示积分 = quota / 50000（1 元 = 10 积分，产品确认 2026-08-19） */
-const QUOTA_PER_UNIT = 500000;
-
 /** ISO 时间转 datetime-local 输入值（本地时区） */
 function isoToLocalInput(iso: string | null): string {
   if (!iso) return '';
@@ -117,6 +114,14 @@ export default function RechargePlans() {
   const [deleting, setDeleting] = useState(false);
   const [sorting, setSorting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  /**
+   * 当前生效的换算率（1 元 = 多少积分），随档位列表一起从服务端回来。
+   *
+   * ⚠️ **表单的积分预览用它算**，不要在本地写死倍数：换算是运行时配置
+   * （住在 billing 的定价目录里，运营随时可改），前端猜不出来。
+   * 曾经这里写死「×10」，而列表走服务端按真实换算率派生 —— 同一页两个数。
+   */
+  const [creditsPerYuan, setCreditsPerYuan] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
 
   /** 刷新全部档位（含停用），按 sortOrder 排序展示；页面加载与加载失败重试都走它 */
@@ -124,9 +129,11 @@ export default function RechargePlans() {
     setLoading(true);
     setLoadError('');
     fetchTopupTiers()
-      .then((list) =>
-        setPlans([...list].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan))
-      )
+      .then((data) => {
+        // 换算率随列表一起回来 —— 表单的积分预览必须用它（见 creditsPerYuan 状态的注释）
+        setCreditsPerYuan(data.creditsPerYuan);
+        setPlans([...data.tiers].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan));
+      })
       .catch((e) => setLoadError(isApiError(e) ? e.message : '获取档位列表失败'))
       .finally(() => setLoading(false));
   }, []);
@@ -398,6 +405,7 @@ export default function RechargePlans() {
       {form !== null && (
         <PlanFormModal
           initial={form.id !== undefined ? plans.find((p) => p.id === form.id) : undefined}
+          creditsPerYuan={creditsPerYuan}
           onClose={() => setForm(null)}
           onSubmit={handleSubmit}
         />
@@ -423,11 +431,13 @@ export default function RechargePlans() {
 /* ============ 新建/编辑档位弹窗 ============ */
 interface PlanFormModalProps {
   initial?: Plan;
+  /** 当前生效的换算率（1 元 = 多少积分），由列表接口带回。积分预览用它算。 */
+  creditsPerYuan: number;
   onClose: () => void;
   onSubmit: (data: Omit<Plan, 'id' | 'pay' | 'amount' | 'sort'>, id?: string) => Promise<void>;
 }
 
-function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
+function PlanFormModal({ initial, creditsPerYuan, onClose, onSubmit }: PlanFormModalProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [price, setPrice] = useState(initial ? String(initial.price) : '10');
   const [ratio, setRatio] = useState(initial ? String(initial.ratio) : '1');
@@ -439,7 +449,10 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
 
   const priceNum = parseFloat(price) || 0;
   const ratioNum = parseFloat(ratio) || 0;
-  const points = (priceNum * QUOTA_PER_UNIT) / 50_000;
+  // 到账积分 = 原价 × **当前生效的换算率**（与后端 deriveCredits 同一条公式、同一个数）。
+  // ⚠️ 这里以前写死 `× 500000 / 50000`（= ×10），而列表里的 amount 走服务端按真实换算率派生 ——
+  //    换算是运行时配置，两边一旦不同就是同页两个数（2026-09-26 实测：本地库是 15）。
+  const points = Math.round(priceNum * creditsPerYuan);
   const pay = priceNum * ratioNum;
 
   const handleSave = async () => {
@@ -502,7 +515,9 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
           <div style={{ marginBottom: 6 }}>
             积分数 (派生){' '}
             <Hint>
-              <div>积分 = 原价 × 500000（只读派生，对应 Go 充值配额 QuotaPerUnit）。</div>
+              <div>
+                积分 = 原价 × 当前换算率（1 元 = {creditsPerYuan} 积分，在「系统设置 → 计费」里改）。
+              </div>
               <div>实付 = 原价 × 折扣；折扣 = 1 表示无折扣。</div>
             </Hint>
           </div>

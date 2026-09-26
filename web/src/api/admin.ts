@@ -49,9 +49,23 @@ export interface TopupTier {
   updatedAt: string;
 }
 
+/** `GET /api/admin/topup-tiers` 的回包。 */
+export interface TopupTierList {
+  tiers: TopupTier[];
+  /**
+   * 当前生效的换算率（1 元 = 多少积分）。
+   *
+   * ⚠️ **编辑表单的积分预览必须用它算**，不要在本地写死一个倍数：
+   * 换算是**运行时配置**（住在 billing 的定价目录里，运营随时可改），前端算不出来。
+   * 曾经这里的前端自己写死「×10」派生，而列表里的 `amount` 走服务端按真实换算率派生 ——
+   * 同一页两个数（2026-09-26 实测：本地库是 15，那页的预览与列表已经对不上）。
+   */
+  creditsPerYuan: number;
+}
+
 /** 获取全部充值档位列表（含停用），按 sortOrder 排序展示 */
 export function fetchTopupTiers() {
-  return http.get<TopupTier[]>('/api/admin/topup-tiers');
+  return http.get<TopupTierList>('/api/admin/topup-tiers');
 }
 
 /** POST /api/admin/topup-tiers 新建参数（amount 服务端派生，客户端传入会被忽略） */

@@ -54,7 +54,10 @@ function javaEnumLiterals(source: string, enumDecl: string): string[] {
 /* ── 1. 用量维度：Java 枚举 ↔ TS 白名单 ─────────────────────────────────── */
 
 const JAVA_USAGE_DIMS = javaEnumLiterals(
-  stripComments(read(`${JAVA_BILLING}pricing/UsageDim.java`)),
+  // ⚠️ 路径跟着 Java 包的**角色**走，不跟着「以前在哪」走：`pricing` 现在是 `domain/pricing`
+  //    （2026-09-26 的包结构重排把纯领域收进了 domain/）。**这条测试当时就是靠这一行红的**——
+  //    重排只跑了 Java 套件，TS 套件没跑，于是「读不到文件」被 `read()` 直接抛出。
+  stripComments(read(`${JAVA_BILLING}domain/pricing/UsageDim.java`)),
   "public enum UsageDim",
 );
 

@@ -72,7 +72,7 @@ async function fillAndSave(price: string, ratio: string) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  adminApi.fetchTopupTiers.mockResolvedValue([]);
+  adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [], creditsPerYuan: 15 });
   adminApi.createTopupTier.mockResolvedValue({
     data: {
       id: 1,
@@ -154,6 +154,31 @@ describe('RechargePlans 档位边界值 toast', () => {
     await fillAndSave('9.5', '1');
     expect(toastApi.error).toHaveBeenCalledWith('原价须为正整数');
     expect(adminApi.createTopupTier).not.toHaveBeenCalled();
+  });
+
+  it('★ 积分预览按**服务端给的换算率**算，不是本地写死的倍数', async () => {
+    // ⚠️ 这条钉的是 2026-09-26 修掉的那个活 bug：表单曾本地写死 `原价 × 500000 / 50000`（= ×10）
+    //    派生预览，而列表里的 `amount` 走服务端按**真实换算率**派生 —— 换算是运行时配置
+    //    （住在 billing 的定价目录里，运营随时可改），两边一旦不同，**同一页就显示两个数**。
+    //    实测本地库的换算是 15，那一页的预览与列表当时已经对不上。
+    //
+    //    故意用 15（而不是最常见的 10）：写死任何一种倍数都不该过 —— 断言的是「读了服务端的数」，
+    //    不是「值恰好等于 1500」。
+    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [], creditsPerYuan: 15 });
+    await renderPage();
+    await openCreateModal();
+
+    const priceInput = document.body.querySelector<HTMLInputElement>(
+      'input[aria-label="原价（元）"]',
+    );
+    if (!priceInput) throw new Error('原价输入未渲染');
+    await act(async () => {
+      nativeInput(priceInput, '100');
+    });
+
+    // 100 元 × 15 = 1500。若写死 ×10 则这里是 1,000 —— 这条就会红。
+    const pointsInput = document.body.querySelector<HTMLInputElement>('input[aria-label="积分数"]');
+    expect(pointsInput?.value).toBe('1,500');
   });
 
   it('接口失败不写页面 formError（toast 由 http 层负责）', async () => {

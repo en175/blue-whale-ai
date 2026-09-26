@@ -42,10 +42,22 @@ export class AdminTopupTiersController {
       const creditsPerYuan = await fetchCreditsPerYuan();
       return {
         success: true,
-        data: tiers.map((t) => {
-          const amount = deriveCredits(t.originalPrice, creditsPerYuan);
-          return { ...t, amount, name: displayTierName(t.name, amount) };
-        }),
+        data: {
+          tiers: tiers.map((t) => {
+            const amount = deriveCredits(t.originalPrice, creditsPerYuan);
+            return { ...t, amount, name: displayTierName(t.name, amount) };
+          }),
+          // ★ 把换算率**一并回给管理端**，不是顺手多带一个字段。
+          //
+          //   编辑表单要**边输价格边显示会到账多少积分**，而那个数只能用它算。
+          //   在此之前前端是本地写死「×10」派生的（`price × 500000 / 50000`），
+          //   于是同一页出现两个数：表单预览按 10 算、表格里按换算率算。
+          //   2026-09-26 实测：本地库的换算是 **15**，那一页的预览与列表就已经对不上了。
+          //
+          //   ⚠️ 不要再让前端自己算「每元多少积分」——它算不出来，那是运行时配置
+          //      （住在 billing 的定价目录里，运营随时可改）。回给它，它就不需要猜。
+          creditsPerYuan,
+        },
       };
     } catch (error) {
       throw toAdminError(error);
