@@ -3,10 +3,12 @@ package com.bluewhale.billing.ledger;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bluewhale.billing.domain.entity.CostReservationEntity;
 import com.bluewhale.billing.infrastructure.mapper.CostReservationMapper;
+import com.bluewhale.billing.infrastructure.mapper.StaleReservationRow;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Repository;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -85,6 +87,41 @@ public class ReservationRepository {
      */
     public long sumSettledActualCredits(LocalDateTime from, LocalDateTime to) {
         return mapper.sumSettledActualCredits(from, to);
+    }
+
+    /**
+     * 持有超过 {@code olderThan} 仍未终态的预留（最早持有的在前）。
+     *
+     * <p>取数口径（为什么用 {@code gmt_modified}、为什么时间在 SQL 侧算、
+     * 为什么必须有 limit）见 {@link CostReservationMapper#listStaleHeld}。
+     *
+     * @param olderThan 超过多久算「超时」；由调用方传入阈值，
+     *                  这里不预设 2h/24h——**阈值是策略，不是持久化的事**
+     */
+    public List<StaleHold> listStaleHeld(Duration olderThan, int limit) {
+        return mapper.listStaleHeld(olderThan.getSeconds(), limit).stream()
+                .map(ReservationRepository::toStaleHold)
+                .toList();
+    }
+
+    /**
+     * 「持有超时」的预留读模型。
+     *
+     * <p>它不是 {@link Reservation}：兜底扫描不需要分配明细与规则快照
+     * （那两列是结算复现用的），带上它们只是让每轮扫描多读一批没人看的字节。
+     * 需要恢复成完整预留时，按 jobId 再查一次即可——那条路径走的是唯一索引。
+     */
+    public record StaleHold(long jobId, long userId, long reservedCredits, long heldSeconds) {
+
+        /** 已持有小时数（只用于展示与日志）。 */
+        public long heldHours() {
+            return heldSeconds / 3600;
+        }
+    }
+
+    private static StaleHold toStaleHold(StaleReservationRow row) {
+        return new StaleHold(row.getGenerationJobId(), row.getUserId(),
+                row.getReservedCredits(), row.getHeldSeconds());
     }
 
     private static Reservation toReservation(CostReservationEntity entity) {

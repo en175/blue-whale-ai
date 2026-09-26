@@ -47,4 +47,31 @@
     LIMIT 1
   </select>
 
+  <!--
+    该用户最近 N 条分录，按 (科目, id) 升序返回——账本自检沿 balance_after 走一遍用。
+
+    内层先按 id DESC 取最近 N 条（走 idx_ledger__user_account），外层再按 (account, id)
+    升序重排：**分组遍历与「取最近的」是两个不同方向的要求**，一个语句里只能各让一层做。
+
+    ⚠️ 排列必须是 (account, id) 而不是 id：balance_after 是**按科目各自累计**的快照，
+       把不同科目的分录混在一条链上比，天天都会报「不平」——而那种假警报会让真正的
+       断裂再也无人相信。
+
+    ⚠️ 不在这里加 account IN ('wallet','frozen') 过滤：账本自检要验的是**全部科目**的
+       快照自洽性（cost / revenue / receivable 同样由同一段代码写入，同样的断裂风险），
+       而「按用户不平」的判定只用 wallet+frozen——两件事，不要混成一件。
+  -->
+  <select id="listRecentForAudit" resultType="com.bluewhale.billing.domain.entity.LedgerEntryEntity">
+    SELECT *
+    FROM (
+      SELECT id, user_id, account, direction, amount, biz_type, biz_id,
+             idempotency_key, balance_after, remark, gmt_create
+      FROM billing_ledger_entries
+      WHERE user_id = #{userId}
+      ORDER BY id DESC
+      LIMIT #{limit}
+    ) recent
+    ORDER BY recent.account ASC, recent.id ASC
+  </select>
+
 </mapper>

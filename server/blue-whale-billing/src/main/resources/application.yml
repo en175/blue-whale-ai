@@ -11,6 +11,14 @@ spring:
     virtual:
       enabled: true             # Java 21 虚拟线程：计费是 I/O 密集（DB + gRPC），线程不是瓶颈
 
+  # 调度线程池。默认只有 1 个线程：两条对账任务（预留兜底 / 账本自检）会共用一个，
+  # 慢的那条把另一条顶到后面去——而账本自检是全表聚合，一条卡住的查询就能
+  # 让「解冻超时预留」这条必需的兜底一起停摆。分开成 2 个线程，代价是 1 个闲置线程。
+  task:
+    scheduling:
+      pool:
+        size: 2
+
   # ── 自有库（ADR-0113 数据主权：每个服务数据私有，禁止跨服务直连） ──
   #
   # ⚠️ **凭据只走环境变量、不落任何入库文件**（对齐测试站连接串的治理口径）。
@@ -82,13 +90,22 @@ billing:
     enabled: true
     port: ${BILLING_GRPC_PORT:4004}
 
-  # ── 管理端接口（/admin/**，发布定价目录、发放积分） ──
+  # ── 管理端接口（/admin/**，发布定价目录、发放积分、折扣与促销） ──
   #
   # ⚠️ **没有鉴权**。它与 gRPC 的差别在于：Hold 受用户余额约束，而管理端能**凭空生积分**。
   #    这个端口只在内网、只由运维与后台调用；管理端鉴权落地前**禁止对外暴露**。
-  #    要临时关掉：BILLING_ADMIN_ENABLED=false。
+  #
+  # ⚠️ **默认关闭**（2026-09-26 架构评审后改的）：在此之前默认是 `true`，于是
+  #    「无鉴权 + 能改钱 + 默认开」三者叠加 —— 任何能到达 4003 端口的人 POST 一次
+  #    /admin/credits/grants 就能凭空生成积分，不需要越过任何认证。
+  #    部署治理（端口只在内网）挡得住外网，挡不住「同一个内网里别的东西配错了」。
+  #
+  #    默认关**没有副作用**：读的那半边早已迁到 gRPC（走 billing.grpc.enabled 那条开关），
+  #    这里只剩写的那几条（发放 / 发布目录 / 折扣 / 促销）。
+  #    本地与测试站要开，显式给：BILLING_ADMIN_ENABLED=true
+  #    （本地启动命令见 .claude/skills/start-local-services/SKILL.md，那里已带上它）
   admin:
-    enabled: ${BILLING_ADMIN_ENABLED:true}
+    enabled: ${BILLING_ADMIN_ENABLED:false}
 
   # ── MQ：结算 / 返还的消费端 ──
   #
@@ -100,6 +117,64 @@ billing:
     enabled: ${BILLING_MQ_ENABLED:true}
     topic-completed: ${BILLING_MQ_TOPIC_COMPLETED:generation-job-completed}
     topic-failed: ${BILLING_MQ_TOPIC_FAILED:generation-job-failed}
+
+  # ── 对账（《计费逻辑详细设计》§9）────────────────────────────────────────────
+  #
+  # 两条任务都跑在 Spring 的调度线程上，**都不在扣费路径上**（Hold 的事务预算 < 5ms）。
+  # 默认值同时写在 @Scheduled / @Value 的占位符兜底里（注解读不到 bean，两者必须一致）——
+  # 改这里就够了，那边的兜底只在「本文件被整段拿掉」时生效。
+  reconciliation:
+
+    # ② 预留兜底：扫「held 且长期未终态」的预留。
+    #
+    # 为什么它必需：结算/返全靠 MQ 事件，而 RocketMQ 重投有次数上限（18 次进死信）。
+    # 超限后再没有人会去解冻那笔钱——用户看到「处理中」永不结束，余额里有一块用不了，
+    # 而所有健康检查都是绿的。billing 扫自己的表，不依赖外部任何一方。
+    sweeper:
+      # 每轮间隔。设计文档 §9 定的是 10 分钟：远小于「用户会来投诉」的量级，
+      # 又远大于任何单轮扫描的耗时，不会把库打满。
+      fixed-delay: ${BILLING_SWEEP_FIXED_DELAY:PT10M}
+      # 启动后多久跑第一轮。为什么不是 0：滚动发布期间每一轮重启都会立刻扫一次，
+      # 一波发布就是几次无谓的全表扫描；1 分钟足够覆盖「重启期间攒下的」，
+      # 又短到不会让本该释放的钱多冻一个周期。
+      initial-delay: ${BILLING_SWEEP_INITIAL_DELAY:PT1M}
+      # 超过它 → 结构化 WARN（条数 + 前若干条 jobId/userId/冻结额/持有秒数），**不动作**。
+      # 为什么是 2h：正常任务分钟级终态，MQ 重投也在分钟级完成；2h 之后还 held 说明
+      # 「一定出事了」，但还不足以断言是「事件丢了」还是「任务还活着」——那一档交给人。
+      warn-after: ${BILLING_SWEEP_WARN_AFTER:PT2H}
+      # 超过它 → 自动释放（走 CreditService.refund 的幂等返还路径）并 WARN。
+      # 为什么是 24h 且默认开：两种可能都不支持继续冻着——要么 job 早已终态而事件丢了，
+      # 要么它永远不会终态。继续冻着 = **用户的钱被永久锁死**（确定发生的损失）；
+      # 相比之下「极少数丢事件场景下平台少收一笔」小得多。24h 也长于任何正常任务
+      # 与 MQ 全部重投的总时长，误伤窗口很窄。
+      # ⚠️ 代价明码标价：释放后若 job 真的终态了（丢的事件被补投），结算会因已 released
+      #    而无操作，那一单不再收费。要收缩它需要一个新的跨服务契约（billing 看不到 job 表）。
+      release-after: ${BILLING_SWEEP_RELEASE_AFTER:PT24H}
+      # 自动释放开关。关掉后退回「只报不动」，超时的钱会一直冻着等人处置——
+      # 所以关掉这件事本身会打 WARN。
+      auto-release: ${BILLING_SWEEP_AUTO_RELEASE:true}
+      # 每轮最多处理几条。必须有上限：一次扫出几万条会让调度线程长时间占住。
+      # 按「最久优先」排序 + 每轮重扫，本轮没处理完的下一轮接着来，不会饥饿。
+      batch-size: ${BILLING_SWEEP_BATCH_SIZE:200}
+      # 日志里每档最多列几条明细（明细是给人查库用的，列太多等于没列）。
+      sample-size: ${BILLING_SWEEP_SAMPLE_SIZE:10}
+
+    # ① 账本自检：每日验 Σ lots.remaining == ledger(wallet) + ledger(frozen)。
+    #
+    # ⚠️ 不平**只报不动**：自动补一条「调平分录」会把证据一起抹掉——差额怎么来的
+    #    从此不可考。对账的第一价值是定位，第二才是平账。
+    self-check:
+      # 每日 03:00（时区写死在 LedgerSelfCheck.CRON_ZONE = Asia/Shanghai）。
+      # 为什么是 3 点：当日结算基本收尾、请求量最低，而这条自检要做全表聚合。
+      # 时区不跟着容器走（容器默认 UTC，那样会变成北京时间上午 11 点跑，与高峰抢资源）。
+      cron: ${BILLING_SELF_CHECK_CRON:0 0 3 * * *}
+      # 不平的用户最多报几个。
+      user-limit: ${BILLING_SELF_CHECK_USER_LIMIT:20}
+      # 每个用户最多打几行 balance_after 断裂明细。
+      break-sample: ${BILLING_SELF_CHECK_BREAK_SAMPLE:10}
+      # 每个用户回看多少条分录。快照自洽性是**相邻两条**的性质，不必从头读；
+      # 取满时会明确标注「窗口已满」，不把「窗口内没断」说成「历史上没断」。
+      entry-window: ${BILLING_SELF_CHECK_ENTRY_WINDOW:500}
 
 # gRPC proxy 端点。键名与 worker 逐字相同，部署时不必记两套；凭证只走 env（不落库）。
 rocketmq:

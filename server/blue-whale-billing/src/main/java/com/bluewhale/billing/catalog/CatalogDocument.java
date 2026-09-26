@@ -40,6 +40,20 @@ public record CatalogDocument(
     public static final int SUPPORTED_SCHEMA_VERSION = 1;
 
     /**
+     * 本服务能编译的**规则快照**格式版本（{@link TaskRule#schemaVersion}）。
+     *
+     * <p>与 {@link #SUPPORTED_SCHEMA_VERSION} 分开：那个管整份目录，这个只管一条规则的形状。
+     *
+     * <p>⚠️ **改规则语义时必须 +1**（例如把 {@code dims} 的万分比换成绝对值）。
+     * 不加的后果是：老快照会被按新语义**静默重算**出一个价 —— 账平、无告警、钱错。
+     * +1 之后老快照会变成一次明确的拒单，有人看得见。
+     *
+     * <p>{@code null}（老快照没这个字段）按本值处理 —— 加字段那一次必须是兼容的，
+     * 否则线上所有在途预留同时结不掉。
+     */
+    public static final int SUPPORTED_RULE_SCHEMA_VERSION = 1;
+
+    /**
      * {@link #creditsPerYuan} 的合法区间（含端点）。
      *
      * <p>下界 1：0 或负数意味着「多少元都换不到积分」，整份目录失去换算意义。
@@ -72,6 +86,7 @@ public record CatalogDocument(
      * @param rounding        {@code halfUp}（默认）| {@code ceil} | {@code floor}
      * @param tokenEstimate   视频按 token 计价的**预扣估算参数**；不配 = 该规则不做估算
      *                        （按 {@code usage.c} 计价就必须配，否则提交时算不出契约量）
+     * @param schemaVersion   快照的**格式版本**，见下面 `@param` 后的说明
      */
     public record TaskRule(
             String usageSemantic,
@@ -84,7 +99,32 @@ public record CatalogDocument(
             Long minCredits,
             Long maxCredits,
             String rounding,
-            TokenEstimate tokenEstimate
+            TokenEstimate tokenEstimate,
+            /**
+             * 快照的**格式版本**。{@code null} = 加这个字段之前冻下的老快照，按
+             * {@link CatalogDocument#SUPPORTED_RULE_SCHEMA_VERSION} 处理。
+             *
+             * <h2>为什么必须有它</h2>
+             *
+             * <p>规则快照是**冻结的文本**，而结算时用**当前代码**去编译它
+             * （{@link CatalogCompiler#compileRuleSnapshot}）。在此之前那份文本没有任何版本标记，
+             * 于是「改了规则 schema 的语义」只能靠人记得 —— 而两种改动都会静默出事：
+             * <ul>
+             *   <li><b>收紧校验</b>（例如给 {@code dims} 加一条「值不能为负」）：老快照编不过 ⇒
+             *       那条预留**永远结不掉**，MQ 重投到死信，钱一直冻着。</li>
+             *   <li><b>改语义</b>（例如把 {@code dims} 的万分比换成绝对值）：**不报错**，
+             *       直接按新语义给老单重算一个价 —— 比编译失败更坏，因为没有任何信号。</li>
+             * </ul>
+             *
+             * <p>有了它，第二种情况就能被挡住：编译时只接受自己认识的版本，
+             * 改语义时把 {@code SUPPORTED_RULE_SCHEMA_VERSION} 一加，老快照当场变成
+             * 一次**明确的拒单**（有人看得见），而不是一笔算错的账。
+             *
+             * <p>⚠️ 与目录文档的 {@code schemaVersion} 是**两个东西**：那个管整份目录
+             * （换算率 + 折扣策略），这个只管一条规则的形状。分开是因为演进节奏不同 ——
+             * 换折扣策略不该逼着所有规则快照升版本。
+             */
+            Integer schemaVersion
     ) {}
 
     /**

@@ -24,7 +24,16 @@ export interface BillingQuoteContext {
   modelId: string;
   taskType: string;
   input: Record<string, unknown>;
-  /** 能力行的 `pricing` 快照（JSON 文本）。缺省 = 不传，billing 回落目录那份。 */
+  /**
+   * 能力行的 `pricing` 快照（JSON 文本）。
+   *
+   * ⚠️ **必填** —— 缺省/空串 = billing 算不出价，回 `UNPRICEABLE`。
+   * 这里**没有**「回落去查定价目录」那条路（目录早已不装模型规则，它只剩换算率与折扣策略）。
+   *
+   * 与预扣的差别只在**调用方怎么处置**：预扣 fail closed（拒绝提交），
+   * 报价这条把异常吞掉返回 `null`（前端据此不显示预估）—— 它一分钱都不动，所以可以软失败。
+   * 但两条路必须传**同一份**规则，否则「预览一个价、实扣另一个价」。
+   */
   ruleSnapshot?: string;
 }
 

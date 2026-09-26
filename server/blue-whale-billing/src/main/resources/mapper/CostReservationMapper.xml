@@ -64,4 +64,35 @@
       AND gmt_modified &lt; #{to}
   </select>
 
+  <!--
+    持有超时仍未终态的预留（《计费逻辑详细设计》§9 层次②）。
+
+    三处细节各有理由：
+
+    ① `status = 'held'` + `gmt_modified` 正好是 idx_reservation__status (status, gmt_modified)
+       的前两列：索引区间扫描，不是全表扫。这张表随任务增长，而这条扫描每 10 分钟跑一次。
+
+    ② 阈值用 `INTERVAL #{seconds} SECOND` 而不是 Java 传来的时间点：判定「冻了多久」
+       只能有一个时钟，见接口注释。NOW() 是**会话时区**（被钉成北京时间），
+       与写入 gmt_modified 的 CURRENT_TIMESTAMP 同源。
+
+    ③ held_seconds 由 TIMESTAMPDIFF 现算：日志里要报「冻了几个小时」给人看，
+       同一个时钟算出来的秒数才是可信的。
+
+    ORDER BY gmt_modified ASC + LIMIT：最久的先处理。配合「每轮重扫」，
+    即使一轮取不完（limit 截断），下一轮也会接着最久的那些，不会有饥饿。
+  -->
+  <select id="listStaleHeld" resultType="com.bluewhale.billing.infrastructure.mapper.StaleReservationRow">
+    SELECT id,
+           generation_job_id,
+           user_id,
+           reserved_credits,
+           TIMESTAMPDIFF(SECOND, gmt_modified, NOW()) AS held_seconds
+    FROM billing_cost_reservations
+    WHERE status = 'held'
+      AND gmt_modified &lt;= DATE_SUB(NOW(), INTERVAL #{seconds} SECOND)
+    ORDER BY gmt_modified ASC
+    LIMIT #{limit}
+  </select>
+
 </mapper>

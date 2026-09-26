@@ -38,8 +38,16 @@ new-api 已被切断，**预扣改由我们自己的 billing-svc 承担**——�
 cd <worktree>/server
 BILLING_DB_PASSWORD="$(docker inspect bw-mysql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MYSQL_ROOT_PASSWORD | cut -d= -f2)" \
 ROCKETMQ_ENDPOINTS=127.0.0.1:8081 \
+BILLING_ADMIN_ENABLED=true \
 nohup mvn -o -pl blue-whale-billing -am spring-boot:run > /tmp/bw-billing.log 2>&1 &
 ```
+
+⚠️ **`BILLING_ADMIN_ENABLED=true` 是本地必给的**（2026-09-26 起）：管理端 HTTP 接口
+（`/admin/**`）的默认值已改成 **false**，因为它**无鉴权却能凭空生积分** ——
+任何能到达 4003 的人 POST 一次 `/admin/credits/grants` 就能造钱。默认关掉之后，
+本地要跑**充值到账 / 发布目录 / 折扣 / 促销**这些写操作，就得显式打开它；
+不给的话表现为「充值下单 503 / 发放积分失败」，而服务本身一切正常。
+读的那半边不受影响（消费记录、流水现在走 gRPC 的 `BillingAdminService`）。
 
 - HTTP/admin 走 `4003`，**gRPC 走 `4004`**——后端要连的是后者（`BILLING_GRPC_URL=http://127.0.0.1:4004`）
 - 库是 `bw_billing`（billing 自己的库，Flyway 管 schema，**不归 Prisma**）

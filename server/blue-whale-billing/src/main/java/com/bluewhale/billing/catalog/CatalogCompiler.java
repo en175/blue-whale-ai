@@ -126,10 +126,36 @@ public final class CatalogCompiler {
         }
     }
 
+    /**
+     * 快照的格式版本必须是本服务认识的那一版。
+     *
+     * <p>⚠️ {@code null} **放行**，按当前版本处理 —— 那是「加 schemaVersion 之前冻下的老快照」。
+     * 这一条不是宽容，是**必需**：加字段那一刻，线上所有在途预留的文本里都没有它，
+     * 拒掉就等于让那些钱同时结不掉（MQ 重投到死信、钱一直冻着）。
+     * 真正的保护在**下一次**改语义时生效 —— 那时把
+     * {@code SUPPORTED_RULE_SCHEMA_VERSION} 一加，老快照当场变成一次明确的拒单。
+     *
+     * @throws CompileException 版本不认识：按当前语义编译它会算出一个**看着合理但不同**的价，
+     *         而且没有任何信号 —— 宁可拒，不可静默重算
+     */
+    private static void requireKnownRuleSchema(Integer schemaVersion) {
+        if (schemaVersion == null) {
+            return;
+        }
+        if (schemaVersion != CatalogDocument.SUPPORTED_RULE_SCHEMA_VERSION) {
+            throw new CompileException(
+                    "不支持的规则快照 schemaVersion=" + schemaVersion
+                            + "（本服务支持 " + CatalogDocument.SUPPORTED_RULE_SCHEMA_VERSION
+                            + "）。这条规则是按**另一版语义**写下的，按当前语义编译会静默算出另一个价，"
+                            + "所以拒绝编译：要么补一个按该版本编译的分支，要么人工确认这条规则该怎么算。");
+        }
+    }
+
     static CompiledRule compileRule(CatalogDocument.TaskRule rule) {
         if (rule == null) {
             throw new CompileException("规则为空");
         }
+        requireKnownRuleSchema(rule.schemaVersion());
 
         UsageDim baseUnit = UsageDim.of(requireNonBlank(rule.baseUnit(), "baseUnit"));
         BasePriceResolver basePrice = compileBasePrice(rule.basePrice());

@@ -569,6 +569,69 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
   });
 });
 
+describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账上就是「倒扣成免费」", () => {
+  // 2026-09-26 架构评审查出的缺口：闸门只判「是不是数字」，不判符号。
+  // 负单价算出的金额 ≤ 0，出口的 max(minCredits, …) 把它变成 minCredits（通常 0），
+  // 而「计价为 0」在提交侧被当成「不用冻钱」⇒ 不建预留、不冻钱、账面无异常。
+  // 一次本该收 200 积分的生成变成免费，**没有任何信号**。
+  //
+  // ⚠️ **只拒负，0 放行** —— 见下面那条「零价模型是合法配置」。第一版把 0 一起拒了，
+  //    当场打红了 Java 侧两条既有断言；测试是规格，收得过紧就是把合法配置拦在门外。
+  //
+  // 不传 capability_type/channel：渠道收窄是另一条规则，这里只测符号本身（与下面那组同理）。
+  const update = (pricing: unknown) => parseModelUpdateBody({ pricing });
+
+  /** 一条能存进去的最小规则 —— 只换要测的那一项，别的都不动。 */
+  const base = { baseUnit: "constant:1", basePrice: { kind: "const", value: 30000 } };
+
+  it("basePrice 常数为负 → 拒", () => {
+    const parsed = update({ ...base, basePrice: { kind: "const", value: -2000 } });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("不能为负");
+  });
+
+  it("★ basePrice 常数 = 0 **放行** —— 「零价模型」是合法配置，别收得过紧", () => {
+    // ★ 边界用例（这条是被 Java 侧打红后补上的）：`PricingEngineTest.零价模型` 用
+    //   `Constant(0L)` 钉着两条断言（下限 0 时真的收 0、下限缺省 1 时收 1）——
+    //   也就是说 0 是**刻意支持**的表达，真正的价格下限由 minCredits 兜。
+    //   第一版校验把 0 一起拒了，结果把一条合法配置拦在门外。符号校验该拒的只有**负**。
+    expect(update({ ...base, basePrice: { kind: "const", value: 0 } }).ok).toBe(true);
+  });
+
+  it("★ basePrice 查表里**某一档**为负 → 拒（漏挡一档就是那一档倒挂）", () => {
+    const parsed = update({
+      ...base,
+      basePrice: { kind: "table", table: { "size=1k": 4500, "size=2k": -600 } },
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("size=2k");
+  });
+
+  it("multipliers = 0 → 拒（整单连乘，0 会让**整单**免费）", () => {
+    const parsed = update({ ...base, multipliers: { "usage.referenceCount": 0 } });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("须为正整数");
+  });
+
+  it("dims 为负 → 拒（负倍率把等效数量拉低，等于少收）", () => {
+    const parsed = update({ ...base, dims: { "usage.referenceCount": -1000 } });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("不能为负");
+  });
+
+  it("dims = 0 放行 —— 「这一维不加量」，等价于不写它，不该被误伤", () => {
+    // ★ 边界用例：证明我只拒了该拒的。把 dims 的 0 也拒掉会让一批合法规则突然存不进去，
+    //   而它本身没有任何危害（加 0 等于不加）。
+    expect(update({ ...base, dims: { "usage.referenceCount": 0 } }).ok).toBe(true);
+  });
+
+  it("正常的正数规则照常放行（回归：别把闸门收得过紧）", () => {
+    expect(update({ ...base, basePrice: { kind: "const", value: 4500 } }).ok).toBe(true);
+    expect(update({ ...base, multipliers: { "usage.referenceCount": 12000 } }).ok).toBe(true);
+    expect(update({ ...base, dims: { "usage.referenceCount": 4000 } }).ok).toBe(true);
+  });
+});
+
 describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
   const tokenPricing = {
     baseUnit: "usage.c",

@@ -1,6 +1,5 @@
 package com.bluewhale.billing.application;
 
-import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.HoldResult;
@@ -190,9 +189,9 @@ class ReferenceCountSurchargeTest {
 
     /** 完成事件：用量行报的是 worker 真的会上报的那几个维度。 */
     private void settle(String status, Map<String, Long> quantities) {
-        settlement.settle(new JobEventPayload.JobCompleted(JOB, USER, status, 1,
+        settlement.settle(new SettlementCommand(JOB, USER, status, 1,
                 quantities.getOrDefault("usage.succeededSlots", 0L).intValue(),
-                List.of(new JobEventPayload.UsageLine(MODEL, TASK, quantities,
+                List.of(new SettlementUsageLine(MODEL, TASK, quantities,
                         Map.of("size", "2k")))));
     }
 

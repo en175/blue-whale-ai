@@ -371,12 +371,35 @@ function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
   if (typeof kind !== "string" || !PRICING_KINDS.has(kind)) {
     return `计价规则(pricing).basePrice.kind 须为 const / table / unset，实为「${String(kind)}」`;
   }
-  if (kind === "const" && typeof price.value !== "number") {
-    return "计价规则(pricing).basePrice.kind=const 时必须给数值 value";
+  if (kind === "const") {
+    if (typeof price.value !== "number") {
+      return "计价规则(pricing).basePrice.kind=const 时必须给数值 value";
+    }
+    // ⚠️ **不能为负**（2026-09-26 架构评审查出的缺口）：负单价算出的金额经出口的
+    //    `max(minCredits, …)` 变成 minCredits（通常 0），而「计价为 0」在提交侧被当成
+    //    「不用冻钱」⇒ 不建预留、不冻钱、账面无异常 —— 一次本该收 200 积分的生成
+    //    就这样变成**免费**，没有任何信号。
+    //    ⚠️ **0 放行**：「零价模型」是被测试钉着的合法配置（`PricingEngineTest.零价模型`），
+    //    它表达「这个模型不收费」，真正的价格下限由 minCredits 兜。收得过紧会把合法配置拦在门外。
+    if (price.value < 0) {
+      return (
+        `计价规则(pricing).basePrice.value 不能为负（实为 ${String(price.value)}）：` +
+        `负单价经下限兜底后变成 0，整单免费且账面无信号；要表达「免费」请直接写 0，并用 minCredits 定下限`
+      );
+    }
   }
   if (kind === "table") {
     if (!isPlainObject(price.table) || Object.keys(price.table).length === 0) {
       return "计价规则(pricing).basePrice.kind=table 时必须给非空 table";
+    }
+    // 同理：表里**每一档**都不能为负（0 合法 —— 「这一档免费」）
+    for (const [axis, v] of Object.entries(price.table)) {
+      if (typeof v !== "number" || v < 0) {
+        return (
+          `计价规则(pricing).basePrice.table.${axis} 不能为负（实为 ${String(v)}）：` +
+          `负单价经下限兜底后变成 0`
+        );
+      }
     }
   }
 
@@ -404,9 +427,25 @@ function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
     const v = pricing[key];
     if (v === undefined || v === null) continue;
     if (!isPlainObject(v)) return `计价规则(pricing).${key} 须为 JSON 对象`;
-    for (const axis of Object.keys(v)) {
+    for (const [axis, raw] of Object.entries(v)) {
       if (!PRICING_BASE_UNITS.has(axis)) {
         return `计价规则(pricing).${key} 的键须为基准维度，实为「${axis}」`;
+      }
+      // ⚠️ 值的**符号**同样要查（2026-09-26 评审查出的缺口）：
+      //    · `multipliers` 是整单**连乘**，0 会让整单金额直接归零（= 免费）
+      //    · `dims` 是**相对加量**，负数会把等效数量拉低（= 少收）
+      //    两者的正确「不参与」写法都是**不写这一维**，而不是写个 0 或负数。
+      if (typeof raw !== "number" || !Number.isInteger(raw)) {
+        return `计价规则(pricing).${key}.${axis} 须为整数（万分比），实为 ${String(raw)}`;
+      }
+      if (key === "multipliers" && raw <= 0) {
+        return (
+          `计价规则(pricing).multipliers.${axis} 须为正整数（实为 ${raw}）：` +
+          `0 会让整单免费，「这一维不参与」应当是不写它`
+        );
+      }
+      if (key === "dims" && raw < 0) {
+        return `计价规则(pricing).dims.${axis} 不能为负（实为 ${raw}）：负倍率把等效数量拉低，等于少收`;
       }
     }
   }

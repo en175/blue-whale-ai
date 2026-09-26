@@ -11,6 +11,11 @@ import java.util.Map;
  * 会让 NestJS 侧的生产者多一道编解码，收益是省几百字节）。
  *
  * <p>字段名与 proto 一致（camelCase），这样从任一侧看过去都是同一套名字。
+ *
+ * <p>⚠️ <b>本类是纯 wire 形态，不含领域转换。</b>它绑定的是 JSON 的形状，
+ * 也只被 MQ 适配器（{@link JobEventConsumer}）读——应用层看到的是
+ * {@code com.bluewhale.billing.application.SettlementCommand}，
+ * 映射在消费者里做。把转换放在这里会让应用层被迫 import 本包。
  */
 public final class JobEventPayload {
 
@@ -21,7 +26,8 @@ public final class JobEventPayload {
      * {@code generation-job-completed} 的载荷 —— 触发**结算**。
      *
      * @param status         {@code succeeded} | {@code partially_succeeded}
-     * @param catalogVersion ★ 提交时冻结的版本，billing 按它复现定价，不按当前版本
+     * @param catalogVersion ★ 提交时冻结的版本，随事件送来留痕；**复现定价读的是预留行上的值**，
+     *                       不是这里的（见 {@code SettlementService#rulesAtHoldTime}）
      * @param succeededSlots 成功的输出槽数（图片多张 / 视频多段）。本版本只用于留痕与告警
      */
     public record JobCompleted(
@@ -40,6 +46,9 @@ public final class JobEventPayload {
     /**
      * 一条用量。**worker 只报原始量，不报积分**——价格是 billing 的事。
      *
+     * <p>⚠️ 它的领域转换（{@code toUsage()}）不在这里，在应用层类型
+     * {@code SettlementUsageLine} 上——理由见那个方法，以及本类类注释。
+     *
      * @param quantities 维度 → 数量。key 与 catalog 的 baseUnit/dims 用同一套封闭枚举
      *                   （见 {@code usage.proto}），也即 {@code UsageDim} 的 key
      * @param specs      规格，用于按轴查基准价
@@ -53,21 +62,6 @@ public final class JobEventPayload {
         public UsageLine {
             quantities = quantities == null ? Map.of() : Map.copyOf(quantities);
             specs = specs == null ? Map.of() : Map.copyOf(specs);
-        }
-
-        /**
-         * wire → 领域对象。
-         *
-         * <p>放在这里而不是某个 service 里：这是**这份 wire 格式的转换**，
-         * 谁解析它谁就需要它（MQ 消费者、gRPC 的 Quote）。
-         * 放在 service 侧就会出现两份略有差异的复制品。
-         *
-         * @throws com.bluewhale.billing.pricing.UsageDim.UnknownUsageDimException
-         *         出现封闭枚举之外的维度键——**拒绝，不忽略**：
-         *         忽略一个维度就是少算一笔钱，而且没有任何信号
-         */
-        public com.bluewhale.billing.pricing.Usage toUsage() {
-            return com.bluewhale.billing.pricing.Usage.ofKeys(modelId, taskType, quantities);
         }
     }
 

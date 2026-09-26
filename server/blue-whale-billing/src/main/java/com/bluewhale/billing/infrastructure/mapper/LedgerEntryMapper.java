@@ -5,6 +5,8 @@ import com.bluewhale.billing.domain.entity.LedgerEntryEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 /**
  * 复式账本 Mapper。
  *
@@ -36,4 +38,26 @@ public interface LedgerEntryMapper extends BaseMapper<LedgerEntryEntity> {
      * 而漏加/多加锁的后果（读路径持锁 vs 写路径漏锁）天差地别。
      */
     Long latestBalance(@Param("userId") long userId, @Param("account") String account);
+
+    /**
+     * 取该用户**最近若干条**分录（按科目分组、组内按 id 升序），供账本自检沿
+     * {@code balance_after} 走一遍用（《计费逻辑详细设计》§9 层次①）。
+     *
+     * <h2>为什么是「最近 N 条」而不是全量</h2>
+     *
+     * {@code balance_after} 的自洽性是**逐对相邻分录**的性质：
+     * 第 k 条只与第 k−1 条有关，不需要从第 1 条读起。所以取最近 N 条就足以发现
+     * 最近发生的断裂——而「有人在最近改过账本」正是这一层要抓的东西。
+     *
+     * <p>代价是**更早的断裂看不到**。所以返回行数等于 {@code limit} 时调用方必须
+     * 把「窗口已满」说出来（见 {@code LedgerRepository.findBalanceBreaks}），
+     * 不能把「窗口里没断」当成「全history 没断」。
+     *
+     * <p>⚠️ 只由每日自检调用。活跃用户的分录可能很多，这条查询按
+     * {@code idx_ledger__user_account (user_id, account, id)} 取数，不在扣费路径上。
+     *
+     * @param limit 最多取几条（按 id 从大到小取，再按 科目, id 升序返回）
+     */
+    List<LedgerEntryEntity> listRecentForAudit(@Param("userId") long userId,
+                                              @Param("limit") int limit);
 }

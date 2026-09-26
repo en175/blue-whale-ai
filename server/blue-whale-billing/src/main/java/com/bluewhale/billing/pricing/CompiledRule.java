@@ -77,6 +77,33 @@ public record CompiledRule(
                         "dimPrices 的单价必须为正：" + e.getKey().key() + " → " + e.getValue());
             }
         }
+        // ⚠️ 单价的**符号**也要查 —— 这是 2026-09-26 架构评审查出的一个真缺口。
+        //    负单价算出的 mc 为负，经出口的 `Math.max(minCredits, …)` 变成 minCredits（通常 0）；
+        //    而「计价为 0」在提交侧被当成「不用冻钱」⇒ 不建预留、不冻钱、账面无异常。
+        //    一次本该收 200 积分的生成就这样变成**免费**，且没有任何信号。
+        //    （`dimPrices.unitMc` 早就拦了这个问题，`basePrice` 当时漏了 —— 属遗漏而非取舍。）
+        //    ⚠️ 只拒**负**，0 放行：「零价模型」是被测试钉着的合法配置（见方法注释）。
+        //    这是**第二道闸门**：第一道在 backend 的 `constants.ts`（拦「脏配置存不进去」），
+        //    这道拦的是「脏配置已经在库里了」。
+        requireNonNegativeBasePrice(basePrice);
+        // dims 是**相对加量**（折算成基准单位数）：0 表示这一维不加量，等价于不写它，无害；
+        // 负数会把等效数量拉低 ⇒ 少收。故只拒负。
+        for (var e : dims.entrySet()) {
+            if (e.getValue() < 0) {
+                throw new IllegalArgumentException(
+                        "dims 的倍率不能为负：" + e.getKey().key() + " → " + e.getValue()
+                                + "（负倍率把等效数量拉低，等于少收）");
+            }
+        }
+        // multipliers 是**整单连乘**：0 会让整单金额直接归零。与 dims 不同，它的 0 必须拒——
+        // 「这一维不参与」的正确写法是**不写它**，而不是写个 0。
+        for (var e : multipliers.entrySet()) {
+            if (e.getValue() <= 0) {
+                throw new IllegalArgumentException(
+                        "multipliers 的倍率必须为正：" + e.getKey().key() + " → " + e.getValue()
+                                + "（0 会让整单免费；「这一维不参与」应当是不写它）");
+            }
+        }
         // ⚠️ 上限与绝对加价**不能同时配**：上限路径（capDetailed）跳过用量计算，
         //    算不到绝对加价 ⇒ 预扣冻的是一份不含加价的上限，而结算会把它算进去 ⇒
         //    多出的部分记应收（静默少收）。写闸门也拦这一条，这里是第二道（脏配置可能直接改库进来）。
@@ -84,6 +111,50 @@ public record CompiledRule(
             throw new IllegalArgumentException(
                     "maxCredits 与 dimPrices 不能同时配：上限冻结算不到维度绝对加价，"
                             + "结算会超出预扣并记应收（少收且静默）");
+        }
+    }
+
+    /**
+     * 基准单价**不能为负**（0 合法）。
+     *
+     * <h2>为什么 0 合法、负数不合法</h2>
+     *
+     * <p>「零价模型」是一条**被刻意支持的配置**（{@code PricingEngineTest.零价模型} 用
+     * {@code Constant(0L)} 钉着两条：下限 0 时真的收 0，下限缺省 1 时收 1）——
+     * 它表达「这个模型不收费」，真正的价格下限由 {@code minCredits} 兜。
+     * 所以 0 必须放行，否则会把一条合法配置拦在门外。
+     *
+     * <p>负数则是纯粹的错配：算出的 mc 为负，经出口的 {@code Math.max(minCredits, …)}
+     * 变成 minCredits（通常是 0）—— 一次本该收 200 积分的生成变成免费，**账面无任何异常**
+     * （「计价为 0」在提交侧被当成「不用冻钱」⇒ 不建预留、不冻钱）。
+     * 这是 2026-09-26 架构评审查出的缺口，也是本类作为**第二道闸门**该拦的东西：
+     * 第一道在 backend 的 {@code constants.ts}（拦「脏配置存不进去」），这道拦「已经在库里了」。
+     *
+     * <p>⚠️ {@link BasePriceResolver.Unset} 那一档**刻意不拦**：它不是「配错」而是「还没配」，
+     * 它的 resolve 会抛 {@code UnpriceableSpecException}（拒绝提交，不是按 0 放行）。
+     */
+    private static void requireNonNegativeBasePrice(BasePriceResolver basePrice) {
+        switch (basePrice) {
+            case BasePriceResolver.Constant c -> {
+                if (c.mc() < 0) {
+                    throw new IllegalArgumentException(
+                            "basePrice 常数单价不能为负：" + c.mc()
+                                    + "（负单价算出的金额经下限兜底后变成 0，整单免费且账面无信号；"
+                                    + "要表达「免费」请直接写 0，并用 minCredits 定下限）");
+                }
+            }
+            case BasePriceResolver.Table t -> {
+                for (var e : t.table().entrySet()) {
+                    // Table 不复制入参，所以这里仍可能拿到 null
+                    if (e.getValue() == null || e.getValue() < 0) {
+                        throw new IllegalArgumentException(
+                                "basePrice 查表单价不能为负：" + e.getKey() + " → " + e.getValue());
+                    }
+                }
+            }
+            case BasePriceResolver.Unset ignored -> {
+                // 空位：resolve 时抛 UnpriceableSpecException（拒绝提交，不是免费），不在此拦
+            }
         }
     }
 

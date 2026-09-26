@@ -2,7 +2,6 @@ package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.admin.CatalogPublisher;
 import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.Account;
 import com.bluewhale.billing.ledger.CreditLotRepository;
 import com.bluewhale.billing.ledger.CreditService;
@@ -251,8 +250,8 @@ class SettlementIntegrationTest {
     }
 
     /** 完成事件；usage 为空 = worker 报不出用量（降级路径，见 SettlementService#settle）。 */
-    private JobEventPayload.JobCompleted completed(long jobId) {
-        return new JobEventPayload.JobCompleted(jobId, USER, "succeeded", 1, 1, List.of());
+    private SettlementCommand completed(long jobId) {
+        return new SettlementCommand(jobId, USER, "succeeded", 1, 1, List.of());
     }
 
     /**
@@ -262,9 +261,9 @@ class SettlementIntegrationTest {
      * {@code SettlementService} 走的是「按预扣额结算」的兜底，根本不进计价引擎，
      * 于是改没改价、停没停活动都看不出来——测试会假绿。
      */
-    private JobEventPayload.JobCompleted completedWithUsage(long jobId) {
-        return new JobEventPayload.JobCompleted(jobId, USER, "succeeded", 1, 1,
-                List.of(new JobEventPayload.UsageLine(MODEL, TASK,
+    private SettlementCommand completedWithUsage(long jobId) {
+        return new SettlementCommand(jobId, USER, "succeeded", 1, 1,
+                List.of(new SettlementUsageLine(MODEL, TASK,
                         Map.of(), Map.of("resolution", "1080p"))));
     }
 

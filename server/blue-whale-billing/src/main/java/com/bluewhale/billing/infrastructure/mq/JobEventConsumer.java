@@ -1,6 +1,8 @@
 package com.bluewhale.billing.infrastructure.mq;
 
+import com.bluewhale.billing.application.SettlementCommand;
 import com.bluewhale.billing.application.SettlementService;
+import com.bluewhale.billing.application.SettlementUsageLine;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
@@ -97,7 +99,7 @@ public class JobEventConsumer implements AutoCloseable {
                 JobEventPayload.JobCompleted event =
                         json.readValue(body, JobEventPayload.JobCompleted.class);
                 requireIdentifiable(event.jobId(), event.userId(), topic, body);
-                settlement.settle(event);
+                settlement.settle(toCommand(event));
             } else if (failedTopic.equals(topic)) {
                 JobEventPayload.JobFailed event =
                         json.readValue(body, JobEventPayload.JobFailed.class);
@@ -115,6 +117,33 @@ public class JobEventConsumer implements AutoCloseable {
             log.error("处理计费事件失败，将重投：topic={} body={}", topic, body, e);
             return ConsumeResult.FAILURE;
         }
+    }
+
+    /**
+     * wire → 应用层入参。**适配器的职责就是这个转换**——应用层不认识
+     * {@link JobEventPayload}，那正是应用层类型存在的理由（见 {@link SettlementCommand}）。
+     *
+     * <p>逐字段搬运，不做判断、不丢字段：这里一旦有「顺手处理一下」的逻辑，
+     * 它就落在了一个没有领域概念的地方，而且只在 MQ 入口生效——
+     * 换个入口（重放工具、管理端补结算、测试夹具）就绕过去了。
+     *
+     * <p>归一化（空集合收敛、维度键 → {@code UsageDim}）在应用层类型上，不在这里重复一遍：
+     * 两份归一迟早在某个维度上分叉，而分叉的表现是少算一笔钱。
+     *
+     * <p>包私有而非 private：这条缝是「JSON 形状对不对」唯一被钉住的地方，
+     * 要能被测试直接调（见 {@code JobEventConsumerMappingTest}），与下面的守卫同一立场。
+     */
+    static SettlementCommand toCommand(JobEventPayload.JobCompleted event) {
+        return new SettlementCommand(
+                event.jobId(), event.userId(), event.status(), event.catalogVersion(),
+                event.succeededSlots(),
+                event.usage().stream().map(JobEventConsumer::toUsageLine).toList());
+    }
+
+    /** 一条用量行的搬运；转换动作在 {@link SettlementUsageLine#toUsage()} 那边。 */
+    private static SettlementUsageLine toUsageLine(JobEventPayload.UsageLine line) {
+        return new SettlementUsageLine(
+                line.modelId(), line.taskType(), line.quantities(), line.specs());
     }
 
     /**

@@ -19,7 +19,14 @@ export interface BillingHoldContext {
   modelId: string;
   taskType: string;
   input: Record<string, unknown>;
-  /** 能力行的 `pricing` 快照（JSON 文本）。缺省 = 不传，billing 回落目录那份。 */
+  /**
+   * 能力行的 `pricing` 快照（JSON 文本）。
+   *
+   * ⚠️ **必填** —— 缺省/空串 = billing 算不出价，**直接拒单**（`UNPRICEABLE`）。
+   * 这里**没有**「回落去查定价目录」那条路：目录早已不再装模型规则（它只剩换算率与折扣策略），
+   * 曾经有过一个过渡期的回落分支，随目录规则一起删了。所以别把它当可选的：
+   * 传空串会让一次本该成功的提交变成一次拒单。
+   */
   ruleSnapshot?: string;
 }
 

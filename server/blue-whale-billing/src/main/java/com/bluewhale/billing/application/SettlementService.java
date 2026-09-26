@@ -1,7 +1,6 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.Reservation;
 import com.bluewhale.billing.ledger.ReservationRepository;
@@ -20,6 +19,11 @@ import java.time.Instant;
 
 /**
  * 结算与返还（《计费逻辑详细设计》§4.3 / §4.4），由 MQ 事件触发。
+ *
+ * <p>入参是**应用层类型**（{@link SettlementCommand} / {@link SettlementUsageLine}），
+ * 不是 MQ 载荷——wire 类型的转换在适配器（{@code JobEventConsumer}）里做。
+ * 理由与 {@link HoldCommand} 同一条：换一种 MQ 编码不该改到本包，第三个入口
+ * （重放工具、管理端补结算、测试夹具）也不该先伪造一个 {@code infrastructure.mq} 的对象。
  *
  * <h2>为什么结算必须用「冻结的规则 + 冻结的折扣」</h2>
  *
@@ -81,10 +85,35 @@ public class SettlementService {
      * @throws CatalogCompiler.CompileException 预留行上的规则快照编不过（数据损坏）——
      *         同样抛出去重投，不静默按 0 结算
      */
-    public void settle(JobEventPayload.JobCompleted event) {
+    public void settle(SettlementCommand event) {
         Reservation reservation = reservations.findByJobId(event.jobId()).orElse(null);
-        if (reservation == null || !reservation.isPending()) {
-            log.info("跳过结算：jobId={} 无待结算预留（未预扣，或已被结算/返还）", event.jobId());
+        if (reservation == null) {
+            // 无预留 = 这个任务本来就**没走过预扣**（MediaKit 那一族免费工具：抠图/扩图/擦除/裁切/
+            // 去字幕/音视频分离，它们的 job 由各自的服务直接建，压根不碰 billing），
+            // 或者预扣在写 job 之前就失败了。MQ 至少一次投递，重复到达是常态，都不是错误。
+            log.info("跳过结算：jobId={} 无预留（未预扣的任务，或预扣未落库）", event.jobId());
+            return;
+        }
+        if (!reservation.isPending()) {
+            // ⚠️ 这里有一个**必须吵出来**的分支：预留已被**释放**（而不是结算）时收到「完成」事件，
+            //    意味着那份钱已经退回用户了，而这单其实干完了 —— **平台少收了这一笔**。
+            //
+            //    `ReservationSweeper` 的自动释放正是造出这种时序的那条路径：它按**时间**放钱
+            //    （看不到 job 终态 —— billing 与 backend 不共享库），所以一个合法跑超阈值的任务
+            //    被释放后、真正的终态事件才到达时，就走到这里。
+            //
+            //    以前这里与「重复投递」共用一条 INFO —— 少收一笔与一次正常重投在日志里长得
+            //    一模一样，等于没有信号。兜底释放是这次刚加的，所以这是它带进来的新失效模式，
+            //    必须同时带上可观测性。
+            if (reservation.status() == Reservation.Status.RELEASED) {
+                log.warn("⚠️ 终态事件晚于兜底释放：jobId={} 预留已按 {} 积分释放，本单**未收费**。"
+                                + "若由自动释放造成，说明该 job 的真实耗时超过了释放阈值"
+                                + "（billing.reconciliation.sweeper.release-after），需上调阈值或人工补收。",
+                        event.jobId(), reservation.reservedCredits());
+                return;
+            }
+            // SETTLED：同一条完成事件被投递了多次。正常，静默。
+            log.info("跳过结算：jobId={} 预留已结算（重复投递）", event.jobId());
             return;
         }
 
@@ -124,7 +153,7 @@ public class SettlementService {
             }
         } else {
             actualCredits = 0;
-            for (JobEventPayload.UsageLine line : event.usage()) {
+            for (SettlementUsageLine line : event.usage()) {
                 Usage usage = line.toUsage();
                 requireBaseUnitReported(frozen, line, usage);
                 PricingRequest request = new PricingRequest(
@@ -160,7 +189,7 @@ public class SettlementService {
      * @throws IllegalStateException 用量行没带规则的基准维度
      */
     private static void requireBaseUnitReported(FrozenRules frozen,
-                                                JobEventPayload.UsageLine line, Usage usage) {
+                                                SettlementUsageLine line, Usage usage) {
         CompiledRule rule = frozen.lookup(line.modelId(), line.taskType());
         if (rule == null) {
             // 规则缺失由引擎抛 RuleNotFoundException —— 同一个错误不在这里报第二遍

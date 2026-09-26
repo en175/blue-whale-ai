@@ -1,7 +1,6 @@
 package com.bluewhale.billing.application;
 
 import com.bluewhale.billing.catalog.CatalogCompiler;
-import com.bluewhale.billing.infrastructure.mq.JobEventPayload;
 import com.bluewhale.billing.ledger.CreditService;
 import com.bluewhale.billing.ledger.Reservation;
 import com.bluewhale.billing.ledger.ReservationRepository;
@@ -104,7 +103,7 @@ class SettlementServiceTest {
     void 用量为空_按预扣额结算() {
         hold(12L, perSlotRule(3_000L));
 
-        settlement.settle(new JobEventPayload.JobCompleted(
+        settlement.settle(new SettlementCommand(
                 JOB, USER, "succeeded", 1, 4, List.of()));
 
         // 报不出用量时唯一一个「不比契约多收、也不比契约少收」的取值
@@ -116,7 +115,7 @@ class SettlementServiceTest {
     void 部分成功_用量为空_仍按全额() {
         hold(12L, perSlotRule(3_000L));
 
-        settlement.settle(new JobEventPayload.JobCompleted(
+        settlement.settle(new SettlementCommand(
                 JOB, USER, "partially_succeeded", 1, 2, List.of()));
 
         // 这是**取不到用量时的保守取值**，不是正确值：worker 报不出 model_id 时才会走到，
@@ -130,7 +129,7 @@ class SettlementServiceTest {
         // 规则按秒计价，而 worker 只报了槽数（比如将来漏报时长的那条路径）
         hold(10L, perSecondRule(2_000L));
 
-        JobEventPayload.JobCompleted event = completed("succeeded", 5, 5);
+        SettlementCommand event = completed("succeeded", 5, 5);
 
         // 取不到 → 0 → 落到 minCredits：用户白用一次，账面上却没有任何异常。
         // 所以宁可重投进死信（红灯有人看得见），也不要静默少收。
@@ -231,10 +230,10 @@ class SettlementServiceTest {
     }
 
     /** 完成事件：{@code succeededSlots} 是事件里的标量，用量行报的是实际量。 */
-    private static JobEventPayload.JobCompleted completed(String status, int succeededSlots,
-                                                         long reportedSlots) {
-        return new JobEventPayload.JobCompleted(JOB, USER, status, 1, succeededSlots,
-                List.of(new JobEventPayload.UsageLine(MODEL, TASK,
+    private static SettlementCommand completed(String status, int succeededSlots,
+                                               long reportedSlots) {
+        return new SettlementCommand(JOB, USER, status, 1, succeededSlots,
+                List.of(new SettlementUsageLine(MODEL, TASK,
                         Map.of("usage.succeededSlots", reportedSlots),
                         Map.of("size", "2k"))));
     }
