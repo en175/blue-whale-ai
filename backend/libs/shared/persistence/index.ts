@@ -249,6 +249,10 @@ export {
 } from "./cost-adjustment-repo.js";
 export {
   createRechargeOrderRepo,
+  RECHARGE_ORDER_STATUS,
+  RECHARGE_ORDER_STATUSES,
+  PAID_REACHED_STATUSES,
+  RECHARGE_ORDER_SNAPSHOT_DEFAULTS,
   type RechargeOrderRepo,
   type RechargeOrderView,
   type RechargeOrderStatus,

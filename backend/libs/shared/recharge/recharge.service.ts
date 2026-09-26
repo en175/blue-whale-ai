@@ -11,13 +11,20 @@
  *
  * 1. **billing 的幂等键**（`grantKey = purchased:{tradeNo}`）：真正拦重复发放的那道。
  *    进程重启、回调重投、两个请求并发进来，唯一索引都拦得住。
- * 2. **本地订单状态**（`recharge_orders.status`）：记下「这笔已经发过了」，
+ * 2. **本地订单状态**（`recharge_orders.status`）：记下「这笔走到哪一步了」，
  *    让重复回调不必要地再打一次 billing，也让查单能回答用户。
  *
  * 只留第 1 道：每次重复回调都白打一次 billing（能跑通，但噪音大）。
  * 只留第 2 道：进程在「发放成功 — 写状态」之间挂掉，重试就会**发第二次**——直接的钱损失。
- * 所以两道都要，且顺序是「先发放、后改状态」：先写状态的话，中间挂掉就变成「标记了已到账
- * 而钱没发」，那是最坏的一种不一致（用户付了钱，账上永远没有）。
+ * 所以两道都要，且本地状态**分两段写**（2026-09-26 起，状态机 4 态扩到 6 态）：
+ *
+ *   · `paid_pending`（钱到了）写在**发放之前**——发放失败时订单停在这里，
+ *     与「用户还没付钱」的 `pending` 区分得开，网关重投也还剩一次重试机会；
+ *   · `paid`（积分也发了）写在**发放成功之后**——顺序反了的话，中间挂掉就变成
+ *     「标记了已到账而钱没发」，那是最坏的一种不一致（用户付了钱，账上永远没有）。
+ *
+ * 于是「钱到了没有」的判据是 **`paid_pending` 或 `paid`**（>= 待到账），不再是 `= paid`。
+ * 写 `= paid` 的地方会把已经付款、只是还没发成功的单当成没收到钱。
  *
  * ── 到账积分在下单时刻冻结 ────────────────────────────────────────────────────
  *
@@ -41,6 +48,7 @@ import {
 import { sharedBillingClient, toBillingError } from "@lib/shared/billing/billing-client.js";
 import {
   createRechargeOrderRepo,
+  RECHARGE_ORDER_STATUS,
   type RechargeOrderListFilter,
   type RechargeOrderPage,
   type RechargeOrderRepo,
@@ -204,6 +212,10 @@ export class RechargeService {
 
     // 先落库再调用网关：网关超时/网络抖动时我们仍然有一条记录可查、可对账；
     // 反过来（先调用后落库）一旦落库失败，网关那边的成功订单就没有本地对应物。
+    //
+    // 落库时把**商品快照**一起写死（PRD §9.3）：商品名用展示名（用户此刻看到的那串字），
+    // 配置版本取档位行此刻的 version（运营之后改价/改名都 +1，据此可判「这单是改价前还是改价后」）。
+    // 其余几列（首购、有效期、赠送）此刻还是常量，取值在 repo 的写入侧一处。
     const tradeNo = generateTradeNo();
     await this.repo.create({
       tradeNo,
@@ -212,6 +224,8 @@ export class RechargeService {
       amountFen,
       credits,
       creditsPerYuan,
+      productName: displayTierName(tier.name, credits),
+      configVersion: tier.version,
     });
 
     const order = await unifiedOrder({
@@ -265,10 +279,28 @@ export class RechargeService {
     tradeNo: string;
   }): Promise<RechargeOrderStateView> {
     const order = await this.loadOwnOrder(input.userId, input.tradeNo);
-    const current = order.status === "pending" ? await this.reconcile(order) : order;
+    // ⚠️ 两条自愈路径，都由**用户轮询**触发，但做的事不同：
+    //   · `pending`      —— 还不知道钱到没到，要**问网关**（reconcile）
+    //   · `paid_pending` —— 钱已确认收到、只是积分没发成功，**不必再问网关**，直接补发
+    //
+    // ⚠️ 第二支不能省。网关重投窗口只有约 15 分钟，过了就没人补发；而用户只要还开着页面
+    //    就会一直轮询 —— 少了它，一次发放失败会让用户**永远**停在「发放中」，
+    //    比拆状态之前的旧行为还差（那时单留在 `pending`，轮询会经 reconcile 补发）。
+    //
+    //    补发本身幂等：`fulfill` 先 `markPaidPending`（条件更新，已达则不动作），
+    //    发放走 billing 的 `purchased:{tradeNo}` 幂等键，重复调用不会重复发积分。
+    //
+    // ⚠️ 剩下的缺口（#45 主动对账）：**没人轮询的单**仍然不会自愈 —— 用户关掉页面之后，
+    //    重投窗口一过就没人管了。这里补的是「有人在看」的那一半。
+    const current =
+      order.status === RECHARGE_ORDER_STATUS.pending
+        ? await this.reconcile(order)
+        : order.status === RECHARGE_ORDER_STATUS.paidPending
+          ? await this.retryFulfill(order)
+          : order;
 
     let creditsAfter: number | null = null;
-    if (current.status === "paid") {
+    if (current.status === RECHARGE_ORDER_STATUS.paid) {
       try {
         const balance = await sharedBillingClient().queryBalance(input.userId);
         creditsAfter = balance.availableCredits;
@@ -337,8 +369,8 @@ export class RechargeService {
         await this.repo.markExpired(order.tradeNo);
       }
     } catch (error) {
-      // 查单失败不改变本地状态：网关抖动或配置缺失时，本地那条「pending」仍是已知最准的答案。
-      // 抛出去只会让用户端连「这笔还没到账」都看不到。
+      // 查单失败（或查到了、但随后的发放失败）都不改变本地状态：现有那条状态就是已知最准的
+      // 答案（`paid_pending` 尤其不能往回写）。抛出去只会让用户端连「这笔还没到账」都看不到。
       this.logger.warn(
         `查单补偿失败 tradeNo=${order.tradeNo}：${
           error instanceof Error ? error.message : String(error)
@@ -381,9 +413,13 @@ export class RechargeService {
     await this.repo.recordNotify(tradeNo);
 
     // 已到账：重投直接确认，不再打一次 billing。
-    // 这条短路是安全的——`markPaid` 只在**发放成功之后**才写（见 `fulfill`），
+    // 这条短路是安全的——`paid` 只在**发放成功之后**才写（见 `fulfill`），
     // 所以「本地是 paid」蕴含「积分已经发过」。billing 的幂等键仍留着兜并发与崩溃重试。
-    if (order.status === "paid") {
+    //
+    // ⚠️ **只短路 `paid`，不短路 `paid_pending`**：那个状态的意思正是「钱到了、积分还没发成功」。
+    //    网关这一投是一次白给的重试机会（重投最多 6 次），短路掉就把它浪费了——
+    //    订单从此停在 paid_pending，只能等人来查。所以 paid_pending 要**继续往下走、重试发放**。
+    if (order.status === RECHARGE_ORDER_STATUS.paid) {
       return true;
     }
 
@@ -406,8 +442,10 @@ export class RechargeService {
         await this.fulfill(order);
         return true;
       } catch (error) {
-        // 发放失败 → 不接受，让网关按 30/60/90… 秒重投；
-        // 重投窗口过了还有查单补偿（`reconcile`）兜底。
+        // 发放失败 → 不接受，让网关按 30/60/90… 秒重投。订单留在 `paid_pending`
+        // （钱到了、积分没发），所以那几次重投是**真的重试发放**，不是白重投。
+        // ⚠️ 别指望查单补偿接住它：`reconcile` 只处理 `pending`（见 `getOrderStatus`），
+        //    重投窗口（约 15 分钟）过后的补发要等主动对账。
         this.logger.error(
           `到账发放失败 tradeNo=${tradeNo}：${
             error instanceof Error ? error.message : String(error)
@@ -434,9 +472,38 @@ export class RechargeService {
   /**
    * 发放积分并把这笔订单记为已到账。
    *
-   * <p>顺序不可颠倒（见文件头注释）：**先发放、后改状态**。
+   * <p>三步的顺序固定（见文件头注释）：**先置「钱到了」→ 再发放 → 最后置「积分也发了」**。
+   *
+   * <p>发放失败时本方法抛错，订单停在 `paid_pending` —— 这正是这个状态存在的理由：
+   * 客服看得到「用户付了钱、积分没发」，而不是一条与「还没付钱」不可分辨的 `pending`。
    */
+  /**
+   * 补发：钱已确认收到、积分没发成功时的重试（由用户轮询触发，见 {@link #getOrderStatus}）。
+   *
+   * <p>为什么不复用 {@link #reconcile}：那条会**再问一次网关**，而这里的钱已经确认收过了 ——
+   * 再问一次既多余，也会把「网关说的算不算数」这套判断重新卷进来（它已经判过一次了）。
+   *
+   * <p>⚠️ 失败**不抛**：补发失败不该让「查这笔单到哪一步了」这个请求也失败 ——
+   * 「发放中」本身就是一个有效且正确的答案。异常记日志，下一次轮询接着试。
+   */
+  private async retryFulfill(order: RechargeOrderView): Promise<RechargeOrderView> {
+    try {
+      await this.fulfill(order);
+    } catch (error) {
+      this.logger.warn(
+        `补发失败 tradeNo=${order.tradeNo}（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，`
+          + `用户轮询会继续重试）：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    // 重新读一次：成功了要给调用方看 `paid`，失败了要如实回 `paid_pending`
+    return this.loadOwnOrder(Number(order.userId), order.tradeNo);
+  }
+
   private async fulfill(order: RechargeOrderView): Promise<void> {
+    // 条件更新，重投/并发下只有一个为 true；返回值这里不用——发放与否由调用方按
+    // 「状态是否 >= 待到账」判定（`paid_pending` 上的重投要重试发放），不是由它判。
+    await this.repo.markPaidPending(order.tradeNo);
+
     const { lotId, duplicated } = await grantCredits({
       userId: Number(order.userId),
       credits: order.credits,

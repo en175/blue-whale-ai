@@ -6,10 +6,18 @@ import {
 } from "@lib/shared/account/admin-paging.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
-import type { RechargeOrderStatus } from "@lib/shared/persistence/index.js";
+import {
+  RECHARGE_ORDER_STATUSES,
+  type RechargeOrderStatus,
+} from "@lib/shared/persistence/index.js";
 
-/** 订单状态白名单。传别的当场拒绝——静默返回空列表与「真的没有」长得一模一样。 */
-const STATUSES: readonly RechargeOrderStatus[] = ["pending", "paid", "expired", "failed"];
+/**
+ * 订单状态白名单。传别的当场拒绝——静默返回空列表与「真的没有」长得一模一样。
+ *
+ * <p>清单**不在这里手写**：状态一扩（2026-09-26 由 4 态到 6 态），
+ * 手写的数组不会报错，只会让新状态的单筛不出来（「按 paid_pending 筛」永远返回空）。
+ */
+const STATUSES = RECHARGE_ORDER_STATUSES;
 
 /**
  * 充值记录（管理端）。

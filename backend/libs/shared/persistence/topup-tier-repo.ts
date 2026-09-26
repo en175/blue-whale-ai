@@ -15,6 +15,14 @@ export interface TopupTierView {
   startTime: string | null;
   endTime: string | null;
   sortOrder: number;
+  /**
+   * 档位配置版本。**每保存一次 +1**（不是自增主键，也不跟 gmt_modified 等价：
+   * 后者是「什么时候动的」，它是「口径变到第几版了」）。
+   *
+   * <p>下单时把它快照进 `recharge_orders.config_version`，用来回答
+   * 「这单是改价前还是改价后下的」——订单只冻结了价格与积分数，没冻结「当时是哪一版配置」。
+   */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +81,7 @@ function toView(row: any): TopupTierView {
     startTime: row.start_time ? new Date(row.start_time).toISOString() : null,
     endTime: row.end_time ? new Date(row.end_time).toISOString() : null,
     sortOrder: row.sort_order,
+    version: row.version,
     createdAt: new Date(row.gmt_create).toISOString(),
     updatedAt: new Date(row.gmt_modified).toISOString(),
   };
@@ -167,7 +176,14 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       const discount = Number(input.discount ?? existing.discount);
       const price = Math.round(originalPrice * discount * 100) / 100;
 
-      const data: Record<string, unknown> = { price, gmt_modified: new Date() };
+      const data: Record<string, unknown> = {
+        price,
+        // 口径版本 +1。写在**保存**这一步（而不是只在改价时）：保存是运营唯一能改商品配置的
+        // 入口，版本号要能覆盖名字 / 折扣 / 上下架 / 时间窗 —— 这些都会改变用户下单时看到的东西。
+        // 排序不算配置（见 updateSortOrder：它只动 sort_order，不碰 version）。
+        version: { increment: 1 },
+        gmt_modified: new Date(),
+      };
       if (input.name !== undefined) data.name = input.name;
       if (input.amount !== undefined) data.amount = BigInt(Math.round(input.amount));
       if (input.originalPrice !== undefined) data.original_price = input.originalPrice;
