@@ -1,7 +1,9 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor;
+import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
+import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -24,6 +26,9 @@ import com.volcengine.tos.model.object.PreSignedURLInput;
 import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -33,6 +38,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mybatis.spring.mapper.MapperFactoryBean;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -671,6 +677,115 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
                 (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5", 227.0, "1920x1080", "12"))).isFalse();
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
         assertThat(probes.get()).isEqualTo(2);
+    }
+
+    /**
+     * UNCONFIRMED 保守保留 + 恢复复判（IKIN8V，规格缺失 a2）：在飞发布事务对 generation_jobs
+     * 行持 X 锁贯穿全部探测轮（默认 {@code publishSettleProbeAttempts=3}、轮间 500ms——探测轮
+     * 与延时为 processor 包级旋钮，本类跨包不可注入，默认值窗口 ~1s 对 {@code @Timeout(90)}
+     * 缩比可忽略）→ 判 UNCONFIRMED 保守保留并留 {@code [pending-cleanup]} 结构化记录；随后
+     * 提交该在飞事务（同键 Asset 落定、job 由守卫 CAS 写成 succeeded）→ fail 落库被守卫拒绝
+     * （不改写成功终态）→ 再次调用清理决策（同一决策入口，结果不明口径）→ 权威引用已可见 →
+     * 对象保留。raw 连接 finally 兜底落定防容器复用污染。
+     */
+    @Test
+    @Timeout(90)
+    @DisplayName("在飞事务贯穿全部探测轮：UNCONFIRMED 保守保留 + [pending-cleanup] 结构化记录；提交后再次清理决策 → Asset 已可见，对象仍保留")
+    void inFlightTransactionAcrossAllProbesKeepsObjectThenRecheckAfterCommitRetainsIt() throws Exception {
+        long jobId = seedClaimableMuxJob();
+        ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
+        AtomicReference<String> realKey = new AtomicReference<>();
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(realTosStandin(objects, null), "bkt", "tos.example.com");
+        JobStateMachineService spyService = spy(realService);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        when(gateway.poll("sk-frozen", "mux-task-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
+                        227.0, "1920x1080", null, null, "request-db-1"));
+        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService, credentials,
+                gateway, relay, mock(GenerationMessageProducer.class));
+
+        CountDownLatch rawTxOpen = new CountDownLatch(1);
+        CountDownLatch failAttempted = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        AtomicReference<Connection> rawRef = new AtomicReference<>();
+
+        doAnswer(invocation -> {
+            PublishAudioVideoMuxDto dto = invocation.getArgument(0);
+            realKey.set(dto.storageKey());
+            Connection raw = openRawConnection();
+            rawRef.set(raw);
+            executeInFlightPublish(raw, jobId, dto.workerId(), dto.fencingToken(), dto.storageKey());
+            rawTxOpen.countDown();
+            throw new RuntimeException("发布事务提交窗口断连（结果不明）");
+        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+
+        // 全部探测轮真跑：行锁被在飞事务占用 → in-flight；窗口耗尽即 UNCONFIRMED（默认 3 轮）
+        doAnswer(invocation -> {
+            probes.incrementAndGet();
+            return invocation.callRealMethod();
+        }).when(spyService).hasInFlightJobWriteTransaction(String.valueOf(jobId));
+
+        // fail 落库钩子：[pending-cleanup] 记录在 discard 内同步先于 fail 写出——latch 放行即
+        // 留痕已定；真实 fail UPDATE 阻塞在在飞事务行锁上，等主线程提交后守卫不命中（已 succeeded）
+        doAnswer(invocation -> {
+            failAttempted.countDown();
+            return invocation.callRealMethod();
+        }).when(spyService).failMediaExtractJob(any(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class));
+
+        Logger processorLogger = (Logger) LoggerFactory.getLogger(AudioVideoMuxJobProcessor.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        processorLogger.addAppender(appender);
+        ExecutorService single = Executors.newSingleThreadExecutor();
+        try {
+            var handle = single.submit(() -> processor.handle(String.valueOf(jobId)));
+            assertThat(rawTxOpen.await(20, TimeUnit.SECONDS)).as("在飞发布事务应已开启").isTrue();
+            assertThat(failAttempted.await(20, TimeUnit.SECONDS))
+                    .as("探测窗口应耗尽（UNCONFIRMED）并进入 fail 落库").isTrue();
+            // 行锁贯穿全部探测轮（publishSettleProbeAttempts 默认 3）：无一轮见到锁空闲
+            assertThat(probes.get()).isEqualTo(3);
+            rawRef.get().commit();
+            handle.get(60, TimeUnit.SECONDS);
+
+            // 第一次决策（UNCONFIRMED）：对象保守保留 + 结构化待处理记录（jobId/storageKey/reason/resolution）
+            assertThat(objects).containsKey(realKey.get());
+            assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .filter(message -> message.contains("[pending-cleanup]")).toList())
+                    .anySatisfy(message -> assertThat(message)
+                            .contains("jobId=" + jobId)
+                            .contains("storageKey=" + realKey.get())
+                            .contains("发布结果不明")
+                            .contains("resolution=retain-pending"));
+            // 在飞事务提交后：Asset 引用可见、job 成功终态，迟到 fail 守卫被拒不改写终态
+            assertThat(countAssets(jobId, realKey.get())).isOne();
+            GenerationJobEntity job = readJob(jobId);
+            assertThat(job.getStatus()).isEqualTo("succeeded");
+            verify(spyService).failMediaExtractJob(any());
+            assertThat(readJob(jobId).getError()).isNull();
+
+            // 恢复复判：状态恢复后再次调用同一清理决策（发布结果不明口径）——探测锁空闲 +
+            // Asset 引用已可见 → REFERENCED 保留，对象不删
+            ClaimedMediaExtractJobDto jobDto = new ClaimedMediaExtractJobDto(String.valueOf(jobId),
+                    "99", "9", Map.of(), "mux-task-1", "amux-recheck", job.getFencingToken(),
+                    0, 0, WorkerClock.now(), null);
+            TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
+                    "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
+                    (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5");
+            var decision = AudioVideoMuxJobProcessor.class.getDeclaredMethod(
+                    "discardUnpublishedTransfer", ClaimedMediaExtractJobDto.class,
+                    TosVideoMediaRelay.StoredVideo.class, boolean.class);
+            decision.setAccessible(true);
+            decision.invoke(processor, jobDto, stored, true);
+            assertThat(objects).containsKey(realKey.get());
+            assertThat(countAssets(jobId, realKey.get())).isOne();
+            assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
+        } finally {
+            processorLogger.detachAppender(appender);
+            settleQuietly(rawRef.get());
+            single.shutdownNow();
+        }
     }
 
     /** raw 连接兜底落定（容器复用防污染）：未关闭则回滚并关闭。 */
