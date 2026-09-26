@@ -30,24 +30,33 @@ vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   };
 });
 
+/** 一条按 status 分组后的充值求和行（`sumPaidRecharges` 用 groupBy，见那里的注释）。 */
+type RechargeRow = {
+  status: string;
+  _sum: { credits: bigint | null; amount_fen: bigint | null };
+};
+
 function makeService(options: {
   totalUsers?: number;
   jobRows?: Array<{ type: string; _count: { _all: number } }>;
-  rechargeSum?: { credits: bigint | null; amount_fen: bigint | null };
+  /**
+   * ⚠️ 是**按状态分组的多行**，不是一条求和。
+   * 拆出 `paid_pending` 之后，实收金额与到账积分的口径不同（钱到了 vs 积分发了），
+   * 一条 `where` 出不来两个数 —— 见 `sumPaidRecharges` 的注释。
+   */
+  rechargeRows?: RechargeRow[];
 }) {
   const groupBy = vi.fn().mockResolvedValue(options.jobRows ?? []);
-  const aggregate = vi
-    .fn()
-    .mockResolvedValue({ _sum: options.rechargeSum ?? { credits: null, amount_fen: null } });
+  const rechargeGroupBy = vi.fn().mockResolvedValue(options.rechargeRows ?? []);
   const service = new DashboardService(
     {
       listAdminUsers: vi.fn().mockResolvedValue({ total: options.totalUsers ?? 7 }),
     } as never,
     {
-      client: { generation_jobs: { groupBy }, recharge_orders: { aggregate } },
+      client: { generation_jobs: { groupBy }, recharge_orders: { groupBy: rechargeGroupBy } },
     } as never,
   );
-  return { service, groupBy, aggregate };
+  return { service, groupBy, rechargeGroupBy };
 }
 
 describe("DashboardService —— 任务数与类型分组", () => {
@@ -120,25 +129,50 @@ describe("DashboardService —— 充值积分与收入金额", () => {
     vi.unstubAllGlobals();
   });
 
-  it("按**到账时刻**（paid_at）划区间、只算 paid、金额单位是分", async () => {
+  it("按**到账时刻**（paid_at）划区间；实收含 `paid_pending`、到账积分只算 `paid`", async () => {
+    // ⚠️ 这条的断言语义**变了**（2026-09-26 拆出 `paid_pending` 之后）：
+    //    停在 `paid_pending` 的单**钱已经收了**（网关确认过），只是积分还没发成功 ——
+    //    所以它该进「实收金额」，不该进「到账积分」。原来一条 `where: status='paid'`
+    //    把两个数一起算，会把这部分收入**低报**。
     grpcConsumedCredits(() => 4321n);
-    const { service, aggregate } = makeService({
-      rechargeSum: { credits: 5_000_000n, amount_fen: 1_000_000n },
+    const { service, rechargeGroupBy } = makeService({
+      rechargeRows: [
+        // 已到账：钱与积分都算
+        { status: "paid", _sum: { credits: 5_000_000n, amount_fen: 1_000_000n } },
+        // 待到账：只算钱、不算积分
+        { status: "paid_pending", _sum: { credits: 700n, amount_fen: 30_000n } },
+      ],
     });
 
     const stats = await service.stats(RANGE);
 
-    expect(aggregate).toHaveBeenCalledWith({
-      where: { is_delete: 0, status: "paid", paid_at: WINDOW },
+    // 查询本身：区间与「≥ 待到账」的过滤都要在 SQL 里（不是取回来再筛）
+    expect(rechargeGroupBy).toHaveBeenCalledWith({
+      by: ["status"],
+      where: { is_delete: 0, status: { in: ["paid_pending", "paid"] }, paid_at: WINDOW },
       _sum: { credits: true, amount_fen: true },
     });
+    // 积分：只有 paid 那 5,000,000（待到账的 700 不算 —— 积分确实还没发出去）
     expect(stats.totalRechargeCredits).toBe(5_000_000);
-    expect(stats.totalRevenueFen).toBe(1_000_000);
+    // 金额：两笔都算（钱都收了）
+    expect(stats.totalRevenueFen).toBe(1_030_000);
   });
 
-  it("区间内没有已到账订单时两列都是 null（BIGINT 求和无行返回 null），要落成 0 而不是 NaN", async () => {
+  it("区间内没有相关订单时两列都是 0（不是 NaN）", async () => {
     grpcConsumedCredits(() => 4321n);
-    const { service } = makeService({ rechargeSum: { credits: null, amount_fen: null } });
+    const { service } = makeService({ rechargeRows: [] });
+
+    const stats = await service.stats(RANGE);
+
+    expect(stats.totalRechargeCredits).toBe(0);
+    expect(stats.totalRevenueFen).toBe(0);
+  });
+
+  it("求和列缺值（BIGINT 无行）落成 0 而不是 NaN", async () => {
+    grpcConsumedCredits(() => 4321n);
+    const { service } = makeService({
+      rechargeRows: [{ status: "paid", _sum: { credits: null, amount_fen: null } }],
+    });
 
     const stats = await service.stats(RANGE);
 
@@ -185,7 +219,7 @@ describe("DashboardService —— 消耗积分（billing）", () => {
     const { service } = makeService({
       totalUsers: 42,
       jobRows: [{ type: "video", _count: { _all: 3 } }],
-      rechargeSum: { credits: 100n, amount_fen: 200n },
+      rechargeRows: [{ status: "paid", _sum: { credits: 100n, amount_fen: 200n } }],
     });
 
     const stats = await service.stats(RANGE);

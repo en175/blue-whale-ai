@@ -34,6 +34,10 @@ import {
 } from "@lib/shared/billing/billing-admin-client.js";
 import { createLogger, type Logger } from "@lib/core/logging";
 import { IdentityService } from "@lib/shared/identity/index.js";
+import {
+  PAID_REACHED_STATUSES,
+  RECHARGE_ORDER_STATUS,
+} from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { withinRange, type DashboardRange } from "./dashboard-range.js";
 
@@ -123,21 +127,45 @@ export class DashboardService {
   }
 
   /** 区间内已到账订单的积分合计与实付金额合计（一条 SQL 出两个数）。 */
+  /**
+   * 区间内的**实收金额**与**已发放积分**合计。
+   *
+   * <p>⚠️ 两个数的口径**从此不同**（2026-09-26 状态机拆出 `paid_pending` 之后）：
+   * <ul>
+   *   <li><b>实收金额</b>取「≥ 待到账」（`paid_pending` 或 `paid`）—— 钱**已经收了**。
+   *       只算 `paid` 会把「已付款、只是积分还没发成功」的单漏掉，**收入被低报**。</li>
+   *   <li><b>到账积分</b>仍取严格 `paid` —— 那些积分确实还没发出去，算进来就是虚报。</li>
+   * </ul>
+   *
+   * <p>所以一条 `where` 出不来了（原实现是一条 aggregate 出两个数）。改成按 status 分组
+   * 取回、在内存里分开累加 —— **仍然只有一次往返**，代价只是多传回一行。
+   */
   private async sumPaidRecharges(window: {
     gte: Date;
     lt: Date;
   }): Promise<{ credits: number; revenueFen: number }> {
-    const agg = await this.prisma.client.recharge_orders.aggregate({
-      where: { is_delete: 0, status: "paid", paid_at: window },
+    const rows = await this.prisma.client.recharge_orders.groupBy({
+      by: ["status"],
+      where: {
+        is_delete: 0,
+        status: { in: [...PAID_REACHED_STATUSES] },
+        paid_at: window,
+      },
       _sum: { credits: true, amount_fen: true },
     });
+
+    let credits = 0;
+    let revenueFen = 0;
     // 两列都是 BIGINT，没行时 `_sum` 为 null（不是 0）。
     // 转 Number：区间上限 30 天，30 天内的充值笔数与单笔金额都不足以逼近
     // Number.MAX_SAFE_INTEGER（9e15），这个转法是安全的。
-    return {
-      credits: Number(agg._sum.credits ?? 0n),
-      revenueFen: Number(agg._sum.amount_fen ?? 0n),
-    };
+    for (const row of rows) {
+      revenueFen += Number(row._sum.amount_fen ?? 0n);
+      if (row.status === RECHARGE_ORDER_STATUS.paid) {
+        credits += Number(row._sum.credits ?? 0n);
+      }
+    }
+    return { credits, revenueFen };
   }
 
   /**
