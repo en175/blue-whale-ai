@@ -2647,9 +2647,12 @@ export default function CanvasPage() {
    *  否则会把 versionRef 打回打开时的旧 version，随后保存带着过期 If-Match 必 412。 */
   const hydratedDocRef = useRef<typeof doc>(null);
   const hydratedProjectRef = useRef<string | null>(null);
-  /** IKIIWN：水合基线是否非空。空保存的 confirmEmpty 只授予「本会话加载到过非空画布」的会话
-   *  （用户显式删光场景）；水合进来即为空（服务端返回空/内容丢失）的空保存不带标记，由服务端 422 拦下。 */
-  const hydratedNonEmptyRef = useRef(false);
+  /** IKIIWN/IKIMQK：本会话是否成功确认过非空画布。空保存的 confirmEmpty 授予依据有二：
+   *  成功水合非空基线（用户显式删光场景），或本会话成功保存非空文档并取得新版本
+   *  （IKIMQK 合法例外：空水合 → 新增 → 非空保存成功 → 再明确删除）；水合进来即为空
+   *  且从未成功保存过非空文档（服务端返回空/内容丢失/新建未保存即删）的空保存不带标记，
+   *  由服务端 422 拦下。 */
+  const confirmedNonEmptyRef = useRef(false);
   /** IKILUE：清空命令待复核——带 confirmEmpty 的空保存被 412 拒绝（另一会话已改写画布）后置位。
    *  生效期间待发文档仍为空时不再自动/手动发出保存（防旧空文档覆盖服务端新画布），
    *  仅在成功重新水合或项目切换重置时解除；期间新增内容使文档非空的保存不受影响。 */
@@ -2682,7 +2685,7 @@ export default function CanvasPage() {
       lastSavedRef.current = '';
       hydratedDocRef.current = null;
       hydratedProjectRef.current = null;
-      hydratedNonEmptyRef.current = false;
+      confirmedNonEmptyRef.current = false;
       emptyClearConflictRef.current = false; // IKILUE：项目卸载/切换重置，清空待复核闸门一并复位
       emptyOverwriteRejectedRef.current = false; // IKILTB：422 阻断标记同步复位
       setSaveStatus('idle');
@@ -2702,7 +2705,7 @@ export default function CanvasPage() {
       return;
     }
     hydratedProjectRef.current = canvasLoadFailed ? null : currentId;
-    hydratedNonEmptyRef.current = doc.nodes.length > 0;
+    confirmedNonEmptyRef.current = doc.nodes.length > 0;
     emptyClearConflictRef.current = false; // IKILUE：重新水合即解除清空待复核（confirmEmpty 按新基线重新授予）
     emptyOverwriteRejectedRef.current = false; // IKILTB：重新水合解除 422 阻断（空覆盖按新基线重新判定）
     const t: Node[] = [];
@@ -3006,15 +3009,19 @@ export default function CanvasPage() {
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
-      // IKILUE：空文档保存的显式确认标记（仅本会话水合基线非空时授予）；
+      // IKILUE：空文档保存的显式确认标记（本会话成功确认过非空画布时授予：水合基线非空，
+      // 或本会话成功保存非空文档并取得新版本——IKIMQK 空基线新增后再删光的合法例外）；
       // 412 后据此区分「清空待复核」与普通版本冲突
-      const confirmEmpty = nodes.length === 0 && hydratedNonEmptyRef.current;
+      const confirmEmpty = nodes.length === 0 && confirmedNonEmptyRef.current;
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       trackCanvasSave(
         saveCanvasDoc(currentId, { viewport, nodes, edges, confirmEmpty }, versionRef.current)
           .then((saved) => {
             versionRef.current = saved.version;
+            // IKIMQK：成功保存非空文档并取得新版本——授予确认清空资格（空保存的 If-Match
+            // 即用该版本，缺版本时服务端按 428 拒绝）
+            if (nodes.length > 0) confirmedNonEmptyRef.current = true;
             setSaveBlocked(false);
             emptyOverwriteRejectedRef.current = false; // IKILTB：保存成功解除 422 阻断标记
             pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
@@ -10700,9 +10707,9 @@ export default function CanvasPage() {
       if (emptyClearConflictRef.current && nodes.length === 0) return false;
       const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
       if (signature !== lastSavedRef.current) {
-        // IKILUE：空文档保存的显式确认标记（仅本会话水合基线非空时授予），412 后据此登记清空待复核闸门
+        // IKILUE：空文档保存的显式确认标记（本会话成功确认过非空画布时授予，口径同自动保存），412 后据此登记清空待复核闸门
         // IKILTB：提到 try 外——catch 登记 412 闸门时同口径复用，不再重写同义表达式（与自动保存路径一致）
-        const confirmEmpty = nodes.length === 0 && hydratedNonEmptyRef.current;
+        const confirmEmpty = nodes.length === 0 && confirmedNonEmptyRef.current;
         try {
           const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current, confirmEmpty }, versionRef.current);
           if (activeProjectRef.current !== projectId) {
@@ -10711,6 +10718,8 @@ export default function CanvasPage() {
             return false;
           }
           versionRef.current = saved.version;
+          // IKIMQK：成功保存非空文档并取得新版本——授予确认清空资格（口径同自动保存路径）
+          if (nodes.length > 0) confirmedNonEmptyRef.current = true;
           lastSavedRef.current = signature;
           pendingNodeIdsRef.current.clear();
         } catch (error) {
