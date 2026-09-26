@@ -12,6 +12,7 @@ import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.sun.net.httpserver.HttpServer;
 import com.volcengine.tos.TOSV2;
+import com.volcengine.tos.model.object.DeleteObjectInput;
 import com.volcengine.tos.model.object.PreSignedURLInput;
 import com.volcengine.tos.model.object.PreSignedURLOutput;
 import org.junit.jupiter.api.AfterEach;
@@ -37,10 +38,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -326,6 +329,212 @@ class AudioVideoMuxStreamingTransferTest {
                 failure.message() != null && failure.message().contains("任务执行截止时间已到")));
         verify(stateMachine, never()).publishAudioVideoMuxResult(any());
         assertThat(uploadedBytes.get()).isEqualTo(0);
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    // ========== IKIN03：转存成功返回后 → 发布前的未发布对象清理（真实 relay + TOS 替身） ==========
+
+    /** 真实转存 + 发布链的受控替身夹具：慢流源完整转存（768KiB 真实送达 TOS 替身）。 */
+    private TOSV2 fullyTransferredFixture(JobStateMachineService stateMachine,
+                                          GenerationCredentialService credentials,
+                                          NewApiMediaKitMuxAudioVideoClient gateway,
+                                          GenerationMessageProducer producer,
+                                          String sourceUrl) throws IOException {
+        TOSV2 tosClient = tosStandin();
+        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
+                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", sourceUrl,
+                        227.0, "1920x1080", null, null, null));
+        return tosClient;
+    }
+
+    /** 心跳窗拉长到 5s（转存 ~1.2s 内不触发）：让「转存后」分支由打桩的续租/发布返回值确定性控制。 */
+    private AudioVideoMuxJobProcessor quietHeartbeatProcessor(JobStateMachineService stateMachine,
+                                                              GenerationCredentialService credentials,
+                                                              NewApiMediaKitMuxAudioVideoClient gateway,
+                                                              TosVideoMediaRelay relay,
+                                                              GenerationMessageProducer producer) {
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        processor.leaseRenewIntervalMs = 5_000;
+        return processor;
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("真实转存成功后失租：发布前放弃 → 权威核实未引用 → TOS 替身收到 deleteObject（key=本次上传）；不发布不失败")
+    void realTransferThenLeaseLostBeforePublishCleansUpTheUploadedTosObject() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        // 转存前续租命中；转存成功返回后续租未命中（已被接管/终态）→ 发布前放弃并清理
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        // 该次上传真实完整送达过 TOS 替身（对象确实存在），清理必须精确指向本次上传的 key
+        assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        var deleted = ArgumentCaptor.forClass(DeleteObjectInput.class);
+        verify(tosClient).deleteObject(deleted.capture());
+        assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+        assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
+        assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
+        // 旧执行者 fencing：不生成 Asset、不把失租写成普通失败终态（hasPublishedAsset 默认未引用）
+        verify(stateMachine).hasPublishedAsset("70", uploaded.getValue().getKey());
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("真实转存 + 发布成功：TOS 对象保留为已发布成品，Asset 与对象一致，绝不 deleteObject")
+    void realTransferPublishedKeepsTheTosObject() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(true);
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
+        // Asset 与 GenerationJob 结果一致：发布的 storageKey 即本次真实上传的 key
+        ArgumentCaptor<PublishAudioVideoMuxDto> published = ArgumentCaptor.forClass(PublishAudioVideoMuxDto.class);
+        verify(stateMachine).publishAudioVideoMuxResult(published.capture());
+        assertThat(published.getValue().storageKey()).isEqualTo(uploaded.getValue().getKey());
+        assertThat(published.getValue().size()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
+        assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("守卫拒绝但权威核实发现 Asset 已引用：保留对象（迟到清理不删已发布成品）")
+    void realTransferGuardRejectionKeepsObjectWhenAuthorityConfirmsReference() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+        // 权威核实替身：该 job 的转存对象已被 Asset 引用（发布事务已提交）→ 保留
+        when(stateMachine.hasPublishedAsset(eq("70"), anyString())).thenReturn(true);
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        verify(stateMachine).hasPublishedAsset("70", uploaded.getValue().getKey());
+        verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        // 成品完整保留在 TOS 替身
+        assertThat(uploadedBytes.get()).isEqualTo((long) BLOCK_BYTES * BLOCK_COUNT);
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("发布抛异常但权威核实确认事务已提交（Asset 已引用）：保留对象，异常仍走既有 fail 终态")
+    void realTransferPublishExceptionKeepsCommittedObject() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any()))
+                .thenThrow(new RuntimeException("发布事务结果不明"));
+        // 提交结果不明：先核实权威状态——已被 Asset 引用（事务实际已提交）则保留
+        when(stateMachine.hasPublishedAsset(eq("70"), anyString())).thenReturn(true);
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        verify(stateMachine).hasPublishedAsset("70", uploaded.getValue().getKey());
+        verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
+        // 异常继续上抛走既有 fail 终态路径（守卫仍 fencing），不吞异常
+        verify(stateMachine).failMediaExtractJob(any());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("发布抛异常且权威核实确认未发布：清理本次上传的 TOS 对象（key 精确匹配）")
+    void realTransferPublishExceptionCleansUpWhenUnpublished() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any()))
+                .thenThrow(new RuntimeException("发布事务结果不明"));
+        List<String> tempBefore = relayTempFiles();
+
+        quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        var uploaded = ArgumentCaptor.forClass(PreSignedURLInput.class);
+        verify(tosClient).preSignedURL(uploaded.capture());
+        var deleted = ArgumentCaptor.forClass(DeleteObjectInput.class);
+        verify(tosClient).deleteObject(deleted.capture());
+        assertThat(deleted.getValue().getKey()).isEqualTo(uploaded.getValue().getKey());
+        verify(stateMachine).hasPublishedAsset("70", uploaded.getValue().getKey());
+        verify(stateMachine).failMediaExtractJob(any());
+        assertThat(relayTempFiles()).isEqualTo(tempBefore);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("TOS 删除失败：删除动作仍发生（留对象身份与错误记录），失租静默退出不变、无临时文件残留")
+    void realTransferTosDeleteFailureKeepsSilentExitAndCleansTempFiles() throws Exception {
+        String sourceUrl = serveSlow();
+        JobStateMachineService stateMachine = mock(JobStateMachineService.class);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
+        TOSV2 tosClient = fullyTransferredFixture(stateMachine, credentials, gateway, producer, sourceUrl);
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(tosClient).deleteObject(any(DeleteObjectInput.class));
+        List<String> tempBefore = relayTempFiles();
+
+        assertThatCode(() ->
+                quietHeartbeatProcessor(stateMachine, credentials, gateway, relay, producer).handle("70"))
+                .doesNotThrowAnyException();
+
+        // 删除尝试确实发生（relay 内部记录 storageKey + 错误后吞掉异常），主语义不变
+        verify(tosClient).deleteObject(any(DeleteObjectInput.class));
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
 }

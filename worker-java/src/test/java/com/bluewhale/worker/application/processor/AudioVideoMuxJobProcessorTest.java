@@ -398,7 +398,7 @@ class AudioVideoMuxJobProcessorTest {
     }
 
     @Test
-    void abortedTransferReturningAResultDoesNotPublishOrFail() {
+    void abortedTransferReturningAResultCleansUpWithoutPublishingOrFailing() {
         when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
@@ -419,6 +419,251 @@ class AudioVideoMuxJobProcessorTest {
         new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        // IKIN03：转存已成功返回但本执行者放弃发布 → 核实未被 Asset 引用后清理该次上传
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+    }
+
+    @Test
+    void cancellationAfterSuccessfulTransferCleansUpTheUnpublishedObject() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        // 转存前三段取消检查未命中；转存返回后命中取消（cancelled 终态由取消检查落）
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
+                .thenReturn(false, false, false, true);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+    }
+
+    @Test
+    void leaseMissedAfterSuccessfulTransferCleansUpTheUnpublishedObject() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        // 转存前续租命中；转存成功返回后续租未命中（已被接管/终态）→ 放弃发布
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+    }
+
+    @Test
+    void leaseRenewalErrorAfterSuccessfulTransferCleansUpAndKeepsFailSemantics() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        // 转存前续租命中；转存返回后续租抛异常（DB 断连）→ 清理孤儿后按既有语义上抛走 fail
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L)))
+                .thenReturn(true)
+                .thenThrow(new RuntimeException("续租 DB 断连"));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).publishAudioVideoMuxResult(any());
+        verify(stateMachine).failMediaExtractJob(any());
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+    }
+
+    @Test
+    void guardRejectionCleansUpWhenAuthorityConfirmsUnpublished() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        // 发布守卫明确拒绝（旧 fencing token）：published=false 无法区分被拒与已被接管，
+        // 删除前先核实权威状态（此处确认未被 Asset 引用）才清理。
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+    }
+
+    @Test
+    void guardRejectionKeepsObjectWhenAuthorityConfirmsAssetReference() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+        // 权威核实：assets 已有 generation_job_id + storage_key 匹配行（如接管者已发布同 key
+        // 或本执行者事务已提交）→ 保留对象，不删。
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+    }
+
+    @Test
+    void publishExceptionCleansUpOnlyAfterAuthorityConfirmsUnpublished() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("发布事务结果不明"));
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        // 不能仅凭本地异常直接删除：先核实权威状态，确认未被 Asset 引用才清理
+        verify(stateMachine).hasPublishedAsset("70", "generated/9/video/out.mp4");
+        verify(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+        // 异常继续上抛走既有 fail 终态路径（守卫仍 fencing），不吞异常
+        verify(stateMachine).failMediaExtractJob(any());
+    }
+
+    @Test
+    void publishExceptionKeepsObjectWhenAuthorityConfirmsPublishedAsset() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenThrow(new RuntimeException("提交后网络才断"));
+        // 权威核实：发布事务实际已提交（assets 已有匹配行）→ 保留成品，迟到清理不删
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4")).thenReturn(true);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+        verify(stateMachine).failMediaExtractJob(any());
+    }
+
+    @Test
+    void successfulPublishKeepsTheTosObject() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(true);
+
+        new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        // Finalize 成功：TOS 对象保留为已发布成品，绝不进入清理
+        verify(stateMachine).publishAudioVideoMuxResult(any());
+        verify(relay, never()).deleteUnpublishedObject(anyString());
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void tosCleanupFailureIsRecordedWithoutTurningIntoJobFailure() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+        // TOS 删除失败（如 5xx）：留可定位的对象身份与错误记录，不改变主语义、不落失败终态
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(relay).deleteUnpublishedObject("generated/9/video/out.mp4");
+
+        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer)
+                .handle("70")).doesNotThrowAnyException();
+
+        // 守卫拒绝（published=false）本就未生成 Asset；清理失败不把任务写成失败终态
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void authorityCheckFailureSkipsCleanupWithoutFailingTheJob() {
+        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", "https://temporary/out.mp4",
+                        227.0, "1920x1080", null, null, null));
+        when(relay.persistStreaming(eq("https://temporary/out.mp4"), eq("9"),
+                eq(AudioVideoMuxContract.MAX_RESULT_BYTES), any(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo("https://our-tos/out.mp4", "generated/9/video/out.mp4",
+                        "video/mp4", 100L, "md5"));
+        when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(false);
+        // 权威核实自身异常（DB 断连）：无法确认未发布 → 保守保留对象，不删、不落失败终态
+        when(stateMachine.hasPublishedAsset("70", "generated/9/video/out.mp4"))
+                .thenThrow(new RuntimeException("核实查询断连"));
+
+        assertThatCode(() -> new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer)
+                .handle("70")).doesNotThrowAnyException();
+
+        verify(relay, never()).deleteUnpublishedObject(anyString());
         verify(stateMachine, never()).failMediaExtractJob(any());
     }
 

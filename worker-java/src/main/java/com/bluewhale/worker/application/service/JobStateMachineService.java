@@ -263,6 +263,11 @@ public class JobStateMachineService {
         return finalizer.publishAudioVideoMuxResult(input);
     }
 
+    /** 委托转存对象权威发布核实（IKIN03）：processor 清理未发布对象前的判据——已被 Asset 引用即保留。 */
+    public boolean hasPublishedAsset(String jobId, String storageKey) {
+        return finalizer.hasPublishedAsset(jobId, storageKey);
+    }
+
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
         return finalizer.failMediaExtractJob(
                 input.jobId(), input.code(), input.message(), input.details(),

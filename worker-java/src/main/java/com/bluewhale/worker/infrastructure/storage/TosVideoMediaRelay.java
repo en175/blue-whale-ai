@@ -437,8 +437,12 @@ public class TosVideoMediaRelay {
         return total;
     }
 
-    /** 中止后清理未发布 TOS 对象（IKILVH）：deleteObject 幂等（对象未落地也不报错），失败仅记日志。 */
-    private void deleteUnpublishedObject(String storageKey) {
+    /**
+     * 清理未发布 TOS 对象（IKILVH 建于中止路径，IKIN03 起供 processor 复用——转存已成功
+     * 返回后的放弃/守卫拒绝/发布异常路径，正常 return 后 relay 内部不再触达）：deleteObject
+     * 幂等（对象未落地也不报错），失败仅记日志（含对象身份，可定位）。
+     */
+    public void deleteUnpublishedObject(String storageKey) {
         try {
             client.deleteObject(new DeleteObjectInput().setBucket(bucket).setKey(storageKey));
             log.info("转存中止后清理未发布 TOS 对象 storageKey={}", storageKey);
