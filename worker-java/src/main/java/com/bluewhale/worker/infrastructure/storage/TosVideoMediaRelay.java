@@ -72,16 +72,25 @@ public class TosVideoMediaRelay {
     /**
      * 停流超时 60s（IKILVH）：以「上次有进度」为基准，连续 60 秒无任何字节到达即中止——与
      * 响应头等待 60s（{@link #STREAM_HEADER_TIMEOUT}）同口径（对端已连上，60s 不吐一个字节
-     * 即判停流；正常慢传输只要持续有字节就不会触发）。取代旧的固定 10 分钟总时限：10 GiB
-     * 上限下总时限要求 ≥17.1MiB/s 才能在窗内完成，合法慢传输会被误杀；新模型只拦「完全
-     * 无进度」，持续有字节的传输不限总时长，改由调用方注入的任务截止时间
-     * （{@link #persistStreaming(String, String, long, TransferAbortHandle, Instant)}）与
+     * 即判停流；正常慢传输只要持续有字节就不会触发）。在五参入口（IKILVH 新模型）取代旧的
+     * 固定 10 分钟总时限：10 GiB 上限下总时限要求 ≥17.1MiB/s 才能在窗内完成，合法慢传输会被
+     * 误杀；新模型只拦「完全无进度」，持续有字节的传输不限总时长，改由调用方注入的任务截止
+     * 时间（{@link #persistStreaming(String, String, long, TransferAbortHandle, Instant)}）与
      * {@code maxBytes} 容量上限分别限界。受控测试（TosVideoMediaRelayTest 慢流用例注入
      * 缩比参数）实测持续 ~0.6MiB/s 且总时长 2 倍于旧时限缩比值仍能完成；线上能否在任务
      * 截止时间内完成 10 GiB 取决于实际吞吐（10GiB@2MiB/s ≈ 85 分钟），本类不对未实测的
      * 线上速率做任何「任意速率均可完成」的承诺。
      */
     static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
+
+    /**
+     * 四参兼容入口的总时限兜底 10 分钟（IKILU5 恢复）：未迁移到任务截止时间模型的旧调用方
+     * （如 VideoMatting 未传 {@code execution_deadline_at}）走四参
+     * {@link #persistStreaming(String, String, long, TransferAbortHandle)}——保留 IKILVH 之前
+     * 「10 分钟总时限」的旧语义作为兜底（+ 60s 停流），行为对这类调用方完全不变；只有五参
+     * 入口才用调用方任务截止时间替代兜底（IKILVH 时限模型只对音视频合成家族生效，不外溢）。
+     */
+    private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
 
     /**
      * 错误响应正文读取截止 60s（IKHSFC）：错误体至多读 4096 字节，正常毫秒级完成；此前
@@ -233,6 +242,9 @@ public class TosVideoMediaRelay {
      * <p>
      * 临时文件落在系统临时目录，正常与异常路径都删（失败留垃圾会把容器盘吃满）。同一
      * {@code maxBytes} 语义与字节数组路径一致：等于上限通过、大于上限拒绝。
+     * <p>
+     * 本三参重载为无中止源兼容入口：等价四参传 null 句柄——保留旧 10 分钟总时限兜底
+     * （{@link #STREAM_COPY_DEADLINE}）+ 60s 停流。测试桩与跨端验收仍在使用。
      *
      * @param sourceUrl 上游生成的视频 URL
      * @param userId    归属用户（key 路径用）
@@ -241,27 +253,33 @@ public class TosVideoMediaRelay {
      * @throws RuntimeException 下载 / 校验 / 上传失败（同 {@link #persist} 的错误类型）
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes) {
-        return persistStreaming(sourceUrl, userId, maxBytes, null, null);
+        return persistStreaming(sourceUrl, userId, maxBytes, null);
     }
 
     /**
-     * 流式转存（带外部中止句柄）：句柄触发（如 IKHSFD 的转存期租约心跳未命中）会主动中止
-     * 正在进行的下载/上传，以 {@link TransferAbortedException} 退出——调用方据此静默放弃
-     * 本 worker 的发布（任务已被接管），不落失败终态。句柄可为 null（无外部中止源）。
+     * 流式转存（带外部中止句柄，兼容入口）：句柄触发（如 IKHSFD 的转存期租约心跳未命中）会
+     * 主动中止正在进行的下载/上传，以 {@link TransferAbortedException} 退出——调用方据此静默
+     * 放弃本 worker 的发布（任务已被接管），不落失败终态。句柄可为 null（无外部中止源）。
+     * <p>
+     * 时限模型（IKILU5）：本入口保留 IKILVH 之前的旧总时限——{@link #STREAM_COPY_DEADLINE}
+     * 10 分钟兜底 + 60s 停流，供未迁移任务截止时间模型的旧调用方（VideoMatting 未传
+     * {@code execution_deadline_at}）使用，行为与其改动前完全一致；需要用任务截止时间替代
+     * 兜底的调用方（AudioVideoMux）走五参。
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
                                         TransferAbortHandle abortHandle) {
-        return persistStreaming(sourceUrl, userId, maxBytes, abortHandle, null);
+        return persistStreaming(sourceUrl, userId, maxBytes, abortHandle,
+                Instant.now().plus(STREAM_COPY_DEADLINE));
     }
 
     /**
-     * 流式转存（带外部中止句柄 + 任务截止时间，IKILVH）：时限模型为「停流超时（默认
+     * 流式转存（带外部中止句柄 + 任务截止时间，IKILVH 新模型）：时限模型为「停流超时（默认
      * {@link #STREAM_STALL_TIMEOUT}，无进度才计时）+ 任务截止时间（到点即中止）+ 容量上限
      * （边读边判）」三限界，不再有固定总时限——持续有进度的慢传输不受总时长约束。调用方
      * （processor）把 {@code execution_deadline_at} 传入：截止到点由 {@link StreamWatchdog}
      * 主动 close 响应流 / 取消上传，以「任务执行截止时间已到」的供应商错误退出（属普通
      * 失败口径，与停流、容量超限、外部中止的文案分别命名，运维可定位）。截止时间可为
-     * null（无任务截止约束）。
+     * null（无任务截止约束，此时无任何总时限兜底——四参兼容入口才有 10 分钟兜底）。
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
                                         TransferAbortHandle abortHandle, Instant taskDeadline) {
@@ -471,8 +489,9 @@ public class TosVideoMediaRelay {
      * HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read 返回后
      * 执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
      * {@link #translateReadFailure} 归因（外部中止 → 停流 → 任务截止 → 错误体截止 →
-     * 供应商错误，文案分别命名）；上传侧经逐请求 Call.cancel 与外部中止状态检查同口径
-     * 中止。每个 {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
+     * 供应商错误，文案分别命名）；上传侧经逐请求 Call.cancel 取消、{@link #requireNotAborted()}
+     * 按「外部中止 → 任务截止」优先级归因（截止中止不得误报网络失败）。每个
+     * {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
      */
     private static final class StreamWatchdog implements AutoCloseable {
         private final InputStream body;
@@ -606,8 +625,16 @@ public class TosVideoMediaRelay {
                     "生成视频下载失败: " + e.getMessage(), e);
         }
 
+        /**
+         * 非读取段的主动中止检查（上传前后 / IOException 归因）：优先级 externalAbort →
+         * deadlineAbort → 通过。任务截止到点（IKILU5）与下载段 {@link #translateReadFailure}
+         * 同口径抛「任务执行截止时间已到」——否则上传段的截止中止会被 {@link #upload} 的
+         * IOException catch 误归因为「网络失败」。
+         */
         void requireNotAborted() {
             if (externalAbort) throw new TransferAbortedException(externalReason());
+            if (deadlineAbort) throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "任务执行截止时间已到，中止结果转存");
         }
 
         void upload(Call call) {
@@ -622,6 +649,8 @@ public class TosVideoMediaRelay {
                     }
                 }
             } catch (IOException e) {
+                // 先归因主动中止（外部句柄 / 任务截止到点，各自抛专属文案），才轮到网络失败——
+                // 截止取消连接与真实网络故障同抛 IOException，顺序反了会把截止误报成网络失败。
                 requireNotAborted();
                 // 不带签名 URL / SDK 凭证进入用户错误或日志。
                 throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,

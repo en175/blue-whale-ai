@@ -29,9 +29,15 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -583,5 +589,107 @@ class TosVideoMediaRelayTest {
 
         assertThat(stored.size()).isEqualTo(payload.length);
         assertThat(uploadedBytes.get()).isEqualTo(payload.length);
+    }
+
+    // ========== IKILU5：四参兼容入口恢复 10 分钟总时限兜底（VideoMatting 未传任务截止时间） ==========
+
+    /**
+     * 四参兜底的验证方式（IKILU5）：不真等 10 分钟——spy 打桩 {@code persistStreamingInternal}
+     * 捕获四参入口注入的任务截止时间，断言 ≈ now+10min（STREAM_COPY_DEADLINE）；该截止会被
+     * internal 的任务截止机制到点执行已由 {@code persistStreaming_taskDeadline_abortsSlowTransfer}
+     * 钉死，两段组合即「四参仍受 10 分钟总时限」的行为证明（VideoMatting 行为与 IKILVH 改动前
+     * 一致）。internal 层的慢流不受总时限（五参模型）由
+     * {@code persistStreaming_slowStreamWithProgress_completesPastLegacyTotalDeadline} 继续覆盖。
+     */
+    @Test
+    @DisplayName("四参入口注入 10 分钟总时限兜底：internal 收到 ≈now+10min 的任务截止")
+    void persistStreaming_fourArgs_fallsBackToLegacyTotalDeadline() {
+        TosVideoMediaRelay relay = spy(new TosVideoMediaRelay(mock(TOSV2.class), "bkt", "tos.example.com"));
+        doReturn(new TosVideoMediaRelay.StoredVideo("u", "k", "video/mp4", 1L, "d"))
+                .when(relay).persistStreamingInternal(any(), any(), anyLong(), any(), any(), any(), any());
+
+        java.time.Instant before = java.time.Instant.now();
+        relay.persistStreaming("https://volc/out.mp4", "9", 1024, null);
+        java.time.Instant after = java.time.Instant.now();
+
+        var deadline = org.mockito.ArgumentCaptor.forClass(java.time.Instant.class);
+        verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
+                isNull(), deadline.capture(), any(), any());
+        // 兜底 = 调用时刻 + 10 分钟：捕获值落在前后取时各 +10min 的窗口内
+        assertThat(deadline.getValue()).isBetween(before.plusSeconds(600), after.plusSeconds(600));
+    }
+
+    @Test
+    @DisplayName("五参入口透传调用方任务截止：null 不强加 10 分钟兜底、具体值原样透传")
+    void persistStreaming_fiveArgs_passesThroughCallerDeadline() {
+        TosVideoMediaRelay relay = spy(new TosVideoMediaRelay(mock(TOSV2.class), "bkt", "tos.example.com"));
+        doReturn(new TosVideoMediaRelay.StoredVideo("u", "k", "video/mp4", 1L, "d"))
+                .when(relay).persistStreamingInternal(any(), any(), anyLong(), any(), any(), any(), any());
+
+        // AudioVideoMux 无 execution_deadline_at 时传 null：不得强加 10 分钟兜底（慢流不受总时限）
+        relay.persistStreaming("https://volc/out.mp4", "9", 1024, null, null);
+        verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
+                isNull(), isNull(), any(), any());
+
+        java.time.Instant callerDeadline = java.time.Instant.now().plusSeconds(7);
+        relay.persistStreaming("https://volc/out.mp4", "9", 1024, null, callerDeadline);
+        verify(relay).persistStreamingInternal(eq("https://volc/out.mp4"), eq("9"), eq(1024L),
+                isNull(), same(callerDeadline), any(), any());
+    }
+
+    /**
+     * 上传段截止归因（IKILU5）：下载快速完成后上传 body 送达服务端、连接挂住等响应——此窗口
+     * 任务截止到点只能靠看门狗 cancel 上传请求，抛出的 IOException 若不先做截止归因会被
+     * 误包成「生成视频转存网络失败」。截止中止是普通失败口径（与外部中止的静默退出不同），
+     * PUT 已发起的未发布对象清理与下载段截止口径一致（不清理，由既有用例断言）。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("上传段任务截止到点：中止归因为「任务执行截止时间已到」，不误报网络失败")
+    void taskDeadlineDuringUpload_reportsDeadlineNotNetworkFailure() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        TOSV2 client = mock(TOSV2.class);
+        List<String> before = relayTempFiles();
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            org.mockito.Mockito.when(client.preSignedURL(any(com.volcengine.tos.model.object.PreSignedURLInput.class)))
+                    .thenReturn(new com.volcengine.tos.model.object.PreSignedURLOutput(
+                            "http://127.0.0.1:" + socketServer.getLocalPort() + "/upload", java.util.Map.of()));
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(5000);
+                    InputStream in = socket.getInputStream();
+                    var header = new java.io.ByteArrayOutputStream();
+                    int next;
+                    while ((next = in.read()) != -1) {
+                        header.write(next);
+                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+                    }
+                    assertThat(in.readNBytes(4096)).hasSize(4096);
+                    // 服务端收完 body 挂住不回响应：上传停在等响应窗口，截止只能靠看门狗取消连接
+                    return in.read();
+                }
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                            null, java.time.Instant.now().plusMillis(500)));
+            try {
+                assertThatThrownBy(() -> transfer.get(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(VideoProviderError.class)
+                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageNotContaining("转存网络失败");
+                // 截止取消连接后服务端读到 EOF；截止是普通失败口径，不做未发布对象清理（同下载段）
+                assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                assertThat(relayTempFiles()).isEqualTo(before);
+                verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+            } finally {
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
     }
 }
