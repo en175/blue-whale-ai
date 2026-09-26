@@ -23,8 +23,28 @@ import {
    IKILTB 追加：422 阻断置 saveBlocked 后的项目切换/返回首页也不再引导注定再 422 的
    无效重试，改提示刷新复核并中止导航；412/422 toast 三分叉收拢为共享 helper。
    IKIMQK 追加：confirmEmpty 授予依据从「仅水合基线非空」扩展为「水合基线非空，或本会话
-   成功保存非空文档并取得新版本」——空水合 → 新增 → 非空保存成功 → 再明确删光是合法例外；
-   412 清空待复核闸门与 422 阻断语义不变（不因一次本地状态变化绕过刷新复核）。 */
+   成功保存非空文档并取得新版本」——空水合 → 新增 → 非空保存成功 → 再明确删光是合法例外。
+   IKIN23 追加：清空 412 / 空覆盖 422 升级为整文档待复核——本会话一切整文档 PUT（无论待发
+   节点数）在重新水合前均被阻断；冲突响应带回的 version 仅供提示，不构成重发许可；加载失败、
+   资产字典刷新与本地改动均不解除待复核；IKIMQK c/d 两例按新语义改写。 */
+
+/** 右键面板菜单「添加节点 → 文本」新增文本卡（空画布起步的用户新增操作路径） */
+async function addTextNodeViaPaneMenu() {
+  await act(async () => {
+    flowProps.current.onPaneContextMenu({ clientX: 10, clientY: 10 });
+  });
+  const addItem = [...document.querySelectorAll('button')].find((b) => b.textContent === '添加节点');
+  expect(addItem).toBeTruthy();
+  await act(async () => {
+    // React onMouseEnter 由 mouseover 冒泡合成（口径同 cardRename 既有先例）
+    addItem!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+  });
+  const textItem = [...document.querySelectorAll('button')].find((b) => b.textContent === '文本');
+  expect(textItem).toBeTruthy();
+  await act(async () => {
+    textItem!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
 
 function seedDoc(nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>, loadFailed = false) {
   canvasDocMock.current = {
@@ -307,25 +327,9 @@ describe('IKILTB 422 阻断后项目切换提示刷新复核', () => {
 });
 
 /* IKIMQK：空基线新增后允许再次明确清空——confirmEmpty 授予依据扩展为「水合基线非空，
-   或本会话成功保存非空文档并取得新版本」；412/422 阻断语义不变。 */
+   或本会话成功保存非空文档并取得新版本」；IKIN23 起 412/422 阻断升级为整文档待复核
+   （新增保持非空也不再放行旧整文档，见 c/d 改写与文末 IKIN23 组）。 */
 describe('IKIMQK 空基线新增保存成功后允许再次明确清空', () => {
-  /** 右键面板菜单「添加节点 → 文本」新增文本卡（空画布起步的用户新增操作路径） */
-  async function addTextNodeViaPaneMenu() {
-    await act(async () => {
-      flowProps.current.onPaneContextMenu({ clientX: 10, clientY: 10 });
-    });
-    const addItem = [...document.querySelectorAll('button')].find((b) => b.textContent === '添加节点');
-    expect(addItem).toBeTruthy();
-    await act(async () => {
-      // React onMouseEnter 由 mouseover 冒泡合成（口径同 cardRename 既有先例）
-      addItem!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
-    });
-    const textItem = [...document.querySelectorAll('button')].find((b) => b.textContent === '文本');
-    expect(textItem).toBeTruthy();
-    await act(async () => {
-      textItem!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-  }
 
   it('a. 空水合 → 新增 → 非空保存成功获得新版本 → 删光：空保存带 confirmEmpty=true 与该次保存版本', async () => {
     seedDoc([]);
@@ -381,32 +385,34 @@ describe('IKIMQK 空基线新增保存成功后允许再次明确清空', () => 
     }, { timeout: 3000 });
   });
 
-  it('c. 412 清空冲突后：本地新增并成功非空保存、再删光——闸门仍拦旧空文档，须重新水合复核', async () => {
+  it('c. 412 清空冲突后：本地新增保持非空、再删光均不再发出旧整文档（IKIN23 整文档待复核）', async () => {
     seedDoc([T1]);
     await renderPage();
     await clearToConflict412();
 
     await addTextNodeViaPaneMenu();
-    // 闸门只拦空文档：非空保存正常发出并成功（版本对齐服务端）
-    await vi.waitFor(() => {
-      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
-      expect(apiMocks.saveCanvasDoc.mock.calls[1]![1].nodes.length).toBeGreaterThan(0);
-    }, { timeout: 3000 });
+    expect(flowProps.current.textNodes).toHaveLength(1);
+    // 新增保持非空后等满一个防抖周期：含新增节点的旧整文档不得发出
+    //（冲突响应带回的 version 不构成重发许可）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
 
-    // 再删光：即便本会话刚成功保存过非空文档，旧清空命令的闸门不因本地状态变化解除
+    // 再删光：空文档同样不再发出——待复核只能由当前项目成功重新水合解除
     await deleteNodes([flowProps.current.textNodes[0]!.id as string]);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1100));
     });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2); // 旧空文档未重发
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
   });
 
-  it('d. 422 拒后：同一防抖窗口内新增又删光（非空保存从未成功）的空保存仍不带 confirmEmpty', async () => {
+  it('d. 422 拒后：新增又删光、移动视口均不再触发旧整文档保存（IKIN23 整文档待复核）', async () => {
     seedDoc([]);
     await renderPage();
     apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
 
-    // 初始空画布的空保存（viewport 变化）收 422 → 置阻断
+    // 初始空画布的空保存（viewport 变化）收 422 → 进入整文档待复核
     await act(async () => {
       flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
     });
@@ -415,13 +421,237 @@ describe('IKIMQK 空基线新增保存成功后允许再次明确清空', () => 
       expect(document.body.textContent).toContain(REJECTED_422_TOAST);
     }, { timeout: 3000 });
 
-    // 一次本地状态变化：新增→删光（同一防抖窗口内，非空保存从未发出/成功）
+    // 本地状态变化（新增→删光）与视口移动均不能解除待复核、不得发出旧整文档
     await addTextNodeViaPaneMenu();
     await deleteNodes([flowProps.current.textNodes[0]!.id as string]);
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 240, y: 0, zoom: 1 });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* IKIN23：412 清空冲突 / 422 空覆盖被拒升级为整文档待复核——本会话一切整文档 PUT
+   （无论待发节点数）在当前项目成功重新水合前均被阻断；冲突响应 version 仅供提示；
+   排队中的保存在实际发请求前复查；加载失败与资产字典刷新不解除待复核。 */
+describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
+  it('a. 412 清空冲突后新增保持非空：手动「重试保存」不发 PUT，提示刷新复核', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    await addTextNodeViaPaneMenu();
+    expect(flowProps.current.textNodes).toHaveLength(1);
+    // 防抖自动保存被待复核阻断
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    await act(async () => { retryBtn!.click(); });
+    await act(async () => {});
+
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+  });
+
+  it('b. 412 清空冲突后新增保持非空：返回首页中止并提示刷新复核', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    await addTextNodeViaPaneMenu();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    // 「返回首页」与项目切换共用 ensureSavedBeforeProjectSwitch 落盘闸门
+    const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
+    expect(exitBtn).toBeTruthy();
+    await act(async () => { exitBtn!.click(); });
+    await act(async () => {});
+
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    expect(locationRef!.search).toContain('project=p1'); // 中止导航，停留当前项目
+  });
+
+  it('c. 清空保存 412 落地时排在在途保存之后的 flush 执行前复查，仍不发请求', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    // flush1 挂起，等测试手工放行
+    let rejectInflight!: (e: unknown) => void;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectInflight = reject; }),
+    );
+    await deleteNodes(['t1']);
+
+    // 防抖 800ms 未到点时立即点「返回首页」：flush1 发出（空文档带 confirmEmpty）并挂起
+    const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
+    expect(exitBtn).toBeTruthy();
+    await act(async () => { exitBtn!.click(); });
     await vi.waitFor(() => {
-      const call = apiMocks.saveCanvasDoc.mock.calls.at(-1)!;
-      expect(call[1].nodes).toHaveLength(0);
-      expect(call[1].confirmEmpty).toBeFalsy(); // 未成功保存非空 → 不授予，仍走刷新复核
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(apiMocks.saveCanvasDoc.mock.calls[0]![1].confirmEmpty).toBe(true);
+    });
+
+    // flush1 在途期间第二次点「返回首页」：flush2 经 savePromiseRef 排队
+    await act(async () => { exitBtn!.click(); });
+
+    // flush1 收 412（confirmEmpty 清空冲突）→ 登记整文档待复核
+    await act(async () => { rejectInflight(conflict412(5)); });
+    await act(async () => {});
+
+    // 排队中的 flush2 执行时复查到待复核，不发请求；导航中止
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain(CONFLICT_TOAST);
+    expect(locationRef!.search).toContain('project=p1');
+  });
+
+  it('d. 422 拒后新增保持非空：防抖自动保存与手动重试均不发旧整文档', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
     }, { timeout: 3000 });
+
+    await addTextNodeViaPaneMenu();
+    expect(flowProps.current.textNodes).toHaveLength(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    await act(async () => { retryBtn!.click(); });
+    await act(async () => {});
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+  });
+
+  it('e. 422 拒后新增保持非空：返回首页中止并提示刷新复核', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+
+    await addTextNodeViaPaneMenu();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
+    expect(exitBtn).toBeTruthy();
+    await act(async () => { exitBtn!.click(); });
+    await act(async () => {});
+
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    expect(locationRef!.search).toContain('project=p1');
+  });
+
+  it('f. 加载失败的重新水合不解除待复核；成功重新水合后才以新基线恢复保存', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    // 一次失败的重新水合：兜底空文档 + loadFailed（doc 引用变化驱动水合 effect）
+    canvasDocMock.current = {
+      ...canvasDocMock.current,
+      doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
+      loadFailed: true,
+    };
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 200, y: 0, zoom: 1 });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    // 待复核仍在：手动重试仍被拦截并提示刷新复核
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    await act(async () => { retryBtn!.click(); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+
+    // 成功重新水合（服务端最新布局 version=7）：页面展示新节点，不静默重放冲突前文档
+    canvasDocMock.current = {
+      ...canvasDocMock.current,
+      doc: {
+        id: 11,
+        version: 7,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [{ id: 't2', type: 'textNode', position: { x: 40, y: 40 }, data: { title: '新卡', text: '另一会话的内容' } }],
+        edges: [],
+      },
+      loadFailed: false,
+    };
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 260, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(flowProps.current.textNodes.map((n: { id: string }) => n.id)).toEqual(['t2']);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1); // 水合基线本身不触发重放
+
+    // 用户在新布局上再次明确删光：带 confirmEmpty 与新版本（If-Match 7）放行
+    await deleteNodes(['t2']);
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
+      const call = apiMocks.saveCanvasDoc.mock.calls[1]!;
+      expect(call[1].nodes).toHaveLength(0);
+      expect(call[1].confirmEmpty).toBe(true);
+      expect(call[2]).toBe(7);
+    }, { timeout: 3000 });
+  }, 10000);
+
+  it('g. 资产字典刷新（doc 引用不变）不解除待复核', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    // 仅资产字典变化：doc 引用不变，水合 effect 走 !docChanged 刷新分支
+    canvasDocMock.current = {
+      ...canvasDocMock.current,
+      assets: {
+        42: { asset_id: 42, type: 'image', access_url: 'https://example.com/a.png', width: null, height: null, material_id: null, material_status: null },
+      },
+    };
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 200, y: 0, zoom: 1 });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    await act(async () => { retryBtn!.click(); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
   });
 });
