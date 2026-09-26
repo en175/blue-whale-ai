@@ -37,21 +37,31 @@ function fmtCredits(n: number): string {
 
 export default function AccountRecordsModal({ onClose }: AccountRecordsModalProps) {
   const [tab, setTab] = useState<'recharge' | 'consume'>('recharge');
-  const [consumptions, setConsumptions] = useState<ConsumptionRecord[]>([]);
+  const [records, setRecords] = useState<ConsumptionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // 消费页签拉真实流水（前 20 条）
+  /**
+   * 当前页签对应的流水类型。
+   *
+   * ⚠️ **两个页签都拉真实数据**。这里曾经把「充值记录」写死成一个占位块
+   *    （「充值功能暂未开放 / 支付通道尚未接入，暂时无法充值」）—— 而充值 2026-09-25
+   *    就已接回，后端读面（`type=recharge`）也一直是通的。用户点开自己的充值记录，
+   *    看到的是与事实相反的一句话。
+   *
+   * ⚠️ `type` 是**单值**，不接受逗号拼接的并集（见 `account.controller.ts` 的注释）；
+   *    不传 = 全部流水，会把赠送 / 退款混进来，所以两个页签各自传自己的。
+   */
+  const typeFilter = tab === 'recharge' ? 'recharge' : 'consume';
+
+  // 拉当前页签的流水（前 20 条）
   useEffect(() => {
-    if (tab !== 'consume') return;
     let alive = true;
     setLoading(true);
     setError('');
-    // ⚠️ 写死 type=consume：标签叫「消费」，内容就该只有消费。后端默认（不传 type）= 全部流水，
-    //    不加这个过滤会把充值 / 赠送 / 退款也混进来。type 是单值，不接受逗号拼接的并集。
-    fetchConsumptions('', 20, 'consume')
+    fetchConsumptions('', 20, typeFilter)
       .then((d) => {
-        if (alive) setConsumptions(d?.items ?? []);
+        if (alive) setRecords(d?.items ?? []);
       })
       .catch((e) => {
         if (alive) setError(e instanceof Error ? e.message : '记录加载失败');
@@ -62,7 +72,7 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
     return () => {
       alive = false;
     };
-  }, [tab]);
+  }, [typeFilter]);
 
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
@@ -92,21 +102,16 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
 
         {/* 记录列表（真实数据） */}
         <div className={styles.list}>
-          {tab === 'recharge' ? (
-            <div className={styles.placeholder}>
-              <span className={styles.placeholderTitle}>充值功能暂未开放</span>
-              <span className={styles.placeholderDesc}>
-                支付通道尚未接入，暂时无法充值，因此也没有充值记录。
-              </span>
-            </div>
-          ) : loading ? (
+          {loading ? (
             <div className={styles.empty}>记录加载中…</div>
           ) : error ? (
             <div className={styles.empty}>{error}</div>
-          ) : consumptions.length === 0 ? (
-            <div className={styles.empty}>暂无消费记录</div>
+          ) : records.length === 0 ? (
+            <div className={styles.empty}>
+              {tab === 'recharge' ? '暂无充值记录' : '暂无消费记录'}
+            </div>
           ) : (
-            consumptions.map((r) => {
+            records.map((r) => {
               // 进账（退款/赠送）与出账（消费）同列。后端给的一律是正的变动幅度，
               // 方向看 `direction`——照抄扣费的 `-` 会把退回来的积分显示成又扣了一笔。
               const isIn = r.direction === 'in';

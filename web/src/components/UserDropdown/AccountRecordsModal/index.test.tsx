@@ -74,12 +74,17 @@ afterEach(async () => {
 });
 
 describe('AccountRecordsModal', () => {
-  it('充值记录页签保留入口，但只说明充值暂未开放（不打已删除的接口）', async () => {
+  it('★ 充值记录页签拉**真实**流水（type=recharge），不是占位说明', async () => {
+    // ⚠️ 这条以前断言的是相反的东西：「充值功能暂未开放 / 支付通道尚未接入」。
+    //    那句话在写下时是对的，但充值 2026-09-25 就已接回，后端读面（`type=recharge`）
+    //    一直是通的 —— 于是它变成了一句与事实相反的话：用户点开自己的充值记录，
+    //    看到的是「暂时无法充值」。
+    //
+    //    测试跟着行为改，不是行为跟着测试改：这条现在断言「真的去查了充值流水」。
     await renderModal();
 
-    expect(document.body.textContent).toContain('充值记录');
-    expect(document.body.textContent).toContain('充值功能暂未开放');
-    expect(accountApi.fetchConsumptions).not.toHaveBeenCalled();
+    expect(accountApi.fetchConsumptions).toHaveBeenCalledWith('', 20, 'recharge');
+    expect(document.body.textContent).not.toContain('暂未开放');
   });
 
   it('消费记录写死 type=consume，只取消费流水', async () => {
