@@ -664,6 +664,64 @@ class VideoJobProcessorTest {
                 anyString(), any(), anyString(), eq(1L));
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS5；对齐音频提取 IKIMS2 样板）==========
+
+    @Test
+    @DisplayName("IKIMS5: poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        ClaimedVideoJobDto claim = videoClaim("119", false, "task-119", 3, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("119"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        // 401 不在瞬时白名单（429/500/502/503/504）→ 非瞬时直进失败终态；submit !2xx 不带
+        // cause 是已知现状，故本族透传用例走 poll（poll !2xx 挂 HttpStatusException cause）
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频轮询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}",
+                new NewApiVideoClient.HttpStatusException(401)))
+                .when(videoClient).poll(eq("token"), eq("task-119"));
+
+        processor.handle("119");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("119"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(details)
+                .containsEntry("raw", "new-api 视频轮询失败: body={\"error\":{\"message\":\"Incorrect API key\"}}")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("IKIMS5: 结果下载失败（无状态 cause）→ 文案保留 HTTP 404 字样，details 不写 http_status 键")
+    void relayDownloadFailure_keepsHttpStatusTextInMessage() {
+        ClaimedVideoJobDto claim = videoClaim("120", false, "task-120", 5, 100, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("120"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("task-120"));
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "生成视频下载失败: HTTP 404 body=not found"))
+                .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
+
+        processor.handle("120");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 纯排查文案（TosVideoMediaRelay 下载失败不带状态 cause）：保留状态码字样、不写键
+        // ——该路径永远无判定读取，缺键 = 无非 HTTP 状态可读
+        assertThat(messageCaptor.getValue()).contains("HTTP 404");
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
+    }
+
     // ========== isTransientPollError ==========
 
     @Nested

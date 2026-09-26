@@ -4,11 +4,13 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
@@ -287,8 +289,15 @@ public class VideoJobProcessor implements JobProcessor {
                 code = GenerationError.ERROR_PROVIDER_FAILED;
                 message = error.getMessage() != null ? error.getMessage() : "视频生成失败";
             }
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(error);
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS5），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body 等排查信息原样保留。结果下载
+                // 失败等纯排查文案无状态 cause（httpStatus=null），不受影响、永远保留字样
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("runVideoJobStep 异常 jobId={} code={}: {}", claim.id(), code, message, error);
-            failVideo(claim, code, message);
+            failVideo(claim, code, message, httpStatus);
         }
     }
 
@@ -504,12 +513,23 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * 失败处理（video-job-runner.ts:530-558 fail）。
+     * 失败处理（video-job-runner.ts:530-558 fail）。非 HTTP 失败路径统一走它，details 不含状态键。
      */
     private void failVideo(ClaimedVideoJobDto claim, String code, String message) {
+        failVideo(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS5，音频提取 IKIMS2 同款）：判定读
+     *  {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；非 HTTP
+     *  失败（超时 / 连接失败 / 业务信封失败 / 结果下载失败）不写该键。submit 阶段网关
+     *  !2xx 不带 cause 是已知现状，缺键语义 = 无非 HTTP 状态可读。 */
+    private void failVideo(ClaimedVideoJobDto claim, String code, String message, Integer httpStatus) {
         log.warn("video job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         // 修正一：releaseNote 整体省略（video-job-runner.ts:545 releaseNote 参数删除）
         stateMachine.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
     }
