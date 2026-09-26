@@ -581,3 +581,28 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - Worker 以冻结顺序提交 `POST /v1/mediakit/mix-audio`：`{"model":"mediakit-mix-audio","audio_urls":["https://.../a.mp3","https://.../b.mp3"],"format":"mp3"}`。出站键恒为 **`format`**，不是 `output_format`。提交成功取 `task_id` 持久化，查询 `GET /v1/mediakit/tasks/{task_id}`；提交同步失败即使有 `request_id` 而无 `task_id` 也须将 `request_id` 留在错误中，不得进入轮询。
 - 查询 `status=completed` 时读取 `result.audio_url` 与 `result.duration`（秒）；结果 URL 先安全下载并转存我方 TOS、设置公开 ACL，再创建 Asset、以 `round(duration * 1000)` 写 `duration_ms`、发布终态。临时供应商 URL 不写成长期资产。验收须对 Asset URL 做实际 GET 并核验媒体字节；失败保留上游可读原因与 `request_id`。
 - 现有 1 GiB 内存式音频转存上限及 RecoveryService 全局 2 小时扫描窗口仍是上线前容量/长任务验收项，由 IKI696 制定扩容与超时/退避口径；本节不改全局策略。
+
+## 20. 冻结增量（2026-09-26，IKIMN8）：`error.details.http_status` 键名双端单源与适用家族
+
+生成任务失败详情键 `http_status` 由 audio_mix 专属（IKIHGQ / §19）提升为全族共享契约；本节冻结键名、单源落点、写入/读取方与缺省语义，适用家族的实际写入接入由 IKIMN8 后续子卡实施。
+
+### 20.1 键名与单源落点
+
+- 键名冻结为 **`http_status`**（JSON 传输 snake_case），值 = 上游网关响应的数值 HTTP 状态码（整数），写入 `generation_jobs.error.details`。
+- **worker-java 唯一来源**：`worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS`（全族共享契约类）；audio_mix 先行的 `AudioMixContract.ERROR_DETAIL_HTTP_STATUS` 定义已删除并改引用本类。
+- **backend 唯一来源**：`backend/libs/contracts/error-codes.ts` 的 `GENERATION_ERROR_DETAIL_HTTP_STATUS`（与生成域错误码同文件，经 `contracts/index.ts` re-export）；audio_mix 先行的 `audio-mix.ts` 定义已删除并改引用。双端禁止在别处发明 `"http_status"` 字面量。
+
+### 20.2 写入方 / 读取方 / 缺省语义
+
+- **写入方**：worker-java 各族 processor 失败路径——失败异常链带 `NewApiVideoClient.HttpStatusException` cause（上游非 2xx）时写入数值状态；**其余情况不写该键**（网络超时、连接失败、2xx 业务信封失败、上游任务 failed 观察分支均无 cause 可读）。当前仅 audio_mix 已实现（IKIHGQ）。
+- **读取方**：backend 重试换凭证判定（先例 `audio-mixes.service.ts` `isUpstreamUnauthorized`）——`details.http_status` 为数值时以其为准（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；无数值状态时回退 `error.message` 文案正则 `/\bHTTP 401\b/`（仅旧任务数据兼容）。
+- **缺省语义**：键不存在 = 非 HTTP 失败或旧数据，读取方不得把缺键解释为任何状态值；文案正则兜底行为不变。
+
+### 20.3 适用家族清单（11 族）
+
+音频混合 `audio_mix`（已实现，IKIHGQ）、音频变速 `audio_speed`、音频裁剪 `audio_trim`、人声分离 `vocal_split`、音频提取 `media_extract`、画质增强 `video_enhance`、视频插帧 `video_frame_interpolation`、视频抠像 `video_matting`、场景分割 `video_scene_split`、字幕擦除 `video_subtitle_erase`，以及视频生成 `video`。各族网关链（异步 MediaKit 模板 submit/poll、`NewApiVideoClient` poll）均带 `HttpStatusException` cause；唯视频生成 submit 链当前不带 cause（`NewApiVideoClient.submit` 非 2xx 只构造 message），其透传覆盖口径由 IKIMN8 实施子卡另行冻结，不在本节预设。
+
+### 20.4 缺省家族清单（6 族，不透传）
+
+图片抠图 `image_cutout`、图片擦除 `image_erase`、图片扩图 `image_outpaint`、图片高清放大 `image_enhance`、图片生成 `image`、音频生成 `audio`。缺省原因 = 网关异常链不带 `HttpStatusException` cause（同步模板 `NewApiMediaKitSyncClient` 非 2xx 只构造 message 不挂 cause；`NewApiImageClient` / `NewApiAudioClient` 全链无 initCause）——worker 无状态可写，是契约口径而非遗漏，不为其补透传。
+

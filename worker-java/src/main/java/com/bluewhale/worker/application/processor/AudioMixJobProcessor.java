@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -285,7 +286,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         if (httpStatus != null) {
-            details.put(AudioMixContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
         log.warn("[audio_mix] job 失败 jobId={} code={} message={}", job.id(), code, message);
         return stateMachine.failMediaExtractJob(new FailMediaExtractDto(
