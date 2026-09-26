@@ -584,7 +584,7 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 
 ## 20. 冻结增量（2026-09-26，IKIMN8）：`error.details.http_status` 键名双端单源与适用家族
 
-生成任务失败详情键 `http_status` 由 audio_mix 专属（IKIHGQ / §19）提升为全族共享契约；本节冻结键名、单源落点、写入/读取方与缺省语义，适用家族的实际写入接入由 IKIMN8 后续子卡实施。
+生成任务失败详情键 `http_status` 由 audio_mix 专属（IKIHGQ / §19）提升为全族共享契约；本节冻结键名、单源落点、写入/读取方与缺省语义。适用家族的实际写入接入已由 IKIMN8 子卡（IKIMS2–IKIMS5）全部落地，IKIMS6 收口音频混合并记录双端对账结论（§20.5）。
 
 ### 20.1 键名与单源落点
 
@@ -594,15 +594,20 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 
 ### 20.2 写入方 / 读取方 / 缺省语义
 
-- **写入方**：worker-java 各族 processor 失败路径——失败异常链带 `NewApiVideoClient.HttpStatusException` cause（上游非 2xx）时写入数值状态；**其余情况不写该键**（网络超时、连接失败、2xx 业务信封失败、上游任务 failed 观察分支均无 cause 可读）。当前仅 audio_mix 已实现（IKIHGQ）。
-- **读取方**：backend 重试换凭证判定（先例 `audio-mixes.service.ts` `isUpstreamUnauthorized`）——`details.http_status` 为数值时以其为准（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；无数值状态时回退 `error.message` 文案正则 `/\bHTTP 401\b/`（仅旧任务数据兼容）。
+- **写入方**：worker-java 各族 processor 失败路径——失败异常链带 `NewApiVideoClient.HttpStatusException` cause（上游非 2xx）时写入数值状态；**其余情况不写该键**（网络超时、连接失败、2xx 业务信封失败、上游任务 failed 观察分支均无 cause 可读）。11 族写入已全部落地（IKIHGQ 先行 audio_mix，IKIMS2–IKIMS5 补齐其余 10 族）；解析统一走共享函数 `NewApiHttpSupport.upstreamHttpStatus`（沿 cause 链取状态，audio_mix 的内联实现已收口删除）。写入结构化状态时生产文案同步净化：message 只剥网关文案的「`: HTTP <code>`」片段（上游原因 / body / request_id 等排查信息原样保留），状态码字样不再与新文案耦合。
+- **读取方**：backend 重试换凭证判定（先例 `audio-mixes.service.ts` `isUpstreamUnauthorized`，当前唯一读取方）——`details.http_status` 为数值时以其为准（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；无数值状态时回退 `error.message` 文案正则 `/\bHTTP 401\b/`（仅旧任务数据兼容）。
 - **缺省语义**：键不存在 = 非 HTTP 失败或旧数据，读取方不得把缺键解释为任何状态值；文案正则兜底行为不变。
 
 ### 20.3 适用家族清单（11 族）
 
-音频混合 `audio_mix`（已实现，IKIHGQ）、音频变速 `audio_speed`、音频裁剪 `audio_trim`、人声分离 `vocal_split`、音频提取 `media_extract`、画质增强 `video_enhance`、视频插帧 `video_frame_interpolation`、视频抠像 `video_matting`、场景分割 `video_scene_split`、字幕擦除 `video_subtitle_erase`，以及视频生成 `video`。各族网关链（异步 MediaKit 模板 submit/poll、`NewApiVideoClient` poll）均带 `HttpStatusException` cause；唯视频生成 submit 链当前不带 cause（`NewApiVideoClient.submit` 非 2xx 只构造 message），其透传覆盖口径由 IKIMN8 实施子卡另行冻结，不在本节预设。
+音频混合 `audio_mix`、音频变速 `audio_speed`、音频裁剪 `audio_trim`、人声分离 `vocal_split`、音频提取 `media_extract`、画质增强 `video_enhance`、视频插帧 `video_frame_interpolation`、视频抠像 `video_matting`、场景分割 `video_scene_split`、字幕擦除 `video_subtitle_erase`，以及视频生成 `video`（11 族写入均已落地）。各族网关链（异步 MediaKit 模板 submit/poll、`NewApiVideoClient` poll）均带 `HttpStatusException` cause；唯视频生成 submit 链不带 cause（`NewApiVideoClient.submit` 非 2xx 只构造 message）——IKIMS5 已冻结口径：不为 submit 补挂 cause（网关异常形态不变），该路径缺键 = 无状态可读，透传覆盖 poll 链（401 换凭证判定的轮询重现场）。
 
 ### 20.4 缺省家族清单（6 族，不透传）
 
 图片抠图 `image_cutout`、图片擦除 `image_erase`、图片扩图 `image_outpaint`、图片高清放大 `image_enhance`、图片生成 `image`、音频生成 `audio`。缺省原因 = 网关异常链不带 `HttpStatusException` cause（同步模板 `NewApiMediaKitSyncClient` 非 2xx 只构造 message 不挂 cause；`NewApiImageClient` / `NewApiAudioClient` 全链无 initCause）——worker 无状态可写，是契约口径而非遗漏，不为其补透传。
 
+### 20.5 双端对账结论（2026-09-26，IKIMS6 收口）
+
+- **worker 写入方**：11 族全部落地——audio_mix（IKIHGQ 先行，IKIMS6 收口文案净化与共享解析函数）+ IKIMS2（media_extract + `NewApiHttpSupport.upstreamHttpStatus` 共享函数）+ IKIMS3/4（异步 MediaKit 八族）+ IKIMS5（video，poll 链）。各族写入语义一致：有状态 cause → `details.http_status` 数值 + message 剥「`: HTTP <code>`」片段；无 cause → 不写键、文案不动。
+- **backend 读取方**：当前唯一读取方 = 音频混合重试换凭证判定（`audio-mixes.service.ts` `isUpstreamUnauthorized`，结构化优先）。其余 10 族 backend 暂无读取方——写入先行属预期，后续各族重试/换凭证能力接入时直接消费 §20.1 双端常量，不再新建键名。
+- **缺省 6 族**：零透传、实现零改动（`git diff cf3f61a20…HEAD` 核验 6 个 processor 路径无变更，见 IKIMS6 交付记录）；未来若同步网关补挂 cause，须先回本节修订清单再实施。
