@@ -238,7 +238,9 @@ function putCanvasDoc(
  * 保存画布 PUT /api/canvases/:projectId
  * @param payload.confirmEmpty 非空画布清空保存的显式确认（IKIIWN）；服务端已有非空节点而无标记时回 422 零写入
  * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
- * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）
+ * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）；
+ *   IKILUE：confirmEmpty 保存不自动重试，首次 412 即原样抛出——冲突说明服务端已被其他会话
+ *   改写，用新版本号重发旧空文档会覆盖对方成果，由调用方引导刷新复核
  * @throws ApiError status=422 表示空覆盖被拒（服务端非空而本次提交为空且未确认）
  */
 export async function saveCanvasDoc(
@@ -255,6 +257,8 @@ export async function saveCanvasDoc(
       lastError = error;
       const recovered = readCanvasConflictVersion(error);
       if (recovered === undefined) throw error;
+      // IKILUE：仅更新 If-Match 复用原文档重发不构成用户重新确认——清空命令撞上冲突即作废
+      if (payload.confirmEmpty) throw error;
       expected = recovered;
     }
   }

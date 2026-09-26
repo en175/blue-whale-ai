@@ -9,7 +9,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
@@ -97,7 +97,10 @@ vi.mock('@/api/assets', () => ({
   fetchAssetDetail: vi.fn(),
   linkAssetToProject: vi.fn(),
 }));
-vi.mock('@/api/canvas', () => ({
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  // IKILUE：readCanvasConflictVersion 等纯函数沿用真实现（412 信封解析口径与线上一致），
+  // 仅覆盖需要打桩的请求函数与序列化助手
+  ...(await importOriginal<typeof import('@/api/canvas')>()),
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
@@ -162,10 +165,13 @@ export function enableReactActEnvironment() {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移） */
+/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移）；
+ *  locationRef 供断言导航是否真的发生（IKILUE 切换中止用例） */
 export let navigateRef: ((to: string) => void) | null = null;
+export let locationRef: { search: string } | null = null;
 function NavProbe() {
   navigateRef = useNavigate();
+  locationRef = { search: useLocation().search };
   return null;
 }
 
@@ -197,6 +203,7 @@ export async function unmountPage() {
   root = null;
   container = null;
   navigateRef = null;
+  locationRef = null;
 }
 
 export function textNodes(): Node[] {
