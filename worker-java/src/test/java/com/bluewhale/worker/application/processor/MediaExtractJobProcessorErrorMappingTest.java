@@ -585,6 +585,76 @@ class MediaExtractJobProcessorErrorMappingTest {
         assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS2；对齐音频混合 IKIHGQ 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        MediaExtractError unauthorized = new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
+                "音频提取任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "音频提取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input(), 3, 7);
+        MediaExtractError unauthorized = new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 音频提取任务查询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}"
+                        + " request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        assertThat(failure.message()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(failure.details())
+                .containsEntry("raw", "MediaKit 音频提取任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("submit 超时（非 HTTP 失败，链上无状态 cause）→ details 不写 http_status 键")
+    void submitTimeout_noHttpStatusDetailKey() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString()))
+                .thenThrow(new MediaExtractError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 音频提取提交超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        // 反例钉住缺键语义：非 HTTP 失败（超时/连接失败/业务异常）不写 http_status，只留 raw
+        assertThat(failure.details()).doesNotContainKey("http_status").containsKey("raw");
+    }
+
     // ========== poll 相：火山任务 failed（§18.4 第二类映射） ==========
 
     @Test
