@@ -19,7 +19,9 @@ import {
    自动/手动发出（防旧空文档覆盖另一会话的新画布），本地保留清空态、入口提示刷新复核；
    重新水合后闸门解除、confirmEmpty 按新基线重新授予。
    IKILUG 追加：空保存被 422 拒后，防抖自动保存/项目切换强制保存/手动「重试保存」
-   三个入口统一提示刷新复核（不再笼统「保存失败，请重试」），本地编辑保留、不当成保存成功。 */
+   三个入口统一提示刷新复核（不再笼统「保存失败，请重试」），本地编辑保留、不当成保存成功。
+   IKILTB 追加：422 阻断置 saveBlocked 后的项目切换/返回首页也不再引导注定再 422 的
+   无效重试，改提示刷新复核并中止导航；412/422 toast 三分叉收拢为共享 helper。 */
 
 function seedDoc(nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>, loadFailed = false) {
   canvasDocMock.current = {
@@ -266,5 +268,37 @@ describe('IKILUG 画布保存 422 刷新复核提示', () => {
     const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
     expect(retryBtn).toBeTruthy();
     expect(document.body.textContent).not.toContain('已保存');
+  });
+});
+
+/* IKILTB（code-review 修订）：防抖空保存收 422 置 saveBlocked 后，项目切换/返回首页的
+   saveBlocked 拦截分支提示刷新复核而非笼统「保存失败，请重试」（重试注定再 422），
+   且中止导航停留当前项目。 */
+describe('IKILTB 422 阻断后项目切换提示刷新复核', () => {
+  it('e. 防抖空保存收 422 后点「返回首页」：刷新复核提示（非笼统重试），未再发 PUT，中止导航', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+
+    // viewport 变化驱动防抖发出空文档 PUT（水合基线为空 → confirmEmpty 不授予）收 422 置阻断
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+
+    // toast 为单例替换（data-testid=canvas-toast；「保存失败，请重试」另为面板内静态提示条，
+    // 与 toast 无关）：点「返回首页」（与项目切换共用 ensureSavedBeforeProjectSwitch）后，
+    // saveBlocked 拦截分支必弹其一——断言 toast 文案为刷新复核而非笼统重试
+    const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
+    expect(exitBtn).toBeTruthy();
+    await act(async () => { exitBtn!.click(); });
+    await act(async () => {});
+
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1); // saveBlocked 拦截分支未再发 PUT
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    expect(locationRef!.search).toContain('project=p1'); // 中止导航，停留当前项目
   });
 });
