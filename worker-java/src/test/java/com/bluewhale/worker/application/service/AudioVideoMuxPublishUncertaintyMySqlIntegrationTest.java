@@ -75,6 +75,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -785,6 +786,68 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             processorLogger.detachAppender(appender);
             settleQuietly(rawRef.get());
             single.shutdownNow();
+        }
+    }
+
+    /**
+     * 发布异常路径删除失败不记成功（IKIN8V，规格缺失 a3）：发布异常且已确认可删（无在飞事务、
+     * 无 Asset 引用）时 TOS {@code deleteObject} 抛错——真实 relay 链路上删除失败由 relay 吞掉
+     * 并留失败痕迹（storageKey + err），不得报告清理成功（无成功记录）；对象保留在替身（删除
+     * 未生效）；清理失败不改写任务失败原因（failed 的 error 仍是发布异常，不含删除错误）。
+     */
+    @Test
+    @Timeout(90)
+    @DisplayName("组合（真实 relay）：已确认可删但 TOS deleteObject 抛错——对象保留、失败留痕含 storageKey 与错误、不报告清理成功、失败原因不改写")
+    void realRelayTosDeleteFailureOnConfirmedDeletableKeepsObjectWithoutReportingSuccess() throws Exception {
+        long jobId = seedClaimableMuxJob();
+        ConcurrentHashMap<String, byte[]> objects = new ConcurrentHashMap<>();
+        AtomicReference<String> realKey = new AtomicReference<>();
+        TOSV2 tosClient = realTosStandin(objects, null);
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(tosClient)
+                .deleteObject(any(DeleteObjectInput.class));
+        TosVideoMediaRelay relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
+        JobStateMachineService spyService = spy(realService);
+        GenerationCredentialService credentials = mock(GenerationCredentialService.class);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
+        when(gateway.poll("sk-frozen", "mux-task-1"))
+                .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
+                        227.0, "1920x1080", null, null, "request-db-1"));
+        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+                mock(GenerationMessageProducer.class));
+        doAnswer(invocation -> {
+            realKey.set(((PublishAudioVideoMuxDto) invocation.getArgument(0)).storageKey());
+            throw new RuntimeException("发布事务结果不明");
+        }).when(spyService).publishAudioVideoMuxResult(any(PublishAudioVideoMuxDto.class));
+
+        Logger relayLogger = (Logger) LoggerFactory.getLogger(TosVideoMediaRelay.class);
+        ListAppender<ILoggingEvent> relayLogs = new ListAppender<>();
+        relayLogs.start();
+        relayLogger.addAppender(relayLogs);
+        try {
+            processor.handle(String.valueOf(jobId));
+
+            // 删除动作确实发生且失败未生效：真实上传对象仍完整保留在替身（不得记为清理成功）
+            assertThat(realKey.get()).startsWith("generated/9/video/");
+            assertThat(objects).containsKey(realKey.get());
+            assertThat(objects.get(realKey.get())).hasSize(SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT);
+            List<String> messages = relayLogs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+            // 失败留痕含对象身份与错误（jobId 由失败终态行关联，见下）；成功留痕不得出现
+            assertThat(messages.stream().filter(m -> m.contains("清理未发布 TOS 对象失败")).toList())
+                    .anySatisfy(m -> assertThat(m)
+                            .contains("storageKey=" + realKey.get())
+                            .contains("TOS 删除 5xx"));
+            assertThat(messages).noneMatch(m -> m.contains("清理未发布 TOS 对象 storageKey="));
+            // 不转成（额外的）任务失败：failed 的原因仍是发布异常，清理失败不改写失败语义
+            GenerationJobEntity job = readJob(jobId);
+            assertThat(job.getStatus()).isEqualTo("failed");
+            assertThat(job.getError())
+                    .contains("audio_video_mux_failed")
+                    .contains("发布事务结果不明")
+                    .doesNotContain("TOS 删除");
+            verify(spyService).failMediaExtractJob(any());
+        } finally {
+            relayLogger.detachAppender(relayLogs);
         }
     }
 
