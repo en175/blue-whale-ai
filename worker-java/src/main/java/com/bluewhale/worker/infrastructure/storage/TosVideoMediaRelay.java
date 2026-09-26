@@ -102,6 +102,13 @@ public class TosVideoMediaRelay {
      */
     private static final Duration STREAM_ERROR_BODY_TIMEOUT = Duration.ofSeconds(60);
 
+    /**
+     * 任务截止中止的统一文案（HeaderWait / 看门狗四处抛出，文案不变）：IKIN90 起 catch 清理
+     * 据此判别「截止口径的失败」——截止以 {@link VideoProviderError}（普通失败口径）抛出，
+     * 无法按异常类型与停流 / copyWindow / 网络失败区分，文案是唯一稳定判别依据。
+     */
+    static final String TASK_DEADLINE_ABORT_MESSAGE = "任务执行截止时间已到，中止结果转存";
+
     /** 看门狗定时器（daemon 单线程，进程级共享）：只负责到点 close 响应流，无状态轮询。 */
     private static final ScheduledExecutorService WATCHDOG_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -308,7 +315,7 @@ public class TosVideoMediaRelay {
                                          Duration copyWindow, Duration stallTimeout,
                                          Duration errorBodyTimeout) {
         Path tempFile = null;
-        // 已向上游发起 PUT 的对象 key：中止退出时对象可能已落地（body 发完、仅响应未回的
+        // 已向上游发起 PUT 的对象 key：中止/截止退出时对象可能已落地（body 发完、仅响应未回的
         // 窗口），无 Asset 引用即孤儿——catch 里 deleteObject 清理（幂等，未落地也不报错）。
         String uploadedKey = null;
         try {
@@ -390,9 +397,13 @@ public class TosVideoMediaRelay {
                 return new StoredVideo(publicUrl, storageKey, mime, size, md5);
             }
         } catch (RuntimeException e) {
-            // 外部中止（取消/失租/续租异常）且 PUT 已发起 → 清理可能已落地的未发布对象；
-            // 清理失败只记日志，中止路径主语义（及时退出、不发布）不因清理失败而变。
-            if (e instanceof TransferAbortedException && uploadedKey != null) {
+            // 外部中止（取消/失租/续租异常）或任务截止（IKIN90）且 PUT 已发起 → 清理可能已落地
+            // 的未发布对象——转存未成功返回前对象无 Asset 引用，截止虽属普通失败口径，同样会
+            // 留孤儿，与外部中止同等清理；清理失败只记日志，中止/截止路径主语义（及时退出、
+            // 不发布、原异常照常上抛）不因清理失败而变。其余失败（停流 / copyWindow / 网络 /
+            // HTTP 错误，含四参旧口径的全部失败形态）维持不清理的现状。
+            if (uploadedKey != null && (e instanceof TransferAbortedException
+                    || isTaskDeadlineAbort(e))) {
                 deleteUnpublishedObject(uploadedKey);
             }
             throw e;
@@ -437,9 +448,20 @@ public class TosVideoMediaRelay {
     }
 
     /**
+     * 截止口径失败的判别（IKIN90）：任务截止中止抛 {@link VideoProviderError}（普通失败口径），
+     * 与停流 / copyWindow / 网络失败同类型，仅文案可稳定区分——命中即视为「转存未成功返回的
+     * 已落地对象」，与外部中止同等清理。截止只可能由本类的截止布防（HeaderWait / 看门狗）
+     * 抛出，其余入口不会产生此文案；四参兼容入口无截止布防，天然不触发。
+     */
+    private static boolean isTaskDeadlineAbort(RuntimeException e) {
+        return e instanceof VideoProviderError && TASK_DEADLINE_ABORT_MESSAGE.equals(e.getMessage());
+    }
+
+    /**
      * 清理未发布 TOS 对象（IKILVH 建于中止路径，IKIN03 起供 processor 复用——转存已成功
-     * 返回后的放弃/守卫拒绝/发布异常路径，正常 return 后 relay 内部不再触达）：deleteObject
-     * 幂等（对象未落地也不报错），失败仅记日志（含对象身份，可定位）。
+     * 返回后的放弃/守卫拒绝/发布异常路径，正常 return 后 relay 内部不再触达；IKIN90 起任务
+     * 截止未成功返回的已落地对象同走此清理）：deleteObject 幂等（对象未落地也不报错），失败
+     * 仅记日志（含对象身份，可定位）。
      */
     public void deleteUnpublishedObject(String storageKey) {
         try {
@@ -562,7 +584,7 @@ public class TosVideoMediaRelay {
                     }
                     if (deadlineAbort) {
                         throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                                "任务执行截止时间已到，中止结果转存");
+                                TASK_DEADLINE_ABORT_MESSAGE);
                     }
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载已取消", e);
                 }
@@ -730,7 +752,7 @@ public class TosVideoMediaRelay {
             if (deadline != null && System.nanoTime() >= deadline) {
                 deadlineAbort = true;
                 throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "任务执行截止时间已到，中止结果转存");
+                        TASK_DEADLINE_ABORT_MESSAGE);
             }
             Long copyEnd = copyWindowNanos;
             if (copyEnd != null && System.nanoTime() >= copyEnd) {
@@ -747,7 +769,7 @@ public class TosVideoMediaRelay {
             }
             if (deadlineAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "任务执行截止时间已到，中止结果转存", e);
+                        TASK_DEADLINE_ABORT_MESSAGE, e);
             }
             if (stallAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -774,7 +796,7 @@ public class TosVideoMediaRelay {
         void requireNotAborted() {
             if (externalAbort) throw new TransferAbortedException(externalReason());
             if (deadlineAbort) throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                    "任务执行截止时间已到，中止结果转存");
+                    TASK_DEADLINE_ABORT_MESSAGE);
         }
 
         void upload(Call call) {

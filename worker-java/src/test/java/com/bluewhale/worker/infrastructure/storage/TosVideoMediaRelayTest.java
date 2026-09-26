@@ -66,6 +66,12 @@ class TosVideoMediaRelayTest {
     private volatile String uploadedMime;
     private volatile String uploadedAcl;
     private final java.util.concurrent.CountDownLatch releaseStall = new java.util.concurrent.CountDownLatch(1);
+    /**
+     * 有状态 TOS 替身的对象表（IKIN90）：上传对端保存 key→字节，{@code deleteObject} 查表
+     * 真删——测试断言对象存在性（删后真没了 / 失败后还在），不以删除调用次数代替结果。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, byte[]> tosObjects =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     private static byte[] patternBlock() {
         byte[] block = new byte[BLOCK_BYTES];
@@ -215,6 +221,50 @@ class TosVideoMediaRelayTest {
                     + "/" + input.getKey(), input.getHeader());
         }).when(client).preSignedURL(any(PreSignedURLInput.class));
         return uploads;
+    }
+
+    /**
+     * 有状态 TOS 替身的删除通道（IKIN90）：{@code deleteObject} 查对象表真删——key 不存在
+     * 静默通过（幂等口径同真实 TOS），测试据此断言对象存在性而非仅 verify 调用次数。
+     */
+    private void deleteObjectsFromState(TOSV2 client) {
+        doAnswer(invocation -> {
+            com.volcengine.tos.model.object.DeleteObjectInput input = invocation.getArgument(0);
+            tosObjects.remove(input.getKey());
+            return null;
+        }).when(client).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+    }
+
+    /**
+     * 手写 socket 上传对端的签名 stub（IKIN90）：签名 URL 的 path 携带真实 storageKey，
+     * 对端从请求行即可取回 key——「PUT 的对象」与「deleteObject 清理的对象」可核对同一身份。
+     */
+    private void stubPresignedUrlToSocket(TOSV2 client, java.net.ServerSocket socketServer) {
+        doAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            return new PreSignedURLOutput(
+                    "http://127.0.0.1:" + socketServer.getLocalPort() + "/" + input.getKey(),
+                    java.util.Map.of());
+        }).when(client).preSignedURL(any(PreSignedURLInput.class));
+    }
+
+    /** 手写对端读到的 PUT 请求（IKIN90）：请求行提取的 storageKey + 完整 body。 */
+    private record SocketPut(String key, byte[] body) {}
+
+    /** 读 PUT 请求头（逐字节到空行）并按 Content-Length 读满 body：path 去前导 '/' 即 storageKey。 */
+    private static SocketPut readPut(java.net.Socket socket, int bodyBytes) throws IOException {
+        InputStream in = socket.getInputStream();
+        var header = new java.io.ByteArrayOutputStream();
+        int next;
+        while ((next = in.read()) != -1) {
+            header.write(next);
+            if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+        }
+        // "PUT /generated/9/video/xxx.mp4 HTTP/1.1" → path 去前导 '/' 即 storageKey
+        String requestLine = header.toString(StandardCharsets.US_ASCII).split("\r\n", 2)[0];
+        String key = requestLine.split(" ")[1].substring(1);
+        byte[] body = in.readNBytes(bodyBytes);
+        return new SocketPut(key, body);
     }
 
     /**
@@ -794,59 +844,229 @@ class TosVideoMediaRelayTest {
     }
 
     /**
-     * 上传段截止归因（IKILU5）：下载快速完成后上传 body 送达服务端、连接挂住等响应——此窗口
-     * 任务截止到点只能靠看门狗 cancel 上传请求，抛出的 IOException 若不先做截止归因会被
-     * 误包成「生成视频转存网络失败」。截止中止是普通失败口径（与外部中止的静默退出不同），
-     * PUT 已发起的未发布对象清理与下载段截止口径一致（不清理，由既有用例断言）。
+     * 上传段截止归因（IKILU5）+ 截止清理（IKIN90）：下载快速完成后上传 body 送达服务端、对象
+     * 先在替身落地、连接挂住等响应——此窗口任务截止到点只能靠看门狗 cancel 上传请求，抛出的
+     * IOException 若不先做截止归因会被误包成「生成视频转存网络失败」。截止中止是普通失败口径
+     * （与外部中止的静默退出不同、processor 侧仍按普通失败终态处理），但转存未成功返回前 PUT
+     * 已落地，无 Asset 引用即孤儿（IKIN90）：与外部中止同等清理未发布对象。有状态替身断言
+     * 「对象先存在、截止清理后真没了」，不以删除调用次数代替结果。
      */
     @Test
     @Timeout(15)
-    @DisplayName("上传段任务截止到点：中止归因为「任务执行截止时间已到」，不误报网络失败")
+    @DisplayName("上传段任务截止到点：归因「任务执行截止时间已到」不误报网络失败，已落地未发布对象被清理")
     void taskDeadlineDuringUpload_reportsDeadlineNotNetworkFailure() throws Exception {
         String source = serve("video/mp4", 200, 4096, new byte[4096]);
         TOSV2 client = mock(TOSV2.class);
+        var received = new java.util.concurrent.CountDownLatch(1);
         List<String> before = relayTempFiles();
+        deleteObjectsFromState(client);
         try (var socketServer = new java.net.ServerSocket(0, 1,
                 java.net.InetAddress.getLoopbackAddress());
              var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
             socketServer.setSoTimeout(5000);
-            org.mockito.Mockito.when(client.preSignedURL(any(com.volcengine.tos.model.object.PreSignedURLInput.class)))
-                    .thenReturn(new com.volcengine.tos.model.object.PreSignedURLOutput(
-                            "http://127.0.0.1:" + socketServer.getLocalPort() + "/upload", java.util.Map.of()));
+            stubPresignedUrlToSocket(client, socketServer);
             var peer = executor.submit(() -> {
                 try (var socket = socketServer.accept()) {
                     socket.setSoTimeout(5000);
-                    InputStream in = socket.getInputStream();
-                    var header = new java.io.ByteArrayOutputStream();
-                    int next;
-                    while ((next = in.read()) != -1) {
-                        header.write(next);
-                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
-                    }
-                    assertThat(in.readNBytes(4096)).hasSize(4096);
+                    SocketPut put = readPut(socket, 4096);
+                    // 有状态替身：对象先落地（key→字节入库），再挂住不回响应——延迟上传响应窗口
+                    tosObjects.put(put.key(), put.body());
+                    received.countDown();
                     // 服务端收完 body 挂住不回响应：上传停在等响应窗口，截止只能靠看门狗取消连接
-                    return in.read();
+                    return socket.getInputStream().read();
                 }
             });
             var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
                     .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
-                            null, java.time.Instant.now().plusMillis(500)));
+                            null, java.time.Instant.now().plusMillis(2500)));
             try {
-                assertThatThrownBy(() -> transfer.get(5, java.util.concurrent.TimeUnit.SECONDS))
+                // 对象必须在截止到点前已在替身落地（2500ms 截止给足本地回环下载+上传+落地的余量）
+                assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("上传 body 必须先完整送达并在替身落地").isTrue();
+                assertThat(tosObjects).isNotEmpty();
+                assertThatThrownBy(() -> transfer.get(8, java.util.concurrent.TimeUnit.SECONDS))
                         .isInstanceOf(java.util.concurrent.ExecutionException.class)
                         .hasCauseInstanceOf(VideoProviderError.class)
                         .hasMessageContaining("任务执行截止时间已到")
                         .hasMessageNotContaining("转存网络失败");
-                // 截止取消连接后服务端读到 EOF；截止是普通失败口径，不做未发布对象清理（同下载段）
-                assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                // 截止取消连接后服务端读到 EOF；截止是普通失败口径，但 PUT 已落地 → 与外部中止
+                // 同等清理（IKIN90：转存未成功返回的已落地对象不留无主孤儿）
+                assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                var deleted = org.mockito.ArgumentCaptor.forClass(
+                        com.volcengine.tos.model.object.DeleteObjectInput.class);
+                verify(client).deleteObject(deleted.capture());
+                assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+                assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
+                // 有状态断言：deleteObject 查表真删——对象不再存在，替身无残留
+                assertThat(tosObjects).doesNotContainKey(deleted.getValue().getKey());
+                assertThat(tosObjects).isEmpty();
                 assertThat(relayTempFiles()).isEqualTo(before);
-                verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
             } finally {
                 socketServer.close();
                 transfer.cancel(true);
                 peer.cancel(true);
             }
         }
+    }
+
+    /**
+     * 成功响应与截止交错（IKIN90）：上传 body 送达、对象已在替身落地后**延迟**回 200——只要
+     * 上传响应在截止前返回、转存成功返回，对象就已交给调用方（processor 侧发布流程负责），
+     * relay 成功返回路径绝不删对象。与上一用例相对：同一「先落地、延迟响应」替身，交错结果
+     * 由「成功返回先于截止」翻转，钉住不误删已发布（成功交接）对象的边界。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("上传成功响应先于截止返回：转存成功返回，对象保留（成功路径绝不删对象）")
+    void taskDeadline_uploadSuccessBeforeDeadline_returnsAndKeepsObject() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        TOSV2 client = mock(TOSV2.class);
+        var received = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        deleteObjectsFromState(client);
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            stubPresignedUrlToSocket(client, socketServer);
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(5000);
+                    SocketPut put = readPut(socket, 4096);
+                    tosObjects.put(put.key(), put.body());
+                    received.countDown();
+                    // 对象落地后延迟 1.2s 才回 200：等响应窗口内截止（5s）尚未到点，交错但成功
+                    Thread.sleep(1200);
+                    socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+                            .getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                    return 0;
+                }
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                            null, java.time.Instant.now().plusSeconds(5)));
+            try {
+                assertThat(received.await(4, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("上传 body 必须先完整送达并在替身落地").isTrue();
+                TosVideoMediaRelay.StoredVideo stored =
+                        transfer.get(7, java.util.concurrent.TimeUnit.SECONDS);
+                // 成功返回：对象交由调用方负责，relay 不得删除（替身对象保留、deleteObject 未发生）
+                assertThat(stored.size()).isEqualTo(4096L);
+                verify(client, never()).deleteObject(
+                        any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+                assertThat(tosObjects).hasSize(1);
+                String storedKey = tosObjects.keys().nextElement();
+                assertThat(storedKey).startsWith("generated/9/video/");
+                assertThat(stored.storageKey()).isEqualTo(storedKey);
+                assertThat(tosObjects.get(storedKey)).hasSize(4096);
+                assertThat(relayTempFiles()).isEqualTo(before);
+                assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(0);
+            } finally {
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
+    }
+
+    /**
+     * 截止清理失败留痕（IKIN90）：上传已落地、截止中止落在等响应窗口时清理必须执行且对象身份
+     * 进入清理调用；清理本身失败（deleteObject 抛错）只留日志记录（storageKey + err，运维可
+     * 定位），不得吞掉或改写截止失败语义：仍以「任务执行截止时间已到」的 VideoProviderError
+     * 退出（普通失败口径照旧），本地临时文件照常清理。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("上传响应窗口截止且清理失败：仍以截止失败口径退出，对象身份进入清理调用，临时文件不残留")
+    void taskDeadline_uploadCleanupFailure_keepsDeadlineSemantics() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        TOSV2 client = mock(TOSV2.class);
+        var received = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        doThrow(new RuntimeException("tos unavailable"))
+                .when(client).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            stubPresignedUrlToSocket(client, socketServer);
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(5000);
+                    SocketPut put = readPut(socket, 4096);
+                    tosObjects.put(put.key(), put.body());
+                    received.countDown();
+                    // 服务端收完 body 挂住不回响应：截止落在「body 已送达、对象已落地」的窗口
+                    return socket.getInputStream().read();
+                }
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                            null, java.time.Instant.now().plusMillis(2500)));
+            try {
+                assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("上传 body 必须先完整送达并在替身落地").isTrue();
+                // 清理失败不得吞掉/改写截止失败语义：仍是「任务执行截止时间已到」的普通失败口径
+                assertThatThrownBy(() -> transfer.get(8, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(VideoProviderError.class)
+                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageNotContaining("转存网络失败");
+                assertThat(peer.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                // 清理确实执行过且对象身份传入（失败详情由 log.warn 记录 storageKey 与 err）
+                var deleted = org.mockito.ArgumentCaptor.forClass(
+                        com.volcengine.tos.model.object.DeleteObjectInput.class);
+                verify(client).deleteObject(deleted.capture());
+                assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+                assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
+                // 删除失败未生效：替身对象仍在（不能报告清理成功）
+                assertThat(tosObjects).containsKey(deleted.getValue().getKey());
+                assertThat(relayTempFiles()).isEqualTo(before);
+            } finally {
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
+    }
+
+    /**
+     * 四参入口失败不清理（IKIN90 防回归）：清理条件扩展到截止口径后，四参（无任务截止布防，
+     * VideoMatting 生产路径）的普通失败——上传 503——必须维持现状不清理。条件若误扩成
+     * 「任何失败都清」，本用例即红（该入口失败语义与现状偏离）。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("四参口径：上传失败（HTTP 503）维持不清理，不上传成功自然无孤儿，临时文件不残留")
+    void fourArgs_uploadFailure_skipsUnpublishedCleanup() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        TOSV2 client = mock(TOSV2.class);
+        List<String> before = relayTempFiles();
+        deleteObjectsFromState(client);
+        uploadServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        uploadServer.createContext("/", exchange -> {
+            exchange.getRequestBody().transferTo(OutputStream.nullOutputStream());
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        uploadServer.start();
+        doAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            return new PreSignedURLOutput(
+                    "http://127.0.0.1:" + uploadServer.getAddress().getPort() + "/" + input.getKey(),
+                    java.util.Map.of());
+        }).when(client).preSignedURL(any(PreSignedURLInput.class));
+
+        assertThatThrownBy(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES, null))
+                .isInstanceOf(VideoProviderError.class)
+                .hasMessageContaining("生成视频转存失败: HTTP 503");
+
+        // 四参失败路径维持不清理；503 上传未成功，替身无对象，无孤儿产生
+        verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+        assertThat(tosObjects).isEmpty();
+        assertThat(relayTempFiles()).isEqualTo(before);
     }
 
     // ========== IKIN01：响应头等待期的可取消等待责任 + 中止清理失败口径 ==========
