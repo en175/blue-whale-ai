@@ -172,3 +172,159 @@ message UserTransaction {
   string created_at = 7; // RFC3339
   string settled_at = 8; // RFC3339，仅 done 时非空
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 运营面（客服 / 运营后台）
+//
+// ⚠️ **与用户面刻意分开**，不是重复：用户面只出现一个金额（上面那条硬规则），
+//    运营面要能回答「这笔钱为什么先冻了 12、最后只扣了 1」—— 所以它看得见预扣额。
+//
+// ── 迁移说明（2026-09-26）──────────────────────────────────────────────────
+// 这组能力此前**只有 HTTP**（`/admin/**`，内网、无鉴权），与产品面的 gRPC 分裂成
+// 两套协议、两套客户端、两份同一读模型的实现 —— 加一个字段要判断「该进哪个面」，
+// 而那个判断没有任何文档，只能靠 proto 注释和代码惯例猜。
+//
+// ⚠️ **当初为什么是 HTTP，以及为什么现在可以改**（这段是给下一个读代码的人写的，
+//    它很重要——不然会照着旧注释把迁移回滚掉）：
+//
+//   旧注释（`consumption-records.controller.ts`）写的是「没有复用用户面那条 gRPC
+//   `ListTransactions`：它的契约里 `user_id` 必填，语义是『把我的账给我』；管理端要的是
+//   『某个人的 / 所有人一起看』——给**用户面契约**加『userId 可不填』等于给每个持 token
+//   的调用者开了拉全站流水的口子」。
+//
+//   ⚠️ 那个顾虑反驳的是「**复用用户面那条 rpc / 给它的 message 加字段**」，
+//      **不是**「用 gRPC」。而本服务是一条**独立**的契约：
+//      `AdminListTransactionsRequest.user_id` 不填 = 全站，**用户面那条一个字没动** ——
+//      口子没有开。这一点是本迁移成立的前提，改动这里之前先确认它仍然成立。
+//
+//   所以这次迁移**满足**了旧注释的要求（用户面契约不受影响），同时消掉了它当时
+//   不得不接受的代价（一个内网无鉴权的 HTTP 端口 + 两套协议）。独立服务还更好管：
+//   鉴权与网络策略可以按**服务**配，而不是按「这个端口上恰好都是运营接口」。
+//
+// 本次先把**读**迁过来（下面四条）；写的（发放 / 结算 / 返还 / 目录发布 / 促销 /
+// 会员折扣）随后按同一形状迁。分两步是刻意的：每一步都能独立编译、独立验证，
+// 中途停下也不会留下「端口切了一半」的状态。
+// ══════════════════════════════════════════════════════════════════════════════
+service BillingAdminService {
+
+  // 运营面流水（**一个业务动作一行**）。与 ListTransactions **同源同模型**，
+  // 唯一差别是每行多带一个 `reserved_credits` —— 那个字段是这组接口存在的全部理由。
+  //
+  // 失败语义：UNAVAILABLE（billing 不可用）。查询本身不该失败。
+  rpc AdminListTransactions(AdminListTransactionsRequest) returns (AdminListTransactionsResponse);
+
+  // 某用户的余额与临期批次。
+  //
+  // ⚠️ **这条不是从 HTTP 迁过来的**（HTTP 面从来没有查余额的接口），它是**新增**的。
+  //    加在这里是因为它已有一处明确、写在仓里的需求：
+  //    `backend/libs/shared/persistence/admin-user-query.ts` 的管理端用户列表
+  //    `balance` / `totalRecharge` / `totalSpend` 三列**当前硬编码为 0**，注释写着
+  //    「属于计费域，而计费侧还没按用户维度接过来……**等计费接上再回填**」。
+  //    这条 rpc 就是「接上」的那一半。
+  //
+  // ⚠️ **但它只够回填「详情页」，不够回填「列表页」**：列表一页最多 100 个用户，
+  //    逐个调这条就是 N+1（100 次跨进程往返，每次还要各自算一遍批次）。
+  //    回填列表需要一个**批量**形态（`repeated user_id` → map），那还要在 billing 侧
+  //    加一条按 user_id IN (...) 分组的 SQL —— 是独立的一件事，**故意没塞进这次迁移**。
+  //    写在这里是为了让它是一个**已知缺口**，而不是被后来的人当成漏掉。
+  //
+  // 失败语义：UNAVAILABLE（billing 不可用）。用户不存在**不是**错误 —— 余额为 0
+  // 与「查无此人」在账本上无从区分（没有批次即没有余额），返回零值即可。
+  rpc AdminQueryBalance(AdminQueryBalanceRequest) returns (AdminQueryBalanceResponse);
+
+  // 区间内**已结算的实际消耗**合计（运营对账用）。
+  rpc AdminConsumedCredits(AdminConsumedCreditsRequest) returns (AdminConsumedCreditsResponse);
+
+  // 当前生效的定价目录原文（运营页展示 + 排查「这个模型为什么算不出价」）。
+  rpc AdminGetActiveCatalog(AdminGetActiveCatalogRequest) returns (AdminGetActiveCatalogResponse);
+}
+
+message AdminListTransactionsRequest {
+  int64  user_id    = 1; // 0 = 全部用户
+  string type       = 2; // consume | grant | ledger；空 = 全部
+  int32  page_size  = 3; // 0 = 默认页大小
+  string page_token = 4; // 空 = 第一页。游标分页：翻页期间新增的行不会挤掉已看过的行
+}
+
+message AdminListTransactionsResponse {
+  repeated AdminTransactionItem items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// 运营面的一行流水 —— 与 UserTransaction 同一个读模型，多 `user_id` 与 `reserved_credits`。
+message AdminTransactionItem {
+  string id         = 1;
+  // 归属用户。**管理面独有的列** —— UserTransaction 里没有它（用户只看自己那份，带了是冗余）。
+  //
+  // ⚠️ 这一列不是装饰：管理面的全部理由就是「某个人的 / **所有人一起看**」。后者
+  //    （请求里 user_id = 0）若响应不带它，页面上就是一列**没有主人的流水**，
+  //    运营拿着它回答不了「这笔是谁的」——而「所有人一起看」正是这条接口存在的理由之一。
+  //    HTTP 面的 Item 一直在投影这一列，迁移时**不能丢**。
+  int64  user_id    = 2;
+  string type       = 3; // 同 UserTransaction.type
+  string direction  = 4; // in | out
+  string title      = 5; // 「视频生成 · seedance-2.5 1080p 5s」
+  // 整数积分，该行**唯一的金额**（语义随 status：pending = 预计消耗，done = 实际消耗）
+  int64  amount     = 6;
+  // ★ 该行预留当初冻了多少（整数积分）。**只有消费行有值。**
+  //
+  // ⚠️ 用显式 presence 而不是「0 = 没有」：0 是「冻了 0」，缺值是「这个概念不适用于
+  //    这一行」（发放 / 账本行压根没有预扣）。前端靠这个区别决定显不显示 ——
+  //    混成一个数就会出现「发放行显示预扣 0」。本文件第一次用 proto3 的 optional。
+  optional int64 reserved_credits = 7;
+  string status     = 8; // pending | done
+  string created_at = 9; // RFC3339
+  string settled_at = 10; // RFC3339，未结算为空串
+}
+
+message AdminQueryBalanceRequest {
+  int64 user_id = 1;
+}
+
+message AdminQueryBalanceResponse {
+  int64 available_credits = 1;
+  // 冻结的钱还在，只是动不了 —— 可用 + 冻结 = 总资产
+  int64 frozen_credits    = 2;
+  repeated AdminExpiringLot expiring = 3;
+}
+
+message AdminExpiringLot {
+  int64  credits    = 1;
+  string expires_at = 2; // RFC3339
+  string source     = 3; // 批次来源（recharge | bonus | …）
+}
+
+message AdminConsumedCreditsRequest {
+  string from = 1; // RFC3339；空 = 不限
+  string to   = 2; // RFC3339；空 = 不限
+}
+
+message AdminConsumedCreditsResponse {
+  // **已结算**的实际消耗（整数积分，与用户账本同单位）——
+  // 不含冻结中的预扣：那是「可能消耗」，把它算进消耗额会让对账数字随在途任务浮动
+  int64 consumed_credits = 1;
+}
+
+message AdminGetActiveCatalogRequest {}
+
+message AdminGetActiveCatalogResponse {
+  // 目录原文（逐字，不重新序列化）。
+  //
+  // ⚠️ 它是 MySQL JSON 列的**规范化形态**（键序与空白由 MySQL 决定），与发布时提交的
+  //    那串字节**不同** —— 判断「内容改没改」要解析成对象比，比文本会让一次没改过的
+  //    保存凭空多出版本。管理端「读当前 → 改 → 整份发布」正是靠它起步。
+  //
+  // ⚠️ 回原文而不是让调用方自己拼：让「只改一个单价」的保存顺手把服务端不认识的字段
+  //    （向前兼容空间）抹掉，是更坏的默认值。
+  string document_json = 1;
+  // ★ **-1 = 当前没有生效目录**（不是 0）。与 {@link credits_per_yuan} 同口径：
+  //   没有生效目录时两者都是 -1、且没有内容可给，**不编造**。管理端要在这种情况下
+  //   显示「还没发布过任何目录」并让运营从零建一份 —— 所以它不能是个错误。
+  int64  version       = 2;
+  // 发布时对**提交文本**取的 SHA-256。⚠️ 与上面 document_json 的 hash **不相等**（见其注释）。
+  string document_hash = 3;
+  // 1 元 = 多少积分。★ **充值路径的换算率就是从这里读的**
+  // （`billing-admin-client.ts` 的 `fetchCreditsPerYuan` → 取不到即停，不回落默认值）：
+  // 少了这个字段，「用户看到的积分」就没了核对基准。没有生效目录时 -1。
+  int64  credits_per_yuan = 4;
+}
