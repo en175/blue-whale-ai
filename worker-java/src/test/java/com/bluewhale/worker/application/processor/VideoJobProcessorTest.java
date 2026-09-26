@@ -460,8 +460,16 @@ class VideoJobProcessorTest {
 
         processor.handle("107");
 
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(stateMachine).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
-                anyString(), any(), anyString(), eq(1L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // processing 达上限无 cause → 文案不变、不写 http_status 键（IKIN6Y 反例）
+        assertThat(messageCaptor.getValue())
+                .isEqualTo("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS + " 次）");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
     }
 
     @Test
@@ -501,16 +509,22 @@ class VideoJobProcessorTest {
 
         processor.handle("110");
 
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
-                eq("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS
-                        + " 次），上游持续错误: 查询超时"),
-                any(), anyString(), eq(1L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // 超时形态（无状态 cause）达上限 → 文案保持现状、不写 http_status 键（IKIN6Y 反例）
+        assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
+                + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 查询超时");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ provider_timeout（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ provider_timeout 且透传 http_status=503（瞬时错误各形态同受上限约束）")
     void pollTransientHttp503AtLimit_fails() {
         ClaimedVideoJobDto claim = videoClaim("111", false, "task-111",
                 VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
@@ -526,8 +540,49 @@ class VideoJobProcessorTest {
 
         processor.handle("111");
 
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
-                anyString(), any(), anyString(), eq(1L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // 网关文案无「: HTTP <code>」字样 → 剥离无命中、文案原样；状态照写 details（IKIN6Y）
+        assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
+                + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 网关繁忙");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).containsEntry("http_status", 503);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKIN6Y: poll 瞬时错误达上限（429 cause 携带状态）→ details.http_status=429，message 剥状态码字样、保留排查信息")
+    void pollTransientHttp429AtLimit_persistsHttpStatusDetail() {
+        ClaimedVideoJobDto claim = videoClaim("121", false, "task-121",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("121"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频轮询失败: HTTP 429 body={\"error\":{\"message\":\"Requests too fast\"}} request_id=req-882",
+                new NewApiVideoClient.HttpStatusException(429)))
+                .when(videoClient).poll(eq("token"), eq("task-121"));
+
+        processor.handle("121");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6Y）：状态入 details，message/raw 不含
+        // 状态码字样，body / request_id 等排查信息原样保留；错误码保持 provider_timeout 不变
+        assertThat(messageCaptor.getValue()).doesNotContain("429")
+                .contains("Requests too fast").contains("request_id=req-882");
+        assertThat(details)
+                .containsEntry("raw", "视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS
+                        + " 次），上游持续错误: new-api 视频轮询失败: body={\"error\":{\"message\":\"Requests too fast\"}} request_id=req-882")
+                .containsEntry("http_status", 429);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

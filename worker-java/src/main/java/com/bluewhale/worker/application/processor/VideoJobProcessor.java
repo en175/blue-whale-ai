@@ -351,9 +351,18 @@ public class VideoJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_VIDEO_POLLS) {
                     log.warn("[video] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failVideo(claim, GenerationError.ERROR_PROVIDER_TIMEOUT,
-                            "视频生成轮询超时（超过 " + MAX_VIDEO_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                    // IKIN6Y：预算耗尽分支与顶层 catch（IKIMS5 / IKIMN8）同一透传口径——状态从
+                    // 当次瞬时错误的 cause 链解析（共享 NewApiHttpSupport.upstreamHttpStatus）：
+                    // 取到才写 details.http_status 并剥 message 的「: HTTP <code>」片段（body /
+                    // request_id 等排查信息原样保留）；取不到（超时 / 连接失败等无状态 cause）
+                    // 不写键、不推断状态，文案保持现状。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "视频生成轮询超时（超过 " + MAX_VIDEO_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failVideo(claim, GenerationError.ERROR_PROVIDER_TIMEOUT, message, httpStatus);
                     return;
                 }
                 log.warn("[video] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
