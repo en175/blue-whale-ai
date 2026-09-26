@@ -35,6 +35,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -839,6 +840,199 @@ class TosVideoMediaRelayTest {
                 assertThat(relayTempFiles()).isEqualTo(before);
                 verify(client, never()).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
             } finally {
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
+    }
+
+    // ========== IKIN01：响应头等待期的可取消等待责任 + 中止清理失败口径 ==========
+
+    /**
+     * 响应头等待期接线（IKIN01）：外部中止信号先于响应头到达也必须立即停止下载请求——此前
+     * 中止句柄只在拿到正文流后才接线（StreamWatchdog 构造），阻塞在响应头等待里的传输只能
+     * 等 60s 响应头超时、且被误归因为普通下载失败。及时性即证明：记录 abort → 异常抛出的
+     * 实际延迟并断言远小于 60s 响应头超时；服务端观察到连接被真关（请求真正停止，不只是
+     * 调用方放弃等待）。走四参公开入口（真实 60s 响应头超时在跑，证明不等请求超时）。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("响应头未返回时外部中止：立即取消下载请求（延迟远小于 60s 响应头超时），连接真关")
+    void externalAbortDuringHeaderWait_cancelsRequestPromptly() throws Exception {
+        TOSV2 client = mock(TOSV2.class);
+        var handle = new TosVideoMediaRelay.TransferAbortHandle();
+        var headerReceived = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            String url = "http://127.0.0.1:" + socketServer.getLocalPort() + "/slow-header.bin";
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(10_000);
+                    InputStream in = socket.getInputStream();
+                    var header = new java.io.ByteArrayOutputStream();
+                    int next;
+                    while ((next = in.read()) != -1) {
+                        header.write(next);
+                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+                    }
+                    headerReceived.countDown();
+                    // 连接保持、响应头永不返回：等待只能靠客户端主动取消打断
+                    return in.read();
+                }
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES, handle));
+            try {
+                assertThat(headerReceived.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("下载请求必须到达真实 HTTP 传输层").isTrue();
+                long abortAt = System.nanoTime();
+                handle.abort("结果转存租约丢失");
+                assertThatThrownBy(() -> transfer.get(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
+                        .hasMessageContaining("结果转存租约丢失");
+                long abortDelayMs = Duration.ofNanos(System.nanoTime() - abortAt).toMillis();
+                System.out.printf("[IKIN01] 响应头等待期外部中止延迟 %dms（60s 响应头超时为对照基准）%n",
+                        abortDelayMs);
+                assertThat(abortDelayMs)
+                        .as("abort→异常延迟 %dms，须远小于 60s 响应头超时", abortDelayMs)
+                        .isLessThan(5_000L);
+                assertThat(peer.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                assertThat(relayTempFiles()).isEqualTo(before);
+                verify(client, never()).putObject(any(PutObjectInput.class));
+            } finally {
+                handle.abort("test cleanup");
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
+    }
+
+    /**
+     * 任务截止约束响应头等待（IKIN01，五参）：execution_deadline_at 到点时响应头尚未返回，
+     * 请求也必须被立即取消并归因为「任务执行截止时间已到」——此前截止只从正文读取开始布防，
+     * 响应头窗口内到点同样要等 60s 超时误报网络失败。走五参公开入口，截止缩比 500ms。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("响应头未返回时任务截止到点：立即取消下载请求并归因截止，不误报网络失败")
+    void taskDeadlineDuringHeaderWait_cancelsRequestPromptly() throws Exception {
+        TOSV2 client = mock(TOSV2.class);
+        var headerReceived = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            String url = "http://127.0.0.1:" + socketServer.getLocalPort() + "/slow-header.bin";
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(10_000);
+                    InputStream in = socket.getInputStream();
+                    var header = new java.io.ByteArrayOutputStream();
+                    int next;
+                    while ((next = in.read()) != -1) {
+                        header.write(next);
+                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+                    }
+                    headerReceived.countDown();
+                    return in.read();
+                }
+            });
+            long startNanos = System.nanoTime();
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(url, "9", VideoMattingContract.MAX_RESULT_BYTES,
+                            null, java.time.Instant.now().plusMillis(500)));
+            try {
+                assertThat(headerReceived.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .as("下载请求必须到达真实 HTTP 传输层").isTrue();
+                assertThatThrownBy(() -> transfer.get(5, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(VideoProviderError.class)
+                        .hasMessageContaining("任务执行截止时间已到")
+                        .hasMessageNotContaining("转存网络失败");
+                long elapsedMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+                System.out.printf("[IKIN01] 响应头等待期任务截止中止延迟 %dms（截止注入 500ms，60s 响应头超时为对照基准）%n",
+                        elapsedMs);
+                assertThat(elapsedMs)
+                        .as("截止→异常延迟 %dms，须远小于 60s 响应头超时", elapsedMs)
+                        .isLessThan(5_000L);
+                assertThat(peer.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                assertThat(relayTempFiles()).isEqualTo(before);
+                verify(client, never()).putObject(any(PutObjectInput.class));
+            } finally {
+                socketServer.close();
+                transfer.cancel(true);
+                peer.cancel(true);
+            }
+        }
+    }
+
+    /**
+     * 清理失败口径（IKIN01）：上传已发出、中止落在等响应窗口时对象可能已落地为无 Asset 引用
+     * 的孤儿——清理必须执行且对象身份进入清理调用；清理本身失败（deleteObject 抛错）只留
+     * 日志记录（storageKey + 错误），不得吞掉或改写中止语义：仍以 TransferAbortedException
+     * 退出，本地临时文件照常清理。
+     */
+    @Test
+    @Timeout(15)
+    @DisplayName("上传响应窗口中止且清理失败：仍以中止语义退出，对象身份进入清理调用，临时文件不残留")
+    void externalAbort_uploadCleanupFailure_keepsAbortSemantics() throws Exception {
+        String source = serve("video/mp4", 200, 4096, new byte[4096]);
+        TOSV2 client = mock(TOSV2.class);
+        var handle = new TosVideoMediaRelay.TransferAbortHandle();
+        var received = new java.util.concurrent.CountDownLatch(1);
+        List<String> before = relayTempFiles();
+        doThrow(new RuntimeException("tos unavailable"))
+                .when(client).deleteObject(any(com.volcengine.tos.model.object.DeleteObjectInput.class));
+        try (var socketServer = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            socketServer.setSoTimeout(5000);
+            org.mockito.Mockito.when(client.preSignedURL(any(com.volcengine.tos.model.object.PreSignedURLInput.class)))
+                    .thenReturn(new com.volcengine.tos.model.object.PreSignedURLOutput(
+                            "http://127.0.0.1:" + socketServer.getLocalPort() + "/upload", java.util.Map.of()));
+            var peer = executor.submit(() -> {
+                try (var socket = socketServer.accept()) {
+                    socket.setSoTimeout(5000);
+                    InputStream in = socket.getInputStream();
+                    var header = new java.io.ByteArrayOutputStream();
+                    int next;
+                    while ((next = in.read()) != -1) {
+                        header.write(next);
+                        if (header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) break;
+                    }
+                    assertThat(in.readNBytes(4096)).hasSize(4096);
+                    received.countDown();
+                    // 服务端保持连接且不发响应：中止落在「body 已送达、对象可能已落地」的窗口
+                    return in.read();
+                }
+            });
+            var transfer = executor.submit(() -> new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                    .persistStreaming(source, "9", VideoMattingContract.MAX_RESULT_BYTES, handle));
+            try {
+                assertThat(received.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                handle.abort("lease lost");
+                // 清理失败不得吞掉/改写中止语义：仍是 TransferAbortedException、原因透传
+                assertThatThrownBy(() -> transfer.get(2, java.util.concurrent.TimeUnit.SECONDS))
+                        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                        .hasCauseInstanceOf(TosVideoMediaRelay.TransferAbortedException.class)
+                        .hasMessageContaining("lease lost");
+                assertThat(peer.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(-1);
+                // 清理确实执行过且对象身份传入（失败详情由 log.warn 记录 storageKey 与 err）
+                var deleted = org.mockito.ArgumentCaptor.forClass(
+                        com.volcengine.tos.model.object.DeleteObjectInput.class);
+                verify(client).deleteObject(deleted.capture());
+                assertThat(deleted.getValue().getBucket()).isEqualTo("bkt");
+                assertThat(deleted.getValue().getKey()).startsWith("generated/9/video/");
+                assertThat(relayTempFiles()).isEqualTo(before);
+            } finally {
+                handle.abort("test cleanup");
                 socketServer.close();
                 transfer.cancel(true);
                 peer.cancel(true);

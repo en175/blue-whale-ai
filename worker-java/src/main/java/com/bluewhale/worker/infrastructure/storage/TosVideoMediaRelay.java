@@ -32,6 +32,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -65,7 +68,9 @@ public class TosVideoMediaRelay {
     /**
      * 流式转存的响应头等待超时 60s（同字节数组路径值）。探针实证：{@code BodyHandlers.ofInputStream}
      * 语义下 {@code HttpRequest.timeout} 只覆盖到响应头（1s 超时 + 4s 慢 body 实测正常读完），
-     * 故此值不约束大文件下载本身，body 段由 {@link #STREAM_STALL_TIMEOUT} 兜底。
+     * 故此值不约束大文件下载本身，body 段由停流超时（五参，{@link #STREAM_STALL_TIMEOUT}）
+     * 或 copyWindow 固定窗（四参，{@link #STREAM_COPY_DEADLINE}）兜底；等待期内外部中止与
+     * 五参任务截止经 {@link HeaderWait} 可立即取消请求，不等满本超时。
      */
     private static final Duration STREAM_HEADER_TIMEOUT = Duration.ofSeconds(60);
 
@@ -280,8 +285,9 @@ public class TosVideoMediaRelay {
      * 流式转存（带外部中止句柄 + 任务截止时间，IKILVH 新模型）：时限模型为「停流超时（默认
      * {@link #STREAM_STALL_TIMEOUT}，无进度才计时）+ 任务截止时间（到点即中止）+ 容量上限
      * （边读边判）」三限界，不再有固定总时限——持续有进度的慢传输不受总时长约束。调用方
-     * （processor）把 {@code execution_deadline_at} 传入：截止到点由 {@link StreamWatchdog}
-     * 主动 close 响应流 / 取消上传，以「任务执行截止时间已到」的供应商错误退出（属普通
+     * （processor）把 {@code execution_deadline_at} 传入：截止从请求发起（响应头等待）到正文
+     * 读取、上传全程约束，到点由 {@link HeaderWait} 取消请求 / {@link StreamWatchdog} 主动
+     * close 响应流 / 取消上传，以「任务执行截止时间已到」的供应商错误退出（属普通
      * 失败口径，与停流、容量超限、外部中止的文案分别命名，运维可定位）。截止时间可为
      * null（无任务截止约束，此时无任何总时限兜底——四参兼容入口才有 10 分钟兜底）。
      */
@@ -309,7 +315,8 @@ public class TosVideoMediaRelay {
         try {
             tempFile = Files.createTempFile("video-relay-", ".part");
 
-            // 1. 下载到临时文件（响应头等待走 60s；错误体与正文段各自布防看门狗——停流时
+            // 1. 下载到临时文件（响应头等待走 60s，同时经 HeaderWait 建立可取消的等待责任——
+            //    中止信号先于响应头到达也能立即取消请求；错误体与正文段各自布防看门狗——停流时
             //    截止检查在阻塞 read 里走不到，必须由看门狗到点主动 close 响应流打断读取）
             long size;
             HttpRequest req = HttpRequest.newBuilder()
@@ -317,7 +324,10 @@ public class TosVideoMediaRelay {
                     .timeout(STREAM_HEADER_TIMEOUT)
                     .GET()
                     .build();
-            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            CompletableFuture<HttpResponse<InputStream>> pending =
+                    httpClient.sendAsync(req, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> resp =
+                    new HeaderWait(pending, abortHandle, taskDeadline).await();
             String contentType = resp.headers().firstValue("content-type").orElse(null);
             String mime = contentType != null ? contentType.split(";", 2)[0].trim() : "video/mp4";
             try (InputStream body = resp.body();
@@ -403,9 +413,10 @@ public class TosVideoMediaRelay {
 
     /**
      * 分块落盘：边读边判上限（上限语义同字节数组路径——等于上限通过）；每块到达即向看门狗
-     * 上报进度（重置停流基准；任务截止到点直接中止）。停流的阻塞中止由看门狗兜——read
-     * 返回后才发现停流是常态，阻塞中的打断只能靠看门狗 close 响应流。持续有进度即不再有
-     * 总时长约束（IKILVH：10 GiB 上限与固定总时限互斥，慢传输由任务截止时间限界）。
+     * 上报进度（重置停流基准；任务截止 / copyWindow 到点直接中止）。停流的阻塞中止由看门狗
+     * 兜——read 返回后才发现停流是常态，阻塞中的打断只能靠看门狗 close 响应流。五参模型下
+     * 持续有进度即不再有总时长约束（IKILVH：10 GiB 上限与固定总时限互斥，慢传输由任务截止
+     * 时间限界）；四参的 copyWindow 固定窗不因进度重置（IKIN01 旧口径）。
      */
     private long copyToFile(InputStream in, Path target, long maxBytes, String sourceUrl,
                             StreamWatchdog watchdog) throws IOException {
@@ -449,9 +460,10 @@ public class TosVideoMediaRelay {
     public record StoredVideo(String url, String storageKey, String mime, Long size, String md5) {}
 
     /**
-     * 传输中止句柄（IKHSFC 建通道，IKHSFD 消费）：调用方（如转存期租约心跳）在确认应放弃
-     * 本次传输时 {@link #abort(String)}；传输内部接线后到点主动 close 响应流 / 取消上传 HTTP 请求，
-     * 以 {@link TransferAbortedException} 退出。接线前触发同样生效（wire 时补触发）。
+     * 传输中止句柄（IKHSFC 建通道，IKHSFD 消费，IKIN01 扩到响应头等待期）：调用方（如转存期
+     * 租约心跳）在确认应放弃本次传输时 {@link #abort(String)}；传输内部接线后主动 close 响应
+     * 流 / 取消上传 HTTP 请求 / 取消等待响应头期间的下载请求，以 {@link TransferAbortedException}
+     * 退出。接线前触发同样生效（wire 时补触发）。
      */
     public static final class TransferAbortHandle {
         private volatile Runnable action;
@@ -491,6 +503,69 @@ public class TosVideoMediaRelay {
     public static final class TransferAbortedException extends RuntimeException {
         public TransferAbortedException(String reason) {
             super(reason);
+        }
+    }
+
+    /**
+     * 响应头等待期的可取消等待责任（IKIN01）：发起供应商下载请求（sendAsync）的同时把外部
+     * 中止句柄与任务截止接到 pending future 上——中止信号先于响应头到达也能立即取消请求，
+     * 不必等到 60s 响应头超时。此前的实现只在拿到正文流后才接线（StreamWatchdog 构造），
+     * send 阻塞窗口内句柄与截止均无法打断等待，取消/失租要挂到最多 60s 响应头超时且被误
+     * 归因为普通下载失败。响应头正常返回后 StreamWatchdog 的 wire 覆盖本类 wire 的取消
+     * 动作（watchdog 接管正文与上传段的中止）；异常退出时残留的取消动作指向已终结的
+     * future（cancel 为 no-op），无害。JDK HttpClient 的 future cancel 会关闭底层连接，
+     * 服务端可观察到请求真正停止。
+     */
+    private static final class HeaderWait {
+        private final CompletableFuture<HttpResponse<InputStream>> pending;
+        private final TransferAbortHandle handle;
+        private volatile ScheduledFuture<?> deadlineTask;
+        private volatile boolean deadlineAbort;
+
+        HeaderWait(CompletableFuture<HttpResponse<InputStream>> pending,
+                   TransferAbortHandle handle, Instant taskDeadline) {
+            this.pending = pending;
+            this.handle = handle;
+            if (handle != null) {
+                // wire 时若句柄已 abort 会补触发，立即取消请求（接线前触发的补偿通道）
+                handle.wire(() -> pending.cancel(true));
+            }
+            if (taskDeadline != null) {
+                long nanos = System.nanoTime() + Duration.between(Instant.now(), taskDeadline).toNanos();
+                deadlineTask = WATCHDOG_SCHEDULER.schedule(this::abortFromDeadline,
+                        Math.max(0, nanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+            }
+        }
+
+        private void abortFromDeadline() {
+            deadlineAbort = true;
+            pending.cancel(true);
+        }
+
+        /** 等待响应头：取消类完成按「外部中止 → 任务截止」归因（与看门狗同优先级），其余包供应商错误。 */
+        HttpResponse<InputStream> await() {
+            try {
+                return pending.join();
+            } catch (CompletionException e) {
+                if (e.getCause() instanceof CancellationException) {
+                    // 请求取消只来自本类的两个动作：外部中止（优先）或任务截止到点
+                    if (handle != null && handle.aborted()) {
+                        throw new TransferAbortedException(handle.reason());
+                    }
+                    if (deadlineAbort) {
+                        throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                                "任务执行截止时间已到，中止结果转存");
+                    }
+                    throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载已取消", e);
+                }
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频下载失败: " + cause.getMessage(), cause);
+            } finally {
+                // 响应头已到（或已失败）：等待期截止定时器职责终结，正文段由看门狗另行布防
+                ScheduledFuture<?> task = deadlineTask;
+                if (task != null) task.cancel(false);
+            }
         }
     }
 
