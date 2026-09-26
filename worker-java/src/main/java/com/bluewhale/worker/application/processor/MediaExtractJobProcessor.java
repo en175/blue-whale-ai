@@ -267,9 +267,16 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_MEDIA_EXTRACT_POLLS) {
                     log.warn("[media_extract] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
+                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "音频提取轮询超时（超过 " + MAX_MEDIA_EXTRACT_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
                     failMediaExtract(claim, MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED,
-                            "音频提取轮询超时（超过 " + MAX_MEDIA_EXTRACT_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                            message, httpStatus);
                     return;
                 }
                 log.warn("[media_extract] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",

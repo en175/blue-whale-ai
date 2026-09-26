@@ -297,9 +297,15 @@ public class VocalSplitJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
                     log.warn("[vocal_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
-                            "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
+                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED, message, httpStatus);
                     return;
                 }
                 log.warn("[vocal_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",

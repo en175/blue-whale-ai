@@ -278,9 +278,15 @@ public class AudioTrimJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_AUDIO_TRIM_POLLS) {
                     log.warn("[audio_trim] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failAudioTrim(claim, AudioTrimContract.ERROR_AUDIO_TRIM_FAILED,
-                            "音频截取轮询超时（超过 " + MAX_AUDIO_TRIM_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
+                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "音频截取轮询超时（超过 " + MAX_AUDIO_TRIM_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failAudioTrim(claim, AudioTrimContract.ERROR_AUDIO_TRIM_FAILED, message, httpStatus);
                     return;
                 }
                 log.warn("[audio_trim] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",

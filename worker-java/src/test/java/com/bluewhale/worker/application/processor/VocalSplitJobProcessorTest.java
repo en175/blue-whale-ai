@@ -602,12 +602,14 @@ class VocalSplitJobProcessorTest {
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
         VocalSplitError gatewayBusy = new VocalSplitError(
@@ -617,7 +619,22 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        ArgumentCaptor<FailMediaExtractDto> gatewayCaptor =
+                ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
+        assertThat(gatewayCaptor.getValue().message())
+                .isEqualTo("人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

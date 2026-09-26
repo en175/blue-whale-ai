@@ -400,12 +400,14 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .isEqualTo("音频调速轮询超时（超过 "
                         + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
                         + " 次），上游持续错误: MediaKit 音频调速任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1051，文案摘要可区分网关 5xx（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1051 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input(), AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS, 7);
         AudioSpeedError gatewayBusy = new AudioSpeedError(
@@ -420,8 +422,17 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(stateMachine).failAudioSpeedJob(gatewayCaptor.capture());
         assertThat(gatewayCaptor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
         assertThat(gatewayCaptor.getValue().message())
-                .contains("上游持续错误: MediaKit 音频调速任务查询失败: HTTP 503");
+                .isEqualTo("音频调速轮询超时（超过 "
+                        + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
+                        + " 次），上游持续错误: MediaKit 音频调速任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "音频调速轮询超时（超过 "
+                        + AudioSpeedJobProcessor.MAX_AUDIO_SPEED_POLLS
+                        + " 次），上游持续错误: MediaKit 音频调速任务查询失败:");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
