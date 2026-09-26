@@ -6,11 +6,13 @@ import com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto;
 import com.bluewhale.worker.domain.dto.FailAudioTrimDto;
 import com.bluewhale.worker.domain.dto.PublishAudioTrimDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.error.AudioTrimError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitTrimAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitTrimAudioClient.TrimAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -138,9 +140,15 @@ public class AudioTrimJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "音频截取失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[audio_trim] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failAudioTrim(claim, code, message);
+            failAudioTrim(claim, code, message, httpStatus);
         }
     }
 
@@ -457,9 +465,20 @@ public class AudioTrimJobProcessor implements JobProcessor {
     /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at + next_poll_at，轮询型任务
      *  语义完备；details.raw 透传原始原因）。 */
     private void failAudioTrim(ClaimedAudioTrimJobDto claim, String code, String message) {
+        failAudioTrim(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failAudioTrim(ClaimedAudioTrimJobDto claim, String code, String message,
+                               Integer httpStatus) {
         log.warn("audio_trim job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failAudioTrimJob(new FailAudioTrimDto(
                 claim.id(),
                 claim.workerId(),

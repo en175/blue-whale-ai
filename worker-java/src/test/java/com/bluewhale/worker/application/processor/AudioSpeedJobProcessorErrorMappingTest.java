@@ -289,6 +289,32 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        AudioSpeedError unauthorized = new AudioSpeedError(GenerationError.ERROR_PROVIDER_FAILED,
+                "音频调速任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(adjustAudioSpeedClient.submit(anyString(), anyString(), any())).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
+        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailAudioSpeedDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "音频调速任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
 
     @Test

@@ -280,6 +280,32 @@ class VideoEnhanceJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input("1080p"));
+        stubSourceAsset(1920, 1080);
+        VideoEnhanceError unauthorized = new VideoEnhanceError(GenerationError.ERROR_PROVIDER_FAILED,
+                "画质增强任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(enhanceVideoClient.submit(anyString(), anyString(), anyString())).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED), messageCaptor.capture(),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "画质增强任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89S / ADR-0114；平移 VideoJobProcessorTest 先例）==========
 
     @Test

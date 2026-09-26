@@ -314,6 +314,33 @@ class VocalSplitJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input("audio"));
+        stubSourceAsset("video");
+        VocalSplitError unauthorized = new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
+                "人声背景分离任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
+                .thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "人声背景分离任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89R / ADR-0114；平移家族定型票先例）==========
 
     @Test

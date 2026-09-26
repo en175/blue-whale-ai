@@ -6,11 +6,13 @@ import com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto;
 import com.bluewhale.worker.domain.dto.FailAudioSpeedDto;
 import com.bluewhale.worker.domain.dto.PublishAudioSpeedDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.AudioSpeedContract;
 import com.bluewhale.worker.domain.error.AudioSpeedError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitAdjustAudioSpeedClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitAdjustAudioSpeedClient.AudioSpeedTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -138,9 +140,15 @@ public class AudioSpeedJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "音频调速失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[audio_speed] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failAudioSpeed(claim, code, message);
+            failAudioSpeed(claim, code, message, httpStatus);
         }
     }
 
@@ -416,9 +424,20 @@ public class AudioSpeedJobProcessor implements JobProcessor {
     /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at + next_poll_at，轮询型任务
      *  语义完备；details.raw 透传原始原因）。 */
     private void failAudioSpeed(ClaimedAudioSpeedJobDto claim, String code, String message) {
+        failAudioSpeed(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failAudioSpeed(ClaimedAudioSpeedJobDto claim, String code, String message,
+                                Integer httpStatus) {
         log.warn("audio_speed job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failAudioSpeedJob(new FailAudioSpeedDto(
                 claim.id(),
                 claim.workerId(),

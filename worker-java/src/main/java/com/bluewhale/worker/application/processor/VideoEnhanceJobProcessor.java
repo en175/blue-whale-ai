@@ -5,11 +5,13 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEnhanceVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEnhanceVideoClient.EnhanceVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -136,9 +138,15 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频画质增强失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_enhance] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -484,9 +492,20 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  HD 高清无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
     private void failClaimed(ClaimedVideoEnhanceJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failClaimed(ClaimedVideoEnhanceJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_enhance job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
