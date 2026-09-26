@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
-import { tierFormError } from './tierForm';
+import { tierCardFormError, tierFormError } from './tierForm';
 import { ApiError } from '@/api/http';
 
 const adminApi = vi.hoisted(() => ({
@@ -68,6 +68,41 @@ async function fillAndSave(price: string, ratio: string) {
       .find((button) => button.textContent === '保存')
       ?.click();
   });
+}
+
+/** 填一个 aria-label 命中的输入框（卡片字段那批都用它；卡片说明是多行框）。 */
+async function fillInput(ariaLabel: string, value: string) {
+  const el = document.body.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `input[aria-label="${ariaLabel}"], textarea[aria-label="${ariaLabel}"]`
+  );
+  if (!el) throw new Error(`输入未渲染：${ariaLabel}`);
+  const proto =
+    el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, value);
+  await act(async () => {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** 自绘 Select：点触发器展开，再点 role=option 的那一项。 */
+async function selectOption(ariaLabel: string, optionText: string) {
+  await act(async () => {
+    document.body
+      .querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`)
+      ?.click();
+  });
+  await act(async () => {
+    [...document.body.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes(optionText))
+      ?.click();
+  });
+}
+
+/** 当前创建请求的入参。 */
+function createPayload() {
+  return adminApi.createTopupTier.mock.calls[0][0] as Record<string, unknown>;
 }
 
 beforeEach(() => {
@@ -194,5 +229,164 @@ describe('RechargePlans 档位边界值 toast', () => {
     expect(toastApi.error).not.toHaveBeenCalled();
     // 上游错误文案不渲染到表单里（本页已无私有样式类，改为断言文案未渲染）
     expect(document.body.textContent).not.toContain('每个原价只能有一个档位');
+  });
+});
+
+describe('tierCardFormError', () => {
+  const base = {
+    description: '',
+    bonusCredits: 0,
+    activityTag: '',
+    buttonText: '立享加赠',
+    firstPurchaseEligible: false,
+    creditsValidMonths: 24,
+    permissionAllowlist: [] as string[],
+    permissionDeniedHint: '',
+  };
+
+  it('按钮文案必填（PRD §10.2）：空串与纯空格都不行', () => {
+    expect(tierCardFormError({ ...base, buttonText: '' })).toBe('按钮文案不能为空');
+    expect(tierCardFormError({ ...base, buttonText: '   ' })).toBe('按钮文案不能为空');
+  });
+
+  it('赠送积分须为 0 或正整数', () => {
+    expect(tierCardFormError({ ...base, bonusCredits: -1 })).toBe('赠送积分须为非负整数');
+    expect(tierCardFormError({ ...base, bonusCredits: 1.5 })).toBe('赠送积分须为非负整数');
+    expect(tierCardFormError({ ...base, bonusCredits: NaN })).toBe('赠送积分须为非负整数');
+    expect(tierCardFormError({ ...base, bonusCredits: 0 })).toBeNull();
+  });
+
+  it('积分有效期是 1–1200 的整数月（0 会让积分永不到期）', () => {
+    expect(tierCardFormError({ ...base, creditsValidMonths: 0 })).toBe(
+      '积分有效期须为 1–1200 的整数（单位：月）'
+    );
+    expect(tierCardFormError({ ...base, creditsValidMonths: 1201 })).toBe(
+      '积分有效期须为 1–1200 的整数（单位：月）'
+    );
+    expect(tierCardFormError({ ...base, creditsValidMonths: 24 })).toBeNull();
+  });
+
+  it('文本超列宽时先拦下来，别等写库时炸成 500', () => {
+    expect(tierCardFormError({ ...base, description: 'x'.repeat(256) })).toBe(
+      '卡片说明最长 255 个字符'
+    );
+    expect(tierCardFormError({ ...base, activityTag: 'x'.repeat(65) })).toBe(
+      '活动标签最长 64 个字符'
+    );
+  });
+
+  it('白名单元素必须是十进制 userId（一个错字就是一条永远匹配不上的规则）', () => {
+    expect(tierCardFormError({ ...base, permissionAllowlist: ['9001'] })).toBeNull();
+    expect(tierCardFormError({ ...base, permissionAllowlist: ['9001x'] })).toBe(
+      '白名单里的「9001x」不是合法的 userId'
+    );
+  });
+});
+
+describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
+  it('★ 新建默认草稿：状态预选「草稿」，提交时送 status=draft', async () => {
+    // PRD §10.5「新建卡片默认草稿，不展示给用户」。表单若默认「上架」，
+    // 运营一点保存就把价格、赠送、标签都还没配的卡片卖给用户了。
+    await renderPage();
+    await openCreateModal();
+
+    const trigger = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="上架状态"]'
+    );
+    expect(trigger?.textContent).toContain('草稿');
+
+    await fillAndSave('100', '1');
+    expect(createPayload().status).toBe('draft');
+  });
+
+  it('权限默认「全部登录用户」时不渲染白名单输入（选了才出现）', async () => {
+    await renderPage();
+    await openCreateModal();
+
+    expect(document.body.querySelector('input[aria-label="添加白名单用户"]')).toBeNull();
+  });
+
+  it('★ 权限选「指定用户群」→ 白名单出现，提交带 userId 数组', async () => {
+    await renderPage();
+    await openCreateModal();
+    await selectOption('购买权限', '指定用户群');
+
+    await fillInput('添加白名单用户', '9001');
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent === '添加')
+        ?.click();
+    });
+
+    await fillAndSave('100', '1');
+    expect(createPayload().permission).toBe('user_group');
+    expect(createPayload().permissionAllowlist).toEqual(['9001']);
+  });
+
+  it('★ 卡片字段随创建请求一起送（PRD §10.2 的九项）', async () => {
+    await renderPage();
+    await openCreateModal();
+    await fillInput('卡片说明', '适合轻量体验');
+    await fillInput('活动标签', '首购加赠 50%');
+    await fillInput('赠送积分', '3750');
+    await fillInput('积分有效期（月）', '24');
+    await fillInput('无权限提示', '该档位暂不对外开放');
+
+    await fillAndSave('100', '1');
+
+    expect(adminApi.createTopupTier).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originalPrice: 100,
+        discount: 1,
+        description: '适合轻量体验',
+        activityTag: '首购加赠 50%',
+        bonusCredits: 3750,
+        creditsValidMonths: 24,
+        permissionDeniedHint: '该档位暂不对外开放',
+        // 按钮文案没动过 → 默认值（PRD §10.2「默认『立享加赠』」）
+        buttonText: '立享加赠',
+        firstPurchaseEligible: false,
+      })
+    );
+  });
+
+  it('★ 派生量不当参数发出去：实付价格与基础积分由服务端算', async () => {
+    // 「保留原价 + 折扣」的落实：价格与积分是算出来的，表单里只读。
+    // 送过去也会被服务端忽略，但真送出去就意味着某天有人会拿它当输入。
+    await renderPage();
+    await openCreateModal();
+    await fillAndSave('100', '1');
+
+    expect(createPayload()).not.toHaveProperty('price');
+    expect(createPayload()).not.toHaveProperty('amount');
+  });
+
+  it('按钮文案清空 → toast 且不发请求', async () => {
+    await renderPage();
+    await openCreateModal();
+    await fillInput('按钮文案', '   ');
+    await fillAndSave('100', '1');
+
+    expect(toastApi.error).toHaveBeenCalledWith('按钮文案不能为空');
+    expect(adminApi.createTopupTier).not.toHaveBeenCalled();
+  });
+
+  it('积分有效期填 0 → toast 且不发请求', async () => {
+    await renderPage();
+    await openCreateModal();
+    await fillInput('积分有效期（月）', '0');
+    await fillAndSave('100', '1');
+
+    expect(toastApi.error).toHaveBeenCalledWith('积分有效期须为 1–1200 的整数（单位：月）');
+    expect(adminApi.createTopupTier).not.toHaveBeenCalled();
+  });
+
+  it('赠送积分留空按 0 处理（不赠送是合法值，不是非法输入）', async () => {
+    await renderPage();
+    await openCreateModal();
+    await fillInput('赠送积分', '');
+    await fillAndSave('100', '1');
+
+    expect(createPayload().bonusCredits).toBe(0);
   });
 });

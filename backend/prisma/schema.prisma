@@ -610,6 +610,10 @@ model identity_verification_codes {
 }
 
 // ===== 充值档位（blue_whale 侧 CRUD，支付执行走 Go new-api） =====
+//
+// ⚠️ 列序 = 迁移里的物理列序（新列一律 `ALTER TABLE … ADD COLUMN` 追加在末尾，
+// 所以模型里也写在末尾）。**重排这里的顺序不是无害的排版**：下一次
+// `prisma migrate` 会把它识别成一次列重排，生成一串没人读得懂的 MODIFY。
 
 model topup_tiers {
   id             BigInt    @id @default(autoincrement())
@@ -619,7 +623,10 @@ model topup_tiers {
   discount       Decimal   @default(1) @db.Decimal(5, 4)
   price          Decimal   @db.Decimal(10, 2)
   is_recommended Boolean   @default(false)
-  status         String    @default("active") @db.VarChar(16)
+  /// 三态（PRD §10.5）：draft 草稿 | active 上架 | inactive 下架。
+  /// ⚠️ **默认 draft** —— 新建卡片默认草稿，不展示给用户，运营配齐再上架。
+  /// 存量行不动（它们已经是上架/下架，没有理由回退成草稿）。
+  status         String    @default("draft") @db.VarChar(16)
   start_time     DateTime? @db.DateTime(0)
   end_time       DateTime? @db.DateTime(0)
   sort_order     Int       @default(0)
@@ -627,6 +634,20 @@ model topup_tiers {
   gmt_modified   DateTime  @default(now()) @db.DateTime(0)
   version        Int       @default(0)
   is_delete      Int       @default(0) @db.TinyInt
+
+  // ── 卡片展示与首购活动（PRD §10.2；2026-09-26 由迁移 047 追加，故排在末尾）──
+  description              String  @default("") @db.VarChar(255)
+  bonus_credits            BigInt  @default(0)
+  activity_tag             String  @default("") @db.VarChar(64)
+  button_text              String  @default("立享加赠") @db.VarChar(32)
+  first_purchase_eligible  Int     @default(0) @db.TinyInt
+  /// 到账积分有效期，单位**月**（默认 2 年 = 24 个月）。口径钉死为月，年表达不了 6/18 个月
+  credits_valid_months     Int     @default(24)
+  /// all 全部登录用户 | user_group 指定用户群 | member_tier 指定会员等级（阶段 2 生效，先占位）
+  permission               String  @default("all") @db.VarChar(16)
+  /// JSON 数组，元素是 userId 的十进制字符串（BigInt 超 JS 安全整数，存串不丢精度）
+  permission_allowlist     Json?
+  permission_denied_hint   String  @default("") @db.VarChar(255)
 
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }

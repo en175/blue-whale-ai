@@ -186,7 +186,15 @@ export class RechargeService {
 
     const tier = await this.topupTier.getById(input.tierId);
     if (!tier) throw new NewApiError("档位不存在", 404);
-    if (tier.status !== "active") throw new NewApiError("该档位已下架", 400);
+    // ⚠️ 草稿与下架都不可买，但话不能说成同一句（PRD §6.3 / §10.5）：
+    // 「已下架」说的是一个曾经卖过的东西，而草稿是**还没上过架** ——
+    // 对着一张运营刚建好、字段还没配齐的卡片说「已下架」，客服和用户都无从下手。
+    if (tier.status !== "active") {
+      throw new NewApiError(
+        tier.status === "draft" ? "该档位尚未上架" : "该档位已下架",
+        400,
+      );
+    }
     const now = Date.now();
     if (tier.startTime && new Date(tier.startTime).getTime() > now) {
       throw new NewApiError("该档位尚未生效", 400);

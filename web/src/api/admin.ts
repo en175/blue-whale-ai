@@ -21,13 +21,29 @@ export function fetchAdminSession() {
   return http.get<AdminSessionData>('/api/admin/session', { silent: true });
 }
 
+/**
+ * 上架状态三态（PRD §10.5）。
+ *
+ * ⚠️ `draft` 是**新建的默认值**：新建卡片落在草稿、不展示给用户，
+ * 运营把字段配齐再显式上架。存量档位已经是上架/下架，不会被回退成草稿。
+ */
+export type TopupTierStatus = 'draft' | 'active' | 'inactive';
+
+/**
+ * 购买权限（PRD §10.4）。
+ *
+ * ⚠️ `member_tier`（指定会员等级）是**阶段 2** 的事，本阶段只在枚举里占位、
+ * 不做判断。本阶段真正生效的是 `all` 与 `user_group`。
+ */
+export type TopupTierPermission = 'all' | 'user_group' | 'member_tier';
+
 /** 充值档位记录 */
 export interface TopupTier {
   /** 档位 ID（string） */
   id: string;
   /** 档位名称 */
   name: string;
-  /** 到账积分数（服务端派生：原价 × 500000） */
+  /** 到账积分数（服务端派生：原价 × 换算率） */
   amount: number;
   /** 原价（元），正整数，主输入字段 */
   originalPrice: number;
@@ -37,8 +53,8 @@ export interface TopupTier {
   price: number;
   /** 是否推荐档位 */
   isRecommended: boolean;
-  /** 状态：active 启用 / inactive 停用 */
-  status: 'active' | 'inactive';
+  /** 上架状态：draft 草稿（新建默认）/ active 上架 / inactive 下架 */
+  status: TopupTierStatus;
   /** 生效时间（ISO），null 表示不限 */
   startTime: string | null;
   /** 失效时间（ISO），null 表示不限 */
@@ -47,6 +63,30 @@ export interface TopupTier {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /* ── PRD §10.2 卡片展示与首购活动 ── */
+  /** 卡片说明；'' = 未填 */
+  description: string;
+  /** 首购/活动赠送积分；0 = 不赠送 */
+  bonusCredits: number;
+  /** 活动标签（如「首购加赠 50%」）；'' = 无标签。已首购用户在用户侧隐藏 */
+  activityTag: string;
+  /** 购买按钮文案，默认「立享加赠」 */
+  buttonText: string;
+  /** 是否参与首购加赠 */
+  firstPurchaseEligible: boolean;
+  /** 到账积分有效期，单位**月**（默认 24 = 2 年） */
+  creditsValidMonths: number;
+  /** 购买权限 */
+  permission: TopupTierPermission;
+  /**
+   * 权限白名单（userId 列表）。
+   *
+   * ⚠️ 元素是**十进制字符串**而不是 number：userId 是 BigInt，超过 JS 安全整数范围后
+   * number 会静默改值，而白名单错一位就是放进来一个陌生人。服务端读到 NULL 时归一成 `[]`。
+   */
+  permissionAllowlist: string[];
+  /** 无权限提示；'' = 用默认文案 */
+  permissionDeniedHint: string;
 }
 
 /** `GET /api/admin/topup-tiers` 的回包。 */
@@ -76,11 +116,23 @@ export interface CreateTopupTierParams {
   discount: number;
   name?: string;
   isRecommended?: boolean;
-  status?: 'active' | 'inactive';
+  /** 不传 = draft（PRD §10.5：新建卡片默认草稿，不展示给用户） */
+  status?: TopupTierStatus;
   /** 生效时间（ISO），留空表示永久有效 */
   startTime?: string;
   /** 失效时间（ISO），留空表示永久有效 */
   endTime?: string;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  /** 积分有效期，单位月；1–1200 */
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  /** null = 清空；[] = 名单为空 */
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 /** PUT /api/admin/topup-tiers/:id 部分更新参数（startTime/endTime 传空字符串清空） */
@@ -89,9 +141,18 @@ export interface UpdateTopupTierParams {
   discount?: number;
   name?: string;
   isRecommended?: boolean;
-  status?: 'active' | 'inactive';
+  status?: TopupTierStatus;
   startTime?: string;
   endTime?: string;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 /** 新建档位（包络可能携带 Go 折扣同步警告） */
@@ -132,7 +193,7 @@ export interface SortTopupTierResult {
   amount: number;
   originalPrice: number;
   price: number;
-  status: 'active' | 'inactive';
+  status: TopupTierStatus;
 }
 
 /** 提交全量排序数组（本地交换后调用） */
@@ -156,7 +217,7 @@ export interface TopupTierPreview {
   price: number;
   /** 是否推荐，前端显示推荐标签 */
   isRecommended: boolean;
-  status: 'active' | 'inactive';
+  status: TopupTierStatus;
 }
 
 /** 获取用户端充值页预览列表 */

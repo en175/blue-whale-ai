@@ -370,6 +370,33 @@ describe("RechargeService — 下单", () => {
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(/已下架/);
   });
 
+  it("★ 档位还是草稿 → 拒绝下单，且**不说「已下架」**", async () => {
+    // 草稿与下架都不可买，但话不能说成同一句（PRD §6.3 / §10.5）：
+    // 「已下架」说的是一个曾经卖过的东西，而草稿是还没上过架 ——
+    // 对着一张运营刚建好、字段还没配齐的卡片说「已下架」，客服和用户都无从下手。
+    makeHttp();
+    grpcActiveCatalog();
+    const { prisma } = makePrisma();
+    const settings = new SystemSettingsService({ client: prisma } as never);
+    await settings.update({
+      credentials: {
+        hccb_mch_no: "M0001",
+        hccb_app_id: "app-1",
+        hccb_app_secret: APP_SECRET,
+        hccb_notify_url: NOTIFY_URL,
+      },
+    });
+    const tiers = {
+      listActive: async () => [],
+      getById: async () => ({ ...TIER, status: "draft" as const }),
+    } as unknown as TopupTierService;
+    const service = new RechargeService({ client: prisma } as never, tiers, settings);
+
+    await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(
+      /尚未上架/,
+    );
+  });
+
   it("商户凭证没配全 → 拒绝下单，不带着半份配置去调用网关", async () => {
     const http = makeHttp();
     grpcActiveCatalog();

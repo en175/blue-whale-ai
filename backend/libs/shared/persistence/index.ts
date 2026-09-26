@@ -231,6 +231,8 @@ export {
   createTopupTierRepo,
   type TopupTierRepo,
   type TopupTierView,
+  type TopupTierStatus,
+  type TopupTierPermission,
   type CreateTopupTierInput,
   type UpdateTopupTierInput,
 } from "./topup-tier-repo.js";

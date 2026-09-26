@@ -1,7 +1,26 @@
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 /** 充值档位 repo（Prisma-backed），blue_whale 侧 CRUD。
  *  支付执行逻辑在 Go new-api，本 repo 只管档位数据。 */
+
+/**
+ * 上架状态三态（PRD §10.5）。
+ *
+ * <p>`draft` 是本次新增的**默认值**：新建卡片落在草稿，不上用户侧
+ * （{@link TopupTierRepo.listActive} 只认 `active`），运营把字段配齐再上架。
+ * 存量行一律不动 —— 它们已经是上架/下架，没有理由回退成草稿。
+ */
+export type TopupTierStatus = "draft" | "active" | "inactive";
+
+/**
+ * 购买权限（PRD §10.4）。
+ *
+ * <p>⚠️ `member_tier`（指定会员等级）是**阶段 2** 的事，本阶段只在枚举里占位、
+ * 不做判断 —— 先写进列定义，将来接会员模块时加的是逻辑，不是 DDL。
+ * 本阶段真正生效的是 `all` 与 `user_group`。
+ */
+export type TopupTierPermission = "all" | "user_group" | "member_tier";
 
 export interface TopupTierView {
   id: string;
@@ -11,7 +30,7 @@ export interface TopupTierView {
   discount: number;
   price: number;
   isRecommended: boolean;
-  status: "active" | "inactive";
+  status: TopupTierStatus;
   startTime: string | null;
   endTime: string | null;
   sortOrder: number;
@@ -25,6 +44,36 @@ export interface TopupTierView {
   version: number;
   createdAt: string;
   updatedAt: string;
+
+  /* ── PRD §10.2 卡片展示与首购活动（迁移 047）── */
+  /** 卡片说明。选填 → 空串表示未填 */
+  description: string;
+  /** 首购/活动赠送积分；0 = 不赠送。只有参与首购且用户满足首购条件时才发放 */
+  bonusCredits: number;
+  /** 活动标签，如「首购加赠 50%」；空串 = 无标签。已首购用户侧隐藏 */
+  activityTag: string;
+  /** 购买按钮文案，默认「立享加赠」 */
+  buttonText: string;
+  /** 是否参与首购。与 `recharge_orders.first_purchase_eligible` 同义：下单时快照进订单 */
+  firstPurchaseEligible: boolean;
+  /**
+   * 到账积分有效期，单位**月**（默认 24 = 2 年）。
+   *
+   * <p>口径钉死为月：`年` 表达不了 6/18 个月这类档位，而月向上兼容。
+   */
+  creditsValidMonths: number;
+  /** 购买权限。`all` / `user_group` 本阶段生效，`member_tier` 阶段 2 */
+  permission: TopupTierPermission;
+  /**
+   * 权限白名单（userId 列表）。**读出恒为数组**：存量行的列是 NULL，归一成 `[]`。
+   *
+   * <p>元素是**十进制字符串**而不是 number —— userId 是 BigInt，
+   * 超过 JS 安全整数范围后 number 会静默改值（`9007199254740993` → `…992`），
+   * 而白名单错一位就是「放进来一个陌生人」。
+   */
+  permissionAllowlist: string[];
+  /** 无权限提示文案；空串 = 用前端默认文案 */
+  permissionDeniedHint: string;
 }
 
 export interface CreateTopupTierInput {
@@ -33,9 +82,19 @@ export interface CreateTopupTierInput {
   originalPrice: number;
   discount: number;
   isRecommended?: boolean;
-  status?: "active" | "inactive";
+  /** 不传 = `draft`（PRD §10.5：新建卡片默认草稿） */
+  status?: TopupTierStatus;
   startTime?: string | null;
   endTime?: string | null;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 export interface UpdateTopupTierInput {
@@ -44,10 +103,19 @@ export interface UpdateTopupTierInput {
   originalPrice?: number;
   discount?: number;
   isRecommended?: boolean;
-  status?: "active" | "inactive";
+  status?: TopupTierStatus;
   startTime?: string | null;
   endTime?: string | null;
   sortOrder?: number;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 export interface TopupTierRepo {
@@ -67,6 +135,43 @@ export interface TopupTierRepo {
 
 /* ---------- helpers ---------- */
 
+/**
+ * 可空 JSON 列：null → **SQL NULL** 用 `Prisma.DbNull` 表达。
+ *
+ * <p>Prisma 不允许对 Json 列裸传 `null`——裸 `null` 在它那里是「JSON 里放一个 null」，
+ * 列本身非空，与存量行的 SQL NULL 不是一回事。写进去的是哪种，读出来就得按哪种判断。
+ */
+function nullableJson(v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return v == null ? Prisma.DbNull : (v as Prisma.InputJsonValue);
+}
+
+/**
+ * 读白名单：**宽的读、严的写**。
+ *
+ * <p>列里理论上有三种东西：我们写进去的十进制 userId 串、存量行的 NULL、
+ * 和手改过库的人留下的数字。读路径不该因为看不懂某一行就抛错，
+ * 所以这里跳过无法识别的元素而不是报错；识别不了的一律丢掉。
+ *
+ * <p>掐前导零与写路径同口径（`007` → `7`）：不掐的话，「同一个用户在名单里存了两条」
+ * 与「名单里有个谁也匹配不上的 id」会同时发生——比对是字符串比对。
+ */
+function toAllowlist(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    const text =
+      typeof item === "string"
+        ? item.trim()
+        : typeof item === "number" && Number.isSafeInteger(item) && item >= 0
+          ? String(item)
+          : "";
+    if (!/^\d{1,19}$/.test(text)) continue;
+    const id = String(BigInt(text));
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toView(row: any): TopupTierView {
   return {
@@ -84,6 +189,15 @@ function toView(row: any): TopupTierView {
     version: row.version,
     createdAt: new Date(row.gmt_create).toISOString(),
     updatedAt: new Date(row.gmt_modified).toISOString(),
+    description: row.description,
+    bonusCredits: Number(row.bonus_credits),
+    activityTag: row.activity_tag,
+    buttonText: row.button_text,
+    firstPurchaseEligible: row.first_purchase_eligible === 1,
+    creditsValidMonths: row.credits_valid_months,
+    permission: row.permission,
+    permissionAllowlist: toAllowlist(row.permission_allowlist),
+    permissionDeniedHint: row.permission_denied_hint,
   };
 }
 
@@ -155,10 +269,22 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
           discount: input.discount,
           price,
           is_recommended: input.isRecommended ?? false,
-          status: input.status ?? "active",
+          // ⚠️ 默认 **draft**，不是 active（PRD §10.5「新建卡片默认草稿，不展示给用户」）。
+          // 这里与列默认值同口径：即使有人绕过本 repo 直接 INSERT（漏写 status），
+          // 落下来的也是草稿而不是「上线了」——错的方向必须是保守的那一边。
+          status: input.status ?? "draft",
           start_time: parseDateTime(input.startTime),
           end_time: parseDateTime(input.endTime),
           sort_order: nextSort,
+          description: input.description ?? "",
+          bonus_credits: BigInt(Math.round(input.bonusCredits ?? 0)),
+          activity_tag: input.activityTag ?? "",
+          button_text: input.buttonText ?? "立享加赠",
+          first_purchase_eligible: input.firstPurchaseEligible ? 1 : 0,
+          credits_valid_months: input.creditsValidMonths ?? 24,
+          permission: input.permission ?? "all",
+          permission_allowlist: nullableJson(input.permissionAllowlist),
+          permission_denied_hint: input.permissionDeniedHint ?? "",
         },
       });
       return toView(row);
@@ -193,6 +319,26 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       if (input.startTime !== undefined) data.start_time = parseDateTime(input.startTime);
       if (input.endTime !== undefined) data.end_time = parseDateTime(input.endTime);
       if (input.sortOrder !== undefined) data.sort_order = input.sortOrder;
+      if (input.description !== undefined) data.description = input.description;
+      if (input.bonusCredits !== undefined) {
+        data.bonus_credits = BigInt(Math.round(input.bonusCredits));
+      }
+      if (input.activityTag !== undefined) data.activity_tag = input.activityTag;
+      if (input.buttonText !== undefined) data.button_text = input.buttonText;
+      if (input.firstPurchaseEligible !== undefined) {
+        data.first_purchase_eligible = input.firstPurchaseEligible ? 1 : 0;
+      }
+      if (input.creditsValidMonths !== undefined) {
+        data.credits_valid_months = input.creditsValidMonths;
+      }
+      if (input.permission !== undefined) data.permission = input.permission;
+      // 显式 null = 清空白名单；[] = 名单为空（两者语义由调用方定，物理落点见 nullableJson）
+      if (input.permissionAllowlist !== undefined) {
+        data.permission_allowlist = nullableJson(input.permissionAllowlist);
+      }
+      if (input.permissionDeniedHint !== undefined) {
+        data.permission_denied_hint = input.permissionDeniedHint;
+      }
 
       const row = await prisma.topup_tiers.update({
         where: { id: pid },
