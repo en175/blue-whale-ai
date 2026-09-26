@@ -84,11 +84,12 @@ public class TosVideoMediaRelay {
     private static final Duration STREAM_STALL_TIMEOUT = Duration.ofSeconds(60);
 
     /**
-     * 四参兼容入口的总时限兜底 10 分钟（IKILU5 恢复）：未迁移到任务截止时间模型的旧调用方
-     * （如 VideoMatting 未传 {@code execution_deadline_at}）走四参
-     * {@link #persistStreaming(String, String, long, TransferAbortHandle)}——保留 IKILVH 之前
-     * 「10 分钟总时限」的旧语义作为兜底（+ 60s 停流），行为对这类调用方完全不变；只有五参
-     * 入口才用调用方任务截止时间替代兜底（IKILVH 时限模型只对音视频合成家族生效，不外溢）。
+     * 四参兼容入口的下载正文段总窗兜底 10 分钟（IKILU5 恢复、IKIN01 修正口径）：未迁移到
+     * 任务截止时间模型的旧调用方（如 VideoMatting 未传 {@code execution_deadline_at}）走四参
+     * {@link #persistStreaming(String, String, long, TransferAbortHandle)}——恢复 IKILVH 之前
+     * 的旧语义：响应头等待 60s 独立超时不在此窗内；窗从正文开始读取时起算、进度不重置、正文
+     * 结束即撤销；上传段不受此窗约束；60s 停流规则不适用于本入口（停流只属五参模型，
+     * IKILVH 时限模型不对四参调用方外溢）。只有五参入口用调用方任务截止时间替代兜底。
      */
     private static final Duration STREAM_COPY_DEADLINE = Duration.ofMinutes(10);
 
@@ -243,8 +244,9 @@ public class TosVideoMediaRelay {
      * 临时文件落在系统临时目录，正常与异常路径都删（失败留垃圾会把容器盘吃满）。同一
      * {@code maxBytes} 语义与字节数组路径一致：等于上限通过、大于上限拒绝。
      * <p>
-     * 本三参重载为无中止源兼容入口：等价四参传 null 句柄——保留旧 10 分钟总时限兜底
-     * （{@link #STREAM_COPY_DEADLINE}）+ 60s 停流。测试桩与跨端验收仍在使用。
+     * 本三参重载为无中止源兼容入口：等价四参传 null 句柄——响应头 60s 独立、下载正文段
+     * {@link #STREAM_COPY_DEADLINE} 10 分钟固定窗兜底（进度不重置）、上传段无时限、无停流
+     * 限制。测试桩与跨端验收仍在使用。
      *
      * @param sourceUrl 上游生成的视频 URL
      * @param userId    归属用户（key 路径用）
@@ -261,15 +263,17 @@ public class TosVideoMediaRelay {
      * 主动中止正在进行的下载/上传，以 {@link TransferAbortedException} 退出——调用方据此静默
      * 放弃本 worker 的发布（任务已被接管），不落失败终态。句柄可为 null（无外部中止源）。
      * <p>
-     * 时限模型（IKILU5）：本入口保留 IKILVH 之前的旧总时限——{@link #STREAM_COPY_DEADLINE}
-     * 10 分钟兜底 + 60s 停流，供未迁移任务截止时间模型的旧调用方（VideoMatting 未传
-     * {@code execution_deadline_at}）使用，行为与其改动前完全一致；需要用任务截止时间替代
-     * 兜底的调用方（AudioVideoMux）走五参。
+     * 时限口径（IKILU5 恢复、IKIN01 修正）：本入口保持 IKILVH 之前的旧语义——响应头等待
+     * {@link #STREAM_HEADER_TIMEOUT} 60s 独立超时；下载正文段受 {@link #STREAM_COPY_DEADLINE}
+     * 10 分钟固定窗约束（从正文开始读取时起算、进度不重置、正文结束即撤销）；上传段无时限；
+     * 不布防停流规则（60s 停流只属五参模型，不对本入口外溢），供未迁移任务截止时间模型的
+     * 旧调用方（VideoMatting 未传 {@code execution_deadline_at}）使用，行为与其改动前一致；
+     * 需要停流 + 任务截止模型的调用方（AudioVideoMux）走五参。
      */
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
                                         TransferAbortHandle abortHandle) {
-        return persistStreaming(sourceUrl, userId, maxBytes, abortHandle,
-                Instant.now().plus(STREAM_COPY_DEADLINE));
+        return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle,
+                null, STREAM_COPY_DEADLINE, null, STREAM_ERROR_BODY_TIMEOUT);
     }
 
     /**
@@ -284,17 +288,20 @@ public class TosVideoMediaRelay {
     public StoredVideo persistStreaming(String sourceUrl, String userId, long maxBytes,
                                         TransferAbortHandle abortHandle, Instant taskDeadline) {
         return persistStreamingInternal(sourceUrl, userId, maxBytes, abortHandle, taskDeadline,
-                STREAM_STALL_TIMEOUT, STREAM_ERROR_BODY_TIMEOUT);
+                null, STREAM_STALL_TIMEOUT, STREAM_ERROR_BODY_TIMEOUT);
     }
 
     /**
      * 全参内部版（IKHSFC 起可注入截止；IKILVH 起 {@code stallTimeout} 语义改为停流超时——
-     * 以「上次有进度」为基准，测试用亚秒级值做确定性回归，不真等 60s；任务截止时间
-     * {@code taskDeadline} 可为 null）。
+     * 以「上次有进度」为基准，测试用亚秒级值做确定性回归，不真等 60s；IKIN01 起增
+     * {@code copyWindow} 下载正文段固定总窗——从正文开始读取时起算、进度不重置、正文结束即
+     * 撤销、只管下载段不管上传段，四参兼容入口注入 {@link #STREAM_COPY_DEADLINE}，五参传
+     * null。{@code taskDeadline} 与 {@code stallTimeout} 均可为 null（四参旧口径两者皆 null）。
      */
     StoredVideo persistStreamingInternal(String sourceUrl, String userId, long maxBytes,
                                          TransferAbortHandle abortHandle, Instant taskDeadline,
-                                         Duration stallTimeout, Duration errorBodyTimeout) {
+                                         Duration copyWindow, Duration stallTimeout,
+                                         Duration errorBodyTimeout) {
         Path tempFile = null;
         // 已向上游发起 PUT 的对象 key：中止退出时对象可能已落地（body 发完、仅响应未回的
         // 窗口），无 Asset 引用即孤儿——catch 里 deleteObject 清理（幂等，未落地也不报错）。
@@ -331,16 +338,21 @@ public class TosVideoMediaRelay {
                 if (!mime.startsWith("video/")) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成结果不是视频");
                 }
-                // 停流超时以「上次有进度」为基准计时（每块字节到达即重置）；任务截止时间
-                // 全程布防（含上传段），到点由看门狗主动打断。
-                watchdog.armStall();
+                // 停流超时只属五参模型（stallTimeout != null 才布防）：以「上次有进度」为基准
+                // 计时（每块字节到达即重置）；任务截止时间全程布防（含上传段），到点由看门狗
+                // 主动打断；copyWindow 是四参旧口径的下载正文段固定总窗（进度不重置、正文结束
+                // 即撤销）——两套时限模型互斥，四参（copyWindow）与五参（stall + taskDeadline）
+                // 各自独立布防。
+                if (stallTimeout != null) watchdog.armStall();
                 watchdog.armDeadline(taskDeadline);
+                if (copyWindow != null) watchdog.armCopyWindow(copyWindow);
                 try {
                     size = copyToFile(body, tempFile, maxBytes, sourceUrl, watchdog);
                 } catch (IOException e) {
                     throw watchdog.translateReadFailure(e, errorBodyTimeout);
                 }
                 watchdog.disarmStall();
+                watchdog.disarmCopyWindow();
                 if (size == 0) {
                     throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
                 }
@@ -483,14 +495,16 @@ public class TosVideoMediaRelay {
     }
 
     /**
-     * 传输看门狗（IKHSFC 建通道，IKILVH 扩时限模型）：停流超时（以「上次有进度」为基准，
-     * {@link #progress()} 重置）/ 任务截止时间 / 错误体读取截止 / 外部句柄四类信号到点或
-     * 触发时主动 close 正在读取的响应流、取消进行中的上传，打断阻塞中的 read（JDK
-     * HttpClient 的响应流 close 会让阻塞读抛 IOException——此前截止检查只在 read 返回后
-     * 执行，停流时永远走不到，500ms 仍阻塞的审查探针即此因）。读取侧 IOException 经
-     * {@link #translateReadFailure} 归因（外部中止 → 停流 → 任务截止 → 错误体截止 →
-     * 供应商错误，文案分别命名）；上传侧经逐请求 Call.cancel 取消、{@link #requireNotAborted()}
-     * 按「外部中止 → 任务截止」优先级归因（截止中止不得误报网络失败）。每个
+     * 传输看门狗（IKHSFC 建通道，IKILVH 扩时限模型，IKIN01 增 copyWindow）：停流超时（以
+     * 「上次有进度」为基准，{@link #progress()} 重置）/ 任务截止时间 / 下载正文段固定总窗
+     * （copyWindow，进度不重置）/ 错误体读取截止 / 外部句柄五类信号到点或触发时主动 close
+     * 正在读取的响应流、取消进行中的上传，打断阻塞中的 read（JDK HttpClient 的响应流 close
+     * 会让阻塞读抛 IOException——此前截止检查只在 read 返回后执行，停流时永远走不到，500ms
+     * 仍阻塞的审查探针即此因）。读取侧 IOException 经 {@link #translateReadFailure} 归因
+     * （外部中止 → 任务截止 → 停流 → copyWindow → 错误体截止 → 供应商错误，文案分别命名）；
+     * 上传侧经逐请求 Call.cancel 取消、{@link #requireNotAborted()} 按「外部中止 → 任务截止」
+     * 优先级归因（截止中止不得误报网络失败）。copyWindow 不进入上传段归因——四参旧口径下
+     * 上传段无时限（任务截止与外部通道保持接通，copyWindow 定时器在正文结束即撤销）。每个
      * {@code persistStreamingInternal} 调用一个实例，try-with-resources 释放。
      */
     private static final class StreamWatchdog implements AutoCloseable {
@@ -502,9 +516,13 @@ public class TosVideoMediaRelay {
         private volatile ScheduledFuture<?> timeoutTask;
         private volatile ScheduledFuture<?> deadlineTask;
         private volatile Long deadlineNanos;
+        private volatile ScheduledFuture<?> copyWindowTask;
+        private volatile Long copyWindowNanos;
+        private volatile Duration copyWindowTimeout;
         private volatile boolean stallAbort;
         private volatile boolean timeoutAbort;
         private volatile boolean deadlineAbort;
+        private volatile boolean copyWindowAbort;
         private volatile boolean externalAbort;
         private volatile Call activeUpload;
 
@@ -544,6 +562,24 @@ public class TosVideoMediaRelay {
                     Math.max(0, nanos - System.nanoTime()), TimeUnit.NANOSECONDS);
         }
 
+        /**
+         * 布防下载正文段固定总窗（IKIN01 四参旧口径）：从正文开始读取时起算，进度不重置
+         * （与 {@link #armStall} 的进度基准模型互斥），正文结束即 {@link #disarmCopyWindow()}
+         * 撤销——不约束上传段，到点也不取消上传（旧语义：copyDeadline 只关响应流）。
+         */
+        void armCopyWindow(Duration window) {
+            copyWindowTimeout = window;
+            copyWindowNanos = System.nanoTime() + window.toNanos();
+            copyWindowTask = WATCHDOG_SCHEDULER.schedule(this::abortFromCopyWindow,
+                    window.toNanos(), TimeUnit.NANOSECONDS);
+        }
+
+        /** 撤防正文段固定总窗（下载正文正常完成后；窗不延伸到上传段）。 */
+        void disarmCopyWindow() {
+            ScheduledFuture<?> task = copyWindowTask;
+            if (task != null) task.cancel(false);
+        }
+
         /** 撤防停流定时（下载正常完成后；任务截止与外部通道保持接通直到 {@link #close()}）。 */
         void disarmStall() {
             ScheduledFuture<?> task = stallTask;
@@ -574,6 +610,11 @@ public class TosVideoMediaRelay {
             closeBodyQuietly();
         }
 
+        private void abortFromCopyWindow() {
+            copyWindowAbort = true;
+            closeBodyQuietly();
+        }
+
         private void abortFromExternal() {
             externalAbort = true;
             Call upload = activeUpload;
@@ -593,7 +634,7 @@ public class TosVideoMediaRelay {
             return handle != null ? handle.reason() : null;
         }
 
-        /** 每块字节到达即调用：重置停流基准；任务截止到点直接抛（read 返回后无需等定时器）。 */
+        /** 每块字节到达即调用：重置停流基准；任务截止 / copyWindow 到点直接抛（read 返回后无需等定时器）。 */
         void progress() {
             lastProgressNanos = System.nanoTime();
             Long deadline = deadlineNanos;
@@ -602,9 +643,15 @@ public class TosVideoMediaRelay {
                 throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                         "任务执行截止时间已到，中止结果转存");
             }
+            Long copyEnd = copyWindowNanos;
+            if (copyEnd != null && System.nanoTime() >= copyEnd) {
+                copyWindowAbort = true;
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频下载超时（超过 " + describeDuration(copyWindowTimeout) + "）");
+            }
         }
 
-        /** 读取侧 IOException 归因：外部中止 → 任务截止 → 停流 → 错误体截止 → 其余包供应商错误。 */
+        /** 读取侧 IOException 归因：外部中止 → 任务截止 → 停流 → copyWindow → 错误体截止 → 其余包供应商错误。 */
         RuntimeException translateReadFailure(IOException e, Duration errorBodyTimeout) {
             if (externalAbort) {
                 return new TransferAbortedException(externalReason());
@@ -616,6 +663,10 @@ public class TosVideoMediaRelay {
             if (stallAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                         "生成视频下载停流（连续 " + describeDuration(stallTimeout) + " 无进度）", e);
+            }
+            if (copyWindowAbort) {
+                return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频下载超时（超过 " + describeDuration(copyWindowTimeout) + "）", e);
             }
             if (timeoutAbort) {
                 return new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -663,6 +714,7 @@ public class TosVideoMediaRelay {
         @Override
         public void close() {
             disarmStall();
+            disarmCopyWindow();
             ScheduledFuture<?> timeout = timeoutTask;
             if (timeout != null) timeout.cancel(false);
             ScheduledFuture<?> deadline = deadlineTask;
