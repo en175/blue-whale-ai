@@ -13,8 +13,8 @@
     走 uk_reservation__job（generation_job_id 唯一索引），锁的是那一行本身。
   -->
   <select id="lockByJobId" resultType="com.bluewhale.billing.domain.entity.CostReservationEntity">
-    SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, status,
-           allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
+    SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, receivable_credits,
+           status, allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
            gmt_create, gmt_modified, version
     FROM billing_cost_reservations
     WHERE generation_job_id = #{jobId}
@@ -24,12 +24,17 @@
   <!--
     置为已结算。actual_credits 落最终值——对账时「预扣多少、实际多少」都在这张表上。
 
+    ★ receivable_credits 与 actual_credits **同一条 UPDATE 写**（见 V9 迁移）：
+    它记的是「实际里没收到的那部分」，与账本 RECEIVABLE 那一腿由同一次结算给出。
+    拆成两条语句就会留下「欠费列已写、账本腿还没写」的窗口——那正是这次要消灭的东西。
+
     version = version + 1 是自引用表达式，故写在 XML 而非 Wrapper。
   -->
   <update id="markSettled">
     UPDATE billing_cost_reservations
     SET status = 'settled',
         actual_credits = #{actualCredits},
+        receivable_credits = #{receivableCredits},
         version = version + 1
     WHERE generation_job_id = #{jobId}
   </update>

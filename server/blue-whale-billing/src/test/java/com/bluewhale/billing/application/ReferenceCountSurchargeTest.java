@@ -183,7 +183,7 @@ class ReferenceCountSurchargeTest {
      */
     private void reservation(long reservedCredits) {
         when(reservations.findByJobId(JOB)).thenReturn(Optional.of(new Reservation(
-                1L, JOB, USER, reservedCredits, null, Reservation.Status.HELD,
+                1L, JOB, USER, reservedCredits, null, 0L, Reservation.Status.HELD,
                 List.of(), 1, 10_000, RULE, "测试任务", null)));
     }
 

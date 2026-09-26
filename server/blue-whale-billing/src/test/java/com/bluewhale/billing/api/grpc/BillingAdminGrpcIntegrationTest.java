@@ -435,6 +435,46 @@ class BillingAdminGrpcIntegrationTest {
         assertThat(balance.getAvailableCredits()).isZero();
         assertThat(balance.getFrozenCredits()).isZero();
         assertThat(balance.getExpiringList()).isEmpty();
+        assertThat(balance.getReceivableCredits())
+                .as("查无此人也没有欠费 —— 与「余额为 0」同口径，不是另一个哨兵值")
+                .isZero();
+    }
+
+    /**
+     * ★ 欠费**只在管理面可见**，且它就是账本应收那一笔。
+     *
+     * <p>这是本仓「先欠费」产品口径落地后欠费的**唯一出口**：此前超出预扣的部分只以一条
+     * 借 {@code RECEIVABLE} 的分录躺在账本里，全仓没有任何代码读它 —— 欠了多少钱只有翻账本
+     * 能看见。产品已确认不收款、不封禁、不拦截，所以「可见」就是这一条的全部。
+     *
+     * <p>⚠️ 用户面 {@code QueryBalanceResponse} 里**没有**这个字段（契约层面就没有），
+     * 所以这里没有「用户面断言不出它」这一说 —— 那是编译期事实，不是运行期性质。
+     * 用户面能断言的只有它自己那两个数没被影响。
+     */
+    @Test
+    void 欠费_只在管理面可见_且用户实扣仍是预扣额() {
+        // 预扣 100、实际 130 —— 超出的 30 分平台先垫着记应收
+        userFacing.hold(hold(USER, "adm-recv-1", 9_213L));
+        credits.settle(9_213L, 130);
+
+        AdminQueryBalanceResponse balance = admin.adminQueryBalance(
+                AdminQueryBalanceRequest.newBuilder().setUserId(USER).build());
+
+        assertThat(balance.getReceivableCredits())
+                .as("管理端必须看得见这笔欠费（= 实际 − 预扣 = 130 − 100）")
+                .isEqualTo(30);
+        // 欠费不是用户的资产：它不进「可用」，也不进「冻结」——
+        // 总资产的等式仍然是 可用 + 冻结，用户实际被扣走的还是预扣的 100
+        assertThat(balance.getAvailableCredits())
+                .as("用户实扣仍只有预扣额 100：10000 − 100")
+                .isEqualTo(9_900);
+        assertThat(balance.getFrozenCredits()).isZero();
+
+        // 没超扣过的用户读出来是 0，而不是「查不到」的另一个值
+        assertThat(admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
+                        .setUserId(OTHER_USER).build()).getReceivableCredits())
+                .as("没超扣过的用户是 0")
+                .isZero();
     }
 
     @Test

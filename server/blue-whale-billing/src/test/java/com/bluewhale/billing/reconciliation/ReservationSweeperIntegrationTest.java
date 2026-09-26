@@ -150,7 +150,10 @@ class ReservationSweeperIntegrationTest {
     void 超过告警阈值但未到释放阈值_只告警不动钱() {
         long jobId = 8803L;
         hold(jobId, 120);
-        backdate(jobId, Duration.ofHours(3));
+        // ⚠️ 取 2h：必须**落在两条阈值之间**（默认 warn=1h、release=3h）。
+        //    改任一条阈值时这条夹具要跟着挪，否则它会以「钱被释放了」的形式红
+        //    ——那是好事（说明有人动过阈值），但别把它当偶发。
+        backdate(jobId, Duration.ofHours(2));
 
         ReservationSweeper.SweepResult result;
         String warns;
@@ -163,7 +166,7 @@ class ReservationSweeperIntegrationTest {
         assertThat(result.stale()).extracting(ReservationRepository.StaleHold::jobId).containsExactly(jobId);
         ReservationRepository.StaleHold stale = result.stale().get(0);
         assertThat(stale.reservedCredits()).isEqualTo(120);
-        assertThat(stale.heldSeconds()).isGreaterThanOrEqualTo(Duration.ofHours(3).getSeconds() - 5);
+        assertThat(stale.heldSeconds()).isGreaterThanOrEqualTo(Duration.ofHours(2).getSeconds() - 5);
         assertThat(warns)
                 .as("这一档的全部价值就是「让人看见」——没有日志等于没有这一档")
                 .contains("jobId=" + jobId)
@@ -207,7 +210,9 @@ class ReservationSweeperIntegrationTest {
         hold(ancient, 120);
         hold(recent, 80);
         backdate(ancient, Duration.ofHours(30));
-        backdate(recent, Duration.ofHours(5));
+        // ⚠️ 取 2h：必须落在两条阈值**之间**（默认 warn=1h、release=3h）。
+        //    取在释放线之上时这条测试会以「两条都被释放」的形式红。
+        backdate(recent, Duration.ofHours(2));
 
         ReservationSweeper.SweepResult result = sweeper.sweepOnce();
 
@@ -218,7 +223,7 @@ class ReservationSweeperIntegrationTest {
         assertThat(reservations.findByJobId(ancient).orElseThrow().status())
                 .isEqualTo(Reservation.Status.RELEASED);
         assertThat(reservations.findByJobId(recent).orElseThrow().status())
-                .as("5 小时的那条只该被看见，不该被动")
+                .as("2 小时的那条只该被看见，不该被动")
                 .isEqualTo(Reservation.Status.HELD);
 
         // 冻结额：120 已解冻，80 仍冻着 → 可用 = 1000 - 80

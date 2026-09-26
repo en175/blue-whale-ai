@@ -28,6 +28,15 @@ public class CostReservationEntity {
     /** 实际额（mc），结算后填；未结算为 NULL。 */
     private Long actualCredits;
 
+    /**
+     * 欠费额（积分，见 V9 迁移）——本次结算中「实际 > 预扣」的差额。
+     *
+     * <p>与账本 {@code RECEIVABLE} 那一腿由**同一次结算、同一个表达式**写下，两者逐笔一致。
+     * 三者关系：{@code 使用 = actual_credits}、{@code 欠费 = receivable_credits}、
+     * {@code 实收 = actual − receivable}。0 = 没有超扣（含全部存量行）。
+     */
+    private Long receivableCredits;
+
     /** held | settled | released。 */
     private String status;
 
@@ -70,6 +79,8 @@ public class CostReservationEntity {
     public void setReservedCredits(Long reservedCredits) { this.reservedCredits = reservedCredits; }
     public Long getActualCredits() { return actualCredits; }
     public void setActualCredits(Long actualCredits) { this.actualCredits = actualCredits; }
+    public Long getReceivableCredits() { return receivableCredits; }
+    public void setReceivableCredits(Long receivableCredits) { this.receivableCredits = receivableCredits; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getAllocations() { return allocations; }

@@ -151,17 +151,21 @@ billing:
       # 又短到不会让本该释放的钱多冻一个周期。
       initial-delay: ${BILLING_SWEEP_INITIAL_DELAY:PT1M}
       # 超过它 → 结构化 WARN（条数 + 前若干条 jobId/userId/冻结额/持有秒数），**不动作**。
-      # 为什么是 2h：正常任务分钟级终态，MQ 重投也在分钟级完成；2h 之后还 held 说明
-      # 「一定出事了」，但还不足以断言是「事件丢了」还是「任务还活着」——那一档交给人。
-      warn-after: ${BILLING_SWEEP_WARN_AFTER:PT2H}
+      # 为什么是 1h：**产品已确认单任务最长不超过 1 小时**（含排队 + 上游重试）。
+      # 所以 1h 之后还 held 就是「一定出事了」，而不是「任务还在跑」——这一档只给人看，
+      # 留出的 2 小时窗口够人工确认是「事件丢了」还是真出了别的事。
+      warn-after: ${BILLING_SWEEP_WARN_AFTER:PT1H}
       # 超过它 → 自动释放（走 CreditService.refund 的幂等返还路径）并 WARN。
-      # 为什么是 24h 且默认开：两种可能都不支持继续冻着——要么 job 早已终态而事件丢了，
-      # 要么它永远不会终态。继续冻着 = **用户的钱被永久锁死**（确定发生的损失）；
-      # 相比之下「极少数丢事件场景下平台少收一笔」小得多。24h 也长于任何正常任务
-      # 与 MQ 全部重投的总时长，误伤窗口很窄。
+      # 为什么是 3h 且默认开：
+      #   · 上限锚点是产品给的「单任务 ≤ 1h」，3h = **3 倍余量**，误伤窗口很窄；
+      #   · 两种可能都不支持继续冻着——要么 job 早已终态而事件丢了，要么它永远不会终态。
+      #     继续冻着 = **用户的钱被永久锁死**（确定发生的损失）；
+      #     相比之下「极少数丢事件场景下平台少收一笔」小得多，而且那笔现在**有 WARN 可查**
+      #     （见 SettlementService：预留已 released 却收到完成事件时会打 WARN）。
+      #   · 订得越低，用户的冻结时长越短；24h 在「单任务 ≤ 1h」这个前提下是白白多冻 21 小时。
       # ⚠️ 代价明码标价：释放后若 job 真的终态了（丢的事件被补投），结算会因已 released
       #    而无操作，那一单不再收费。要收缩它需要一个新的跨服务契约（billing 看不到 job 表）。
-      release-after: ${BILLING_SWEEP_RELEASE_AFTER:PT24H}
+      release-after: ${BILLING_SWEEP_RELEASE_AFTER:PT3H}
       # 自动释放开关。关掉后退回「只报不动」，超时的钱会一直冻着等人处置——
       # 所以关掉这件事本身会打 WARN。
       auto-release: ${BILLING_SWEEP_AUTO_RELEASE:true}

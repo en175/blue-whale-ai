@@ -151,13 +151,16 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
     }
 
     /**
-     * 某用户的余额与临期批次。
+     * 某用户的余额、**欠费**与临期批次。
      *
      * <p>与用户面的 {@code QueryBalance} 是同一个应用方法、同一个模型。
      *
      * <p>⚠️ 用户不存在**不是错误**：账本上「查无此人」与「余额为 0」无从区分
      * （没有批次即没有余额），所以走零值返回，而不是 NOT_FOUND。把它判成错误会让
      * 运营在一个刚注册、还没充过值的用户身上看到一个假的故障。
+     *
+     * <p>⚠️ {@code receivableCredits} **只在这里投影**，用户面一个字都不带 ——
+     * 落实「任何用户可见界面永远只出现一个金额」这条硬规则（理由见 proto 该字段的注释）。
      */
     @Override
     public void adminQueryBalance(AdminQueryBalanceRequest request,
@@ -168,7 +171,9 @@ public class BillingAdminGrpcService extends BillingAdminServiceGrpc.BillingAdmi
             AdminQueryBalanceResponse.Builder response = AdminQueryBalanceResponse.newBuilder()
                     .setAvailableCredits(balance.availableCredits())
                     // 冻结的钱还在，只是动不了 —— 可用 + 冻结 = 总资产
-                    .setFrozenCredits(balance.frozenCredits());
+                    .setFrozenCredits(balance.frozenCredits())
+                    // 欠费：用量已发生、平台没收到的那部分（不是用户的资产，所以不进总资产）
+                    .setReceivableCredits(balance.receivableCredits());
             for (BalanceView.ExpiringLot lot : balance.expiring()) {
                 response.addExpiring(AdminExpiringLot.newBuilder()
                         .setCredits(lot.credits())

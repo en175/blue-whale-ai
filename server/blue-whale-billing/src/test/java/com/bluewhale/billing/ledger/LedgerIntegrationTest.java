@@ -1,5 +1,7 @@
 package com.bluewhale.billing.ledger;
 
+import ch.qos.logback.classic.Level;
+import com.bluewhale.billing.testsupport.LogCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -205,12 +207,138 @@ class LedgerIntegrationTest {
         // 批次只被扣掉**预扣额**（27）——超出的 1 分不悄悄从余额里多扣用户
         assertThat(remainingOf(lot)).isEqualTo(73);
         assertThat(frozenOf(lot)).isZero();
+        assertThat(lots.availableCredits(USER))
+                .as("用户实扣仍是**预扣额** 27（不是 28）—— 超出的那 1 分不从他余额里补")
+                .isEqualTo(73);
         // 超出的 1 分记应收（平台垫付），收入照记 28 = 27 + 1
         assertThat(ledger.balanceOf(USER, Account.REVENUE)).isEqualTo(28);
-        assertThat(reservations.findByJobId(JOB).orElseThrow().status())
-                .isEqualTo(Reservation.Status.SETTLED);
+
+        // ── ★ 欠费落成一等列，且与账本那一腿同数（本次改动的核心）───────────────
+        Reservation settled = reservations.findByJobId(JOB).orElseThrow();
+        assertThat(settled.status()).isEqualTo(Reservation.Status.SETTLED);
+        assertThat(settled.actualCredits())
+                .as("actual_credits 的语义**不变**：它是真实用量成本，含超出的那 1 分")
+                .isEqualTo(28);
+        assertThat(settled.receivableCredits())
+                .as("欠费 = max(0, 实际 − 预扣) = 28 − 27")
+                .isEqualTo(1);
+        // ⚠️ RECEIVABLE 的自然方向是**借**（Account.normalDebit=true），超扣走的正是借方：
+        //    读出来就是**正数 = 该用户欠多少**，所以取数时不取绝对值。
+        //    这条断言同时把符号约定钉死——哪天有人把它改成贷方记账，这里会当场红。
+        assertThat(ledger.balanceOf(USER, Account.RECEIVABLE))
+                .as("借方余额 = 用户欠多少（正数）。若这里读到负数，说明符号约定被改反了")
+                .isEqualTo(1);
+
         assertInvariant();
         assertEveryVoucherBalanced();
+        assertReceivableColumnMatchesLedgerPerJob();
+    }
+
+    @Test
+    void 结算_实际未超预扣_欠费列为零且账本无应收() {
+        grant(CreditSource.PURCHASED, 200, null, "g-noover");
+        // 两笔：一笔实际 < 预扣，一笔实际 == 预扣 —— 后者是「≤」的边界。
+        // 判据写成 `actual < reserved` 而不是 `<=` 时，恰好相等那笔会凭空多记一笔欠费
+        long less = 511L;
+        long equal = 512L;
+
+        credits.hold(USER, "cmd-less", less, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.hold(USER, "cmd-equal", equal, 40, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.settle(less, 30);
+        credits.settle(equal, 40);
+
+        for (long jobId : new long[]{less, equal}) {
+            assertThat(reservations.findByJobId(jobId).orElseThrow().receivableCredits())
+                    .as("jobId=%s：实际 ≤ 预扣 → 一分不欠（不是 null、不是实际值）", jobId)
+                    .isZero();
+            assertThat(receivableLegOfJob(jobId))
+                    .as("jobId=%s：账本上根本不该出现应收这一腿", jobId)
+                    .isZero();
+        }
+        assertThat(ledger.balanceOf(USER, Account.RECEIVABLE))
+                .as("整个账户的应收余额应为 0 —— 有超扣才该非零")
+                .isZero();
+        // 差额那 10 分回到可用：200 − 30 − 40
+        assertThat(lots.availableCredits(USER)).isEqualTo(130);
+        assertInvariant();
+        assertEveryVoucherBalanced();
+        assertReceivableColumnMatchesLedgerPerJob();
+    }
+
+    /**
+     * ★ 欠费列与账本 {@code RECEIVABLE} 那一腿**逐笔**相等 —— 本次改动的核心不变量。
+     *
+     * <h2>为什么不能只断言「两个 SUM 相等」</h2>
+     *
+     * 汇总相等可以被一次「两处各错一个方向」的巧合蒙对：列里把 A 的欠费多记了 5、
+     * 账本里 B 少记了 5，总和照样相等，而两笔都错。逐笔比对把
+     * 「**同一笔**结算里，列里的数与分录里的数来自同一个表达式」这件事钉死——
+     * 任何一处写反/写漏/写重，都会在某个 jobId 上当场露出来。
+     *
+     * <h2>校验方式（两边的权威来源，逐条比对）</h2>
+     *
+     * <ul>
+     *   <li>一边是预留行的 {@code receivable_credits} 列；</li>
+     *   <li>另一边是账本里 {@code idempotency_key = settle:{jobId}:receivable} 的那条分录
+     *       （键的拼接与生产代码共用 {@link Voucher#legKey}，这里刻意不自己拼字符串——
+     *       自己拼一份就等于放一份可能分叉的第二实现进来）；</li>
+     *   <li>再各自与「实际 − 预扣（负数归零）」对一次，确保金额本身也不是抄来的。</li>
+     * </ul>
+     *
+     * <p>最后再把 Σ列 与账本 RECEIVABLE 的余额对一次：那是
+     * 「按 job 记账」与「按用户汇总」之间唯一能对上的连接点，
+     * 也是管理端看到的 {@code receivable_credits} 与账本口径一致的证明。
+     */
+    @Test
+    void 结算_欠费列与账本应收逐笔相等() {
+        // 四笔覆盖不同的超扣形态：超 1 / 恰好相等 / 不足 / 超 15
+        long over1 = 521L;
+        long exact = 522L;
+        long under = 523L;
+        long over15 = 524L;
+
+        grant(CreditSource.PURCHASED, 500, null, "g-recv");
+        credits.hold(USER, "cmd-r1", over1, 27, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.hold(USER, "cmd-r2", exact, 50, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.hold(USER, "cmd-r3", under, 60, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.hold(USER, "cmd-r4", over15, 30, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+        credits.settle(over1, 28);
+        credits.settle(exact, 50);
+        credits.settle(under, 10);
+        credits.settle(over15, 45);
+
+        assertThat(receivableColumnOf(over1)).isEqualTo(1);
+        assertThat(receivableColumnOf(exact)).isZero();
+        assertThat(receivableColumnOf(under)).isZero();
+        assertThat(receivableColumnOf(over15)).isEqualTo(15);
+
+        assertEveryVoucherBalanced();
+        assertReceivableColumnMatchesLedgerPerJob();
+    }
+
+    /**
+     * 欠费必须从日志里**看得见金额** —— 「先欠费」这个产品口径的全部可观测面。
+     *
+     * <p>产品已确认不收款、不封禁、不拦截，所以这笔欠费的主动出口就只有这条 WARN：
+     * 预留行与账本要有人去查才看得见，而日志是自己报出来的。一条只说「结算超出预扣」、
+     * 不带差额的日志，等于把「到底欠了多少」又推回给读日志的人。
+     */
+    @Test
+    void 结算_超预扣_warn里带出欠费额() {
+        grant(CreditSource.PURCHASED, 100, null, "g-warn");
+        credits.hold(USER, "cmd-warn", JOB, 27, CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+
+        try (LogCapture logs = LogCapture.of(CreditService.class)) {
+            credits.settle(JOB, 28);
+
+            assertThat(logs.text(Level.WARN))
+                    .as("这条 WARN 是欠费的唯一主动出口；缺了金额就只剩翻库")
+                    .contains("jobId=" + JOB)
+                    .contains("预扣=27")
+                    .contains("实际=28")
+                    .contains("欠费=1");
+        }
+        assertInvariant();
     }
 
     @Test
@@ -377,6 +505,84 @@ class LedgerIntegrationTest {
         return jdbc.queryForList(
                 "SELECT account FROM billing_ledger_entries WHERE idempotency_key LIKE ?",
                 String.class, idempotencyBase + ":%");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 欠费（receivable_credits，见 V9 迁移）
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * 欠费列与账本应收那一腿**逐笔**相等。
+     *
+     * <p>两个来源都取自库：预留行的 {@code receivable_credits} 列，与账本里
+     * {@code settle:{jobId}:receivable} 那条分录。逐条比而不是比总和——理由见
+     * {@link #结算_欠费列与账本应收逐笔相等()}。
+     *
+     * <p>另外把每一笔与「实际 − 预扣（负数归零）」对一次：只比「列 == 分录」是不够的，
+     * 两处一起写错（比如都写成 actual_credits）时两边照样相等。三方对上才算真对。
+     */
+    private void assertReceivableColumnMatchesLedgerPerJob() {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT generation_job_id, receivable_credits FROM billing_cost_reservations "
+                        + "WHERE user_id = ? AND status = 'settled' ORDER BY generation_job_id",
+                USER);
+        assertThat(rows).as("应有已结算的预留可供逐笔比对").isNotEmpty();
+
+        for (Map<String, Object> row : rows) {
+            long jobId = ((Number) row.get("generation_job_id")).longValue();
+            long column = ((Number) row.get("receivable_credits")).longValue();
+            assertThat(column)
+                    .as("jobId=%s：欠费列(%s) 必须与账本 settle:%s:receivable 那一腿(%s) 相等"
+                                    + " —— 两者由同一次结算、同一个表达式写下",
+                            jobId, column, jobId, receivableLegOfJob(jobId))
+                    .isEqualTo(receivableLegOfJob(jobId));
+            assertThat(column)
+                    .as("jobId=%s：欠费列也必须等于「实际 − 预扣」（负数归零）"
+                            + " —— 只比「列 == 分录」不够，两处一起写错时照样相等", jobId)
+                    .isEqualTo(overageOf(jobId));
+        }
+
+        assertThat(sumReceivableColumn())
+                .as("Σ 预留行欠费列 应等于账本 RECEIVABLE 余额 —— 这是「按 job 记账」"
+                        + "与「按用户汇总」之间唯一能对上的连接点")
+                .isEqualTo(ledger.balanceOf(USER, Account.RECEIVABLE));
+    }
+
+    /**
+     * 该 job 在账本上那一腿应收的金额；没有这一腿（未超扣）时为 0。
+     *
+     * <p>分录键由 {@link Voucher#legKey}（基础键 + 科目）推导，这里直接按它查——
+     * 不自己拼一份「另一个实现」，那正是判重失效的经典成因。
+     */
+    private long receivableLegOfJob(long jobId) {
+        List<Long> amounts = jdbc.queryForList(
+                "SELECT amount FROM billing_ledger_entries WHERE idempotency_key = ?",
+                Long.class, Voucher.legKey("settle:" + jobId, Account.RECEIVABLE));
+        return amounts.isEmpty() ? 0L : amounts.get(0);
+    }
+
+    /** 该 job 的「实际 − 预扣」（负数归零）—— 与生产侧那个表达式的口径一致。 */
+    private long overageOf(long jobId) {
+        Long overage = jdbc.queryForObject(
+                "SELECT GREATEST(actual_credits - reserved_credits, 0) "
+                        + "FROM billing_cost_reservations WHERE generation_job_id = ?",
+                Long.class, jobId);
+        return overage == null ? 0L : overage;
+    }
+
+    private long receivableColumnOf(long jobId) {
+        Long credits = jdbc.queryForObject(
+                "SELECT receivable_credits FROM billing_cost_reservations WHERE generation_job_id = ?",
+                Long.class, jobId);
+        return credits == null ? 0L : credits;
+    }
+
+    private long sumReceivableColumn() {
+        Long sum = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(receivable_credits), 0) FROM billing_cost_reservations "
+                        + "WHERE user_id = ? AND status = 'settled'",
+                Long.class, USER);
+        return sum == null ? 0L : sum;
     }
 
     private long remainingOf(long lotId) {

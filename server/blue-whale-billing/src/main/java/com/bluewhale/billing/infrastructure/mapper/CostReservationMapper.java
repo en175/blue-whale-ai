@@ -21,7 +21,20 @@ public interface CostReservationMapper extends BaseMapper<CostReservationEntity>
     /** 取出并锁住该 job 的预留；不存在返回 null。 */
     CostReservationEntity lockByJobId(@Param("jobId") long jobId);
 
-    int markSettled(@Param("jobId") long jobId, @Param("actualCredits") long actualCredits);
+    /**
+     * 置为已结算，落两个数。
+     *
+     * <p>{@code actualCredits} 是**真实用量成本**、{@code receivableCredits} 是其中
+     * **没收到的那部分**（见 V9 迁移）。两者一次写入，因为它们出自同一次结算的同一个判断
+     * （{@code receivable = max(0, actual − reserved)}）——分两次写就会出现「有欠费列
+     * 却没有对应账本腿」的窗口。
+     *
+     * @param actualCredits    实际消耗（积分）
+     * @param receivableCredits 欠费额（积分），无超扣时为 0
+     */
+    int markSettled(@Param("jobId") long jobId,
+                    @Param("actualCredits") long actualCredits,
+                    @Param("receivableCredits") long receivableCredits);
 
     int markReleased(@Param("jobId") long jobId, @Param("releaseNote") String releaseNote);
 

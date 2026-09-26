@@ -322,16 +322,32 @@ public class BillingApplicationService {
         return priced;
     }
 
-    /** 余额与临期批次（用户可见）。 */
+    /**
+     * 余额、欠费与临期批次 —— **用户面与管理面共用的唯一取数处**。
+     *
+     * <p>哪些字段投影到哪个契约由适配器决定：{@code receivableCredits} 只进管理面
+     * （用户面永远只出现一个金额，见 {@link BalanceView}）。
+     */
     public BalanceView balance(long userId) {
         // 冻结总额取自账本账户，而不是再扫一遍批次表：
         // 账本本来就是「冻结了多少」的权威记录，多一处聚合就多一处可能对不上的地方。
         long frozen = ledger.balanceOf(userId, Account.FROZEN);
+
+        // 欠费额同样取自账本，**不**去 SUM 预留行的 receivable_credits 列。
+        // 理由是同一件事的另一面：预扣/结算/返还全部经过账本，账本才是权威；
+        // 预留行那一列是给「按 job 追溯这笔怎么欠的」用的（见 V9 迁移），
+        // 拿它聚合等于把一份派生数据当账根。
+        //
+        // ⚠️ 符号约定：RECEIVABLE 的自然方向是**借**（Account.normalDebit=true），
+        // 超扣走的正是借方，所以这里读出来就是**正数 = 该用户欠多少**，不取绝对值。
+        // 反过来取 abs 会把「贷方余额」（多收/已收）也变成正数，两件相反的事叠成一个数。
+        long receivable = ledger.balanceOf(userId, Account.RECEIVABLE);
+
         var expiring = lots.listExpiring(userId, EXPIRING_WINDOW_DAYS, EXPIRING_LIMIT).stream()
                 .map(lot -> new BalanceView.ExpiringLot(
                         lot.available(), lot.expiresAt(), lot.source().key()))
                 .toList();
-        return new BalanceView(lots.availableCredits(userId), frozen, expiring);
+        return new BalanceView(lots.availableCredits(userId), frozen, receivable, expiring);
     }
 
     /**

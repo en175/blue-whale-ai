@@ -225,7 +225,7 @@ class SettlementServiceTest {
      */
     private void hold(long reservedCredits, String ruleSnapshot) {
         when(reservations.findByJobId(JOB)).thenReturn(Optional.of(new Reservation(
-                1L, JOB, USER, reservedCredits, null, Reservation.Status.HELD,
+                1L, JOB, USER, reservedCredits, null, 0L, Reservation.Status.HELD,
                 List.of(), 1, 10_000, ruleSnapshot, "测试任务", null)));
     }
 

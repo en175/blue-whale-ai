@@ -172,6 +172,20 @@ public class CreditService {
      * 差额自动回到可用余额。**不重算分配**——期间可能插入了新批次或旧批次过期，
      * 重算会扣到别的批次上。
      *
+     * <h2>三个金额，以及它们各自的去向</h2>
+     * <pre>
+     *   使用 = actualCredits          真实用量成本（**不是**用户被扣走的）
+     *   实扣 = min(actual, reserved)   用户余额里真正少了多少 = 预扣额（不悄悄多扣）
+     *   欠费 = actual − 实扣          差额，平台先垫、用户后欠
+     * </pre>
+     * 欠费那一笔同时落在三处、且取同一个变量：预留行的 {@code receivable_credits} 列
+     * （见 V9 迁移，管理端据此可见）、账本「借 {@code RECEIVABLE}」那一腿、以及下面那条 WARN。
+     *
+     * <p>⚠️ <b>{@code RECEIVABLE} 的符号约定</b>：它的自然方向是<b>借</b>
+     * （{@link Account#RECEIVABLE} 的 {@code normalDebit=true}），而超扣走的正是
+     * <b>借</b>方，所以 {@code ledger.balanceOf(userId, RECEIVABLE)} 读出来就是
+     * <b>正数 = 该用户欠多少</b>，不需要取绝对值。反向（贷应收）只会在将来真收到钱时才出现。
+     *
      * @param actualCredits 实际消耗（积分）。{@code > 预扣} 分两种情形，处理相同
      *                      （差额记应收并告警，**不悄悄多扣用户**）：
      *                      <ul>
@@ -202,6 +216,16 @@ public class CreditService {
 
         long reserved = reservation.reservedCredits();
         long consumed = Math.min(actualCredits, reserved);
+
+        // ★ 欠费额 —— 这次真实用量里**没能从用户余额收到**的那部分（= 实际 − 预扣，负数归零）。
+        //   它有三个落点，而且**必须是同一个数**：
+        //     ① 预留行的 receivable_credits 列（下面 markSettled 一把写下，管理端按它看得见欠费）
+        //     ② 账本「借 RECEIVABLE」那一腿（复式分录的另一半）
+        //     ③ 下面那条 WARN 报出的「欠费」
+        //   此前这三处没有共同来源：列里根本没有这一项、账本腿只在分录里、日志只说「多出多少」，
+        //   于是「用户欠了多少钱」全仓没有任何一处读得出来——口径之争就是这么来的。
+        //   所以只在这里算一次，往下全是引用。
+        long receivable = actualCredits - consumed;
 
         // ── 把实际消耗按**同一顺序**铺回各批次；剩余部分（若实际 > 预扣）走应收
         Map<Long, Long> actualByLot = new LinkedHashMap<>();
@@ -243,13 +267,16 @@ public class CreditService {
         // 用户的钱永远冻着 —— 线上实测（jobId=1924：预扣 27 / 实际 28）。
         //
         // 为什么计入收入而不是少记：那是平台先垫、用户后欠（应收），金额本身是真的。
-        long overage = actualCredits - consumed;
-        if (overage > 0) {
-            consumedByAccount.merge(marginalAccount, overage, Long::sum);
-            log.warn("结算超出预扣：jobId={} 预扣={} 实际={} 多出={} 挂应收 —— "
+        if (receivable > 0) {
+            consumedByAccount.merge(marginalAccount, receivable, Long::sum);
+            // ⚠️ 这条日志就是**欠费信号**：产品已确认走「先欠费」——只记录、只可见，
+            //    不收款、不封禁、不拦截。所以这里不动作，只把「欠了多少」报清楚，
+            //    并让 jobId 成为从日志走到预留行 / 账本那一笔的入口。
+            log.warn("结算超出预扣：jobId={} 预扣={} 实际={} 欠费={} —— "
+                            + "这笔差额记应收、先记着不收（产品口径：欠费只记录不追收）；"
                             + "按 token 估的预扣偏低是预期内的（估算 vs 上游真值），"
                             + "若某个模型长期单向偏高，多半是它的估算参数该调了",
-                    jobId, reserved, actualCredits, overage);
+                    jobId, reserved, actualCredits, receivable);
         }
 
         // ── 复式分录（§3 分录 6/7/8）
@@ -264,11 +291,14 @@ public class CreditService {
             // 只体现为「预计消耗 40」变成「消耗 30」
             voucher.credit(Account.WALLET, refund, "差额回可用余额");
         } else if (refund < 0) {
-            voucher.debit(Account.RECEIVABLE, -refund, "超扣转应收");
+            // refund < 0 ⟺ receivable > 0 —— 同一个差额的两种说法，金额取上面那个共同来源，
+            // 保证账本这一腿与预留行的 receivable_credits 列**逐笔相等**（可对账）
+            voucher.debit(Account.RECEIVABLE, receivable, "超扣转应收");
         }
         ledger.insert(voucher.build());
 
-        reservations.markSettled(jobId, actualCredits);
+        // 欠费额与账本那一腿同一个数、同一次结算落库（见 markSettled 的说明）
+        reservations.markSettled(jobId, actualCredits, receivable);
     }
 
     /**

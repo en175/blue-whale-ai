@@ -9,7 +9,13 @@ import java.util.List;
  * 与「已完成 · 消耗 30」两个状态，不该知道中间存在过一笔预留。
  *
  * @param reservedCredits 预扣额（积分）
- * @param actualCredits   实际额（积分）；未结算时为 null
+ * @param actualCredits   实际额（积分）；未结算时为 null。
+ *                        ⚠️ 它是**真实用量成本**，可能**大于** reservedCredits
+ *                        （按 token 估的预扣偏低是预期内的），不是「用户被扣走的」
+ * @param receivableCredits 欠费额（积分，见 V9 迁移）——actualCredits 里**没收到**的那部分，
+ *                        也就是「实际 > 预扣」的差额；无超扣时为 0。
+ *                        用户实际被扣走的是 {@code actual − receivable}（二者之差就是预扣额）。
+ *                        它与账本 {@code RECEIVABLE} 那一腿同数，见 {@link CreditService#settle}
  * @param status          状态机见 {@link Status}
  * @param allocations     预扣分配的批次明细；结算与返还**按同一份**处理
  * @param catalogVersion  冻结的定价版本——只作追溯（当时按哪一版目录的换算率/折扣策略）；
@@ -36,6 +42,7 @@ public record Reservation(
         long userId,
         long reservedCredits,
         Long actualCredits,
+        long receivableCredits,
         Status status,
         List<Allocation> allocations,
         int catalogVersion,

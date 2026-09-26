@@ -70,8 +70,16 @@ public class ReservationRepository {
         return entity == null ? null : toReservation(entity);
     }
 
-    public void markSettled(long jobId, long actualCredits) {
-        mapper.markSettled(jobId, actualCredits);
+    /**
+     * 置为已结算。
+     *
+     * @param actualCredits     真实用量成本（积分）
+     * @param receivableCredits 其中**没收到**的那部分（积分，见 V9 迁移）；无超扣时传 0。
+     *                          它与 actualCredits 由调用方在同一次判断里算出、这里同一条
+     *                          UPDATE 写入——「欠费列已写、账本腿还没写」的窗口不能存在
+     */
+    public void markSettled(long jobId, long actualCredits, long receivableCredits) {
+        mapper.markSettled(jobId, actualCredits, receivableCredits);
     }
 
     public void markReleased(long jobId, String releaseNote) {
@@ -131,6 +139,8 @@ public class ReservationRepository {
                 entity.getUserId(),
                 entity.getReservedCredits(),
                 entity.getActualCredits(),
+                // NOT NULL DEFAULT 0（V9）：结算前读不出来也不会是 null，无需兜底
+                entity.getReceivableCredits(),
                 Reservation.Status.of(entity.getStatus()),
                 readAllocations(entity.getAllocations()),
                 entity.getCatalogVersion(),

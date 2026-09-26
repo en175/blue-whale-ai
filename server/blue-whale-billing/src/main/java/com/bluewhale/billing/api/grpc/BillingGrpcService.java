@@ -102,6 +102,9 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         try {
             BalanceView balance = billing.balance(request.getUserId());
 
+            // ⚠️ **刻意不投影 balance.receivableCredits()**（欠费）：它是平台少收了多少，
+            //    不是用户的资产。用户面永远只出现一个金额（《计费逻辑详细设计》§2.3.1）；
+            //    欠费只在管理面可见，见 BillingAdminGrpcService#adminQueryBalance。
             QueryBalanceResponse.Builder response = QueryBalanceResponse.newBuilder()
                     .setAvailableCredits(balance.availableCredits())
                     .setFrozenCredits(balance.frozenCredits());
