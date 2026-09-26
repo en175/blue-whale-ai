@@ -2186,7 +2186,17 @@ export default function CanvasPage() {
         { replace: true, state: location.state });
       return;
     }
+    // IKIN8A：整文档待复核期间，同页路由（前进/后退/外部 navigate 改 ?project=）请求打开另一
+    // Project 时中止切换并把地址恢复到当前项目——不走项目选择器落盘闸门的这条路径若放行，
+    // 水合 doc 先置 null 会静默复位待复核标记，随后新项目水合再覆盖本地工作副本，
+    // 等于把未保存内容当作已落盘丢弃。同项目其他 query 变化（fromQuery 相同）不受影响。
+    if (fromQuery && activeProjectRef.current && fromQuery !== activeProjectRef.current && blockedByPendingCanvasReview()) {
+      navigate({ pathname: location.pathname, search: canvasLocationSearch(new URLSearchParams(location.search), activeProjectRef.current) },
+        { replace: true, state: location.state });
+      return;
+    }
     if (fromQuery) setCurrentId(fromQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedByPendingCanvasReview 每次渲染重建，判定仅读跨渲染稳定的 ref
   }, [location.search, location.pathname, location.state, navigate]);
 
   /** 当前画布写入 ?project=，刷新后回到同一张画布；保留其它 query 与 location.state */

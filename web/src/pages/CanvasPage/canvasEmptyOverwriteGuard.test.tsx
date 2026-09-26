@@ -8,6 +8,7 @@ import {
   enableReactActEnvironment,
   flowProps,
   locationRef,
+  navigateRef,
   renderPage,
   unmountPage,
 } from './testing/canvasPageTestHarness';
@@ -654,4 +655,124 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
   });
+});
+
+/* IKIN8A：待复核期间同页 Project 导航门禁——页面保持挂载时 URL ?project= 变化
+   （前进/后退/外部 navigate 同路径）不走项目选择器的落盘闸门，直接 setCurrentId 切画布：
+   水合 doc 先置 null 会静默复位待复核标记，随后新项目水合覆盖本地工作副本，
+   等于把未保存内容当作已落盘丢弃。门禁同构 audioMixInFlightRef 先例：中止切换、
+   地址恢复当前项目，本地节点与未保存状态原样保留；仅当前项目成功重新水合后解除。 */
+describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
+  /** 模拟同页路由变化（非整页地址栏重载）：navigate 同路径不同 query */
+  async function navigateSamePage(to: string) {
+    await act(async () => { navigateRef!(to); });
+    await act(async () => {});
+  }
+
+  it('a. 412 清空冲突待复核期间：同页路由切到另一 Project 被中止，地址恢复当前项目，本地编辑保留，无旧整文档 PUT', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    // 新增本地节点保持非空（待复核期间本地编辑仍在累积）
+    await addTextNodeViaPaneMenu();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    await navigateSamePage('/canvas?project=p2');
+
+    // 地址被恢复到当前项目，Canvas 仍显示 A 的本地节点
+    expect(locationRef!.search).toContain('project=p1');
+    expect(locationRef!.search).not.toContain('project=p2');
+    expect(flowProps.current.textNodes.length).toBeGreaterThan(0);
+    // 没有发送旧整文档 PUT；页面提示刷新复核
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+  }, 10000);
+
+  it('b. 被拒的同页导航不清除待复核：此后手动重试保存仍被拦，仍提示刷新复核', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    await navigateSamePage('/canvas?project=p2');
+    expect(locationRef!.search).toContain('project=p1');
+
+    // 导航被拒后待复核闸门原样生效（未被切换过程静默复位）
+    const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
+    expect(retryBtn).toBeTruthy();
+    await act(async () => { retryBtn!.click(); });
+    await act(async () => {});
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+  }, 10000);
+
+  it('c. 422 空覆盖待复核期间：同页路由切换同样被中止，新增节点保留并提示刷新复核', async () => {
+    seedDoc([]);
+    await renderPage();
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+    }, { timeout: 3000 });
+    await addTextNodeViaPaneMenu();
+    expect(flowProps.current.textNodes).toHaveLength(1);
+
+    await navigateSamePage('/canvas?project=p2');
+
+    expect(locationRef!.search).toContain('project=p1');
+    expect(flowProps.current.textNodes).toHaveLength(1); // 新增节点未被 B 的水合覆盖
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+  }, 10000);
+
+  it('d. 无待复核时同页切换到另一 Project：正常水合新项目、地址指向新项目、可正常保存', async () => {
+    seedDoc([T1]);
+    await renderPage();
+
+    await navigateSamePage('/canvas?project=p2');
+    expect(locationRef!.search).toContain('project=p2'); // 无门禁拦截，地址未被回退
+
+    // 模拟 B 的水合（打桩换 doc 引用；viewport 变化驱动重渲染，口径同 IKIN23 f 用例）
+    const P2T1 = { id: 'p2-t1', type: 'textNode', position: { x: 20, y: 20 }, data: { title: 'B卡', text: '项目二内容' } };
+    canvasDocMock.current = {
+      doc: { id: 22, version: 9, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [P2T1], edges: [] },
+      assets: {},
+      refetch: () => Promise.resolve([]),
+      acceptDoc: vi.fn(),
+      loadFailed: false,
+    };
+    await act(async () => {
+      flowProps.current.onViewportChange?.({ x: 60, y: 0, zoom: 1 });
+    });
+    await vi.waitFor(() => {
+      expect(flowProps.current.textNodes.map((n: { id: string }) => n.id)).toEqual(['p2-t1']);
+    });
+
+    // B 上正常编辑并保存（PUT 发往新项目）
+    apiMocks.saveCanvasDoc.mockClear();
+    await addTextNodeViaPaneMenu();
+    await vi.waitFor(() => {
+      const call = apiMocks.saveCanvasDoc.mock.calls.at(-1)!;
+      expect(call[0]).toBe('p2');
+      expect((call[1].nodes as unknown[]).length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+  }, 10000);
+
+  it('e. 待复核期间同项目的其他 query 参数变化：地址不回退、不误拦', async () => {
+    seedDoc([T1]);
+    await renderPage();
+    await clearToConflict412();
+
+    await navigateSamePage('/canvas?project=p1&panel=agent');
+
+    // fromQuery 与当前项目相同：非跨项目切换，地址保持（含新 query），不触发恢复导航
+    expect(locationRef!.search).toContain('project=p1');
+    expect(locationRef!.search).toContain('panel=agent');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+  }, 10000);
 });
