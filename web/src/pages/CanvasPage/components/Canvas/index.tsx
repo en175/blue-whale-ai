@@ -251,7 +251,20 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     if (!selectRequest || selectRequest.ts === selectReqTsRef.current) return;
     if (chromeSelectionLockIds()) return;
     selectReqTsRef.current = selectRequest.ts;
-    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
+    /* IKIJ62 等值守卫：目标选中集合与当前一致（仅 selectRequest.id 选中、其余未选中）时
+     *  返回原数组，不重建节点对象——等值选中请求不再放大渲染（选中循环的放大器兜底，
+     *  同上方 revertLockedSelection 的 changed ? next : prev 先例；undefined 与 false
+     *  同为未选中，React Flow 侧 selected ?? false 同口径）。 */
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        const shouldSelect = n.id === selectRequest.id;
+        if (Boolean(n.selected) === shouldSelect) return n;
+        changed = true;
+        return { ...n, selected: shouldSelect };
+      });
+      return changed ? next : prev;
+    });
   }, [selectRequest, setNodes]);
 
   /** 父层显式多选请求（IKGBPA 粘贴自动选中）：机制同 selectRequest，一次选中多个目标并取消其余。 */
@@ -279,6 +292,17 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onViewportChangeRef.current = onViewportChange;
   const onViewportLiveRef = useRef(onViewportLive);
   onViewportLiveRef.current = onViewportLive;
+  /** IKIJ60：传给 ReactFlow 的选中变化回调必须引用稳定——@xyflow/react 12.11.2 的
+   *  SelectionListener 把回调自身列入 effect 依赖且不检查选中是否真的变化，回调引用一变
+   *  就把当前选中等值再通报一次；内联包裹每轮渲染重建会让等值通报无限再生（草稿面板切换
+   *  时滚成 Maximum update depth exceeded）。ref 每轮同步 + 空依赖稳定壳（同上方
+   *  onViewportChangeRef 先例），始终调最新闭包。 */
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  const handleFlowSelectionChange = useCallback((params: OnSelectionChangeParams) => {
+    if (isChromeGestureActive()) return;
+    onSelectionChangeRef.current?.(params);
+  }, []);
 
   /** 波点缩放补偿：屏幕点半径 = size × zoom，取 size = 1/zoom 使屏幕点径恒定约 2px，
    * 缩小视图（如 58%）时波点依然清晰可见 */
@@ -890,14 +914,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             : undefined
         }
         onPaneClick={onPaneClick}
-        onSelectionChange={
-          frameDragMemberIds.size > 0
-            ? undefined
-            : (params) => {
-                if (isChromeGestureActive()) return;
-                onSelectionChange?.(params);
-              }
-        }
+        onSelectionChange={frameDragMemberIds.size > 0 ? undefined : handleFlowSelectionChange}
         onMove={(_e, v) => onViewportLiveRef.current?.(v)}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}

@@ -290,7 +290,7 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
-import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import ImageDialog, { composeImageSendPrompt, type UploadedFile, type ImageTextAttachment } from './components/ImageDialog';
 import { composedPromptLimitError, promptMaxLengthOfModel } from '@/lib/prompt-max-length';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import TextGenDialog from './components/TextGenDialog';
@@ -423,6 +423,7 @@ import {
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import type { AtMentionItem } from './atMention';
+import { draftSeedEquals, type ImageDraftSeed, type VideoDraftSeed, type AudioDraftSeed } from './draftSeed';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -1409,7 +1410,7 @@ export default function CanvasPage() {
    *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比）；
    *  targetNodeId/attachments 仅图片媒体节点面板发起时存在（IKDLQF）：提交携带 target_node_id，
    *  附件在打开当下按连线快照，面板只读展示 */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[]; promptDoc?: PromptDoc | null } | null>(null);
+  const [imageSeed, setImageSeed] = useState<ImageDraftSeed | null>(null);
   /** 面板当前绑定的图片草稿节点 id（IKDMQQ）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  草稿被删除/取消或成功转成品卡时由清理 effect 结束绑定并关闭面板 */
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
@@ -1425,9 +1426,9 @@ export default function CanvasPage() {
   const [videoFreeRefs, setVideoFreeRefs] = useState<VideoMediaRefs>({ reference: [] });
   /** 节点工具条/首页带入视频对话框的种子；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<VideoDraftSeed | null>(null);
   /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
-  const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string; doc?: PromptDoc | null; refs?: AudioRefItem[] } | null>(null);
+  const [audioSeed, setAudioSeed] = useState<AudioDraftSeed | null>(null);
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片/视频草稿绑定一致 */
   const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
@@ -3396,12 +3397,17 @@ export default function CanvasPage() {
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard };
 
   /** 唤起底部图片对话框（工具栏图片图标 / 资产卡「生成图片」共用）；
-   *  IKGZ5O：会话期打开请求先退出编辑会话（参数丢弃）再放行 */
+   *  IKGZ5O：会话期打开请求先退出编辑会话（参数丢弃）再放行；
+   *  IKIJ61：关闭视频/音频面板的路径同步清理其草稿绑定——不留「面板已关绑定还在」的
+   *  幽灵绑定（源码核验：不置对方隐藏豁免——普通草稿卡的轻位移点卡依赖选中通报路径
+   *  开面板，nodeDragThreshold=1 时位移会吞掉 click，豁免会挡掉这条既有打开路径） */
   const handleOpenImageDialog = () => {
     exitEditSessionForGenPanel();
     imagePanelHiddenRef.current = false;
     setShowImageDialog(true);
+    setVideoDraftId(null);
     setShowBottomDialog(false);
+    setAudioDraftId(null);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
@@ -4184,6 +4190,18 @@ export default function CanvasPage() {
     if (showMusicDialog && (soloId || candidates.length > 1)) setShowMusicDialog(false);
   };
 
+  /** IKIJ60：下传 FlowCanvas 的选中处理函数同步稳定化——页面每轮渲染重建
+   *  handleSelectionChange 会连带容器每轮渲染重建传给 ReactFlow 的包裹，使
+   *  SelectionListener 的等值通报无限再生（草稿面板切换滚成 Maximum update depth
+   *  exceeded）。ref 每轮赋值保证始终调最新闭包，处理逻辑本身不动（禁 useCallback+
+   *  依赖数组重构：上方函数闭包捕获态过多，stale 闭包风险），对外只暴露空依赖稳定壳。 */
+  const handleSelectionChangeRef = useRef(handleSelectionChange);
+  handleSelectionChangeRef.current = handleSelectionChange;
+  const handleSelectionChangeStable = useCallback(
+    (params: OnSelectionChangeParams) => handleSelectionChangeRef.current(params),
+    [],
+  );
+
   /** IKFYH6 画布外 UI 点击关闭：document 捕获阶段 click——捕获先于 React 事件处理器执行，
    *  同一次点击先到此（面板尚未因该点击打开），「刚打开的面板」不会被误关。
    *  豁免：「面板领土」（五面板根 + @菜单/资产弹窗等 portal 浮层，data-gen-panel-territory 标记）、
@@ -4571,7 +4589,8 @@ export default function CanvasPage() {
   };
 
   /** 打开绑定指定草稿的图片面板（IKDMQQ）：带入草稿已保存的参数与当前连线文本附件；
-   *  IKFR4X：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取） */
+   *  IKFR4X：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取）；
+   *  IKIJ61：seed 内容等值（除 ts）时跳过写入，重复通报同一草稿不再产生新引用（key 不变、不重挂载） */
   const openImageDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
     endImagePickSession();
@@ -4579,7 +4598,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setImageDraftId(nodeId);
-    setImageSeed({
+    const nextImageSeed: ImageDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       // IKFA1M：结构化正文与拍平镜像一致才恢复标签；旧客户端改写过则按纯文本恢复，不猜造标签
@@ -4592,7 +4611,8 @@ export default function CanvasPage() {
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
-    });
+    };
+    setImageSeed((prev) => (draftSeedEquals(prev, nextImageSeed) ? prev : nextImageSeed));
     setShowTextGenDialog(false);
     handleOpenImageDialog();
   };
@@ -4855,7 +4875,10 @@ export default function CanvasPage() {
 
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件；
    *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底；
-   *  IKFR4Y：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取） */
+   *  IKFR4Y：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取）；
+   *  IKIJ61：seed 内容等值（除 ts）时跳过写入，重复通报同一草稿不再产生新引用（key 不变、
+   *  不重挂载）；关闭图片/音频面板的路径同步清理其草稿绑定，不留幽灵绑定（不置对方隐藏
+   *  豁免——普通草稿卡轻位移点卡依赖选中通报路径开面板，见 handleOpenImageDialog 注释） */
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
     if (!canOpenEditor(nodeId)) return;
     endVideoPickSession();
@@ -4864,7 +4887,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setVideoDraftId(nodeId);
-    setVideoSeed({
+    const nextVideoSeed: VideoDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       doc: restorePromptDoc(d.promptDoc, d.prompt),
@@ -4879,11 +4902,14 @@ export default function CanvasPage() {
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
-    });
+    };
+    setVideoSeed((prev) => (draftSeedEquals(prev, nextVideoSeed) ? prev : nextVideoSeed));
     warnStaleMediaRefs(nodeId, 'video');
     exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowBottomDialog(true);
+    setImageDraftId(null);
     setShowImageDialog(false);
+    setAudioDraftId(null);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
     setShowTextGenDialog(false);
@@ -5333,7 +5359,9 @@ export default function CanvasPage() {
   /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型。
    *  IKFDFZ：媒体参考改为「来源→草稿」连线持久化；存量 data.audioRefs 的画布项
    *  首次打开时迁移为连线（按节点 id 找回来源），迁移后清空旧字段——画布项不再经 seed 恢复；
-   *  IKFR4Z：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取） */
+   *  IKFR4Z：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取）；
+   *  IKIJ61：seed 内容等值（除 ts）时跳过写入；关闭视频/图片面板的路径同步清理其草稿绑定，
+   *  不留幽灵绑定（口径同 openVideoDraftDialog 互关清绑定） */
   const openAudioDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
     endAudioPickSession();
@@ -5354,17 +5382,20 @@ export default function CanvasPage() {
       }
       patchMediaNode(nodeId, { audioRefs: [] });
     }
-    setAudioSeed({
+    const nextAudioSeed: AudioDraftSeed = {
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
       targetNodeId: nodeId,
       doc: restorePromptDoc(d.promptDoc, d.prompt),
       refs: [],
-    });
+    };
+    setAudioSeed((prev) => (draftSeedEquals(prev, nextAudioSeed) ? prev : nextAudioSeed));
     exitEditSessionForGenPanel(); // IKGZ5O：会话期打开请求先退会话（参数丢弃）再放行
     setShowAudioDialog(true);
+    setVideoDraftId(null);
     setShowBottomDialog(false);
+    setImageDraftId(null);
     setShowImageDialog(false);
     setShowMusicDialog(false);
     setShowEnhanceDialog(false);
@@ -12328,7 +12359,7 @@ export default function CanvasPage() {
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
-          onSelectionChange={handleSelectionChange}
+          onSelectionChange={handleSelectionChangeStable}
           refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || outpaintSessionActive}
           outpaintFrame={
             outpaintSessionActive && outpaintRect
