@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -90,6 +90,10 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
     class HarnessModule {}
     Module({ controllers: [ProjectAssetsController, AssetsController, CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController, JobsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
       { provide: AssetStorageService, useValue: new AssetStorageService() },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
@@ -240,7 +244,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       expected_output_count: 1,
       parameters: audioParameters,
     });
-    expect(wrongType.code).toBe(400);
+    expect(wrongType.code).toBe(1002);
     expect(wrongType.msg).toContain("目标节点不存在或不是音频媒体节点");
 
     const missing = await createJob(projectId, {
@@ -249,7 +253,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       expected_output_count: 1,
       parameters: audioParameters,
     });
-    expect(missing.code).toBe(400);
+    expect(missing.code).toBe(1002);
     expect(missing.msg).toContain("目标节点不存在或不是音频媒体节点");
     expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } })).toBe(0);
   });
@@ -264,7 +268,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       expected_output_count: 1,
       parameters: { prompt: "   ", model_id: MODEL_ID },
     });
-    expect(blank.code).toBe(400);
+    expect(blank.code).toBe(1002);
     expect(blank.msg).toBe("prompt 无效");
 
     const withRefs = await createJob(projectId, {
@@ -274,7 +278,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       parameters: audioParameters,
       input_asset_ids: ["1"],
     });
-    expect(withRefs.code).toBe(400);
+    expect(withRefs.code).toBe(1004);
     // IKE4GC 起文案为现行口径（音频仅支持单数组 references），旧 IKDMQT 文案已废弃
     expect(withRefs.msg).toContain("音频生成暂不支持旧参考字段");
     expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } })).toBe(0);
@@ -335,7 +339,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       parameters: audioParameters,
       references: [audioA, audioB, audioA, imageAsset].map((id) => ({ role: "reference", type: "audio", asset_id: id })),
     });
-    expect(overflow.code).toBe(400);
+    expect(overflow.code).toBe(1034);
     expect(overflow.msg).toContain("参考音频最多 3 个");
 
     const mixed = await createJob(projectId, {
@@ -348,7 +352,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
         { role: "reference", type: "image", asset_id: imageAsset },
       ],
     });
-    expect(mixed.code).toBe(400);
+    expect(mixed.code).toBe(1034);
     expect(mixed.msg).toContain("音频与图片参考不可混用");
 
     const videoRef = await createJob(projectId, {
@@ -358,7 +362,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       parameters: audioParameters,
       references: [{ role: "reference", type: "video", asset_id: audioA }],
     });
-    expect(videoRef.code).toBe(400);
+    expect(videoRef.code).toBe(1034);
     expect(videoRef.msg).toContain("参考素材引用无效");
 
     expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } })).toBe(before);

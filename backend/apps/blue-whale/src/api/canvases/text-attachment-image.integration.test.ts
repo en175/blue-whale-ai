@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -99,6 +99,11 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -251,11 +256,11 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const missing = await createJob(projectId, imageJobBody("ghost", "暮色"));
-    expect(missing.code).toBe(400);
+    expect(missing.code).toBe(1002);
     expect(missing.msg).toBe("目标节点不存在或不是图片媒体节点");
 
     const videoTarget = await createJob(projectId, imageJobBody("media-v", "暮色"));
-    expect(videoTarget.code).toBe(400);
+    expect(videoTarget.code).toBe(1002);
     expect(videoTarget.msg).toBe("目标节点不存在或不是图片媒体节点");
 
     // IKDLQG 起 target_node_id 支持视频；此处图片节点作为视频目标 → 目标类型不匹配明确失败
@@ -265,7 +270,7 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       expected_output_count: 1,
       parameters: { prompt: "暮色", model_id: VIDEO_MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
     });
-    expect(videoType.code).toBe(400);
+    expect(videoType.code).toBe(1002);
     expect(videoType.msg).toBe("目标节点不存在或不是视频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
@@ -298,7 +303,7 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, imageJobBody("media-1", ""));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1002);
     expect(created.msg).toBe("prompt 无效");
     expect(await jobCount(projectId)).toBe(0);
   });

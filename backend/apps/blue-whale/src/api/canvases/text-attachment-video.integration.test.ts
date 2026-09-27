@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -79,6 +79,11 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -204,11 +209,11 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const missing = await createJob(projectId, videoJobBody("ghost", "暮色"));
-    expect(missing.code).toBe(400);
+    expect(missing.code).toBe(1002);
     expect(missing.msg).toBe("目标节点不存在或不是视频媒体节点");
 
     const imageTarget = await createJob(projectId, videoJobBody("media-i", "暮色"));
-    expect(imageTarget.code).toBe(400);
+    expect(imageTarget.code).toBe(1002);
     expect(imageTarget.msg).toBe("目标节点不存在或不是视频媒体节点");
 
     const audioType = await createJob(projectId, {
@@ -217,7 +222,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       expected_output_count: 1,
       parameters: { prompt: "哼一段旋律", model_id: "any-audio-model" },
     });
-    expect(audioType.code).toBe(400);
+    expect(audioType.code).toBe(1002);
     // 音频类型现已支持音频目标（IKDLQG 后演进）：携带视频目标按「不是音频媒体节点」明确拒绝
     expect(audioType.msg).toBe("目标节点不存在或不是音频媒体节点");
 
@@ -237,7 +242,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, videoJobBody("media-1", ""));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1002);
     expect(created.msg).toBe("prompt 无效");
     expect(await jobCount(projectId)).toBe(0);
   });

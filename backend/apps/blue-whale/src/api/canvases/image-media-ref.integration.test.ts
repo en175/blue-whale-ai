@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -97,6 +97,11 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController, JobsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -289,7 +294,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       expected_output_count: 1,
       parameters: { prompt: "暮色", model_id: STRICT_MODEL_ID, aspect_ratio: "1:1" },
     });
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1004);
     expect(created.msg).toContain("参考图最多 2 张");
     // 拒绝即不建任务
     expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } })).toBe(0);
