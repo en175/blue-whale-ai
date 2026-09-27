@@ -59,9 +59,8 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-/** 指针坐标是否落在元素边界矩形内（滚动关闭的命中判定，含边界）；
- *  入参兼容 floating-ui 的 VirtualElement（setReference 接收的实际是 DOM 节点） */
-function containsPoint(target: { getBoundingClientRect(): { left: number; right: number; top: number; bottom: number } }, pointer: { x: number; y: number }): boolean {
+/** 指针坐标是否落在元素边界矩形内（滚动关闭的命中判定，含边界） */
+function containsPoint(target: Element, pointer: { x: number; y: number }): boolean {
   const rect = target.getBoundingClientRect();
   return pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom;
 }
@@ -215,8 +214,9 @@ export function RefThumbnail({
     if (!previewOpen) return;
     const handleScroll = () => {
       const pointer = pointerRef.current;
+      // reference 恒为真实 DOM 节点（根 div），floating-ui 类型上保守含 VirtualElement，此处按 Element 收窄
       const anchor = refs.reference.current;
-      if (!pointer || !anchor) return;
+      if (!pointer || !(anchor instanceof Element)) return;
       if (containsPoint(anchor, pointer)) return;
       const floating = refs.floating.current;
       if (interactivePreview && floating && containsPoint(floating, pointer)) return;

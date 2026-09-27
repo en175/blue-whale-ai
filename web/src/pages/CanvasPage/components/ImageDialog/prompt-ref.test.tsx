@@ -9,7 +9,7 @@ import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
-import { promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+import { collapseCaretAt, promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -590,19 +590,6 @@ it('真实菜单键盘确认把已引用素材插入正文', async () => {
 /* IKIQ88：缩略图 @ 按钮启用「当前选区」回落——光标置于文本中间时 chip 原位插入；
    无光标记录（未聚焦过输入框）仍追加末尾，插入后编辑器聚焦、光标落在 chip 之后 */
 describe('IKIQ88 缩略图 @ 光标处插入', () => {
-  /** 把光标折叠在首个文本节点 offset 处（等价点击定位光标） */
-  async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorInstance>, offset: number) {
-    await act(async () => {
-      editor.update(() => {
-        const text = $getRoot().getFirstDescendant();
-        const sel = $createRangeSelection();
-        sel.anchor.set(text!.getKey(), offset, 'text');
-        sel.focus.set(text!.getKey(), offset, 'text');
-        $setSelection(sel);
-      }, { tag: SKIP_DOM_SELECTION_TAG });
-    });
-  }
-
   it('光标置于文本中间：点击缩略图 @ 按钮，chip 插入光标处而非末尾', async () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
     await typePromptRefText(container, '让衣服');

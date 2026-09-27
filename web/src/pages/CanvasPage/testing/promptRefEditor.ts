@@ -6,10 +6,12 @@
 import { act } from 'react';
 import {
   $createParagraphNode,
+  $createRangeSelection,
   $createTextNode,
   $getRoot,
   $getSelection,
   $isRangeSelection,
+  $setSelection,
   SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
 } from 'lexical';
@@ -51,6 +53,19 @@ export function readPromptRefText(container: ParentNode): string {
 /** 只读状态（等价旧 textarea.disabled） */
 export function promptRefReadOnly(container: ParentNode): boolean {
   return !promptRefEditorInstance(container).isEditable();
+}
+
+/** 把光标折叠在首个文本节点 offset 处（等价点击定位光标） */
+export async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorInstance>, offset: number) {
+  await act(async () => {
+    editor.update(() => {
+      const text = $getRoot().getFirstDescendant();
+      const sel = $createRangeSelection();
+      sel.anchor.set(text!.getKey(), offset, 'text');
+      sel.focus.set(text!.getKey(), offset, 'text');
+      $setSelection(sel);
+    }, { tag: SKIP_DOM_SELECTION_TAG });
+  });
 }
 
 /** 在末尾光标处逐段插入原始文本（模拟键入；用于触发 @ 查询检测） */
