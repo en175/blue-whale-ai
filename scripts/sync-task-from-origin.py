@@ -97,6 +97,35 @@ def lineage_paths(root: Path, branch: str) -> tuple[Path, str]:
             "refs/agent-implement-spec-lineage/" + slug)
 
 
+def rebase_lineage_paths(root: Path, branch: str, synced_head: str) -> tuple[Path, str]:
+    common = absolute_git_path(root, "--git-common-dir")
+    slug = branch.replace("/", "%")
+    return (common / "blue-whale" / "implement-spec-rebase-lineage" / slug / f"{synced_head}.json",
+            f"refs/agent-implement-spec-rebase-lineage/{slug}/{synced_head}")
+
+
+def integrated_child_heads(root: Path, branch: str, target_branch: str,
+                           original_head: str) -> dict[str, str]:
+    children = {}
+    worktree = None
+    for line in git_output(root, "worktree", "list", "--porcelain").splitlines() + [""]:
+        if line.startswith("worktree "):
+            worktree = Path(line[9:]).resolve()
+        elif not line and worktree is not None:
+            if worktree != root:
+                try:
+                    metadata = read_task_metadata(worktree, target_branch)
+                except (TaskMetadataError, OSError):
+                    metadata = None
+                if metadata and metadata["task_branch"] != branch:
+                    child_head = git_output(worktree, "rev-parse", "HEAD")
+                    if git(root, "merge-base", "--is-ancestor", child_head,
+                           original_head, check=False).returncode == 0:
+                        children[str(metadata["task_branch"])] = child_head
+            worktree = None
+    return children
+
+
 def _legacy_polluted_branch(candidate: str, real: str) -> bool:
     """兼容旧版脚本（PR577 前）写入的 GBK 乱码分支名。
 
@@ -234,6 +263,8 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
             "backup_ref": backup_ref,
             "created_at": int(time.time()),
         }
+    recovery.setdefault("child_heads", integrated_child_heads(root, branch, target_branch,
+                                                                str(recovery["original_head"])))
     write_recovery(marker, recovery)
 
     rebase = git(root, "rebase", upstream_ref, check=False)
@@ -264,6 +295,15 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
 
     synced_head = git_output(root, "rev-parse", "HEAD")
     recovery["synced_head"] = synced_head
+    recovery.pop("rebase_tree", None)
+    rebase_lineage_dir = rebase_lineage_paths(root, branch, synced_head)[0].parent
+    if recovery["child_heads"] or rebase_lineage_dir.is_dir():
+        expected = git(root, "merge-tree", "--write-tree", upstream_sha,
+                       str(recovery["original_head"]), check=False)
+        if (expected.returncode == 0 and expected.stdout.splitlines()
+                and expected.stdout.splitlines()[0] == git_output(root, "rev-parse", "HEAD^{tree}")
+                and not git_output(root, "rev-list", "--merges", f"{upstream_sha}..HEAD")):
+            recovery["rebase_tree"] = expected.stdout.splitlines()[0]
     write_recovery(marker, recovery)
     diff_check = git(root, "diff", "--check", "{}...HEAD".format(upstream_ref), check=False)
     if diff_check.returncode != 0:
@@ -519,6 +559,40 @@ def finalize(root: Path, as_json: bool) -> int:
                    check=False).returncode == 0:
                 if git_output(root, "rev-parse", lineage_ref) != original_head:
                     raise WorkflowError("implement-spec 线性化保留引用与原 PR 源提交不符。")
+            else:
+                git(root, "update-ref", lineage_ref, original_head)
+            lineage_file.parent.mkdir(parents=True, exist_ok=True)
+            write_recovery(lineage_file, lineage)
+    if recovery.get("rebase_tree"):
+        original_head = str(recovery["original_head"])
+        upstream_sha = str(recovery["upstream_sha"])
+        synced_head = str(recovery["synced_head"])
+        expected = git(root, "merge-tree", "--write-tree", upstream_sha,
+                       original_head, check=False)
+        if (expected.returncode or not expected.stdout.splitlines()
+                or expected.stdout.splitlines()[0] != recovery["rebase_tree"]
+                or git_output(root, "rev-parse", f"{synced_head}^{{tree}}") != recovery["rebase_tree"]
+                or git(root, "merge-base", "--is-ancestor", synced_head,
+                       current_head, check=False).returncode
+                or remote_branch_sha(root, branch) != current_head):
+            raise WorkflowError("同步后的文件树或远端 PR 源分支未通过无损核对，禁止 finalize。")
+        lineage_file, lineage_ref = rebase_lineage_paths(root, branch, synced_head)
+        lineage = {
+            "version": 1, "proof_kind": "rebase", "source_branch": branch,
+            "target_branch": recovery["target_branch"],
+            "pull_request_id": recovery["verified_pr_iid"],
+            "original_head": original_head, "upstream_sha": upstream_sha,
+            "synced_head": synced_head, "verified_head": current_head,
+            "merged_tree": recovery["rebase_tree"],
+            "child_heads": recovery["child_heads"],
+        }
+        if lineage_file.exists():
+            if load_recovery(lineage_file) != lineage or git_output(root, "rev-parse", lineage_ref) != original_head:
+                raise WorkflowError("已有不同的 implement-spec 同步证明，禁止覆盖。")
+        else:
+            if git(root, "show-ref", "--verify", "--quiet", lineage_ref, check=False).returncode == 0:
+                if git_output(root, "rev-parse", lineage_ref) != original_head:
+                    raise WorkflowError("implement-spec 同步保留引用与原提交不符。")
             else:
                 git(root, "update-ref", lineage_ref, original_head)
             lineage_file.parent.mkdir(parents=True, exist_ok=True)

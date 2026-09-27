@@ -102,7 +102,7 @@ scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编�
 
 多个子分支重复传 `--child-branch`。先从 Gitee 核对子工单确属该规格，再让入口核验其工作树元数据和 merge 父提交。入口要求本地 HEAD 等于远端 PR 源 HEAD，目标发布线已在本地 HEAD 中，所有提交路径属于 PR 冻结范围；它保存原 HEAD 恢复点，将原文件树写成线性提交，并运行 PR 阶段验证。失败时保留恢复点，不推送。成功后在新 HEAD 上重新执行代码评审。评审若产生同范围修订，用提交入口落盘，再运行 `scripts/sync-task-from-origin.sh sync --json` 更新恢复点并重跑 PR 阶段验证。评审和验证通过后，按上文 `--update-pr` 入口使用远端 SHA 租约推送，回读 Gitee 并运行 `scripts/verify-pr-update.sh`，最后 finalize。旧 HEAD 的评审不算新提交的结论。遇 `REMOTE_SOURCE_CHANGED` 或租约变化时先核对远端提交归属，不能覆盖未知提交。普通 `sync` 返回 `UP_TO_DATE` 不会自动处理 merge commit。决策见 [ADR-0116](../adr/0116-implement-spec-integration-workflow.md)。
 
-在 PR 合入 release 前，子任务工作树使用独立清理入口。取最新 Gitee PR 快照后，从子工作树执行 `python3 scripts/cleanup-implement-spec-child.py --pr-snapshot <临时JSON> --json`。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先。已发布 PR 经线性化后，`finalize` 留下原合回提交和已核验新 HEAD 的本地证明；清理入口核对旧子提交属于原合回历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口在删除前复核远端源 HEAD 未变化。集成工作树在 PR 合入 release 后仍使用 `scripts/cleanup-task-worktree.sh`。
+在 PR 合入 release 前，子任务工作树使用独立清理入口。取最新 Gitee PR 快照后，从子工作树执行 `python3 scripts/cleanup-implement-spec-child.py --pr-snapshot <临时JSON> --json`。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先。若父整合分支合回后因发布线前进而 rebase，须先更新同一 PR、完成 Gitee 回读和同步事务 finalize；清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明，证明断链时不删除子工作树。已发布 PR 经线性化后，`finalize` 留下原合回提交和已核验新 HEAD 的本地证明；清理入口核对旧子提交属于原合回历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口在删除前复核远端源 HEAD 未变化。集成工作树在 PR 合入 release 后仍使用 `scripts/cleanup-task-worktree.sh`。
 
 ## Commit 规范
 

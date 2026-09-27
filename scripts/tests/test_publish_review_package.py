@@ -628,6 +628,71 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "release/prod", cwd=self.main),
                          self.git("rev-parse", "master", cwd=self.main))
 
+    def test_child_cleanup_after_parent_sync_rebases_published_pr(self) -> None:
+        _, child_root = self.implement_spec_child()
+        child_head = self.git("rev-parse", "HEAD", cwd=child_root)
+        self.git("push", "origin", BRANCH)
+        before = self.pr_snapshot()
+        (self.main / "release.txt").write_text("release\n", encoding="utf-8")
+        self.git("add", "release.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance release", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+
+        synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        self.assertNotEqual(run("git", "merge-base", "--is-ancestor", child_head, "HEAD",
+                                cwd=self.worktree).returncode, 0)
+        published = self.invoke_update(before)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        after = self.pr_snapshot()
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                       "--pr-snapshot", str(after), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
+
+        (self.main / "release-next.txt").write_text("next\n", encoding="utf-8")
+        self.git("add", "release-next.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance release again", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+        second_sync = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(second_sync.returncode, 0, second_sync.stdout + second_sync.stderr)
+        second_publish = self.invoke_update(after)
+        self.assertEqual(second_publish.returncode, 0, second_publish.stdout + second_publish.stderr)
+        latest = self.pr_snapshot()
+        second_verify = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                            "--pr-snapshot", str(latest), "--json", cwd=self.worktree)
+        self.assertEqual(second_verify.returncode, 0, second_verify.stdout + second_verify.stderr)
+        second_finalize = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(second_finalize.returncode, 0, second_finalize.stdout + second_finalize.stderr)
+
+        common = Path(self.git("rev-parse", "--git-common-dir"))
+        lineage_dir = common / "blue-whale" / "implement-spec-rebase-lineage" / BRANCH.replace("/", "%")
+        records = list(lineage_dir.glob("*.json"))
+        self.assertEqual(2, len(records))
+        original_record = next(path for path in records if child_head in path.read_text(encoding="utf-8"))
+        original_content = original_record.read_text(encoding="utf-8")
+        tampered = json.loads(original_content)
+        tampered["merged_tree"] = "0" * 40
+        original_record.write_text(json.dumps(tampered), encoding="utf-8")
+        rejected = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(latest),
+                       "--json", cwd=child_root)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertTrue(child_root.exists())
+        original_record.write_text(original_content, encoding="utf-8")
+        wrong_pr = run(sys.executable, CLEANUP_CHILD_SCRIPT,
+                       "--pr-snapshot", str(self.pr_snapshot(iid=66)), "--json", cwd=child_root)
+        self.assertNotEqual(wrong_pr.returncode, 0)
+        self.assertTrue(child_root.exists())
+
+        cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(latest),
+                      "--json", cwd=child_root)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+        self.assertFalse(child_root.exists())
+        self.assertEqual("child\n", (self.worktree / "child.txt").read_text(encoding="utf-8"))
+        self.assertEqual("release\n", (self.worktree / "release.txt").read_text(encoding="utf-8"))
+        self.assertEqual("next\n", (self.worktree / "release-next.txt").read_text(encoding="utf-8"))
+
     def test_linearized_pr_finalize_rejects_readback_of_another_pr(self) -> None:
         child_branch, _ = self.implement_spec_child()
         self.git("push", "origin", BRANCH)

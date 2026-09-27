@@ -48,6 +48,55 @@ def worktrees(root: Path) -> list[tuple[Path, str]]:
     return entries
 
 
+def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
+                          target_branch: str, pull_request_id: int,
+                          child_branch: str, child_head: str, source_head: str) -> bool:
+    slug = source_branch.replace("/", "%")
+    directory = common_dir / "blue-whale" / "implement-spec-rebase-lineage" / slug
+    if not directory.is_dir():
+        return False
+    records = []
+    for path in directory.glob("*.json"):
+        record = load_recovery(path)
+        if (record.get("proof_kind") == "rebase"
+                and record.get("source_branch") == source_branch
+                and record.get("target_branch") == target_branch
+                and record.get("pull_request_id") == pull_request_id):
+            records.append((path, record))
+    reachable = set()
+    for _ in records:
+        for path, record in records:
+            original = str(record.get("original_head", ""))
+            synced = str(record.get("synced_head", ""))
+            verified = str(record.get("verified_head", ""))
+            children = record.get("child_heads")
+            if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (original, synced, verified)):
+                raise CleanupError("同步证明含无效提交 SHA，未清理。")
+            if not isinstance(children, dict):
+                raise CleanupError("同步证明缺少子任务映射，未清理。")
+            direct = (children.get(child_branch) == child_head
+                      and git(root, "merge-base", "--is-ancestor", child_head,
+                              original, check=False).returncode == 0)
+            chained = any(git(root, "merge-base", "--is-ancestor", previous,
+                              original, check=False).returncode == 0 for previous in reachable)
+            if not direct and not chained:
+                continue
+            ref = f"refs/agent-implement-spec-rebase-lineage/{slug}/{synced}"
+            retained = git(root, "rev-parse", "--verify", ref, check=False)
+            expected = git(root, "merge-tree", "--write-tree",
+                           str(record.get("upstream_sha", "")), original, check=False)
+            if (path.stem != synced or retained.returncode or retained.stdout.strip() != original
+                    or expected.returncode or not expected.stdout.splitlines()
+                    or expected.stdout.splitlines()[0] != record.get("merged_tree")
+                    or output(root, "rev-parse", f"{synced}^{{tree}}") != record.get("merged_tree")
+                    or git(root, "merge-base", "--is-ancestor", synced,
+                           verified, check=False).returncode):
+                raise CleanupError("同步证明未通过原提交、合并文件树和远端回读核对，未清理。")
+            reachable.add(verified)
+    return any(git(root, "merge-base", "--is-ancestor", verified,
+                   source_head, check=False).returncode == 0 for verified in reachable)
+
+
 def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
     git_dir = Path(output(root, "rev-parse", "--absolute-git-dir")).resolve()
     common_dir = Path(output(root, "rev-parse", "--git-common-dir")).resolve()
@@ -86,6 +135,11 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
         raise CleanupError("PR 快照与远端源分支 HEAD 不一致，未清理。")
     direct_ancestor = git(root, "merge-base", "--is-ancestor", child_head, fetched_head,
                           check=False).returncode == 0
+    if not direct_ancestor:
+        if rebase_lineage_proves(root, common_dir, source_branch, target_branch,
+                                 int(snapshot["pull_request_id"]), child_branch,
+                                 child_head, fetched_head):
+            direct_ancestor = True
     if not direct_ancestor:
         slug = source_branch.replace("/", "%")
         lineage_file = common_dir / "blue-whale" / "implement-spec-lineage" / f"{slug}.json"
