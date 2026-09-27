@@ -47,7 +47,7 @@ import type { ImageMediaRef } from '../../mediaRefs';
 import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import AtMentionMenu from '../AtMentionMenu';
+import AtMentionMenu, { MENTION_TEXT_PREVIEW_CHARS } from '../AtMentionMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
@@ -414,10 +414,14 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
     syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
   };
 
-  /** 失效替换菜单可选项：全量有效参考与文本附件（IKFA1N B5 语义，不与 @ 查询过滤耦合） */
-  const replaceItems = [
+  /** 失效替换菜单可选项：全量有效参考与文本附件（IKFA1N B5 语义，不与 @ 查询过滤耦合）；
+   *  IKIPWV：文本附件带正文摘要（截断一次），@ 检索可按内容命中 */
+  const replaceItems: Array<{
+    assetId: string; url: string; name: string; badge: string;
+    mediaType: 'image' | 'text'; textPreview?: string;
+  }> = [
     ...orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
-    ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const })),
+    ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const, textPreview: a.text.slice(0, MENTION_TEXT_PREVIEW_CHARS) })),
   ];
   /** IKFXOR：Esc 取消（restoreFocus=true）把光标落回 @ 后并还焦编辑器；点外关闭维持现状不抢焦 */
   const closeMention = (restoreFocus = false) => {
@@ -597,7 +601,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
             editorQuery={mention.query}
             referencedItems={replaceItems.map(r => ({
               id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
-              kind: r.mediaType, badge: r.badge,
+              kind: r.mediaType, badge: r.badge, textPreview: r.textPreview,
             }))}
             onSelectReferenced={(item) => pickMentionRef(item.id)}
             disabledKinds={['audio']}

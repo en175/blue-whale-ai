@@ -2,12 +2,12 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import AtMentionMenu from './index';
+import AtMentionMenu, { type ReferencedMentionItem } from './index';
 
 let root: Root;
 let host: HTMLDivElement;
 const image = { id: 'node-1', assetId: '101', kind: 'image' as const, name: '图片节点 1' };
-async function render(overrides: { onClose?: () => void; onEscapeClose?: () => void } = {}) {
+async function render(overrides: { onClose?: () => void; onEscapeClose?: () => void; referencedItems?: Array<ReferencedMentionItem> } = {}) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   host = document.createElement('div');
   document.body.append(host);
@@ -18,7 +18,7 @@ async function render(overrides: { onClose?: () => void; onEscapeClose?: () => v
     anchorRef: { current: host }, editorQuery: '', onClose: overrides.onClose ?? vi.fn(), onSelect,
     onEscapeClose: overrides.onEscapeClose,
     items: [image, { id: 'v1', kind: 'video', name: '视频节点 1' }, { id: 't1', kind: 'text', name: '文本节点 1' }],
-    referencedItems: [{ ...image, badge: '图片1' }], onSelectReferenced,
+    referencedItems: overrides.referencedItems ?? [{ ...image, badge: '图片1' }], onSelectReferenced,
     disabledKinds: ['video'],
   })));
   return { onSelect, onSelectReferenced };
@@ -57,6 +57,34 @@ it('统一搜索保留跨分区重复项、类型分组及禁用状态，点击�
   expect(onSelect).toHaveBeenCalledWith(image);
 });
 
+
+it('IKIPWV：无标题文本附件按正文关键词命中，既有标题/编号匹配不变', async () => {
+  await render({ referencedItems: [
+    { ...image, badge: '图片1' },
+    { id: 'ta1', kind: 'text', name: '', badge: '文本1', textPreview: '深海之下，一只蓝鲸缓缓游过，尾鳍轻摆' },
+    { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', textPreview: '开场：城市夜景空镜' },
+  ] });
+  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
+  const search = (text: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
+  // 正文关键词 → 命中无标题文本附件（标题与编号均不含该词）
+  await search('蓝鲸');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本1');
+  // 画布素材分区不误报（画布节点名不含该词）
+  expect([...document.querySelectorAll('[data-testid="at-mention-canvas-item"]')]).toHaveLength(0);
+  // 既有编号匹配不变
+  await search('文本2');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本2');
+  // 既有标题匹配不变
+  await search('分镜');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本2');
+});
 
 it('搜索框向上导航从最后一个可选项开始，跳过禁用分类', async () => {
   await render();

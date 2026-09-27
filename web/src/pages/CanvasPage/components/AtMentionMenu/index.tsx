@@ -41,7 +41,13 @@ function ItemThumb({ item }: { item: AtMentionItem }) {
 
 export interface ReferencedMentionItem extends AtMentionItem {
   badge: string;
+  /** IKIPWV：文本附件正文摘要（构造方按 MENTION_TEXT_PREVIEW_CHARS 截断一次）。
+   *  无标题文本节点仅凭标题/编号找不到时，可按正文关键词命中；其余类型不带。 */
+  textPreview?: string;
 }
+
+/** IKIPWV：正文摘要参与 @ 检索的截断长度。构造方截一次，过滤只做 includes，不做昂贵计算。 */
+export const MENTION_TEXT_PREVIEW_CHARS = 200;
 
 interface AtMentionMenuProps {
   /** 定位锚点（输入框容器） */
@@ -83,10 +89,11 @@ export default function AtMentionMenu({
   const searching = query.trim().length > 0;
   const matched = filterAtMentionItems(items, query);
   const normalizedQuery = query.trim().toLowerCase();
-  // 两个分区独立过滤，不跨分区去重。
+  // 两个分区独立过滤，不跨分区去重。IKIPWV：已引用的文本附件追加正文摘要匹配（只 includes）。
   const matchedRefs = referencedItems.filter(item => !normalizedQuery
     || item.name.toLowerCase().includes(normalizedQuery)
-    || item.badge.toLowerCase().includes(normalizedQuery));
+    || item.badge.toLowerCase().includes(normalizedQuery)
+    || (item.textPreview?.toLowerCase().includes(normalizedQuery) ?? false));
 
   useEffect(() => {
     setQuery(editorQuery);

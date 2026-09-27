@@ -71,7 +71,7 @@ import {
   supportsVideoReferenceOf,
   checkReferenceLimits,
 } from '@/lib/model-reference-limits';
-import AtMentionMenu from '../AtMentionMenu';
+import AtMentionMenu, { MENTION_TEXT_PREVIEW_CHARS } from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import {
   VIDEO_FOLLOW_MODE_LABEL,
@@ -697,7 +697,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   /** 当前模式下有效的参考（帧、普通素材与文本）；过滤统一由菜单完成。 */
   const mentionItems = useMemo(() => {
-    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text' }> = [];
+    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text'; textPreview?: string }> = [];
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
       if (!item) continue;
       const id = refIdOf(item);
@@ -705,10 +705,11 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       if (!badge) continue; // 模式不接受或身份失效：不提供插入（不留下伪有效标签）
       out.push({ assetId: id, url: item.url, name: item.name, badge, mediaType: item.mediaType });
     }
-    // IKFA1P：文本附件项（编号跟附件顺序，与服务端 text_attachments 同源）
+    // IKFA1P：文本附件项（编号跟附件顺序，与服务端 text_attachments 同源）；
+    // IKIPWV：带正文摘要（截断一次），无标题文本附件可按内容检索
     for (let i = 0; i < (attachments ?? []).length; i += 1) {
       const a = attachments![i]!;
-      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' });
+      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', textPreview: a.text.slice(0, MENTION_TEXT_PREVIEW_CHARS) });
     }
     return out;
   }, [videoMediaRefs, attachments, reconcileKey]);
@@ -867,7 +868,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             editorQuery={mention.query}
             referencedItems={mentionItems.map(r => ({
               id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
-              kind: r.mediaType, badge: r.badge,
+              kind: r.mediaType, badge: r.badge, textPreview: r.textPreview,
             }))}
             onSelectReferenced={(item) => pickMentionRef(item.id)}
             onSelect={(item) => {
