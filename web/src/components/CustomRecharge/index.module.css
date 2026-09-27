@@ -1,0 +1,175 @@
+/* ============================================
+ * CustomRecharge 自定义充值面板（模块 B）
+ * 配色沿用 RechargeModal 的深色底 + 蓝色强调，嵌进那一页时不用再调
+ * ============================================ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background-color: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: #fff;
+}
+
+/* 「600 – 499,995 积分」这类范围提示：最低/最高由后台配，文案不写死常量 */
+.rangeHint {
+  font-size: var(--font-size-sm);
+  color: #888;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.slider {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  border-radius: 2px;
+  background-color: #2f2f2f;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background-color: #3e8efc;
+  cursor: grab;
+}
+
+.slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
+
+/* 手动输入：滑杆之外的第二个精确入口（PRD §7.2「至少需要一种精确输入方式」） */
+.inputWrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background-color: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.inputWrapInvalid {
+  border-color: #b4453e;
+}
+
+.input {
+  width: 104px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.input:disabled {
+  color: #888;
+}
+
+.inputSuffix {
+  font-size: var(--font-size-sm);
+  color: #888;
+}
+
+/* 修正提示：告诉用户「刚才那个数被改成了什么」，而不是默默改掉 */
+.correction {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.price {
+  font-size: 28px;
+  font-weight: 700;
+  color: #3e8efc;
+  line-height: 1.2;
+}
+
+.priceUnit {
+  margin-left: 8px;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: #888;
+}
+
+.buyBtn {
+  padding: 12px 28px;
+  background-color: #3e63c4;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.buyBtn:hover {
+  background-color: #4a72d8;
+}
+
+.buyBtn:disabled {
+  background-color: #2a2a2a;
+  color: #777;
+  cursor: not-allowed;
+}
+
+.denied {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+}
+
+.error {
+  font-size: var(--font-size-sm);
+  color: #e5534b;
+}
+
+.loading {
+  padding: 24px;
+  color: #888;
+  font-size: var(--font-size-sm);
+}

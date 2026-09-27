@@ -14,6 +14,7 @@ import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-c
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
+import { RechargeCustomLibModule } from "@lib/shared/recharge-custom/recharge-custom.module.js";
 import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
@@ -92,6 +93,7 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     AgentSkillsModule,
     GenerationApiModule,
     RechargeLibModule,
+    RechargeCustomLibModule,
     RechargeModule,
     SystemSettingsModule,
     UsageModule,

@@ -18,7 +18,16 @@ export interface AdminRechargeRecord {
   payOrderId: string | null;
   /** 用户 ID（bigint 字符串，超出 JS 安全整数范围也不丢精度） */
   userId: string;
-  tierId: string;
+  /**
+   * 档位 ID；**自定义充值（模块 B）为 null** —— 它没有档位。
+   *
+   * ⚠️ 判「是不是档位商品」看 `productType`，不看这一列：列的 null 只说明「这单没有档位」。
+   */
+  tierId: string | null;
+  /** 商品类型快照：`tier` 固定积分卡 | `custom` 自定义充值（判类型看它，不看 tierId） */
+  productType: string;
+  /** 商品名称快照（如「轻量尝鲜」「自定义充值」）—— 自定义充值单在列表里靠它认出来 */
+  productName: string;
   /** 实付金额，单位**分**——不是元，也不是积分 */
   amountFen: number;
   /** 下单时冻结的到账积分（按档位原价 × 当时的换算率算定，之后改口径不追溯） */

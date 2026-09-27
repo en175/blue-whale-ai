@@ -55,9 +55,11 @@ export const PAID_REACHED_STATUSES: readonly RechargeOrderStatus[] = [
 /**
  * 订单快照（PRD §9.3）里此刻还是常量的那几列。
  *
- * <p>首购两列写 `unknown` / `0`（#40 首购加赠上线时才变成计算值），有效期写 `null`
- * （永久，沿用存量行为，2 年有效期是 #43 的事）。取值集中在写入侧一处，
- * 是为了那几件事落地时只改这里，不必再动表。
+ * <p>首购两列写 `unknown` / `0`（#40 首购加赠上线时才变成计算值），有效期默认写 `null`
+ * （永久）：档位单的 2 年有效期是 #43 的事，**自定义充值单不走这个默认值** ——
+ * PRD §7.4 明确要求自定义充值订单快照有效期，那条路径用
+ * `RechargeService.buildCustomOrderSnapshot` 显式传 `creditsExpireAt`。
+ * 取值集中在写入侧一处，是为了那几件事落地时只改这里，不必再动表。
  */
 export const RECHARGE_ORDER_SNAPSHOT_DEFAULTS = {
   productType: "tier",
@@ -74,12 +76,27 @@ export interface RechargeOrderView {
   /** 支付网关订单号；下单应答回来前为 null */
   payOrderId: string | null;
   userId: string;
-  tierId: string;
+  /**
+   * 档位 ID；**自定义充值（`productType === "custom"`）为 null**。
+   *
+   * <p>⚠️ 判「是不是档位商品」一律看 {@link productType}，不看这一列 ——
+   * 列的 NULL 只说明「这单没有档位」，不说明商品类型（将来的第三种无档位商品也是 NULL）。
+   */
+  tierId: string | null;
   /** 实付金额，单位分 */
   amountFen: number;
   /** 下单时冻结的到账积分 */
   credits: number;
   creditsPerYuan: number;
+  /**
+   * 商品类型快照：`tier` 固定积分卡 | `custom` 自定义充值。
+   *
+   * <p>⚠️ **判商品类型一律看它，不看 `tierId`** —— 后者为 null 只说明「这单没有档位」，
+   * 不说明是不是自定义充值（将来的第三种无档位商品也是 null）。
+   */
+  productType: string;
+  /** 商品名称快照（如「轻量尝鲜」「自定义充值」）。管理端列表靠它区分自定义充值单 */
+  productName: string;
   status: RechargeOrderStatus;
   paidAt: string | null;
   grantLotId: string | null;
@@ -90,11 +107,20 @@ export interface RechargeOrderView {
 export interface CreateRechargeOrderInput {
   tradeNo: string;
   userId: number;
-  tierId: number;
+  /**
+   * 档位 ID；**自定义充值传 null**（模块 B：自定义充值没有档位）。
+   *
+   * <p>⚠️ 不传 `0` 或 `1` 来顶替：编出来的数会被按 `tier_id` 聚合的对账当成真档位，
+   * 全部自定义充值会静默聚到某个无辜档位上。
+   */
+  tierId: number | null;
   amountFen: number;
   credits: number;
   creditsPerYuan: number;
-  /** 商品类型快照；不传取 {@link RECHARGE_ORDER_SNAPSHOT_DEFAULTS}（当前只有档位商品） */
+  /**
+   * 商品类型快照；不传取 {@link RECHARGE_ORDER_SNAPSHOT_DEFAULTS}。
+   * `tier` 固定积分卡 | `custom` 自定义充值
+   */
   productType?: string;
   /** 下单那刻用户看到的商品名 —— 传**展示名**而不是库里那列原始名，
    *  因为自动生成的名字会随换算率重派生（见 `displayTierName`），
@@ -185,10 +211,12 @@ function toView(row: any): RechargeOrderView {
     tradeNo: row.trade_no,
     payOrderId: row.pay_order_id ?? null,
     userId: row.user_id.toString(),
-    tierId: row.tier_id.toString(),
+    tierId: row.tier_id === null ? null : row.tier_id.toString(),
     amountFen: Number(row.amount_fen),
     credits: Number(row.credits),
     creditsPerYuan: row.credits_per_yuan,
+    productType: row.product_type,
+    productName: row.product_name,
     status,
     paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
     grantLotId: row.grant_lot_id === null ? null : row.grant_lot_id.toString(),
@@ -206,7 +234,8 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         data: {
           trade_no: input.tradeNo,
           user_id: BigInt(input.userId),
-          tier_id: BigInt(input.tierId),
+          // NULL = 非档位商品（自定义充值）。**不要**在调用方兜底成 0 —— 见字段注释
+          tier_id: input.tierId === null ? null : BigInt(input.tierId),
           amount_fen: BigInt(input.amountFen),
           credits: BigInt(input.credits),
           credits_per_yuan: input.creditsPerYuan,

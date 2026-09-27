@@ -43,9 +43,36 @@
  *   **与积分再无数学关系** —— `credits` 既不是 `原价 × 换算率`，也不是 `实付 × 换算率`。
  *   看到「¥499 划 ¥500，但积分 7,500 不是 500 的倍数」**不要去「修」那个对不上的数**。
  *   `credits_per_yuan` 仍写进订单行，但它现在只回答「下单那一刻的换算率是多少」（对账/客服追溯），
- *   **不参与任何积分计算**；换算率的唯一现役用途是自定义充值的反算（模块 B，未做）。
- * ============================================ */
-import { randomBytes } from "node:crypto";
+ *   **不参与任何积分计算**：档位到账积分读 `base_credits`（配置值），自定义充值的价格
+ *   由配置表自己的 `credits_per_yuan` 反算（见下）。
+ *
+ * ── 两种商品类型走同一条链路（模块 B）─────────────────────────────────────────
+ *
+ * `createOrder` 收两种输入：`{tierId}`（固定档位）与 `{credits}`（自定义充值）。
+ * **不是两条链路** —— 落库、调网关、回调、到账（`hold` → 发放 → `paid`/`paid_pending`）
+ * 全都共用。两种商品只在「这一单是什么、收多少钱、发多少分」这一步分叉，分叉点集中在
+ * `buildTierOrderSpec` / `buildCustomOrderSpec` 两个私有方法里，之后合成同一个 `OrderSpec`。
+ *
+ * 自定义充值的三条口径（产品 2026-09-27 定，别在这里重新发明）：
+ *
+ *   1. **取整以积分为准**：用户选 N 积分就发 N 积分，价格 = `N ÷ 每元积分数`，
+ *      **四舍五入到分**。所以价格会带 ≤ 半分钱的零头，平台承担 —— 账本只有整数积分，
+ *      不可能为了把钱凑整去改用户要到账的积分数。
+ *   2. **换算率用配置表自己那一份**（`recharge_custom_config.credits_per_yuan`，PRD §7.1
+ *      默认 15），不是定价目录里那条**消费锚点**。两者本来就不同：PRD §7.1 自己注明
+ *      「与现有展示口径 1 元 = 10 积分不一致，待评审确认」。
+ *   3. **`tier_id` 写 NULL**：自定义充值没有档位（迁移 050 把它改成可空）。
+ *      编一个 0/1 出来会被按 tier_id 聚合的对账当成真档位。
+ *
+ * ⚠️ **首购相关的两条刻意没做**（产品的决定，不是遗漏）：
+ *   · PRD §7.2 的「购买后将失去首购加赠资格」确认提示；
+ *   · PRD §7.4 的「支付成功后该账号视为已首购」。
+ *   原因：**首购功能本身还没定形** —— 「每档独立算一次还是每账号只一次」未决（#40 停放中）。
+ *   在首购状态怎么算都还没定的时候写「占用资格」，会先冻住一个可能被推翻的口径，
+ *   而它一旦落进订单快照（`first_purchase_state`）就改不回来了。
+ *   所以自定义充值单的第一购两列仍是默认值（`unknown` / `0` = 不参与加赠），
+ *   等 #40 定了再一起补 —— 那时要动的是这里与 `buildCustomOrderSpec`。
+ * ============================================ */import { randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger, type Logger } from "@lib/core/logging";
@@ -66,6 +93,8 @@ import {
   type RechargeOrderView,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
+import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
 import {
   PayGatewayError,
   PayServerConfigError,
@@ -143,6 +172,48 @@ export interface RechargeOrderCreated {
   credits: number;
 }
 
+/** 下单输入·固定档位（模块 A）。 */
+export interface CreateTierOrderInput {
+  userId: number;
+  tierId: string;
+}
+
+/**
+ * 下单输入·自定义充值（模块 B，PRD §7.3）。
+ *
+ * <p>`credits` 是**用户要买的积分数**（整数）。价格由服务端按配置反算，
+ * **不接受前端传价格** —— 价格是钱，只能由服务端算（PRD §7.5「以服务端最新配置为准」）。
+ */
+export interface CreateCustomOrderInput {
+  userId: number;
+  credits: number;
+}
+
+/** 下单输入：带 `tierId` = 档位商品，带 `credits` = 自定义充值。两者互斥（判别式联合）。 */
+export type CreateRechargeOrderInput = CreateTierOrderInput | CreateCustomOrderInput;
+
+/**
+ * 「这一单是什么、收多少钱、发多少分」—— 两种商品类型分叉的**唯一**落点，
+ * 之后的落库 / 调网关 / 回调 / 到账全部共用（见文件头）。
+ */
+interface OrderSpec {
+  /** 档位 ID；自定义充值为 null（迁移 050 起列可空） */
+  tierId: number | null;
+  amountFen: number;
+  credits: number;
+  creditsPerYuan: number;
+  productType: "tier" | "custom";
+  productName: string;
+  configVersion: number;
+  /** 赠送积分；不传 = 走 repo 的默认值 0 */
+  bonusCredits?: number;
+  /** 积分到期时刻；不传 = 走 repo 的默认值 null（永久） */
+  creditsExpireAt?: Date | null;
+  /** 网关订单标题 / 内容 */
+  subject: string;
+  body: string;
+}
+
 export interface RechargeOrderStateView {
   tradeNo: string;
   status: RechargeOrderStatus;
@@ -153,13 +224,15 @@ export interface RechargeOrderStateView {
 /**
  * 到账积分 = 原价（元）× 换算率，四舍五入到整数积分。
  *
- * <p>⚠️ **现役代码里已经没有调用方**（2026-09-27 起）：档位到账积分改成读
- * `topup_tiers.base_credits` 这个**配置值**（充值的「元 → 积分」与消费锚点
- * 「1 元 = 15 积分」不是一回事，充值常有折扣 —— ¥499 → 7,500 而不是 7,485）。
+ * <p>⚠️ **现役代码里没有调用方，而且模块 B 落地后仍然没有**（2026-09-27）：
+ *   · 档位到账积分读 `topup_tiers.base_credits` 这个**配置值**（充值常有折扣：
+ *     ¥499 → 7,500 而不是 7,485）；
+ *   · 自定义充值要的是**反算** —— 用户输入「我要 500 积分」折回该付多少钱。
+ *     那是 **除**（`customPriceFen` = `credits × 100 ÷ creditsPerYuan`），
+ *     不是这个乘。所以它没有被接进模块 B，**这不是漏了**。
  *
- * <p>**刻意保留**：自定义充值（模块 B，未做）要用它做**反算** ——
- * 用户输入「我要 500 积分」时，按当前换算率折回需要付多少钱。
- * 在那之前不要把它接回任何档位路径：档位的积分不是算出来的。
+ * <p>保留它是因为删除一个已导出的符号是独立决策（要连着它的单测一起动），
+ * 而它现在**没有任何生产调用方** —— 谁要清理死代码，从这里开始，别再给它找活干。
  */
 export function deriveCredits(originalPrice: number, creditsPerYuan: number): number {
   return Math.round(originalPrice * creditsPerYuan);
@@ -181,6 +254,7 @@ export class RechargeService {
     private readonly prisma: PrismaService,
     private readonly topupTier: TopupTierService,
     private readonly settings: SystemSettingsService,
+    private readonly custom: RechargeCustomService,
   ) {}
 
   /* ---------- 档位目录 ---------- */
@@ -211,11 +285,29 @@ export class RechargeService {
 
   /* ---------- 下单 ---------- */
 
-  async createOrder(input: {
-    userId: number;
-    tierId: string;
-  }): Promise<RechargeOrderCreated> {
-    // 换算率取自定价目录：它现在**不再参与积分计算**，只作为「下单那一刻的口径」快照进订单行
+  /**
+   * 下单：两种商品类型共用这一条链路（见文件头「两种商品类型走同一条链路」）。
+   *
+   * <p>输入是判别式联合：带 `tierId` = 固定档位，带 `credits` = 自定义充值。
+   * 用 `"tierId" in input` 而不是「先看 credits 有没有」：`tierId` 是**必填**的那一侧，
+   * 拿可选字段判类型会让「两个都传」或「两个都没传」落到默认分支上。
+   */
+  async createOrder(input: CreateRechargeOrderInput): Promise<RechargeOrderCreated> {
+    const spec =
+      "tierId" in input
+        ? await this.buildTierOrderSpec(input)
+        : await this.buildCustomOrderSpec(input);
+    return this.placeOrder(input.userId, spec);
+  }
+
+  /**
+   * 档位单的「这一单是什么、收多少钱、发多少分」。
+   *
+   * <p>⚠️ **到账积分 = 档位配的基础积分**（配置值），不是「原价 × 换算率」：
+   * 充值常有折扣，¥499 的档到账 7,500 积分（499×15=7,485）。原价与折扣只为展示划线价。
+   */
+  private async buildTierOrderSpec(input: CreateTierOrderInput): Promise<OrderSpec> {
+    // 换算率取自定价目录：它**不参与档位积分计算**，只作为「下单那一刻的口径」快照进订单行
     // （对账/客服追溯用）。取不到就说明这个环境的定价目录还没发布 —— 口径都定不下来，
     // 也就谈不上受理一笔充值。见文件头「到账积分在下单时刻冻结」。
     const creditsPerYuan = await fetchCreditsPerYuan();
@@ -253,33 +345,71 @@ export class RechargeService {
       throw new NewApiError("档位 ID 不合法", 500);
     }
 
-    // 商户配置缺项 → 这里就抛（503），不带着半份配置去下单
-    const merchant = await this.settings.requirePayMerchantConfig();
-
-    // 先落库再调用网关：网关超时/网络抖动时我们仍然有一条记录可查、可对账；
-    // 反过来（先调用后落库）一旦落库失败，网关那边的成功订单就没有本地对应物。
-    //
-    // 落库时把**商品快照**一起写死（PRD §9.3）：商品名用展示名（用户此刻看到的那串字），
-    // 配置版本取档位行此刻的 version（运营之后改价/改名都 +1，据此可判「这单是改价前还是改价后」）。
-    // 其余几列（首购、有效期、赠送）此刻还是常量，取值在 repo 的写入侧一处。
-    const tradeNo = generateTradeNo();
-    await this.repo.create({
-      tradeNo,
-      userId: input.userId,
+    return {
       tierId,
       amountFen,
       credits,
       creditsPerYuan,
+      productType: "tier",
       productName: displayTierName(tier.name, credits),
       configVersion: tier.version,
+      subject: tier.name || "积分充值",
+      body: tier.name || `积分充值 ${credits} 积分`,
+    };
+  }
+
+  /**
+   * 自定义充值单的「这一单是什么、收多少钱、发多少分」（模块 B，PRD §7.4 / §7.5）。
+   *
+   * <p>校验、算价、快照拼装全在 {@link buildCustomOrderPlan}：那里的规则可以脱离
+   * Prisma 与网关被直接单测。这里只负责「下单那一刻重新读一次配置」——
+   * 用户可能已经在页面上停留很久，期间运营改过上下限或换算率
+   * （PRD §7.5「创建订单时以服务端最新配置为准」）。
+   */
+  private async buildCustomOrderSpec(input: CreateCustomOrderInput): Promise<OrderSpec> {
+    return buildCustomOrderPlan(
+      await this.custom.requireConfig(),
+      input.userId,
+      input.credits,
+    );
+  }
+
+  /**
+   * 落库 + 调网关 —— 两种商品类型**共用**的尾段。
+   *
+   * <p>顺序是固定的：**先落库再调用网关**。网关超时/网络抖动时我们仍然有一条记录可查、
+   * 可对账；反过来一旦落库失败，网关那边的成功订单就没有本地对应物。
+   */
+  private async placeOrder(userId: number, spec: OrderSpec): Promise<RechargeOrderCreated> {
+    // 商户配置缺项 → 这里就抛（503），不带着半份配置去下单
+    const merchant = await this.settings.requirePayMerchantConfig();
+
+    // 落库时把**商品快照**一起写死（PRD §9.3）：商品名用展示名（用户此刻看到的那串字），
+    // 配置版本取配置行此刻的 version（运营之后改价/改名都 +1，据此可判「这单是改价前还是改价后」）。
+    // 其余几列（首购、赠送、权限结果）此刻还是常量，取值在 repo 的写入侧一处。
+    const tradeNo = generateTradeNo();
+    await this.repo.create({
+      tradeNo,
+      userId,
+      tierId: spec.tierId,
+      amountFen: spec.amountFen,
+      credits: spec.credits,
+      creditsPerYuan: spec.creditsPerYuan,
+      productType: spec.productType,
+      productName: spec.productName,
+      configVersion: spec.configVersion,
+      ...(spec.bonusCredits !== undefined ? { bonusCredits: spec.bonusCredits } : {}),
+      ...(spec.creditsExpireAt !== undefined
+        ? { creditsExpireAt: spec.creditsExpireAt }
+        : {}),
     });
 
     const order = await unifiedOrder({
       credentials: merchant,
       mchOrderNo: tradeNo,
-      amountFen,
-      subject: tier.name || "积分充值",
-      body: tier.name || `积分充值 ${credits} 积分`,
+      amountFen: spec.amountFen,
+      subject: spec.subject,
+      body: spec.body,
       notifyUrl: merchant.notifyUrl,
     });
 
@@ -298,8 +428,10 @@ export class RechargeService {
       // 展示的是**银行收银台令牌**的有效期（30 分钟），不是网关订单的有效期（默认 2 小时）。
       // 用户要关心的是「什么时候扫不了码」，那个期限由银行令牌说了算。
       expiresAt: new Date(Date.now() + CASHIER_TOKEN_TTL_MS).toISOString(),
-      amount: tier.price,
-      credits,
+      // 实付金额与落库/发给网关的 `amountFen` **同源**（不是各自算一遍）：
+      // 用户看到的价、我们收的价、事后对账的价，必须永远是一个数
+      amount: spec.amountFen / 100,
+      credits: spec.credits,
     };
   }
 

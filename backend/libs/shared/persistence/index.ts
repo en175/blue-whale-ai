@@ -263,6 +263,13 @@ export {
   type RechargeOrderPage,
 } from "./recharge-order-repo.js";
 export {
+  createRechargeCustomConfigRepo,
+  CUSTOM_CONFIG_ROW_ID,
+  type RechargeCustomConfigRepo,
+  type RechargeCustomConfigView,
+  type SaveRechargeCustomConfigInput,
+} from "./recharge-custom-config-repo.js";
+export {
   createSystemSettingRepo,
   type SystemSettingRepo,
   type SystemSettingRow,

@@ -14,6 +14,8 @@ const ROW = {
   amount_fen: 9900n,
   credits: 1485n,
   credits_per_yuan: 15,
+  product_type: "tier",
+  product_name: "轻量尝鲜",
   status: "paid",
   paid_at: new Date("2026-09-25T00:05:00Z"),
   grant_lot_id: 12n,
@@ -99,6 +101,8 @@ describe("createRechargeOrderRepo.list", () => {
       amountFen: 9900,
       credits: 1485,
       creditsPerYuan: 15,
+      productType: "tier",
+      productName: "轻量尝鲜",
       status: "paid",
       paidAt: "2026-09-25T00:05:00.000Z",
       grantLotId: "12",
@@ -153,6 +157,42 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
       permission_result: "allowed",
       config_version: 3,
     });
+  });
+
+  it("★ 自定义充值单：`tier_id` 写 **NULL**，不是 0/1（模块 B，迁移 050）", async () => {
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
+      snapshotRow(data),
+    );
+    const repo = createRechargeOrderRepo({ recharge_orders: { create } } as never);
+
+    const view = await repo.create({
+      tradeNo: "RC20260927001",
+      userId: 9001,
+      tierId: null,
+      amountFen: 4_000,
+      credits: 600,
+      creditsPerYuan: 15,
+      productType: "custom",
+      productName: "自定义充值",
+      configVersion: 5,
+      creditsExpireAt: new Date("2028-09-27T00:00:00Z"),
+    });
+
+    // 编一个 0/1 顶上去，会让按 tier_id 聚合的对账把全部自定义充值算到某个无辜档位上
+    expect(create.mock.calls[0]![0].data.tier_id).toBeNull();
+    expect(view.tierId).toBeNull();
+    expect(create.mock.calls[0]![0].data.product_type).toBe("custom");
+  });
+
+  it("可空 tier_id 的读回：NULL 原样投影成 null（不是 \"null\" 字符串，也不抛错）", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ ...ROW, tier_id: null }]);
+    const repo = createRechargeOrderRepo({
+      recharge_orders: { count: vi.fn().mockResolvedValue(1), findMany },
+    } as never);
+
+    const page = await repo.list({ page: 1, pageSize: 20 });
+
+    expect(page.items[0]?.tierId).toBeNull();
   });
 
   it("markPaidPending 只对「钱还没到」的单生效（>= 待到账 的下界判断）", async () => {

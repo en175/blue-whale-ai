@@ -40,6 +40,35 @@ export interface RechargeTierCatalog {
   credits_per_yuan: number;
 }
 
+/**
+ * 自定义充值配置（模块 B，PRD §7.2）。**游客也能拿到**（「游客可见不可买」）。
+ *
+ * ⚠️ `credits_per_yuan` 是**这张表自己的**换算率（PRD §7.1 默认 15），
+ * 与 `RechargeTierCatalog.credits_per_yuan`（定价目录里那条**消费锚点**）**不是一回事**。
+ * PRD §7.1 自己注明「与现有展示口径 1 元 = 10 积分不一致，待评审确认」——
+ * 看到两个数不一样，**不要去把它们统一起来**。
+ */
+export interface RechargeCustomConfig {
+  /** 是否启用。false = 用户侧不展示自定义充值 */
+  enabled: boolean;
+  /** 最低可购积分（PRD §7.1 默认 600） */
+  min_credits: number;
+  /** 最高可购积分（PRD §7.1 默认 499,995） */
+  max_credits: number;
+  /** 进入时的默认选中值（PRD §7.1 默认 600） */
+  default_credits: number;
+  /** 滑杆步长（PRD §10.3），手动输入也要对齐到它 */
+  step_credits: number;
+  /** 每元积分数，价格 = 积分数 ÷ 它（**本表自己的**那条，见上方说明） */
+  credits_per_yuan: number;
+  /** 到账积分有效期（月），默认 24 = 2 年 */
+  credits_valid_months: number;
+  /** 当前用户能否购买；**null = 游客，未判定**（PRD §7.4「游客可见不可买」） */
+  can_purchase: boolean | null;
+  /** 无权限时展示的文案（后台可配，未配则服务端给默认文案） */
+  denied_hint: string;
+}
+
 /** 创建订单结果 */
 export interface RechargeOrder {
   /** 订单号（我们自己的商户订单号），用于查单 */
@@ -81,6 +110,30 @@ export function createRechargeOrder(tierId: string) {
     method: 'POST',
     silent: true,
     body: JSON.stringify({ tier_id: tierId }),
+  });
+}
+
+/**
+ * 拉取自定义充值配置（公开接口 —— 游客也要能看到价格与范围，PRD §7.4）。
+ *
+ * silent：调用方自己有「加载失败」的就地错误态，让 http 层再弹一次全局 toast
+ * 就是同一件事说两遍。
+ */
+export function fetchRechargeCustomConfig() {
+  return apiRequest<RechargeCustomConfig>('/api/recharge/custom', { silent: true });
+}
+
+/**
+ * 创建自定义充值订单（需登录）。
+ *
+ * ⚠️ 只传**积分数**，不传价格：价格一律服务端按当前配置算（PRD §7.5「以服务端最新配置为准」）。
+ * 前端界面上那个价只是展示 —— 传上去也没人看，反而会让人以为「前端能定价」。
+ */
+export function createCustomRechargeOrder(credits: number) {
+  return apiRequest<RechargeOrder>('/api/recharge/order', {
+    method: 'POST',
+    silent: true,
+    body: JSON.stringify({ credits }),
   });
 }
 

@@ -9,19 +9,28 @@ import {
   SystemSettingsService,
 } from "@lib/shared/system-settings/index.js";
 import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
+import {
+  APP_SECRET,
+  NOTIFY_URL,
+  TIER,
+  makeHttp,
+  makePrisma,
+  makeService,
+  notifyParams,
+  signed,
+} from "./recharge.testlib.js";
 import { deriveCredits, RechargeService } from "./recharge.service.js";
-
 /* ============================================
  * 充值到账的账实一致：这是钱路径，测的是「会不会多发一次」「会不会按错的数发」。
  *
  * 用内存假 Prisma 而不是 vi.fn 桩：条件更新（`status != paid`、查单名额）正是幂等的实现本身，
- * 桩掉它等于把要测的东西测没。
+ * 桩掉它等于把要测的东西测没。夹具在 `recharge.testlib.ts`（自定义充值那条链路共用同一套）。
  *
  * ⚠️ 换算率（`fetchCreditsPerYuan`）读的是**定价目录的 gRPC 接口**，不再是 HTTP ——
  *    所以它由 `grpcActiveCatalog()` 桩，HTTP 那套只剩发放（`grantCredits` 尚未迁）。
  * ============================================ */
 
-// 只做转发，「装哪个 router」在 billing-admin-grpc-stub.testlib.ts 里（三个测试文件同一套）。
 vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@connectrpc/connect-node")>();
   return {
@@ -30,246 +39,6 @@ vi.mock("@connectrpc/connect-node", async (importOriginal) => {
   };
 });
 
-const APP_SECRET = "s3cret";
-const NOTIFY_URL = "https://api.example.com/api/recharge/notify/pay";
-
-type Row = Record<string, unknown>;
-
-function makePrisma() {
-  const orders = new Map<string, Row>();
-  const settings = new Map<string, Row>();
-  /**
-   * 状态列**被写入**的顺序（每次 updateMany 命中就记一笔）。
-   *
-   * <p>要的不只是最终值：`paid_pending` 与 `paid` 这两个写入的**先后**正是本次设计的核心，
-   * 只看终值的话「先写 paid、事后补一次 paid_pending」也是绿的。
-   */
-  const statusWrites: string[] = [];
-
-  const matches = (row: Row, where: Row): boolean => {
-    if (where.trade_no !== undefined && row.trade_no !== where.trade_no) return false;
-    const status = where.status as
-      | { not?: string; notIn?: string[] }
-      | string
-      | undefined;
-    if (typeof status === "string" && row.status !== status) return false;
-    if (status && typeof status === "object") {
-      if (status.not !== undefined && row.status === status.not) return false;
-      // notIn 也要实现：`markPaidPending` 的「钱还没到」正是靠它做的条件更新，
-      // 桩成「总是命中」等于把要测的幂等本身测没了
-      if (status.notIn !== undefined && status.notIn.includes(String(row.status))) {
-        return false;
-      }
-    }
-    if (where.pay_order_id === null && row.pay_order_id !== null) return false;
-    const or = where.OR as Row[] | undefined;
-    if (or) {
-      const ok = or.some((clause) => {
-        if (clause.last_query_at === null) return row.last_query_at === null;
-        const lt = (clause.last_query_at as { lt?: Date } | undefined)?.lt;
-        if (lt) {
-          const current = row.last_query_at as Date | null;
-          return current !== null && current.getTime() < lt.getTime();
-        }
-        return false;
-      });
-      if (!ok) return false;
-    }
-    return true;
-  };
-
-  const apply = (row: Row, data: Row): void => {
-    for (const [key, value] of Object.entries(data)) {
-      if (value && typeof value === "object" && "increment" in (value as Row)) {
-        row[key] = Number(row[key] ?? 0) + Number((value as { increment: number }).increment);
-      } else {
-        row[key] = value;
-      }
-      if (key === "status") statusWrites.push(String(value));
-    }
-  };
-
-  const prisma = {
-    recharge_orders: {
-      create: async ({ data }: { data: Row }) => {
-        const row: Row = {
-          id: BigInt(orders.size + 1),
-          pay_order_id: null,
-          status: "pending",
-          paid_at: null,
-          grant_lot_id: null,
-          last_query_at: null,
-          notify_count: 0,
-          is_delete: 0,
-          gmt_create: new Date(),
-          gmt_modified: new Date(),
-          ...data,
-        };
-        orders.set(String(data.trade_no), row);
-        return row;
-      },
-      findFirst: async ({ where }: { where: Row }) => {
-        const row = orders.get(String(where.trade_no));
-        return row && row.is_delete === 0 ? row : null;
-      },
-      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
-        const row = orders.get(String((where as Row).trade_no));
-        if (!row || !matches(row, where)) return { count: 0 };
-        apply(row, data);
-        return { count: 1 };
-      },
-    },
-    system_settings: {
-      findUnique: async ({ where }: { where: Row }) =>
-        settings.get(String(where.setting_key)) ?? null,
-      upsert: async ({ where, create, update }: { where: Row; create: Row; update: Row }) => {
-        const key = String(where.setting_key);
-        const existing = settings.get(key);
-        if (existing) apply(existing, update);
-        else settings.set(key, { ...create });
-        return settings.get(key);
-      },
-    },
-  };
-  return { prisma, orders, statusWrites };
-}
-
-/** 网关 + 发放（HTTP）的桩，按 URL 分流并记录调用。目录与余额都走 gRPC，不在这里。 */
-function makeHttp(gatewayState = 1) {
-  const granted: { amount: number; bizId: string }[] = [];
-  const calls: { url: string; body: Record<string, unknown> }[] = [];
-  /** 接下来 N 次发放请求返回 500（模拟 billing 抖动），用来观测「发放失败后重投」那条路。 */
-  let grantFailures = 0;
-
-  const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const target = String(url);
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
-    calls.push({ url: target, body });
-
-    if (target.endsWith("/admin/credits/grants")) {
-      if (grantFailures > 0) {
-        grantFailures -= 1;
-        return new Response("boom", { status: 500 });
-      }
-      const bizId = String(body.bizId);
-      if (granted.some((g) => g.bizId === bizId)) {
-        return new Response(JSON.stringify({ code: "DUPLICATE" }), { status: 409 });
-      }
-      granted.push({ amount: Number(body.amount), bizId });
-      return json({ lotId: 42, userId: body.userId, source: "purchased", amount: body.amount });
-    }
-    if (target.endsWith("/api/pay/unifiedOrder")) {
-      return json({
-        code: 0,
-        msg: "SUCCESS",
-        data: {
-          payOrderId: "P-GATEWAY-1",
-          orderState: 1,
-          payDataType: "codeUrl",
-          payData: "https://test.hccb.cc/uniCashierNew.html?tokenCode=abc",
-        },
-      });
-    }
-    if (target.endsWith("/api/pay/query")) {
-      return json({
-        code: 0,
-        msg: "SUCCESS",
-        data: { payOrderId: "P-GATEWAY-1", mchOrderNo: body.mchOrderNo, state: gatewayState, amount: 10000 },
-      });
-    }
-    throw new Error(`未预期的请求：${target}`);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  return {
-    granted,
-    calls,
-    setGatewayState: (v: number) => {
-      gatewayState = v;
-    },
-    failNextGrants: (n: number) => {
-      grantFailures = n;
-    },
-  };
-}
-
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-
-const TIER = {
-  id: "7",
-  name: "1000积分",
-  /**
-   * ⚠️ **基础积分是配置值**：7,500 与 `原价 100 × 换算率 15 = 1,500` **刻意不同**。
-   * 任何一个「还在按原价派生积分」的实现都会在这条线上红 —— 那正是本次要钉住的事
-   * （充值常有折扣，¥499 的档给 7,500 而不是 7,485）。
-   */
-  baseCredits: 7_500,
-  originalPrice: 100,
-  discount: 1,
-  price: 100,
-  isRecommended: false,
-  status: "active" as const,
-  startTime: null,
-  endTime: null,
-  sortOrder: 1,
-  version: 3,
-  createdAt: "2026-09-01T00:00:00.000Z",
-  updatedAt: "2026-09-01T00:00:00.000Z",
-};
-
-async function makeService() {
-  const { prisma, orders, statusWrites } = makePrisma();
-  const settings = new SystemSettingsService({ client: prisma } as never);
-  await settings.update({
-    credentials: {
-      hccb_mch_no: "M0001",
-      hccb_app_id: "app-1",
-      hccb_app_secret: APP_SECRET,
-      hccb_notify_url: NOTIFY_URL,
-    },
-  });
-  // 档位**可变**：`config_version` 快照的是下单那一刻的 version，
-  // 所以测试要能中途把版本推上去，再看已创建订单有没有被连带改掉
-  let tier = { ...TIER };
-  const tiers = {
-    listActive: async () => [tier],
-    getById: async (id: string) => (id === tier.id ? tier : null),
-  } as unknown as TopupTierService;
-  const service = new RechargeService({ client: prisma } as never, tiers, settings);
-  return {
-    service,
-    orders,
-    settings,
-    statusWrites,
-    setTierVersion: (v: number) => {
-      tier = { ...tier, version: v };
-    },
-  };
-}
-
-/** 网关回调的报文（真实字段集，金额单位分，`state=2` 表示支付成功）。 */
-function notifyParams(tradeNo: string, overrides: Record<string, string> = {}) {
-  return {
-    payOrderId: "P-GATEWAY-1",
-    mchNo: "M0001",
-    appId: "app-1",
-    mchOrderNo: tradeNo,
-    ifCode: "hccb",
-    wayCode: "HCCB_QR",
-    state: "2",
-    amount: "10000",
-    ...overrides,
-  };
-}
-
-async function signed(params: Record<string, string>): Promise<Record<string, string>> {
-  const { paySign } = await import("@lib/shared/pay-server/pay-sign.js");
-  return { ...params, sign: paySign(params, APP_SECRET) };
-}
 
 describe("RechargeService — 下单", () => {
   beforeEach(() => {
@@ -374,7 +143,12 @@ describe("RechargeService — 下单", () => {
       listActive: async () => [],
       getById: async () => ({ ...TIER, status: "inactive" as const }),
     } as unknown as TopupTierService;
-    const service = new RechargeService({ client: prisma } as never, tiers, settings);
+    const service = new RechargeService(
+      { client: prisma } as never,
+      tiers,
+      settings,
+      new RechargeCustomService({ client: prisma } as never),
+    );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(/已下架/);
   });
@@ -399,7 +173,12 @@ describe("RechargeService — 下单", () => {
       listActive: async () => [],
       getById: async () => ({ ...TIER, status: "draft" as const }),
     } as unknown as TopupTierService;
-    const service = new RechargeService({ client: prisma } as never, tiers, settings);
+    const service = new RechargeService(
+      { client: prisma } as never,
+      tiers,
+      settings,
+      new RechargeCustomService({ client: prisma } as never),
+    );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(
       /尚未上架/,
@@ -418,7 +197,12 @@ describe("RechargeService — 下单", () => {
       listActive: async () => [TIER],
       getById: async () => TIER,
     } as unknown as TopupTierService;
-    const service = new RechargeService({ client: prisma } as never, tiers, settings);
+    const service = new RechargeService(
+      { client: prisma } as never,
+      tiers,
+      settings,
+      new RechargeCustomService({ client: prisma } as never),
+    );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(
       /支付商户信息未配置完整/,
@@ -426,6 +210,7 @@ describe("RechargeService — 下单", () => {
     expect(http.calls.some((c) => c.url.endsWith("/api/pay/unifiedOrder"))).toBe(false);
   });
 });
+
 
 describe("RechargeService — 回调到账", () => {
   beforeEach(() => {

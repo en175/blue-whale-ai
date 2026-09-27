@@ -678,7 +678,10 @@ model recharge_orders {
   trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
   pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
   user_id          BigInt
-  tier_id          BigInt
+  /// 档位 ID。**可空**：NULL = 这不是档位商品（自定义充值，`product_type = 'custom'`）。
+  /// 自定义充值没有档位，编一个 0/1 出来会被后续按 tier_id 聚合的对账当成真档位。
+  /// 判「是不是档位商品」一律看 product_type，不看这一列。
+  tier_id          BigInt?
   amount_fen       BigInt
   credits          BigInt
   credits_per_yuan Int
@@ -716,6 +719,51 @@ model recharge_orders {
   /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
   /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
   @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+}
+
+// ===== 自定义充值配置（模块 B，PRD §7 / §10.3）。**单行表**，id 恒为 1 =====
+//
+// ⚠️ 刻意**不塞进 `system_settings`**：那张表存凭证（AES 密文、is_secret 标记、换密钥要
+// 重写全部密文行的轮换语义），而这里存的是商品配置（明文、要按字段查询与校验、
+// 随运营调价高频变更）。混在一张表里，迟早有人给商品配置也套上加密，
+// 或者把凭证当成一份普通 JSON 去解析。
+//
+// 单行（主键钉住）而不是「一个字段一行」：PRD §10.3 的九个字段是一份**完整口径**，
+// 分开存会出现「下限改了、上限还是旧的」那种中间态被读到。
+//
+// ⚠️ `credits_per_yuan` 是**本表自己的**换算率（PRD §7.1 默认 1 元 = 15 积分），
+// 与定价目录里那条**消费锚点**（生成任务扣分用）不是一回事。自定义充值是**唯一**
+// 真的拿这条比例算价格的地方：`价格(分) = round(积分数 × 100 ÷ 每元积分数)`。
+// 档位的到账积分与此无关（读 `topup_tiers.base_credits`，配置值）。
+model recharge_custom_config {
+  /// 恒为 1：单行表，主键把「只有一份配置」钉在 schema 上
+  id                     Int      @id
+  /// 最低充值积分（PRD §7.1 默认 600 = ¥40）
+  min_credits            BigInt   @default(600)
+  /// 最高充值积分（PRD §7.1 默认 499,995）。保存时校验能被 credits_per_yuan 整除
+  max_credits            BigInt   @default(499995)
+  /// 默认选中积分（PRD §7.1 默认 600）
+  default_credits        BigInt   @default(600)
+  /// 每元积分数（PRD §7.1 默认 15）。**价格算法的输入**，不是消费锚点，见上方说明
+  credits_per_yuan       Int      @default(15)
+  /// 积分步长（PRD §10.3）。滑杆步进与手输修正用。
+  /// 约束（服务端校验）：max-min 与 default-min 都必须是它的整数倍，否则滑杆推不到两端
+  step_credits           BigInt   @default(15)
+  /// 是否启用（PRD §10.3）。0 = 用户侧不展示自定义充值，下单被拒
+  enabled                Int      @default(1) @db.TinyInt
+  /// 购买权限（PRD §10.3「与固定积分卡一致」，枚举与 topup_tiers.permission 同一套）：
+  /// all 全部登录用户 | user_group 指定用户群 | member_tier 指定会员等级（阶段 2 生效）
+  permission             String   @default("all") @db.VarChar(16)
+  /// JSON 数组，元素是 userId 的十进制字符串（BigInt 超 JS 安全整数，存串不丢精度）
+  permission_allowlist   Json?
+  /// 无权限提示（PRD §10.3 选填）。空串 = 用前端默认文案
+  permission_denied_hint String   @default("") @db.VarChar(255)
+  /// 到账积分有效期，单位**月**（PRD §10.3 默认 2 年 = 24 个月），与档位同口径
+  credits_valid_months   Int      @default(24)
+  /// 配置版本：**每保存一次 +1**。下单时快照进 recharge_orders.config_version
+  version                Int      @default(0)
+  gmt_create             DateTime @default(now()) @db.DateTime(0)
+  gmt_modified           DateTime @default(now()) @db.DateTime(0)
 }
 
 // ===== 系统设置（管理端可配；按模块整行存一份快照） =====
