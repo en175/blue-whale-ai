@@ -26,6 +26,15 @@ async function render(overrides: { onClose?: () => void; onEscapeClose?: () => v
 }
 afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); });
 
+/** 在搜索框输入检索词（原生 value setter + input 事件触发 React onChange） */
+async function search(text: string) {
+  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 it('同一菜单直接呈现已引用和原有四种素材分类', async () => {
   await render();
   expect(document.querySelector('[data-testid="mention-menu"]')?.hasAttribute('data-canvas-overlay')).toBe(true);
@@ -65,11 +74,6 @@ it('IKIPWV：无标题文本附件按正文关键词命中，既有标题/编号
     { id: 'ta1', kind: 'text', name: '', badge: '文本1', searchText: '深海之下，一只蓝鲸缓缓游过，尾鳍轻摆' },
     { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', searchText: '开场：城市夜景空镜' },
   ] });
-  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
-  const search = (text: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
   const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
   // 正文关键词 → 命中无标题文本附件（标题与编号均不含该词）
   await search('蓝鲸');
@@ -96,11 +100,6 @@ it('IKIQGR：已引用文本附件按全文检索——超过前 200 字的尾�
     { ...image, badge: '图片1' },
     { id: 'ta-long', kind: 'text', name: '', badge: '文本1', searchText: LONG_BODY },
   ] });
-  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
-  const search = (text: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
   const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
   // 尾段关键词（第 200 字之后）命中无标题文本附件
   await search(LONG_BODY_TAIL);
@@ -122,11 +121,6 @@ it('IKIQGR：画布分区无标题文本节点按正文全文命中；媒体项�
       { id: 't-plain', kind: 'text', name: '文本节点', searchText: LONG_BODY },
     ],
     referencedItems: [],
-  });
-  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
-  const search = (text: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   const canvasRows = () => [...document.querySelectorAll('[data-testid="at-mention-canvas-item"]')];
   await search(LONG_BODY_TAIL);
