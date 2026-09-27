@@ -116,6 +116,27 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
                 )
             metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
+    def synced_inherited_child_with_added_file(self, release_shared=False, child_shared=False):
+        parent = self.commit(self.integration, "validation.md", "parent\n")
+        self.git(self.main, "switch", "release/test")
+        release = self.commit(self.main, "shared.txt" if release_shared else "release.txt",
+                              "release\n")
+        self.git(self.main, "push", "origin", "release/test")
+        self.git(self.child_one, "merge", "--ff-only", release)
+        self.git(self.child_one, "merge", "--no-ff", "--no-edit", "-m",
+                 "chore: 继承整包父整合提交", parent)
+        inherited = self.git(self.child_one, "rev-parse", "HEAD")
+        metadata_path = Path(self.git(self.child_one, "rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["start_sha"] = release
+        metadata["inherited_sha"] = inherited
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        (metadata_path.parent / "task-integration-sha").write_text(inherited + "\n", encoding="utf-8")
+        self.commit(self.child_one, "validation.md", "parent\nchild\n")
+        if child_shared:
+            self.commit(self.child_one, "shared.txt", "child\n")
+        self.git(self.integration, "rebase", release)
+
     def test_two_children_from_different_integration_commits_fast_forward_with_correct_tree(self):
         self.commit(self.integration, "integration.txt", "integration\n")
         self.commit(self.child_one, "one.txt", "one\n")
@@ -226,6 +247,48 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.git(self.integration, "push", "origin", INTEGRATION)
         cleaned = self.cleanup(self.snapshot(self.git(self.integration, "rev-parse", "HEAD")))
         self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+
+    def test_inherited_child_merges_after_release_sync_with_equivalent_tree(self):
+        self.synced_inherited_child_with_added_file()
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "validation.md").read_text(), "parent\nchild\n")
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"),
+                         self.git(self.child_one, "rev-parse", "HEAD"))
+
+    def test_inherited_child_merges_after_release_sync_and_local_fix(self):
+        self.synced_inherited_child_with_added_file()
+        self.commit(self.integration, "local-fix.txt", "fix\n")
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "validation.md").read_text(), "parent\nchild\n")
+        self.assertEqual((self.integration / "local-fix.txt").read_text(), "fix\n")
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"),
+                         self.git(self.child_one, "rev-parse", "HEAD"))
+
+    def test_release_sync_tree_mismatch_keeps_default_merge_conflict(self):
+        self.synced_inherited_child_with_added_file()
+        (self.integration / "later.txt").write_text("later\n", encoding="utf-8")
+        self.git(self.integration, "add", "later.txt")
+        self.git(self.integration, "commit", "--amend", "--no-edit")
+        integration_head = self.git(self.integration, "rev-parse", "HEAD")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("合并冲突", stopped.stdout)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), integration_head)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+
+    def test_release_sync_explicit_merge_base_conflict_keeps_both_branches(self):
+        self.synced_inherited_child_with_added_file(release_shared=True, child_shared=True)
+        integration_head = self.git(self.integration, "rev-parse", "HEAD")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("合并冲突", stopped.stdout)
+        self.assertIn("shared.txt", stopped.stdout)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), integration_head)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
 
     def test_conflict_keeps_both_branches_and_original_child_head(self):
         self.commit(self.integration, "shared.txt", "integration\n")
