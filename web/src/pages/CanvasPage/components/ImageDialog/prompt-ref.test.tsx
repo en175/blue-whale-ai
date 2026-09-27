@@ -603,7 +603,7 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
     await typePromptRefText(container, '让衣服');
     await collapseCaretAt(promptRefEditorInstance(container), 1);
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title^="插入引用"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
@@ -623,7 +623,7 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
   it('未聚焦过输入框：chip 追加末尾，插入后编辑器聚焦、光标落在 chip 之后', async () => {
     await renderDialog({ mediaRefs: [REF_A] });
     (document.activeElement as HTMLElement | null)?.blur?.();
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title^="插入引用"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
