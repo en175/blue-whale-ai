@@ -544,6 +544,7 @@ export const ERROR_CODES: Record<number, string> = {
   100408: "空参数卡片不可保存，请补全参考图或描述",
   100409: "幂等键冲突：同键异载荷",
   100410: "共享资产类型不支持",
+  100409: "幂等键冲突：同键异载荷", // IDEMPOTENCY_CONFLICT_CODE（IKIPWT 收编登记，分组末尾追加）
 };
 
 /**
@@ -624,6 +625,9 @@ export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
 /** 同一把 Idempotency-Key 配了不同的载荷：建任务与重试共用同一个处置（拒绝，不取首次结果）。 */
 export const IDEMPOTENCY_CONFLICT_CODE = 100409;
 export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
+/** IKIPWT：生成任务重试的幂等键冲突（同键异摘要）。原是 handle-retry-generation-job.ts
+ *  的本地常量，按「码不各自定义」（ADR-0083）收编登记，沿用既有 100409 号。 */
+export const IDEMPOTENCY_CONFLICT_CODE = 100409;
 
 // ═══════════════════════════════════════════════════════════════
 // 八、数值码 → HTTP 状态码（ADR-0083 阶段 5/6 的投影换算，唯一一处）
