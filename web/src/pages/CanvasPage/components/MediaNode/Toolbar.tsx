@@ -16,7 +16,7 @@
  * 音视频合成」四功能钮 + 竖直分隔线 + 下载。IKHB6Y 首位「截取」从占位点亮为
  * 可点入口（门槛见 audioTrim.ts：音频 URL 缺失或时长缺失/为 0 置灰，不照搬家族
  * 「数据缺失不拦」口径；点击派发 onTrimAudio，编辑态行为归 IKHB7A）。调速与混合
- * 已点亮，音视频合成仍显示「即将上线」；ADR-0109 原五钮中的「转码」钮
+ * 已点亮，「音视频合成」也已点亮（IKIHPK，见下文）；ADR-0109 原五钮中的「转码」钮
  * 已按需求撤除（不再提供转码功能，占位连同入口一并删除）。详情钮随改版对音频退役，
  * 图片/视频分支的详情不变；音频不出现「替换」入口；@（mention）对音频保持隐藏。
  * IKH8BJ 视频卡追加「场景切分」入口：图标+文字单按钮（无下拉），形态同「音视频分离」，
@@ -34,8 +34,12 @@
  * IKHW5C（父单 IKHVYO）音频卡第二钮「调速」点亮（ADR-0109 第二钮）：自占位数组移出
  * 单独渲染接门槛与回调（形态同「截取」钮 IKHB6Y 先例：图标+文字、aria-disabled 置灰、
  * 点击守卫后派发 onAudioSpeed，编辑态本体归 IKHW5S）；音频 URL 或资产 ID 缺失
- * 时置灰（audioSpeed.ts，悬停「音频不可用，无法调速」；时长缺失不拦），混合/音视频合成
- * 两钮维持置灰占位「即将上线」不变。
+ * 时置灰（audioSpeed.ts，悬停「音频不可用，无法调速」；时长缺失不拦）。
+ * IKIHPK（父规格 IKIHMX / ADR-0115）：第四钮「音视频合成」自占位数组移出单独渲染
+ * （形态同「截取」「调速」先例），门槛见 audioVideoMux.ts（已完成音频成品卡 + 仅源
+ * 音频 URL 缺失置灰，悬停唯一原因），点击守卫后派发 onComposeAudioVideo 从源音频卡
+ * 拉出合成草稿卡（草稿卡会话与拖线绑定归 IKIHPK，提交回填归 IKIHP M）；音频分支
+ * 四功能钮自此全部点亮，占位项清空。顺序注释：截取、调速、混合、音视频合成、下载。
  * IKHLKR 视频卡首位「HD」单按钮升为「高清 ▾」下拉（FrameInterpolationMenu，ADR-0113）：
  * 首项「HD 高清」直启原链路零变化，次项「插帧」派发 onFrameInterpolation 建插帧草稿卡
  * （发送闭环由 IKHLKX 交付）。门槛分两层：整钮置灰只看未关联资产（triggerDisabledReason），
@@ -52,6 +56,7 @@ import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../a
 import { audioTrimGateReason } from '../../audioTrim';
 import { audioMixSourceError } from '../../audioMix';
 import { audioSpeedGateReason } from '../../audioSpeed';
+import { audioVideoMuxSourceError } from '../../audioVideoMux';
 import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
 import {
   SMART_MATTING_ENTRY_HINT,
@@ -89,14 +94,13 @@ interface MediaNodeToolbarProps {
   data: MediaNodeData;
 }
 
-/** 音频卡占位钮（音视频合成；ADR-0109）：
+/** 音频卡占位钮配置（ADR-0109）：
  *  置灰占位，无门槛、无回调依赖，故为模块级静态配置（区别于画质横排的组件内数组）；
- *  「截取」「调速」「混合」已点亮，单独渲染各接门槛与回调；
- *  图标按序：剪刀（截取）、仪表盘（调速）、层叠（混合）、场记板（音视频合成），
- *  形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
+ *  「截取」「调速」「混合」「音视频合成」四功能钮已全部点亮，单独渲染各接门槛与回调，
+ *  占位数组当前为空；图标按序：剪刀（截取）、仪表盘（调速）、层叠（混合）、
+ *  场记板（音视频合成），形态沿用画质家族「图标 + 文字」横排口径（ADR-0107）。 */
 const AUDIO_TOOL_PLACEHOLDER_HINT = '即将上线';
 const audioToolItems: Array<{ id: string; label: string; icon: LucideIcon }> = [
-  { id: 'compose', label: '音视频合成', icon: Clapperboard },
 ];
 
 export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
@@ -140,6 +144,16 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
    *  或资产 ID 缺失时悬停「音频不可用，无法调速」；时长缺失不拦） */
   const handleAudioSpeed = useCallback(() => data.onAudioSpeed?.(id), [data, id]);
   const audioSpeedDisabledReason = audioSpeedGateReason(data);
+  /** 音视频合成（IKIHPK，父规格 IKIHMX / ADR-0115）：第四钮点亮，点击派发
+   *  onComposeAudioVideo 从源音频卡拉出合成草稿卡（草稿卡会话归本票，提交回填归
+   *  IKIHP M）；置灰预检见 audioVideoMux.ts（已完成音频成品卡 + 仅源音频 URL
+   *  缺失置灰，时长/分辨率元数据缺失不拦） */
+  const handleComposeAudioVideo = useCallback(() => data.onComposeAudioVideo?.(id), [data, id]);
+  const audioVideoMuxDisabledReason = audioVideoMuxSourceError(data as unknown as Record<string, unknown>);
+  /** 在途合成高亮（IKIHMX 审查修复 1）：源卡有生成中的音视频合成任务时按钮保留高亮
+   *  （CanvasPage 渲染期注入 audioVideoMuxInFlight，不持久化；规格：发送后面板关闭、
+   *  工具条恢复且『音视频合成』保留高亮），aria-pressed 表达开关型激活态 */
+  const audioVideoMuxInFlight = (data as unknown as Record<string, unknown>).audioVideoMuxInFlight === true;
   /** 人声背景分离（IKHA2E 挂接点）：「音视频分离 ▾」下拉第二项派发，本票仅交付点击派发
    *  挂接点，编辑态本体由后续票实现——回调未注入时点击安全 no-op；置灰门槛同源整卡 */
   const handleVocalBackgroundSplit = useCallback(() => data.onVocalBackgroundSplit?.(id), [data, id]);
@@ -417,7 +431,24 @@ export default function MediaNodeToolbar({ id, data }: MediaNodeToolbarProps) {
           <span>混合</span>
         </button>
       )}
-      {/* 音频卡剩余占位（IKH8Q3；ADR-0109 原五钮中的「转码」已撤除）：aria-disabled 置灰保持渲染
+      {/* 音频卡「音视频合成」入口（IKIHPK）：第四钮自占位点亮——形态与置灰口径同
+          「截取」「调速」先例（aria-disabled 置灰保持渲染、置灰 title 悬停原因、
+          可用态无默认悬停文案）；点击守卫后派发 onComposeAudioVideo，草稿卡会话与
+          拖线绑定归本票，提交回填归 IKIHP M。IKIHMX 审查修复 1：源卡有在途合成任务时
+          （audioVideoMuxInFlight）按钮保留高亮（toolBtnActive + aria-pressed） */}
+      {toolbar.audioTools && (
+        <button type="button"
+          className={`${styles.toolBtn} ${audioVideoMuxInFlight ? styles.toolBtnActive : ''}`}
+          title={audioVideoMuxDisabledReason ?? undefined}
+          aria-disabled={audioVideoMuxDisabledReason !== null || undefined}
+          aria-pressed={audioVideoMuxInFlight || undefined}
+          data-testid="audio-tool-compose"
+          onClick={() => { if (audioVideoMuxDisabledReason === null) handleComposeAudioVideo(); }}>
+          <Clapperboard size={14} strokeWidth={2} />
+          <span>音视频合成</span>
+        </button>
+      )}
+      {/* 音频卡剩余占位（IKH8Q3）：aria-disabled 置灰保持渲染
           （口径同画质横排 .toolBtn[aria-disabled='true']），title 悬停「即将上线」，不绑定任何点击行为 */}
       {toolbar.audioTools && audioToolItems.map((item) => {
         const Icon = item.icon;

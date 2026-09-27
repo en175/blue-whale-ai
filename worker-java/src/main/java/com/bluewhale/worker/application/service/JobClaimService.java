@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
@@ -247,6 +248,14 @@ public class JobClaimService {
         GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
                 jobIdLong, AudioMixContract.TAG, List.of(AudioMixContract.SOURCE));
         return claimPollingAudioJob(jobIdLong, workerId, AudioMixContract.TAG, candidate, jobMapper::claimImageCas);
+    }
+
+    /** audio_video_mux 仅选择 type/source 候选，领取生命周期与 media_extract 共用（IKIHPJ）。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, AudioVideoMuxContract.TAG, List.of(AudioVideoMuxContract.SOURCE));
+        return claimPollingAudioJob(jobIdLong, workerId, AudioVideoMuxContract.TAG, candidate, jobMapper::claimImageCas);
     }
 
     @FunctionalInterface

@@ -1193,7 +1193,7 @@ class JobStateMachineMySqlIntegrationTest {
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, 120);
+                recoveryProvider, recoveryProvider, 120);
         recovery.recover();
         verify(recoveryProducer).enqueue(String.valueOf(retryId), 1000L);
 
@@ -1343,7 +1343,7 @@ class JobStateMachineMySqlIntegrationTest {
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
                 recoveryProvider, recoveryProvider, recoveryProvider, recoveryProvider,
-                recoveryProvider, 120);
+                recoveryProvider, recoveryProvider, 120);
         recovery.recover();
         verify(recoveryProducer).enqueue(retry, 1000L);
 

@@ -186,6 +186,13 @@
   background: transparent;
 }
 
+/* 工具按钮激活高亮（IKIHMX 审查修复 1）：源卡有在途任务时对应入口按钮保留高亮
+   （形态对齐 CanvasToolbar.toolBtnActive 的激活态观感：亮字 + 底色常驻） */
+.toolBtnActive {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
 .toolDivider {
   width: 1px;
   height: 16px;

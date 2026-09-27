@@ -123,6 +123,15 @@ public class JobStateMachineService {
         return jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
     }
 
+    /** 以 audio_video_mux 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取（IKIHPJ）。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
+        return claimService.claimAudioVideoMux(jobId, workerId);
+    }
+
+    public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
+        return jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+    }
+
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
             String jobId, String workerId) {
         return claimService.claimAudioTrim(jobId, workerId);
@@ -247,6 +256,21 @@ public class JobStateMachineService {
     /** 委托音频混合终态事务；仅当前租约与 fencing token 有效时创建长期 Asset 并成功，失效返回 false。 */
     public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
         return finalizer.publishAudioMixResult(input);
+    }
+
+    /** 委托音视频合成终态事务；仅当前租约与 fencing token 有效时创建长期视频 Asset 并成功（IKIHPJ）。 */
+    public boolean publishAudioVideoMuxResult(com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto input) {
+        return finalizer.publishAudioVideoMuxResult(input);
+    }
+
+    /** 委托转存对象权威发布核实（IKIN03）：processor 清理未发布对象前的判据——已被 Asset 引用即保留。 */
+    public boolean hasPublishedAsset(String jobId, String storageKey) {
+        return finalizer.hasPublishedAsset(jobId, storageKey);
+    }
+
+    /** 委托「可能发布该对象键的事务已结束」核实（IKIN8Z）：generation_jobs 行写锁被占 = 仍可能提交。 */
+    public boolean hasInFlightJobWriteTransaction(String jobId) {
+        return finalizer.hasInFlightJobWriteTransaction(jobId);
     }
 
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
@@ -410,6 +434,12 @@ public class JobStateMachineService {
 
     public boolean renewAudioMixLease(String jobId, String workerId, long fencingToken) {
         return jobMapper.renewAudioMixLease(Long.parseLong(jobId), workerId,
+                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+    }
+
+    /** 音视频合成大产物转存期续租（IKIHPJ）：与 audio_mix 同 420s 窗口。 */
+    public boolean renewAudioVideoMuxLease(String jobId, String workerId, long fencingToken) {
+        return jobMapper.renewAudioVideoMuxLease(Long.parseLong(jobId), workerId,
                 fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
     }
 

@@ -63,6 +63,10 @@ export const apiMocks = {
   cancelGenerationJob: vi.fn(async () => null),
   retryGenerationJob: vi.fn(),
   retryAudioMix: vi.fn(),
+  /** 音视频合成创建/重试（IKIHPM 发送与失败重试闭环：默认无实现，需要的测试显式
+   *  mockResolvedValue / mockRejectedValue；断言第三参 { silent: true } 与幂等键） */
+  createAudioVideoMux: vi.fn(),
+  retryAudioVideoMux: vi.fn(),
   newIdempotencyKey: vi.fn(() => 'test-retry-key'),
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
@@ -87,6 +91,10 @@ vi.mock('@/api/auth', () => ({
   fetchQuota: apiMocks.fetchQuota,
   toSessionUser: apiMocks.toSessionUser,
 }));
+/** 素材库分页记录（IKIHPK 音视频合成素材库浮层等新消费方）：默认空列表，用例按需注入
+ *  （assetPageQueryOptions 的 queryFn 在查询发起时读取，beforeEach 设置即可生效） */
+export const assetLibraryRecords: { current: Array<Record<string, unknown>> } = { current: [] };
+
 vi.mock('@/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
   fetchUploadPresign: vi.fn(),
@@ -95,6 +103,17 @@ vi.mock('@/api/assets', () => ({
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
   linkAssetToProject: vi.fn(),
+  assetPageQueryOptions: (type: string, size = 30) => ({
+    queryKey: ['assets', 'pages', type, size],
+    initialPageParam: 1,
+    queryFn: async () => ({
+      records: assetLibraryRecords.current,
+      total: assetLibraryRecords.current.length,
+      size,
+      current: 1,
+    }),
+    getNextPageParam: () => undefined,
+  }),
 }));
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
@@ -123,6 +142,8 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: apiMocks.createAudioTrim,
   createAudioSpeed: apiMocks.createAudioSpeed,
+  createAudioVideoMux: apiMocks.createAudioVideoMux,
+  retryAudioVideoMux: apiMocks.retryAudioVideoMux,
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));

@@ -7,6 +7,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { AUDIO_SPEED_EDGE_ORIGIN } from './audioSpeed';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
+import { AUDIO_VIDEO_MUX_EDGE_ORIGIN } from './audioVideoMux';
 import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
 import { panelCanvasRefError } from './refSourceTypes';
@@ -86,9 +87,13 @@ export function audioMediaRefsOf(
     // IKI4M2：调速产物卡的来源边（origin=audio-speed）同口径跳过——调速成品卡保留
     // 生成记录可再开音频面板，不跳过会让源音频占参考位、进 references，源卡删除后
     // 还会进 invalid 阻塞发送（见 audioSpeed.ts 常量注释）。
+    // IKIHPK：音视频合成草稿卡的固定音频输入线与视频绑定线（origin=audio-video-mux）
+    // 同口径跳过——音频源是合法素材但不占参考位，视频绑定的源视频若不跳过会被判成
+    // 非法音频参考、进 invalid 卡住成品卡再生成（音频混合同款坑位）。
     const origin = (edge.data as { origin?: string } | undefined)?.origin;
     if (origin === MEDIA_EXTRACT_EDGE_ORIGIN || origin === AUDIO_TRIM_EDGE_ORIGIN
-      || origin === AUDIO_MIX_EDGE_ORIGIN || origin === AUDIO_SPEED_EDGE_ORIGIN) continue;
+      || origin === AUDIO_MIX_EDGE_ORIGIN || origin === AUDIO_SPEED_EDGE_ORIGIN
+      || origin === AUDIO_VIDEO_MUX_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const reason = audioRefSourceError(source);
