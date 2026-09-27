@@ -2,12 +2,12 @@
 /* IKFA1O：BottomDialog 生视频正文素材标签——多媒体索引/首尾帧角色/模式失效/发送携带 prompt_doc */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { $getSelection, $isRangeSelection } from 'lexical';
+import { $createRangeSelection, $getRoot, $getSelection, $isRangeSelection, $setSelection, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 import type { PromptDoc } from '@/lib/prompt-doc';
-import { promptRefCaretOffset, promptRefEditorInstance, readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
+import { promptRefCaretOffset, promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -256,6 +256,61 @@ describe('IKFA1O 发送与草稿（快照/双写）', () => {
     await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(onSend.mock.calls[0]![2]).toBeNull();
     expect(onSend.mock.calls[0]![0]).toContain('普通描述');
+  });
+});
+
+/* IKIQ88：缩略图 @ 按钮启用「当前选区」回落——光标置于文本中间时 chip 原位插入；
+   无光标记录（未聚焦过输入框）仍追加末尾，插入后编辑器聚焦、光标落在 chip 之后 */
+describe('IKIQ88 缩略图 @ 光标处插入', () => {
+  /** 把光标折叠在首个文本节点 offset 处（等价点击定位光标） */
+  async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorInstance>, offset: number) {
+    await act(async () => {
+      editor.update(() => {
+        const text = $getRoot().getFirstDescendant();
+        const sel = $createRangeSelection();
+        sel.anchor.set(text!.getKey(), offset, 'text');
+        sel.focus.set(text!.getKey(), offset, 'text');
+        $setSelection(sel);
+      }, { tag: SKIP_DOM_SELECTION_TAG });
+    });
+  }
+
+  it('光标置于文本中间：点击缩略图 @ 按钮，chip 插入光标处而非末尾', async () => {
+    const { onParamsChange } = await renderDialog({ videoMediaRefs: ALL_REFS });
+    await typePromptRefText(container, '让衣服');
+    await collapseCaretAt(promptRefEditorInstance(container), 1);
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('让图片1衣服');
+    // 光标落在 chip 之后：继续输入接在标签后
+    await typePromptRefRaw(container, '！');
+    expect(readPromptRefText(container)).toBe('让图片1衣服！');
+    // 与手动 @ 菜单选择同一种 chip：asset_ref 绑定 101、文案 图片1
+    const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
+    expect(patch.promptDoc.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '衣服！' },
+    ]);
+  });
+
+  it('未聚焦过输入框：chip 追加末尾，插入后编辑器聚焦、光标落在 chip 之后', async () => {
+    await renderDialog({ videoMediaRefs: ALL_REFS });
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('图片1');
+    // 插入后编辑器聚焦
+    await vi.waitFor(() => {
+      expect(document.activeElement?.hasAttribute('contenteditable')).toBe(true);
+    });
+    // 光标落在 chip 之后：继续输入接在标签后
+    await typePromptRefRaw(container, '尾巴');
+    expect(readPromptRefText(container)).toBe('图片1尾巴');
   });
 });
 
