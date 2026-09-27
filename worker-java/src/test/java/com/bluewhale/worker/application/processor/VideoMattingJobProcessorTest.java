@@ -558,6 +558,9 @@ class VideoMattingJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
+        // IKIN7Z：收割语境守卫未命中同样核实后清理本次上传对象（复用同一放弃路径）
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
     }
 
     @Test
@@ -1072,6 +1075,35 @@ class VideoMattingJobProcessorTest {
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+        // IKIN7Z：转存返回前刚失租的静默终局同样清理本次上传对象（核实无 Asset 引用后删除）
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
+    }
+
+    @Test
+    @DisplayName("任务已取消（cancelled 终态 → 续租守卫 status='processing' 未命中）→ 经心跳 abort 同路到达清理入口：不发布、不落失败、核实后删除对象（IKIN7Z 取消路径）")
+    void cancelledJobReachesCleanupViaLeaseRenewalMiss() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        // 取消无独立检查点：任务落 cancelled 终态后，updateVideoMattingProgress 的
+        // status='processing' 守卫必然未命中（GenerationJobMapper SQL），心跳据此 abort——
+        // 与失租同路到达转存返回后的清理入口。本用例钉住该映射，防未来给取消加独立通道。
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(inv -> {
+                    TosVideoMediaRelay.TransferAbortHandle handle = inv.getArgument(3);
+                    handle.abort("job cancelled: renewal guard miss (status left processing)");
+                    return new TosVideoMediaRelay.StoredVideo("https://tos/out.webm",
+                            "generated/9/video/a.webm", "video/webm", 1L, null);
+                });
+        processor.handle("100");
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
     }
 
     @Test
@@ -1139,6 +1171,53 @@ class VideoMattingJobProcessorTest {
 
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+        // IKIN7Z：守卫未命中核实无 Asset 引用后清理本次上传对象
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
+    }
+
+    @Test
+    @DisplayName("清理调用自身抛异常（删除链路异常直达 processor 的形态）→ 保守保留 + 结构化待处理记录，不转成任务失败（IKIN7Z，IKIN8Z 同型）")
+    void cleanupErrorLeavesPendingRecordWithoutFailing() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.webm", "generated/9/video/abc.webm",
+                        "video/webm", 1L, null));
+        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(stateMachine.hasPublishedAsset("100", "generated/9/video/abc.webm")).thenReturn(false);
+        // 真实 relay 的 deleteUnpublishedObject 内部吞错只记日志；本用例钉「删除异常一旦
+        // 到达 processor」的防御分支（IKIN8Z 结构化待处理记录同型）
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(mediaRelay)
+                .deleteUnpublishedObject("generated/9/video/abc.webm");
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory
+                        .getLogger(VideoMattingJobProcessor.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            processor.handle("100");
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        assertThat(appender.list.stream()
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("[pending-cleanup]")).toList())
+                .anySatisfy(message -> assertThat(message)
+                        .contains("jobId=100")
+                        .contains("storageKey=generated/9/video/abc.webm")
+                        .contains("TOS 删除 5xx")
+                        .contains("resolution=retain-pending"));
     }
 
     @Test

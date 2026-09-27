@@ -136,6 +136,10 @@ public class VideoMattingJobProcessor implements JobProcessor {
     /** 心跳周期（包私有可覆写：测试注入亚秒级周期做确定性长传输回归，不真等 60s）。 */
     long leaseRenewIntervalMs = RESULT_TRANSFER_LEASE_RENEW_INTERVAL_MS;
 
+    /** 发布结果不明时的有界核实参数（IKIN7Z，IKIN8Z 同值）：总探测轮数（含首次）与轮间延时。 */
+    int publishSettleProbeAttempts = 3;
+    long publishSettleProbeDelayMs = 500;
+
     public VideoMattingJobProcessor(
             JobStateMachineService stateMachine,
             AssetSourceService assetSource,
@@ -428,6 +432,12 @@ public class VideoMattingJobProcessor implements JobProcessor {
      * 一次上游费用）；false = 发布守卫未命中（stale worker 或已终态，收割方同样停止
      * 本次执行不回退提交，与本家族心跳失租路径同一停止语义）；下载/转存失败经异常上抛，
      * 由收割方 catch 后回退（此时仍持有执行权）。
+     * <p>
+     * 转存成功返回后的放弃路径（传输返回前刚失租，或取消落 cancelled 终态后续租未命中，
+     * 或发布守卫明确拒绝）不再保留无主对象（IKIN7Z，IKIN03 音视频合成同款敞口修复平移）：
+     * 核实权威 Asset 引用后清理本次上传对象，核实/删除异常留结构化待处理记录，不改变
+     * 既有静默 return fencing 语义；发布调用抛异常（结果不明）先经有界核实确认发布事务
+     * 已结束且无引用才删，异常照常上抛走既有 fail 终态路径（IKIN8Z 同口径）。
      */
     private boolean publishResult(ClaimedVideoMattingJobDto claim,
                                   MatteVideoTaskObservation observation) {
@@ -514,39 +524,164 @@ public class VideoMattingJobProcessor implements JobProcessor {
             // 成功、失败、中止都停心跳，释放定时资源
             heartbeat.cancel(false);
         }
-        if (abortHandle.aborted()) return true; // 传输返回前刚失租：同中止语义，静默终局
+        if (abortHandle.aborted()) {
+            // 传输返回前刚失租：同中止语义，静默终局；本次上传对象核实无 Asset 引用后清理（IKIN7Z）
+            discardUnpublishedTransfer(claim, stored);
+            return true;
+        }
         log.info("[video_matting] 转存完成 jobId={} storageKey={} size={} resolution={}",
                 claim.id(), stored.storageKey(), stored.size(), observation.resolution());
 
-        boolean published = stateMachine.publishVideoMattingResult(new PublishVideoMattingDto(
-                claim.id(),
-                claim.project_id(),
-                claim.user_id(),
-                claim.workerId(),
-                claim.fencingToken(),
-                stored.url(),
-                stored.storageKey(),
-                stored.mime(),
-                stored.size(),
-                stored.md5(),
-                width,
-                height,
-                durationSec,
-                observation.resolution()));
+        boolean published;
+        try {
+            published = stateMachine.publishVideoMattingResult(new PublishVideoMattingDto(
+                    claim.id(),
+                    claim.project_id(),
+                    claim.user_id(),
+                    claim.workerId(),
+                    claim.fencingToken(),
+                    stored.url(),
+                    stored.storageKey(),
+                    stored.mime(),
+                    stored.size(),
+                    stored.md5(),
+                    width,
+                    height,
+                    durationSec,
+                    observation.resolution()));
+        } catch (Exception error) {
+            // 发布异常 ≠ 未发布（发布事务可能已提交后才断网，也可能仍在服务端提交中）：
+            // 删除前必须先确认「可能发布该键的事务」已结束并核实无 Asset 引用（IKIN7Z，
+            // IKIN8Z 有界核实同口径）；异常继续上抛走既有 fail 终态路径（守卫仍 fencing，
+            // 语义不变）
+            discardUnpublishedTransfer(claim, stored, true);
+            throw error;
+        }
         if (published) {
             log.info("[video_matting] 发布成功 jobId={}", claim.id());
         } else {
             log.warn("[video_matting] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）",
                     claim.id());
+            // 守卫拒绝无法区分「被拒」与「新执行者已发布」：核实权威状态（Asset 引用）后
+            // 清理本次上传对象（IKIN7Z，IKIN03 同口径）
+            discardUnpublishedTransfer(claim, stored);
         }
         return published;
     }
 
     /**
+     * 转存已成功返回但本次执行不再发布（失租 / 取消 / 守卫拒绝）时的清理入口（IKIN7Z，
+     * IKIN03 音视频合成同口径）：取消无独立检查点——任务落 cancelled 终态后经续租未命中
+     * 通道（心跳 abort 或守卫拒绝）到达本入口，与失租同路；发布事务从未开始或已同步结束，
+     * 单次 {@code hasPublishedAsset} 核实未被 Asset 引用即删。
+     */
+    private void discardUnpublishedTransfer(ClaimedVideoMattingJobDto claim,
+                                            TosVideoMediaRelay.StoredVideo stored) {
+        discardUnpublishedTransfer(claim, stored, false);
+    }
+
+    /**
+     * 清理该次上传的未发布对象（IKIN7Z；IKIN03 建清理入口、IKIN8Z 扩发布结果不明路径，
+     * 音视频合成先例同口径平移）。删除是需要证据的动作：
+     * <ul>
+     *   <li>{@code publishOutcomeUncertain=false}（失租 / 取消 / 守卫拒绝）：发布事务从未
+     *       开始或已同步结束（守卫拒绝 = 发布方法已返回），单次
+     *       {@code hasPublishedAsset} 核实——assets 已有 generation_job_id + storage_key
+     *       匹配行即已被引用（如接管者已发布同 key），保留不删；查无即删。</li>
+     *   <li>{@code publishOutcomeUncertain=true}（发布调用抛异常，结果不明）：发布事务可能
+     *       已提交后才断网，也可能仍在服务端提交中——单次查无 Asset 不能证明后续提交不会
+     *       引用该键（REPEATABLE READ 下进行中的事务对并发查询不可见）。走
+     *       {@link #awaitPublishSettledAndUnreferenced}：确认事务已结束且无引用才删；事务
+     *       未落定或权威状态暂不可确认一律保守保留。</li>
+     * </ul>
+     * storageKey 含每次执行独有随机 uuid，删除不会波及接管者或重试的新产物。核实或删除
+     * 自身异常只留结构化待处理记录（含对象身份），不改变主语义、不落额外终态。
+     */
+    private void discardUnpublishedTransfer(ClaimedVideoMattingJobDto claim,
+                                            TosVideoMediaRelay.StoredVideo stored,
+                                            boolean publishOutcomeUncertain) {
+        try {
+            if (publishOutcomeUncertain) {
+                switch (awaitPublishSettledAndUnreferenced(claim.id(), stored.storageKey())) {
+                    case REFERENCED -> {
+                        log.warn("[video_matting] 发布结果不明但对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
+                                claim.id(), stored.storageKey());
+                        return;
+                    }
+                    case UNCONFIRMED -> {
+                        logPendingTransferCleanup(claim.id(), stored.storageKey(),
+                                "发布结果不明：有界重查内可能发布该键的事务仍未结束");
+                        return;
+                    }
+                    case SETTLED_UNREFERENCED -> { /* 事务已结束且无引用，向下删除 */ }
+                }
+            } else if (stateMachine.hasPublishedAsset(claim.id(), stored.storageKey())) {
+                log.warn("[video_matting] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
+                        claim.id(), stored.storageKey());
+                return;
+            }
+            mediaRelay.deleteUnpublishedObject(stored.storageKey());
+        } catch (Exception error) {
+            // 权威状态暂不可确认（核实查询异常）或删除链路异常：保留对象（删除失败不得记为
+            // 成功），留可定位的待处理清理记录；清理失败不转成任务失败（IKIN03 语义保持）
+            logPendingTransferCleanup(claim.id(), stored.storageKey(),
+                    "权威状态核实或删除异常: " + error.getMessage());
+        }
+    }
+
+    /** 发布结果不明路径的核实结论（IKIN7Z，IKIN8Z 同型）。 */
+    private enum UnpublishedTransferCheck {
+        /** 权威数据确认对象已被 Asset 引用（发布事务已提交）→ 保留成品。 */
+        REFERENCED,
+        /** 可能发布该键的事务已结束且无 Asset 引用 → 可安全删除（该键含本次执行独有 uuid，不会再有新事务引用）。 */
+        SETTLED_UNREFERENCED,
+        /** 有界重查内事务仍未结束，或权威状态暂不可确认 → 保守保留并留待处理记录。 */
+        UNCONFIRMED
+    }
+
+    /**
+     * 发布结果不明时的删除前核实（IKIN7Z，IKIN8Z 同口径）：每轮先探测 generation_jobs 行
+     * 写锁（发布守卫写事务的第一条语句即 CAS UPDATE——video_matting 与音视频合成同走
+     * publishResultGuard，行锁持有至提交/回滚——锁被占 = 仍有事务可能提交该键），占用则短
+     * 延时后重查（有界，防未决事务久拖阻塞 worker 线程）；锁空闲即「可能发布该键的事务已
+     * 结束」，此时查 Asset 引用即权威结论：命中 = 已发布（保留），查无 = 已回滚/未插入
+     * （删除）。窗口耗尽仍被占 → UNCONFIRMED 保守保留（待处理记录可定位，交由状态恢复后
+     * 的下一次决策或人工核账收口）。
+     */
+    private UnpublishedTransferCheck awaitPublishSettledAndUnreferenced(String jobId, String storageKey) {
+        for (int attempt = 1; ; attempt++) {
+            if (stateMachine.hasInFlightJobWriteTransaction(jobId)) {
+                if (attempt >= publishSettleProbeAttempts) return UnpublishedTransferCheck.UNCONFIRMED;
+                try {
+                    Thread.sleep(publishSettleProbeDelayMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("发布落定核实等待被中断", interrupted);
+                }
+                continue;
+            }
+            return stateMachine.hasPublishedAsset(jobId, storageKey)
+                    ? UnpublishedTransferCheck.REFERENCED
+                    : UnpublishedTransferCheck.SETTLED_UNREFERENCED;
+        }
+    }
+
+    /**
+     * 结构化待处理清理记录（IKIN7Z，IKIN8Z 同型；父规格明确不新增数据库表，以可检索日志
+     * 形态承载）：固定 tag + jobId / storageKey / reason / resolution 字段，供日志检索定位
+     * 遗留对象的清理责任，状态恢复后可据权威结果完成保留或安全清理。
+     */
+    private static void logPendingTransferCleanup(String jobId, String storageKey, String reason) {
+        log.warn("[video_matting][pending-cleanup] 未发布对象保守保留待处理 jobId={} storageKey={} reason={} resolution=retain-pending",
+                jobId, storageKey, reason);
+    }
+
+    /**
      * 结果转存期续租（转存前一次 + 全程心跳每跳复用，IKHSFD）：一次调用同时续租
      * 〔lease_expires_at 顺延〕+ 保持进度不倒退。守卫未命中或 DB 异常均返回 false：
-     * 任务已被新 worker 接管（或已终态），调用方据此中止转存——本 worker 静默退出，
-     * 已转存 TOS 对象成孤儿与家族口径一致（无 Asset 行、不留半成品悬挂）。
+     * 任务已被新 worker 接管（或已终态），调用方据此中止转存——本 worker 静默退出；
+     * 中止时已发起 PUT 的对象由 relay 内部清理，转存成功返回后失租/守卫拒绝的本次
+     * 上传对象由 publishResult 的放弃路径核实清理（IKIN7Z），不再留无 Asset 引用孤儿。
      */
     private boolean renewLeaseForResultTransfer(ClaimedVideoMattingJobDto claim) {
         try {
