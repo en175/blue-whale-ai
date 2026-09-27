@@ -18,6 +18,7 @@ import { nextDraftPosition, type SpawnBox } from './draftSpawn';
 import {
   computeFollowAnchor,
   enabledVideoFollowModes,
+  firstEnabledVideoMode,
   FOLLOW_GAP,
   FOLLOW_PAD,
   type VideoFollowMode,
@@ -5170,7 +5171,10 @@ export default function CanvasPage() {
         ...(seed?.ratio != null ? { draftRatio: seed.ratio, targetRatio: seed.ratio } : {}),
         ...(seed?.size != null ? { draftSize: seed.size } : {}),
         ...(seed?.duration != null ? { draftDuration: seed.duration } : {}),
-        ...(seed?.mode != null ? { draftMode: seed.mode } : {}),
+        // IKIPSX（IKGUXU D-01）：seed 缺失时也按新建场景（参考集合恒为空）派生默认模式写入，
+        // 与面板默认显示同源——否则用户全程不碰模式选择器时 draftMode 不落盘，
+        // 参考集合变化后重开面板模式解释漂移，违反 IKF93U 用户故事 15。
+        draftMode: seed?.mode ?? firstEnabledVideoMode(enabledVideoFollowModes({ reference: [] })),
         ...(seed?.generateAudio != null ? { draftGenerateAudio: seed.generateAudio } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -7183,6 +7187,11 @@ export default function CanvasPage() {
       const isDraftTarget =
         ((inPlaceNode!.data ?? {}) as Record<string, unknown>).draft === true;
       const customNamed = hasCustomName(inPlaceNode);
+      // IKIPSX（IKGUXU D-01）：draftMode 兜底——草稿已保存模式优先；缺失（2026-09-13 前存量
+      // 旧草稿或异常路径）时按当前面板选中模式（initialDraft.mode）补写，保证提交后 draftMode 落盘。
+      const existingDraftMode = (inPlaceNode!.data as Record<string, unknown>).draftMode;
+      const fallbackDraftMode =
+        typeof existingDraftMode === 'string' ? undefined : initialDraft?.mode;
       patchMediaNode(inPlaceNodeId, {
         genStatus: 'generating',
         progress: 0,
@@ -7197,6 +7206,7 @@ export default function CanvasPage() {
           : {}),
         prompt: parameters.prompt,
         targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
+        ...(fallbackDraftMode != null ? { draftMode: fallbackDraftMode } : {}),
       });
     }
     const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
@@ -7238,7 +7248,9 @@ export default function CanvasPage() {
         draftRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         draftSize: 'size' in parameters ? parameters.size : 'resolution' in parameters ? parameters.resolution : undefined,
         draftDuration: 'duration' in parameters ? parameters.duration : undefined,
-        draftMode: initialDraft?.mode,
+        // IKIPSX：initialDraft.mode 缺失时不得写入 undefined——JSON.stringify 会丢键，
+        // 导致新建生成卡 draftMode 缺失；改成条件展开保证只在有值时落键。
+        ...(initialDraft?.mode != null ? { draftMode: initialDraft.mode } : {}),
         targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
@@ -11443,7 +11455,9 @@ export default function CanvasPage() {
           undefined,
           jobRefs.length > 0 ? { references: jobRefs } : undefined,
           targetNodeId,
-          undefined,
+          // IKIPSX：把当前面板选中模式（含未手动切换时的默认显示）随提交带给 startGenerationJob，
+          // 草稿已保存模式缺失时由它兜底写入 draftMode。
+          { mode: opts.mode, references: [] },
           promptDoc ?? undefined,
         );
         finishSend(submitted);
@@ -12495,6 +12509,12 @@ export default function CanvasPage() {
         if (!(await flushCanvasSave(projectId))) return;
         if (activeProjectRef.current !== projectId) return;
         const jobRefs = buildVideoJobReferences(draftRefs);
+        // IKIPSX：原位更新生成/文本索引重发不走面板，draftMode 兜底——草稿已保存模式优先；
+        // 缺失（2026-09-13 前存量旧草稿）按提交时参考集合派生默认（与面板显示同源）。
+        const fallbackMode =
+          typeof data.draftMode === 'string'
+            ? data.draftMode
+            : firstEnabledVideoMode(enabledVideoFollowModes(draftRefs));
         const submitted = startGenerationJob(
           'video',
           {
@@ -12508,7 +12528,7 @@ export default function CanvasPage() {
           undefined,
           jobRefs.length > 0 ? { references: jobRefs } : undefined,
           nodeId,
-          undefined,
+          { mode: fallbackMode, references: [] },
           promptDoc,
         );
         if (submitted && videoDraftId === nodeId) {
