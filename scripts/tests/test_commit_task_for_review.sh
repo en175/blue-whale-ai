@@ -26,7 +26,11 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 run_commit() {
-  ( cd "$REPO" && HOME="$TEST_ROOT" bash scripts/commit-task-for-review.sh "$@" ) 2>&1
+  run_commit_in "$REPO" "$@"
+}
+
+run_commit_in() {
+  ( cd "$1" && HOME="$TEST_ROOT" bash scripts/commit-task-for-review.sh "${@:2}" ) 2>&1
 }
 
 mkdir -p "$REPO/scripts/lib"
@@ -93,5 +97,40 @@ out="$(run_commit -m "chore: 第三个子项")" || fail "第三次提交应当�
 [ "$(git -C "$REPO" rev-list --count "$BASE_SHA"..HEAD)" = "3" ] || fail "第三次提交后应有 3 个 commit"
 [ "$(python3 "$REPO/scripts/lib/task_metadata.py" read --worktree "$REPO" --field start_sha)" = "$BASE_SHA" ] \
   || fail "修订提交不得改变任务起点 SHA"
+
+# 子票继承后的 merge commit 属于基线，不能由受控 amend 改写。
+PARENT_SHA="$(git -C "$REPO" rev-parse HEAD)"
+CHILD="$WORKTREE_BASE/chore-child"
+git -C "$REPO" worktree add -q -b "chore/IKCHILD-保护整包继承提交" "$CHILD" "$BASE_SHA"
+git -C "$CHILD" merge -q --no-ff -m "chore: 继承父整合提交" "$PARENT_SHA"
+INHERITED_SHA="$(git -C "$CHILD" rev-parse HEAD)"
+PYTHONDONTWRITEBYTECODE=1 python3 - "$SOURCE_ROOT" "$CHILD" "$TARGET_BRANCH" "$BASE_SHA" "$INHERITED_SHA" <<'PY'
+import sys
+from pathlib import Path
+
+source, child, target, start, inherited = sys.argv[1:]
+sys.path.insert(0, str(Path(source) / "scripts/lib"))
+from task_metadata import write_task_metadata
+
+write_task_metadata(Path(child), target, start, inherited_sha=inherited)
+PY
+printf 'own\n' >"$CHILD/own.txt"
+if out="$(run_commit_in "$CHILD" --amend)"; then
+  fail "子票没有自有提交时 --amend 应当拒绝，却成功了"
+fi
+case "$out" in
+  *"尚无自己的 commit"*) ;;
+  *) fail "子票 --amend 拒绝理由错误：$out" ;;
+esac
+[ "$(git -C "$CHILD" rev-parse HEAD)" = "$INHERITED_SHA" ] || fail "拒绝时继承提交被改写"
+out="$(run_commit_in "$CHILD" -m "chore: 子票自有提交")" || fail "子票首次提交失败：$out"
+case "$out" in
+  *"父整合分支统一验证和发布"*) ;;
+  *) fail "子票提交后不应提示独立 PR：$out" ;;
+esac
+printf 'revised\n' >"$CHILD/own.txt"
+run_commit_in "$CHILD" --amend >/dev/null || fail "子票自有提交后 --amend 应当放行"
+git -C "$CHILD" merge-base --is-ancestor "$INHERITED_SHA" HEAD || fail "子票 amend 改写了继承提交"
+[ "$(git -C "$REPO" rev-parse HEAD)" = "$PARENT_SHA" ] || fail "子票提交影响了父分支"
 
 echo "PASS: commit-task-for-review.sh --amend 判据与多次提交"

@@ -140,6 +140,20 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.response(second)["status"], "UP_TO_DATE")
         self.assertEqual(self.git("rev-parse", "HEAD"), rebased_head)
 
+    def test_integration_child_rejects_all_independent_sync_actions(self) -> None:
+        metadata_path = Path(self.git("rev-parse", "--absolute-git-dir")) / "blue-whale/task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["inherited_sha"] = self.git("rev-parse", "HEAD")
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        original_head = self.git("rev-parse", "HEAD")
+
+        for action in ("sync", "rollback", "finalize"):
+            with self.subTest(action=action):
+                result = self.invoke(action, "--json")
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("整包子票不能独立", self.response(result)["detail"])
+                self.assertEqual(original_head, self.git("rev-parse", "HEAD"))
+
     def test_amend_rejects_release_head_after_zero_commit_sync(self) -> None:
         start_sha = self.git("rev-parse", "HEAD")
         release_head = self.advance_release()

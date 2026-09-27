@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from release_line_sync import SyncError, release_line_lock, sync_current_release
-from task_metadata import TaskMetadataError, write_task_metadata
+from task_metadata import TaskMetadataError, read_task_metadata, write_task_metadata
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
@@ -117,12 +117,31 @@ def derive_target(root, task_type, issue, summary):
     return base / directory
 
 
+def integration_commit(root, path):
+    if not path.is_absolute():
+        raise WorkflowError("--integration-worktree 必须是父工作树绝对路径。")
+    parent = path.resolve()
+    top = git(parent, "rev-parse", "--show-toplevel").stdout.strip()
+    if parent != Path(top).resolve():
+        raise WorkflowError("父工作树路径必须指向工作树根目录。")
+    common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    parent_common = git(parent, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    if Path(common).resolve() != Path(parent_common).resolve():
+        raise WorkflowError("父工作树与当前发布线不属于同一仓库。")
+    if git(parent, "status", "--porcelain", "--untracked-files=all").stdout.strip():
+        raise WorkflowError("父工作树不干净；请先提交或处理改动。")
+    parent_meta = read_task_metadata(parent)
+    return parent_meta["target_branch"], git(parent, "rev-parse", "HEAD").stdout.strip()
+
+
 def create_worktree(args):
     root = Path(__file__).resolve().parents[1]
     issue = args.issue if not args.no_issue else None
     summary = normalize_summary(args.summary)
     branch = build_branch(args.task_type, issue, summary)
     target = derive_target(root, args.task_type, issue, summary)
+    if args.integration_worktree and not issue:
+        raise WorkflowError("整包子票必须用 --issue 指定已核实父子关系的工单号。")
 
     if git(root, "show-ref", "--verify", "--quiet", "refs/heads/{}".format(branch), check=False).returncode == 0:
         raise WorkflowError("本地分支已存在：{}".format(branch))
@@ -130,21 +149,40 @@ def create_worktree(args):
         raise WorkflowError("目标 Work Tree 已存在：{}".format(target))
 
     with release_line_lock(root):
+        before_sync = git(root, "rev-parse", "HEAD").stdout.strip()
+        parent_target, parent_sha = (integration_commit(root, args.integration_worktree)
+                                     if args.integration_worktree else (None, None))
         synced = sync_current_release(root)
+        if parent_target and parent_target != synced["branch"]:
+            raise WorkflowError("父工作树目标发布线 {} 与当前发布线 {} 不匹配；发布线同步前 {}，同步后 {}。".format(
+                parent_target, synced["branch"], before_sync, synced["sha"]))
         target.parent.mkdir(parents=True, exist_ok=True)
         git(root, "worktree", "add", str(target), "-b", branch, synced["sha"])
         try:
-            write_task_metadata(target, synced["branch"], synced["sha"])
-        except TaskMetadataError:
-            git(root, "worktree", "remove", str(target))
-            git(root, "branch", "-d", branch)
-            raise
+            inherited_sha = None
+            if parent_sha:
+                merge = git(target, "merge", "--no-ff", "--no-edit", "-m",
+                            "chore: 继承整包父整合提交", parent_sha, check=False)
+                if merge.returncode:
+                    raise WorkflowError("整包继承合并失败：{}".format((merge.stderr or merge.stdout).strip()))
+                inherited_sha = git(target, "rev-parse", "HEAD").stdout.strip()
+            write_task_metadata(target, synced["branch"], synced["sha"], inherited_sha=inherited_sha)
+        except (WorkflowError, TaskMetadataError) as exc:
+            removed = git(root, "worktree", "remove", "--force", str(target), check=False)
+            deleted = git(root, "branch", "-D", branch, check=False) if removed.returncode == 0 else None
+            cleanup = ("已清理新建子工作树与分支" if deleted and deleted.returncode == 0
+                       else "自动清理失败；worktree: {}；branch: {}".format(
+                           removed.stderr.strip(), deleted.stderr.strip() if deleted else "未执行"))
+            raise WorkflowError("{}；{}；发布线同步前 {}，同步后 {}。".format(
+                exc, cleanup, before_sync, synced["sha"])) from exc
 
     print("✅ 发布线同步：{}".format(synced["action"]))
     print("✅ 已创建中文任务分支：{}".format(branch))
     print("✅ Work Tree：{}".format(target))
     print("✅ 目标发布线：{}".format(synced["branch"]))
     print("✅ 起点 SHA：{}".format(synced["sha"]))
+    if parent_sha:
+        print("✅ 父整合提交：{}；继承提交：{}".format(parent_sha, inherited_sha))
     print("下一步：将 Agent 工作目录切换到该 Work Tree；无法切换时在该目录开启新会话。")
 
 
@@ -157,6 +195,8 @@ def parse_start_args(argv):
     issue_group.add_argument("--issue", help="Gitee 工单号，例如 IK094T")
     issue_group.add_argument("--no-issue", action="store_true", help="明确声明本任务没有工单")
     parser.add_argument("--summary", required=True, help="6–15 字中文动宾简述")
+    parser.add_argument("--integration-worktree", type=Path,
+                        help="整包子票的父整合任务工作树绝对路径；先核实 Gitee 父子工单关系")
     return parser.parse_args(argv)
 
 

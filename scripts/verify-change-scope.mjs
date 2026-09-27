@@ -89,15 +89,17 @@ function currentScope({ baseRef, risk, stage }) {
   const head = git("rev-parse", "HEAD");
   const metadata = taskBaseline();
   const startSha = metadata.start_sha;
-  if (baseRef && git("rev-parse", "--verify", `${baseRef}^{commit}`) !== startSha) {
-    throw new Error(`显式基线 ${baseRef} 与任务起点 ${startSha} 不一致`);
+  const ownBaseSha = metadata.inherited_sha ?? startSha;
+  if (baseRef && git("rev-parse", "--verify", `${baseRef}^{commit}`) !== ownBaseSha) {
+    const label = metadata.inherited_sha ? "任务继承提交" : "任务起点";
+    throw new Error(`显式基线 ${baseRef} 与${label} ${ownBaseSha} 不一致`);
   }
   const targetBranch = metadata.target_branch;
   const targetSha = remoteTargetSha(targetBranch);
-  const base = gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
+  const base = metadata.inherited_sha ?? (gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
     gitSucceeds("merge-base", "--is-ancestor", targetSha, head)
     ? targetSha
-    : startSha;
+    : startSha);
   const changedFiles = git("diff", "--name-only", "-z", `${base}...${head}`)
     .split("\0")
     .filter(Boolean)

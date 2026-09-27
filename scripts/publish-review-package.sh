@@ -185,6 +185,9 @@ fi
 case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/*：$TARGET_BRANCH" ;; esac
 start_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field start_sha)" \
   || fail_status 12 TASK_BASE_INVALID "任务起点或目标发布线与元数据不符。"
+inherited_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field inherited_sha)" \
+  || fail_status 12 TASK_BASE_INVALID "任务继承提交元数据无效。"
+[ -z "$inherited_sha" ] || fail_status 12 INTEGRATION_CHILD_NO_PR "整包子票不能独立发布 PR；请由父整合分支统一发布。"
 
 if ! fetch_detail="$(git -C "$ROOT" fetch origin "$TARGET_BRANCH" 2>&1)"; then
   fail_status 7 REMOTE_READ_FAILED "无法读取 origin/${TARGET_BRANCH}；可按规则最多重试两次。" detail "$fetch_detail"
