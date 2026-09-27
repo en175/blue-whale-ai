@@ -269,6 +269,10 @@ test("classifies skill Markdown as documentation (docs) at completion and PR sta
     tier: "docs",
     reasons: ["only documentation files changed"],
   });
+  assert.deepEqual(classifyChanges([".agents/skills/tdd/SKILL.md"], { stage: "pr" }), {
+    tier: "docs",
+    reasons: ["only documentation files changed"],
+  });
 });
 
 test("classifies known Node source changes as scoped verification", async () => {
@@ -337,6 +341,7 @@ test("treats skill agents metadata as documentation at both stages", async () =>
   for (const file of [
     ".claude/skills/ask-matt/agents/openai.yaml",
     ".zcode/skills/pr/agents/openai.yaml",
+    ".agents/skills/pr/agents/openai.yaml",
   ]) {
     assert.deepEqual(classifyChanges([file]), { tier: "docs", reasons: ["only documentation files changed"] });
     assert.deepEqual(classifyChanges([file], { stage: "pr" }), { tier: "docs", reasons: ["only documentation files changed"] });
@@ -520,7 +525,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_sync_release_line",
       "scripts.tests.test_cleanup_task_worktree",
       "scripts.tests.test_implement_spec_child_merge",
-      "scripts.tests.test_sync_implement_spec_skill",
+      "scripts.tests.test_project_skills",
       "scripts.tests.test_release_task_workflow",
     ],
   ]);
@@ -547,7 +552,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_sync_release_line",
       "scripts.tests.test_cleanup_task_worktree",
       "scripts.tests.test_implement_spec_child_merge",
-      "scripts.tests.test_sync_implement_spec_skill",
+      "scripts.tests.test_project_skills",
       "scripts.tests.test_release_task_workflow",
     ],
     ["pnpm", "verify"],
@@ -700,7 +705,7 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "scripts.tests.test_sync_release_line",
         "scripts.tests.test_cleanup_task_worktree",
         "scripts.tests.test_implement_spec_child_merge",
-        "scripts.tests.test_sync_implement_spec_skill",
+        "scripts.tests.test_project_skills",
         "scripts.tests.test_release_task_workflow",
       ],
     ],
@@ -1618,11 +1623,9 @@ test("rejects an unknown verification stage on the command line", () => {
 test("skill assets select their real checks at both stages", async () => {
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
   const files = [
-    ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
-    ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
-    ".zcode/skills/wizard/template.sh",
-    ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
-    ".claude/skills/wizard/template.sh",
+    ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+    ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+    ".agents/skills/wizard/template.sh",
     "tests/skill-assets.test.mjs",
   ];
   for (const stage of ["completion", "pr"]) {
@@ -1635,9 +1638,7 @@ test("skill assets select their real checks at both stages", async () => {
         ["bash", files[0]],
         ["node", "--check", files[1]],
         ["bash", "-n", files[2]],
-        ["node", "--check", files[3]],
-        ["bash", "-n", files[4]],
-        ["node", "--test", files[5]],
+        ["node", "--test", files[3]],
       ]) assert.ok(commands.some(command => JSON.stringify(command) === JSON.stringify(expected)));
     }
   }
@@ -1647,15 +1648,13 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   for (const stage of ["completion", "pr"]) {
     for (const file of [
-      ".zcode/skills/wizard/unknown.sh",
-      ".zcode/skills/deploy-blue-whale-api/tests/unknown.sh",
-      ".zcode/skills/setup-ts-deep-modules/unknown.cjs",
-      ".claude/skills/wizard/unknown.sh",
-      ".claude/skills/setup-ts-deep-modules/unknown.cjs",
+      ".agents/skills/wizard/unknown.sh",
+      ".agents/skills/deploy-blue-whale-api/tests/unknown.sh",
+      ".agents/skills/setup-ts-deep-modules/unknown.cjs",
     ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
   }
   const classification = classifyChanges([
-    ".zcode/skills/wizard/template.sh", "backend/Dockerfile",
+    ".agents/skills/wizard/template.sh", "backend/Dockerfile",
   ], { stage: "pr" });
   assert.equal(classification.tier, "full");
   assert.ok(classification.areas.includes("skill-assets"));

@@ -1,4 +1,4 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 // `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
 // `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。
@@ -34,7 +34,7 @@ const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
 // web 的浏览器端验收规格与 fixture（Playwright）：题材是 web 产品行为，对应的定向验证就是 web 那套。
 // 此前 web/e2e 没有任何归类规则，提交 e2e 规格会在 PR 阶段被兜底升级为 full——与 web/scripts 那个洞同形。
 const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
-const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-contract-breaking|check-error-code-drift|check-hook-closed-loop|check-hook-contracts|cleanup-implement-spec-child|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-implement-spec-child|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-implement-spec-skill|sync-release-line|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
+const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/skills$|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-contract-breaking|check-error-code-drift|check-hook-closed-loop|check-hook-contracts|check-project-skills|cleanup-implement-spec-child|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-implement-spec-child|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-implement-spec-skill|sync-release-line|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|fix-ikij40-canvas-309-mojibake|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|run-testsite-sql|tunnel-testsite-db)\./;
 const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|server\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 // 跨进程契约源（顶层 contracts/）。**此前整棵树没有归类规则**：改 .proto 在收口阶段
@@ -44,11 +44,15 @@ const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-
 // 归 product-impact 的理由：契约是两端（TS / Java）生成代码的源头，改了它两端都要重新生成。
 const CONTRACTS_SOURCE = /^contracts\//;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
-const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
-const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
+const SKILL_SCRIPT_FILE = /^\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
+const SKILL_PACKAGE_FILE = /^\.agents\/skills\/[^/]+\/.+/;
+const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
 
-// 精确登记已同步的技能资产；未知的同目录脚本仍须单独分类。
+// 精确登记技能资产；旧路径保留删除态分类，实际验证只运行权威目录。
 const SKILL_ASSET_FILES = new Set([
+  ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+  ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".agents/skills/wizard/template.sh",
   ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
   ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".zcode/skills/wizard/template.sh",
@@ -69,7 +73,7 @@ function isTestFile(file) {
 }
 
 function hasProductImpact(file, documentationOnlyFiles) {
-  return PRODUCT_IMPACT_FILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
+  return PRODUCT_IMPACT_FILE.test(file) && !SKILL_PACKAGE_FILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
 }
 
 function sourceArea(file) {
@@ -83,6 +87,7 @@ function sourceArea(file) {
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
+  if (SKILL_PACKAGE_FILE.test(file) && !EXECUTABLE_FILE.test(file)) return "operations";
   return null;
 }
 
@@ -300,18 +305,16 @@ function appendAreaCommands(commands, areas, base) {
         "scripts.tests.test_sync_release_line",
         "scripts.tests.test_cleanup_task_worktree",
         "scripts.tests.test_implement_spec_child_merge",
-        "scripts.tests.test_sync_implement_spec_skill",
+        "scripts.tests.test_project_skills",
         "scripts.tests.test_release_task_workflow",
       ],
     );
   }
   if (areas.includes("skill-assets")) {
     commands.push(
-      ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
-      ["bash", "-n", ".zcode/skills/wizard/template.sh"],
-      ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
-      ["bash", "-n", ".claude/skills/wizard/template.sh"],
-      ["node", "--check", ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["bash", ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
+      ["bash", "-n", ".agents/skills/wizard/template.sh"],
+      ["node", "--check", ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
       ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }

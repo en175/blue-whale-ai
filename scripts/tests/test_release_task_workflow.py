@@ -39,8 +39,10 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             actor = root / "actor"
             command("git", "init", "--bare", "--initial-branch=master", origin, cwd=root)
             command("git", "init", "--initial-branch=master", main, cwd=root)
-            for directory in ("scripts", "tests", "docs/agents", ".claude/skills", ".zcode/skills", ".superpowers/skills"):
+            for directory in ("scripts", "tests", "docs/agents", ".agents/skills", ".superpowers/skills"):
                 shutil.copytree(SOURCE / directory, main / directory)
+            (main / ".claude").mkdir()
+            (main / ".claude/skills").symlink_to("../.agents/skills", target_is_directory=True)
             for filename in ("CLAUDE.md", "AGENTS.md", "package.json"):
                 shutil.copy2(SOURCE / filename, main / filename)
             (main / ".gitee").mkdir()
