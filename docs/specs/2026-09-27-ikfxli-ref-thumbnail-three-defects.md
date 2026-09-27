@@ -28,7 +28,7 @@ IKFXLI（集成容器，本 PR）
 | --- | --- | --- | --- |
 | 问题 3（中高）@ 按钮插入落在文本末尾 | IKIQ88 | ImageDialog/BottomDialog 的 @ 回调调用 insertRefAtPending 未传 atCurrentSelection，永远兜底追加末尾；音频面板 AudioPromptEditor 为正确先例 | 子单验收标准 6 条，含 prompt-ref 集成测试覆盖「有光标原位插入 / 无光标追加末尾」 |
 | 问题 2（低–中）预览浮层拖拽/滚动不关闭 | IKIQ89 | 预览关闭唯一路径是 handleMouseLeave，HTML5 拖拽开始后浏览器不再派发鼠标事件；strip-dnd 拖拽状态机未与预览状态联动 | 子单验收标准 6 条，含 RefThumbnail 组件级测试覆盖「拖拽开始关闭」「滚动关闭」 |
-| 问题 1（低）两位数圆钮未加宽 | IKIQ8B | .badge 水平 padding 过小，「10」仅比一位数宽 1–2px | 子单验收标准 4 条；视觉不在单测断言像素，留浏览器复测 TC_REF_DEF_004 |
+| 问题 1（低）两位数圆钮未加宽 | IKIQ8B | .badge 水平 padding 过小，「10」仅比一位数宽 1–2px | 子单验收标准 4 条；视觉不在单测断言像素，留浏览器复测 TC_REF_DEF_004（复测须显式确认第 1–9 号圆钮保持正圆：0 5px padding 下一位数宽度取决于字体渲染，存在失圆风险） |
 
 ## 范围边界
 

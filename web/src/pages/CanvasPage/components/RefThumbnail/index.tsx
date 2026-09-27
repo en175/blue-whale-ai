@@ -33,7 +33,7 @@ export interface RefThumbnailProps {
   onLocate?: () => void;
   /** × 立即删除（走调用方「断开引用、保留来源」链路，无确认弹窗）；缺省不渲染 × */
   onRemove?: () => void;
-  /** @ 插入提示词（调用方复用 insertRefAtPending 记忆光标路径）；缺省不渲染 @ */
+  /** @ 插入提示词（调用方走 insertRefAtPending：记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落）；缺省不渲染 @ */
   onInsertRef?: () => void;
   /** 音频预览时长（秒） */
   audioDuration?: number;
@@ -209,7 +209,8 @@ export function RefThumbnail({
 
   // IKIQ89：参考栏滚动使缩略图移出指针下方时，浏览器不重算 hover、不派发 mouseleave，
   // 监听捕获阶段 scroll 按指针命中判定；文本浮层移入阅读（指针在浮层上）不误关（IKFCX4 不回退）。
-  // 关闭走 handleMouseLeave 同一路径：媒体立即关，文本保留延迟窗；关闭逻辑只依赖稳定 setter 与 ref
+  // 打开计时（200ms）期间的滚动不在监听内，挂载时先补一次命中判定，避免浮层在已滚走的锚点上弹出；
+  // 关闭走 handleMouseLeave 同一路径：媒体立即关，文本保留延迟窗；闭包只依赖稳定 setter、ref 与挂载期恒定的 interactivePreview
   useEffect(() => {
     if (!previewOpen) return;
     const handleScroll = () => {
@@ -222,6 +223,7 @@ export function RefThumbnail({
       if (interactivePreview && floating && containsPoint(floating, pointer)) return;
       handleMouseLeave();
     };
+    handleScroll();
     window.addEventListener('scroll', handleScroll, true);
     return () => window.removeEventListener('scroll', handleScroll, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps

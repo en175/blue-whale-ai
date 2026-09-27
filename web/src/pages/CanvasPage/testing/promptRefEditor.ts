@@ -60,9 +60,11 @@ export async function collapseCaretAt(editor: ReturnType<typeof promptRefEditorI
   await act(async () => {
     editor.update(() => {
       const text = $getRoot().getFirstDescendant();
+      // 前置条件：编辑器已有文本（先调 typePromptRefText 写入），否则报可读错误而非 TypeError
+      if (!text) throw new Error('collapseCaretAt 需要编辑器已有文本节点（先调 typePromptRefText）');
       const sel = $createRangeSelection();
-      sel.anchor.set(text!.getKey(), offset, 'text');
-      sel.focus.set(text!.getKey(), offset, 'text');
+      sel.anchor.set(text.getKey(), offset, 'text');
+      sel.focus.set(text.getKey(), offset, 'text');
       $setSelection(sel);
     }, { tag: SKIP_DOM_SELECTION_TAG });
   });

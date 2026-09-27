@@ -506,4 +506,16 @@ describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
     expect(preview(), '缩略图与浮层均离开指针下方后延迟关闭').toBeNull();
     restore.mockRestore();
   });
+
+  it('打开计时期间缩略图滚出指针下方：到点不弹出浮层（挂载即命中判定）', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });
+    // 滚动发生在 200ms 打开计时窗口内：该窗口没有 scroll 监听，挂载时的命中判定是唯一收口点
+    const restore = mockRects(new Map([[thumb(), { left: 240, top: 12, width: 64, height: 64 }]]));
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    expect(preview(), '锚点已滚出指针下方仍滞留浮层').toBeNull();
+    restore.mockRestore();
+  });
 });
