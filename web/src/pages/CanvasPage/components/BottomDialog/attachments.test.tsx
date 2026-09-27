@@ -230,14 +230,14 @@ describe('IKFCKQ 文本附件进参考栏', () => {
     });
     expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="dock-text-ref"] button[title="移除"]')).toBeNull();
-    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="插入引用"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="插入引用（追加到正文末尾）"]')).toBeNull();
   });
 
   it('缩略图 @ 按钮走 insertRefAtPending 记忆光标路径（text_ref 身份）', async () => {
     await renderDialog({
       attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }],
     });
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="插入引用（追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
     expect(editorPendingCalls).toEqual([{ kind: 'text_ref', id: 't1' }]);
   });

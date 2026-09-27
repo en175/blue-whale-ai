@@ -423,6 +423,20 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
     await typePromptRefRaw(mountNode, '尾巴');
     expect(readPromptRefText(mountNode)).toBe('AB图片1尾巴');
   });
+
+  it('IKIPWW insertTitle 覆盖 @ 按钮 hover 与读屏提示（追加末尾面板预知落点）；缺省「插入引用」由上方台架用例覆盖', async () => {
+    await renderSingle({
+      kind: 'image',
+      url: 'https://x/a.png',
+      name: '角色图',
+      number: 1,
+      onInsertRef: () => {},
+      insertTitle: '插入引用（追加到正文末尾）',
+    });
+    const atBtn = mountNode.querySelector<HTMLButtonElement>('button[title="插入引用（追加到正文末尾）"]')!;
+    expect(atBtn).toBeTruthy();
+    expect(atBtn.getAttribute('aria-label')).toBe('插入引用（追加到正文末尾） 角色图');
+  });
 });
 
 describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {

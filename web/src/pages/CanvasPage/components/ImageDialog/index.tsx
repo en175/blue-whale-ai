@@ -796,6 +796,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     onLocate={r.textNodeId != null && onLocateTextSource ? () => onLocateTextSource(r.textNodeId!) : undefined}
                     onRemove={!readOnly && r.textNodeId == null ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
                     onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
+                    insertTitle="插入引用（追加到正文末尾）"
                     dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
                 ))
@@ -808,6 +809,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     number={f.type === 'image' ? fileNumberOf.get(f.id) : undefined}
                     onRemove={!readOnly ? () => handleRemoveFile(f.id) : undefined}
                     onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
+                    insertTitle="插入引用（追加到正文末尾）"
                     dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
                 )),
@@ -826,6 +828,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     : undefined
                 }
                 onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
+                insertTitle="插入引用（追加到正文末尾）"
               />
             )))}
           </div>

@@ -803,6 +803,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         ? () => (isLibraryOnlyVideoRef(item) ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
         : undefined}
       onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
+      insertTitle="插入引用（追加到正文末尾）"
       dragProps={dragProps}
     />
   );
@@ -833,6 +834,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           : undefined
       }
       onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
+      insertTitle="插入引用（追加到正文末尾）"
       dragProps={stripDrag.itemProps(mixedStrip.index(stripIndex))}
     />
   );

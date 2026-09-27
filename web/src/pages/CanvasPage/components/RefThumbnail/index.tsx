@@ -35,6 +35,8 @@ export interface RefThumbnailProps {
   onRemove?: () => void;
   /** @ 插入提示词（调用方走 insertRefAtPending：记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落）；缺省不渲染 @ */
   onInsertRef?: () => void;
+  /** @ 按钮 hover/读屏提示：按调用方插入落点语义提供（追加末尾面板传「插入引用（追加到正文末尾）」）；缺省「插入引用」 */
+  insertTitle?: string;
   /** 音频预览时长（秒） */
   audioDuration?: number;
   /** 文本预览正文 */
@@ -134,6 +136,7 @@ export function RefThumbnail({
   onLocate,
   onRemove,
   onInsertRef,
+  insertTitle,
   audioDuration,
   textPreview,
   dragProps,
@@ -299,8 +302,8 @@ export function RefThumbnail({
         <button
           type="button"
           className={`${styles.act} ${styles.actAt}`}
-          title="插入引用"
-          aria-label={`插入引用 ${name}`}
+          title={insertTitle ?? '插入引用'}
+          aria-label={`${insertTitle ?? '插入引用'} ${name}`}
           // 点击 @ 不让编辑器失焦（插入后光标语义依赖编辑器保持焦点）
           onMouseDown={(event) => event.preventDefault()}
           onClick={onInsertRef}
