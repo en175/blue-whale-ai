@@ -16,6 +16,9 @@ import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 // IKFA8X「卡片名称编辑、持久保存与生成保留」验收（父规格 IKFA8U A01–A18、A23）：
@@ -52,7 +55,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService, MaterialService, AssetService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -68,6 +71,10 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
         { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
+        // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析
+        // 本地素材绑定；无输入素材的建单路径只建门不发起上游调用。
+        { provide: MaterialService, useValue: new MaterialService(prisma) },
+        { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       ],
     })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
@@ -523,6 +530,209 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await vite.close();
     }
   }, 180_000);
+
+  // IKIQ2E（父决策 IKIQ2D「生成中允许改名」分支）：生成进行中当刻执行改名这个动作本身，
+  // 此前只在「改名前置已完成」的终态断言里被间接覆盖。这里把改名动作落到 genStatus='generating'
+  // 当刻，走与 A14–A16 同一条接缝：真实浏览器 → 真实业务 API → 隔离 MySQL → 刷新恢复。
+  it.runIf(process.env.IKFA8X_BROWSER)("browser: 生成进行中改名覆盖编辑入口、终态保留、引用同步与刷新恢复（IKIQ2E）", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKIQ2E generating rename")).id;
+    const assetA = await createAsset(projectId, "image", "https://example.com/gen-shared.png");
+    // d1：生成中改名主用例卡；img-a/img-b：同素材两张卡做归属隔离对照；d2：引用 d1 的草稿卡
+    const initialNodes = [
+      mediaNode("img-a", "image", "上传图.png", assetA, 0, { mime: "image/png" }),
+      mediaNode("img-b", "image", "上传图.png", assetA, 380, { mime: "image/png" }),
+      imageDraftNode("d1", "图片草稿", 760),
+      imageDraftNode("d2", "引用方草稿", 1140),
+    ];
+    const initialEdges = [{ id: "e-d1-d2", source: "d1", target: "d2" }];
+    expect((await saveCanvas(projectId, initialNodes, initialEdges, "missing")).status).toBe(200);
+
+    const vite = await createVite({
+      root: `${process.cwd()}/web`,
+      server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base }, "/agent": { target: base } } },
+    });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+
+      const d1Card = page.locator('[data-id="d1"]');
+      await d1Card.locator('[data-testid="media-title"]').waitFor();
+      const titleOf = (id: string) => page.locator(`[data-id="${id}"] [data-testid="media-title"]`);
+      const nameInputOf = (id: string) => titleOf(id).locator("input");
+      const nameSpanOf = (id: string) => titleOf(id).locator("span").first();
+
+      const promptEditor = () => page.locator('[contenteditable="true"]').first();
+      async function fillPrompt(text: string) {
+        const editor = promptEditor();
+        await editor.click();
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.press("Backspace");
+        await page.waitForTimeout(150);
+        await editor.pressSequentially(text, { delay: 30 });
+      }
+      /** 双击名称进入原位编辑并填值（不提交，交给各段决定回车 / Esc） */
+      async function startRename(id: string, value: string) {
+        await nameSpanOf(id).dblclick();
+        await nameInputOf(id).waitFor();
+        await nameInputOf(id).fill(value);
+      }
+      /** 双击 → 回车保存，等自动保存把名称与 customName 标记落进隔离库 */
+      async function rename(id: string, value: string) {
+        await startRename(id, value);
+        await nameInputOf(id).press("Enter");
+        await vi.waitFor(async () => {
+          const node = await canvasNode(projectId, id);
+          expect(node?.data.fileName).toBe(value);
+          expect(node?.data.customName, "改名后须显式标记 customName，不靠名称内容推断").toBe(true);
+        }, { timeout: 10_000 });
+      }
+      /** 发送一次生成并等任务落库，返回任务号。
+       *  草稿卡与有生成记录的成品卡同路径：点卡即自动打开其生成面板（IKDMQU），发送后原卡承接任务。
+       *  生成终态由直接改库驱动，任务停在 processing 期间卡片稳定处于生成中。 */
+      async function sendDraft(id: string, prompt: string) {
+        await page.locator(`[data-id="${id}"] [data-testid="media-content"]`).click();
+        await promptEditor().waitFor();
+        await page.getByText("IKFA8X Test", { exact: true }).waitFor();
+        await fillPrompt(prompt);
+        await page.locator('button[title="发送"]').click();
+        await vi.waitFor(async () => {
+          const job = await readJob(await latestJobId(projectId));
+          expect(job!.input.target_node_id, "任务落在目标卡上").toBe(id);
+          expect(job!.input.prompt).toBe(prompt);
+        }, { timeout: 10_000 });
+        return latestJobId(projectId);
+      }
+
+      // 生成中编辑入口：草稿卡进入生成中后双击仍进原位编辑，回车落库，画布不放大
+      const firstJobId = await sendDraft("d1", "画一只蓝鲸");
+      expect(await nameSpanOf("d1").textContent(), "未自定义草稿生成中沿用自动占位名").toContain("图片生成中");
+      const zoomBefore = await page.locator(".react-flow__viewport").getAttribute("style");
+      await rename("d1", "生成中起的名");
+      expect(await page.locator(".react-flow__viewport").getAttribute("style"), "生成中双击改名不触发画布缩放").toBe(zoomBefore);
+      expect(await nameSpanOf("d1").textContent(), "改名当刻不被自动名回写").toContain("生成中起的名");
+      const nodeWhileGenerating = await canvasNode(projectId, "d1");
+      expect(nodeWhileGenerating?.id, "原位生成保持同一卡身份").toBe("d1");
+      expect(nodeWhileGenerating?.data.genStatus, "改名当刻卡片确在生成中").toBe("generating");
+
+      // Esc 取消：编辑内容丢弃，随后真实失焦不提交已取消内容
+      await startRename("d1", "被放弃的名字");
+      await nameInputOf("d1").press("Escape");
+      await vi.waitFor(async () => expect(await nameInputOf("d1").count()).toBe(0));
+      expect(await nameSpanOf("d1").textContent()).toContain("生成中起的名");
+      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click(); // 触发真实失焦
+      await page.waitForTimeout(1200); // 越过 800ms 自动保存窗口
+      expect((await canvasNode(projectId, "d1"))?.data.fileName, "Esc 取消后失焦不提交").toBe("生成中起的名");
+
+      // 成功回填：生成中改的名不被自动名覆盖
+      await succeedJob(projectId, firstJobId, "https://example.com/ikiq2e-out-1.png");
+      await vi.waitFor(async () => {
+        const node = await canvasNode(projectId, "d1");
+        expect(node?.data.src).toBe("https://example.com/ikiq2e-out-1.png");
+        expect(node?.data.fileName, "成功回填保留生成中改的名").toBe("生成中起的名");
+        expect(node?.data.customName).toBe(true);
+        expect(node?.data.draft).toBeUndefined();
+      }, { timeout: 15_000 });
+      expect(await nameSpanOf("d1").textContent()).toContain("生成中起的名");
+
+      // 失败重试：重新生成进入生成中后再改名，失败态与重试后的成功回填都保留
+      const regenJobId = await sendDraft("d1", "换成深海");
+      await rename("d1", "重试前改的名");
+      await failJob(regenJobId);
+      await d1Card.locator('[data-testid="fail-overlay"]').waitFor({ timeout: 15_000 });
+      expect(await nameSpanOf("d1").textContent(), "失败态保留生成中改的名").toContain("重试前改的名");
+      await d1Card.locator('[data-testid="fail-overlay"] button', { hasText: "重试" }).click();
+      const retryJobId = await (async () => {
+        await vi.waitFor(async () => expect(await latestJobId(projectId)).not.toBe(regenJobId), { timeout: 10_000 });
+        return latestJobId(projectId);
+      })();
+      expect(await nameSpanOf("d1").textContent(), "重试生成中保留名称").toContain("重试前改的名");
+      await succeedJob(projectId, retryJobId, "https://example.com/ikiq2e-out-2.png");
+      await vi.waitFor(async () => {
+        const node = await canvasNode(projectId, "d1");
+        expect(node?.data.src).toBe("https://example.com/ikiq2e-out-2.png");
+        expect(node?.data.fileName, "重试成功回填保留名称与自定义状态").toBe("重试前改的名");
+        expect(node?.data.customName).toBe(true);
+      }, { timeout: 15_000 });
+
+      // 成品卡重新生成中改名：重新生成成功后不被自动名覆盖
+      const regen2JobId = await sendDraft("d1", "第三次重画");
+      await rename("d1", "成品重生成中改的名");
+      await succeedJob(projectId, regen2JobId, "https://example.com/ikiq2e-out-3.png");
+      await vi.waitFor(async () => {
+        const node = await canvasNode(projectId, "d1");
+        expect(node?.data.src).toBe("https://example.com/ikiq2e-out-3.png");
+        expect(node?.data.fileName, "成品卡重新生成成功保留改名").toBe("成品重生成中改的名");
+        expect(node?.data.customName).toBe(true);
+      }, { timeout: 15_000 });
+
+      // 归属隔离：改的是与 img-b 同素材的 img-a，img-b 名称与自定义状态、素材库资产行都不被联动
+      const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      await rename("img-a", "只改这张");
+      expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("只改这张");
+      expect((await canvasNode(projectId, "img-b"))?.data.fileName, "同素材另一张卡名称不被联动").toBe("上传图.png");
+      expect((await canvasNode(projectId, "img-b"))?.data.customName, "同素材另一张卡自定义状态不被联动").toBeUndefined();
+      const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      expect(assetRowAfter?.gmt_modified, "素材库资产行不被改名触碰").toEqual(assetRowBefore?.gmt_modified);
+
+      // 生成中改名的卡仍是被 d2 引用的那张：连线与引用身份不变，生成结束后参考显示同步新名称
+      const regen3JobId = await sendDraft("d1", "第四次重画");
+      const beforeRename = (await canvasNode(projectId, "d1"))!;
+      await rename("d1", "被引用的生成中卡");
+      // 生成中改名不扰动连线与卡片身份。
+      // 注：生成中的卡片按 mediaRefs 口径不能作为参考（mediaRefs.ts「生成中的卡片不能作为参考」），
+      // 所以参考显示同步只能在生成结束后观察；此处先钉住改名当刻连线与身份不变。
+      const edgePairs = async () => {
+        const canvas = await getCanvas(projectId);
+        return (JSON.parse(canvas.edges) as Array<{ source: string; target: string }>)
+          .map((e) => `${e.source}->${e.target}`).sort();
+      };
+      const referencedWhileGenerating = await canvasNode(projectId, "d1");
+      expect(await edgePairs(), "生成中改名不改变连线").toEqual(["d1->d2"]);
+      expect(referencedWhileGenerating?.id, "生成中改名后仍是同一节点").toBe("d1");
+      expect(referencedWhileGenerating?.data.src, "生成中改名不改变素材地址").toBe(beforeRename.data.src);
+      expect(referencedWhileGenerating?.data.assetId, "生成中改名不改变素材绑定").toBe(beforeRename.data.assetId);
+
+      await succeedJob(projectId, regen3JobId, "https://example.com/ikiq2e-out-4.png");
+      await vi.waitFor(async () => {
+        expect((await canvasNode(projectId, "d1"))?.data.src).toBe("https://example.com/ikiq2e-out-4.png");
+      }, { timeout: 15_000 });
+
+      // 参考显示同步当前名称：改名是在生成中做的，此处读回的是它落库后的结果
+      await page.locator('[data-id="d2"] [data-testid="media-content"]').click();
+      await promptEditor().waitFor();
+      const dockRefNames = () => page.locator('[data-testid="dock-media-ref"] img').evaluateAll(
+        (imgs) => imgs.map((img) => img.getAttribute("alt")),
+      );
+      await vi.waitFor(async () => {
+        expect(await dockRefNames(), "参考显示同步生成中改的名").toEqual(["被引用的生成中卡"]);
+      }, { timeout: 10_000 });
+      expect(await edgePairs(), "参考显示更新不改变连线").toEqual(["d1->d2"]);
+      const referencedNode = await canvasNode(projectId, "d1");
+      expect(referencedNode?.id, "引用对象仍是同一节点").toBe("d1");
+      // 本轮重新生成成功后卡片指向新产物资产是预期行为；「改名不改素材绑定」由上方生成中
+      // 当刻的 assetId 断言承担，此处回读引用已跟随到本轮产物。
+      expect(referencedNode?.data.assetId, "参考跟随本轮新产物资产").not.toBe(beforeRename.data.assetId);
+
+      // 刷新恢复：名称与「用户自定义过」状态同时从真实保存链路恢复
+      await page.reload();
+      await d1Card.waitFor();
+      expect(await nameSpanOf("d1").textContent(), "刷新后恢复生成中改的名").toContain("被引用的生成中卡");
+      const reloadedNode = await canvasNode(projectId, "d1");
+      expect(reloadedNode?.data.customName, "刷新后自定义状态随名称一起恢复").toBe(true);
+
+      await page.screenshot({ path: "/tmp/ikiq2e-generating-rename.png", fullPage: true });
+    } finally {
+      await browser.close();
+      await vite.close();
+    }
+  }, 300_000);
 
   it.runIf(process.env.IKFA8X_BROWSER)("browser: 保存失败沿用现有反馈，不把本地变化误报为已落库（A18）", async () => {
     const { chromium } = await import("playwright");
