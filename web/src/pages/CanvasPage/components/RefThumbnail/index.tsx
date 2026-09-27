@@ -48,10 +48,10 @@ export interface RefThumbnailProps {
   className?: string;
 }
 
-/** @ 按钮 hover/读屏提示文案（IKIQGU）：先落「正文 @ 添加新素材」记下的插入点；
- *  无记忆点的常见路径差异——图片/视频面板追加到正文末尾，音频面板插入到当前光标处（RefThumbnail 缺省「插入引用」） */
-export const INSERT_REF_APPEND_TITLE = '插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）';
-export const INSERT_REF_AT_SELECTION_TITLE = '插入引用（优先插入上次 @ 的位置，否则插入到当前光标处）';
+/** @ 按钮 hover/读屏提示文案（IKIQGU）：与 insertRefAtPending 三级回落一致——「正文 @ 添加新素材」记下的插入点 →
+ *  当前光标 → 正文末尾；IKIQ88 后三面板落点相同，两常量文案一致（RefThumbnail 缺省「插入引用」） */
+export const INSERT_REF_APPEND_TITLE = '插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）';
+export const INSERT_REF_AT_SELECTION_TITLE = '插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）';
 
 /** 悬停满 200ms 才浮出预览；媒体移出立即消失（close 0ms，规格不引入关闭延迟） */
 const PREVIEW_OPEN_DELAY = 200;

@@ -646,7 +646,7 @@ describe('IKFCKN 文本附件进参考栏', () => {
   it('点击文本缩略图 @ 按钮与手动 @ 选择产出同一种标签：无记忆光标追加末尾、绑定 text_ref', async () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A], attachments: [ATT_A, ATT_B] });
     await typePromptRefRaw(container, '让');
-    const atBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')];
+    const atBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')];
     expect(atBtns).toHaveLength(2);
     await act(async () => {
       atBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -688,7 +688,7 @@ describe('IKFCKN 文本附件进参考栏', () => {
     await renderDialog({ attachments: [ATT_A], draftStatus: 'generating' });
     expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="dock-text-ref"] button[title="移除"]')).toBeNull();
-    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')).toBeNull();
   });
 });
 
@@ -749,7 +749,7 @@ describe('IKFCKK 附件条三态集成', () => {
   it('点击 @ 按钮与手动 @ 选择产出同一种素材标签：无记忆光标追加末尾、光标落在标签后', async () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
     await typePromptRefRaw(container, '让');
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
@@ -770,7 +770,7 @@ describe('IKFCKK 附件条三态集成', () => {
     await renderDialog({ mediaRefs: [REF_A], draftStatus: 'generating' });
     expect(container.querySelector('[data-testid="dock-media-ref"] img')).toBeTruthy();
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
-    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')).toBeNull();
   });
 
   it('IKFXOR Esc 取消 @ 菜单：菜单关闭、焦点回编辑器、光标落 @ 后可继续打字', async () => {
