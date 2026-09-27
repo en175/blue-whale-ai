@@ -261,6 +261,7 @@ export {
   type CreateRechargeOrderInput,
   type RechargeOrderListFilter,
   type RechargeOrderPage,
+  type AbandonedGrants,
 } from "./recharge-order-repo.js";
 export {
   createRechargeCustomConfigRepo,

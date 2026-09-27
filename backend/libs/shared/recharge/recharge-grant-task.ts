@@ -29,7 +29,12 @@
  * ============================================ */
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { createLogger, type Logger } from "@lib/core/logging";
-import { GRANT_SWEEP_BATCH_SIZE, type GrantSweepResult } from "./recharge-grant-sweeper.js";
+import {
+  GRANT_RETRY_WINDOW_MS,
+  GRANT_STALE_AFTER_MS,
+  GRANT_SWEEP_BATCH_SIZE,
+  type GrantSweepResult,
+} from "./recharge-grant-sweeper.js";
 import type { RechargeService } from "./recharge.service.js";
 
 /** 扫描间隔：默认 5 分钟。 */
@@ -48,6 +53,14 @@ export const DEFAULT_GRANT_SWEEP_INITIAL_DELAY_MS = 60 * 1000;
 export const DEFAULT_GRANT_SWEEP_BATCH_SIZE = GRANT_SWEEP_BATCH_SIZE;
 
 /**
+ * 重试窗口：从「钱到账的时刻」起算，最多重试这么久（默认 2 小时，值取自扫描器）。
+ *
+ * <p>⚠️ 分布式的部署里这个上限必须**小于**「运维会去看一次告警」的周期才有意义 ——
+ * 超窗的单不再自动重试，只靠一条 WARN 与心跳里的 `abandoned` 计数说话。
+ */
+export const DEFAULT_GRANT_RETRY_WINDOW_MS = GRANT_RETRY_WINDOW_MS;
+
+/**
  * 总开关（默认开）。关掉后**没有其他东西会去补发**：网关重投窗口早已过去，
  * 用户不轮询就没人管 —— 关它是在主动放弃「没人看也能自愈」这条保证。
  */
@@ -57,6 +70,30 @@ export const DEFAULT_GRANT_SWEEP_ENABLED = true;
 function readPositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * 读重试窗口（毫秒）。它比「正整数」多一条约束：**必须大于 `GRANT_STALE_AFTER_MS`**。
+ *
+ * <p>窗口不比判定阈值长的话，「够格重试」（早于 30 分钟）与「已超窗」（早于窗口起点）
+ * 两个条件的**交集为空** —— 一轮都不会重试，而任务看上去完全正常（心跳在打、日志没有报错）。
+ * 这正是本模块最怕的那种故障形态，所以这种取值一律退回默认值，并**吵一声**。
+ *
+ * <p>仍然**不拒启**：兜底任务不该因为配错一个数字把整个后端拦在启动之外
+ * （与 `readPositiveInt` 同一条）。
+ */
+function readRetryWindowMs(raw: string | undefined, logger: Logger): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (Number.isFinite(parsed) && parsed > GRANT_STALE_AFTER_MS) return parsed;
+  // 空串等于「没配」，那是正常路径，不吵
+  if (raw !== undefined && raw.trim() !== "") {
+    logger.warn(
+      `主动对账重试窗口配置非法（RECHARGE_GRANT_RETRY_WINDOW_MS=${raw}）：`
+        + `必须大于判定阈值 ${GRANT_STALE_AFTER_MS} 毫秒，否则一轮都不会重试；`
+        + `已退回默认值 ${DEFAULT_GRANT_RETRY_WINDOW_MS} 毫秒`,
+    );
+  }
+  return DEFAULT_GRANT_RETRY_WINDOW_MS;
 }
 
 /** 读一个布尔环境变量：只有显式的 `false` / `0` 关，其余（含未配置）都是开。 */
@@ -85,6 +122,7 @@ export class RechargeGrantReconcileTask implements OnModuleInit, OnModuleDestroy
   private readonly intervalMs: number;
   private readonly initialDelayMs: number;
   private readonly batchSize: number;
+  private readonly retryWindowMs: number;
 
   constructor(private readonly recharge: RechargeService) {
     this.enabled = readBool(
@@ -102,6 +140,10 @@ export class RechargeGrantReconcileTask implements OnModuleInit, OnModuleDestroy
     this.batchSize = readPositiveInt(
       process.env.RECHARGE_GRANT_SWEEP_BATCH_SIZE,
       DEFAULT_GRANT_SWEEP_BATCH_SIZE,
+    );
+    this.retryWindowMs = readRetryWindowMs(
+      process.env.RECHARGE_GRANT_RETRY_WINDOW_MS,
+      this.logger,
     );
   }
 
@@ -124,7 +166,8 @@ export class RechargeGrantReconcileTask implements OnModuleInit, OnModuleDestroy
     this.startTimer.unref?.();
     this.logger.info(
       `主动对账已启动：首次 ${Math.round(this.initialDelayMs / 1000)} 秒后、`
-        + `此后每 ${Math.round(this.intervalMs / 1000)} 秒一轮，每轮最多 ${this.batchSize} 笔`,
+        + `此后每 ${Math.round(this.intervalMs / 1000)} 秒一轮，每轮最多 ${this.batchSize} 笔，`
+        + `重试窗口 ${Math.round(this.retryWindowMs / 60_000)} 分钟（超窗只报不再试）`,
     );
   }
 
@@ -165,7 +208,11 @@ export class RechargeGrantReconcileTask implements OnModuleInit, OnModuleDestroy
    */
   async sweepOnce(): Promise<GrantSweepResult | null> {
     try {
-      return await this.recharge.sweepStaleGrants({ batchSize: this.batchSize, claimMs: this.intervalMs });
+      return await this.recharge.sweepStaleGrants({
+        batchSize: this.batchSize,
+        claimMs: this.intervalMs,
+        retryWindowMs: this.retryWindowMs,
+      });
     } catch (error) {
       this.logger.error(
         `主动对账本轮失败（本轮未处理任何订单，${Math.round(this.intervalMs / 1000)} 秒后重试）：`

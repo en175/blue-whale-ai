@@ -47,20 +47,49 @@ export function makePrisma() {
     return true;
   };
 
-  /** 一条列条件：等值 / `null` / `not` / `notIn` / `in` / `lt`。 */
+  /**
+   * 一条列条件：等值 / `null` / `not` / `notIn` / `in` / `lt` / `lte` / `gte` / `gt`。
+   *
+   * <p>⚠️ 一个条件对象里可以**同时有多个操作符**（主动对账的重试窗口就是一个
+   * `{ gte, lt }` 区间）。早期版本按 if/else 只认第一个，于是「窗口的上界写没写」
+   * 在桩里根本测不出来 —— 漏掉 `gte` 的分支会让「早于窗口起点的单不该被重试」
+   * 这一条断言变成恒真。所以这里逐个判、且**认不出任何操作符时返回 false**
+   * （与 Prisma 一样是「不匹配」，而不是「不匹配也算匹配」）。
+   */
   const matchesValue = (current: unknown, cond: unknown): boolean => {
     if (cond === null) return current === null || current === undefined;
     if (cond !== null && typeof cond === "object") {
       const c = cond as Row;
-      if ("not" in c) return current !== c.not;
-      // notIn / in 比的是**状态字符串**（BigInt 列不进这两支），故按 String 统一
-      if ("notIn" in c) return !(c.notIn as unknown[]).includes(String(current));
-      if ("in" in c) return (c.in as unknown[]).map(String).includes(String(current));
-      if ("lt" in c) {
-        const at = current as Date | null | undefined;
-        return at instanceof Date && at.getTime() < (c.lt as Date).getTime();
+      const at = () => (current as Date | null | undefined)?.getTime() ?? null;
+      let recognized = false;
+      if ("not" in c) {
+        recognized = true;
+        if (current === c.not) return false;
       }
-      return false;
+      // notIn / in 比的是**状态字符串**（BigInt 列不进这两支），故按 String 统一
+      if ("notIn" in c) {
+        recognized = true;
+        if ((c.notIn as unknown[]).includes(String(current))) return false;
+      }
+      if ("in" in c) {
+        recognized = true;
+        if (!(c.in as unknown[]).map(String).includes(String(current))) return false;
+      }
+      // 时间比较：current 不是 Date（含 NULL 列）一律不匹配 —— 与 SQL 里
+      // `NULL < x` 为 UNKNOWN 的语义对齐，也让「存量单的 paid_pending_at 为空」
+      // 必须走它自己那条 OR 分支（退回 gmt_create）
+      for (const [op, cmp] of [
+        ["lt", (a: number, b: number) => a < b],
+        ["lte", (a: number, b: number) => a <= b],
+        ["gte", (a: number, b: number) => a >= b],
+        ["gt", (a: number, b: number) => a > b],
+      ] as const) {
+        if (!(op in c)) continue;
+        recognized = true;
+        const lhs = at();
+        if (lhs === null || !cmp(lhs, (c[op] as Date).getTime())) return false;
+      }
+      return recognized;
     }
     return current === cond;
   };
@@ -129,6 +158,9 @@ export function makePrisma() {
         orderBy?: Row[];
         take?: number;
       }) => select({ where, ...(orderBy ? { orderBy } : {}), ...(take !== undefined ? { take } : {}) }),
+      // 主动对账的「已超窗单数」用真 count（样本再多也只是样本，条数是另一个数）
+      count: async ({ where }: { where: Row }) =>
+        [...orders.values()].filter((row) => matches(row, where)).length,
       updateMany: async ({ where, data }: { where: Row; data: Row }) => {
         const hits = [...orders.values()].filter((row) => matches(row, where));
         for (const row of hits) apply(row, data);
@@ -321,6 +353,8 @@ export async function makeService() {
     orders,
     settings,
     statusWrites,
+    /** 假 Prisma 本体：测「某条查询自己挂了」这类路径时要能把它桩坏 */
+    prisma,
     /** 覆盖自定义充值配置的某一列（模拟运营在后台改了配置） */
     setCustomConfig: (patch: Row) => {
       customConfig.set(1, { ...(customConfig.get(1) ?? defaultCustomConfigRow()), ...patch });

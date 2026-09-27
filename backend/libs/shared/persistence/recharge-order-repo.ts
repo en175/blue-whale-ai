@@ -198,6 +198,24 @@ export interface RechargeOrderPage {
   total: number;
 }
 
+/**
+ * 超出重试窗口的单：**不再自动重试**，但必须**看得见**。
+ *
+ * <p>没有 `total` 就只剩「WARN 里提了两笔」——那两个样本回答不了「还有多少钱在等人」，
+ * 而后者才是决定要不要立刻拉人处理的那个数。
+ */
+export interface AbandonedGrants {
+  /**
+   * 超出重试窗口的单数（全部，不是样本数）。
+   *
+   * <p>⚠️ 调用方（扫描器）在**统计查询自己失败**时会用 -1 顶替它：0 是「确实没有超窗单」
+   * 这个正面结论，拿它顶替「没查出来」会把坏掉的统计伪装成「钱都好好的」。
+   */
+  total: number;
+  /** 抽样（最多 sampleLimit 笔，最旧的在前）：WARN 里给人看的那几笔 */
+  samples: RechargeOrderView[];
+}
+
 export interface RechargeOrderRepo {
   create(input: CreateRechargeOrderInput): Promise<RechargeOrderView>;
   getByTradeNo(tradeNo: string): Promise<RechargeOrderView | null>;
@@ -211,13 +229,36 @@ export interface RechargeOrderRepo {
    */
   findActivePending(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
   /**
-   * 主动对账的取数：状态是「钱到了、积分没发完」（`paid_pending` / `grant_failed`）
-   * 且**进入该状态**已超过 `cutoff` 的订单，最旧的在前。
+   * 主动对账的取数：状态是「钱到了、积分没发完」（`paid_pending` / `grant_failed`），
+   * 且**钱到的时刻**落在这个重试窗口里的订单，最旧的在前。
    *
-   * <p>`grant_failed` 也在取数范围内：那个状态是**给人看的信号**，不是终点。只扫
-   * `paid_pending` 的话，一旦被标异常就再没有任何自动重试去碰它 —— 钱收了、积分永远不发。
+   * <p>两端的语义完全不同，别把它们当成同一个 cutoff 的两次调用：
+   *   · `staleBefore` = 「已经等太久了」的**下界**（早于它才够格进这一轮，见 GRANT_STALE_AFTER_MS）；
+   *   · `windowStart` = 「不再重试」的**上界**（早于它的单已经超窗，见 `listGrantsPastRetryWindow`）。
+   *   两个条件必须落在**同一个时刻表达式**上（`paid_pending_at`，为空时退回 `gmt_create`）——
+   *   一个钉 `paid_pending_at`、另一个钉 `gmt_create`，存量单会掉进两段口径中间的缝里。
+   *
+   * <p>上界写进 SQL、而不是取回来再在内存里过滤：取数按最旧优先且带 `LIMIT`，超窗的单只会
+   * 越来越旧，会**永远占着队头**，把窗口内更该重试的单挤出这一轮。积压之后的表现是
+   * 「任务在跑、日志也正常，就是再没有单被补发过」——那种故障没有任何一条日志指向它。
    */
-  listUnsettledBefore(cutoff: Date, limit: number): Promise<RechargeOrderView[]>;
+  listGrantsToRetry(
+    window: { staleBefore: Date; windowStart: Date },
+    limit: number,
+  ): Promise<RechargeOrderView[]>;
+  /**
+   * 已经**超出重试窗口**的同类单：条数 + 抽样（给 WARN 用）。
+   *
+   * <p>这些单不再自动重试（钱收了、积分发不出去，且已经过了我们承诺的自动兜底时长），
+   * 但它们**必须可见**：没有任何一个状态叫「放弃」，所以库里的行看起来只是「卡住」，
+   * 不主动报出来就等于这笔钱「悄悄地没人管了」。
+   *
+   * <p>`total` 是全部笔数（不是样本数）：它是「还有多少笔钱在等人处理」的唯一读数。
+   */
+  listGrantsPastRetryWindow(
+    windowStart: Date,
+    sampleLimit: number,
+  ): Promise<AbandonedGrants>;
   /**
    * 绑定网关订单号与收银台链接。该号已被别的订单占用（或本单已绑过别的号）时返回 false。
    *
@@ -395,18 +436,20 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return row ? toView(row) : null;
     },
 
-    async listUnsettledBefore(cutoff, limit) {
+    async listGrantsToRetry({ staleBefore, windowStart }, limit) {
       const rows = await prisma.recharge_orders.findMany({
         where: {
           is_delete: 0,
           status: {
             in: [RECHARGE_ORDER_STATUS.paidPending, RECHARGE_ORDER_STATUS.grantFailed],
           },
+          // 上下界都钉在「钱到的时刻」这**一个**表达式上（paid_pending_at 为空退回下单时刻，
+          // 理由见下方注释）：一端在 paid_pending_at、另一端在 gmt_create 会让存量单落到缝里。
           OR: [
-            { paid_pending_at: { lt: cutoff } },
+            { paid_pending_at: { gte: windowStart, lt: staleBefore } },
             // 本列上线前进入 paid_pending 的存量单没有那个时刻，退回按**下单时刻**判：
             // 对它更宽松（下单后 30 分钟就够格），好过永远扫不到
-            { paid_pending_at: null, gmt_create: { lt: cutoff } },
+            { paid_pending_at: null, gmt_create: { gte: windowStart, lt: staleBefore } },
           ],
         },
         // 最旧的先处理：它们等得最久，也最可能是真的卡住了
@@ -414,6 +457,31 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         take: limit,
       });
       return rows.map(toView);
+    },
+
+    async listGrantsPastRetryWindow(windowStart, sampleLimit) {
+      const where = {
+        is_delete: 0,
+        status: {
+          in: [RECHARGE_ORDER_STATUS.paidPending, RECHARGE_ORDER_STATUS.grantFailed],
+        },
+        // 与 listGrantsToRetry 的**下界**互补：那边是 `gte windowStart`，这边是 `lt windowStart`。
+        // 两边必须同时改，否则会出现「既在扫描范围、又被报成已超窗」的双重身份。
+        OR: [
+          { paid_pending_at: { lt: windowStart } },
+          { paid_pending_at: null, gmt_create: { lt: windowStart } },
+        ],
+      };
+      const [total, rows] = await Promise.all([
+        prisma.recharge_orders.count({ where }),
+        prisma.recharge_orders.findMany({
+          where,
+          // 抽样取**最旧的**：它们已经等得最久、最该先被人看
+          orderBy: [{ gmt_create: "asc" }, { id: "asc" }],
+          take: sampleLimit,
+        }),
+      ]);
+      return { total, samples: rows.map(toView) };
     },
 
     async bindGatewayOrder(tradeNo, gateway) {

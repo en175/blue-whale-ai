@@ -743,6 +743,11 @@ export class RechargeService {
     batchSize?: number;
     /** 抢名额的间隔（毫秒）：多副本下同一个单多久之内只由一个副本碰 */
     claimMs: number;
+    /**
+     * 重试窗口（毫秒）：从「钱到账的时刻」起算，超窗的单不再重试（只为可见性统计）。
+     * 不传取扫描器的默认值（2 小时）。规则全文见 `recharge-grant-sweeper.ts`。
+     */
+    retryWindowMs?: number;
   }): Promise<GrantSweepResult> {
     // 惰性构造：扫描器要 repo，而 repo 依赖 Prisma 客户端（构造期拿不到）
     this.sweeperInstance ??= createGrantSweeper({
