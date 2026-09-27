@@ -42,6 +42,46 @@
   color: #ccc;
 }
 
+/* ---- 购买方式切换（固定积分卡 / 自定义充值）---- */
+/* 分段控件：底槽 + 选中项高亮。不用下划线——深色底上那条线的分辨率太差 */
+.modeTabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 4px;
+  margin: 16px 0 0;
+  padding: 4px;
+  background-color: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+}
+
+.modeTab {
+  padding: 8px 18px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: #aaa;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.modeTab:hover:not(:disabled) {
+  color: #fff;
+}
+
+.modeTab:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.modeTabActive {
+  background-color: #1e2a4a;
+  color: #fff;
+  box-shadow: 0 0 0 1px #3e63c4 inset;
+}
+
 /* ---- 套餐卡片 ---- */
 .planRow {
   display: grid;

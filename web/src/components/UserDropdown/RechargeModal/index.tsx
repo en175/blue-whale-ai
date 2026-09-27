@@ -1,21 +1,29 @@
 /* ============================================
- * RechargeModal 积分充值弹窗：档位选择 / 扫码支付 / 轮询到账 / 充值协议
+ * RechargeModal 积分充值弹窗：档位选择 / 自定义充值 / 扫码支付 / 轮询到账 / 充值协议
  * 拉起档位 → 创建订单 → 渲染真实收银台二维码 → 轮询支付结果
  *
  * ⚠️ 只有一个支付渠道（杭州银行聚合主扫）：二维码指向银行统一收银台，
  *    微信/支付宝/云闪付由**用户在银行页面上自选**，我们这边没有渠道可切。
+ *
+ * ⚠️ 两种购买方式（固定积分卡 / 自定义充值）**共用同一条支付链路**：
+ *    下单 → 出码 → 轮询 → 到账。切换只换「买什么」，不换「怎么付」——
+ *    所以它们不各写一套二维码与轮询。
  * ============================================ */
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 import Modal from '@/components/Modal';
+import CustomRecharge from '@/components/CustomRecharge';
 import styles from './index.module.css';
 import { fetchCredits } from '@/api/auth';
 import {
+  createCustomRechargeOrder,
   createRechargeOrder,
+  fetchRechargeCustomConfig,
   fetchRechargeOrderStatus,
   fetchRechargeTierCatalog,
+  type RechargeCustomConfig,
   type RechargeOrder,
   type RechargeTierCatalog,
 } from '@/api/recharge';
@@ -25,11 +33,34 @@ interface RechargeModalProps {
   onClose: () => void;
 }
 
-/** 套餐权益 */
-const PERKS = ['积分即时到账', '积分永久有效', '支持全部模型调用'];
+/**
+ * 套餐权益。
+ *
+ * ⚠️ 这里**刻意不写有效期**：充值本金的策略是 billing 的 `GrantPolicy` 按来源
+ *    （`purchased`）给的 **2 年**（自支付成功起算），与「是不是买了加赠档」无关，
+ *    也没有按档位不同的差别 —— 它是整页一条口径，写在卡片上会变成重复三遍的同一条。
+ *    原先那句「积分永久有效」是旧策略留下的假话，已删。
+ */
+const PERKS = ['积分即时到账', '支持全部模型调用'];
+
+/**
+ * 充值到账积分的有效期（＝ billing `GrantPolicy` 对 `source = purchased` 的策略）。
+ *
+ * <p>写死在文案里是**有意的**：这条策略不由本仓决定，用户也不该看到「2 年」随某个
+ * 接口抖动。它变了（PRD §9.5 改口径）就得连着这句文案一起改 —— 这与「档位到账积分」
+ * 那种**后台可配**的值不同，那个必须从接口读。
+ */
+const CREDITS_VALIDITY_TEXT = '积分自到账起 2 年内有效';
 
 /** 支付流程状态：idle 未下单 / creating 下单中 / waiting 待支付 / paid / expired / failed */
 type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
+
+/**
+ * 购买方式：`tier` 固定积分卡（默认，保持原有形态）/ `custom` 自定义充值（PRD §7.2）。
+ *
+ * <p>默认落在固定积分卡：它是有明确档位的推荐路径，自定义是「量不够用」时的补充。
+ */
+type Mode = 'tier' | 'custom';
 
 /** 静态站托管的充值协议，跨域打开以免被 SPA catch-all 打回首页。 */
 const RECHARGE_AGREEMENT_HREF =
@@ -80,6 +111,19 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
+  /** 当前购买方式（固定积分卡 / 自定义充值） */
+  const [mode, setMode] = useState<Mode>('tier');
+  /**
+   * 自定义充值的后台配置；`null` = 还没拿到（或拉失败）。
+   *
+   * <p>⚠️ 本弹窗只拿它判**入口是否存在**（`enabled`），并把同一份**注入**给面板 ——
+   * 面板不再自己拉一次，否则「入口按 A 显示、面板按 B 渲染」迟早出现。
+   */
+  const [customConfig, setCustomConfig] = useState<RechargeCustomConfig | null>(null);
+  /** 自定义充值下单中：防重复提交（PRD §7.5），由面板的按钮呈现 */
+  const [customSubmitting, setCustomSubmitting] = useState(false);
+  /** 自定义充值下单失败：展示在面板里（与 orderError 一样，就地、不弹 toast） */
+  const [customError, setCustomError] = useState('');
 
   /** 可用余额（billing 账本的整数积分）；未拉取到为 null，显示 -- */
   const credits = useAuthStore((s) => s.credits);
@@ -90,8 +134,22 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   /** 仅 order 成功后出右侧支付码；下单中不出「正在创建订单…」 */
   const showQrPanel =
     phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
+  /**
+   * 一次性订单是否还允许切换购买方式。
+   *
+   * <p>`waiting` 期间**锁住**：两个方式各自下单会同时存在两张待付订单，用户付哪张都
+   * 只算一张，「我付了怎么没到账」十有八九是这么来的。与档位卡片在支付中被锁住同一条规矩。
+   */
+  const locked = paying;
+  /** 后台开了自定义充值才给这个入口（拉不到配置一律当没开） */
+  const customAvailable = customConfig?.enabled === true;
+  /** 当前展示的是自定义充值面板（配置在手才是真能买的状态） */
+  const showCustomPanel = mode === 'custom' && customConfig !== null;
 
   // 打开弹窗拉取档位目录（按 sort_order 升序；服务端顺序不做承诺，客户端定一次）
+  // ⚠️ 回包里那条 `credits_per_yuan`（定价目录的**消费锚点**）保留在 state 里但**不展示**：
+  //    档位到账积分是后台配的，与它不成比例（见下方 unitHint 处的说明）。删掉它就得改
+  //    这个接口的返回形状，而它是有用的契约信息，留着但不渲染是代价最小的做法。
   useEffect(() => {
     let alive = true;
     fetchRechargeTierCatalog()
@@ -113,7 +171,24 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, []);
 
+  // 自定义充值配置：只用来判「有没有这个入口」，以及把同一份配置注入给面板。
+  // ⚠️ 拉不到 / 后台关掉（enabled=false）就不出现入口 —— 一个点开是空白的页签
+  //    比没有页签更糟。这与面板「拉不到配置就整块不渲染」是同一条处置。
+  useEffect(() => {
+    let alive = true;
+    fetchRechargeCustomConfig()
+      .then((data) => {
+        if (alive) setCustomConfig(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // 待支付态轮询订单状态（立即一次 + 每 3s），直到落成 paid / expired / failed
+  // ⚠️ `paid_pending`（钱到了、积分还没发）**不是终态**，刻意不在这里分支：
+  //    后端会重试发放，界面继续显示「等待支付结果…」才是对的（提前报成功等于骗用户）。
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
     let alive = true;
@@ -155,6 +230,31 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       });
   };
 
+  /**
+   * 自定义充值点「购买」：面板只交出**修正过的积分数**（价格由服务端重新算）。
+   *
+   * <p>⚠️ 这里只传 `credits`，不传价格 —— 前端那个价是展示值（PRD §7.5）。
+   *    下单成功后与档位单走完全相同的二维码面板与轮询。
+   */
+  const handleCustomConfirm = (customCredits: number) => {
+    if (paying) return;
+    setCustomError('');
+    setOrderError('');
+    setCustomSubmitting(true);
+    setPhase('creating');
+    createCustomRechargeOrder(customCredits)
+      .then((o) => {
+        setOrder(o);
+        setPhase('waiting');
+      })
+      .catch((e) => {
+        // 服务端对不在格点上的值会拒绝（它不替用户改数），文案原样展示
+        setCustomError(e instanceof Error ? e.message : '创建订单失败');
+        setPhase('idle');
+      })
+      .finally(() => setCustomSubmitting(false));
+  };
+
   /** 关闭弹窗。
    *  ⚠️ 不撤单：支付网关侧没有关单接口，本地订单自然过期（撤单只会是个骗人的空壳）。
    *  waiting 态下用户可能刚扫完码付掉，补拉一次余额，免得关掉弹窗后顶栏还是旧值。 */
@@ -189,100 +289,158 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         {/* 左侧主区域 */}
         <div className={styles.main}>
           <h2 className={styles.title}>积分充值</h2>
-          <p className={styles.subtitle}>请选择充值套餐</p>
-          {/* 换算率来自 billing 定价目录（运营可调），不能写死成常量 */}
-          {catalog && (
-            <p className={styles.unitHint}>
-              1 元 = {catalog.credits_per_yuan} 积分 · 充值到账后长期有效
-            </p>
-          )}
+          <p className={styles.subtitle}>
+            {customAvailable ? '请选择充值方式' : '请选择充值套餐'}
+          </p>
 
-          {/* 套餐卡片（真实档位） */}
-          {tiersLoading ? (
-            <div className={styles.emptyHint}>档位加载中…</div>
-          ) : tiersError ? (
-            <div className={styles.emptyHint}>{tiersError}</div>
-          ) : (
-            <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
-              {tiers.map((t) => {
-                const discount = fmtDiscount(t.discount);
-                return (
-                  <button
-                    key={t.id}
-                    className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''}`}
-                    onClick={() => {
-                      if (!paying) setSelectedId(t.id);
-                    }}
-                  >
-                    {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
-                    {t.id === selectedId && (
-                      <span className={styles.selectedBadge}>
-                        <Check size={12} strokeWidth={3} />
-                        已选
-                      </span>
-                    )}
-                    <span className={styles.planTitle}>{t.amount.toLocaleString()} 积分</span>
-                    <span className={styles.planPriceRow}>
-                      <span className={styles.planPrice}>¥{fmtPrice(t.price)}</span>
-                      {discount && <span className={styles.discountTag}>{discount}</span>}
-                    </span>
-                    {t.original_price != null && (
-                      <span className={styles.planOriginal}>
-                        原价 ¥{fmtPrice(t.original_price)}
-                      </span>
-                    )}
-                    <div className={styles.perkList}>
-                      {PERKS.map((perk) => (
-                        <span key={perk} className={styles.perkItem}>
-                          <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
-                          {perk}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 底部结算栏 */}
-          <div className={styles.bottomBar}>
-            {!selected ? (
-              <div className={styles.barLeft}>
-                <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
-                <span className={styles.emptyHintText}>请先选择上方套餐</span>
-              </div>
-            ) : (
-              <div className={styles.barLeft}>
-                <span className={styles.balance}>
-                  {credits === null ? '--' : credits.toLocaleString()} 积分
-                </span>
-                <span className={styles.selectedInfo}>
-                  {selected.amount.toLocaleString()} 积分&nbsp;&nbsp;¥
-                  {fmtPrice(selected.price)}
-                </span>
-                {selected.original_price != null && (
-                  <span className={styles.barOriginal}>
-                    ¥{fmtPrice(selected.original_price)}
-                  </span>
-                )}
-                {fmtDiscount(selected.discount) && (
-                  <span className={styles.barDiscount}>{fmtDiscount(selected.discount)}</span>
-                )}
-                {orderError && <span className={styles.barError}>{orderError}</span>}
-              </div>
-            )}
-            <div className={styles.barRight}>
-              {/* 确认支付（未选套餐时禁用）。渠道没法选：银行收银台统一收单 */}
+          {/* 购买方式切换：固定积分卡（默认）/ 自定义充值。
+              ⚠️ 两者**共用**右侧二维码与轮询那一条链路，切换只决定「买什么」，
+                 所以这里没有第二套支付 UI。支付进行中锁住，避免同时开出两张待付订单。
+              ⚠️ 后台关掉自定义充值时整个切换器都不渲染：只剩一种方式，「选方式」是废话。 */}
+          {customAvailable && (
+            <div className={styles.modeTabs} role="tablist" aria-label="充值方式">
               <button
-                className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
-                onClick={handleConfirm}
-                disabled={!selected || paying || phase === 'paid'}
+                type="button"
+                role="tab"
+                aria-selected={mode === 'tier'}
+                disabled={locked}
+                className={`${styles.modeTab} ${mode === 'tier' ? styles.modeTabActive : ''}`}
+                onClick={() => setMode('tier')}
               >
-                {confirmLabel}
+                固定积分卡
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'custom'}
+                disabled={locked}
+                className={`${styles.modeTab} ${mode === 'custom' ? styles.modeTabActive : ''}`}
+                onClick={() => setMode('custom')}
+              >
+                自定义充值
               </button>
             </div>
-          </div>
+          )}
+
+          {!showCustomPanel ? (
+            <>
+              {/*
+                ⚠️ 这里**不再**写「1 元 = N 积分」。
+                那条换算率是定价目录里的**消费锚点**（生成任务按它计价），而档位到账积分
+                2026-09-27 起是后台按活动配的**配置值**（PRD §6.1 的 6 档都高于该比例，
+                如 ¥499 到账 7,500 而 499 × 15 = 7,485）。摆在卡片上方只会让人拿它去核算，
+                一遇到有折扣的档位就像「少给了」。现在统一说「以各档位标注为准」。
+              */}
+              <p className={styles.unitHint}>
+                到账积分以各档位标注为准 · {CREDITS_VALIDITY_TEXT}
+              </p>
+
+              {/* 套餐卡片（真实档位） */}
+              {tiersLoading ? (
+                <div className={styles.emptyHint}>档位加载中…</div>
+              ) : tiersError ? (
+                <div className={styles.emptyHint}>{tiersError}</div>
+              ) : (
+                <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
+                  {tiers.map((t) => {
+                    const discount = fmtDiscount(t.discount);
+                    return (
+                      <button
+                        key={t.id}
+                        className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''}`}
+                        onClick={() => {
+                          if (!paying) setSelectedId(t.id);
+                        }}
+                      >
+                        {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
+                        {t.id === selectedId && (
+                          <span className={styles.selectedBadge}>
+                            <Check size={12} strokeWidth={3} />
+                            已选
+                          </span>
+                        )}
+                        <span className={styles.planTitle}>{t.amount.toLocaleString()} 积分</span>
+                        <span className={styles.planPriceRow}>
+                          <span className={styles.planPrice}>¥{fmtPrice(t.price)}</span>
+                          {discount && <span className={styles.discountTag}>{discount}</span>}
+                        </span>
+                        {t.original_price != null && (
+                          <span className={styles.planOriginal}>
+                            原价 ¥{fmtPrice(t.original_price)}
+                          </span>
+                        )}
+                        <div className={styles.perkList}>
+                          {PERKS.map((perk) => (
+                            <span key={perk} className={styles.perkItem}>
+                              <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
+                              {perk}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            /*
+              自定义充值面板（PRD §7.2「与固定积分卡并列展示」）。
+              它自带「买多少 / 多少钱」与购买按钮，所以这一支下**不渲染底部结算栏** ——
+              两处各写一次价格，用户会怀疑哪个是真的。
+
+              ⚠️ 不传 onRequireLogin：本弹窗的入口（用户菜单、生成前余额拦截）都在登录态之后，
+                 `can_purchase === null`（游客）走不到这里。将来若放开游客入口，必须在这里接上
+                 登录弹窗，别让它变成一个点了没反应的「登录后购买」。
+            */
+            <CustomRecharge
+              config={customConfig}
+              onConfirm={handleCustomConfirm}
+              submitting={customSubmitting}
+              error={customError}
+            />
+          )}
+
+          {/* 底部结算栏（仅固定积分卡）：自定义充值面板自带价格与购买按钮 */}
+          {!showCustomPanel && (
+            <div className={styles.bottomBar}>
+              {!selected ? (
+                <div className={styles.barLeft}>
+                  <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
+                  <span className={styles.emptyHintText}>请先选择上方套餐</span>
+                </div>
+              ) : (
+                <div className={styles.barLeft}>
+                  <span className={styles.balance}>
+                    {credits === null ? '--' : credits.toLocaleString()} 积分
+                  </span>
+                  <span className={styles.selectedInfo}>
+                    {selected.amount.toLocaleString()} 积分&nbsp;&nbsp;¥
+                    {fmtPrice(selected.price)}
+                  </span>
+                  {selected.original_price != null && (
+                    <span className={styles.barOriginal}>
+                      ¥{fmtPrice(selected.original_price)}
+                    </span>
+                  )}
+                  {fmtDiscount(selected.discount) && (
+                    <span className={styles.barDiscount}>{fmtDiscount(selected.discount)}</span>
+                  )}
+                  {orderError && <span className={styles.barError}>{orderError}</span>}
+                </div>
+              )}
+              <div className={styles.barRight}>
+                {/* 确认支付（未选套餐时禁用）。渠道没法选：银行收银台统一收单 */}
+                <button
+                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
+                  onClick={handleConfirm}
+                  disabled={!selected || paying || phase === 'paid'}
+                >
+                  {confirmLabel}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 右侧二维码面板：仅 order 成功后出现 */}

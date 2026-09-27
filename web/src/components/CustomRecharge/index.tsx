@@ -39,6 +39,17 @@ export interface CustomRechargeProps {
   submitting?: boolean;
   /** 下单失败的就地错误（调用方给，展示在价格旁边） */
   error?: string;
+  /**
+   * 由调用方注入的配置（可选）。
+   *
+   * <p>**为什么可以是外部给的**：嵌入方常需要先知道「这块能不能展示」才能决定要不要给出入口
+   * （后台把 `enabled` 关掉时，一个点开是空白的页签比没有页签更糟）。让两个地方各拉一次配置
+   * 会得到两个数据源，「入口按 A 显示、面板按 B 渲染」这种状态迟早会出现。
+   *
+   * <p>不传 = 组件自己拉（独立使用的默认形态，行为与从前逐字一致）。
+   * 传了则**不再自己拉** —— 调用方已经拿到了同一份。
+   */
+  config?: RechargeCustomConfig;
 }
 
 export default function CustomRecharge({
@@ -46,23 +57,30 @@ export default function CustomRecharge({
   onRequireLogin,
   submitting = false,
   error = '',
+  config: injected,
 }: CustomRechargeProps) {
-  const [config, setConfig] = useState<RechargeCustomConfig | null>(null);
+  /** 自己拉到的配置；调用方注入时恒为 null（那份优先，同一份配置不拉两遍） */
+  const [fetched, setFetched] = useState<RechargeCustomConfig | null>(null);
+  const config = injected ?? fetched;
   const [loadError, setLoadError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(injected === undefined);
   /** 当前选中的积分数（滑杆与提交都看它） */
-  const [credits, setCredits] = useState(0);
+  const [credits, setCredits] = useState(() =>
+    injected ? snapCredits(injected.default_credits, injected) : 0,
+  );
   /** 手输框里的草稿：允许用户输到一半（比如只敲了个「6」），失焦时才修正 */
   const [draft, setDraft] = useState<string | null>(null);
   /** 「已修正为 …」提示：改了什么要说出来，不做无声修正 */
   const [correction, setCorrection] = useState('');
 
   useEffect(() => {
+    // 配置由调用方注入：不再自己拉（同一份配置拉两遍 = 两个数据源）
+    if (injected !== undefined) return;
     let alive = true;
     fetchRechargeCustomConfig()
       .then((data) => {
         if (!alive) return;
-        setConfig(data);
+        setFetched(data);
         // PRD §7.6「默认值」：进入时默认展示后台配的默认积分（默认 600 = ¥40）
         setCredits(snapCredits(data.default_credits, data));
       })
@@ -75,7 +93,7 @@ export default function CustomRecharge({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [injected]);
 
   if (loading) return <div className={styles.loading}>自定义充值加载中…</div>;
   // 拉不到配置就整块不显示：拿一份编的上下限去渲染，用户会按一个不存在的规则下单

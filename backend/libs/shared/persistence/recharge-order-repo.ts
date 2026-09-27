@@ -42,13 +42,20 @@ export const RECHARGE_ORDER_STATUSES: readonly RechargeOrderStatus[] = Object.va
 );
 
 /**
- * 「钱到了」的下界：`paid_pending` 与 `paid` 都算。
+ * 「钱到了」的下界：`paid_pending`、`paid` 与 `grant_failed` 都算。
  *
  * <p>⚠️ 判「钱到没到」一律写「>= 待到账」，不要写 `= paid`：`paid_pending` 是
  * 「钱到了、积分还没发」，把它当成「没收到钱」会让一笔已付款的订单被当成新单重走一遍。
+ *
+ * <p>⚠️ `grant_failed` 也在里面（2026-09-27 主动对账落地时加）：它是 `paid_pending` 的
+ * **后继**状态 —— 钱到了、只是反复发放失败被人标了出来，钱并没有退回去。漏掉它会同时坏两件事：
+ *   · 仪表盘的**实收金额**低报（已收到的钱被算成没收到，见 `dashboard.service`）；
+ *   · 回调重投时 `markPaidPending` 会把异常单**推回** `paid_pending`，顺手刷新
+ *     `paid_pending_at`——而主动对账正是靠那一列算「持有分钟数」的。
  */
 export const PAID_REACHED_STATUSES: readonly RechargeOrderStatus[] = [
   RECHARGE_ORDER_STATUS.paidPending,
+  RECHARGE_ORDER_STATUS.grantFailed,
   RECHARGE_ORDER_STATUS.paid,
 ];
 
@@ -75,6 +82,19 @@ export interface RechargeOrderView {
   tradeNo: string;
   /** 支付网关订单号；下单应答回来前为 null */
   payOrderId: string | null;
+  /**
+   * 银行统一收银台链接（下单应答里的 `payData`，内嵌银行令牌）。
+   *
+   * <p>落在库里是为了**复用未支付订单**：用户再次点「立即支付」时把同一条链接还给他，
+   * 而不是新建一笔单、再打一次网关（PRD §7.5「服务端避免重复有效订单」）。
+   * 网关**不允许**同一个 `mchOrderNo` 再下一次单（`Uni_MchNo_MchOrderNo`，
+   * 重下会应答「商户订单[x]已存在」），所以链接只能存下来、不能事后重新要一个。
+   *
+   * <p>⚠️ null 有两种含义，判「能不能复用」时要分开（判定见 `recharge-active-order.ts`）：
+   * `payOrderId` 也为 null = 这张单**从来没拿到过**链接（下单时网关调用就失败了）；
+   * `payOrderId` 有值 = 链接本来有，只是这一列上线前没记（存量单）。
+   */
+  cashierUrl: string | null;
   userId: string;
   /**
    * 档位 ID；**自定义充值（`productType === "custom"`）为 null**。
@@ -102,6 +122,15 @@ export interface RechargeOrderView {
   grantLotId: string | null;
   notifyCount: number;
   createdAt: string;
+  /**
+   * **首次**进入「支付成功待到账」的时刻；主动对账据此算「持有分钟数」。
+   *
+   * <p>不能用 `gmt_modified` 顶替：回调到达、查单名额都会改它。也不能用 `paid_at`
+   * （那是「积分发成功」的时刻，而这里要的是「钱到的时刻」）。
+   *
+   * <p>null = 本列上线前进入该状态的存量单（那时没有这一列）。
+   */
+  paidPendingAt: string | null;
 }
 
 export interface CreateRechargeOrderInput {
@@ -150,6 +179,20 @@ export interface RechargeOrderListFilter {
   tradeNo?: string;
 }
 
+/**
+ * 找「同一用户、同一商品的活跃单」时用的商品身份。
+ *
+ * <p>`credits` 也算身份的一部分：它能分辨「同一档位在配置改过之后下的单」（到账积分变了
+ * 就是另一件商品）。`amountFen` **刻意不在**里面 —— 同一件商品在待支付期间被运营改了价，
+ * 订单行里冻结的仍是下单那一刻的价，复用就等于按原价卖，不会凭空改口。
+ */
+export interface ActiveOrderIdentity {
+  userId: number;
+  productType: string;
+  tierId: number | null;
+  credits: number;
+}
+
 export interface RechargeOrderPage {
   items: RechargeOrderView[];
   total: number;
@@ -160,8 +203,31 @@ export interface RechargeOrderRepo {
   getByTradeNo(tradeNo: string): Promise<RechargeOrderView | null>;
   /** 管理端列表（offset 分页，时间倒序）。**不供用户端使用**——用户只看得到自己那份。 */
   list(filter: RechargeOrderListFilter): Promise<RechargeOrderPage>;
-  /** 绑定网关订单号。该号已被别的订单占用（或本单已绑过别的号）时返回 false */
-  bindPayOrderId(tradeNo: string, payOrderId: string): Promise<boolean>;
+  /**
+   * 该用户这件商品**尚未支付**的那一笔（没有则 null）。
+   *
+   * <p>下单前先问它：命中就不建新单（PRD §7.5「服务端避免重复有效订单」）。只认 `pending` ——
+   * `paid_pending` / `paid` 说明钱已经收了，那是一笔已完成的交易，不是「用户点重复了」。
+   */
+  findActivePending(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
+  /**
+   * 主动对账的取数：状态是「钱到了、积分没发完」（`paid_pending` / `grant_failed`）
+   * 且**进入该状态**已超过 `cutoff` 的订单，最旧的在前。
+   *
+   * <p>`grant_failed` 也在取数范围内：那个状态是**给人看的信号**，不是终点。只扫
+   * `paid_pending` 的话，一旦被标异常就再没有任何自动重试去碰它 —— 钱收了、积分永远不发。
+   */
+  listUnsettledBefore(cutoff: Date, limit: number): Promise<RechargeOrderView[]>;
+  /**
+   * 绑定网关订单号与收银台链接。该号已被别的订单占用（或本单已绑过别的号）时返回 false。
+   *
+   * <p>两者**同一次更新写入**（网关的同一个应答里回来），所以「有没有链接」与
+   * 「有没有网关订单号」永远同真同假 —— 判「这单有没有拿到过收银台链接」靠的就是这一点。
+   */
+  bindGatewayOrder(
+    tradeNo: string,
+    gateway: { payOrderId: string; cashierUrl: string },
+  ): Promise<boolean>;
   /**
    * 标记「支付已确认、待到账」（`pending` → `paid_pending`）。**条件更新**：仅当尚未到达
    * 至少 `paid_pending` 时才改，返回是否本次改成功（并发/重投下只有一个为 true）。
@@ -171,6 +237,9 @@ export interface RechargeOrderRepo {
    *
    * <p>放行的来源不限 `pending`：`failed` / `expired` 的单收到支付成功回调时钱是真的到了，
    * 网关比我们的时钟权威，同样要能推上来。
+   *
+   * <p>⚠️ 顺带写下 `paid_pending_at`（**首次**进入该状态的时刻，主动对账靠它算持有分钟数）。
+   * 条件更新保证同一单只写一次，重投与异常单回炉都不会把它刷成「刚才」。
    */
   markPaidPending(tradeNo: string): Promise<boolean>;
   /**
@@ -182,6 +251,14 @@ export interface RechargeOrderRepo {
    * 那是一次白给的重试机会）。重复发放仍由 billing 的幂等键兜底，两层都要有。
    */
   markPaid(input: { tradeNo: string; grantLotId?: string }): Promise<boolean>;
+  /**
+   * 标记到账异常（`paid_pending` → `grant_failed`，进核验队列）。
+   * 返回**本次是否由我标记**（已是异常状态时返回 false，调用方据此决定要不要叫人）。
+   *
+   * <p>⚠️ 只从 `paid_pending` 标：`grant_failed` 的意思是「钱到了、发不出去」，
+   * 从 `pending` 标它等于把「用户还没付钱」说成到账异常。
+   */
+  markGrantFailed(tradeNo: string): Promise<boolean>;
   /** 记一次回调到达（只做可观测，不参与判定） */
   recordNotify(tradeNo: string): Promise<void>;
   /**
@@ -210,6 +287,7 @@ function toView(row: any): RechargeOrderView {
   return {
     tradeNo: row.trade_no,
     payOrderId: row.pay_order_id ?? null,
+    cashierUrl: row.cashier_url ?? null,
     userId: row.user_id.toString(),
     tierId: row.tier_id === null ? null : row.tier_id.toString(),
     amountFen: Number(row.amount_fen),
@@ -222,6 +300,9 @@ function toView(row: any): RechargeOrderView {
     grantLotId: row.grant_lot_id === null ? null : row.grant_lot_id.toString(),
     notifyCount: row.notify_count,
     createdAt: new Date(row.gmt_create).toISOString(),
+    paidPendingAt: row.paid_pending_at
+      ? new Date(row.paid_pending_at).toISOString()
+      : null,
   };
 }
 
@@ -294,13 +375,59 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return { items: rows.map(toView), total };
     },
 
-    async bindPayOrderId(tradeNo, payOrderId) {
+    async findActivePending(identity) {
+      const row = await prisma.recharge_orders.findFirst({
+        where: {
+          user_id: BigInt(identity.userId),
+          // 只认 pending：paid_pending / paid 是「钱已经收了」的已完成交易，
+          // 不是「用户点了两次」。异常单同理（它更不该被当成新单的挡板）
+          status: RECHARGE_ORDER_STATUS.pending,
+          is_delete: 0,
+          product_type: identity.productType,
+          // tier_id 传 null 时 Prisma 生成 IS NULL —— 自定义充值单正是这一支
+          tier_id: identity.tierId === null ? null : BigInt(identity.tierId),
+          credits: BigInt(identity.credits),
+        },
+        // 同一件商品理论上只会有一笔 pending，但历史数据/并发下可能有第二笔：
+        // 复用**最新**那笔（次级键 id 不是可选项：DATETIME 只到秒，同秒两笔是常态）
+        orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      });
+      return row ? toView(row) : null;
+    },
+
+    async listUnsettledBefore(cutoff, limit) {
+      const rows = await prisma.recharge_orders.findMany({
+        where: {
+          is_delete: 0,
+          status: {
+            in: [RECHARGE_ORDER_STATUS.paidPending, RECHARGE_ORDER_STATUS.grantFailed],
+          },
+          OR: [
+            { paid_pending_at: { lt: cutoff } },
+            // 本列上线前进入 paid_pending 的存量单没有那个时刻，退回按**下单时刻**判：
+            // 对它更宽松（下单后 30 分钟就够格），好过永远扫不到
+            { paid_pending_at: null, gmt_create: { lt: cutoff } },
+          ],
+        },
+        // 最旧的先处理：它们等得最久，也最可能是真的卡住了
+        orderBy: [{ gmt_create: "asc" }, { id: "asc" }],
+        take: limit,
+      });
+      return rows.map(toView);
+    },
+
+    async bindGatewayOrder(tradeNo, gateway) {
       // 条件更新：本单尚无网关订单号时才绑。更新不到行说明它已经被绑过
       // （或号被别的订单占了 → 唯一索引会拒绝，同样让 count=0，不会静默改写归属）
       try {
         const r = await prisma.recharge_orders.updateMany({
           where: { trade_no: tradeNo, pay_order_id: null },
-          data: { pay_order_id: payOrderId, gmt_modified: new Date() },
+          data: {
+            pay_order_id: gateway.payOrderId,
+            // 与订单号同一次写：两者同真同假，判「有没有拿到过链接」才有依据
+            cashier_url: gateway.cashierUrl,
+            gmt_modified: new Date(),
+          },
         });
         return r.count > 0;
       } catch {
@@ -312,9 +439,15 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       const r = await prisma.recharge_orders.updateMany({
         // `notIn: [paid_pending, paid]` = 「钱还没到」的上界判断。用 notIn 而不是
         // `status: "pending"`：失败/过期的单收到成功回调时（钱真的到了）也要能推上来。
+        //
+        // ⚠️ `grant_failed` 也在 notIn 里（它属于 PAID_REACHED_STATUSES）：异常单回炉重试时
+        // 不能被推回 paid_pending，否则下面那个「首次进入待到账的时刻」会被刷新，
+        // 主动对账的持有分钟数就永远停在几分钟、看起来一切正常
         where: { trade_no: tradeNo, status: { notIn: [...PAID_REACHED_STATUSES] } },
         data: {
           status: RECHARGE_ORDER_STATUS.paidPending,
+          // 全仓**唯一**写这一列的地方。条件更新保证同一单只写一次 = 「首次」进入该状态
+          paid_pending_at: new Date(),
           gmt_modified: new Date(),
         },
       });
@@ -341,6 +474,15 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         where: { trade_no: tradeNo },
         data: { notify_count: { increment: 1 }, gmt_modified: new Date() },
       });
+    },
+
+    async markGrantFailed(tradeNo) {
+      const r = await prisma.recharge_orders.updateMany({
+        // 只从 paid_pending 标：见接口注释（money arrived 是它的前提）
+        where: { trade_no: tradeNo, status: RECHARGE_ORDER_STATUS.paidPending },
+        data: { status: RECHARGE_ORDER_STATUS.grantFailed, gmt_modified: new Date() },
+      });
+      return r.count > 0;
     },
 
     async claimQuerySlot(tradeNo, intervalMs) {

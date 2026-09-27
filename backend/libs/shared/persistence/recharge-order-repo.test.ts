@@ -9,6 +9,7 @@ import { createRechargeOrderRepo } from "./recharge-order-repo.js";
 const ROW = {
   trade_no: "RC20260925001",
   pay_order_id: "PAY-1",
+  cashier_url: "https://test.hccb.cc/uniCashierNew.html?tokenCode=abc",
   user_id: 9001n,
   tier_id: 3n,
   amount_fen: 9900n,
@@ -18,6 +19,7 @@ const ROW = {
   product_name: "轻量尝鲜",
   status: "paid",
   paid_at: new Date("2026-09-25T00:05:00Z"),
+  paid_pending_at: new Date("2026-09-25T00:04:00Z"),
   grant_lot_id: 12n,
   notify_count: 2,
   gmt_create: new Date("2026-09-25T00:00:00Z"),
@@ -96,6 +98,9 @@ describe("createRechargeOrderRepo.list", () => {
     expect(page.items[0]).toEqual({
       tradeNo: "RC20260925001",
       payOrderId: "PAY-1",
+      // 收银台链接要投影出来：复用未支付订单时原样还给用户的那条（网关不允许重下单，
+      // 这条链接事后要不回来）
+      cashierUrl: "https://test.hccb.cc/uniCashierNew.html?tokenCode=abc",
       userId: "9001",
       tierId: "3",
       amountFen: 9900,
@@ -108,6 +113,8 @@ describe("createRechargeOrderRepo.list", () => {
       grantLotId: "12",
       notifyCount: 2,
       createdAt: "2026-09-25T00:00:00.000Z",
+      // 钱到的时刻（不是 paid_at）：主动对账靠它算「持有分钟数」
+      paidPendingAt: "2026-09-25T00:04:00.000Z",
     });
   });
 
@@ -202,13 +209,22 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
     expect(await repo.markPaidPending("RC20260926001")).toBe(true);
 
     // notIn 而不是 `= pending`：failed/expired 的单收到支付成功回调时钱是真的到了，
-    // 网关比我们的时钟权威，也要能推上来
+    // 网关比我们的时钟权威，也要能推上来。
+    //
+    // `grant_failed` 也在这个 notIn 里：那是「钱到了、只是没发成功」的异常单，
+    // 回炉重试不该把它推回 paid_pending —— 那会顺手刷新下面的 paid_pending_at，
+    // 主动对账的「持有分钟数」就永远停在几分钟、看起来一切正常
     expect(updateMany).toHaveBeenCalledWith({
       where: {
         trade_no: "RC20260926001",
-        status: { notIn: ["paid_pending", "paid"] },
+        status: { notIn: ["paid_pending", "grant_failed", "paid"] },
       },
-      data: { status: "paid_pending", gmt_modified: expect.any(Date) },
+      data: {
+        status: "paid_pending",
+        // 「首次」进入待到账的时刻，主动对账据此判「等太久了吗」
+        paid_pending_at: expect.any(Date),
+        gmt_modified: expect.any(Date),
+      },
     });
   });
 });

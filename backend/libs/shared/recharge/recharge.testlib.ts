@@ -35,36 +35,56 @@ export function makePrisma() {
   const statusWrites: string[] = [];
 
   const matches = (row: Row, where: Row): boolean => {
-    if (where.trade_no !== undefined && row.trade_no !== where.trade_no) return false;
-    const status = where.status as
-      | { not?: string; notIn?: string[] }
-      | string
-      | undefined;
-    if (typeof status === "string" && row.status !== status) return false;
-    if (status && typeof status === "object") {
-      if (status.not !== undefined && row.status === status.not) return false;
-      // notIn 也要实现：`markPaidPending` 的「钱还没到」正是靠它做的条件更新，
-      // 桩成「总是命中」等于把要测的幂等本身测没了
-      if (status.notIn !== undefined && status.notIn.includes(String(row.status))) {
-        return false;
+    for (const [key, cond] of Object.entries(where)) {
+      // OR 是「任一子句命中」：主动对账的取数（`paid_pending_at` 为空时退回 `gmt_create`）
+      // 与查单名额（`last_query_at`）都靠它，桩成恒真等于把要测的两件事都测没
+      if (key === "OR") {
+        if (!(cond as Row[]).some((clause) => matches(row, clause))) return false;
+        continue;
       }
-    }
-    if (where.pay_order_id === null && row.pay_order_id !== null) return false;
-    const or = where.OR as Row[] | undefined;
-    if (or) {
-      const ok = or.some((clause) => {
-        if (clause.last_query_at === null) return row.last_query_at === null;
-        const lt = (clause.last_query_at as { lt?: Date } | undefined)?.lt;
-        if (lt) {
-          const current = row.last_query_at as Date | null;
-          return current !== null && current.getTime() < lt.getTime();
-        }
-        return false;
-      });
-      if (!ok) return false;
+      if (!matchesValue(row[key], cond)) return false;
     }
     return true;
   };
+
+  /** 一条列条件：等值 / `null` / `not` / `notIn` / `in` / `lt`。 */
+  const matchesValue = (current: unknown, cond: unknown): boolean => {
+    if (cond === null) return current === null || current === undefined;
+    if (cond !== null && typeof cond === "object") {
+      const c = cond as Row;
+      if ("not" in c) return current !== c.not;
+      // notIn / in 比的是**状态字符串**（BigInt 列不进这两支），故按 String 统一
+      if ("notIn" in c) return !(c.notIn as unknown[]).includes(String(current));
+      if ("in" in c) return (c.in as unknown[]).map(String).includes(String(current));
+      if ("lt" in c) {
+        const at = current as Date | null | undefined;
+        return at instanceof Date && at.getTime() < (c.lt as Date).getTime();
+      }
+      return false;
+    }
+    return current === cond;
+  };
+
+  /** 取行：where + orderBy + take（充值的两条新查询要的是这个，不是「按主键取一条」）。 */
+  const select = (args: { where: Row; orderBy?: Row[]; take?: number }): Row[] => {
+    const rows = [...orders.values()].filter((row) => matches(row, args.where));
+    const orderBy = args.orderBy ?? [];
+    if (orderBy.length > 0) {
+      rows.sort((a, b) => {
+        for (const clause of orderBy) {
+          const [key, dir] = Object.entries(clause)[0] as [string, string];
+          const av = a[key];
+          const bv = b[key];
+          const at = av instanceof Date ? av.getTime() : Number(av ?? 0);
+          const bt = bv instanceof Date ? bv.getTime() : Number(bv ?? 0);
+          if (at !== bt) return dir === "desc" ? bt - at : at - bt;
+        }
+        return 0;
+      });
+    }
+    return args.take === undefined ? rows : rows.slice(0, args.take);
+  };
+
 
   const apply = (row: Row, data: Row): void => {
     for (const [key, value] of Object.entries(data)) {
@@ -83,8 +103,10 @@ export function makePrisma() {
         const row: Row = {
           id: BigInt(orders.size + 1),
           pay_order_id: null,
+          cashier_url: null,
           status: "pending",
           paid_at: null,
+          paid_pending_at: null,
           grant_lot_id: null,
           last_query_at: null,
           notify_count: 0,
@@ -96,15 +118,21 @@ export function makePrisma() {
         orders.set(String(data.trade_no), row);
         return row;
       },
-      findFirst: async ({ where }: { where: Row }) => {
-        const row = orders.get(String(where.trade_no));
-        return row && row.is_delete === 0 ? row : null;
-      },
+      findFirst: async ({ where, orderBy }: { where: Row; orderBy?: Row[] }) =>
+        select({ where, ...(orderBy ? { orderBy } : {}) })[0] ?? null,
+      findMany: async ({
+        where,
+        orderBy,
+        take,
+      }: {
+        where: Row;
+        orderBy?: Row[];
+        take?: number;
+      }) => select({ where, ...(orderBy ? { orderBy } : {}), ...(take !== undefined ? { take } : {}) }),
       updateMany: async ({ where, data }: { where: Row; data: Row }) => {
-        const row = orders.get(String((where as Row).trade_no));
-        if (!row || !matches(row, where)) return { count: 0 };
-        apply(row, data);
-        return { count: 1 };
+        const hits = [...orders.values()].filter((row) => matches(row, where));
+        for (const row of hits) apply(row, data);
+        return { count: hits.length };
       },
     },
     system_settings: {
@@ -166,6 +194,8 @@ export function makeHttp(gatewayState = 1) {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
   /** 接下来 N 次发放请求返回 500（模拟 billing 抖动），用来观测「发放失败后重投」那条路。 */
   let grantFailures = 0;
+  /** 接下来 N 次统一下单返回业务失败，用来造「落库了但没拿到收银台链接」的单。 */
+  let unifiedOrderFailures = 0;
 
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = String(url);
@@ -185,6 +215,12 @@ export function makeHttp(gatewayState = 1) {
       return json({ lotId: 42, userId: body.userId, source: "purchased", amount: body.amount });
     }
     if (target.endsWith("/api/pay/unifiedOrder")) {
+      if (unifiedOrderFailures > 0) {
+        unifiedOrderFailures -= 1;
+        // 网关业务失败（`code != 0`）→ 调用方抛 PayGatewayError。这一支用来造
+        // 「订单行落了库、但从来没拿到过收银台链接」那种单
+        return json({ code: 1, msg: "商户订单[RC...]已存在", data: null });
+      }
       return json({
         code: 0,
         msg: "SUCCESS",
@@ -215,6 +251,9 @@ export function makeHttp(gatewayState = 1) {
     },
     failNextGrants: (n: number) => {
       grantFailures = n;
+    },
+    failNextUnifiedOrders: (n: number) => {
+      unifiedOrderFailures = n;
     },
   };
 }
@@ -247,6 +286,8 @@ export const TIER = {
   updatedAt: "2026-09-01T00:00:00.000Z",
 };
 
+export type Tier = typeof TIER;
+
 export async function makeService() {
   const { prisma, orders, statusWrites, customConfig } = makePrisma();
   // 默认种一份 PRD §7.1 的配置：档位单用不到它，自定义充值单（模块 B）全靠它报价
@@ -261,11 +302,13 @@ export async function makeService() {
     },
   });
   // 档位**可变**：`config_version` 快照的是下单那一刻的 version，
-  // 所以测试要能中途把版本推上去，再看已创建订单有没有被连带改掉
-  let tier = { ...TIER };
+  // 所以测试要能中途把版本推上去，再看已创建订单有没有被连带改掉。
+  // 用 Map 而不是单个变量：下单防重要能造出「换了档位」与「同一档位改了配置」两种情形
+  const tiersById = new Map<string, Tier>();
+  tiersById.set(TIER.id, { ...TIER });
   const tiers = {
-    listActive: async () => [tier],
-    getById: async (id: string) => (id === tier.id ? tier : null),
+    listActive: async () => [...tiersById.values()],
+    getById: async (id: string) => tiersById.get(id) ?? null,
   } as unknown as TopupTierService;
   const service = new RechargeService(
     { client: prisma } as never,
@@ -282,8 +325,19 @@ export async function makeService() {
     setCustomConfig: (patch: Row) => {
       customConfig.set(1, { ...(customConfig.get(1) ?? defaultCustomConfigRow()), ...patch });
     },
+    /** 再挂一个档位（测「换了档位不该被当成重复点击」） */
+    addTier: (t: Tier) => {
+      tiersById.set(t.id, { ...t });
+    },
+    /** 覆盖某个档位的列（模拟运营改配置：到账积分、价格、状态…） */
+    setTier: (patch: Partial<Tier>, id: string = TIER.id) => {
+      const current = tiersById.get(id);
+      if (!current) throw new Error(`没有这个档位：${id}`);
+      tiersById.set(id, { ...current, ...patch });
+    },
     setTierVersion: (v: number) => {
-      tier = { ...tier, version: v };
+      const current = tiersById.get(TIER.id)!;
+      tiersById.set(TIER.id, { ...current, version: v });
     },
   };
 }

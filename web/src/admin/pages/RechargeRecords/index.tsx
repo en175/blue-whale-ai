@@ -19,6 +19,7 @@ import {
   Badge,
   Button,
   Empty,
+  Hint,
   Input,
   Page,
   PageHeader,
@@ -39,18 +40,32 @@ const fmtTime = (iso: string | null) =>
 /** 单位是**分**（后端 `amount_fen` 如此），展示才换成元。 */
 const fmtYuan = (fen: number) => `¥${(fen / 100).toFixed(2)}`;
 
+/**
+ * 六态的中文名。顺序 = 筛选下拉里的顺序（`STATUS_OPTIONS` 由它派生），
+ * 所以按「钱还没到 → 钱到了 → 出问题」排，不是按字母。
+ *
+ * ⚠️ 这两个状态必须**各有各的文案**：`STATUS_LABELS[row.status]` 取不到值时
+ * 徽标会渲染成空白 —— 而空白的恰好是「钱收到了、积分没发出去」这种
+ * 运营最需要一眼看见的单（见下方 subtitle）。
+ */
 const STATUS_LABELS: Record<AdminRechargeStatus, string> = {
   pending: '待支付',
+  paid_pending: '支付成功待到账',
   paid: '已到账',
   expired: '已过期',
   failed: '支付失败',
+  grant_failed: '到账异常',
 };
 
 const STATUS_TONES: Record<AdminRechargeStatus, BadgeTone> = {
   pending: 'warning',
+  // 钱已收、积分未发：不是错误（会自愈重试），但绝不能与「待支付」同色
+  paid_pending: 'accent',
   paid: 'success',
   expired: 'neutral',
   failed: 'danger',
+  // 需人工介入，与「支付失败」（用户没付钱，平台没损失）区分开
+  grant_failed: 'danger',
 };
 
 /** 下拉选项：`all` 是本地哨兵（不发给后端），其余逐字对应后端白名单 */
@@ -104,7 +119,25 @@ export default function RechargeRecords() {
   return (
     <Page>
       <PageHeader
-        title="充值记录"
+        title={
+          <>
+            充值记录{' '}
+            <Hint title="状态怎么读（6 态）">
+              <div>
+                <b>支付成功待到账 = 钱已经收到了，积分还没发出去。</b>
+                回调先写这个状态、再发积分，发放成功才变「已到账」；发放失败的单会停在这里并自动重试，
+                所以它不等于出错，但必须去看 —— 对用户来说这就是「付了钱没到账」。
+              </div>
+              <div>
+                <b>到账异常 = 重试也没发出去，需要人工介入。</b>
+                由对账任务写入，不会再自愈。
+              </div>
+              <div>
+                <b>「支付失败」是另一回事</b>：用户压根没付成钱，平台没有资金在途。
+              </div>
+            </Hint>
+          </>
+        }
         subtitle="全站充值订单：到账积分在下单时冻结，落库后不随换算率变动"
       />
 

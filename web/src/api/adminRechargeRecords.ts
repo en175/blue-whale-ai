@@ -8,8 +8,22 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 
-/** 与后端 `RechargeOrderStatus` 逐字一致（后端的白名单会拒绝其它值）。 */
-export type AdminRechargeStatus = 'pending' | 'paid' | 'expired' | 'failed';
+/**
+ * 与后端 `RechargeOrderStatus` **逐字一致**（后端的白名单会拒绝其它值）。
+ *
+ * ⚠️ 2026-09-26 由 4 态扩到 6 态，多出来的两个不是补漏而是**新语义**：
+ *   · `paid_pending` —— **钱收到了、积分还没发出去**（发放失败时订单停在这里）；
+ *   · `grant_failed` —— 发放反复失败，需人工介入（由对账任务写入）。
+ * 判「钱到没到」的口径是 **`paid_pending` 或 `paid`**（后端 `PAID_REACHED_STATUSES`），
+ * 不再是 `= paid`。少写一种状态不会报错，只会让那类单在筛选与列表里静默消失。
+ */
+export type AdminRechargeStatus =
+  | 'pending'
+  | 'paid_pending'
+  | 'paid'
+  | 'expired'
+  | 'failed'
+  | 'grant_failed';
 
 export interface AdminRechargeRecord {
   /** 交易单号（我们生成的，也是 billing 那边发放积分的幂等键来源） */

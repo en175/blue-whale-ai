@@ -129,11 +129,15 @@ describe("DashboardService —— 充值积分与收入金额", () => {
     vi.unstubAllGlobals();
   });
 
-  it("按**到账时刻**（paid_at）划区间；实收含 `paid_pending`、到账积分只算 `paid`", async () => {
+  it("按**到账时刻**（paid_at）划区间；实收含 `paid_pending` 与 `grant_failed`、到账积分只算 `paid`", async () => {
     // ⚠️ 这条的断言语义**变了**（2026-09-26 拆出 `paid_pending` 之后）：
     //    停在 `paid_pending` 的单**钱已经收了**（网关确认过），只是积分还没发成功 ——
     //    所以它该进「实收金额」，不该进「到账积分」。原来一条 `where: status='paid'`
     //    把两个数一起算，会把这部分收入**低报**。
+    //
+    //    2026-09-27 主动对账落地后又多了一个 `grant_failed`：它是 `paid_pending` 的**后继**
+    //    （钱到了、反复发放失败被标出来），钱并没有退回去 —— 同样该进实收。漏掉它，
+    //    「到账异常」的单就会在收入报表里凭空消失。
     grpcConsumedCredits(() => 4321n);
     const { service, rechargeGroupBy } = makeService({
       rechargeRows: [
@@ -141,6 +145,8 @@ describe("DashboardService —— 充值积分与收入金额", () => {
         { status: "paid", _sum: { credits: 5_000_000n, amount_fen: 1_000_000n } },
         // 待到账：只算钱、不算积分
         { status: "paid_pending", _sum: { credits: 700n, amount_fen: 30_000n } },
+        // 到账异常：钱收了、积分没发出去。同样是「只算钱」
+        { status: "grant_failed", _sum: { credits: 400n, amount_fen: 20_000n } },
       ],
     });
 
@@ -149,13 +155,17 @@ describe("DashboardService —— 充值积分与收入金额", () => {
     // 查询本身：区间与「≥ 待到账」的过滤都要在 SQL 里（不是取回来再筛）
     expect(rechargeGroupBy).toHaveBeenCalledWith({
       by: ["status"],
-      where: { is_delete: 0, status: { in: ["paid_pending", "paid"] }, paid_at: WINDOW },
+      where: {
+        is_delete: 0,
+        status: { in: ["paid_pending", "grant_failed", "paid"] },
+        paid_at: WINDOW,
+      },
       _sum: { credits: true, amount_fen: true },
     });
-    // 积分：只有 paid 那 5,000,000（待到账的 700 不算 —— 积分确实还没发出去）
+    // 积分：只有 paid 那 5,000,000（待到账与异常的都不算 —— 积分确实还没发出去）
     expect(stats.totalRechargeCredits).toBe(5_000_000);
-    // 金额：两笔都算（钱都收了）
-    expect(stats.totalRevenueFen).toBe(1_030_000);
+    // 金额：三笔都算（钱都收了）
+    expect(stats.totalRevenueFen).toBe(1_050_000);
   });
 
   it("区间内没有相关订单时两列都是 0（不是 NaN）", async () => {

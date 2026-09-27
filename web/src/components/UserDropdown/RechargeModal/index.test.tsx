@@ -6,8 +6,10 @@ import RechargeModal from './index';
 
 const rechargeApi = vi.hoisted(() => ({
   createRechargeOrder: vi.fn(),
+  createCustomRechargeOrder: vi.fn(),
   fetchRechargeOrderStatus: vi.fn(),
   fetchRechargeTierCatalog: vi.fn(),
+  fetchRechargeCustomConfig: vi.fn(),
 }));
 
 const authApi = vi.hoisted(() => ({ fetchCredits: vi.fn() }));
@@ -90,6 +92,24 @@ beforeEach(() => {
     amount: 10,
     points: 100,
   });
+  rechargeApi.createCustomRechargeOrder.mockResolvedValue({
+    trade_no: 'trade-custom-1',
+    qr_code_url: 'https://example.com/cashier-custom',
+    expire_time: '2026-08-28T12:00:00+08:00',
+    amount: 40,
+    points: 600,
+  });
+  rechargeApi.fetchRechargeCustomConfig.mockResolvedValue({
+    enabled: true,
+    min_credits: 600,
+    max_credits: 499_995,
+    default_credits: 600,
+    step_credits: 15,
+    credits_per_yuan: 15,
+    credits_valid_months: 24,
+    can_purchase: true,
+    denied_hint: '当前账号暂不可购买自定义充值',
+  });
   rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
     trade_no: 'trade-1',
     status: 'pending',
@@ -106,7 +126,7 @@ afterEach(async () => {
 });
 
 describe('RechargeModal', () => {
-  it('以 Portal 渲染并展示后端返回的档位与换算率', async () => {
+  it('以 Portal 渲染并展示后端返回的档位与到账规则', async () => {
     await renderRechargeModal();
     await flush();
 
@@ -114,8 +134,12 @@ describe('RechargeModal', () => {
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
 
-    // 换算率来自后端目录（不是前端写死的 10）
-    expect(document.body.textContent).toContain('1 元 = 10 积分');
+    // 到账积分只说「以各档位标注为准」：它现在是后台配置值，与定价目录那条消费锚点不成比例
+    expect(document.body.textContent).toContain('到账积分以各档位标注为准');
+    // 有效期是充值本金的真实策略（2 年），不是原来的「永久有效」那句假话
+    expect(document.body.textContent).toContain('积分自到账起 2 年内有效');
+    expect(document.body.textContent).not.toContain('永久有效');
+    expect(document.body.textContent).not.toContain('1 元 =');
     // 档位卡片：到账积分 + 实付价
     expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).toContain('¥10');
@@ -238,5 +262,96 @@ describe('RechargeModal', () => {
     );
     expect(link?.getAttribute('target')).toBe('_blank');
     expect(link?.rel.split(' ')).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+  });
+});
+
+// 自定义充值（模块 B）：与固定积分卡并列，共用同一条支付链路
+describe('RechargeModal — 自定义充值', () => {
+  /** 切到自定义充值页签并等面板把配置拉回来 */
+  async function switchToCustom() {
+    await clickButton('自定义充值');
+    await flush();
+  }
+
+  it('★ 两种方式并列：默认仍是固定积分卡，切过去才换成自定义面板', async () => {
+    await renderRechargeModal();
+    await flush();
+
+    // 默认落在固定积分卡：既有路径一个像素都不变
+    expect(document.body.textContent).toContain('100 积分');
+    expect(document.body.textContent).not.toContain('600 积分');
+
+    await switchToCustom();
+
+    // 面板按后台配置给出默认值 600 积分 / ¥40（1 元 = 15 积分）
+    expect(document.body.textContent).toContain('600 积分');
+    expect(document.body.textContent).toContain('¥40');
+    // 面板自带价格与购买按钮，此时不再渲染档位与底部结算栏（两处各写一次价格会互相打架）
+    expect(document.body.textContent).not.toContain('100 积分');
+    expect(document.body.textContent).not.toContain('确认支付');
+  });
+
+  it('★ 下单只传积分数，成功后复用同一个二维码面板与轮询', async () => {
+    await renderRechargeModal();
+    await flush();
+    await switchToCustom();
+
+    await clickButton('¥40 购买');
+    await flush();
+
+    // 传的是积分，不是价格：价格一律服务端按当前配置算
+    expect(rechargeApi.createCustomRechargeOrder).toHaveBeenCalledWith(600);
+    expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('等待支付结果...');
+    expect(document.body.textContent).toContain('获得 600 积分');
+  });
+
+  it('自定义充值下单失败：就地展示错误，不出二维码', async () => {
+    rechargeApi.createCustomRechargeOrder.mockRejectedValue(
+      new Error('积分数量须为 15 的整数倍'),
+    );
+    await renderRechargeModal();
+    await flush();
+    await switchToCustom();
+
+    await clickButton('¥40 购买');
+    await flush();
+
+    expect(document.body.textContent).toContain('积分数量须为 15 的整数倍');
+    expect(document.body.textContent).not.toContain('等待支付结果...');
+  });
+
+  it('★ 支付进行中锁住页签：不允许同时开出两张待付订单', async () => {
+    await renderRechargeModal();
+    await flush();
+    await switchToCustom();
+    await clickButton('¥40 购买');
+    await flush();
+
+    const tabs = [...document.body.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs).toHaveLength(2);
+    expect(tabs.every((tab) => tab.disabled)).toBe(true);
+  });
+
+  it('★ 后台关掉自定义充值：入口与面板都不出现（点开是空白的页签比没有更糟）', async () => {
+    rechargeApi.fetchRechargeCustomConfig.mockResolvedValue({
+      enabled: false,
+      min_credits: 600,
+      max_credits: 499_995,
+      default_credits: 600,
+      step_credits: 15,
+      credits_per_yuan: 15,
+      credits_valid_months: 24,
+      can_purchase: true,
+      denied_hint: '当前账号暂不可购买自定义充值',
+    });
+    await renderRechargeModal();
+    await flush();
+
+    // 只剩一种方式：连切换器都不渲染（「选方式」是废话）
+    expect(document.body.querySelector('[role="tab"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('自定义充值');
+    // 固定积分卡照旧
+    expect(document.body.textContent).toContain('100 积分');
   });
 });

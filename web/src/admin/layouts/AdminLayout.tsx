@@ -5,6 +5,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { NavLink, Navigate, Outlet } from 'react-router-dom';
 import {
   Layers,
+  SlidersHorizontal,
   Shield,
   LayoutDashboard,
   LayoutTemplate,
@@ -32,6 +33,7 @@ import styles from './index.module.css';
 const navItems = [
   { to: '/admin', end: true, label: '仪表盘', icon: LayoutDashboard },
   { to: '/admin/recharge-plans', end: false, label: '充值档位', icon: Layers },
+  { to: '/admin/recharge-custom-config', end: false, label: '自定义充值', icon: SlidersHorizontal },
   { to: '/admin/billing-promotions', end: false, label: '限时活动', icon: Megaphone },
   { to: '/admin/billing-member-discounts', end: false, label: '会员折扣', icon: BadgePercent },
   { to: '/admin/recharge-records', end: false, label: '充值记录', icon: Wallet },

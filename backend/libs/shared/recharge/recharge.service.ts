@@ -76,13 +76,8 @@
 import { Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger, type Logger } from "@lib/core/logging";
-import {
-  BillingAdminConfigError,
-  BillingAdminError,
-  fetchCreditsPerYuan,
-  grantCredits,
-} from "@lib/shared/billing/billing-admin-client.js";
-import { sharedBillingClient, toBillingError } from "@lib/shared/billing/billing-client.js";
+import { fetchCreditsPerYuan, grantCredits } from "@lib/shared/billing/billing-admin-client.js";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import {
   createRechargeOrderRepo,
   RECHARGE_ORDER_STATUS,
@@ -96,8 +91,11 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
 import {
-  PayGatewayError,
-  PayServerConfigError,
+  CASHIER_TOKEN_TTL_MS,
+  createActiveOrderReuse,
+} from "./recharge-active-order.js";
+import { createGrantSweeper, type GrantSweepResult } from "./recharge-grant-sweeper.js";
+import {
   PAY_IF_CODE_HCCB,
   PAY_ORDER_STATE,
   PAY_WAY_CODE_HCCB_QR,
@@ -105,15 +103,9 @@ import {
   unifiedOrder,
   verifyPaySign,
 } from "@lib/shared/pay-server/index.js";
-import {
-  SystemSettingsConfigError,
-  SystemSettingsService,
-} from "@lib/shared/system-settings/index.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { displayTierName } from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
-
-/** 银行统一收银台令牌有效期 30 分钟（实测 `tokenBegin`~`tokenEnd`）。 */
-const CASHIER_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 /**
  * 网关订单有效期 2 小时（下单不带 `expiredTime` 时网关的默认值）。
@@ -195,8 +187,10 @@ export type CreateRechargeOrderInput = CreateTierOrderInput | CreateCustomOrderI
 /**
  * 「这一单是什么、收多少钱、发多少分」—— 两种商品类型分叉的**唯一**落点，
  * 之后的落库 / 调网关 / 回调 / 到账全部共用（见文件头）。
+ *
+ * <p>导出给 `recharge-active-order.ts`（下单防重要拿商品身份去查有没有未支付单）。
  */
-interface OrderSpec {
+export interface OrderSpec {
   /** 档位 ID；自定义充值为 null（迁移 050 起列可空） */
   tierId: number | null;
   amountFen: number;
@@ -222,6 +216,8 @@ export interface RechargeOrderStateView {
 }
 
 /**
+
+/**
  * 到账积分 = 原价（元）× 换算率，四舍五入到整数积分。
  *
  * <p>⚠️ **现役代码里没有调用方，而且模块 B 落地后仍然没有**（2026-09-27）：
@@ -242,12 +238,30 @@ export function deriveCredits(originalPrice: number, creditsPerYuan: number): nu
 export class RechargeService {
   private readonly logger: Logger = createLogger("recharge");
   private repoInstance?: RechargeOrderRepo;
+  private reuseInstance?: ReturnType<typeof createActiveOrderReuse>;
+  private sweeperInstance?: ReturnType<typeof createGrantSweeper>;
 
   private get repo(): RechargeOrderRepo {
     if (!this.repoInstance) {
       this.repoInstance = createRechargeOrderRepo(this.prisma.client);
     }
     return this.repoInstance;
+  }
+
+  /**
+   * 下单防重的那一查：该用户这件商品已有未支付单时不建新单（判定见 `recharge-active-order.ts`）。
+   * 惰性构造 —— 它要 repo，而 repo 依赖 Prisma 客户端（构造期拿不到）。
+   */
+  private async reuseActiveOrder(
+    userId: number,
+    spec: OrderSpec,
+  ): Promise<RechargeOrderCreated | null> {
+    this.reuseInstance ??= createActiveOrderReuse({
+      repo: this.repo,
+      reconcile: (order) => this.reconcile(order),
+      logger: this.logger,
+    });
+    return this.reuseInstance(userId, spec);
   }
 
   constructor(
@@ -291,12 +305,18 @@ export class RechargeService {
    * <p>输入是判别式联合：带 `tierId` = 固定档位，带 `credits` = 自定义充值。
    * 用 `"tierId" in input` 而不是「先看 credits 有没有」：`tierId` 是**必填**的那一侧，
    * 拿可选字段判类型会让「两个都传」或「两个都没传」落到默认分支上。
+   *
+   * <p>⚠️ **先看有没有同商品的可复用未支付单**（PRD §7.5「服务端避免重复有效订单」）。
+   * 前端 `RechargeModal` 里那个 `if (paying) return` 只拦得住「同一个页面上的连点」——
+   * 换个入口、刷新页面、关掉弹窗再打开，请求照样到得了这里，每来一次就是一笔新单 + 一次网关调用。
    */
   async createOrder(input: CreateRechargeOrderInput): Promise<RechargeOrderCreated> {
     const spec =
       "tierId" in input
         ? await this.buildTierOrderSpec(input)
         : await this.buildCustomOrderSpec(input);
+    const reused = await this.reuseActiveOrder(input.userId, spec);
+    if (reused) return reused;
     return this.placeOrder(input.userId, spec);
   }
 
@@ -413,8 +433,12 @@ export class RechargeService {
       notifyUrl: merchant.notifyUrl,
     });
 
-    const bound = await this.repo.bindPayOrderId(tradeNo, order.payOrderId);
-    if (!bound) {
+    const bound = await this.repo.bindGatewayOrder(tradeNo, {
+      payOrderId: order.payOrderId,
+      // 链接要落库（不只是回给前端）：用户再点一次「立即支付」时复用的就是它，
+      // 而网关不允许同一个 mchOrderNo 重下一次单，想事后重新要一个是拿不到的
+      cashierUrl: order.cashierUrl,
+    });    if (!bound) {
       // 不该发生：新单的 pay_order_id 必为空。写不进去只可能是重号或并发，
       // 两种都意味着「这笔订单的网关身份存疑」，要能在日志里看见。
       this.logger.error(
@@ -701,6 +725,34 @@ export class RechargeService {
     }
   }
 
+  /* ---------- 主动对账（定时任务） ---------- */
+
+  /**
+   * 扫一轮「钱到了、积分没发完」的单，逐笔再推一次发放。**定时与手动走同一条路径**
+   * （`RechargeGrantReconcileTask` 只是这条路的一个计时器，测试与将来的管理端按钮直接调它）。
+   *
+   * <p>⚠️ 它补的是**没人轮询的那一半**（#45）：`getOrderStatus` 的补发要用户开着页面才触发，
+   * 而网关的重投窗口只有约 15 分钟 —— 用户关掉页面之后，一次发放失败的单就再也没有人来碰。
+   *
+   * <p>规则全文（阈值怎么定的、为什么异常逐笔吞、为什么 `grant_failed` 也在扫描范围内）
+   * 在 `recharge-grant-sweeper.ts`；这里只把域内的两件事接进去：订单仓储，与「发放一笔」
+   * （`fulfill`，它才是钱路径上那个幂等的实现）。
+   */
+  async sweepStaleGrants(options: {
+    /** 每轮最多处理几笔；不传取扫描器的默认值 */
+    batchSize?: number;
+    /** 抢名额的间隔（毫秒）：多副本下同一个单多久之内只由一个副本碰 */
+    claimMs: number;
+  }): Promise<GrantSweepResult> {
+    // 惰性构造：扫描器要 repo，而 repo 依赖 Prisma 客户端（构造期拿不到）
+    this.sweeperInstance ??= createGrantSweeper({
+      repo: this.repo,
+      retryGrant: (order) => this.fulfill(order),
+      logger: this.logger,
+    });
+    return this.sweeperInstance(options);
+  }
+
   /* ---------- 私有 ---------- */
 
   private async loadOwnOrder(userId: number, tradeNo: string): Promise<RechargeOrderView> {
@@ -721,29 +773,4 @@ function generateTradeNo(): string {
     `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
     `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   return `RC${stamp}${randomBytes(4).toString("hex")}`;
-}
-
-/**
- * 充值域错误 → HTTP 信封错误。
- *
- * <p>三类分开：**配置错了**（503，要人改配置）、**网关业务失败**（502，可重试或换金额）、
- * **billing 不可用**（503）。统一成 500 会让「少配一个环境变量」看起来像「服务挂了」，
- * 处置完全不同。
- */
-export function toRechargeError(error: unknown, fallbackMessage: string): NewApiError {
-  if (error instanceof NewApiError) return error;
-  if (
-    error instanceof PayServerConfigError ||
-    error instanceof BillingAdminConfigError ||
-    error instanceof SystemSettingsConfigError
-  ) {
-    return new NewApiError(error.message, 503, "recharge_unconfigured");
-  }
-  if (error instanceof PayGatewayError) {
-    return new NewApiError(error.message, 502, "pay_gateway_error");
-  }
-  if (error instanceof BillingAdminError) {
-    return new NewApiError(fallbackMessage, 503, "billing_unavailable");
-  }
-  return toBillingError(error, fallbackMessage);
 }

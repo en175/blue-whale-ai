@@ -8,6 +8,7 @@ import AdminLayout from './layouts/AdminLayout';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const RechargePlans = lazy(() => import('./pages/RechargePlans'));
+const RechargeCustomConfig = lazy(() => import('./pages/RechargeCustomConfig'));
 const Promotions = lazy(() => import('./pages/Promotions'));
 const MemberDiscounts = lazy(() => import('./pages/MemberDiscounts'));
 const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
@@ -37,6 +38,7 @@ export const adminRoutes = {
   children: [
     { index: true, element: <L><Dashboard /></L> },
     { path: 'recharge-plans', element: <L><RechargePlans /></L> },
+    { path: 'recharge-custom-config', element: <L><RechargeCustomConfig /></L> },
     { path: 'billing-promotions', element: <L><Promotions /></L> },
     { path: 'billing-member-discounts', element: <L><MemberDiscounts /></L> },
     { path: 'recharge-records', element: <L><RechargeRecords /></L> },

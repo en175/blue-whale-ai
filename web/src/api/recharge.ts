@@ -83,8 +83,22 @@ export interface RechargeOrder {
   points: number;
 }
 
-/** 订单状态：pending 待支付 / paid 已支付（积分已发放）/ expired 已过期 / failed 失败 */
-export type RechargeOrderState = 'pending' | 'paid' | 'expired' | 'failed';
+/**
+ * 订单状态（与后端 `RechargeOrderStatus` 逐字一致，2026-09-26 起 6 态）。
+ *
+ * <p>`paid_pending`「支付成功待到账」：**钱已经收到了、积分还没发出去** —— 回调先写它、
+ * 再调 billing 发放，成功才升到 `paid`。所以轮询到它时**不是终态**，要继续等：
+ * 后端会重试发放，界面维持「等待支付结果…」才是对的。
+ *
+ * <p>`grant_failed`「到账异常」：发放反复失败、需人工介入（由对账任务写入）。
+ */
+export type RechargeOrderState =
+  | 'pending'
+  | 'paid_pending'
+  | 'paid'
+  | 'expired'
+  | 'failed'
+  | 'grant_failed';
 
 /** 订单支付状态 */
 export interface RechargeOrderStatus {

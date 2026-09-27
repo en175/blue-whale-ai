@@ -205,6 +205,9 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const { service, orders, setCustomConfig } = await makeService();
 
     const before = await service.createOrder({ userId: 9001, credits: 600 });
+    // ⚠️ 第一笔要先离开 `pending`：下单防重（PRD §7.5）会把「同一商品 + 同一用户 + 尚未支付」
+    //    的第二次下单复用成同一笔，那样就没有第二单可比价格了（用户付完再买才是真实路径）
+    orders.get(before.tradeNo)!.status = "paid";
     // 运营把换算率从 15 改成 5（600 积分从 ¥40 变成 ¥120）
     setCustomConfig({ credits_per_yuan: 5 });
     const after = await service.createOrder({ userId: 9001, credits: 600 });

@@ -120,6 +120,11 @@ describe("RechargeService — 下单", () => {
     expect(row?.config_version).toBe(3);
 
     // 运营改配置（保存一次 version +1）之后：新单记新版本，**老单不动**——快照的意义就在这
+    //
+    // ⚠️ 先把第一笔推到已到账再下第二笔：下单防重（PRD §7.5）会把「同一商品 + 同一用户 +
+    //    尚未支付」的第二次下单**复用**成同一笔，那样就没有第二单可比版本了。
+    //    这也正是真实用户的路径：付完了才会再买一笔。
+    orders.get(first.tradeNo)!.status = "paid";
     setTierVersion(4);
     const second = await service.createOrder({ userId: 9001, tierId: TIER.id });
     expect(orders.get(second.tradeNo)?.config_version).toBe(4);

@@ -677,6 +677,10 @@ model recharge_orders {
   id               BigInt    @id @default(autoincrement())
   trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
   pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  /// 银行统一收银台链接（下单应答的 payData，内嵌银行令牌）。落库是为了**复用未支付订单**：
+  /// 网关按 (mch_no, mch_order_no) 唯一，同一单号重下会被拒，链接事后要不回来。
+  /// ⚠️ 判「有没有拿到过链接」看 pay_order_id（两者同一次更新写入，同真同假）
+  cashier_url      String?   @db.VarChar(512)
   user_id          BigInt
   /// 档位 ID。**可空**：NULL = 这不是档位商品（自定义充值，`product_type = 'custom'`）。
   /// 自定义充值没有档位，编一个 0/1 出来会被后续按 tier_id 聚合的对账当成真档位。
@@ -705,6 +709,10 @@ model recharge_orders {
 
   paid_at          DateTime? @db.DateTime(0)
   grant_lot_id     BigInt?
+  /// **首次**进入 paid_pending（钱到了、积分还没发）的时刻；主动对账据此算持有分钟数。
+  /// ⚠️ 不能用 gmt_modified 顶替（回调到达与查单名额都会改它）。
+  /// NULL = 本列上线前进入该状态的存量单
+  paid_pending_at  DateTime? @db.DateTime(0)
   last_query_at    DateTime? @db.DateTime(0)
   notify_count     Int       @default(0)
   gmt_create       DateTime  @default(now()) @db.DateTime(0)
