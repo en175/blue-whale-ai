@@ -621,11 +621,12 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect(nodeWhileGenerating?.id, "原位生成保持同一卡身份").toBe("d1");
       expect(nodeWhileGenerating?.data.genStatus, "改名当刻卡片确在生成中").toBe("generating");
 
-      // Esc 取消：编辑内容丢弃，随后失焦不提交已取消内容
+      // Esc 取消：编辑内容丢弃，随后真实失焦不提交已取消内容
       await startRename("d1", "被放弃的名字");
       await nameInputOf("d1").press("Escape");
       await vi.waitFor(async () => expect(await nameInputOf("d1").count()).toBe(0));
       expect(await nameSpanOf("d1").textContent()).toContain("生成中起的名");
+      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click(); // 触发真实失焦
       await page.waitForTimeout(1200); // 越过 800ms 自动保存窗口
       expect((await canvasNode(projectId, "d1"))?.data.fileName, "Esc 取消后失焦不提交").toBe("生成中起的名");
 
@@ -671,10 +672,12 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         expect(node?.data.customName).toBe(true);
       }, { timeout: 15_000 });
 
-      // 归属隔离：同素材另一张卡与素材库资产行不被联动
+      // 归属隔离：改的是与 img-b 同素材的 img-a，img-b 名称与自定义状态、素材库资产行都不被联动
       const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
-      expect((await canvasNode(projectId, "img-b"))?.data.fileName).toBe("上传图.png");
-      expect((await canvasNode(projectId, "img-b"))?.data.customName).toBeUndefined();
+      await rename("img-a", "只改这张");
+      expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("只改这张");
+      expect((await canvasNode(projectId, "img-b"))?.data.fileName, "同素材另一张卡名称不被联动").toBe("上传图.png");
+      expect((await canvasNode(projectId, "img-b"))?.data.customName, "同素材另一张卡自定义状态不被联动").toBeUndefined();
       const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
       expect(assetRowAfter?.gmt_modified, "素材库资产行不被改名触碰").toEqual(assetRowBefore?.gmt_modified);
 
