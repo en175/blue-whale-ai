@@ -25,7 +25,19 @@ export type TopupTierPermission = "all" | "user_group" | "member_tier";
 export interface TopupTierView {
   id: string;
   name: string;
-  amount: number;
+  /**
+   * **基础积分**（用户下单到账的那个数，单位整数积分）。
+   *
+   * <p>⚠️ 这是**配置值**，不是派生值（2026-09-27 起，推翻迁移 047 的 `原价 × 换算率`）。
+   * 充值常有折扣，`original_price`/`discount` 只为展示划线价，**与积分再无数学关系** ——
+   * ¥499 的档给 7,500 积分（499×15=7,485 只是巧合）。不要拿积分去除原价。
+   *
+   * <p>0 = 还没配过：下单路径会拒绝（宁可下不了单，也不发 0 积分）。
+   *
+   * <p>⚠️ 库里另有一列 `amount`（new-api 时代的遗留 quota），**读路径一律不看它**：
+   * 写入侧把它与 `base_credits` 写成同一个数，只是为了万一还有没改到的读方不会读到 0。
+   */
+  baseCredits: number;
   originalPrice: number;
   discount: number;
   price: number;
@@ -78,7 +90,11 @@ export interface TopupTierView {
 
 export interface CreateTopupTierInput {
   name?: string;
-  amount: number;
+  /**
+   * 基础积分（用户下单到账的积分）。**运营的输入值**，不是从原价算出来的
+   * （原价 × 折扣只为展示划线价 —— 见 {@link TopupTierView.baseCredits}）。
+   */
+  baseCredits: number;
   originalPrice: number;
   discount: number;
   isRecommended?: boolean;
@@ -99,7 +115,8 @@ export interface CreateTopupTierInput {
 
 export interface UpdateTopupTierInput {
   name?: string;
-  amount?: number;
+  /** 基础积分（配置值，见 {@link TopupTierView.baseCredits}） */
+  baseCredits?: number;
   originalPrice?: number;
   discount?: number;
   isRecommended?: boolean;
@@ -177,7 +194,7 @@ function toView(row: any): TopupTierView {
   return {
     id: row.id.toString(),
     name: row.name,
-    amount: Number(row.amount),
+    baseCredits: Number(row.base_credits),
     originalPrice: Number(row.original_price),
     discount: Number(row.discount),
     price: Number(row.price),
@@ -260,11 +277,16 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       });
       const nextSort = (maxSort._max.sort_order ?? 0) + 1;
       const price = Math.round(input.originalPrice * input.discount * 100) / 100;
+      const baseCredits = BigInt(Math.round(input.baseCredits));
 
       const row = await prisma.topup_tiers.create({
         data: {
-          name: input.name || `${input.amount}积分`,
-          amount: BigInt(Math.round(input.amount)),
+          name: input.name || `${input.baseCredits}积分`,
+          // 基础积分是**配置值**（运营填的数），不是从原价派生的；用户下单到账的就是它。
+          base_credits: baseCredits,
+          // 遗留 quota 列：读路径不看它了，写入侧只做同值镜像
+          // （见 TopupTierView.baseCredits 的注释），免得漏改的读方读到 0 或 5,000,000。
+          amount: baseCredits,
           original_price: input.originalPrice,
           discount: input.discount,
           price,
@@ -311,7 +333,12 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
         gmt_modified: new Date(),
       };
       if (input.name !== undefined) data.name = input.name;
-      if (input.amount !== undefined) data.amount = BigInt(Math.round(input.amount));
+      if (input.baseCredits !== undefined) {
+        const credits = BigInt(Math.round(input.baseCredits));
+        data.base_credits = credits;
+        // 遗留列同值镜像（读路径不看它，见 TopupTierView.baseCredits）
+        data.amount = credits;
+      }
       if (input.originalPrice !== undefined) data.original_price = input.originalPrice;
       if (input.discount !== undefined) data.discount = input.discount;
       if (input.isRecommended !== undefined) data.is_recommended = input.isRecommended;

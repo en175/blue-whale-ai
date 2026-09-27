@@ -15,7 +15,12 @@ export interface RechargeTier {
   id: string;
   /** 档位名称 */
   name: string;
-  /** 到账积分（后端按定价目录的 creditsPerYuan 派生：原价 × credits_per_yuan） */
+  /**
+   * 到账积分 = 档位配的基础积分（**配置值，不是派生值**）。
+   *
+   * ⚠️ 别拿它去除以 `price`：充值常有折扣，¥499 的档到账 7,500 积分
+   * （499 × 15 = 7,485 只是巧合）。`price`/`original_price` 只为展示划线价。
+   */
   amount: number;
   /** 实付价格（元） */
   price: number;

@@ -649,6 +649,14 @@ model topup_tiers {
   permission_allowlist     Json?
   permission_denied_hint   String  @default("") @db.VarChar(255)
 
+  // ── 基础积分：**配置值**（2026-09-27 由迁移 048 追加，故排在末尾）──
+  /// 用户下单到账的基础积分（整数积分）。**配置值，不是派生值**（推翻迁移 047 的派生决定）：
+  /// 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事 —— 充值常有折扣。
+  /// `original_price`/`discount` 只为展示划线价，与积分**再无数学关系**：
+  /// ¥499 给 7,500 积分（499×15=7,485 只是巧合），看到「不是原价的整数倍」不要去修。
+  /// 0 = 还没配过基础积分，下单会被拒（宁可下不了单，也不发 0 积分）。
+  base_credits             BigInt  @default(0)
+
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 

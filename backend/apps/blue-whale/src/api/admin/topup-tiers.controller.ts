@@ -15,6 +15,7 @@ import {
   TOPUP_TIER_PERMISSIONS,
   TOPUP_TIER_STATUSES,
   displayTierName,
+  parseBaseCredits,
   parseCreditsValidMonths,
   parseNonNegativeInt,
   parseTierAllowlist,
@@ -28,8 +29,6 @@ import type {
   TopupTierPermission,
   TopupTierStatus,
 } from "@lib/shared/persistence/index.js";
-import { deriveCredits } from "@lib/shared/recharge/recharge.service.js";
-import { fetchCreditsPerYuan } from "@lib/shared/billing/billing-admin-client.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
 
@@ -39,9 +38,13 @@ const PERMISSION_HINT = TOPUP_TIER_PERMISSIONS.join(" | ");
 /**
  * PRD §10.2 里「名称 / 原价 / 折扣 / 状态 / 时间窗 / 推荐 / 排序」之外的那批字段。
  *
- * <p>**支付价格（price）与基础积分（amount）刻意不在这里**：它们是从原价与折扣
- * 派生出来的（`price = 原价 × 折扣`、`amount = 原价 × 换算率`），不是运营的输入框。
- * 收下它们就等于允许「原价 100、积分写 999999」这种自相矛盾的档位存进库。
+ * <p>⚠️ **基础积分（`baseCredits`）曾是「不在这里」的那一类**（2026-09-27 改）：
+ * 那时它由 `原价 × 换算率` 派生，收下它就等于允许「原价 100、积分写 999999」。
+ * 现在它是**配置值** —— 充值常有折扣，「元 → 积分」与消费锚点「1 元 = 15 积分」
+ * 不是一回事（¥499 到账 7,500，而 499×15=7,485）。运营填的就是用户到手的那一个数，
+ * 所以它回到本表单，**由运营直接输入**。
+ *
+ * <p>仍然不在这里的是**实付价格（price）**：它依旧是 `原价 × 折扣`，由 repo 派生。
  */
 interface TierCardFields {
   description: string;
@@ -145,29 +148,20 @@ export class AdminTopupTiersController {
   async list() {
     try {
       const tiers = await this.topupTier.listAll();
-      // ⚠️ **读的时候重新派生，不信库里那一列**：`topup_tiers.amount` 的存量行是
-      // new-api 记账时代写进去的 quota（原价 × 500_000），即 ¥100 档存着 5,000,000，
-      // 而用户端卡片现在显示 1,500。只在写入时改成新公式的话，**老数据永远是错的**——
-      // 管理员看到一个数、用户看到另一个数，正是这次要消掉的那种不一致。
-      // 派生是幂等的，与写入侧用的是同一个 deriveCredits（同一条公式、同一处来源）。
-      const creditsPerYuan = await fetchCreditsPerYuan();
+      // ⚠️ 这里**曾经**读时重新派生（`deriveCredits(原价, 换算率)`），因为那时
+      // `topup_tiers.amount` 的存量行是 new-api 记账时代写进去的 quota（¥100 档存 5,000,000）。
+      // 2026-09-27 起不再派生：到账积分是**配置值** `base_credits`，存的什么就是什么。
+      //   · 原价 × 折扣仍保留，但**只为展示划线价**，与积分再无数学关系；
+      //   · 因此 `creditsPerYuan` 也不再回给管理端 —— 它此前唯一的用途是让表单
+      //     「边输价格边显示会到账多少积分」。留着它只会诱导下一个人在表单里重新乘一遍，
+      //     而那个乘法的结果在充值有折扣时（¥499 → 7,500）本来就是错的。
       return {
         success: true,
         data: {
-          tiers: tiers.map((t) => {
-            const amount = deriveCredits(t.originalPrice, creditsPerYuan);
-            return { ...t, amount, name: displayTierName(t.name, amount) };
-          }),
-          // ★ 把换算率**一并回给管理端**，不是顺手多带一个字段。
-          //
-          //   编辑表单要**边输价格边显示会到账多少积分**，而那个数只能用它算。
-          //   在此之前前端是本地写死「×10」派生的（`price × 500000 / 50000`），
-          //   于是同一页出现两个数：表单预览按 10 算、表格里按换算率算。
-          //   2026-09-26 实测：本地库的换算是 **15**，那一页的预览与列表就已经对不上了。
-          //
-          //   ⚠️ 不要再让前端自己算「每元多少积分」——它算不出来，那是运行时配置
-          //      （住在 billing 的定价目录里，运营随时可改）。回给它，它就不需要猜。
-          creditsPerYuan,
+          tiers: tiers.map((t) => ({
+            ...t,
+            name: displayTierName(t.name, t.baseCredits),
+          })),
         },
       };
     } catch (error) {
@@ -209,6 +203,13 @@ export class AdminTopupTiersController {
     if (discount === null) {
       throw new AdminException(400, "折扣比例须在 (0, 1] 之间");
     }
+    // 基础积分是**必填的配置值**（用户下单到手的就是它）。缺了 / 非法就 400，
+    // **不替运营猜一个** —— 猜「原价 × 换算率」正是本次废掉的那条公式，
+    // 且充值有折扣时它算出来就是错的数（¥499 会得到 7,485 而不是 7,500）。
+    const baseCredits = parseBaseCredits(body.baseCredits);
+    if (baseCredits === null) {
+      throw new AdminException(400, "基础积分须为 1 以上的整数（0 积分的档位无法下单）");
+    }
 
     const existing = await this.topupTier.listAll();
     const clash = existing.find(
@@ -227,7 +228,7 @@ export class AdminTopupTiersController {
     const cardFields = readCardFields(body);
     try {
       const tier = await this.topupTier.create({
-        amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
+        baseCredits,
         originalPrice,
         discount,
         ...(name ? { name } : {}),
@@ -299,6 +300,14 @@ export class AdminTopupTiersController {
         throw new AdminException(400, "折扣比例须在 (0, 1] 之间");
       }
     }
+    // 基础积分是配置值：传了才改（部分更新），值非法一律 400
+    let baseCredits: number | undefined;
+    if (body.baseCredits !== undefined) {
+      baseCredits = parseBaseCredits(body.baseCredits) ?? undefined;
+      if (baseCredits === undefined) {
+        throw new AdminException(400, "基础积分须为 1 以上的整数（0 积分的档位无法下单）");
+      }
+    }
     let status: TopupTierStatus | undefined;
     if (body.status !== undefined) {
       status = requireStatus(body.status);
@@ -325,10 +334,10 @@ export class AdminTopupTiersController {
 
     try {
       const tier = await this.topupTier.update(id, {
-        ...(originalPrice !== null && {
-          originalPrice,
-          amount: deriveCredits(originalPrice, await fetchCreditsPerYuan()),
-        }),
+        // ⚠️ 原价与基础积分是**互相独立**的两项：改原价不再连带改积分
+        //（曾经的 `amount: deriveCredits(原价, 换算率)` 已废 —— 见 list() 的注释）。
+        ...(originalPrice !== null && { originalPrice }),
+        ...(baseCredits !== undefined && { baseCredits }),
         ...(discount !== undefined && { discount }),
         ...(typeof body.name === "string" && { name: body.name }),
         ...(typeof body.isRecommended === "boolean" && {

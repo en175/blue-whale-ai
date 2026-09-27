@@ -72,7 +72,7 @@ export default function PreviewModal({ onClose }: { onClose: () => void }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <Stat
                     label="积分"
-                    value={fmtPoints(p.amount)}
+                    value={fmtPoints(p.baseCredits)}
                     hint={p.discount < 1 ? `${discountLabel(p.discount)}优惠` : undefined}
                   />
                   <Stat

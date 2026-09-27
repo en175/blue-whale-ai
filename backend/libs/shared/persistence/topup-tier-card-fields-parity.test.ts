@@ -107,10 +107,17 @@ describe("topup_tiers 卡片字段扩展三轨迁移", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
-  it("支付价格与基础积分没有新列：它们是派生量，不是输入", () => {
-    // PRD §10.2 把「支付价格」「基础积分」列成字段，但本仓的口径是
-    // price = original_price × discount、amount = original_price × 换算率。
-    // 谁要是照字段表加了 `pay_price` 之类的列，就同时打开了「原价 100、积分 999999」这扇门。
+  it("本迁移（047）没有加支付价格 / 基础积分列", () => {
+    // PRD §10.2 把「支付价格」「基础积分」列成字段，047 当时的口径是两者都派生、
+    // 都不新增列：`price = original_price × discount`、`amount = original_price × 换算率`。
+    //
+    // ⚠️ **其中积分那一半已被迁移 048 推翻**（2026-09-27）：充值常有折扣，
+    //    基础积分是**配置值**，所以 048 加了 `base_credits`。这里断言的是
+    //    **047 这份文件**里没有这些列（历史事实，改了要三轨同改）——
+    //    而不是「本仓没有 base_credits 列」。见 048_topup_tier_base_credits.sql。
+    //
+    // 仍然成立的是 `pay_price` 那一半：实付依旧是 `原价 × 折扣`，没有这一列，
+    // 也不该有 —— 加了就同时打开「原价 100、实付 1」这扇门。
     for (const forbidden of ["pay_price", "paid_price", "base_credits"]) {
       expect(addedColumns(standaloneSql)).not.toContain(forbidden);
     }

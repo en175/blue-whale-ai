@@ -102,6 +102,19 @@ export function parseNonNegativeInt(raw: unknown): number | null {
 }
 
 /**
+ * 解析基础积分（**配置值**，单位整数积分；2026-09-27 起不再从原价派生）。
+ *
+ * <p>只接受 >= 1：0 积分的档位是「用户付了钱、账上什么都没有」，
+ * `RechargeService.createOrder` 本来就拒绝它 —— 在**配置**这一步拦住比让用户
+ * 点下去才报错好。数字串（表单从 DOM 出来就是字符串）与原价 / 折扣同口径放行。
+ */
+export function parseBaseCredits(raw: unknown): number | null {
+  const n = parseNonNegativeInt(raw);
+  if (n === null || n < 1) return null;
+  return n;
+}
+
+/**
  * 解析积分有效期（PRD §10.2「积分有效期」，单位**月**）。
  *
  * <p>只接受 1..1200（100 年）的正整数：0 或负数会让本该到期的积分永不到期，

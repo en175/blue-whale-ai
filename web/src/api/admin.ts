@@ -43,9 +43,15 @@ export interface TopupTier {
   id: string;
   /** 档位名称 */
   name: string;
-  /** 到账积分数（服务端派生：原价 × 换算率） */
-  amount: number;
-  /** 原价（元），正整数，主输入字段 */
+  /**
+   * 基础积分：用户下单到账的积分（整数）。**运营配置的值，不是派生值**
+   * （2026-09-27 起；充值常有折扣，¥499 的档给 7,500 而不是 499×15=7,485）。
+   *
+   * ⚠️ `originalPrice` / `discount` 只为展示划线价，**与积分再无数学关系** ——
+   * 别拿积分去除原价、也别用「原价 × 换算率」在地推它。
+   */
+  baseCredits: number;
+  /** 原价（元），正整数。与折扣一起构成划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 (0, 1]，1 表示无折扣 */
   discount: number;
@@ -92,15 +98,9 @@ export interface TopupTier {
 /** `GET /api/admin/topup-tiers` 的回包。 */
 export interface TopupTierList {
   tiers: TopupTier[];
-  /**
-   * 当前生效的换算率（1 元 = 多少积分）。
-   *
-   * ⚠️ **编辑表单的积分预览必须用它算**，不要在本地写死一个倍数：
-   * 换算是**运行时配置**（住在 billing 的定价目录里，运营随时可改），前端算不出来。
-   * 曾经这里的前端自己写死「×10」派生，而列表里的 `amount` 走服务端按真实换算率派生 ——
-   * 同一页两个数（2026-09-26 实测：本地库是 15，那页的预览与列表已经对不上）。
-   */
-  creditsPerYuan: number;
+  // ⚠️ 这里**曾经**回 `creditsPerYuan`，唯一的用途是让表单「边输价格边显示会到账多少积分」。
+  //    2026-09-27 起积分是配置值（`baseCredits`），那条派生关系废掉了，字段随之删除——
+  //    留着它只会诱导下一个人在表单里重新乘一遍（而充值有折扣时乘出来就是错的）。
 }
 
 /** 获取全部充值档位列表（含停用），按 sortOrder 排序展示 */
@@ -108,12 +108,17 @@ export function fetchTopupTiers() {
   return http.get<TopupTierList>('/api/admin/topup-tiers');
 }
 
-/** POST /api/admin/topup-tiers 新建参数（amount 服务端派生，客户端传入会被忽略） */
+/** POST /api/admin/topup-tiers 新建参数 */
 export interface CreateTopupTierParams {
-  /** 原价（元），须为正整数，同一原价只能有一个档位 */
+  /** 原价（元），须为正整数，同一原价只能有一个档位。只用于展示划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 (0, 1] */
   discount: number;
+  /**
+   * 基础积分（用户下单到账的积分，整数 >= 1）。**必填**：服务端不替运营猜
+   * （猜「原价 × 换算率」在充值有折扣时就是错的数）。0 积分的档位无法下单。
+   */
+  baseCredits: number;
   name?: string;
   isRecommended?: boolean;
   /** 不传 = draft（PRD §10.5：新建卡片默认草稿，不展示给用户） */
@@ -139,6 +144,8 @@ export interface CreateTopupTierParams {
 export interface UpdateTopupTierParams {
   originalPrice?: number;
   discount?: number;
+  /** 基础积分（配置值）：传了才改；改原价**不会**连带改积分 */
+  baseCredits?: number;
   name?: string;
   isRecommended?: boolean;
   status?: TopupTierStatus;
@@ -190,7 +197,7 @@ export interface SortTopupTierItem {
 export interface SortTopupTierResult {
   id: string;
   sortOrder: number;
-  amount: number;
+  baseCredits: number;
   originalPrice: number;
   price: number;
   status: TopupTierStatus;
@@ -207,9 +214,9 @@ export function sortTopupTiers(items: SortTopupTierItem[]) {
 /** 用户端预览档位（已上架且未失效，服务端过滤） */
 export interface TopupTierPreview {
   id: string;
-  /** 到账积分数 */
-  amount: number;
-  /** 原价（元） */
+  /** 到账积分数 = 档位配的基础积分（配置值，不是派生） */
+  baseCredits: number;
+  /** 原价（元）：与折扣一起构成划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 */
   discount: number;

@@ -68,14 +68,6 @@ export default function RechargePlans() {
   const [deleting, setDeleting] = useState(false);
   const [sorting, setSorting] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  /**
-   * 当前生效的换算率（1 元 = 多少积分），随档位列表一起从服务端回来。
-   *
-   * ⚠️ **表单的积分预览用它算**，不要在本地写死倍数：换算是运行时配置
-   * （住在 billing 的定价目录里，运营随时可改），前端猜不出来。
-   * 曾经这里写死「×10」，而列表走服务端按真实换算率派生 —— 同一页两个数。
-   */
-  const [creditsPerYuan, setCreditsPerYuan] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
 
   /** 刷新全部档位（含停用），按 sortOrder 排序展示；页面加载与加载失败重试都走它 */
@@ -84,8 +76,6 @@ export default function RechargePlans() {
     setLoadError('');
     fetchTopupTiers()
       .then((data) => {
-        // 换算率随列表一起回来 —— 表单的积分预览必须用它（见 creditsPerYuan 状态的注释）
-        setCreditsPerYuan(data.creditsPerYuan);
         setPlans([...data.tiers].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan));
       })
       .catch((e) => setLoadError(isApiError(e) ? e.message : '获取档位列表失败'))
@@ -152,9 +142,11 @@ export default function RechargePlans() {
   /** 新建/编辑提交：POST/PUT /api/admin/topup-tiers，以服务端返回记录更新列表 */
   const handleSubmit = async (data: PlanFormValues, id?: string) => {
     setWarning('');
-    // 派生量与输入量分开送：**实付价格与基础积分不在参数里**（服务端从原价与折扣算），
-    // 送过去也会被忽略——收下它们就等于允许「原价 100、积分写 999999」这种自相矛盾的档位。
+    // ⚠️ 实付价格**仍不在参数里**（它由服务端 `原价 × 折扣` 派生，收下它就等于允许
+    //    「原价 100、实付 1」这种自相矛盾的档位）。
+    //    但**基础积分现在在**：它是配置值，运营填的就是用户到账的（见 PlanFormModal 文件头）。
     const card = {
+      baseCredits: data.baseCredits,
       description: data.description,
       bonusCredits: data.bonusCredits,
       activityTag: data.activityTag,
@@ -309,7 +301,7 @@ export default function RechargePlans() {
             <tr key={p.id}>
               <td>{p.id}</td>
               <td>{p.name || '—'}</td>
-              <td>{fmtPoints(p.amount)}</td>
+              <td>{fmtPoints(p.baseCredits)}</td>
               {/* 赠送积分是首购加赠的额度，不是到账积分：独立一列，不与上一列相加展示 */}
               <td>{p.bonusCredits > 0 ? fmtPoints(p.bonusCredits) : '—'}</td>
               <td>¥{fmtMoney(p.price)}</td>
@@ -381,7 +373,6 @@ export default function RechargePlans() {
       {form !== null && (
         <PlanFormModal
           initial={form.id !== undefined ? plans.find((p) => p.id === form.id) : undefined}
-          creditsPerYuan={creditsPerYuan}
           onClose={() => setForm(null)}
           onSubmit={handleSubmit}
         />

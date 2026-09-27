@@ -3,26 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminTopupTiersController } from "./topup-tiers.controller.js";
 
 /**
- * 管理端固定积分卡接口（`/api/admin/topup-tiers`）在字段扩展后的两处硬约束：
+ * 管理端固定积分卡接口（`/api/admin/topup-tiers`）的几处硬约束：
  *
  * <ul>
  *   <li>**新建默认草稿**（PRD §10.5）：落成 active 就是「新建即开卖」，
  *       而卡片上的价格、赠送、标签在那一刻还没配；</li>
- *   <li>**支付价格与基础积分不是输入**：body 里塞 `amount` 必须被忽略，
- *       真正入库的是「原价 × 换算率」派生出来的那个数——否则
- *       「原价 100、积分 999999」这种自相矛盾的档位就能存进库。</li>
+ *   <li>**基础积分是运营的输入**（2026-09-27 改）：它是配置值，用户到账的就是运营填的那个数。
+ *       body 里塞 `amount`（遗留列）仍必须被忽略 —— 真正入库的是 `baseCredits`；</li>
+ *   <li>**实付价格仍不是输入**：`price = 原价 × 折扣`，由 repo 派生。</li>
  * </ul>
  *
  * 其余是枚举与边界的取值纪律：非法值一律 400，**不静默回退到默认值**
  * （静默回退会让运营以为自己改成功了）。
  */
-
-const billing = vi.hoisted(() => ({ fetchCreditsPerYuan: vi.fn() }));
-
-vi.mock("@lib/shared/billing/billing-admin-client.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, ...billing };
-});
 
 function createController() {
   const topupTier = {
@@ -60,14 +53,13 @@ function updateInput(topupTier: { update: { mock: { calls: unknown[][] } } }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  billing.fetchCreditsPerYuan.mockResolvedValue(15);
 });
 
 describe("AdminTopupTiersController.create — 新建默认草稿", () => {
   it("★ 不传 status → 落 draft（不是 active）", async () => {
     const { controller, topupTier } = createController();
 
-    await controller.create({ originalPrice: 100, discount: 1 });
+    await controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500 });
 
     expect(createInput(topupTier).status).toBe("draft");
   });
@@ -75,7 +67,7 @@ describe("AdminTopupTiersController.create — 新建默认草稿", () => {
   it("显式传三态之一 → 以传入为准", async () => {
     const { controller, topupTier } = createController();
 
-    await controller.create({ originalPrice: 100, discount: 1, status: "active" });
+    await controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500, status: "active" });
 
     expect(createInput(topupTier).status).toBe("active");
   });
@@ -84,26 +76,67 @@ describe("AdminTopupTiersController.create — 新建默认草稿", () => {
     const { controller, topupTier } = createController();
 
     await expect(
-      controller.create({ originalPrice: 100, discount: 1, status: "enabled" }),
+      controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500, status: "enabled" }),
     ).rejects.toMatchObject({ status: 400 });
     expect(topupTier.create).not.toHaveBeenCalled();
   });
 });
 
-describe("AdminTopupTiersController.create — 派生量不是输入", () => {
-  it("★ body 里的 amount 被忽略，入库的是「原价 × 换算率」", async () => {
+describe("AdminTopupTiersController.create — 基础积分是输入，实付仍是派生", () => {
+  it("★ 运营填的基础积分原样入库（**不乘换算率、不按原价算**）", async () => {
     const { controller, topupTier } = createController();
 
-    await controller.create({ originalPrice: 100, discount: 1, amount: 999_999 });
+    // 7,500 / 原价 100：**刻意不成整数倍**。任何「原价 × 换算率」的残留实现都会给出 1500，
+    // 而充值常有折扣 —— ¥499 的档给 7,500 而不是 7,485，这个数就是运营填的那个。
+    await controller.create({
+      originalPrice: 100,
+      discount: 1,
+      baseCredits: 7_500,
+    });
 
-    // 100 元 × 15 = 1500。若把 body.amount 当输入收下，用户会看到 999999 而实际到账 1500。
-    expect(createInput(topupTier).amount).toBe(1500);
+    expect(createInput(topupTier).baseCredits).toBe(7500);
+  });
+
+  it("★ 缺 baseCredits → 400，不替运营猜一个（猜出来的在折扣档上就是错的数）", async () => {
+    const { controller, topupTier } = createController();
+
+    await expect(
+      controller.create({ originalPrice: 100, discount: 1 }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(topupTier.create).not.toHaveBeenCalled();
+  });
+
+  it("baseCredits 为 0 / 负数 / 小数 / 非数字 → 400（0 积分档位用户付了钱拿不到东西）", async () => {
+    const { controller, topupTier } = createController();
+
+    for (const bad of [0, -1, 1.5, "abc", "", null]) {
+      await expect(
+        controller.create({ originalPrice: 100, discount: 1, baseCredits: bad }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(topupTier.create).not.toHaveBeenCalled();
+  });
+
+  it("★ body 里的 amount（遗留 quota 列）被忽略，入库的是 baseCredits", async () => {
+    const { controller, topupTier } = createController();
+
+    await controller.create({
+      originalPrice: 100,
+      discount: 1,
+      baseCredits: 1500,
+      amount: 999_999,
+    });
+
+    // `amount` 是 new-api 记账时代遗留的列（读路径已不看它）。若把它当输入收下，
+    // 用户会看到 999999 而实际到账 1500。
+    expect(createInput(topupTier).amount).toBeUndefined();
+    expect(createInput(topupTier).baseCredits).toBe(1500);
   });
 
   it("body 里的 price 被忽略（实付 = 原价 × 折扣，由 repo 派生）", async () => {
     const { controller, topupTier } = createController();
 
-    await controller.create({ originalPrice: 100, discount: 0.5, price: 1 });
+    await controller.create({ originalPrice: 100, discount: 0.5, baseCredits: 1500, price: 1 });
 
     expect(createInput(topupTier)).not.toHaveProperty("price");
   });
@@ -116,6 +149,7 @@ describe("AdminTopupTiersController — 卡片字段解析（PRD §10.2）", () 
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       bonusCredits: 3750,
     });
     expect(createInput(topupTier).bonusCredits).toBe(3750);
@@ -124,7 +158,7 @@ describe("AdminTopupTiersController — 卡片字段解析（PRD §10.2）", () 
     // 见 parseTierOriginalPrice / parseTierDiscount 的既有约定
     for (const bad of [-1, 1.5, true, "abc"]) {
       await expect(
-        controller.create({ originalPrice: 100, discount: 1, bonusCredits: bad }),
+        controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500, bonusCredits: bad }),
       ).rejects.toMatchObject({ status: 400 });
     }
   });
@@ -135,6 +169,7 @@ describe("AdminTopupTiersController — 卡片字段解析（PRD §10.2）", () 
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       creditsValidMonths: 24,
     });
     expect(createInput(topupTier).creditsValidMonths).toBe(24);
@@ -156,6 +191,7 @@ describe("AdminTopupTiersController — 卡片字段解析（PRD §10.2）", () 
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       firstPurchaseEligible: true,
     });
     expect(createInput(topupTier).firstPurchaseEligible).toBe(true);
@@ -203,6 +239,7 @@ describe("AdminTopupTiersController — 购买权限（PRD §10.4）", () => {
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       permission: "member_tier",
     });
 
@@ -213,7 +250,7 @@ describe("AdminTopupTiersController — 购买权限（PRD §10.4）", () => {
     const { controller, topupTier } = createController();
 
     await expect(
-      controller.create({ originalPrice: 100, discount: 1, permission: "vip" }),
+      controller.create({ originalPrice: 100, discount: 1, baseCredits: 1500, permission: "vip" }),
     ).rejects.toMatchObject({ status: 400 });
     expect(topupTier.create).not.toHaveBeenCalled();
   });
@@ -224,6 +261,7 @@ describe("AdminTopupTiersController — 购买权限（PRD §10.4）", () => {
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       permission: "user_group",
       permissionAllowlist: [9001, "007", "9001"],
     });
@@ -254,6 +292,7 @@ describe("AdminTopupTiersController — 购买权限（PRD §10.4）", () => {
     await controller.create({
       originalPrice: 100,
       discount: 1,
+      baseCredits: 1500,
       permissionAllowlist: null,
     });
 
@@ -282,9 +321,34 @@ describe("AdminTopupTiersController.update — 部分更新", () => {
       "name",
       "discount",
       "originalPrice",
+      // 基础积分同为部分更新：只改标签不该顺手把积分写一遍
+      "baseCredits",
     ]) {
       expect(input).not.toHaveProperty(untouched);
     }
+  });
+
+  it("★ 改原价**不再连带改积分**（两条独立配置项）", async () => {
+    const { controller, topupTier } = createController();
+
+    await controller.update("7", { originalPrice: 200 });
+
+    const input = updateInput(topupTier);
+    expect(input.originalPrice).toBe(200);
+    // 曾经这里是 `amount: deriveCredits(原价, 换算率)`：改价顺手把积分重算一遍。
+    // 现在积分是运营配的值，改原价（只为划线价）不该动它。
+    expect(input).not.toHaveProperty("baseCredits");
+  });
+
+  it("编辑也认基础积分：合法放行、非法 400", async () => {
+    const { controller, topupTier } = createController();
+
+    await controller.update("7", { baseCredits: 7_500 });
+    expect(updateInput(topupTier).baseCredits).toBe(7500);
+
+    await expect(
+      controller.update("7", { baseCredits: 0 }),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it("编辑上的状态走同一把尺子：三态放行、别的 400", async () => {

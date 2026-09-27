@@ -28,12 +28,22 @@
  *
  * ── 到账积分在下单时刻冻结 ────────────────────────────────────────────────────
  *
- * 换算率是定价目录的配置项、可改。用户看着「1000 积分 · ¥100」点了支付，之后运营改口径，
- * 不能反悔成 800。所以 `credits` 与 `credits_per_yuan` 都写进订单行，到账按订单里的数发。
+ * 档位积分配置（以及换算率）都是可改的。用户看着「7,500 积分 · ¥499」点了支付，
+ * 之后运营改配置，不能反悔成 800。所以 `credits` 与 `credits_per_yuan` 都写进订单行，
+ * 到账按订单里的数发。
  *
- * 积分按**档位原价**算（不是实付价）：折扣是让利——少收钱、不少给积分。
- * 按实付算的话，用户看到的「原价划线 + 折扣」会变成一个自相矛盾的界面
- * （打了折反而积分更少），且现有档位口径本来就是「到账积分由原价派生」。
+ * ⚠️ **档位积分是配置值，不是派生值**（2026-09-27 起，推翻 #41 的派生口径）。
+ * 用户下单到账的基础积分直接读 `topup_tiers.base_credits` —— 运营在后台填多少就是多少。
+ *
+ *   充值的「元 → 积分」与**消费锚点**「1 元 = 15 积分」不是一回事：充值常有折扣。
+ *   PRD §6.1 的轻量尝鲜是 ¥499 → **7,500** 积分，而 499 × 15 = 7,485，对不上；
+ *   7,500 是「凑整齐」的数，不是算出来的。同理 ¥5,999 → 90,000 积分。
+ *
+ *   ⚠️ 原价 + 折扣**保留，但只为展示划线价**（¥500 划掉、¥499 实付），
+ *   **与积分再无数学关系** —— `credits` 既不是 `原价 × 换算率`，也不是 `实付 × 换算率`。
+ *   看到「¥499 划 ¥500，但积分 7,500 不是 500 的倍数」**不要去「修」那个对不上的数**。
+ *   `credits_per_yuan` 仍写进订单行，但它现在只回答「下单那一刻的换算率是多少」（对账/客服追溯），
+ *   **不参与任何积分计算**；换算率的唯一现役用途是自定义充值的反算（模块 B，未做）。
  * ============================================ */
 import { randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
@@ -92,10 +102,16 @@ const GATEWAY_ORDER_TTL_MS = 2 * 60 * 60 * 1000;
  */
 const RECONCILE_INTERVAL_MS = 30 * 1000;
 
-/** 档位对用户的样子（到账积分是**按当前换算率算出的展示值**，与下单时冻结的是同一个数）。 */
+/** 档位对用户的样子（到账积分是**档位自己配的基础积分**，与换算率无关）。 */
 export interface RechargeTierOffer {
   id: string;
   name: string;
+  /**
+   * 到账积分 = `topup_tiers.base_credits`（**配置值**）。
+   *
+   * <p>⚠️ 不是 `原价 × 换算率`。充值常有折扣，¥499 的档给 7,500 积分 ——
+   * 那个数不是原价的整数倍，是运营在后台填的（见 `RechargeService` 文件头）。
+   */
   amount: number;
   price: number;
   originalPrice: number;
@@ -106,7 +122,12 @@ export interface RechargeTierOffer {
 
 export interface RechargeCatalog {
   tiers: RechargeTierOffer[];
-  /** 1 元 = 多少积分（定价目录的配置项，前端据此渲染换算提示） */
+  /**
+   * 1 元 = 多少积分（定价目录的配置项，前端据此渲染换算提示）。
+   *
+   * <p>⚠️ 它**只是消费侧的锚点口径**，不是档位积分的算法：档位积分读
+   * `base_credits`（配置值）。别拿它去乘原价算积分。
+   */
   creditsPerYuan: number;
 }
 
@@ -129,7 +150,17 @@ export interface RechargeOrderStateView {
   creditsAfter: number | null;
 }
 
-/** 到账积分 = 原价（元）× 换算率。四舍五入到整数积分（账本只有整数积分）。 */
+/**
+ * 到账积分 = 原价（元）× 换算率，四舍五入到整数积分。
+ *
+ * <p>⚠️ **现役代码里已经没有调用方**（2026-09-27 起）：档位到账积分改成读
+ * `topup_tiers.base_credits` 这个**配置值**（充值的「元 → 积分」与消费锚点
+ * 「1 元 = 15 积分」不是一回事，充值常有折扣 —— ¥499 → 7,500 而不是 7,485）。
+ *
+ * <p>**刻意保留**：自定义充值（模块 B，未做）要用它做**反算** ——
+ * 用户输入「我要 500 积分」时，按当前换算率折回需要付多少钱。
+ * 在那之前不要把它接回任何档位路径：档位的积分不是算出来的。
+ */
 export function deriveCredits(originalPrice: number, creditsPerYuan: number): number {
   return Math.round(originalPrice * creditsPerYuan);
 }
@@ -160,7 +191,10 @@ export class RechargeService {
     return {
       creditsPerYuan,
       tiers: rows.map((t) => {
-        const amount = deriveCredits(t.originalPrice, creditsPerYuan);
+        // 到账积分 = 档位自己配的**基础积分**（配置值）。这里**不许**乘换算率：
+        // 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事（充值常有折扣），
+        // ¥499 的档给 7,500 而不是 7,485 —— 那不是算错了，见文件头。
+        const amount = t.baseCredits;
         return {
           id: t.id,
           name: displayTierName(t.name, amount),
@@ -181,7 +215,9 @@ export class RechargeService {
     userId: number;
     tierId: string;
   }): Promise<RechargeOrderCreated> {
-    // 换算率取自定价目录；取不到就报不出价，也就谈不上给用户承诺多少积分
+    // 换算率取自定价目录：它现在**不再参与积分计算**，只作为「下单那一刻的口径」快照进订单行
+    // （对账/客服追溯用）。取不到就说明这个环境的定价目录还没发布 —— 口径都定不下来，
+    // 也就谈不上受理一笔充值。见文件头「到账积分在下单时刻冻结」。
     const creditsPerYuan = await fetchCreditsPerYuan();
 
     const tier = await this.topupTier.getById(input.tierId);
@@ -203,7 +239,9 @@ export class RechargeService {
       throw new NewApiError("该档位已过期", 400);
     }
 
-    const credits = deriveCredits(tier.originalPrice, creditsPerYuan);
+    // ⚠️ **到账积分 = 档位配的基础积分**（配置值），不是「原价 × 换算率」：
+    //    充值常有折扣，¥499 的档到账 7,500 积分（499×15=7,485）。原价与折扣只为展示划线价。
+    const credits = tier.baseCredits;
     const amountFen = Math.round(tier.price * 100);
     if (credits <= 0 || amountFen <= 0) {
       // 到账积分为 0 = 用户付钱拿不到东西。宁可下不了单，也不要产生这种订单

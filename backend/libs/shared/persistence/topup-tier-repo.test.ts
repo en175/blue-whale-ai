@@ -10,6 +10,7 @@ const ROW = {
   id: 7n,
   name: "1000积分",
   amount: 1500n,
+  base_credits: 1500n,
   original_price: 100,
   discount: 1,
   price: 100,
@@ -82,7 +83,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
       topup_tiers: { create, aggregate },
     } as never);
 
-    await repo.create({ amount: 1500, originalPrice: 100, discount: 1 });
+    await repo.create({ baseCredits: 1500, originalPrice: 100, discount: 1 });
 
     // 默认值错的方向必须保守：落成 active 等于「新建即开卖」，
     // 而 PRD 要的是「新建是草稿，运营配齐再上架」。
@@ -102,7 +103,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     } as never);
 
     await repo.create({
-      amount: 1500,
+      baseCredits: 1500,
       originalPrice: 100,
       discount: 1,
       status: "active",
@@ -120,7 +121,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
       topup_tiers: { create, aggregate },
     } as never);
 
-    await repo.create({ amount: 1500, originalPrice: 100, discount: 1 });
+    await repo.create({ baseCredits: 1500, originalPrice: 100, discount: 1 });
 
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -137,6 +138,24 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     // 没给白名单时写 SQL NULL（不是 JSON 里的 null）——两者读出来含义不同
     const data = create.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.permission_allowlist).not.toBeInstanceOf(Array);
+  });
+
+  it("★ 基础积分是**配置值**：原样落 `base_credits`，遗留列 `amount` 只做同值镜像", async () => {
+    const create = vi.fn().mockResolvedValue(ROW);
+    const aggregate = vi.fn().mockResolvedValue({ _max: { sort_order: 0 } });
+    const repo = createTopupTierRepo({
+      topup_tiers: { create, aggregate },
+    } as never);
+
+    // 2026-09-27：积分不再从原价派生（充值常有折扣），传进来多少就是多少。
+    // 故意用 7,500 / 原价 100 这组**不成整数倍**的数：任何「原价 × 换算率」的残留实现都对不上。
+    await repo.create({ baseCredits: 7_500, originalPrice: 100, discount: 1 });
+
+    const data = create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.base_credits).toBe(7500n);
+    // 遗留 quota 列：读路径不看它了，但它 NOT NULL 必须给值 —— 写同一个数，
+    // 免得漏改的读方读到 0 或 5,000,000 那种量级。
+    expect(data.amount).toBe(7500n);
   });
 });
 
@@ -171,6 +190,8 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
 
     expect(view.firstPurchaseEligible).toBe(true);
     expect(view.bonusCredits).toBe(3750);
+    // 基础积分出库成 number（BIGINT → number）：读路径拿到的是**配置值**本身
+    expect(view.baseCredits).toBe(1500);
     expect(view.permission).toBe("user_group");
     expect(view.creditsValidMonths).toBe(24);
     expect(view.buttonText).toBe("立享加赠");
@@ -195,9 +216,24 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
       "permission",
       "permission_allowlist",
       "permission_denied_hint",
+      // 基础积分同样是「传了才改」：改标签不该顺手把积分写一遍
+      "base_credits",
+      "amount",
     ]) {
       expect(data).not.toHaveProperty(untouched);
     }
+  });
+
+  it("★ 传了基础积分才写：`base_credits` 与遗留列 `amount` 一起落同一个数", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ ...ROW, version: 3 });
+    const update = vi.fn().mockResolvedValue(ROW);
+    const repo = createTopupTierRepo({ topup_tiers: { findFirst, update } } as never);
+
+    await repo.update("7", { baseCredits: 7_500 });
+
+    const data = update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.base_credits).toBe(7500n);
+    expect(data.amount).toBe(7500n);
   });
 
   it("白名单传数组时按原样写回（上游已归一）", async () => {

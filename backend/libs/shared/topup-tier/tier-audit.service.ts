@@ -36,8 +36,8 @@ export function describeTierChanges(
   after: TopupTierView,
 ): string {
   const changes: string[] = [];
-  if (before.amount !== after.amount)
-    changes.push(`积分数：${before.amount}→${after.amount}`);
+  if (before.baseCredits !== after.baseCredits)
+    changes.push(`基础积分：${before.baseCredits}→${after.baseCredits}`);
   if (before.originalPrice !== after.originalPrice)
     changes.push(`原价：¥${before.originalPrice}→¥${after.originalPrice}`);
   if (before.discount !== after.discount)
@@ -120,7 +120,7 @@ export class TierAuditService {
 
   async logCreate(tier: TopupTierView): Promise<void> {
     const parts = [
-      `${tier.amount}积分`,
+      `${tier.baseCredits}积分`,
       `原价¥${tier.originalPrice}`,
       fmtDiscount(tier.discount),
       `实付¥${tier.price}`,
@@ -149,7 +149,7 @@ export class TierAuditService {
     await this.writeLog({
       action: "删除",
       target: before.id,
-      detail: `删除档位：${before.amount}积分，原价¥${before.originalPrice}，实付¥${before.price}`,
+      detail: `删除档位：${before.baseCredits}积分，原价¥${before.originalPrice}，实付¥${before.price}`,
     });
   }
 }

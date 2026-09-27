@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
-import { tierCardFormError, tierFormError } from './tierForm';
+import { baseCreditsFormError, tierCardFormError, tierFormError } from './tierForm';
 import { ApiError } from '@/api/http';
 
 const adminApi = vi.hoisted(() => ({
@@ -107,12 +107,12 @@ function createPayload() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [], creditsPerYuan: 15 });
+  adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [] });
   adminApi.createTopupTier.mockResolvedValue({
     data: {
       id: 1,
       name: '',
-      amount: 5_000_000,
+      baseCredits: 7500,
       originalPrice: 10,
       discount: 1,
       price: 10,
@@ -148,6 +148,27 @@ describe('tierFormError', () => {
   it('正整数原价且折扣 ∈ (0, 1] 合法', () => {
     expect(tierFormError(10, 1)).toBeNull();
     expect(tierFormError(10, 0.8)).toBeNull();
+  });
+});
+
+describe('baseCreditsFormError — 基础积分是配置值，只校验形态', () => {
+  it('1 以上的整数合法（含数字串，表单从 DOM 出来本来就是字符串）', () => {
+    expect(baseCreditsFormError('1')).toBeNull();
+    expect(baseCreditsFormError('7500')).toBeNull();
+    expect(baseCreditsFormError(' 499 ')).toBeNull();
+  });
+
+  it('空 / 0 / 负数 / 小数 / 非数字非法', () => {
+    for (const bad of ['', '   ', '0', '-1', '1.5', 'abc']) {
+      expect(baseCreditsFormError(bad)).toBe('基础积分须为 1 以上的整数');
+    }
+  });
+
+  it('★ 不与原价做任何一致性校验：积分不是原价的整数倍也要放行', () => {
+    // ¥499 → 7,500 积分（499 × 15 = 7,485）：对不上是**对的**。
+    // 校验器只收一个参数，物理上就没法拿它跟原价比 —— 这条守着别哪天又给它接回一个价格参数。
+    expect(baseCreditsFormError('7500')).toBeNull();
+    expect(baseCreditsFormError('90000')).toBeNull();
   });
 });
 
@@ -191,31 +212,6 @@ describe('RechargePlans 档位边界值 toast', () => {
     expect(adminApi.createTopupTier).not.toHaveBeenCalled();
   });
 
-  it('★ 积分预览按**服务端给的换算率**算，不是本地写死的倍数', async () => {
-    // ⚠️ 这条钉的是 2026-09-26 修掉的那个活 bug：表单曾本地写死 `原价 × 500000 / 50000`（= ×10）
-    //    派生预览，而列表里的 `amount` 走服务端按**真实换算率**派生 —— 换算是运行时配置
-    //    （住在 billing 的定价目录里，运营随时可改），两边一旦不同，**同一页就显示两个数**。
-    //    实测本地库的换算是 15，那一页的预览与列表当时已经对不上。
-    //
-    //    故意用 15（而不是最常见的 10）：写死任何一种倍数都不该过 —— 断言的是「读了服务端的数」，
-    //    不是「值恰好等于 1500」。
-    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [], creditsPerYuan: 15 });
-    await renderPage();
-    await openCreateModal();
-
-    const priceInput = document.body.querySelector<HTMLInputElement>(
-      'input[aria-label="原价（元）"]',
-    );
-    if (!priceInput) throw new Error('原价输入未渲染');
-    await act(async () => {
-      nativeInput(priceInput, '100');
-    });
-
-    // 100 元 × 15 = 1500。若写死 ×10 则这里是 1,000 —— 这条就会红。
-    const pointsInput = document.body.querySelector<HTMLInputElement>('input[aria-label="积分数"]');
-    expect(pointsInput?.value).toBe('1,500');
-  });
-
   it('接口失败不写页面 formError（toast 由 http 层负责）', async () => {
     adminApi.createTopupTier.mockRejectedValue(
       new ApiError(409, '每个原价只能有一个档位：已存在原价 ¥10 的档位', 409),
@@ -229,6 +225,48 @@ describe('RechargePlans 档位边界值 toast', () => {
     expect(toastApi.error).not.toHaveBeenCalled();
     // 上游错误文案不渲染到表单里（本页已无私有样式类，改为断言文案未渲染）
     expect(document.body.textContent).not.toContain('每个原价只能有一个档位');
+  });
+});
+
+describe('RechargePlans 基础积分是配置值（不是派生量）', () => {
+  it('★ 基础积分是**输入框**（配置值），填多少就提交多少 —— 不做「原价 × 换算率」联动', async () => {
+    // ⚠️ 这条钉的是 2026-09-27 的口径反转：这个框**曾经**是只读的派生预览
+    //    （「积分 = 原价 × 换算率」，还因此让列表接口带回 creditsPerYuan）。
+    //    现在基础积分是**配置值**：充值常有折扣，运营填的 7,500 就是用户到账的数
+    //    （499 × 15 = 7,485 只是巧合，不是公式）。
+    //
+    //    故意填一个**不是原价整数倍**的数：任何「还在按原价算积分」的实现都会把它改成 1500。
+    await renderPage();
+    await openCreateModal();
+
+    const creditsInput = document.body.querySelector<HTMLInputElement>(
+      'input[aria-label="基础积分"]',
+    );
+    expect(creditsInput).not.toBeNull();
+    // 可输入：不再是 readOnly 的派生预览框
+    expect(creditsInput?.readOnly).toBe(false);
+
+    await fillInput('基础积分', '7500');
+    await fillAndSave('100', '1');
+
+    expect(createPayload().baseCredits).toBe(7500);
+    expect(createPayload().originalPrice).toBe(100);
+  });
+
+  it('基础积分留空 / 0 / 小数 → toast 且不发请求（0 积分档位用户付了钱拿不到东西）', async () => {
+    for (const bad of ['', '0', '1.5']) {
+      await renderPage();
+      await openCreateModal();
+      await fillInput('基础积分', bad);
+      await fillAndSave('100', '1');
+
+      expect(toastApi.error).toHaveBeenCalledWith('基础积分须为 1 以上的整数');
+      expect(adminApi.createTopupTier).not.toHaveBeenCalled();
+
+      toastApi.error.mockClear();
+      await act(async () => root.unmount());
+      mountNode?.remove();
+    }
   });
 });
 
@@ -350,15 +388,18 @@ describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
     );
   });
 
-  it('★ 派生量不当参数发出去：实付价格与基础积分由服务端算', async () => {
-    // 「保留原价 + 折扣」的落实：价格与积分是算出来的，表单里只读。
-    // 送过去也会被服务端忽略，但真送出去就意味着某天有人会拿它当输入。
+  it('★ 实付价格仍由服务端算（不发）；基础积分是配置值（要发）', async () => {
+    // 2026-09-27 起 `amount`（遗留 quota 列）与基础积分不再是同一个东西：
+    // 后者是运营的输入（`baseCredits`），必须随请求送出；
+    // 「实付 = 原价 × 折扣」仍是派生量，送出去会被服务端忽略，真送就意味着某天有人会拿它当输入。
     await renderPage();
     await openCreateModal();
     await fillAndSave('100', '1');
 
     expect(createPayload()).not.toHaveProperty('price');
     expect(createPayload()).not.toHaveProperty('amount');
+    // 新建表单的起点值（运营可按活动口径改写）
+    expect(createPayload().baseCredits).toBe(1000);
   });
 
   it('按钮文案清空 → toast 且不发请求', async () => {

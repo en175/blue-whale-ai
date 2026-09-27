@@ -1,10 +1,16 @@
 /* ============================================
  * 新建 / 编辑固定积分卡档位弹窗（PRD §10.2 / §10.4 / §10.5）。
  *
- * ⚠️ 这里**没有**「支付价格」与「基础积分」两个输入框，它们是只读的派生量：
- *   `实付 = 原价 × 折扣`、`积分 = 原价 × 当前换算率`。
- *   收下它们等于允许「原价 100、积分写 999999」这种自相矛盾的档位存进库。
- *   换算率不写死在前端：它是运行时配置（住在 billing 的定价目录里），由列表接口带回。
+ * ⚠️ 这里唯一只读的派生量是**实付价格**（`实付 = 原价 × 折扣`），它不当输入框。
+ *
+ * 「基础积分」**是输入框**（2026-09-27 起）：基础积分是**配置值**，不是派生值 ——
+ * 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事（充值常有折扣）。
+ * 运营填的这个数就是用户下单到账的数：PRD §6.1 的 ¥499 档给 7,500 积分，
+ * 而 499 × 15 = 7,485 —— 对不上是**对的**。
+ *
+ * 原价与折扣保留，但**只为展示划线价**，与积分再无数学关系。所以这里：
+ *   · 不做任何「积分 = 原价 × 什么」的联动预览；
+ *   · 也不校验积分是不是原价的整数倍（那是在恢复一条已经废掉的公式）。
  * ============================================ */
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -22,6 +28,7 @@ import {
   formGrid,
 } from '../../ui';
 import {
+  baseCreditsFormError,
   DEFAULT_BUTTON_TEXT,
   DEFAULT_CREDITS_VALID_MONTHS,
   MAX_CREDITS_VALID_MONTHS,
@@ -30,25 +37,25 @@ import {
   tierCardFormError,
   tierFormError,
 } from './tierForm';
-import { fmtMoney, fmtPoints, type Plan, type PlanFormValues } from './plan';
+import { fmtMoney, type Plan, type PlanFormValues } from './plan';
 
 interface PlanFormModalProps {
   initial?: Plan;
-  /** 当前生效的换算率（1 元 = 多少积分），由列表接口带回。积分预览用它算。 */
-  creditsPerYuan: number;
   onClose: () => void;
   onSubmit: (data: PlanFormValues, id?: string) => Promise<void>;
 }
 
 export default function PlanFormModal({
   initial,
-  creditsPerYuan,
   onClose,
   onSubmit,
 }: PlanFormModalProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [price, setPrice] = useState(initial ? String(initial.price) : '10');
   const [ratio, setRatio] = useState(initial ? String(initial.ratio) : '1');
+  // 基础积分是**配置值**（运营的输入），不是从原价算出来的。
+  // 编辑时带出存档值；新建时留一个能用的起点，由运营按活动口径改写（PRD §6.1 是 7,500 起）。
+  const [credits, setCredits] = useState(initial ? String(initial.baseCredits) : '1000');
   const [start, setStart] = useState(initial?.start ?? '');
   const [end, setEnd] = useState(initial?.end ?? '');
   const [recommended, setRecommended] = useState(initial?.recommended ?? false);
@@ -71,10 +78,10 @@ export default function PlanFormModal({
 
   const priceNum = parseFloat(price) || 0;
   const ratioNum = parseFloat(ratio) || 0;
-  // 到账积分 = 原价 × **当前生效的换算率**（与后端 deriveCredits 同一条公式、同一个数）。
-  // ⚠️ 这里以前写死 `× 500000 / 50000`（= ×10），而列表里的 amount 走服务端按真实换算率派生 ——
-  //    换算是运行时配置，两边一旦不同就是同页两个数（2026-09-26 实测：本地库是 15）。
-  const points = Math.round(priceNum * creditsPerYuan);
+  // 实付 = 原价 × 折扣 —— **本页唯一的派生量**，所以它只读。
+  // ⚠️ 积分不在这条公式里：它现在是运营填的**配置值**（见文件头）。
+  //    曾经这里按「原价 × 换算率」联动预览，那个说法已经废掉：
+  //    充值常有折扣，¥499 的档到账 7,500，而 499 × 15 = 7,485。
   const pay = priceNum * ratioNum;
   // 空数字格先标成 NaN 交给校验去判：`Number('')` 是 0，会悄悄通过「非负整数」这一关
   const bonusNum = bonusCredits.trim() === '' ? NaN : Number(bonusCredits);
@@ -87,6 +94,12 @@ export default function PlanFormModal({
     const err = tierFormError(priceNum, ratioNum);
     if (err) {
       toast.error(err);
+      return;
+    }
+    // 基础积分是配置值，但「填了没有」仍然是必填项：0 / 空 / 非整数都拦在提交前
+    const creditsErr = baseCreditsFormError(credits);
+    if (creditsErr) {
+      toast.error(creditsErr);
       return;
     }
     const cardErr = tierCardFormError({
@@ -110,6 +123,8 @@ export default function PlanFormModal({
           name: name.trim(),
           price: priceNum,
           ratio: ratioNum,
+          // 基础积分：运营填的整数（已过 baseCreditsFormError），不是派生值
+          baseCredits: Number(credits),
           recommended,
           status,
           start,
@@ -168,23 +183,25 @@ export default function PlanFormModal({
           />
         </Field>
         <Field
-          label="积分数 (派生)"
-          hint={`积分 = 原价 × 当前换算率（1 元 = ${creditsPerYuan} 积分）`}
+          label="基础积分"
+          hint="用户下单到账的积分，直接填整数"
           info={
             <div>
-              <div>换算率在「系统设置 → 计费」里改，不在这张表上。</div>
-              <div>实付 = 原价 × 折扣；折扣 = 1 表示无折扣。</div>
               <div>
-                两者都是算出来的，所以这里只读——手填会出现「原价 100、积分 999999」这种自相矛盾的档位。
+                这是**配置值**：填多少，用户到手就是多少。它不是算出来的 —— 充值常有折扣，
+                ¥499 的档给 7,500 积分，而 499 × 15 = 7,485。
               </div>
+              <div>
+                原价与折扣只为展示划线价，与积分没有数学关系：不要为了「凑成整数倍」去改任何一个数。
+              </div>
+              <div>0 或留空保存不了：那样的档位用户付了钱拿不到东西。</div>
             </div>
           }
         >
-          {/* 派生值只读展示：用 readOnly Input 而不是自绘灰框，样式仍由套件定义 */}
           <Input
-            readOnly
-            value={fmtPoints(points)}
-            aria-label="积分数"
+            value={credits}
+            aria-label="基础积分"
+            onChange={(e) => setCredits(e.target.value)}
             style={{ width: '100%' }}
           />
         </Field>

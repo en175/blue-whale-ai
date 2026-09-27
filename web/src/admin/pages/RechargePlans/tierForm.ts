@@ -5,6 +5,22 @@ export function tierFormError(priceNum: number, ratioNum: number): string | null
   return null;
 }
 
+/**
+ * 基础积分的本地校验：非法返回文案，合法返回 null。
+ *
+ * <p>⚠️ 基础积分是**配置值**（运营填的数就是用户到账的数），不是「原价 × 换算率」——
+ * 充值常有折扣，¥499 的档给 7,500 而不是 7,485。所以这里**只校验形态**，
+ * 不与原价、折扣做任何一致性检查（做了就是在恢复那条已经废掉的公式）。
+ *
+ * <p>收原始字符串而不是数字：空框要报错，而 `Number('')` 是 0（会悄悄过掉「整数」这一关）。
+ * 下限 1 与服务端 `parseBaseCredits` 同口径：0 积分的档位用户付了钱拿不到东西。
+ */
+export function baseCreditsFormError(raw: string): string | null {
+  const n = raw.trim() === '' ? NaN : Number(raw);
+  if (!Number.isInteger(n) || n < 1) return '基础积分须为 1 以上的整数';
+  return null;
+}
+
 /** 列宽上限，与服务端同名常量、与 DDL 的列宽**三处同口径**（超了服务端会 400）。 */
 export const TIER_TEXT_LIMITS = {
   description: 255,

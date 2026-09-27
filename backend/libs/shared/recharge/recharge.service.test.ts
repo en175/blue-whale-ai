@@ -202,7 +202,12 @@ const json = (body: unknown) =>
 const TIER = {
   id: "7",
   name: "1000积分",
-  amount: 5_000_000,
+  /**
+   * ⚠️ **基础积分是配置值**：7,500 与 `原价 100 × 换算率 15 = 1,500` **刻意不同**。
+   * 任何一个「还在按原价派生积分」的实现都会在这条线上红 —— 那正是本次要钉住的事
+   * （充值常有折扣，¥499 的档给 7,500 而不是 7,485）。
+   */
+  baseCredits: 7_500,
   originalPrice: 100,
   discount: 1,
   price: 100,
@@ -278,22 +283,24 @@ describe("RechargeService — 下单", () => {
     vi.unstubAllGlobals();
   });
 
-  it("金额单位是分、积分按原价×换算率冻结，收银台链接原样返回", async () => {
+  it("★ 积分冻结的是**档位配的基础积分**（配置值），不是「原价 × 换算率」", async () => {
     const http = makeHttp();
     grpcActiveCatalog();
     const { service, orders } = await makeService();
 
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
-    // 100 元 → 10000 分；100 元 × 15 = 1500 积分
+    // 100 元 → 10000 分；到账 7,500 积分（档位配的），**不是** 100 × 15 = 1500
     expect(created.amount).toBe(100);
-    expect(created.credits).toBe(1500);
+    expect(created.credits).toBe(7500);
     expect(created.cashierUrl).toContain("uniCashierNew.html");
     expect(created.tradeNo).toMatch(/^RC\d{14}[0-9a-f]{8}$/);
 
     const order = orders.get(created.tradeNo);
     expect(order?.amount_fen).toBe(10_000n);
-    expect(order?.credits).toBe(1500n);
+    expect(order?.credits).toBe(7500n);
+    // 换算率仍快照进订单，但它现在只回答「下单那一刻口径是多少」（对账/追溯），
+    // **不参与积分计算** —— 上面那个 7,500 与它无关
     expect(order?.credits_per_yuan).toBe(15);
     expect(order?.status).toBe("pending");
     expect(order?.pay_order_id).toBe("P-GATEWAY-1");
@@ -304,21 +311,23 @@ describe("RechargeService — 下单", () => {
     expect(unified?.body.notifyUrl).toBe(NOTIFY_URL);
   });
 
-  it("换算率改成 20 后：新档位展示跟着变，已下订单仍按冻结的 15 发", async () => {
+  it("★ 换算率改成 20 后：档位展示**不变**（积分是配置值），已下订单仍按冻结的数发", async () => {
     makeHttp();
     const catalog = grpcActiveCatalog();
     const { service, orders } = await makeService();
 
     const before = await service.createOrder({ userId: 9001, tierId: TIER.id });
-    expect(before.credits).toBe(1500);
+    expect(before.credits).toBe(7500);
 
     catalog.setCreditsPerYuan(20);
-    expect((await service.listTiers()).tiers[0]?.amount).toBe(2000);
+    // 档位积分与换算率**无关**：¥100 的档还是 7,500 积分，不是 100 × 20 = 2000。
+    // 换算率回给前端只为渲染「1 元 = 20 积分」那句提示（消费锚点口径）。
+    expect((await service.listTiers()).tiers[0]?.amount).toBe(7500);
     expect((await service.listTiers()).creditsPerYuan).toBe(20);
 
-    // 旧订单没被改口径影响：它冻结的就是 1500
+    // 旧订单没被改口径影响：它冻结的就是 7500
     const order = orders.get(before.tradeNo);
-    expect(order?.credits).toBe(1500n);
+    expect(order?.credits).toBe(7500n);
   });
 
   it("下单写入 8 个快照字段：config_version 取档位**当时**的 version", async () => {
@@ -330,9 +339,9 @@ describe("RechargeService — 下单", () => {
 
     const row = orders.get(first.tradeNo);
     expect(row?.product_type).toBe("tier");
-    // 商品名是**用户当时看到的展示名**，不是库里那列原始名——自动生成的名字会随换算率
+    // 商品名是**用户当时看到的展示名**，不是库里那列原始名——自动生成的名字会随积分
     // 重新派生（`displayTierName`），快照要回答的是「用户当时看到的是哪件商品」
-    expect(row?.product_name).toBe("1500积分");
+    expect(row?.product_name).toBe("7500积分");
     // 下面这几列此刻还是常量：#40 首购加赠 / #43 有效期落地后才变成计算值
     expect(row?.bonus_credits).toBe(0n);
     expect(row?.credits_expire_at).toBeNull();
@@ -438,7 +447,7 @@ describe("RechargeService — 回调到账", () => {
 
     expect(await service.handleNotify(await signed(notifyParams(created.tradeNo)))).toBe(true);
 
-    expect(http.granted).toEqual([{ amount: 1500, bizId: created.tradeNo }]);
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     const order = orders.get(created.tradeNo);
     expect(order?.status).toBe("paid");
     expect(order?.grant_lot_id).toBe(42n);
@@ -466,7 +475,7 @@ describe("RechargeService — 回调到账", () => {
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
     // billing 那把锁的效果：积分只发了一次
     expect(http.granted).toHaveLength(1);
-    expect(http.granted[0]?.amount).toBe(1500);
+    expect(http.granted[0]?.amount).toBe(7500);
   });
 
   it("已是 paid_pending 的重投：**重试发放**（白给的重试机会不能短路掉）", async () => {
@@ -484,7 +493,7 @@ describe("RechargeService — 回调到账", () => {
     // 网关重投：这时**不能**像 paid 那样短路，要继续往下走真的再发一次
     expect(await service.handleNotify(params)).toBe(true);
     expect(orders.get(created.tradeNo)?.status).toBe("paid");
-    expect(http.granted).toEqual([{ amount: 1500, bizId: created.tradeNo }]);
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     // 两次发放请求（第二次才成功）；paid_pending 只写了一次——「钱还没到」的条件更新挡住了重写
     expect(http.calls.filter((c) => c.url.endsWith("/admin/credits/grants"))).toHaveLength(2);
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
@@ -596,7 +605,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
     expect(state.status).toBe("paid");
     expect(state.creditsAfter).toBeNull();
-    expect(http.granted).toEqual([{ amount: 1500, bizId: created.tradeNo }]);
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     expect(orders.get(created.tradeNo)?.status).toBe("paid");
   });
 
@@ -638,7 +647,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
     const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
 
     expect(state.status).toBe("paid");
-    expect(http.granted).toEqual([{ amount: 1500, bizId: created.tradeNo }]);
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
   });
 
   it("★ 停在「待到账」的单，用户轮询会**补发**（不补就永远卡在发放中）", async () => {
@@ -659,7 +668,7 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
     const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
 
-    expect(http.granted).toEqual([{ amount: 1500, bizId: created.tradeNo }]);
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     expect(state.status).toBe("paid");
   });
 
@@ -674,8 +683,12 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
   });
 });
 
-describe("deriveCredits — 换算率是唯一的积分来源", () => {
+describe("deriveCredits — 保留给自定义充值的反算（档位路径已不再用它）", () => {
   it("按原价折算并取整（账本只有整数积分）", () => {
+    // ⚠️ 2026-09-27 起**没有任何档位路径调用它**：档位到账积分读 `topup_tiers.base_credits`
+    //    （配置值）—— 充值常有折扣，¥499 的档给 7,500 而不是 7,485。
+    //    它留着是给自定义充值（模块 B，未做）做反算：用户要「500 积分」时折回该付多少钱。
+    //    谁要是把它接回档位路径，上面那条 TIER.baseCredits ≠ 原价×换算率 的断言就会红。
     expect(deriveCredits(100, 15)).toBe(1500);
     expect(deriveCredits(99, 15)).toBe(1485);
     expect(deriveCredits(1, 1)).toBe(1);

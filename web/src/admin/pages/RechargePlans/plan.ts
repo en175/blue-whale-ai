@@ -12,10 +12,14 @@ import { DEFAULT_BUTTON_TEXT, DEFAULT_CREDITS_VALID_MONTHS } from './tierForm';
 export interface Plan {
   id: string;
   name: string; // 档位名称（可空）
-  price: number; // 原价（元），主输入字段
+  price: number; // 原价（元），与折扣一起构成划线价，**不参与积分计算**
   ratio: number; // 折扣比例 (0-1]，1 = 无折扣
   pay: number; // 实付（元）= 原价 × 折扣，后端权威值
-  amount: number; // 到账积分（服务端派生）
+  /**
+   * 基础积分：用户下单到账的积分。**运营配置的值，不是派生值**
+   * （后端 `topup_tiers.base_credits`；充值常有折扣，¥499 给 7,500 而不是 7,485）。
+   */
+  baseCredits: number;
   recommended: boolean;
   start: string; // datetime-local 格式（空 = 不限）
   end: string;
@@ -34,8 +38,13 @@ export interface Plan {
   deniedHint: string;
 }
 
-/** 表单值：新建/编辑弹窗交给页面去提交的那一份。派生量（实付/积分）不在其中——它们不是输入。 */
-export type PlanFormValues = Omit<Plan, 'id' | 'pay' | 'amount' | 'sort'>;
+/**
+ * 表单值：新建/编辑弹窗交给页面去提交的那一份。
+ *
+ * <p>「实付」（`pay`）与「排序」（`sort`）不在其中 —— 实付是 `原价 × 折扣` 派生出来的，
+ * 排序走单独的排序接口。**基础积分在**：它是运营的输入（配置值），不是派生量。
+ */
+export type PlanFormValues = Omit<Plan, 'id' | 'pay' | 'sort'>;
 
 /** ISO 时间转 datetime-local 输入值（本地时区） */
 export function isoToLocalInput(iso: string | null): string {
@@ -54,7 +63,9 @@ export function toPlan(t: TopupTier): Plan {
     price: t.originalPrice,
     ratio: t.discount,
     pay: t.price,
-    amount: t.amount,
+    // 老后端回包缺这一项时落到 0 = 「没配过」：列表里一眼能看见，
+    // 而且 0 保存不了（服务端 400 / 表单也拦），不会被当成一个真值存下去。
+    baseCredits: t.baseCredits ?? 0,
     recommended: t.isRecommended,
     start: isoToLocalInput(t.startTime),
     end: isoToLocalInput(t.endTime),
