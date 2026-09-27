@@ -751,6 +751,72 @@ class PublishReviewPackageTest(unittest.TestCase):
             remote_head,
         )
 
+    def test_sync_proves_current_rebase_without_reusing_old_conflicted_source(self) -> None:
+        child_branch, child_root = self.implement_spec_child()
+        child_head = self.git("rev-parse", "HEAD", cwd=child_root)
+        old_source = self.git("rev-parse", "HEAD")
+        self.git("push", "origin", BRANCH)
+        before = self.pr_snapshot()
+        backup_ref = "refs/agent-sync-backups/" + BRANCH.replace("/", "%")
+        self.git("update-ref", backup_ref, old_source)
+        self.git("reset", "--hard", "release/prod")
+        (self.worktree / "child.txt").write_text("child\n", encoding="utf-8")
+        self.git("add", "child.txt")
+        self.git("commit", "-m", "fix: preserve resolved child content")
+        resolved = self.git("rev-parse", "HEAD")
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        marker.write_text(json.dumps({
+            "version": 1, "branch": BRANCH, "original_head": old_source,
+            "synced_head": resolved, "upstream_sha": self.git("rev-parse", "release/prod"),
+            "target_branch": "release/prod", "remote_branch_sha": old_source,
+            "backup_ref": backup_ref, "child_heads": {child_branch: child_head},
+        }), encoding="utf-8")
+        marker.chmod(0o600)
+        (self.main / "release.txt").write_text("release\n", encoding="utf-8")
+        self.git("add", "release.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance release", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+
+        synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        rebased = self.git("rev-parse", "HEAD")
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery["rebase_input_head"], resolved)
+        self.assertEqual(recovery["rebase_synced_head"], rebased)
+        self.assertEqual(recovery["rebase_tree"], self.git("rev-parse", "HEAD^{tree}"))
+        self.assertEqual(self.git("rev-parse", recovery["rebase_input_ref"]), resolved)
+        rollback = run("bash", str(SYNC_SCRIPT), "rollback", "--json", cwd=self.worktree)
+        self.assertNotEqual(rollback.returncode, 0)
+        self.assertEqual(self.git("rev-parse", "HEAD"), rebased)
+        self.assertTrue(marker.exists())
+
+        final_head = self.commit_followup("review correction")
+        recovery["synced_head"] = final_head
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+        published = self.invoke_update(before)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        after = self.pr_snapshot()
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                       "--pr-snapshot", str(after), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        self.git("update-ref", recovery["rebase_input_ref"], old_source)
+        false_proof = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertNotEqual(false_proof.returncode, 0)
+        self.assertTrue(marker.exists())
+        self.git("update-ref", recovery["rebase_input_ref"], resolved)
+        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
+        common = Path(self.git("rev-parse", "--git-common-dir"))
+        lineage = common / "blue-whale" / "implement-spec-rebase-lineage" / BRANCH.replace("/", "%") / f"{rebased}.json"
+        record = json.loads(lineage.read_text(encoding="utf-8"))
+        self.assertEqual(record["original_head"], resolved)
+        self.assertEqual(record["synced_head"], rebased)
+        self.assertEqual(record["verified_head"], final_head)
+        rejected = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(after),
+                       "--json", cwd=child_root)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertTrue(child_root.exists())
+
     def test_linearized_pr_after_release_sync_allows_child_cleanup(self) -> None:
         child_branch, child_root = self.implement_spec_child()
         child_head = self.git("rev-parse", "HEAD", cwd=child_root)

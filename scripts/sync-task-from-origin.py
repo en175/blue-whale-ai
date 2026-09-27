@@ -234,6 +234,7 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         )
         return 0
 
+    rebase_input_head = original_head
     if marker.exists():
         recovery = read_recovery(marker, branch)
         if recovery.get("target_branch", "master") != target_branch:
@@ -243,6 +244,7 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         expected_head = str(recovery.get("synced_head", recovery["original_head"]))
         if original_head != expected_head:
             raise WorkflowError("当前 HEAD 已离开已有同步事务，拒绝覆盖恢复点。")
+        rebase_input_head = expected_head
         backup_ref = str(recovery.get("backup_ref", backup_ref))
         remote_sha = str(recovery.get("remote_branch_sha", ""))
         # 旧版脚本（PR577 前）可能写入 GBK 乱码的 branch 字段；read_recovery 已兼容放行，
@@ -263,6 +265,13 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
             "backup_ref": backup_ref,
             "created_at": int(time.time()),
         }
+    input_ref = "refs/agent-sync-inputs/" + branch.replace("/", "%") + "/" + rebase_input_head
+    retained_input = git(root, "rev-parse", "--verify", input_ref, check=False)
+    if retained_input.returncode == 0 and retained_input.stdout.strip() != rebase_input_head:
+        raise WorkflowError("本轮同步输入保留引用与恢复点不符，拒绝覆盖。")
+    git(root, "update-ref", input_ref, rebase_input_head)
+    recovery["rebase_input_head"] = rebase_input_head
+    recovery["rebase_input_ref"] = input_ref
     recovery.setdefault("child_heads", integrated_child_heads(root, branch, target_branch,
                                                                 str(recovery["original_head"])))
     write_recovery(marker, recovery)
@@ -295,13 +304,15 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
 
     synced_head = git_output(root, "rev-parse", "HEAD")
     recovery["synced_head"] = synced_head
+    recovery["rebase_input_head"] = rebase_input_head
+    recovery["rebase_synced_head"] = synced_head
     recovery.pop("rebase_tree", None)
     recovery.pop("rebase_tree_failed", None)
     rebase_lineage_dir = rebase_lineage_paths(root, branch, synced_head)[0].parent
     linearized_lineage = lineage_paths(root, branch)[0]
     if recovery["child_heads"] or rebase_lineage_dir.is_dir() or linearized_lineage.is_file():
         expected = git(root, "merge-tree", "--write-tree", upstream_sha,
-                       str(recovery["original_head"]), check=False)
+                       rebase_input_head, check=False)
         if (expected.returncode == 0 and expected.stdout.splitlines()
                 and expected.stdout.splitlines()[0] == git_output(root, "rev-parse", "HEAD^{tree}")
                 and not git_output(root, "rev-list", "--merges", f"{upstream_sha}..HEAD")):
@@ -506,6 +517,8 @@ def rollback(root: Path, as_json: bool) -> int:
     recovery = read_recovery(marker, branch)
     if recovery.get("pushed_head") or recovery.get("push_state"):
         raise WorkflowError("同步后的 HEAD 已进入推送阶段；禁止自动 rollback，请先完成远端核验与人工决策。")
+    if recovery.get("rebase_input_head", recovery["original_head"]) != recovery["original_head"]:
+        raise WorkflowError("多轮同步含已解决冲突的中间提交；禁止自动回退到旧 PR 源，已保留恢复点与输入引用。")
     original_head = str(recovery["original_head"])
     current_head = git_output(root, "rev-parse", "HEAD")
     synced_head = str(recovery.get("synced_head", original_head))
@@ -574,9 +587,12 @@ def finalize(root: Path, as_json: bool) -> int:
             lineage_file.parent.mkdir(parents=True, exist_ok=True)
             write_recovery(lineage_file, lineage)
     if recovery.get("rebase_tree"):
-        original_head = str(recovery["original_head"])
+        original_head = str(recovery.get("rebase_input_head", recovery["original_head"]))
         upstream_sha = str(recovery["upstream_sha"])
-        synced_head = str(recovery["synced_head"])
+        synced_head = str(recovery.get("rebase_synced_head", recovery["synced_head"]))
+        input_ref = str(recovery.get("rebase_input_ref", ""))
+        if input_ref and git_output(root, "rev-parse", input_ref) != original_head:
+            raise WorkflowError("本轮同步输入保留引用与恢复点不符，禁止 finalize。")
         expected = git(root, "merge-tree", "--write-tree", upstream_sha,
                        original_head, check=False)
         if (expected.returncode or not expected.stdout.splitlines()
