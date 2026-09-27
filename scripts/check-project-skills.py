@@ -10,6 +10,7 @@ from pathlib import Path
 AUTHORITY = Path(".agents/skills")
 AGENTS_ROOT = AUTHORITY.parent
 GENERATED_BUILD = AUTHORITY / "deploy-blue-whale-api/.build"
+GENERATED_FILES = {GENERATED_BUILD / name for name in ("source-commit", "image-tag", "new-api")}
 CLAUDE_ENTRY = Path(".claude/skills")
 CLIENT_ENTRIES = (
     Path(".codex/skills"),
@@ -49,7 +50,6 @@ def check(root, home):
     notices = []
     agents = root / AGENTS_ROOT
     authority = root / AUTHORITY
-    generated_build = root / GENERATED_BUILD
     claude = root / CLAUDE_ENTRY
     tracked = tracked_paths(root)
 
@@ -67,11 +67,14 @@ def check(root, home):
                 errors.append(f"{path.relative_to(root)}: 缺少 SKILL.md")
         for path in files_under(agents):
             relative = path.relative_to(root)
-            if (relative.is_relative_to(GENERATED_BUILD)
-                    and generated_build.is_dir() and not generated_build.is_symlink()):
-                continue
             if path.is_symlink():
                 errors.append(f"{relative}: .agents 包含符号链接，请改为入库文件")
+            elif relative == GENERATED_BUILD:
+                if not path.is_dir():
+                    errors.append(f"{relative}: 已知构建产物必须是实际目录")
+            elif relative.is_relative_to(GENERATED_BUILD):
+                if relative not in GENERATED_FILES or not path.is_file():
+                    errors.append(f"{relative}: 未知构建产物或非普通文件")
             elif path.is_file() and relative not in tracked:
                 errors.append(f"{relative}: 未纳入 Git，新的工作树不会取得此文件")
             elif path.is_dir() and not relative.is_relative_to(AUTHORITY):

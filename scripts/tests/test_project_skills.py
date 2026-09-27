@@ -158,7 +158,7 @@ class ProjectSkillsTest(unittest.TestCase):
         tracked.unlink()
         self.assertIn(".agents/tracked.txt: Git 跟踪的文件缺失", self.check_skills(1))
 
-    def test_known_build_output_is_preserved_but_adjacent_unknown_file_fails(self):
+    def test_only_known_regular_build_outputs_are_accepted(self):
         skill = self.worktree / ".agents/skills/deploy-blue-whale-api"
         skill.mkdir()
         (skill / "SKILL.md").write_text("# Deploy\n", encoding="utf-8")
@@ -172,9 +172,26 @@ class ProjectSkillsTest(unittest.TestCase):
         self.assertIn("校验通过", self.check_skills())
         self.assertEqual((build / "new-api").read_text(encoding="utf-8"), "new-api\n")
 
+        unknown_build = build / "unknown.txt"
+        unknown_build.write_text("unknown\n", encoding="utf-8")
+        self.assertIn(".build/unknown.txt: 未知构建产物", self.check_skills(1))
+        unknown_build.unlink()
+
+        linked = build / "linked"
+        linked.symlink_to("source-commit")
+        self.assertIn(".build/linked: .agents 包含符号链接", self.check_skills(1))
+        linked.unlink()
+
         unknown = skill / "unknown.txt"
         unknown.write_text("unknown\n", encoding="utf-8")
         self.assertIn(".agents/skills/deploy-blue-whale-api/unknown.txt: 未纳入 Git", self.check_skills(1))
+        unknown.unlink()
+
+        for name in ("source-commit", "image-tag", "new-api"):
+            (build / name).unlink()
+        build.rmdir()
+        build.symlink_to(".")
+        self.assertIn(".build: .agents 包含符号链接", self.check_skills(1))
 
     def test_personal_same_name_reports_sources_and_preserves_files(self):
         personal = self.home / ".codex/skills/example"
