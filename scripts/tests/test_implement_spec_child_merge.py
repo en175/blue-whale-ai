@@ -94,6 +94,28 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         return run(sys.executable, CLEANUP_SCRIPT, "--pr-snapshot", snapshot, "--json",
                    cwd=self.child_one, check=False, env=env)
 
+    def merged_release_start(self):
+        self.git(self.main, "switch", "-c", "release-side")
+        self.commit(self.main, "side.txt", "side\n")
+        self.git(self.main, "switch", "release/test")
+        self.commit(self.main, "release.txt", "release\n")
+        self.git(self.main, "merge", "--no-ff", "--no-edit", "-m",
+                 "chore: merge release baseline", "release-side")
+        self.base = self.git(self.main, "rev-parse", "HEAD")
+        self.git(self.main, "push", "origin", "release/test")
+        for worktree in (self.integration, self.child_one):
+            self.git(worktree, "merge", "--ff-only", self.base)
+            git_dir = Path(self.git(worktree, "rev-parse", "--absolute-git-dir"))
+            metadata_path = git_dir / "blue-whale" / "task-base.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["start_sha"] = self.base
+            if worktree == self.child_one:
+                metadata["inherited_sha"] = self.base
+                (metadata_path.parent / "task-integration-sha").write_text(
+                    self.base + "\n", encoding="utf-8"
+                )
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
     def test_two_children_from_different_integration_commits_fast_forward_with_correct_tree(self):
         self.commit(self.integration, "integration.txt", "integration\n")
         self.commit(self.child_one, "one.txt", "one\n")
@@ -147,6 +169,29 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         cleaned = self.cleanup(self.snapshot(source_head))
         self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
         self.assertFalse(self.child_one.exists())
+
+    def test_inherited_child_from_merge_commit_release_start_fast_forwards(self):
+        self.merged_release_start()
+        self.commit(self.child_one, "one.txt", "one\n")
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "one.txt").read_text(), "one\n")
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"),
+                         self.git(self.child_one, "rev-parse", "HEAD"))
+
+    def test_inherited_child_from_merge_commit_release_start_rejects_extra_merge(self):
+        self.merged_release_start()
+        self.git(self.main, "switch", "-c", "child-side", self.base)
+        self.commit(self.main, "child-side.txt", "side\n")
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.git(self.child_one, "merge", "--no-ff", "--no-edit", "-m",
+                 "chore: extra child merge", "child-side")
+        child_head = self.git(self.child_one, "rev-parse", "HEAD")
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("子任务继承历史不符", stopped.stdout)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), self.base)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
 
     def test_inherited_child_waits_for_release_sync_then_keeps_both_sides(self):
         parent = self.commit(self.integration, "integration.txt", "integration\n")

@@ -102,11 +102,17 @@ def merge(root: Path, child: Path) -> dict[str, object]:
         raise MergeError("子任务提交已进入集成分支。")
     inherited_sha = child_metadata.get("inherited_sha")
     if inherited_sha:
-        parents = output(root, "show", "-s", "--format=%P", str(inherited_sha)).split()
-        if (len(parents) != 2 or parents[0] != child_metadata["start_sha"]
-                or output(root, "rev-list", "--first-parent", "--merges",
-                          f"{child_metadata['start_sha']}..{child_sha}").splitlines() != [inherited_sha]
-                or output(root, "rev-list", "--merges", f"{inherited_sha}..{child_sha}")):
+        if inherited_sha == child_metadata["start_sha"]:
+            valid_inheritance = git(root, "merge-base", "--is-ancestor", str(inherited_sha),
+                                    child_sha, check=False).returncode == 0
+        else:
+            parents = output(root, "show", "-s", "--format=%P", str(inherited_sha)).split()
+            valid_inheritance = (len(parents) == 2 and parents[0] == child_metadata["start_sha"]
+                                 and output(root, "rev-list", "--first-parent", "--merges",
+                                            f"{child_metadata['start_sha']}..{child_sha}").splitlines()
+                                 == [inherited_sha])
+        if not valid_inheritance or output(root, "rev-list", "--merges",
+                                           f"{inherited_sha}..{child_sha}"):
             raise MergeError("子任务继承历史不符或含其他 merge commit，拒绝受控 rebase。")
         if git(root, "merge-base", "--is-ancestor", str(child_metadata["start_sha"]),
                integration_sha, check=False).returncode:
