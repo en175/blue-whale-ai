@@ -152,13 +152,19 @@ describe("DashboardService —— 充值积分与收入金额", () => {
 
     const stats = await service.stats(RANGE);
 
-    // 查询本身：区间与「≥ 待到账」的过滤都要在 SQL 里（不是取回来再筛）
+    // 查询本身：状态过滤与**区间条件**都要在 SQL 里（不是取回来再筛）
+    //
+    // ⚠️ 区间是 OR 两条，不是单写 `paid_at` —— 这条断言是**本修复第一版翻车后补的**。
+    //    第一版只把 `status` 放宽了、区间条件没跟着改，于是 `paid_pending` / `grant_failed`
+    //    的行因 `paid_at IS NULL` 被整行过滤掉，**行为与改前逐字相同**，
+    //    而当时那条测试只断言「查询形状长这样」，把这个形状原样钉住了 —— 绿着的假修复。
+    //    所以现在把 OR 写进断言：谁把它改回单写 `paid_at`，这条就红。
     expect(rechargeGroupBy).toHaveBeenCalledWith({
       by: ["status"],
       where: {
         is_delete: 0,
         status: { in: ["paid_pending", "grant_failed", "paid"] },
-        paid_at: WINDOW,
+        OR: [{ paid_at: WINDOW }, { paid_at: null, paid_pending_at: WINDOW }],
       },
       _sum: { credits: true, amount_fen: true },
     });

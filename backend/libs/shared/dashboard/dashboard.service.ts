@@ -21,11 +21,16 @@
  *    到账积分由档位原价派生（`credits` 在下单时刻冻结），而 `amount_fen` 才是用户
  *    真正付出去的钱。看到「充了 100 万分只收了 1 万块」先别当 bug，去看档位折扣。
  *
- * ── 为什么用 `paid_at` 而不是 `gmt_create` 划充值 ──────────────────────────
+ * ── 为什么用「到账时刻」而不是 `gmt_create` 划充值 ────────────────────────────
  *
- * `gmt_create` 是**下单**时刻，`paid_at` 是**到账**时刻。这两个数回答的是「这段时间
+ * `gmt_create` 是**下单**时刻，「到账时刻」是钱进来的时刻。这两个数回答的是「这段时间
  * 收到了多少钱 / 发出去了多少积分」——钱是到账那一刻才进来的，一笔昨天下单、今天付款的
- * 订单属于今天。`status='paid'` 蕴含 `paid_at` 非空（`markPaid` 一并写入），不会漏行。
+ * 订单属于今天。
+ *
+ * ⚠️ **「到账时刻」不总是 `paid_at`**：`paid_at` 只在积分**发完**（`markPaid`）时才写，
+ *    停在 `paid_pending` / `grant_failed` 的单那一列是 **NULL**。用 `paid_at` 单独划区间会把
+ *    这些「钱已收、积分没发」的单整行漏掉（SQL 里 NULL 的比较恒为假）—— 见 `sumPaidRecharges`
+ *    里那段 OR 的注释，那里是这条修复第一版翻车的现场。
  * ============================================ */
 import { Injectable } from "@nestjs/common";
 import {
@@ -149,7 +154,19 @@ export class DashboardService {
       where: {
         is_delete: 0,
         status: { in: [...PAID_REACHED_STATUSES] },
-        paid_at: window,
+        // ⚠️ **区间必须按「钱到的时刻」划，而它不总是 `paid_at`。**
+        //
+        //    `paid_at` 只在 `markPaid`（积分发完了）里写；停在 `paid_pending`（钱到了、积分没发）
+        //    或 `grant_failed`（到账异常）的单**这一列是 NULL**。而 SQL 里 `paid_at >= ? ` 对 NULL
+        //    恒为假 —— 只写 `paid_at: window` 会把这些单**整行过滤掉**，实收金额照样低报。
+        //
+        //    这正是这条修复第一版翻车的地方：`status` 放宽了，区间条件没跟着放宽，
+        //    行为与改前**逐字相同**，但注释、提交信息、以及一条只断言「查询形状」的 mock 测试
+        //    都宣称它修好了 —— 一条绿着的假修复，而它管的是收入报表。
+        //
+        //    所以：`paid_at` 为空时退回 `paid_pending_at`（`markPaidPending` 写的那一列，
+        //    见 `recharge-order-repo` 里「不能用 gmt_modified 顶替」的论证）。
+        OR: [{ paid_at: window }, { paid_at: null, paid_pending_at: window }],
       },
       _sum: { credits: true, amount_fen: true },
     });
