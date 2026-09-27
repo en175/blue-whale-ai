@@ -104,6 +104,36 @@ def rebase_lineage_paths(root: Path, branch: str, synced_head: str) -> tuple[Pat
             f"refs/agent-implement-spec-rebase-lineage/{slug}/{synced_head}")
 
 
+def current_rebase_proof(recovery: dict[str, object]) -> dict[str, str] | None:
+    if not recovery.get("rebase_tree"):
+        return None
+    return {
+        "original_head": str(recovery.get("rebase_input_head", recovery["original_head"])),
+        "upstream_sha": str(recovery.get("rebase_upstream_sha", recovery["upstream_sha"])),
+        "synced_head": str(recovery.get("rebase_synced_head", recovery["synced_head"])),
+        "merged_tree": str(recovery["rebase_tree"]),
+        "input_ref": str(recovery.get("rebase_input_ref", "")),
+    }
+
+
+def verify_rebase_proof(root: Path, proof: dict[str, str], continuation: str) -> None:
+    original = proof["original_head"]
+    upstream = proof["upstream_sha"]
+    synced = proof["synced_head"]
+    tree = proof["merged_tree"]
+    retained = proof.get("input_ref", "")
+    expected = git(root, "merge-tree", "--write-tree", upstream, original, check=False)
+    if (not all(re.fullmatch(r"[0-9a-f]{40}", value)
+                for value in (original, upstream, synced, tree))
+            or expected.returncode or not expected.stdout.splitlines()
+            or expected.stdout.splitlines()[0] != tree
+            or git_output(root, "rev-parse", f"{synced}^{{tree}}") != tree
+            or (retained and git_output(root, "rev-parse", retained) != original)
+            or git(root, "merge-base", "--is-ancestor", synced,
+                   continuation, check=False).returncode):
+        raise WorkflowError("同步证明未通过输入引用、合并文件树或提交接续核对。")
+
+
 def integrated_child_heads(root: Path, branch: str, target_branch: str,
                            original_head: str) -> dict[str, str]:
     children = {}
@@ -241,9 +271,25 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
             raise WorkflowError("已有同步事务绑定其他 PR 目标分支，拒绝切换基线。")
         if recovery.get("pushed_head"):
             raise WorkflowError("上一轮同步结果已经推送；完成远端核验并 finalize 后才能开启新事务。")
+        if recovery.get("rebase_tree_failed"):
+            raise WorkflowError("上一轮同步的文件树核对失败；保留恢复点，禁止用新一轮同步覆盖失败证据。")
         expected_head = str(recovery.get("synced_head", recovery["original_head"]))
         if original_head != expected_head:
             raise WorkflowError("当前 HEAD 已离开已有同步事务，拒绝覆盖恢复点。")
+        proofs = recovery.get("rebase_proofs", [])
+        if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
+            raise WorkflowError("多轮同步证明格式错误，拒绝覆盖恢复点。")
+        current_proof = current_rebase_proof(recovery)
+        if current_proof:
+            proofs.append(current_proof)
+        for index, proof in enumerate(proofs):
+            continuation = str(proofs[index + 1]["original_head"]) if index + 1 < len(proofs) else original_head
+            verify_rebase_proof(root, proof, continuation)
+        recovery["rebase_proofs"] = proofs
+        for field in ("rebase_tree", "rebase_synced_head", "rebase_upstream_sha"):
+            recovery.pop(field, None)
+        recovery.setdefault("rollback_safe", recovery.get("rebase_input_head")
+                            == recovery["original_head"])
         rebase_input_head = expected_head
         backup_ref = str(recovery.get("backup_ref", backup_ref))
         remote_sha = str(recovery.get("remote_branch_sha", ""))
@@ -263,6 +309,7 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
             "target_branch": target_branch,
             "remote_branch_sha": remote_sha,
             "backup_ref": backup_ref,
+            "rollback_safe": True,
             "created_at": int(time.time()),
         }
     input_ref = "refs/agent-sync-inputs/" + branch.replace("/", "%") + "/" + rebase_input_head
@@ -287,6 +334,8 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
             raise WorkflowError(
                 "rebase 冲突且自动 abort 未能恢复原 HEAD；abort 输出：{}".format(abort.stderr.strip())
             )
+        recovery["rollback_safe"] = False
+        write_recovery(marker, recovery)
         emit(
             as_json,
             "REBASE_CONFLICT_ABORTED",
@@ -306,6 +355,7 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     recovery["synced_head"] = synced_head
     recovery["rebase_input_head"] = rebase_input_head
     recovery["rebase_synced_head"] = synced_head
+    recovery["rebase_upstream_sha"] = upstream_sha
     recovery.pop("rebase_tree", None)
     recovery.pop("rebase_tree_failed", None)
     rebase_lineage_dir = rebase_lineage_paths(root, branch, synced_head)[0].parent
@@ -517,7 +567,8 @@ def rollback(root: Path, as_json: bool) -> int:
     recovery = read_recovery(marker, branch)
     if recovery.get("pushed_head") or recovery.get("push_state"):
         raise WorkflowError("同步后的 HEAD 已进入推送阶段；禁止自动 rollback，请先完成远端核验与人工决策。")
-    if recovery.get("rebase_input_head", recovery["original_head"]) != recovery["original_head"]:
+    if not recovery.get("rollback_safe", recovery.get("rebase_input_head")
+                        == recovery["original_head"]):
         raise WorkflowError("多轮同步含已解决冲突的中间提交；禁止自动回退到旧 PR 源，已保留恢复点与输入引用。")
     original_head = str(recovery["original_head"])
     current_head = git_output(root, "rev-parse", "HEAD")
@@ -586,30 +637,29 @@ def finalize(root: Path, as_json: bool) -> int:
                 git(root, "update-ref", lineage_ref, original_head)
             lineage_file.parent.mkdir(parents=True, exist_ok=True)
             write_recovery(lineage_file, lineage)
-    if recovery.get("rebase_tree"):
-        original_head = str(recovery.get("rebase_input_head", recovery["original_head"]))
-        upstream_sha = str(recovery["upstream_sha"])
-        synced_head = str(recovery.get("rebase_synced_head", recovery["synced_head"]))
-        input_ref = str(recovery.get("rebase_input_ref", ""))
-        if input_ref and git_output(root, "rev-parse", input_ref) != original_head:
-            raise WorkflowError("本轮同步输入保留引用与恢复点不符，禁止 finalize。")
-        expected = git(root, "merge-tree", "--write-tree", upstream_sha,
-                       original_head, check=False)
-        if (expected.returncode or not expected.stdout.splitlines()
-                or expected.stdout.splitlines()[0] != recovery["rebase_tree"]
-                or git_output(root, "rev-parse", f"{synced_head}^{{tree}}") != recovery["rebase_tree"]
-                or git(root, "merge-base", "--is-ancestor", synced_head,
-                       current_head, check=False).returncode
-                or remote_branch_sha(root, branch) != current_head):
-            raise WorkflowError("同步后的文件树或远端 PR 源分支未通过无损核对，禁止 finalize。")
+    proofs = recovery.get("rebase_proofs", [])
+    if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
+        raise WorkflowError("多轮同步证明格式错误，禁止 finalize。")
+    current_proof = current_rebase_proof(recovery)
+    if current_proof:
+        proofs.append(current_proof)
+    if proofs and remote_branch_sha(root, branch) != current_head:
+        raise WorkflowError("远端 PR 源分支已变化，禁止归档同步证明。")
+    for index, proof in enumerate(proofs):
+        continuation = str(proofs[index + 1]["original_head"]) if index + 1 < len(proofs) else current_head
+        verify_rebase_proof(root, proof, continuation)
+    for index, proof in enumerate(proofs):
+        continuation = str(proofs[index + 1]["original_head"]) if index + 1 < len(proofs) else current_head
+        original_head = str(proof["original_head"])
+        synced_head = str(proof["synced_head"])
         lineage_file, lineage_ref = rebase_lineage_paths(root, branch, synced_head)
         lineage = {
             "version": 1, "proof_kind": "rebase", "source_branch": branch,
             "target_branch": recovery["target_branch"],
             "pull_request_id": recovery["verified_pr_iid"],
-            "original_head": original_head, "upstream_sha": upstream_sha,
-            "synced_head": synced_head, "verified_head": current_head,
-            "merged_tree": recovery["rebase_tree"],
+            "original_head": original_head, "upstream_sha": proof["upstream_sha"],
+            "synced_head": synced_head, "verified_head": continuation,
+            "merged_tree": proof["merged_tree"],
             "child_heads": recovery["child_heads"],
         }
         if lineage_file.exists():
