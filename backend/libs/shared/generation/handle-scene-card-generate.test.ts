@@ -4,7 +4,7 @@ import { handleSceneCardGenerate } from "./handle-scene-card-generate.js";
 import { baseInput } from "../persistence/scene-card-generation-repo.test-helpers.js";
 
 // IKF YHJ：场景卡再生成是第三条视频创建路径。这里只钉握手——门的拒绝原因必须以
-// 400 + invalid_reference 返回（与创建期/重试期同款），不落成 404/500。
+// invalid_reference（1034）信封返回（与创建期/重试期同款），不落成 404/500。
 
 /** 合法请求体：parameters 与 capability_snapshot_version 直接取自 repo 测试用的那份
  *  已验证取值（schema 的 superRefine 要求两者 capability_type/model_id/provider_id 一致），
@@ -25,7 +25,7 @@ function makeDeps(result: unknown) {
 }
 
 describe("handleSceneCardGenerate 素材门（IKFYHJ）", () => {
-  it("门拒绝 → 400 + invalid_reference，原因原文外显", async () => {
+  it("门拒绝 → 1034 invalid_reference，原因原文外显", async () => {
     const { deps } = makeDeps({
       kind: "material_blocked",
       reason: "该素材未审核通过，不能用于视频生成",
@@ -41,7 +41,7 @@ describe("handleSceneCardGenerate 素材门（IKFYHJ）", () => {
     );
 
     expect(result).toEqual({
-      code: 400,
+      code: 1034,
       msg: "该素材未审核通过，不能用于视频生成",
       data: { code: "invalid_reference" },
     });

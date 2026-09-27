@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   ASSET_UNAVAILABLE_CODE,
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
+  errorCodeToNumeric,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
@@ -61,13 +64,14 @@ export async function handleSceneCardGenerate(
   try {
     jsonBody = JSON.parse(body);
   } catch {
-    return fail(400, "请求参数无效");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   }
   const parsed = sceneCardRegenerationRequestSchema.safeParse(jsonBody);
-  if (!parsed.success) return fail(400, "请求参数无效");
+  if (!parsed.success)
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   // URL 路径资源身份为权威，body 的 scene_card_id 必须与之相符。
   if (parsed.data.scene_card_id !== sceneCardId)
-    return fail(400, "场景卡不一致");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "场景卡不一致");
 
   const result = await deps.regenerateSceneCard({
     userId,
@@ -97,8 +101,10 @@ export async function handleSceneCardGenerate(
   });
   switch (result.kind) {
     case "material_blocked":
-      // 与创建期/重试期同款口径：400 + invalid_reference，原因原文外显。
-      return fail(400, result.reason, { code: ERROR_INVALID_REFERENCE });
+      // 与创建期/重试期同款口径：invalid_reference（1034），原因原文外显。
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), result.reason, {
+        code: ERROR_INVALID_REFERENCE,
+      });
     case "applied":
       return ok({
         scene_card_id: wireInteger(result.scene_card_id),
@@ -130,7 +136,11 @@ export async function handleSceneCardGenerate(
         "生成能力已变化，需刷新能力后重试",
       );
     case "capability_limit":
-      return fail(400, result.reason);
+      // 参数越界/参考数量超限归 capability_unsupported_param（1030），reason 原文外显。
+      return fail(
+        errorCodeToNumeric(ERROR_CAPABILITY_UNSUPPORTED_PARAM),
+        result.reason,
+      );
     case "validation_failed":
       return fail(ASSET_UNAVAILABLE_CODE, "引用素材失效或来源缺失");
     case "forbidden":

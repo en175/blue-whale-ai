@@ -200,7 +200,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         msg: string;
         data: unknown;
       };
-      expect(body.code).toBe(400);
+      expect(body.code).toBe(1034);
       // IKG6EK / ADR-0088：prompt_doc 退役后不再按 doc 声明细化索引文案，统一走通用信封
       expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
@@ -226,7 +226,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         msg: string;
         data: unknown;
       };
-      expect(body.code).toBe(400);
+      expect(body.code).toBe(1034);
       expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
     });

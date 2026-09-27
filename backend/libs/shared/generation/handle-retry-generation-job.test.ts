@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { handleRetryGenerationJob } from "./handle-retry-generation-job.js";
 
 // IKF YHJ（ADR-0087 决策 7）：重试期的素材状态门在 repo 内、幂等重放之后触发；
-// 这里只钉住握手——门的拒绝原因必须以 400 + invalid_reference 返回，不落成 404/500。
+// 这里只钉住握手——门的拒绝原因必须以 invalid_reference（1034）信封返回，不落成 404/500。
 
 function makeDeps(overrides: {
   retryResult: unknown;
@@ -27,7 +27,7 @@ const CREATED = {
 };
 
 describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
-  it("门拒绝 → 400 + invalid_reference，原因原文外显", async () => {
+  it("门拒绝 → 1034 invalid_reference，原因原文外显", async () => {
     const { deps } = makeDeps({
       retryResult: {
         kind: "material_blocked",
@@ -46,7 +46,7 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
     );
 
     expect(result).toEqual({
-      code: 400,
+      code: 1034,
       msg: "该素材未审核通过，不能用于视频生成",
       data: { code: "invalid_reference" },
     });
