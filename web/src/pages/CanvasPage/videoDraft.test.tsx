@@ -1095,3 +1095,86 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await expectMode('文生视频');
   });
 });
+
+/* IKIPSX（IKGUXU D-01）：新建视频草稿默认模式写入 draftMode。
+   创建路径：画布常规新建（无 seed）也要把当前默认模式写入草稿 data.draftMode，与面板默认显示同源；
+   提交路径：startGenerationJob 兜底——草稿已保存模式优先，否则用当前面板选中模式，
+   覆盖 2026-09-13 功能上线以来存量的无 draftMode 旧草稿；手动切换路径（syncDraftParams）行为不变。 */
+describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
+  it('侧栏入口新建视频草稿：未碰模式选择器，data.draftMode 落盘为面板默认显示模式 prompt', async () => {
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+
+    // 新建草稿卡（seed d1 之外新增一张）
+    expect(videoDrafts()).toHaveLength(2);
+    const newDraft = videoDrafts().find((n) => n.id !== 'd1')!;
+    // 创建路径补写：与面板默认显示（modeOptions[0].key = 'prompt'）同源
+    expect((newDraft.data as Record<string, unknown>).draftMode).toBe('prompt');
+    // 面板显示与落盘一致：新建默认文生视频
+    expect(container.textContent).toContain('文生视频');
+
+    // 不止页面内节点状态：编辑驱动自动保存后，画布保存请求体中该新草稿同样携带
+    // 与面板默认显示一致的模式值（payload.nodes 为节点对象数组，见 saveCanvasDoc 调用）
+    await typePrompt('新建草稿保存');
+    await vi.waitFor(() => {
+      const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as
+        [string, { nodes: Node[] }] | undefined;
+      expect(last).toBeTruthy();
+      const saved = last![1].nodes.find((n) => n.id === newDraft.id);
+      expect((saved?.data as Record<string, unknown> | undefined)?.draftMode).toBe('prompt');
+    }, { timeout: 3000 });
+  });
+
+  it('存量无 draftMode 草稿经面板发送：提交时按当前面板选中模式兜底写入', async () => {
+    // seed 的 d1 草稿 data 无 draftMode（模拟 2026-09-13 前的存量旧草稿）；
+    // 画布渲染后读节点——单跑时 flowProps.current 尚未赋值，不得在 renderPage 前读取
+    await renderPage();
+    expect(draftDataOf('d1').draftMode).toBeUndefined();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    // 不碰模式选择器，面板默认显示「文生视频」
+    await expectMode('文生视频');
+    await typePrompt('存量草稿提交');
+
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 提交路径兜底：草稿已保存模式缺失时，按当前面板选中模式写入
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('prompt'));
+  });
+
+  it('手动切过模式的存量草稿经面板发送：draftMode 保留为所选模式，不被兜底覆盖', async () => {
+    // seed 的 d1 草稿 data 无 draftMode（存量），用户打开面板手动切到「全能参考」
+    await renderPage();
+    expect(draftDataOf('d1').draftMode).toBeUndefined();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('m1', 'd1'); // 加图参考使「全能参考」可选且自动切
+    await expectMode('全能参考');
+    // 自动切换路径已经写过一次（syncDraftParams）
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await typePrompt('已切模式提交');
+
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 提交后仍为所选模式（兜底不覆盖已保存值）
+    expect(draftDataOf('d1').draftMode).toBe('all');
+  });
+
+  it('存量草稿带参考经更新生成（不走面板）：draftMode 按提交时参考集合派生默认补写', async () => {
+    // seed 的 d1 草稿 data 无 draftMode（存量）；draftModelId 等参数齐全可直接更新生成
+    await renderPage();
+    expect(draftDataOf('d1').draftMode).toBeUndefined();
+    await connect('m1', 'd1'); // 加图参考：派生默认应为 'all'（与面板显示同源）
+
+    // 触发更新生成（卡片 onUpdateGenerate 回调，不走面板）
+    await act(async () => {
+      flowProps.current.onUpdateGenerate('d1');
+    });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 提交后 draftMode 被补写为按当前参考集合派生的默认（m1 图参考 → 'all'）
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+  });
+});
