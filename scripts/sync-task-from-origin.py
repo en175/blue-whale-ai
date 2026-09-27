@@ -296,15 +296,23 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     synced_head = git_output(root, "rev-parse", "HEAD")
     recovery["synced_head"] = synced_head
     recovery.pop("rebase_tree", None)
+    recovery.pop("rebase_tree_failed", None)
     rebase_lineage_dir = rebase_lineage_paths(root, branch, synced_head)[0].parent
-    if recovery["child_heads"] or rebase_lineage_dir.is_dir():
+    linearized_lineage = lineage_paths(root, branch)[0]
+    if recovery["child_heads"] or rebase_lineage_dir.is_dir() or linearized_lineage.is_file():
         expected = git(root, "merge-tree", "--write-tree", upstream_sha,
                        str(recovery["original_head"]), check=False)
         if (expected.returncode == 0 and expected.stdout.splitlines()
                 and expected.stdout.splitlines()[0] == git_output(root, "rev-parse", "HEAD^{tree}")
                 and not git_output(root, "rev-list", "--merges", f"{upstream_sha}..HEAD")):
             recovery["rebase_tree"] = expected.stdout.splitlines()[0]
+        else:
+            recovery["rebase_tree_failed"] = True
     write_recovery(marker, recovery)
+    if recovery.get("rebase_tree_failed"):
+        emit(as_json, "VERIFICATION_FAILED", branch=branch, head=synced_head,
+             recovery_file=str(marker), detail="子任务合回后的同步文件树与无冲突合并结果不一致；禁止发布。")
+        return 4
     diff_check = git(root, "diff", "--check", "{}...HEAD".format(upstream_ref), check=False)
     if diff_check.returncode != 0:
         emit(
@@ -520,6 +528,8 @@ def finalize(root: Path, as_json: bool) -> int:
     ensure_no_git_operation(git_dir)
     marker, backup_ref = recovery_paths(git_dir, branch)
     recovery = read_recovery(marker, branch)
+    if recovery.get("rebase_tree_failed"):
+        raise WorkflowError("同步后的文件树核对失败，禁止 finalize。")
     current_head = git_output(root, "rev-parse", "HEAD")
     if recovery.get("push_state") != "pushed" or recovery.get("pushed_head") != current_head:
         raise WorkflowError("同步事务尚未推送当前 HEAD，禁止 finalize。")

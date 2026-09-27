@@ -50,7 +50,8 @@ def worktrees(root: Path) -> list[tuple[Path, str]]:
 
 def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                           target_branch: str, pull_request_id: int,
-                          child_branch: str, child_head: str, source_head: str) -> bool:
+                          child_branch: str, child_head: str, source_head: str,
+                          initial_verified: str | None = None) -> bool:
     slug = source_branch.replace("/", "%")
     directory = common_dir / "blue-whale" / "implement-spec-rebase-lineage" / slug
     if not directory.is_dir():
@@ -63,7 +64,8 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                 and record.get("target_branch") == target_branch
                 and record.get("pull_request_id") == pull_request_id):
             records.append((path, record))
-    reachable = set()
+    reachable = {initial_verified} if initial_verified else set()
+    proven = set()
     for _ in records:
         for path, record in records:
             original = str(record.get("original_head", ""))
@@ -93,8 +95,9 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                            verified, check=False).returncode):
                 raise CleanupError("同步证明未通过原提交、合并文件树和远端回读核对，未清理。")
             reachable.add(verified)
+            proven.add(verified)
     return any(git(root, "merge-base", "--is-ancestor", verified,
-                   source_head, check=False).returncode == 0 for verified in reachable)
+                   source_head, check=False).returncode == 0 for verified in proven)
 
 
 def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
@@ -156,16 +159,22 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
         if (lineage.get("source_branch") != source_branch
                 or lineage.get("target_branch") != target_branch
                 or lineage.get("pull_request_id") != int(snapshot["pull_request_id"])
-                or lineage.get("verified_head") != fetched_head
                 or child_heads.get(child_branch) != child_head
                 or output(root, "rev-parse", lineage_ref) != original_head
                 or git(root, "merge-base", "--is-ancestor", child_head, original_head,
                        check=False).returncode
                 or output(root, "rev-parse", f"{original_head}^{{tree}}") != original_tree
                 or output(root, "rev-parse", f"{linearized_head}^{{tree}}") != original_tree
-                or git(root, "merge-base", "--is-ancestor", linearized_head, fetched_head,
+                or git(root, "merge-base", "--is-ancestor", linearized_head,
+                       str(lineage.get("verified_head", "")),
                        check=False).returncode):
             raise CleanupError("线性化记录未证明子任务内容进入已核验的 PR 源分支，未清理。")
+        verified_head = str(lineage["verified_head"])
+        if verified_head != fetched_head and not rebase_lineage_proves(
+                root, common_dir, source_branch, target_branch,
+                int(snapshot["pull_request_id"]), child_branch, child_head,
+                fetched_head, initial_verified=verified_head):
+            raise CleanupError("线性化后的同步证明未接续到当前 PR 源提交，未清理。")
     remote_line = output(root, "ls-remote", "--heads", "origin", f"refs/heads/{source_branch}")
     if not remote_line or remote_line.split()[0] != fetched_head:
         raise CleanupError("远端 PR 源分支在核验期间变化，未清理。")

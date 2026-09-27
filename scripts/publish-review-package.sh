@@ -246,6 +246,21 @@ common="$(cd "$common" && pwd)"
 marker_path="$common/agent-release-review-package-$slug"
 git_dir="$(git -C "$ROOT" rev-parse --absolute-git-dir)"
 recovery_file="$git_dir/agent-sync-recovery.json"
+if [ -f "$recovery_file" ]; then
+  [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "同步恢复点需要可用的 Python 3；Microsoft Store 桩不可用。"
+  if ! "${PYTHON[@]}" - "$recovery_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    recovery = json.load(stream)
+if recovery.get("rebase_tree_failed"):
+    raise SystemExit(3)
+PY
+  then
+    fail_status 1 INVALID_RECOVERY "同步后的文件树核对失败，禁止发布；先核对恢复点与子任务内容。"
+  fi
+fi
 
 mark_recovery_state() {
   state="$1"
@@ -311,6 +326,7 @@ if (
     data.get("branch") != branch
     or data.get("synced_head") != head
     or data.get("target_branch", "master") != target
+    or data.get("rebase_tree_failed")
 ):
     raise SystemExit(3)
 print(data.get("remote_branch_sha", ""))
