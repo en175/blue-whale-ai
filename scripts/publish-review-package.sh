@@ -268,7 +268,7 @@ clear_push_state_only_if_remote_unchanged() {
 
 if [ "$MODE" = create ]; then
   if [ -n "$remote_sha" ] && ! git -C "$ROOT" merge-base --is-ancestor "$remote_sha" "$head_sha"; then
-    fail_status 5 REMOTE_SOURCE_CHANGED "远端同名分支含本地未包含的提交；创建模式拒绝覆盖。" expected_remote_sha "$remote_sha" head "$head_sha"
+    fail_status 5 REMOTE_SOURCE_CHANGED "远端同名分支含本地未包含的提交；先核对远端提交归属，创建模式拒绝覆盖。" expected_remote_sha "$remote_sha" head "$head_sha"
   fi
   if ! mark_recovery_state in_flight; then
     fail_status 9 PUSH_STATE_PERSIST_FAILED "无法在推送前持久化 fail-closed 状态。"
@@ -319,7 +319,7 @@ PY
   expected_remote_sha="$recovery_values"
 else
   if ! git -C "$ROOT" merge-base --is-ancestor "$remote_sha" "$head_sha"; then
-    fail_status 5 REMOTE_SOURCE_CHANGED "本地更新未包含当前远端源分支，拒绝覆盖未知提交。" expected_remote_sha "$remote_sha" head "$head_sha"
+    fail_status 5 REMOTE_SOURCE_CHANGED "本地更新未包含当前远端源分支。重新读取 Gitee PR 与远端提交并核对归属；未知提交不得覆盖。implement-spec 合回修复见 docs/agents/git-workflow.md。" expected_remote_sha "$remote_sha" head "$head_sha"
   fi
 fi
 
@@ -331,7 +331,7 @@ task_commit_count="$(git -C "$ROOT" rev-list --count "$upstream_ref"..HEAD)"
 merge_commit_count="$(git -C "$ROOT" rev-list --count --merges "$upstream_ref"..HEAD)"
 changed_files="$(git -C "$ROOT" diff --name-only "$upstream_ref"...HEAD)"
 if [ "$merge_commit_count" -gt 0 ]; then
-  fail_status 6 SCOPE_MERGE_COMMIT_DETECTED "PR 创建后范围冻结；任务分支包含 merge commit，停止更新。" merge_commit_count "$merge_commit_count" task_commit_count "$task_commit_count" changed_files "$changed_files" pull_request_id "$PR_IID"
+  fail_status 6 SCOPE_MERGE_COMMIT_DETECTED "PR 创建后范围冻结；任务分支包含 merge commit。若属于 implement-spec 子任务合回且本轮已获 PR 更新授权，按 docs/agents/git-workflow.md 的受控线性化流程修复并重新评审；其他来源停止更新。" merge_commit_count "$merge_commit_count" task_commit_count "$task_commit_count" changed_files "$changed_files" pull_request_id "$PR_IID"
 fi
 
 [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "PR 快照硬校验需要可用的 Python 3。"

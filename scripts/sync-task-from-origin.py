@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -89,6 +90,13 @@ def recovery_paths(git_dir: Path, branch: str) -> tuple[Path, str]:
     return git_dir / RECOVERY_FILE, BACKUP_PREFIX + branch.replace("/", "%")
 
 
+def lineage_paths(root: Path, branch: str) -> tuple[Path, str]:
+    common = absolute_git_path(root, "--git-common-dir")
+    slug = branch.replace("/", "%")
+    return (common / "blue-whale" / "implement-spec-lineage" / f"{slug}.json",
+            "refs/agent-implement-spec-lineage/" + slug)
+
+
 def _legacy_polluted_branch(candidate: str, real: str) -> bool:
     """兼容旧版脚本（PR577 前）写入的 GBK 乱码分支名。
 
@@ -168,6 +176,24 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode == 0:
+        if marker.exists():
+            recovery = read_recovery(marker, branch)
+            if recovery.get("linearized_pr") and recovery.get("synced_head") != original_head:
+                prior_head = str(recovery["synced_head"])
+                if recovery.get("push_state") or recovery.get("pushed_head"):
+                    raise WorkflowError("线性化结果已进入推送阶段，不能更新恢复点。")
+                if git(root, "merge-base", "--is-ancestor", prior_head, original_head,
+                       check=False).returncode:
+                    raise WorkflowError("当前 HEAD 不是线性化提交的后续修订，拒绝更新恢复点。")
+                if git_output(root, "rev-list", "--merges", f"{prior_head}..HEAD"):
+                    raise WorkflowError("线性化后的修订含 merge commit，拒绝更新恢复点。")
+                changed = set(git_output(root, "diff", "--name-only", f"{upstream_ref}...HEAD").splitlines())
+                if changed - set(recovery["frozen_files"]):
+                    raise WorkflowError("线性化后的修订超出 PR 冻结文件范围，拒绝更新恢复点。")
+                if remote_branch_sha(root, branch) != recovery["remote_branch_sha"]:
+                    raise WorkflowError("线性化后远端源分支变化，拒绝更新恢复点。")
+                recovery["synced_head"] = original_head
+                write_recovery(marker, recovery)
         emit(
             as_json,
             "UP_TO_DATE",
@@ -265,6 +291,139 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     return 0
 
 
+def _worktree_for_branch(root: Path, branch: str) -> Path:
+    worktree = None
+    current_path = None
+    for line in git_output(root, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            current_path = Path(line[9:])
+        elif line == f"branch refs/heads/{branch}":
+            worktree = current_path
+    if worktree is None:
+        raise WorkflowError(f"找不到子任务 {branch} 的工作树，无法证明 merge commit 来源。")
+    return worktree
+
+
+def linearize(
+    root: Path, as_json: bool, authorized: bool, iid: int | None,
+    snapshot_path: Path | None, child_branches: list[str],
+) -> int:
+    if not authorized or iid is None or snapshot_path is None:
+        raise WorkflowError("线性化已发布 PR 需要本轮明确更新授权、--update-pr 和 --pr-snapshot。")
+    git_dir, branch = worktree_context(root)
+    metadata = read_task_metadata(root)
+    ensure_clean(root)
+    ensure_no_git_operation(git_dir)
+    marker, backup_ref = recovery_paths(git_dir, branch)
+    if marker.exists() or git(root, "show-ref", "--verify", "--quiet", backup_ref, check=False).returncode == 0:
+        raise WorkflowError("已有同步恢复点或 backup ref；先核查并完成现有事务。")
+
+    target_branch = str(metadata["target_branch"])
+    fetch = git(root, "fetch", "origin", target_branch, check=False)
+    if fetch.returncode:
+        raise WorkflowError(f"无法读取 origin/{target_branch}：{fetch.stderr.strip()}")
+    upstream_sha = git_output(root, "rev-parse", f"origin/{target_branch}")
+    target_line = git_output(root, "ls-remote", "--heads", "origin", f"refs/heads/{target_branch}")
+    if not target_line or target_line.split()[0] != upstream_sha:
+        raise WorkflowError("目标发布线在 fetch 后变化，停止线性化。")
+    original_head = git_output(root, "rev-parse", "HEAD")
+    if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode:
+        raise WorkflowError("PR 源分支尚未包含当前目标发布线；先核对基线，不能直接线性化。")
+    if git(root, "merge-base", "--is-ancestor", str(metadata["start_sha"]), upstream_sha,
+           check=False).returncode:
+        raise WorkflowError("远端目标发布线尚未包含任务起点，停止线性化。")
+    remote_sha = remote_branch_sha(root, branch)
+    if remote_sha != original_head:
+        raise WorkflowError("本地 HEAD 与已发布 PR 源分支不一致，拒绝覆盖未知远端提交。")
+
+    preflight = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("pr-update-evidence.py")),
+         "preflight", "--update-pr", str(iid), "--pr-snapshot", str(snapshot_path),
+         "--remote-sha", remote_sha, "--json"],
+        cwd=root, text=True, encoding="utf-8", capture_output=True,
+    )
+    if preflight.returncode:
+        raise WorkflowError("PR 快照预检未通过：" + (preflight.stdout.strip() or preflight.stderr.strip()))
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if snapshot["target_branch"] != target_branch:
+        raise WorkflowError("PR 目标与任务元数据不一致。")
+    frozen_files = set(snapshot["changed_files"])
+    current_files = set(git_output(root, "diff", "--name-only", f"origin/{target_branch}...HEAD").splitlines())
+    if current_files != frozen_files:
+        raise WorkflowError("PR 快照文件范围与当前源分支不一致。")
+
+    commit_range = f"{upstream_sha}..{original_head}"
+    merges = git_output(root, "rev-list", "--merges", commit_range).splitlines()
+    first_parent_merges = git_output(root, "rev-list", "--first-parent", "--merges", commit_range).splitlines()
+    if not merges or set(merges) != set(first_parent_merges):
+        raise WorkflowError("merge commit 不是本 PR 集成分支的可核对合回记录。")
+    if len(child_branches) != len(merges) or len(set(child_branches)) != len(child_branches):
+        raise WorkflowError("必须为每个 merge commit 指定唯一的 --child-branch。")
+    child_tips = {}
+    for child_branch in child_branches:
+        if not re.match(r"^(feature|fix|hotfix|docs|chore)/[^/]+$", child_branch) or child_branch == branch:
+            raise WorkflowError(f"子任务分支名无效：{child_branch}")
+        child_root = _worktree_for_branch(root, child_branch)
+        child_meta = read_task_metadata(child_root, target_branch)
+        if child_meta["task_branch"] != child_branch:
+            raise WorkflowError(f"子任务元数据不匹配：{child_branch}")
+        child_tips[child_branch] = git_output(root, "rev-parse", f"refs/heads/{child_branch}")
+    second_parents = []
+    for merge_sha in merges:
+        parents = git_output(root, "show", "-s", "--format=%P", merge_sha).split()
+        if len(parents) != 2 or parents[1] not in child_tips.values():
+            raise WorkflowError(f"无法证明 merge commit 属于指定子任务：{merge_sha}")
+        second_parents.append(parents[1])
+    if set(second_parents) != set(child_tips.values()):
+        raise WorkflowError("子任务提交与 merge commit 未一一对应。")
+    for commit_sha in git_output(root, "rev-list", "--no-merges", commit_range).splitlines():
+        paths = set(git_output(root, "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha).splitlines())
+        if paths - frozen_files:
+            raise WorkflowError(f"提交 {commit_sha} 涉及 PR 冻结范围外文件：{', '.join(sorted(paths - frozen_files))}")
+
+    tree = git_output(root, "rev-parse", "HEAD^{tree}")
+    git(root, "update-ref", backup_ref, original_head, "")
+    recovery = {
+        "version": 1, "branch": branch, "original_head": original_head,
+        "upstream_sha": upstream_sha, "target_branch": target_branch,
+        "remote_branch_sha": remote_sha, "backup_ref": backup_ref,
+        "created_at": int(time.time()), "linearized_pr": iid,
+        "frozen_files": sorted(frozen_files),
+        "original_tree": tree, "child_heads": child_tips,
+    }
+    write_recovery(marker, recovery)
+    commit = subprocess.run(
+        ["git", "-C", str(root), "commit-tree", tree, "-p", upstream_sha],
+        input=f"chore: linearize implement-spec PR !{iid}\n",
+        text=True, encoding="utf-8", capture_output=True,
+    )
+    if commit.returncode:
+        raise WorkflowError("无法建立线性提交，恢复点已保留：" + commit.stderr.strip())
+    new_head = commit.stdout.strip()
+    git(root, "reset", "--keep", new_head)
+    if git_output(root, "rev-parse", "HEAD^{tree}") != tree:
+        raise WorkflowError("线性化前后文件树不同；恢复点已保留，禁止推送。")
+    if git_output(root, "rev-list", "--merges", f"{upstream_sha}..HEAD"):
+        raise WorkflowError("线性化后仍有 merge commit；恢复点已保留，禁止推送。")
+    recovery["synced_head"] = new_head
+    recovery["linearized_head"] = new_head
+    write_recovery(marker, recovery)
+    verification = subprocess.run(
+        ["node", str(root / "scripts/verify-change-scope.mjs"), "run", "--stage", "pr"],
+        cwd=root, text=True, encoding="utf-8", capture_output=True,
+    )
+    if verification.returncode:
+        emit(as_json, "VERIFICATION_FAILED", head=new_head, recovery_file=str(marker),
+             detail=verification.stdout.strip() or verification.stderr.strip())
+        return 4
+    if remote_branch_sha(root, branch) != remote_sha:
+        raise WorkflowError("验证期间远端源分支已变化；恢复点已保留，禁止推送。")
+    emit(as_json, "LINEARIZED", branch=branch, original_head=original_head,
+         head=new_head, tree=tree, recovery_file=str(marker),
+         remote_branch_sha=remote_sha, review_required=True)
+    return 0
+
+
 def rollback(root: Path, as_json: bool) -> int:
     git_dir, branch = worktree_context(root)
     if read_task_metadata(root).get("inherited_sha"):
@@ -302,6 +461,44 @@ def finalize(root: Path, as_json: bool) -> int:
         raise WorkflowError("同步事务尚未推送当前 HEAD，禁止 finalize。")
     if recovery.get("verified_head") != current_head:
         raise WorkflowError("当前 HEAD 尚未通过 Gitee PR 远端核验，禁止 finalize。")
+    if recovery.get("linearized_pr"):
+        if recovery.get("verified_pr_iid") != recovery["linearized_pr"]:
+            raise WorkflowError("Gitee 回读的 PR 编号与线性化的 PR 不一致，禁止 finalize。")
+        linearized_head = str(recovery["linearized_head"])
+        original_head = str(recovery["original_head"])
+        original_tree = str(recovery["original_tree"])
+        if git_output(root, "rev-parse", f"{original_head}^{{tree}}") != original_tree:
+            raise WorkflowError("原 PR 源提交的文件树与线性化记录不符。")
+        if git_output(root, "rev-parse", f"{linearized_head}^{{tree}}") != original_tree:
+            raise WorkflowError("线性化提交的文件树与原 PR 源提交不一致。")
+        if git(root, "merge-base", "--is-ancestor", linearized_head, current_head,
+               check=False).returncode or remote_branch_sha(root, branch) != current_head:
+            raise WorkflowError("已核验 PR HEAD 未保留线性化提交，或远端源分支再次变化。")
+        lineage_file, lineage_ref = lineage_paths(root, branch)
+        lineage = {
+            "version": 1, "source_branch": branch,
+            "target_branch": recovery["target_branch"],
+            "pull_request_id": recovery["linearized_pr"],
+            "original_head": original_head,
+            "original_tree": original_tree,
+            "linearized_head": linearized_head,
+            "verified_head": current_head,
+            "child_heads": recovery["child_heads"],
+        }
+        if lineage_file.exists():
+            if load_recovery(lineage_file) != lineage:
+                raise WorkflowError("已有不同的 implement-spec 线性化核验记录。")
+            if git_output(root, "rev-parse", lineage_ref) != original_head:
+                raise WorkflowError("implement-spec 线性化保留引用与记录不符。")
+        else:
+            if git(root, "show-ref", "--verify", "--quiet", lineage_ref,
+                   check=False).returncode == 0:
+                if git_output(root, "rev-parse", lineage_ref) != original_head:
+                    raise WorkflowError("implement-spec 线性化保留引用与原 PR 源提交不符。")
+            else:
+                git(root, "update-ref", lineage_ref, original_head)
+            lineage_file.parent.mkdir(parents=True, exist_ok=True)
+            write_recovery(lineage_file, lineage)
     remove_recovery(root, marker, str(recovery.get("backup_ref", backup_ref)))
     emit(as_json, "FINALIZED", branch=branch, head=current_head)
     return 0
@@ -309,9 +506,13 @@ def finalize(root: Path, as_json: bool) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("sync", "rollback", "finalize"))
+    parser.add_argument("action", choices=("sync", "linearize", "rollback", "finalize"))
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--target-branch")
+    parser.add_argument("--user-authorized", action="store_true")
+    parser.add_argument("--update-pr", type=int)
+    parser.add_argument("--pr-snapshot", type=Path)
+    parser.add_argument("--child-branch", action="append", default=[])
     return parser.parse_args(argv)
 
 
@@ -328,10 +529,16 @@ def main(argv: list[str] | None = None) -> int:
         root = repository_root()
         if args.action == "sync":
             return synchronize(root, args.as_json, args.target_branch)
+        if args.action == "linearize":
+            if args.target_branch is not None:
+                raise WorkflowError("线性化目标分支由任务元数据和 PR 快照决定，请勿传 --target-branch。")
+            return linearize(root, args.as_json, args.user_authorized, args.update_pr,
+                             args.pr_snapshot, args.child_branch)
         if args.action == "rollback":
             return rollback(root, args.as_json)
         return finalize(root, args.as_json)
-    except (RecoveryError, TaskMetadataError, WorkflowError, subprocess.CalledProcessError) as exc:
+    except (RecoveryError, TaskMetadataError, WorkflowError, subprocess.CalledProcessError,
+            OSError, ValueError) as exc:
         emit(args.as_json, "ERROR", detail=str(exc))
         return 1
 

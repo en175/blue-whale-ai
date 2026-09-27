@@ -90,6 +90,20 @@
 - push 后 Agent 重新读取 Gitee 快照；`verify-pr-update.sh` 硬校验 opened/source/target、`head_sha=HEAD`、`conflict=false` 与最终 changed_files 一致，并记录 `verified_head`。未通过该入口不得 finalize。
 - 只有 Gitee PR 仍 opened、source 匹配、`head_sha=HEAD`、`conflict=false`、文件/diff/本轮修订均已核对且 PR 描述已更新，才可报告“PR 已更新”。完整状态机见 `docs/adr/0013-open-pr-update-state-machine.md`。
 
+### implement-spec 子任务合回与已发布 PR 的 merge commit
+
+`implement-spec` 保留任务图、并行 implementer、merger 和集成分支。新建子任务工作树需要集成分支已有内容时，在子分支尚无自己的提交前执行 `git merge --ff-only <集成分支>`。merger 在集成工作树执行 `python3 scripts/merge-implement-spec-child.py --child-worktree <子任务工作树> --json`。入口只改写未共享的子分支，比较 rebase 后文件树与无冲突合并结果，然后快进集成分支。冲突、内容不一致或子分支已共享时停止；不得改用非快进合并。
+
+已发布 PR 因合法子任务 merge commit 被 `SCOPE_MERGE_COMMIT_DETECTED` 拦截时，本轮须明确获准更新该 PR。先从 Gitee 读取当前 PR 的 opened、source、target、head、conflict 和 diff，生成权限为 600 的临时 JSON 快照。每个 merge commit 的第二父提交必须能对应仍有任务元数据的子分支。然后在集成工作树执行：
+
+```bash
+scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编号> --pr-snapshot <临时JSON> --child-branch <子分支> --json
+```
+
+多个子分支重复传 `--child-branch`。先从 Gitee 核对子工单确属该规格，再让入口核验其工作树元数据和 merge 父提交。入口要求本地 HEAD 等于远端 PR 源 HEAD，目标发布线已在本地 HEAD 中，所有提交路径属于 PR 冻结范围；它保存原 HEAD 恢复点，将原文件树写成线性提交，并运行 PR 阶段验证。失败时保留恢复点，不推送。成功后在新 HEAD 上重新执行代码评审。评审若产生同范围修订，用提交入口落盘，再运行 `scripts/sync-task-from-origin.sh sync --json` 更新恢复点并重跑 PR 阶段验证。评审和验证通过后，按上文 `--update-pr` 入口使用远端 SHA 租约推送，回读 Gitee 并运行 `scripts/verify-pr-update.sh`，最后 finalize。旧 HEAD 的评审不算新提交的结论。遇 `REMOTE_SOURCE_CHANGED` 或租约变化时先核对远端提交归属，不能覆盖未知提交。普通 `sync` 返回 `UP_TO_DATE` 不会自动处理 merge commit。决策见 [ADR-0116](../adr/0116-implement-spec-integration-workflow.md)。
+
+在 PR 合入 release 前，子任务工作树使用独立清理入口。取最新 Gitee PR 快照后，从子工作树执行 `python3 scripts/cleanup-implement-spec-child.py --pr-snapshot <临时JSON> --json`。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先。已发布 PR 经线性化后，`finalize` 留下原合回提交和已核验新 HEAD 的本地证明；清理入口核对旧子提交属于原合回历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口在删除前复核远端源 HEAD 未变化。集成工作树在 PR 合入 release 后仍使用 `scripts/cleanup-task-worktree.sh`。
+
 ## Commit 规范
 
 - Conventional Commits：`<type>: <描述>`，type 用 `feat` / `fix` / `docs` / `refactor` / `chore`。

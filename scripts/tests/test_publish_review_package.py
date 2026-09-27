@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLISH_SCRIPT = REPO_ROOT / "scripts" / "publish-review-package.sh"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-task-from-origin.sh"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-pr-update.sh"
+CLEANUP_CHILD_SCRIPT = REPO_ROOT / "scripts" / "cleanup-implement-spec-child.py"
 CREATE_PR_HOOK = REPO_ROOT / ".claude" / "hooks" / "confirm-release-action.sh"
 BRANCH = "feature/测试已有PR更新流程"
 
@@ -436,6 +437,176 @@ class PublishReviewPackageTest(unittest.TestCase):
             self.git("ls-remote", "--heads", "origin", "refs/heads/{}".format(BRANCH)).split()[0],
             remote_head,
         )
+
+    def implement_spec_child(self) -> tuple[str, Path]:
+        child_branch = "fix/IKIOS6-受控线性化子任务"
+        child_root = self.root / "blue-whale-worktrees" / "child"
+        self.git("worktree", "add", "-b", child_branch, str(child_root), "release/prod", cwd=self.main)
+        self.configure(child_root)
+        metadata = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child_root)) / "blue-whale/task-base.json"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(json.dumps({
+            "version": 1, "task_branch": child_branch, "target_branch": "release/prod",
+            "start_sha": self.git("rev-parse", "release/prod", cwd=self.main),
+        }), encoding="utf-8")
+        (child_root / "child.txt").write_text("child\n", encoding="utf-8")
+        self.git("add", "child.txt", cwd=child_root)
+        self.git("commit", "-m", "fix: child", cwd=child_root)
+        self.git("merge", "--no-ff", "--no-edit", child_branch)
+        return child_branch, child_root
+
+    def invoke_linearize(self, snapshot: Path, child_branch: str, *extra: str):
+        return subprocess.run(
+            [BASH, str(SYNC_SCRIPT), "linearize", "--update-pr", "65",
+             "--pr-snapshot", str(snapshot), "--child-branch", child_branch,
+             *extra, "--json"], cwd=self.worktree, text=True, encoding="utf-8",
+            capture_output=True, env=self.base_env,
+        )
+
+    def test_authorized_linearization_preserves_tree_and_reuses_update_lease(self) -> None:
+        child_branch, _ = self.implement_spec_child()
+        original = self.git("rev-parse", "HEAD")
+        tree = self.git("rev-parse", "HEAD^{tree}")
+        self.git("push", "origin", BRANCH)
+        snapshot = self.pr_snapshot()
+
+        denied = self.invoke_linearize(snapshot, child_branch)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
+        rewritten = self.invoke_linearize(snapshot, child_branch, "--user-authorized")
+        self.assertEqual(rewritten.returncode, 0, rewritten.stdout + rewritten.stderr)
+        self.assertEqual(self.response(rewritten)["status"], "LINEARIZED")
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}"), tree)
+        self.assertEqual(self.git("rev-list", "--merges", "origin/release/prod..HEAD"), "")
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        self.assertEqual(json.loads(marker.read_text(encoding="utf-8"))["original_head"], original)
+        self.assertIn("run --stage pr", self.verification_log.read_text(encoding="utf-8"))
+
+        reviewed_head = self.commit_followup("review correction")
+        refreshed = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
+        self.assertEqual(json.loads(marker.read_text(encoding="utf-8"))["synced_head"], reviewed_head)
+
+        published = self.invoke_update(snapshot)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        self.assertEqual(self.response(published)["status"], "PUSHED_UPDATE_PR")
+
+    def test_linearization_rejects_untracked_merge_parent_and_scope_expansion(self) -> None:
+        child_branch, child_root = self.implement_spec_child()
+        original = self.git("rev-parse", "HEAD")
+        self.git("push", "origin", BRANCH)
+        wrong = self.pr_snapshot(changed_files=["task.txt"])
+        rejected = self.invoke_linearize(wrong, child_branch, "--user-authorized")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
+
+        self.git("reset", "--hard", "HEAD^", cwd=child_root)
+        correct = self.pr_snapshot()
+        rejected = self.invoke_linearize(correct, child_branch, "--user-authorized")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("无法证明", rejected.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
+
+    def test_linearization_rejects_changed_remote_source(self) -> None:
+        child_branch, _ = self.implement_spec_child()
+        self.git("push", "origin", BRANCH)
+        snapshot = self.pr_snapshot()
+        attacker = self.root / "attacker-linearize"
+        run("git", "clone", str(self.origin), str(attacker), cwd=self.root, check=True)
+        self.configure(attacker)
+        self.git("checkout", "-b", BRANCH, f"origin/{BRANCH}", cwd=attacker)
+        (attacker / "remote.txt").write_text("remote\n", encoding="utf-8")
+        self.git("add", "remote.txt", cwd=attacker)
+        self.git("commit", "-m", "fix: concurrent update", cwd=attacker)
+        self.git("push", "origin", BRANCH, cwd=attacker)
+        result = self.invoke_linearize(snapshot, child_branch, "--user-authorized")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("未知远端", result.stdout)
+
+    def test_linearized_update_rejects_lease_change(self) -> None:
+        child_branch, _ = self.implement_spec_child()
+        self.git("push", "origin", BRANCH)
+        snapshot = self.pr_snapshot()
+        rewritten = self.invoke_linearize(snapshot, child_branch, "--user-authorized")
+        self.assertEqual(rewritten.returncode, 0, rewritten.stdout + rewritten.stderr)
+        attacker = self.root / "attacker-after-linearize"
+        run("git", "clone", str(self.origin), str(attacker), cwd=self.root, check=True)
+        self.configure(attacker)
+        self.git("checkout", "-b", BRANCH, f"origin/{BRANCH}", cwd=attacker)
+        (attacker / "remote.txt").write_text("remote\n", encoding="utf-8")
+        self.git("add", "remote.txt", cwd=attacker)
+        self.git("commit", "-m", "fix: concurrent update", cwd=attacker)
+        self.git("push", "origin", BRANCH, cwd=attacker)
+
+        rejected = self.invoke_update(snapshot)
+        self.assertEqual(rejected.returncode, 5)
+        self.assertEqual(self.response(rejected)["status"], "REMOTE_LEASE_CHANGED")
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        self.assertTrue(marker.exists())
+
+    def test_linearized_pr_readback_allows_child_cleanup_before_release_merge(self) -> None:
+        child_branch, child_root = self.implement_spec_child()
+        child_head = self.git("rev-parse", "HEAD", cwd=child_root)
+        self.git("push", "origin", BRANCH)
+        before = self.pr_snapshot()
+        rewritten = self.invoke_linearize(before, child_branch, "--user-authorized")
+        self.assertEqual(rewritten.returncode, 0, rewritten.stdout + rewritten.stderr)
+        self.commit_followup("review corrected")
+        refreshed = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
+        published = self.invoke_update(before)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        after = self.pr_snapshot()
+        source_head = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(run("git", "merge-base", "--is-ancestor", child_head, source_head,
+                                cwd=self.worktree).returncode, 0)
+        premature = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(after),
+                        "--json", cwd=child_root)
+        self.assertNotEqual(premature.returncode, 0)
+        self.assertTrue(child_root.exists())
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                       "--pr-snapshot", str(after), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        original_head = json.loads(marker.read_text(encoding="utf-8"))["original_head"]
+        lineage_ref = "refs/agent-implement-spec-lineage/" + BRANCH.replace("/", "%")
+        self.git("update-ref", lineage_ref, child_head)
+        rejected = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("保留引用", str(self.response(rejected)["detail"]))
+        self.git("update-ref", lineage_ref, original_head)
+        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
+        cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(after),
+                      "--json", cwd=child_root)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+        self.assertFalse(child_root.exists())
+        self.assertEqual(self.git("rev-parse", "release/prod", cwd=self.main),
+                         self.git("rev-parse", "master", cwd=self.main))
+
+    def test_linearized_pr_finalize_rejects_readback_of_another_pr(self) -> None:
+        child_branch, _ = self.implement_spec_child()
+        self.git("push", "origin", BRANCH)
+        before = self.pr_snapshot()
+        rewritten = self.invoke_linearize(before, child_branch, "--user-authorized")
+        self.assertEqual(rewritten.returncode, 0, rewritten.stdout + rewritten.stderr)
+        published = self.invoke_update(before)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+
+        other_pr = self.pr_snapshot(iid=66)
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "66",
+                       "--pr-snapshot", str(other_pr), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        rejected = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("PR 编号", str(self.response(rejected)["detail"]))
+
+        correct_pr = self.pr_snapshot()
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                       "--pr-snapshot", str(correct_pr), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
 
     def test_update_mode_rejects_unknown_remote_change_after_sync_snapshot(self) -> None:
         remote_before = self.git("rev-parse", "HEAD")

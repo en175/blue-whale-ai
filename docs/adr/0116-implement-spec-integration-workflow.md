@@ -14,4 +14,4 @@
 
 已发布的 PR 源分支若含合法子任务合回产生的 merge commit，仅在获得更新该 PR 的明确授权后，才允许标准入口受控线性化。入口先留恢复点，核对改写前后的文件树，重跑验证，再以远端 SHA 租约推送并回读 Gitee。任一检查失败就停止，不把此情形视为通过原有发布门禁。改写后须针对当前提交重新执行代码评审和发布核验，再将 PR 标记为可评审；旧提交的评审结论不能沿用。
 
-`implement-spec` 第 9 步仍在 PR 合入 release 前清理子任务 worktree。为此新增子任务专用清理入口，先确认子任务提交已进入远端 PR 源分支，再清理对应 worktree。现有 `cleanup-task-worktree.sh` 继续用于提交已进入远端 release 后的任务清理。
+`implement-spec` 第 9 步仍在 PR 合入 release 前清理子任务 worktree。为此新增子任务专用清理入口。普通快进路径确认子任务提交已进入远端 PR 源分支；已发布 PR 经受控线性化后，原子任务 SHA 不再属于新历史，须等 Gitee 回读与事务 finalize 后，核对原子提交属于改写前 PR 源、改写前后文件树相同且新线性提交已进入远端 PR 源，再清理对应 worktree。现有 `cleanup-task-worktree.sh` 继续用于提交已进入远端 release 后的任务清理。
