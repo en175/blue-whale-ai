@@ -17,6 +17,7 @@ import type { VideoFrameInterpolationInput } from '@lib/contracts/video-frame-in
 import type { MediaExtractOutputFormat } from '@lib/contracts/media-extract';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
+import type { AudioVideoMuxCreate } from '@lib/contracts/audio-video-mux';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { VocalSplitInput, VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import type { VideoSceneSplitGranularity } from '@lib/contracts/video-scene-split';
@@ -31,7 +32,7 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
 
 /** 通用任务查询可能返回媒体提取、高清放大、图片擦除、智能扩图、抠图、视频去字幕与
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
-export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'video_frame_interpolation';
+export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'audio_video_mux' | 'video_frame_interpolation';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -396,6 +397,51 @@ export function retryAudioMix(
 ): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
   return apiRequest(
     `/api/projects/${encodeURIComponent(projectId)}/audio-mixes/${encodeURIComponent(String(jobId))}/retry`,
+    { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      ...silentInit(init) },
+  );
+}
+
+/** POST /api/projects/:id/audio-video-muxes 请求体（IKIHPJ 契约恒等：冻结快照
+ *  { audio: {assetId,nodeId}, video: {assetId,nodeId?}, is_audio_reserve, sync }——
+ *  对象内 camel、顶层 snake 各就各位，web 不各自拼键，直接用契约类型）。 */
+export type CreateAudioVideoMuxPayload = AudioVideoMuxCreate;
+
+/** 创建音视频合成任务返回（IKIHPJ）：业务 API 受理后回 jobId 并标记需入队；
+ *  免费任务无积分预估、不走余额拦截门。占位卡由草稿卡原地转生成中（不新建卡/线），
+ *  产物经 GET /api/jobs/:id 的 asset 回填。 */
+export interface AudioVideoMuxCreatedData {
+  job_id: string;
+  status: 'queued';
+  enqueue_required?: boolean;
+}
+
+/** 创建音视频合成任务（IKIHPL 发送闭环）。
+ *  init.silent 透传 apiRequest（错误提示归属同 createAudioMix）：静默传输失败仍抛
+ *  ApiError 但 http 层不 toast，由持有发送身份的页面 catch 统一提示一次。 */
+export function createAudioVideoMux(
+  projectId: string,
+  payload: AudioVideoMuxCreate,
+  init: { idempotencyKey: string; silent?: boolean },
+): Promise<AudioVideoMuxCreatedData> {
+  return apiRequest<AudioVideoMuxCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-video-muxes`,
+    { method: 'POST', headers: { 'Idempotency-Key': init.idempotencyKey }, body: JSON.stringify(payload),
+      ...silentInit(init) },
+  );
+}
+
+/** 使用服务端冻结输入重试同一音视频合成任务（IKIHPL `:jobId/retry`）；必带 Idempotency-Key
+ *  （1–128 可打印非空白，服务端 PARAM_MISSING 拒绝空键），调用方为一次重试尝试保留同一个
+ *  幂等键——双击/状态未知后重发沿用同键，服务端按 command_idempotency 重放。 */
+export function retryAudioVideoMux(
+  projectId: string,
+  jobId: string | number,
+  idempotencyKey: string,
+  init?: { silent?: boolean },
+): Promise<{ job_id: string; status: JobStatus; replayed: boolean }> {
+  return apiRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/audio-video-muxes/${encodeURIComponent(String(jobId))}/retry`,
     { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
       ...silentInit(init) },
   );

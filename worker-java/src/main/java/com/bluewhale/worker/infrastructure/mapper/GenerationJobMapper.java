@@ -121,6 +121,38 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 
     /**
+     * 探测 generation_jobs 行写锁是否空闲（IKIN8Z，SELECT … FOR UPDATE NOWAIT，读到即瞬时
+     * 持锁并在本语句结束时释放，不改任何数据）。
+     * <p>
+     * 守卫写事务（publishResultGuard / failMediaExtractGuard / 续租 / 取消 CAS）的第一条语句
+     * 就是对本行的 CAS UPDATE，行 X 锁自那一刻起持有至事务提交/回滚结束——「可能发布某次
+     * 转存对象键的事务」若仍在服务端进行（如 commit 窗口断连后的未决事务），本行锁必被其
+     * 占用。行锁空闲即该类事务已全部结束。
+     * <p>
+     * 返回行 id（锁空闲）；行不存在返回 null（无从发布，同视为空闲）；行锁被其他事务持有时
+     * 抛 MySQL 3572（NOWAIT）/ 1205（锁等待超时），由调用方按「事务仍在进行」识别。
+     */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE id = #{jobId}
+            FOR UPDATE NOWAIT
+            """)
+    Long probeJobRowWriteLock(@Param("jobId") Long jobId);
+
+    /** 音视频合成大产物转存期续租（IKIHPJ）：仅当前未过期的 owner/fence 可延期。 */
+    @Update("""
+            UPDATE generation_jobs
+            SET lease_expires_at = #{leaseExpiresAt}, version = version + 1
+            WHERE id = #{jobId} AND type = 'audio_video_mux' AND source = 'dock'
+              AND status = 'processing' AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken} AND lease_expires_at > NOW()
+            """)
+    int renewAudioVideoMuxLease(@Param("jobId") Long jobId,
+                                @Param("workerId") String workerId,
+                                @Param("fencingToken") Long fencingToken,
+                                @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
+
+    /**
      * 更新 video_scene_split 进度：CAS 更新 + 续租（IKH8BP 审查修复；SQL 语义与
      * updateMediaExtractProgress 同款，仅租约时长由调用侧按场景切分的单段转存窗口传入）。
      * <p>
@@ -841,6 +873,22 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                                   @Param("workerId") String workerId,
                                   @Param("fencingToken") Long fencingToken);
 
+    /** audio_video_mux 软取消（IKIHPJ）：仅当前 owner/fence 可消费取消请求，已提交上游时停止本地轮询和结果接纳。 */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'cancelled', progress = 0,
+                next_action_at = NULL, next_poll_at = NULL,
+                lease_owner = NULL, lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId} AND type = 'audio_video_mux' AND source = 'dock'
+              AND status = 'processing' AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND cancel_requested_at IS NOT NULL
+            """)
+    int cancelAudioVideoMuxIfRequested(@Param("jobId") Long jobId,
+                                       @Param("workerId") String workerId,
+                                       @Param("fencingToken") Long fencingToken);
+
     /**
      * 按 id 查 provider_task_id（IKEA26 parent-reuse 用：retry job 查父 job 的上游 task）。
      */
@@ -948,6 +996,12 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     /** 音频混合到点/孤儿：处理可超过通用 2h 扫描窗；由处理器的轮询预算收敛终态。 */
     default List<Long> listDueAudioMixJobIds(int limit, int maxAgeMinutes) {
         return listDueJobIdsByTypeAndSources("audio_mix", List.of("dock"), limit, maxAgeMinutes);
+    }
+
+    /** 音视频合成到点/孤儿（IKIHPJ）：maxAge=0 不按龄期过滤（audio_mix 特例同款，长任务由
+     *  execution_deadline_at 收敛）。 */
+    default List<Long> listDueAudioVideoMuxJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("audio_video_mux", List.of("dock"), limit, maxAgeMinutes);
     }
 
     /** 音频调速到点/孤儿（IKHW5A，父单 IKHVYO）：**不套 source 白名单**（claim 同形态
