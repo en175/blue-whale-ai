@@ -4,43 +4,30 @@ description: "Implement a specification in code."
 disable-model-invocation: true
 ---
 
-You have been provided a spec. This spec should have tickets associated with it, describing how to implement the spec.
+Implement the supplied spec and its tickets on one integration branch, delivered as one reviewed PR.
 
-The goal is a PR which implements the entire spec on a single branch.
+The tickets form a **task graph**. The **frontier** contains tickets whose prerequisites are satisfied and which have not been assigned. Run independent frontier tickets concurrently in background implementer subagents. Each ticket keeps its own worktree and branch; a merger subagent integrates completed work serially.
 
-The tickets are not a list of steps. They are a **task graph** with blocking relationships between them. This means there is always a **frontier** of tickets which are ready to be grabbed.
+Communicate through **context pointers** to the spec, tickets, research notes, and commits. Include the assignment, ownership, and missing context in each handoff, without copying material the recipient can read.
 
-Communication to and from subagents should be sparse. Communicate primarily through **context pointers**: to the spec, tickets, research notes, and previous commits. Don't duplicate information already available via pointers.
-
-**Implementer subagents** should be run in the background where possible for **maximum concurrency**.
+This repository creates the PR after implementation and review. [ADR-0116](../../../docs/adr/0116-implement-spec-integration-workflow.md) records this adaptation of the [upstream workflow](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/in-progress/implement-spec/SKILL.md). Invoking this skill authorizes implementation, not publication or PR merge.
 
 ## Steps
 
-1. Read the spec and tickets. Read enough to understand the task graph. 本仓适配：先解析工单拓扑——父规格单下通常已切分子工单（to-tickets 产物）。Gitee `search=<父单号>` 查不到子工单（子工单标题是 `【前端|后端】<标题>`，空结果不代表无子）；用 `list_enterprise_issues(project_id, state="open", per_page=100)` 客户端筛 `parent_id == 父单数字 id`（详见 `docs/agents/issue-tracker.md`「操作约定·查子工单」）。子工单是任务图节点：按其 `Blocked by` 声明确定 frontier 与串行依赖，不按父单正文自行切阶段；每张子工单独立实施、验证、留痕、流转状态。
+1. Read the spec and discover its existing child tickets using the [issue tracker rules](../../../docs/agents/issue-tracker.md). Follow all result pages and compare numeric parent IDs; a title search is not a hierarchy query. Build the task graph from each ticket's scope, acceptance criteria, and `Blocked by` references. Resolve missing dependencies and cycles before dispatch. Apply the contract-first and serial-family rules in the [Git workflow](../../../docs/agents/git-workflow.md); a dependency requiring a release merge stays blocked until that merge. This step ends with every ticket accounted for and an explicit frontier.
 
-2. (optional) Use an **exploration subagent** to conduct any exploration required by the tickets - relevant codebase files or external documentation. Ensure the exploration subagent can save files - it should save its markdown notes in a directory outside the repo, accessible by all future subagents. This lets **implementer subagents** focus on implementation rather than exploration.
+2. If tickets need shared research, use an exploration subagent. Before code exploration or delegation, follow the [code discovery protocol](../../../agent-rules/code-discovery.md), including parent graph evidence and the recipient's actual tool access. Have the explorer save notes outside the repository at paths later subagents can read. Finish when the notes answer the implementation questions, or record which questions still block tickets.
 
-3. Create a branch, and a draft PR. The PR should be marked as 'closing' the spec issue and tickets.
+3. Create the integration worktree for the spec issue using [worktree setup](references/worktrees.md#integration-worktree). Record its branch, target release, and starting commit. This is the future PR branch; keep it local through step 7.
 
-4. Use **implementer subagents** to implement each ticket. Each implementer subagent should work in its own worktree, on its own branch.
+4. Dispatch an implementer for each available frontier ticket, following the [implementer handoff](references/worktrees.md#implementers). Each implementer owns one ticket, its declared files, and an isolated worktree. A completed handoff includes the committed HEAD, acceptance evidence, test results, and any unresolved limitation.
 
-5. Once an **implementer subagent** completes, merge its work to the PR branch with a **merger subagent**.
+5. Send completed tickets to a merger subagent using the [integration procedure](references/worktrees.md#merger). Give only one merger write access to the integration worktree at a time. Mark a ticket integrated only after the guarded merge succeeds and its result is recorded.
 
-6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
+6. Recompute the frontier after each integration and dispatch newly unblocked tickets immediately. Internal dependencies become available when their required work is integrated, not merely when an implementer reports completion. Repeat steps 4 through 6 until every ticket is integrated. If unfinished tickets remain but none can run, report their blockers instead of declaring completion.
 
-7. Once all tickets are complete, run /code-review on the PR branch. Fix all issues raised by the code review in a single **implementer subagent**.
+7. Synchronize the integration branch to its recorded release target using the [delivery preparation](references/delivery.md#prepare-the-branch). Run `/code-review` on the complete spec diff, passing the fixed baseline and spec explicitly. Use one implementer subagent to resolve the review findings in the integration worktree with exclusive write access. Verify the resulting HEAD and re-review changes after fixes or synchronization; finish when the spec's acceptance criteria pass and no unresolved review finding remains.
 
-8. Mark the PR as ready for review.
+8. Publish one non-draft PR through the [publication procedure](references/delivery.md#publish). If publication is not yet authorized, present the verified branch, review results, and proposed PR for approval. Existing authorization covering this publication needs no second confirmation. Finish only after Gitee readback confirms the intended PR and exact HEAD; then hand it to the developer for review.
 
-9. Clean up all **implementer subagent** worktrees.
-
-本仓适配（worktree 与提交，2026-09-26 IKIMN8 实证）：仓 Hook 硬拦无元数据 worktree 的提交——任务 worktree 只能由 `scripts/start-task-worktree.sh` 建立，提交只能走 `scripts/commit-task-for-review.sh`（详见 `docs/agents/git-workflow.md`）。步骤 4/5/9 的多 worktree 并行设计不变，在本仓按以下方式落地：
-
-- 父规格单先建集成 worktree（`--issue <父单号>`），其分支即 PR 分支。
-- 第 3 步先创建集成分支和草稿 PR。Gitee 企业版零差异草稿 PR 尚未实测；若创建仅因零差异失败，先提交本规格确需的实施记录，写明任务图、子工单链接和验收依据，再重试。没有真实内容可提交时停止并报告，不改变第 3 步顺序。
-- 每个 implementer 子代理先核实 Gitee 父子工单关系，再用开工入口建自己的 worktree（`--issue <子单号> --integration-worktree <父整合工作树绝对路径>`，子单状态随入口自动流转）；入口继承启动时固定的父整合提交。之后实施、自跑定向测试、提交。
-- merger 子代理在集成 worktree 执行 `python3 scripts/merge-implement-spec-child.py --child-worktree <子任务worktree> --json`。父整合分支须先包含子任务开工时的发布线起点。入口仅接受开工记录的继承 merge，对未共享子分支受控 rebase，核对结果文件树等于同一集成提交上的无冲突合并结果，更新子任务继承标记，然后快进集成分支。冲突、文件树不同或已共享时停止并保留核查线索。全部合完后在集成 worktree 跑收口与 PR 阶段验证（`node scripts/verify-change-scope.mjs run --stage pr`）。
-- 已发布 PR 的源分支若留有可证明来自子任务的 merge commit，仅在本轮明确获准更新该 PR 时，先核对 Gitee 子工单归属，再用最新 Gitee PR 快照执行 `scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编号> --pr-snapshot <临时JSON> --child-branch <子分支> --json`；每个集成分支首父链上的子任务合回 merge commit 指定一个仍有任务元数据的子分支；子任务开工时的继承 merge 由入口核对，无需另指定。入口保留恢复点、核对改写前后文件树并重跑 PR 阶段验证。随后对新 HEAD 重新执行第 7 步代码评审；若评审修订产生新提交，运行 `scripts/sync-task-from-origin.sh sync --json` 更新恢复点并重跑 PR 阶段验证。按 `docs/agents/git-workflow.md` 的已有 PR 更新流程用远端 SHA 租约推送、回读 Gitee，通过后才执行第 8 步。旧 HEAD 的评审结论不能沿用。
-- 第 9 步清理每个子 worktree 时，先取最新 Gitee PR 快照，再从子 worktree 执行 `python3 scripts/cleanup-implement-spec-child.py --pr-snapshot <临时JSON> --json`。普通快进路径直接核对远端 PR 源分支包含子任务 HEAD；若父整合分支在合回后因发布线前进而 rebase，须先更新同一 PR 并完成 Gitee 回读与 finalize，再核对每次同步保留的原提交和合并文件树证明，证明断链时保留 worktree；已发布 PR 经受控线性化时，须先完成新 HEAD 的 Gitee 回读与 finalize，再凭原子任务祖先、改写前后文件树和已核验新 HEAD 的本地记录核对。远端源分支变化时停止。集成任务在 PR 合入 release 后仍使用 `scripts/cleanup-task-worktree.sh`。
-- 纯后端工单子 worktree 零额外成本（mvn 直接可用，`~/.m2` 共享）；涉及 backend/web 依赖的票需先在该 worktree 跑一次 `pnpm install --frozen-lockfile`。
-- 轻量变体（可选）：frontier 票为纯机械复制且父代理已核对文件集不相交时，可共用集成 worktree 并发只改文件不提交，由父代理统一验证后逐票提交。文件集无法确认不相交时回退上面的标准形态。
+9. After publication is verified, clean up implementer worktrees using the [child cleanup procedure](references/delivery.md#clean-up-child-worktrees). Retain any worktree whose content cannot be proven present in the PR. Keep the integration worktree for review revisions until the PR has merged into its target release.
