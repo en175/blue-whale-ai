@@ -198,6 +198,51 @@ describe('RefThumbnail dragProps 透传（IKFCKT）', () => {
   });
 });
 
+describe('RefThumbnail 拖拽开始关闭预览（IKIQ89）', () => {
+  // 真实 FloatingPortal 挂在 document.body（本文件不 mock floating-ui），预览查全文档
+  const preview = () => document.querySelector('[data-testid="ref-thumb-preview"]');
+
+  function hover(el: Element) {
+    act(() => {
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+  }
+
+  const wait = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+
+  it('预览打开状态下开始拖拽：浮层立即关闭（文本项也不走延迟窗）', async () => {
+    await renderHost();
+    hover(item('a'));
+    await act(async () => { await wait(230); });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    act(() => { item('a').dispatchEvent(dragEvent('dragstart')); });
+    expect(preview(), '拖拽开始即取消关闭计时并立即关闭预览').toBeNull();
+  });
+
+  it('悬停未满 200ms 开始拖拽：打开计时被取消，预览不再弹出', async () => {
+    await renderHost();
+    hover(item('a'));
+    await act(async () => { await wait(80); });
+    expect(preview()).toBeNull();
+    act(() => { item('a').dispatchEvent(dragEvent('dragstart')); });
+    await act(async () => { await wait(230); });
+    expect(preview(), '200ms 打开计时已随 dragstart 取消').toBeNull();
+  });
+
+  it('拖拽开始关闭预览不影响换位链路：drop 换位与紧凑重编号照常', async () => {
+    await renderHost();
+    hover(item('a'));
+    await act(async () => { await wait(230); });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    act(() => { item('a').dispatchEvent(dragEvent('dragstart')); });
+    act(() => { item('c').dispatchEvent(dragEvent('dragover', { clientX: 50 })); });
+    act(() => { item('c').dispatchEvent(dragEvent('drop', { clientX: 50 })); });
+    expect(reorderCalls, '换位回调不受预览关闭影响').toEqual(['0->2']);
+    const badgeOf = (id: string) => item(id).querySelector('[data-testid="ref-thumb-badge"]')!.textContent;
+    expect([badgeOf('a'), badgeOf('b'), badgeOf('c')]).toEqual(['3', '1', '2']);
+  });
+});
+
 function MixedHost({ media, text, saved, onChange }: { media: string[]; text: string[]; saved?: string[]; onChange?: (order: string[]) => void }) {
   const strip = useMixedRefStrip(media, text, { stripOrder: saved, onStripOrderChange: onChange });
   return createElement('div', null,

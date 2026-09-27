@@ -8,14 +8,28 @@ import RefThumbnail, { type RefThumbnailKind, type RefThumbnailProps } from './i
 import PromptRefEditor, { type PromptRefEditorHandle } from '../PromptRefEditor';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
+// 真实 floating-ui 的 refs 跨渲染稳定（同一实例同一对象，detach/attach 写同一 current）；
+// mock 也必须共享稳定 refs——否则重渲染后闭包持有的旧 refs 被 detach 置 null，
+// IKIQ89 滚动命中判定拿不到锚点
+const mockFloatingRefs = vi.hoisted(() => ({
+  reference: { current: null as Element | null },
+  floating: { current: null as Element | null },
+}));
+
 vi.mock('@floating-ui/react', () => ({
   FloatingPortal: ({ children }: { children: unknown }) => children,
   autoUpdate: () => () => {},
   flip: () => ({}),
   offset: () => ({}),
   shift: () => ({}),
+  // refs 记录真实元素：IKIQ89 滚动关闭按 reference/floating 的 rect 做指针命中判定
   useFloating: () => ({
-    refs: { setReference: () => {}, setFloating: () => {} },
+    refs: {
+      reference: mockFloatingRefs.reference,
+      floating: mockFloatingRefs.floating,
+      setReference: (el: Element | null) => { mockFloatingRefs.reference.current = el; },
+      setFloating: (el: Element | null) => { mockFloatingRefs.floating.current = el; },
+    },
     floatingStyles: {},
     context: {},
   }),
@@ -408,5 +422,88 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
     // 插入后光标落在标签之后：继续输入接在原位插入的标签后
     await typePromptRefRaw(mountNode, '尾巴');
     expect(readPromptRefText(mountNode)).toBe('AB图片1尾巴');
+  });
+});
+
+describe('RefThumbnail 预览关闭新时机（IKIQ89）', () => {
+  /** jsdom rect 恒 0：按元素 mock rect（未登记的元素返回零矩形） */
+  function mockRects(layout: Map<Element, { left: number; top: number; width: number; height: number }>) {
+    return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mock(this: HTMLElement) {
+      const rect = layout.get(this);
+      const zero = { left: 0, top: 0, width: 0, height: 0 };
+      const r = rect ?? zero;
+      return {
+        left: r.left, top: r.top, width: r.width, height: r.height,
+        right: r.left + r.width, bottom: r.top + r.height, x: r.left, y: r.top, toJSON: () => ({}),
+      } as DOMRect;
+    });
+  }
+
+  function scrollStrip() {
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+  }
+
+  it('预览打开状态下滚动参考栏（指针不动、缩略图移出指针下方）：浮层立即关闭', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    // jsdom hover 记录的指针坐标在原点：mock 参考栏滚动后缩略图 rect 离开原点
+    const restore = mockRects(new Map([[thumb(), { left: 240, top: 12, width: 64, height: 64 }]]));
+    scrollStrip();
+    expect(preview(), '缩略图离开指针下方即等同移出（媒体预览立即消失）').toBeNull();
+    restore.mockRestore();
+  });
+
+  it('滚动后指针仍位于缩略图下方：浮层不误关', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    // 滚动量小：缩略图 rect 仍覆盖指针（原点）
+    const restore = mockRects(new Map([[thumb(), { left: -8, top: -8, width: 64, height: 64 }]]));
+    scrollStrip();
+    expect(preview(), '缩略图仍在指针下方时滚动不关闭').toBeTruthy();
+    restore.mockRestore();
+  });
+
+  it('文本浮层移入阅读时滚动不误关（IKFCX4 不回退）；指针离开缩略图与浮层后才延迟关闭', async () => {
+    await renderSingle({ kind: 'text', name: '长文案', number: 1, textPreview: '长正文内容' });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    unhover(thumb());
+    hover(preview()!);
+    // 指针在浮层上：缩略图滚出指针下方但浮层 rect 仍覆盖指针，不关闭
+    const layout = new Map<Element, { left: number; top: number; width: number; height: number }>([
+      [thumb(), { left: 240, top: 12, width: 64, height: 64 }],
+      [preview()!, { left: -40, top: -40, width: 280, height: 200 }],
+    ]);
+    const restore = mockRects(layout);
+    scrollStrip();
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '移入文本浮层滚动阅读不被滚动关闭').toBeTruthy();
+    // 浮层也滚出指针下方：等同移出，走文本延迟关闭
+    layout.set(preview()!, { left: 240, top: 300, width: 280, height: 200 });
+    scrollStrip();
+    await act(async () => {
+      await wait(60);
+    });
+    expect(preview(), '短窗内保持（文本移出延迟语义一致）').toBeTruthy();
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '缩略图与浮层均离开指针下方后延迟关闭').toBeNull();
+    restore.mockRestore();
   });
 });
