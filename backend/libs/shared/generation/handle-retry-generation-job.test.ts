@@ -108,3 +108,63 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
     expect(result.code).toBe(100409);
   });
 });
+
+// IKIPWU：同为「点重试失败」必须可区分真实原因；任务存在但不可重试不再并成「资源不存在」。
+describe("handleRetryGenerationJob 不可重试原因外显（IKIPWU）", () => {
+  it("任务存在但状态不可重试 → 1054 + 专用文案", async () => {
+    const { deps } = makeDeps({
+      retryResult: { kind: "not_retryable_status" },
+    });
+
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "300",
+      "retry-5",
+      "",
+      deps as never,
+    );
+
+    expect(result).toEqual({
+      code: 1054,
+      msg: "当前状态不允许重试，仅失败或部分成功的任务可重试",
+      data: null,
+    });
+  });
+
+  it("失败项已全部重试（无可补槽）→ 1055 + 专用文案", async () => {
+    const { deps } = makeDeps({
+      retryResult: { kind: "already_retried" },
+    });
+
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "300",
+      "retry-6",
+      "",
+      deps as never,
+    );
+
+    expect(result).toEqual({
+      code: 1055,
+      msg: "该任务的失败项已全部重试，无需再次重试",
+      data: null,
+    });
+  });
+
+  it("任务不存在/非本人 → 仍是「资源不存在」口径，不泄露存在性", async () => {
+    const { deps } = makeDeps({ retryResult: null });
+
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "300",
+      "retry-7",
+      "",
+      deps as never,
+    );
+
+    expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
+  });
+});

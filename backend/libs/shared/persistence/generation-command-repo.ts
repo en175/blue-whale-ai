@@ -94,7 +94,11 @@ export interface GenerationCommandRepo {
    *  返回值带 type，供路由按 image/video 重新入队。
    *  - 重放命中（同 Key 同摘要）→ 返回既有结果；
    *  - 冲突（同 Key 异摘要）→ 返回 { kind: "idempotency_conflict" }；
-   *  - 原 job 非终态 failed/partially_succeeded → null。
+   *  - 原 job 不存在/非本人/已删除 → null（越权隐藏口径：与不存在同形，不泄露存在性）；
+   *  - 原 job 存在但状态非终态 failed/partially_succeeded →
+   *    { kind: "not_retryable_status" }（IKIPWU：真实原因外显，不再并成 null）；
+   *  - 原 job 存在但无可补失败槽（失败项已全部由历史重试补成功）→
+   *    { kind: "already_retried" }（IKIPWU：同上）。
    *
    *  IKF YHJ（ADR-0087 决策 7）：`guardInput` 在「确实要建新 job」的那一刻（幂等重放之后、
    *  create 之前）拿原 job 的 input 再过一次素材状态门。位置不能提前——重放是既有结果，
@@ -115,6 +119,8 @@ export interface GenerationCommandRepo {
     | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
     | { kind: "material_blocked"; reason: string }
+    | { kind: "not_retryable_status" }
+    | { kind: "already_retried" }
     | null
   >;
   appendLog(
@@ -389,7 +395,8 @@ export function createGenerationCommandRepo(
           original.status !== "failed" &&
           original.status !== "partially_succeeded"
         ) {
-          return null;
+          // IKIPWU：任务存在但状态不可重试——真实原因带出，不再并成 null 的「资源不存在」。
+          return { kind: "not_retryable_status" } as const;
         }
 
         // IK7G9X：重试复用原 job 的记账快照（同一任务的重试，定价口径不变）。
@@ -466,7 +473,10 @@ export function createGenerationCommandRepo(
         ).filter(
           (slot) => slot.status === "failed" || slot.status === "missing",
         );
-        if (originalSlotIds.size > 0 && failedSlots.length === 0) return null;
+        // IKIPWU：无可补失败槽（失败项已全部由历史重试补成功）——真实原因带出，不再并成 null。
+        if (originalSlotIds.size > 0 && failedSlots.length === 0) {
+          return { kind: "already_retried" } as const;
+        }
         const retryCount =
           originalSlotIds.size > 0
             ? failedSlots.length

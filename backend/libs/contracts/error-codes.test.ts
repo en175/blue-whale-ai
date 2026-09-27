@@ -16,6 +16,8 @@ import {
   ERROR_CAPABILITY_UNSUPPORTED_DURATION,
   ERROR_INVALID_REFERENCE,
   ERROR_CONTENT_REJECTED_REFERENCE,
+  ERROR_JOB_NOT_RETRYABLE_STATUS,
+  ERROR_JOB_ALREADY_RETRIED,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
   ACCOUNT_ERROR_NUMERIC_CODES,
   RESOURCE_NOT_FOUND_CODE,
@@ -78,6 +80,18 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
     // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
     expect(1038).toBeGreaterThanOrEqual(1000);
     expect(1038).toBeLessThanOrEqual(1099);
+  });
+
+  it("IKIPWU：重试不可重试两类专用码 1054/1055 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_JOB_NOT_RETRYABLE_STATUS]).toBe(1054);
+    expect(ERROR_CODES[1054]).toBe("当前状态不允许重试，仅失败或部分成功的任务可重试");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_JOB_ALREADY_RETRIED]).toBe(1055);
+    expect(ERROR_CODES[1055]).toBe("该任务的失败项已全部重试，无需再次重试");
+    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
+    expect(1054).toBeGreaterThanOrEqual(1000);
+    expect(1054).toBeLessThanOrEqual(1099);
+    expect(1055).toBeGreaterThanOrEqual(1000);
+    expect(1055).toBeLessThanOrEqual(1099);
   });
 
   it("全局业务码已登记；未知码 messageOf 给缺省文案", () => {
