@@ -111,7 +111,7 @@ class ProjectSkillsTest(unittest.TestCase):
     def test_missing_extra_stale_and_duplicate_content_fail(self):
         skill = self.worktree / ".agents/skills/example"
         (skill / "references/details.md").unlink()
-        self.assertIn("Git 跟踪的技能文件缺失", self.check_skills(1))
+        self.assertIn("Git 跟踪的文件缺失", self.check_skills(1))
         (skill / "references/details.md").write_text("details\n", encoding="utf-8")
         (skill / "extra.txt").write_text("unknown\n", encoding="utf-8")
         self.assertIn("未纳入 Git", self.check_skills(1))
@@ -133,6 +133,30 @@ class ProjectSkillsTest(unittest.TestCase):
         extra.mkdir(parents=True)
         (extra / "SKILL.md").write_text("unknown\n", encoding="utf-8")
         self.assertIn("额外项目技能", self.check_skills(1))
+
+    def test_agents_root_content_must_be_tracked_in_new_worktree(self):
+        agents = self.worktree / ".agents"
+        local = agents / "local.txt"
+        local.write_text("local\n", encoding="utf-8")
+        self.assertIn(".agents/local.txt: 未纳入 Git", self.check_skills(1))
+        local.unlink()
+
+        empty = agents / "empty"
+        empty.mkdir()
+        self.assertIn(".agents/empty: 未纳入 Git", self.check_skills(1))
+        empty.rmdir()
+
+        link = agents / "linked"
+        link.symlink_to("skills")
+        self.assertIn(".agents/linked: .agents 包含符号链接", self.check_skills(1))
+        link.unlink()
+
+        tracked = agents / "tracked.txt"
+        tracked.write_text("tracked\n", encoding="utf-8")
+        run("git", "add", ".agents/tracked.txt", cwd=self.worktree)
+        self.check_skills()
+        tracked.unlink()
+        self.assertIn(".agents/tracked.txt: Git 跟踪的文件缺失", self.check_skills(1))
 
     def test_personal_same_name_reports_sources_and_preserves_files(self):
         personal = self.home / ".codex/skills/example"

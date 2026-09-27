@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 AUTHORITY = Path(".agents/skills")
+AGENTS_ROOT = AUTHORITY.parent
 CLAUDE_ENTRY = Path(".claude/skills")
 CLIENT_ENTRIES = (
     Path(".codex/skills"),
@@ -19,7 +20,7 @@ CLIENT_ENTRIES = (
 
 def tracked_paths(root):
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "-z", "--", str(AUTHORITY), str(CLAUDE_ENTRY)],
+        ["git", "ls-files", "--stage", "-z", "--", str(AGENTS_ROOT), str(CLAUDE_ENTRY)],
         cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
     )
     return {
@@ -45,11 +46,12 @@ def package_files(directory):
 def check(root, home):
     errors = []
     notices = []
+    agents = root / AGENTS_ROOT
     authority = root / AUTHORITY
     claude = root / CLAUDE_ENTRY
     tracked = tracked_paths(root)
 
-    if not authority.is_dir() or authority.is_symlink():
+    if not agents.is_dir() or agents.is_symlink() or not authority.is_dir() or authority.is_symlink():
         errors.append(f"{AUTHORITY}: 必须是当前工作树内的实际目录")
         names = set()
     else:
@@ -61,17 +63,20 @@ def check(root, home):
                 errors.append(f"{path.relative_to(root)}: 权威目录中有未知或链接内容")
             elif not (path / "SKILL.md").is_file():
                 errors.append(f"{path.relative_to(root)}: 缺少 SKILL.md")
-        for path in files_under(authority):
+        for path in files_under(agents):
             relative = path.relative_to(root)
             if path.is_symlink():
-                errors.append(f"{relative}: 权威技能包含符号链接，请改为入库文件")
+                errors.append(f"{relative}: .agents 包含符号链接，请改为入库文件")
             elif path.is_file() and relative not in tracked:
                 errors.append(f"{relative}: 未纳入 Git，新的工作树不会取得此文件")
+            elif path.is_dir() and not relative.is_relative_to(AUTHORITY):
+                if not any(relative in tracked_path.parents for tracked_path in tracked):
+                    errors.append(f"{relative}: 未纳入 Git，新的工作树不会取得此目录")
         for relative in sorted(tracked):
             if relative == CLAUDE_ENTRY:
                 continue
             if not (root / relative).is_file():
-                errors.append(f"{relative}: Git 跟踪的技能文件缺失")
+                errors.append(f"{relative}: Git 跟踪的文件缺失")
 
     if not claude.is_symlink():
         state = "普通目录" if claude.is_dir() else "丢失或平台未保留符号链接"
