@@ -91,7 +91,7 @@
  *   所以自定义充值单的第一购两列仍是默认值（`unknown` / `0` = 不参与加赠），
  *   等 #40 定了再一起补 —— 那时要动的是这里与 `buildCustomOrderSpec`。
  * ============================================ */import { randomBytes } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { createLogger, type Logger } from "@lib/core/logging";
 import { fetchCreditsPerYuan, grantCredits } from "@lib/shared/billing/billing-admin-client.js";
@@ -115,7 +115,7 @@ import {
 import { creditsExpireAt } from "./credits-validity.js";
 import {
   createGrantSweeper,
-  GRANT_RETRY_WINDOW_MS,
+  GRANT_RETRY_WINDOW_MS_TOKEN,
   type GrantSweepResult,
 } from "./recharge-grant-sweeper.js";
 import {
@@ -346,11 +346,21 @@ export class RechargeService {
     return this.grantWarnGateInstance;
   }
 
+  /**
+   * @param grantRetryWindowMs 补发重试窗口（毫秒），由装配层注入（见 `RechargeLibModule`）。
+   *
+   * <p>⚠️ 它**不是本服务自己读 env 得来的**，只有一份来源（`resolveGrantRetryWindowMs`）：
+   * 同一个窗口管着两条自愈路径 —— 用户轮询触发的 {@link retryFulfill} 与主动对账的
+   * {@link sweepStaleGrants}。服务里再读一遍 env，就会出现「运维把窗口调大了、
+   * 而用户轮询那条路仍在 2 小时停」这种只对一条路生效的配置。
+   */
   constructor(
     private readonly prisma: PrismaService,
     private readonly topupTier: TopupTierService,
     private readonly settings: SystemSettingsService,
     private readonly custom: RechargeCustomService,
+    @Inject(GRANT_RETRY_WINDOW_MS_TOKEN)
+    private readonly grantRetryWindowMs: number,
   ) {}
 
   /* ---------- 档位目录 ---------- */
@@ -817,10 +827,16 @@ export class RechargeService {
    *     与「查单补偿」同一个名额、同一个间隔。**刻意不用**扫描器的 `GRANT_STALE_AFTER_MS`
    *     （30 分钟）：那是扫描器的「够格重试」下界，套到用户这条路上等于把一次瞬时的
    *     billing 抖动延迟半小时才重试（而用户正盯着「等待支付结果…」）；
-   *   · **窗口**用扫描器的 `GRANT_RETRY_WINDOW_MS`（2 小时），起点同样是「钱到的时刻」
-   *     （`paid_pending_at`）。超窗就不再打 billing，只把**如实的状态**回给前端
+   *   · **窗口**用扫描器同一个**可配**值（`grantRetryWindowMs`，默认 2 小时），起点同样是
+   *     「钱到的时刻」（`paid_pending_at`）。超窗就不再打 billing，只把**如实的状态**回给前端
    *     （订单仍是 `paid_pending`，等主动对账/人工处理），让界面能说「发放异常」，
    *     而不是永远转圈、也不是我们编一个「已到账」。
+   *
+   * <p>⚠️ 窗口**两条路必须同一个数**（2026-09-27 评审修正）。它此前在这里是硬编码的
+   * `GRANT_RETRY_WINDOW_MS`，而扫描器用的是 `readRetryWindowMs(env)` 读出来的可配值 ——
+   * 运维按扫描器注释的邀请把 `RECHARGE_GRANT_RETRY_WINDOW_MS` 调大之后，用户轮询这条
+   * 仍在 2 小时就停，且下面那条 WARN 会写「超出 120 分钟」，与真实配置不符。
+   * 现在只有一份来源（装配层解析后注入），WARN 里的分钟数跟着真实值走。
    *
    * <p>⚠️ 先抢名额**再**判窗口：抢不到名额就不必算窗口（30 秒内已经有谁在管这一笔）。
    * 但**名额不再兼当那条 WARN 的限流**（2026-09-27 修正）：30 秒的名额会让
@@ -837,13 +853,13 @@ export class RechargeService {
     // 起点是「钱到账的时刻」（`paid_pending_at`）；存量行没有那一列就退回下单时刻
     // （与扫描器的 `heldMinutes` 同一口径：宁可在日志里显得久一点，也不要漏判）
     const held = Date.now() - Date.parse(order.paidPendingAt ?? order.createdAt);
-    if (held > GRANT_RETRY_WINDOW_MS) {
+    if (held > this.grantRetryWindowMs) {
       // 频次闸：同一条单在冷却窗口内只留一条 WARN。**超窗本身仍然可见** ——
       // 扫描器的聚合 WARN（带 count + 样本）与心跳指标里的 abandoned 每轮都在报，
       // 这里压掉的只是「同一个事实被用户的手速复述」的那部分。
       if (this.grantWarnGate.shouldWarn(order.tradeNo)) {
         this.logger.warn(
-          `补发已超出 ${Math.round(GRANT_RETRY_WINDOW_MS / 60_000)} 分钟重试窗口，不再打 billing：`
+          `补发已超出 ${Math.round(this.grantRetryWindowMs / 60_000)} 分钟重试窗口，不再打 billing：`
             + `tradeNo=${order.tradeNo} 已等=${Math.round(held / 60_000)} 分钟`
             + `（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，等主动对账或人工处理）`,
           { event: "recharge.grant_retry_window_exceeded", trade_no: order.tradeNo },
@@ -929,7 +945,8 @@ export class RechargeService {
     claimMs: number;
     /**
      * 重试窗口（毫秒）：从「钱到账的时刻」起算，超窗的单不再重试（只为可见性统计）。
-     * 不传取扫描器的默认值（2 小时）。规则全文见 `recharge-grant-sweeper.ts`。
+     * 不传取本服务注入的那个窗口 —— 与用户轮询那条路（{@link retryFulfill}）**同一个数**，
+     * 两条自愈路径不可能各用各的窗口。规则全文见 `recharge-grant-sweeper.ts`。
      */
     retryWindowMs?: number;
   }): Promise<GrantSweepResult> {
@@ -939,7 +956,10 @@ export class RechargeService {
       retryGrant: (order) => this.fulfill(order),
       logger: this.logger,
     });
-    return this.sweeperInstance(options);
+    return this.sweeperInstance({
+      ...options,
+      retryWindowMs: options.retryWindowMs ?? this.grantRetryWindowMs,
+    });
   }
 
   /* ---------- 管理端：人工补发 ---------- */

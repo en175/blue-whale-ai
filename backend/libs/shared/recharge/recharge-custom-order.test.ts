@@ -20,6 +20,7 @@ import {
 } from "./recharge.testlib.js";
 import { creditsExpireAt } from "./credits-validity.js";
 import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
+import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
 import { RechargeService } from "./recharge.service.js";
 /* ============================================
  * 自定义充值下单（模块 B，PRD §7）：从「用户点了买 N 积分」到「订单落库 + 交给网关」。
@@ -260,6 +261,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
       { listActive: async () => [], getById: async () => null } as unknown as TopupTierService,
       settings,
       new RechargeCustomService({ client: prisma } as never),
+      GRANT_RETRY_WINDOW_MS,
     );
 
     await expect(service.createOrder({ userId: 9001, credits: 600 })).rejects.toThrow(

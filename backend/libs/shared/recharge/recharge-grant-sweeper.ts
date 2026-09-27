@@ -12,10 +12,14 @@
  * ── 对每一笔做三件事 ──────────────────────────────────────────────────────────
  *
  *   1. **先抢一个名额**（`claimQuerySlot`）—— 名额记在库里而不是进程内存：多副本部署时
- *      各记各的内存等于没限流。抢不到 = 别的副本这几分钟内已经在管这一笔了，跳过它；
+ *      各记各的内存等于没限流。抢不到 = 别的副本这几分钟内已经在管这一笔了，跳过它。
+ *      ⚠️ 名额**只挡第 2 步**（那才是对 billing 的真实调用）：第 3 步的「升级」一次 billing
+ *      都不打，不能被它挡住 —— 否则用户在轮询时（30 秒的名额一直被用户续上、5 分钟的名额
+ *      永远抢不到）这个任务会一步都不执行，见 `retryEach` 的说明；
  *   2. 再调一次发放（`retryGrant`，即 `RechargeService.fulfill`：先置待到账 → 发放 → 置到账）。
  *      幂等由 billing 的 `purchased:{tradeNo}` 键兜底，重复调用不会重复发积分；
- *   3. 仍失败就标 `grant_failed` 并**打一条结构化 WARN**，让人能去查。
+ *   3. 仍失败就标 `grant_failed` 并**打一条结构化 WARN**，让人能去查（第 1 步抢不到名额时
+ *      也标 —— 那一轮探不到补发结果，但「钱到账 30 分钟还没发出去」这个事实已经成立）。
  *
  * ── 异常逐笔吞、只累加计数 ────────────────────────────────────────────────────
  *
@@ -100,11 +104,54 @@ export const GRANT_SWEEP_BATCH_SIZE = 200;
  * <p>⚠️ **不是「放弃」**：超窗之后只是不再重试，订单状态一个都不改（没有「放弃」这个状态），
  * 而这件事必须**看得见** —— 见 `sweepStaleGrants` 里那条 `recharge.grant_retry_exhausted`。
  *
- * <p>可配：`RECHARGE_GRANT_RETRY_WINDOW_MS`（默认值写在这里与 `recharge-grant-task.ts` 两处）。
+ * <p>可配：`RECHARGE_GRANT_RETRY_WINDOW_MS`。**默认值与读取都只有这一处**（这个常量与
+ * {@link resolveGrantRetryWindowMs}；任务侧那个 `DEFAULT_GRANT_RETRY_WINDOW_MS` 只是它的别名）：
+ * 这个窗口有**两个**消费者 —— 本扫描器，与用户轮询那条补发路（`RechargeService.retryFulfill`）。
+ * 两处各读一次 env，就会出现「参数只对一条路生效」，
+ * 而那正是本模块最怕的故障形态（一条路看着正常、另一条路早就不是配的那个数）。
  * 取值必须**大于** `GRANT_STALE_AFTER_MS`，否则「够格重试」与「已经超窗」两个条件的交集为空 ——
- * 表现为一轮都不会重试（配置读取侧会挡掉这种值，见 `readRetryWindowMs`）。
+ * 表现为一轮都不会重试（配置读取侧会挡掉这种值，见 {@link resolveGrantRetryWindowMs}）。
  */
 export const GRANT_RETRY_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * 重试窗口的 **env → 毫秒** 解析，全仓唯一一处（`RECHARGE_GRANT_RETRY_WINDOW_MS`）。
+ *
+ * <p>它比「读一个正整数」多一条约束：**必须大于 `GRANT_STALE_AFTER_MS`**。
+ * 窗口不比判定阈值长的话，「够格重试」（早于 30 分钟）与「已超窗」（早于窗口起点）
+ * 两个条件的**交集为空** —— 一轮都不会重试，而任务看上去完全正常（心跳在打、日志没有报错）。
+ * 所以这种取值一律退回默认值，并**吵一声**。
+ *
+ * <p>仍然**不拒启**：兜底任务不该因为配错一个数字把整个后端拦在启动之外。
+ *
+ * <p>⚠️ 由装配层（`RechargeLibModule` 的工厂）调用一次，结果经 {@link GRANT_RETRY_WINDOW_MS_TOKEN}
+ * 注入给**两个**消费者（定时任务与 `RechargeService`）—— 谁都不许自己再读一遍 env。
+ */
+export function resolveGrantRetryWindowMs(
+  raw: string | undefined,
+  logger: Logger,
+): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (Number.isFinite(parsed) && parsed > GRANT_STALE_AFTER_MS) return parsed;
+  // 空串等于「没配」，那是正常路径，不吵
+  if (raw !== undefined && raw.trim() !== "") {
+    logger.warn(
+      `主动对账重试窗口配置非法（RECHARGE_GRANT_RETRY_WINDOW_MS=${raw}）：`
+        + `必须大于判定阈值 ${GRANT_STALE_AFTER_MS} 毫秒，否则一轮都不会重试；`
+        + `已退回默认值 ${GRANT_RETRY_WINDOW_MS} 毫秒`,
+    );
+  }
+  return GRANT_RETRY_WINDOW_MS;
+}
+
+/**
+ * 把解析出来的重试窗口交给消费者的注入令牌（见 {@link resolveGrantRetryWindowMs}）。
+ *
+ * <p>为什么要经令牌而不是各自读 env：这个窗口同时管着扫描器与用户轮询那条路，
+ * 而「用户轮询」那条路上的窗口此前写死在代码里 —— 运维把 env 调大之后，两条路各用各的数，
+ * WARN 里报的分钟数也跟着变成假话。env 只解析一次、只注入一次，两条路才不可能漂。
+ */
+export const GRANT_RETRY_WINDOW_MS_TOKEN = Symbol("GRANT_RETRY_WINDOW_MS");
 
 /**
  * 超窗 WARN 里最多带几笔样本。
@@ -227,8 +274,24 @@ interface RetryCounts {
 /**
  * 逐笔重推发放：抢名额 → 重试 → 失败标异常。
  *
- * <p>抽出来只为让 `sweepStaleGrants` 一眼能读完（取数、可见性、逐笔重试三段各归其位）；
- * 逻辑一行未改。
+ * <p>抽出来只为让 `sweepStaleGrants` 一眼能读完（取数、可见性、逐笔重试三段各归其位）。
+ *
+ * <p>⚠️ **名额只挡「补发」，不挡「升级」**（2026-09-27 评审修正）。`claimQuerySlot` 记的是
+ * `last_query_at` 这一列，而**两条路共用它**：用户轮询那条按 30 秒抢（`RECONCILE_INTERVAL_MS`），
+ * 本扫描器按一轮的间隔抢（默认 5 分钟）。用户只要开着充值弹窗，30 秒的名额就被他一次次续上，
+ * 5 分钟的名额**永远抢不到** —— 于是此前这段代码每次都走 `skipped`，一步都不执行：
+ * `markGrantFailed` 不发生、「到账异常」那条 WARN（自称是它唯一能被看见的地方）一次都不打。
+ * 而「用户盯着一直失败」恰恰是最该升级的场景，两条路的门槛却互相把对方饿死了。
+ *
+ * <p>所以：**抢不到名额时也升级**。理由不是「反正幂等」，是**层级**——名额存在的唯一目的是
+ * 「别把 billing 打爆」，而升级（改一行状态 + 打一条 WARN）一次 billing 都不打。拿一个为
+ * billing 设的门槛去挡一个不碰 billing 的动作，本来就不成立。补发那一步仍然归名额管，
+ * 每 3 秒轮询不会变成每 3 秒打一次 billing。
+ *
+ * <p>抢不到名额时探不到那次补发的结果（那正是名额的意思），但这不影响升级的成立：能进到
+ * 这一轮的单本来就满足「钱到账 `GRANT_STALE_AFTER_MS` 了、积分还没发出去」—— 那就是
+ * `heldMinutes` 一路算下来的「到账异常」的定义。真被别的路径救活了（补发成功）时
+ * `markGrantFailed` 也标不动它（那条 UPDATE 只认 `paid_pending`），不会误报。
  */
 async function retryEach(
   deps: GrantSweeperDeps,
@@ -239,7 +302,13 @@ async function retryEach(
   for (const order of stale) {
     try {
       if (!(await deps.repo.claimQuerySlot(order.tradeNo, claimMs))) {
-        counts.skipped += 1;
+        // 抢不到 = 这几分钟内已经有别人在管这一笔（用户轮询、别的副本）。
+        // 升级照做（见函数头）；标不动（已经是 grant_failed，或已被救活）就记 skipped
+        if (await flagGrantFailed(deps, order, NOT_CLAIMED_REASON)) {
+          counts.flagged += 1;
+        } else {
+          counts.skipped += 1;
+        }
         continue;
       }
       await deps.retryGrant(order);
@@ -249,37 +318,58 @@ async function retryEach(
           + `金额=${order.amountFen / 100} 元 持有=${heldMinutes(order)} 分钟`,
       );
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
       // markGrantFailed 的返回值就是「本次是否由我把它标成异常」：
       // 只有那一次才值得叫人，之后的每轮重试失败都只是「还是没发出去」。
-      if (await deps.repo.markGrantFailed(order.tradeNo)) {
+      if (await flagGrantFailed(deps, order, detail)) {
         counts.flagged += 1;
-        // ⚠️ 这条 WARN 是「到账异常」**唯一**能被看见的地方：没有它，这个状态只是
-        //    把「发放失败」换了个名字，日志里什么也查不到。四个字段是排查的最小集：
-        //    拿 trade_no 去网关/我们的订单表对，拿 user_id 去联系用户，金额对账，
-        //    持有分钟数说明这事拖了多久。
-        deps.logger.warn(
-          `到账异常：钱已到账但积分反复发放失败，已转入人工核验 `
-            + `tradeNo=${order.tradeNo} userId=${order.userId} `
-            + `金额=${order.amountFen / 100} 元 持有=${heldMinutes(order)} 分钟 `
-            + `原因=${error instanceof Error ? error.message : String(error)}`,
-          {
-            event: "recharge.grant_failed",
-            trade_no: order.tradeNo,
-            user_id: order.userId,
-            amount_fen: order.amountFen,
-            held_minutes: heldMinutes(order),
-          },
-        );
       } else {
         counts.stillFailing += 1;
         deps.logger.info(
-          `到账异常单重试仍失败 tradeNo=${order.tradeNo} 持有=${heldMinutes(order)} 分钟：`
-            + `${error instanceof Error ? error.message : String(error)}`,
+          `到账异常单重试仍失败 tradeNo=${order.tradeNo} 持有=${heldMinutes(order)} 分钟：${detail}`,
         );
       }
     }
   }
   return counts;
+}
+
+/** 抢不到名额时那条 WARN 的「原因」：不是补发失败，是**这一轮没轮到我们去探**。 */
+const NOT_CLAIMED_REASON =
+  "本轮没抢到补发名额（用户轮询或其他副本正在处理这一笔），没探到补发结果";
+
+/**
+ * 把一笔单升级成「到账异常」：**本次由我标记**时打那条唯一的 WARN，并返回 true。
+ *
+ * <p>返回 false = 它已经是异常状态（或已经不是 `paid_pending` 了，例如刚被并发的补发救活）
+ * —— 那种情况**不重复叫人**，由调用方自己记那一笔账。
+ *
+ * <p>幂等，且**不需要名额**：只改一行状态、打一条 WARN，一次 billing 都不打（见 `retryEach`）。
+ */
+async function flagGrantFailed(
+  deps: GrantSweeperDeps,
+  order: RechargeOrderView,
+  reason: string,
+): Promise<boolean> {
+  if (!(await deps.repo.markGrantFailed(order.tradeNo))) return false;
+  // ⚠️ 这条 WARN 是「到账异常」**唯一**能被看见的地方：没有它，这个状态只是
+  //    把「发放失败」换了个名字，日志里什么也查不到。四个字段是排查的最小集：
+  //    拿 trade_no 去网关/我们的订单表对，拿 user_id 去联系用户，金额对账，
+  //    持有分钟数说明这事拖了多久。
+  deps.logger.warn(
+    `到账异常：钱已到账但积分反复发放失败，已转入人工核验 `
+      + `tradeNo=${order.tradeNo} userId=${order.userId} `
+      + `金额=${order.amountFen / 100} 元 持有=${heldMinutes(order)} 分钟 `
+      + `原因=${reason}`,
+    {
+      event: "recharge.grant_failed",
+      trade_no: order.tradeNo,
+      user_id: order.userId,
+      amount_fen: order.amountFen,
+      held_minutes: heldMinutes(order),
+    },
+  );
+  return true;
 }
 
 /**

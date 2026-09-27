@@ -21,6 +21,7 @@ import {
   signed,
 } from "./recharge.testlib.js";
 import { creditsExpireAt } from "./credits-validity.js";
+import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
 import { deriveCredits, RechargeService } from "./recharge.service.js";
 /* ============================================
  * 充值到账的账实一致：这是钱路径，测的是「会不会多发一次」「会不会按错的数发」。
@@ -246,6 +247,7 @@ describe("RechargeService — 下单", () => {
       tiers,
       settings,
       new RechargeCustomService({ client: prisma } as never),
+      GRANT_RETRY_WINDOW_MS,
     );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(/已下架/);
@@ -276,6 +278,7 @@ describe("RechargeService — 下单", () => {
       tiers,
       settings,
       new RechargeCustomService({ client: prisma } as never),
+      GRANT_RETRY_WINDOW_MS,
     );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(
@@ -300,6 +303,7 @@ describe("RechargeService — 下单", () => {
       tiers,
       settings,
       new RechargeCustomService({ client: prisma } as never),
+      GRANT_RETRY_WINDOW_MS,
     );
 
     await expect(service.createOrder({ userId: 1, tierId: "7" })).rejects.toThrow(
@@ -780,6 +784,90 @@ describe("RechargeService — 超窗 WARN 的频次（M-1）", () => {
     }
 
     expect(http.grantBodies).toHaveLength(0);
+  });
+});
+
+describe("RechargeService — 重试窗口两条路同一个值", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
+    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
+    vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * 运维按扫描器注释的邀请把窗口调小的那个值（45 分钟）。
+   *
+   * <p>取 45 而不是随便一个数：它**明显不同于默认的 120**，任何「这条路上还是写死的 120」
+   * 的实现都会在这几条用例里红。
+   */
+  const TUNED_WINDOW_MS = 45 * 60 * 1000;
+
+  /** 造一笔「钱到账 **50 分钟**了、积分一直没发出去」的单：默认 2 小时窗口内、45 分钟窗口外。 */
+  async function makeOrderHeld50Min(grantRetryWindowMs?: number) {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const made = await makeService(
+      grantRetryWindowMs === undefined ? {} : { grantRetryWindowMs },
+    );
+    const created = await made.service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = made.orders.get(created.tradeNo)!;
+    row.status = "paid_pending";
+    row.paid_pending_at = new Date(Date.now() - 50 * 60 * 1000);
+    return { ...made, http, tradeNo: created.tradeNo };
+  }
+
+  it("★ 窗口调成 45 分钟：用户轮询那条路也按 45 分钟停（不再是硬编码的 120）", async () => {
+    // 此前这条路的窗口是代码里的常量，而扫描器读的是可配的 env：运维把
+    // `RECHARGE_GRANT_RETRY_WINDOW_MS` 调大（扫描器注释明确邀请这么做）之后，
+    // 用户轮询那条仍在 2 小时就停，WARN 里还写着「超出 120 分钟」—— 与真实配置不符。
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service, tradeNo, http } = await makeOrderHeld50Min(TUNED_WINDOW_MS);
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo });
+
+    // 50 分钟 > 45 分钟 → 超窗、一次 billing 都不打
+    expect(http.grantBodies).toHaveLength(0);
+    expect(state.status).toBe("paid_pending");
+    const line = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((text) => text.includes("recharge.grant_retry_window_exceeded"));
+    expect(line).toBeDefined();
+    // 分钟数跟着**真实配置**走：写死 120 的实现会在这两条断言上红
+    expect(line).toContain("45 分钟");
+    expect(line).not.toContain("120 分钟");
+  });
+
+  it("★ 同一个 45 分钟也管着扫描器：这一轮取不到它（进 abandoned、一单都不重试）", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service, orders, tradeNo, http } = await makeOrderHeld50Min(TUNED_WINDOW_MS);
+
+    // 不传 retryWindowMs：扫描器必须用**服务注入的那一个**（否则两条路各用各的窗口）
+    const result = await service.sweepStaleGrants({ claimMs: 60_000 });
+
+    expect(result).toMatchObject({ scanned: 0, healed: 0, abandoned: 1 });
+    expect(http.grantBodies).toHaveLength(0);
+    // 超窗不改状态（没有「放弃」这个状态）：它只是不再被重试
+    expect(orders.get(tradeNo)?.status).toBe("paid_pending");
+    const line = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((text) => text.includes("recharge.grant_retry_exhausted"));
+    expect(JSON.parse(line as string)).toMatchObject({ count: 1, window_minutes: 45 });
+  });
+
+  it("★ 默认（2 小时）下同一笔单两条路都放行：可配不等于默认被改掉", async () => {
+    const { service, tradeNo, http } = await makeOrderHeld50Min();
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo });
+
+    // 50 分钟落在默认窗口内 → 用户轮询真的补发（走通了才说明上一条不是「一律拒绝」）
+    expect(http.grantBodies).toHaveLength(1);
+    expect(state.status).toBe("paid");
   });
 });
 

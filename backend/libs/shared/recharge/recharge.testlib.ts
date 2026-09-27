@@ -15,6 +15,7 @@ import type { TopupTierPermission } from "@lib/shared/persistence/index.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
+import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
 import { RechargeService } from "./recharge.service.js";
 
 export const APP_SECRET = "s3cret";
@@ -340,7 +341,14 @@ export const TIER = {
 
 export type Tier = typeof TIER;
 
-export async function makeService() {
+/**
+ * @param options.grantRetryWindowMs 补发重试窗口（毫秒）。生产里由装配层从 env 解析后注入
+ *   （`RechargeLibModule` 的工厂），所以这里也只能**注入** —— 被测服务不许自己读 env，
+ *   否则「两条路用同一个窗口」这件事在测试里就测不出来了（各读各的永远一起变）。
+ */
+export async function makeService(
+  options: { grantRetryWindowMs?: number } = {},
+) {
   const { prisma, orders, statusWrites, customConfig } = makePrisma();
   // 默认种一份 PRD §7.1 的配置：档位单用不到它，自定义充值单（模块 B）全靠它报价
   customConfig.set(1, defaultCustomConfigRow());
@@ -367,6 +375,8 @@ export async function makeService() {
     tiers,
     settings,
     new RechargeCustomService({ client: prisma } as never),
+    // 默认就用生产那个默认窗口（同一个常量）：测试想要的「调大窗口」直接传进来
+    options.grantRetryWindowMs ?? GRANT_RETRY_WINDOW_MS,
   );
   return {
     service,
