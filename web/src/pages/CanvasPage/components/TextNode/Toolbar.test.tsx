@@ -165,6 +165,8 @@ beforeEach(() => {
   storeState.width = 1200;
   // 多选用例会改写 nodes 的 selected 标记，逐用例恢复原始态
   storeState.nodes.forEach((n) => { n.selected = false; });
+  // 连线同样逐用例清空，防用例间泄漏
+  storeState.edges = [];
 });
 
 afterEach(async () => {
@@ -309,6 +311,8 @@ describe('操作条（唯一选中、非编辑）', () => {
   });
 
   it('点击卡内素材标签弹出定位/替换/删除，不出现顶部「删除标签 #n」', async () => {
+    // 有效性契约（契约 §3）：有效 = 画布存在该节点 + m1→本文本卡的 textIndex 连线，缺一判失效
+    storeState.edges = [{ id: 'e-m1-t1', source: 'm1', target: 't1', data: { textIndex: true } }];
     await renderTextNode({
       selected: true,
       data: {
