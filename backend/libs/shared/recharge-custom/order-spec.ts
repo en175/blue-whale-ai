@@ -35,6 +35,19 @@ export interface CustomOrderPlan {
    * （见 `recharge/credits-validity.ts`），算完同时交给 billing 与订单快照。
    */
   creditsValidMonths: number;
+  /**
+   * 下单时服务端判定的权限结果快照（`allowed`）。
+   *
+   * <p>⚠️ 与档位那条**同一个口径**（M-3，2026-09-27 补）：它**必须由真实判定算出来**，
+   * 不能是个写死的常量 —— 这一列要回答的是「这单当时到底判过权限没有」。此前只有档位
+   * 那条传真值，自定义充值这条落的是 repo 的默认常量 `allowed`，于是同一列在两条购买
+   * 路径上口径不同：档位那边刚论证过「写死 allowed 会让这一列说假话」，这边却正写着。
+   *
+   * <p>当前实现里被拒的用户根本建不了单（上面 `canPurchaseCustom` 那一步就抛了），
+   * 所以落库的值只可能是 `allowed`；但它是**判定出来的** allowed，不是常量 ——
+   * 将来加入别的判定分支时这一列自动正确。
+   */
+  permissionResult: string;
   /** 恒 0：PRD §7.1「第一版默认不对自定义充值发放首购赠送积分」 */
   bonusCredits: number;
   subject: string;
@@ -71,7 +84,11 @@ export function buildCustomOrderPlan(
     throw new NewApiError("自定义充值暂未开放", 400);
   }
   // 权限：与档位同一套枚举（PRD §10.3「与固定积分卡一致」），判定见 `canPurchaseCustom`
-  if (!canPurchaseCustom(config, userId)) {
+  //
+  // ⚠️ 判定结果**落到快照里**（不是常量）：被拒的单根本走不到下面，所以这里落库的值
+  //    只会是 `allowed` —— 但它是判出来的，与档位那条同一个口径（见 `permissionResult`）
+  const allowed = canPurchaseCustom(config, userId);
+  if (!allowed) {
     throw new NewApiError(customDeniedHint(config), 403);
   }
 
@@ -117,6 +134,9 @@ export function buildCustomOrderPlan(
     configVersion: config.version,
     // 快照的是**月数**（运营配多少就记多少），到期时刻发放那一刻按支付成功时间折出来
     creditsValidMonths: config.creditsValidMonths,
+    // 判出来的 allowed（不是常量）：这一列要能回答「当时到底判没判」，
+    // 与档位那条同口径 —— 两条购买路径落在同一列上的值不能有两套来源
+    permissionResult: allowed ? "allowed" : "denied",
     bonusCredits: 0,
     subject: "自定义充值",
     body: `自定义充值 ${credits} 积分`,

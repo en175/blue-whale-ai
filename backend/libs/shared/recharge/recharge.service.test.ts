@@ -674,3 +674,214 @@ describe("deriveCredits — 保留给自定义充值的反算（档位路径已�
     expect(deriveCredits(100, 7)).toBe(700);
   });
 });
+
+describe("RechargeService — 档位目录带上有效期（C-1）", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
+    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
+    vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("★ 有效期**逐档**回给前端：不同档位拿到不同的数（不是整页一个写死的 2 年）", async () => {
+    // 有效期是按商品可配的，而 C 把配置接通之后「配 6 个月」是真的生效。
+    // 目录接口一个字都不说的话，用户侧就只能照着写死的一句「2 年内有效」念 ——
+    // 那句话对配了 6 个月的那一档就是假的。
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, addTier, setTier } = await makeService();
+
+    setTier({ creditsValidMonths: 6 });
+    addTier({ ...TIER, id: "8", name: "高级", creditsValidMonths: 24 });
+
+    const catalog = await service.listTiers();
+
+    const byId = new Map(catalog.tiers.map((t) => [t.id, t.creditsValidMonths]));
+    expect(byId.get("7")).toBe(6);
+    expect(byId.get("8")).toBe(24);
+  });
+
+  it("默认档位把后台配的月数原样带出来（游客也要能拿到，价格表本来就是公开信息）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service } = await makeService();
+
+    const catalog = await service.listTiers();
+
+    expect(catalog.tiers[0]?.creditsValidMonths).toBe(TIER.creditsValidMonths);
+  });
+});
+
+describe("RechargeService — 超窗 WARN 的频次（M-1）", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
+    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
+    vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** 把一笔订单造成「钱在 3 小时前到账、积分一直没发出去」（已超出 2 小时窗口）。 */
+  async function makeOverWindowOrder() {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const made = await makeService();
+    const created = await made.service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = made.orders.get(created.tradeNo)!;
+    row.status = "paid_pending";
+    row.paid_pending_at = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    return { ...made, http, tradeNo: created.tradeNo };
+  }
+
+  it("★ 同一笔超窗单被轮询多次，WARN 只出现一次（名额是 30 秒，不压就是 2880 条/天）", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service, tradeNo } = await makeOverWindowOrder();
+
+    // 用户每 3 秒轮一次，连着轮 10 次 —— 名额会让其中若干次真的走到窗口判定那一步
+    for (let i = 0; i < 10; i += 1) {
+      await service.getOrderStatus({ userId: 9001, tradeNo });
+    }
+
+    const lines = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((text) => text.includes("recharge.grant_retry_window_exceeded"));
+    expect(lines).toHaveLength(1);
+  });
+
+  it("★ 压的是频次、不是可见性：超窗这件事仍然报得出来（带单号与已等多久）", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service, tradeNo } = await makeOverWindowOrder();
+
+    await service.getOrderStatus({ userId: 9001, tradeNo });
+
+    const line = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((text) => text.includes("recharge.grant_retry_window_exceeded"));
+    expect(line).toBeDefined();
+    expect(line).toContain(tradeNo);
+    // 时间戳那一行必须还在：把频次压掉，不代表把「这事拖了多久」也压掉
+    expect(line).toContain("已等=180 分钟");
+  });
+
+  it("★ 超窗的门票仍然一次都不打 billing（压频次没把重试也改回去）", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service, tradeNo, http } = await makeOverWindowOrder();
+
+    for (let i = 0; i < 5; i += 1) {
+      await service.getOrderStatus({ userId: 9001, tradeNo });
+    }
+
+    expect(http.grantBodies).toHaveLength(0);
+  });
+});
+
+describe("RechargeService — 管理端人工补发（E-1 的第三条出口）", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
+    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
+    vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
+    freshGrpcUrl();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("★ 超窗的 paid_pending 单：人工点一下**能**补发（自动重试已停，这是唯一出口）", async () => {
+    // 自动重试窗口用尽之后，没有任何自动路径会再碰它；而它也不会自己好。
+    // 人明确点了这一下，就该真的再打一次 billing —— 窗口约束的是无人看管时的预算
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = orders.get(created.tradeNo)!;
+    row.status = "paid_pending";
+    row.paid_pending_at = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+    const result = await service.retryGrantForAdmin(created.tradeNo);
+
+    expect(http.grantBodies).toHaveLength(1);
+    expect(result.status).toBe("paid");
+    expect(orders.get(created.tradeNo)?.status).toBe("paid");
+  });
+
+  it("★ 已标 grant_failed 的单也能人工补发（billing 恢复后人一点就通）", async () => {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "grant_failed";
+
+    const result = await service.retryGrantForAdmin(created.tradeNo);
+
+    expect(result.status).toBe("paid");
+    expect(http.grantBodies).toHaveLength(1);
+  });
+
+  it("★ 补发不是「点一下就必成」：仍失败时如实回当前状态，不编一个已到账", async () => {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "paid_pending";
+    http.failNextGrants(1);
+
+    const result = await service.retryGrantForAdmin(created.tradeNo);
+
+    expect(result.status).toBe("paid_pending");
+    expect(orders.get(created.tradeNo)?.status).toBe("paid_pending");
+  });
+
+  it("★ 未支付的单不能补发：从 pending 补发等于无中生有地发积分", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+
+    await expect(service.retryGrantForAdmin(created.tradeNo)).rejects.toThrow(/尚未收到款项/);
+    expect(orders.get(created.tradeNo)?.status).toBe("pending");
+  });
+
+  it("★ 已到账的单不给补发：说清楚「无需重试」，而不是报一个笼统的错", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "paid";
+
+    await expect(service.retryGrantForAdmin(created.tradeNo)).rejects.toThrow(/已经发放到账/);
+  });
+
+  it("单号不存在 → 404", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service } = await makeService();
+
+    await expect(service.retryGrantForAdmin("RC-NOPE")).rejects.toThrow(/订单不存在/);
+  });
+
+  it("★ 补发失败**也回读状态**而不是抛错：管理端要记的是每一次尝试", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "paid_pending";
+    http.failNextGrants(1);
+
+    // 抛出去的话，「失败的补发」在操作日志里一条都不会有；而「成功没有」的权威答案
+    // 本来就是订单行，不是异常处理。所以：如实回状态，原因进 error 日志
+    const result = await service.retryGrantForAdmin(created.tradeNo);
+
+    expect(result).toEqual({ tradeNo: created.tradeNo, status: "paid_pending" });
+  });
+});

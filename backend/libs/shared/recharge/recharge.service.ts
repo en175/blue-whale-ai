@@ -119,6 +119,10 @@ import {
   type GrantSweepResult,
 } from "./recharge-grant-sweeper.js";
 import {
+  createGrantWindowWarnGate,
+  type GrantWindowWarnGate,
+} from "./grant-window-warn.js";
+import {
   PAY_IF_CODE_HCCB,
   PAY_ORDER_STATE,
   PAY_WAY_CODE_HCCB_QR,
@@ -175,6 +179,18 @@ export interface RechargeTierOffer {
   canPurchase: boolean | null;
   /** 不能买时展示的文案（后台可配，未配则由服务端给默认文案） */
   deniedHint: string;
+  /**
+   * 这一档到账积分的有效期（月，PRD §9.5 / §10.2）。
+   *
+   * <p>⚠️ **必须逐档回给前端**（2026-09-27 补）。它此前只在后台可配、只在发放那一刻生效，
+   * 目录接口一个字都不说 —— 于是用户侧只能照着写死的一句「积分自到账起 2 年内有效」念。
+   * 而一旦运营把某一档配成 6 个月，那句话对**这一档**就是假的（把配置接通之后才成立：
+   * 在此之前配了不生效，那句「2 年」倒是碰巧没错）。
+   *
+   * <p>有效期是**按商品可配**的，页面级写死任何一个数都会再次变成假话：
+   * 卡片上标的必须是**这一档自己**的那个数（与自定义充值那条 `credits_valid_months` 对称）。
+   */
+  creditsValidMonths: number;
 }
 
 export interface RechargeCatalog {
@@ -266,6 +282,13 @@ export interface RechargeOrderStateView {
   creditsAfter: number | null;
 }
 
+/** 管理端人工补发的结果：补发**之后**回读到的真实状态。 */
+export interface RechargeGrantRetryResult {
+  tradeNo: string;
+  /** `paid` = 这次补发成功；仍是 `paid_pending` / `grant_failed` = 这次没成（原因在日志里） */
+  status: RechargeOrderStatus;
+}
+
 /**
 
 /**
@@ -291,6 +314,8 @@ export class RechargeService {
   private repoInstance?: RechargeOrderRepo;
   private reuseInstance?: ReturnType<typeof createActiveOrderReuse>;
   private sweeperInstance?: ReturnType<typeof createGrantSweeper>;
+  /** 「补发已超窗」那条 WARN 的频次闸（规则见 `grant-window-warn.ts`） */
+  private grantWarnGateInstance?: GrantWindowWarnGate;
 
   private get repo(): RechargeOrderRepo {
     if (!this.repoInstance) {
@@ -313,6 +338,12 @@ export class RechargeService {
       logger: this.logger,
     });
     return this.reuseInstance(userId, spec);
+  }
+
+  /** 「补发已超窗」那条 WARN 的频次闸（为什么要它见 `grant-window-warn.ts`） */
+  private get grantWarnGate(): GrantWindowWarnGate {
+    this.grantWarnGateInstance ??= createGrantWindowWarnGate();
+    return this.grantWarnGateInstance;
   }
 
   constructor(
@@ -355,6 +386,9 @@ export class RechargeService {
           // 「界面上可点、下单被拒」或者反过来（界面灰着、接口其实放行）
           canPurchase: userId === null ? null : canPurchaseTier(t, userId),
           deniedHint: tierDeniedHint(t),
+          // 有效期**逐档**照抄配置：卡片上要标这一档自己的那个数，
+          // 页面级那句「N 年内有效」在按商品可配之后必然对某些档是假话
+          creditsValidMonths: t.creditsValidMonths,
         };
       }),
     };
@@ -788,8 +822,10 @@ export class RechargeService {
    *     （订单仍是 `paid_pending`，等主动对账/人工处理），让界面能说「发放异常」，
    *     而不是永远转圈、也不是我们编一个「已到账」。
    *
-   * <p>⚠️ 先抢名额**再**判窗口：名额同时给那条 WARN 限流。顺序反了的话，一个超窗的单
-   * 会被开着页面的用户每 3 秒灌一条 WARN（扫描器那边一条 WARN 是一轮一次，这里不是）。
+   * <p>⚠️ 先抢名额**再**判窗口：抢不到名额就不必算窗口（30 秒内已经有谁在管这一笔）。
+   * 但**名额不再兼当那条 WARN 的限流**（2026-09-27 修正）：30 秒的名额会让
+   * 「补发已超窗」这条 WARN 变成 ≈2880 条/天/副本，比扫描器高两个量级。它现在有自己的
+   * 频次闸（`grantWarnGate`，按 tradeNo 去重 + 冷却窗口，见 `grant-window-warn.ts`）。
    */
   private async retryFulfill(order: RechargeOrderView): Promise<RechargeOrderView> {
     // 抢不到名额 = 30 秒内已经有谁（本进程的另一次轮询、扫描器、别的副本）在管这一笔了。
@@ -802,12 +838,17 @@ export class RechargeService {
     // （与扫描器的 `heldMinutes` 同一口径：宁可在日志里显得久一点，也不要漏判）
     const held = Date.now() - Date.parse(order.paidPendingAt ?? order.createdAt);
     if (held > GRANT_RETRY_WINDOW_MS) {
-      this.logger.warn(
-        `补发已超出 ${Math.round(GRANT_RETRY_WINDOW_MS / 60_000)} 分钟重试窗口，不再打 billing：`
-          + `tradeNo=${order.tradeNo} 已等=${Math.round(held / 60_000)} 分钟`
-          + `（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，等主动对账或人工处理）`,
-        { event: "recharge.grant_retry_window_exceeded", trade_no: order.tradeNo },
-      );
+      // 频次闸：同一条单在冷却窗口内只留一条 WARN。**超窗本身仍然可见** ——
+      // 扫描器的聚合 WARN（带 count + 样本）与心跳指标里的 abandoned 每轮都在报，
+      // 这里压掉的只是「同一个事实被用户的手速复述」的那部分。
+      if (this.grantWarnGate.shouldWarn(order.tradeNo)) {
+        this.logger.warn(
+          `补发已超出 ${Math.round(GRANT_RETRY_WINDOW_MS / 60_000)} 分钟重试窗口，不再打 billing：`
+            + `tradeNo=${order.tradeNo} 已等=${Math.round(held / 60_000)} 分钟`
+            + `（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，等主动对账或人工处理）`,
+          { event: "recharge.grant_retry_window_exceeded", trade_no: order.tradeNo },
+        );
+      }
       // 如实回状态：前端据此显示「发放异常」，而不是我们编一个「已到账」
       return order;
     }
@@ -899,6 +940,69 @@ export class RechargeService {
       logger: this.logger,
     });
     return this.sweeperInstance(options);
+  }
+
+  /* ---------- 管理端：人工补发 ---------- */
+
+  /**
+   * 管理端「重试发放」：对一笔**钱已收、积分没发出去**的单，人工再推一次发放。
+   *
+   * <p>── 为什么需要它（E-1 的第三条）────────────────────────────────────────────
+   *
+   * 到账的三条自动路径都有边界：网关只重投约 15 分钟、用户轮询只在用户开着页面时发生、
+   * 扫描器**超窗（2 小时）之后就不再重试**。三条都用尽之后，那笔单在库里看起来只是
+   * 「卡住」—— 没有任何一个状态叫「放弃」，也没有任何动作能再推它一次，只能等人。
+   * 而人此前**没有任何入口**：管理端那一页只有只读列表。
+   *
+   * <p>⚠️ 它**刻意越过重试窗口**。窗口约束的是**无人看管**时的自动重试预算
+   * （一个永久坏单每 5 分钟打一次 billing、没有出口）；这里是一次**有人明确决定**的重试，
+   * 前提就是「人已经判断过这笔该再试一次」。窗口在这里不是保护，是障碍。
+   *
+   * <p>⚠️ 它**不抢 `claimQuerySlot` 名额**：那个名额是为了避免「多副本重复做同一件事」，
+   * 而人工点击本来就是一次独立决定 —— 抢不到名额就回一句「稍后再试」等于让操作员
+   * 对着一个没有任何提示的按钮反复点。重复发放仍然安全：`fulfill` 走 billing 的
+   * `purchased:{tradeNo}` 幂等键，多发一次不会多给积分。
+   *
+   * <p>⚠️ 发放失败**不回错误码，而是如实回读到的状态**（`paid_pending` / `grant_failed`）。
+   * 两个理由：
+   *   · 「这次点成功了没有」的权威答案**是订单行本身**，不是我们的异常处理 ——
+   *     发放过程中任何一步失败都可能钱已经动了，报「失败」比报「状态还是 X」更容易骗人；
+   *   · 管理端的审计要记的是**每一次尝试**（含没成的那些），抛出去就等于
+   *     「失败的补发在操作日志里一条都没有」。
+   * 失败原因写进 error 日志（带单号），排查时按单号捞。
+   */
+  async retryGrantForAdmin(tradeNo: string): Promise<RechargeGrantRetryResult> {
+    const order = await this.repo.getByTradeNo(tradeNo);
+    if (!order) throw new NewApiError("订单不存在", 404);
+
+    // ⚠️ 只认「钱到了、积分没发出去」这两种状态。从 `pending` 补发等于把「用户还没付钱」
+    //    当成到账异常处理 —— 那是无中生有地发积分。
+    if (
+      order.status !== RECHARGE_ORDER_STATUS.paidPending &&
+      order.status !== RECHARGE_ORDER_STATUS.grantFailed
+    ) {
+      throw new NewApiError(
+        order.status === RECHARGE_ORDER_STATUS.paid
+          ? "该订单的积分已经发放到账，无需重试"
+          : `该订单尚未收到款项（当前状态：${order.status}），不能补发`,
+        400,
+      );
+    }
+
+    try {
+      await this.fulfill(order);
+    } catch (error) {
+      // 不抛出：调用方要的是「现在到底怎么样了」，下面回读给他
+      this.logger.error(
+        `人工补发失败 tradeNo=${tradeNo}：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    // 回过读后的**真实**状态（不是「我以为成功了」）：fulfill 幂等命中或并发下，
+    // 订单可能已经被别人推到 paid，回读拿到的是那个答案
+    const after = await this.repo.getByTradeNo(tradeNo);
+    return { tradeNo, status: after?.status ?? order.status };
   }
 
   /* ---------- 私有 ---------- */

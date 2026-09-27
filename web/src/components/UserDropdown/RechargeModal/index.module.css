@@ -203,14 +203,19 @@
   text-decoration: line-through;
 }
 
+/* 这一档的有效期（PRD §6.2「适用说明」）。值从接口来，按档位各不相同，
+   所以它必须在**卡片上**、与其它档位共有的那组权益分开。 */
+.planValidity {
+  font-size: var(--font-size-sm);
+  color: #9aa7bd;
+}
+
 .perkList {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-top: 8px;
-}
-
-.perkItem {
+}.perkItem {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -433,6 +438,21 @@
 .waiting {
   font-size: var(--font-size-sm);
   color: #888;
+}
+
+/* 到账异常（`grant_failed`）：与「发放中」不同色 —— 后者会自己好，这个要人来处理。
+   用与后台警示一致的暖色，不写死任何年数/期限 */
+.waitingBad {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+}
+
+/* 下单回来的金额与页面上原显示的价不一致（运营刚改过价）：提示在二维码上方，
+   与 `qrAmount` 相邻 —— 用户先读到「价变了」，再看到那个新数字 */
+.qrPriceChanged {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+  text-align: center;
 }
 
 /* 支付结果态（成功/过期/失败） */

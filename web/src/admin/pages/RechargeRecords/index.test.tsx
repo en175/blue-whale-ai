@@ -3,13 +3,14 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/api/http';
 import RechargeRecords from './index';
 
 // 充值记录页：钉住**六个状态都看得见**这一条。
 // 状态机 2026-09-26 由 4 态扩到 6 态，而本页的状态列走的是 `STATUS_LABELS[row.status]` ——
 // 少写一种，那一行的徽标就是**一片空白**，且不报任何错。
 
-const api = vi.hoisted(() => ({ fetchRecords: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchRecords: vi.fn(), retryGrant: vi.fn() }));
 
 vi.mock('@/api/adminRechargeRecords', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/adminRechargeRecords')>();
@@ -19,6 +20,7 @@ vi.mock('@/api/adminRechargeRecords', async (importOriginal) => {
       queryKey: actual.adminRechargeRecordKeys.list(query as never),
       queryFn: api.fetchRecords,
     }),
+    retryAdminRechargeGrant: api.retryGrant,
   };
 });
 
@@ -131,5 +133,69 @@ describe('充值记录页 — 六个状态', () => {
     expect(options).toContain('支付成功待到账');
     expect(options).toContain('到账异常');
     expect(options).toContain('全部状态');
+  });
+});
+
+/** 点某一行上的按钮（按文字找） */
+async function clickRowButton(tradeNo: string, label: string) {
+  const row = [...document.body.querySelectorAll<HTMLTableRowElement>('tbody tr')].find(
+    (tr) => tr.textContent?.includes(tradeNo),
+  );
+  const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) =>
+    b.textContent?.includes(label),
+  );
+  await act(async () => {
+    button?.click();
+    await Promise.resolve();
+  });
+  await settle();
+}
+
+describe('充值记录页 — 人工补发（E-1 的那条出口）', () => {
+  it('★ 只有「钱收了、积分没发出去」两种状态才有重试按钮', async () => {
+    // 给每一行都摆一个按钮是错的：对 pending 点它等于无中生有地发积分，
+    // 对 paid 点它是纯噪声。判据必须与后端那道闸一致，否则运营撞上一次 400
+    await renderPage();
+
+    const rowTrades = [...document.body.querySelectorAll<HTMLTableRowElement>('tbody tr')].map(
+      (tr) => tr.textContent ?? '',
+    );
+    // ROWS 的顺序：pending / paid_pending / paid / expired / failed / grant_failed
+    const withButton = rowTrades.filter((text) => text.includes('重试发放'));
+    expect(withButton).toHaveLength(2);
+    expect(withButton[0]).toContain('trade-1'); // paid_pending
+    expect(withButton[1]).toContain('trade-5'); // grant_failed
+  });
+
+  it('★ 点一下真的发补发请求，并把成功的结果写在页面上', async () => {
+    api.retryGrant.mockResolvedValue({ tradeNo: 'trade-5', status: 'paid' });
+    await renderPage();
+
+    await clickRowButton('trade-5', '重试发放');
+
+    expect(api.retryGrant).toHaveBeenCalledWith('trade-5');
+    expect(document.body.textContent).toContain('补发成功，积分已到账');
+  });
+
+  it('★ 补发后仍是 paid_pending：如实说「仍停在…需继续排查」，不写成成功', async () => {
+    // 服务端回的是**回读后的真实状态**，不是「我以为成功了」。
+    // 把没成的也写成成功，运营就会以为这笔已经处理完了
+    api.retryGrant.mockResolvedValue({ tradeNo: 'trade-1', status: 'paid_pending' });
+    await renderPage();
+
+    await clickRowButton('trade-1', '重试发放');
+
+    expect(document.body.textContent).toContain('支付成功待到账');
+    expect(document.body.textContent).toContain('需继续排查');
+    expect(document.body.textContent).not.toContain('补发成功');
+  });
+
+  it('补发失败：就地展示服务端给的原因（后端文案原样呈现）', async () => {
+    api.retryGrant.mockRejectedValue(new ApiError(400, '该订单尚未收到款项'));
+    await renderPage();
+
+    await clickRowButton('trade-1', '重试发放');
+
+    expect(document.body.textContent).toContain('该订单尚未收到款项');
   });
 });

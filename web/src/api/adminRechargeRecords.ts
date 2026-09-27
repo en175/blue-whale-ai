@@ -99,3 +99,29 @@ export function adminRechargeRecordsOptions(query: AdminRechargeRecordQuery) {
     queryFn: () => fetchAdminRechargeRecords(query),
   });
 }
+
+/** 人工补发的结果：补发**之后**回读到的真实状态（服务端说的，不是前端猜的）。 */
+export interface AdminRechargeRetryResult {
+  tradeNo: string;
+  status: AdminRechargeStatus;
+}
+
+/**
+ * 人工补发一笔卡住的单（`POST /api/admin/recharge-records/:tradeNo/retry-grant`）。
+ *
+ * ⚠️ **为什么要这个按钮**：一笔「钱收了、积分始终发不出去」的单，在自动重试窗口（2 小时）
+ * 用尽之后就再没有任何自动路径会碰它 —— 网关只重投约 15 分钟、用户轮询要用户开着页面、
+ * 扫描器超窗就停。没有「放弃」这个状态，也没有别的入口：运营只能看着它卡在那里。
+ * 这个按钮就是那条出口（E-1）。
+ *
+ * ⚠️ 它**故意越过重试窗口**：窗口约束的是无人看管时的重试预算，而这一下是有人明确点的。
+ * 服务端侧重复调用是安全的（发放走 billing 的幂等键），所以点错行不会多发积分。
+ */
+export function retryAdminRechargeGrant(
+  tradeNo: string,
+): Promise<AdminRechargeRetryResult> {
+  return apiRequest<AdminRechargeRetryResult>(
+    `/api/admin/recharge-records/${encodeURIComponent(tradeNo)}/retry-grant`,
+    { method: 'POST', silent: true },
+  );
+}

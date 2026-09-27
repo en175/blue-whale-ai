@@ -23,7 +23,7 @@ import type { OrderSpec, RechargeOrderCreated } from "./recharge.service.js";
 export const CASHIER_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 export interface ActiveOrderReuseDeps {
-  repo: Pick<RechargeOrderRepo, "findActiveOrder">;
+  repo: Pick<RechargeOrderRepo, "findActiveOrder" | "findUnsettledPaidOrder">;
   /** 把一笔 `pending` 单往终态推一步（问网关 + 过期判定）；复用判定要用它的结果 */
   reconcile: (order: RechargeOrderView) => Promise<RechargeOrderView>;
   logger: Logger;
@@ -62,12 +62,23 @@ export interface ActiveOrderReuseDeps {
  *
  * <p>── 已有活跃单，但**钱已经收了**（`paid_pending` / `grant_failed`）怎么办 ────────
  *
- * 不复用它的二维码，也不建新单，而是 409 让用户去看那一笔。两个理由各管一件事：
+ * 不复用它的二维码，也不建新单，而是 409。两个理由各管一件事：
  *   · **不复用码**：钱已经付过了，再给他一张能扫的码 = 让他再付一次（网关那边这笔单
  *     已成功，扫码只会撞上「订单已支付」或者更糟）；
  *   · **不建新单**：这正是「用户付了钱卡在发放中 → 关掉弹窗再打开看到空闲态 → 再买一笔
  *     再付一次 → 旧单随后又被补发成功 → 被扣两次钱走客服退款」那条路。拦在服务端。
- * 与「未支付单」的区别是**话不一样**：那一句让用户去继续支付，这一句告诉他不用再买。
+ *
+ * <p>⚠️ **这条判定与商品身份无关，也不看金额**（2026-09-27 再修正，推翻上一版）。
+ * 上一版把它塞进「同一件商品」那一查里（`findActiveOrder` 认三种状态）—— 于是判据被绑上了
+ * 类型 + 档位 + 积分 + **金额**：用户在途时运营一改价，他再点一次就不命中，建新单、照样能付，
+ * **重复收款的防护被一次改价绕开**，而两笔都会到账。
+ * 重复收款的依据是「**用户已经付过一笔还没落地的钱**」，与他这次想买什么无关 ——
+ * 所以这条判定搬到了不看身份、不看金额的 `findUnsettledPaidOrder`，并且**排在最前面**：
+ * 连「换了档位」「改了价」这些正常会放行的情形，只要有一笔已付未落地的单，一律拦住。
+ *
+ * <p>与「未支付单」的区别是**话不一样**：那一句让用户继续付或稍后再来，这一句告诉他不用再买。
+ * 两句都**不再指向「充值记录」**（2026-09-27 修正）：那里是 billing 账本，而一笔还没发放的
+ * 订单在账本上**没有任何分录**，用户点过去只会看到「暂无充值记录」—— 指了一个看不到该单的地方。
  *
  * <p>── 令牌过期了怎么办 ───────────────────────────────────────────────────────
  *
@@ -83,6 +94,27 @@ export function createActiveOrderReuse(
   deps: ActiveOrderReuseDeps,
 ): (userId: number, spec: OrderSpec) => Promise<RechargeOrderCreated | null> {
   return async function reuseActiveOrder(userId, spec) {
+    // ⚠️ **钱已经收了、还没落地**的单排在最前面，且**不看商品身份、不看金额**
+    //    （2026-09-27 修正）：这条判定的依据是「这个人已经付过一笔还没落地的钱」，
+    //    与他这次想买什么无关。放在后面 / 绑上金额，运营在用户在途时改一次价就能绕开它
+    //    （改价 → 不命中 → 建新单 → 再付一次 → 两笔都到账）。
+    const unsettled = await deps.repo.findUnsettledPaidOrder(userId);
+    if (unsettled) {
+      deps.logger.warn(
+        `用户重复下单命中一笔已支付的未终态单 tradeNo=${unsettled.tradeNo} `
+          + `userId=${unsettled.userId} 状态=${unsettled.status}：不建新单、不复用二维码`,
+      );
+      throw new NewApiError(
+        // ⚠️ 别让用户去「充值记录」看这笔单：那里读的是 billing 账本，而一笔还没发放的订单
+        // 在账本上**没有任何分录** —— 他点过去只会看到「暂无充值记录」，比不说还糟。
+        // 真正的下一步只有两件：等（我们还在自愈/对账），或者找人（积分一直没到就是异常）。
+        `您有一笔订单正在处理中（${unsettled.tradeNo}），请勿重复购买。`
+          + `请稍后重试本页；若长时间未到账请联系客服`,
+        409,
+        "recharge_order_paid",
+      );
+    }
+
     const active = await deps.repo.findActiveOrder({
       userId,
       productType: spec.productType,
@@ -91,22 +123,6 @@ export function createActiveOrderReuse(
       amountFen: spec.amountFen,
     });
     if (!active) return null;
-
-    // ⚠️ **钱已经收了**的活跃单（paid_pending / grant_failed）先处理，且排在下面那条
-    //    「没拿到过链接」的判断**之前**：那种单本来就不该被放行成新单。
-    //    用户的正确动作是去充值记录看那一笔的到账进度，不是再买一次（见文件头）。
-    if (active.status !== RECHARGE_ORDER_STATUS.pending) {
-      deps.logger.warn(
-        `用户重复下单命中一笔已支付的活跃单 tradeNo=${active.tradeNo} `
-          + `userId=${active.userId} 状态=${active.status}：不建新单、不复用二维码`,
-      );
-      throw new NewApiError(
-        `您有一笔已支付、正在到账的订单（${active.tradeNo}），`
-          + `请前往「充值记录」查看进度，无需重复购买`,
-        409,
-        "recharge_order_paid",
-      );
-    }
 
     // 网关订单号与收银台链接是同一次更新写进去的，所以「没有网关订单号」= 这张单
     // **从来没拿到过**链接（下单那次网关调用就失败了，比如超时）。那不是一笔有效订单，
@@ -134,9 +150,10 @@ export function createActiveOrderReuse(
     if (active.cashierUrl === null && age <= CASHIER_TOKEN_TTL_MS) {
       // 令牌还没过期，但我们**拿不出链接**（本列上线前创建的存量单，那时没存 URL）。
       // 这时既不能复用（给不出链接），也不该建新单（旧单还有效，用户可能正扫着它）。
-      // 报错让他去充值记录里看那一笔 —— 这个窗口最长只有本列上线后的半小时。
+      // 报错让他稍后重试 —— 这个窗口最长只有本列上线后的半小时。
+      // ⚠️ 同样**不指向「充值记录」**：未支付的单在 billing 账本上没有分录，那里看不到它。
       throw new NewApiError(
-        `您有一笔尚未支付的订单（${active.tradeNo}），请前往「充值记录」继续支付或稍后重试`,
+        `您有一笔尚未支付的订单（${active.tradeNo}），请稍后重试本页；若持续失败请联系客服`,
         409,
         "recharge_order_pending",
       );

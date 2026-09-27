@@ -74,6 +74,9 @@ export class RechargeController {
           // 与自定义充值那条（`can_purchase`）同一个形状，两条购买路径体验对称
           can_purchase: t.canPurchase,
           denied_hint: t.deniedHint,
+          // 这一档到账积分的有效期（月）。**逐档回**，与自定义充值那条（`credits_valid_months`）
+          // 同一个形状：卡片上要标这一档自己的那个数，页面级写死任何一个数都会是假话
+          credits_valid_months: t.creditsValidMonths,
         })),
         credits_per_yuan: catalog.creditsPerYuan,
       });

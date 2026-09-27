@@ -198,7 +198,7 @@ export interface RechargeOrderListFilter {
 }
 
 /**
- * 找「同一用户、同一商品的活跃单」时用的商品身份。
+ * 找「同一用户、同一商品的**未支付**活跃单」时用的商品身份。
  *
  * <p>身份 = 商品类型 + 档位 + 到账积分 + **实付金额**。前两项分辨「换了一档」，
  * `credits` 分辨「同一档位在配置改过之后下的单」（到账积分变了就是另一件商品）。
@@ -212,6 +212,10 @@ export interface RechargeOrderListFilter {
  *
  * <p>所以：**价变了就不是同一件商品**，照常建新单（旧单留给它自己过期）。订单冻结的
  * 仍是下单那一刻的价，这一条没变 —— 变的是「价格不同的两笔单不再互相顶替」。
+ *
+ * <p>⚠️ **它只回答「这件商品要不要复用那张未支付单」**（2026-09-27 再修正）。
+ * 「这个用户是不是已经有一笔钱付了、还没落地」是**另一个问题**，且与商品身份无关 ——
+ * 它由 {@link RechargeOrderRepo.findUnsettledPaidOrder} 单独回答，见那段注释。
  */
 export interface ActiveOrderIdentity {
   userId: number;
@@ -251,20 +255,32 @@ export interface RechargeOrderRepo {
   /** 管理端列表（offset 分页，时间倒序）。**不供用户端使用**——用户只看得到自己那份。 */
   list(filter: RechargeOrderListFilter): Promise<RechargeOrderPage>;
   /**
-   * 该用户这件商品的**活跃单**（没有则 null）。
+   * 该用户这件商品的**未支付**活跃单（没有则 null）。
    *
-   * <p>下单前先问它：命中就不建新单（PRD §7.5「服务端避免重复有效订单」）。
+   * <p>下单前先问它：命中就不建新单、把存下来的那条收银台链接还给他
+   * （PRD §7.5「服务端避免重复有效订单」）。
    *
-   * <p>⚠️ 活跃 = `pending`（还没付）+ `paid_pending` / `grant_failed`（**钱已经收了**、
-   * 积分还没发出去）。后两者也要算进来，否则会出现真实的重复收款：用户付了钱卡在
-   * 「发放中」，界面一直显示「等待支付结果…」，他关掉弹窗再打开看到的是干净的空闲态，
-   * 于是再买一笔、再付一次 —— 旧单之后又被对账任务补发成功，用户被扣两次钱。
+   * <p>⚠️ 它**只找 `pending`**（2026-09-27 收窄）。此前把 `paid_pending` / `grant_failed`
+   * 也塞在这里，于是「钱已经收了」那条判定被绑在**商品身份**上（类型 + 档位 + 积分 + 金额）：
+   * 用户在途时运营一改价，再点一次就不命中，照样建新单、照样能付 —— 重复收款防护被改价绕开。
+   * 「用户已经付过一笔还没落地的钱」与「他这次想买什么」无关，所以那条判定搬到了
+   * {@link RechargeOrderRepo.findUnsettledPaidOrder}。
    *
    * <p>⚠️ `paid` **不在**里面：那是一笔已经完成的交易，用户再买一笔是正常的。
-   * 命中 `paid_pending` / `grant_failed` 时的处置（复用还是 409）由调用方决定，
-   * 见 `recharge-active-order.ts`。
    */
   findActiveOrder(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
+  /**
+   * 该用户**钱已收、还没落地**的单（`paid_pending` / `grant_failed`），没有则 null。
+   *
+   * <p>⚠️ **刻意不看商品身份、也不看金额**（2026-09-27 加，见 `ActiveOrderIdentity` 末段）：
+   * 重复收款的依据是「**用户已经付过一笔还没落地的钱**」，与他这次想买什么无关。
+   * 判据绑上金额/bigint 商品身份之后，运营在用户在途时改一次价，再点一次就不命中 ——
+   * 建新单、能付款 = 同一个人被收两次钱，而两笔都会到账。
+   *
+   * <p>命中时的处置一律是 409（不复用二维码、也不建新单），见 `recharge-active-order.ts`。
+   * `paid` **不在**里面：已完成的一笔，用户再买一次是正常的。
+   */
+  findUnsettledPaidOrder(userId: number): Promise<RechargeOrderView | null>;
   /**
    * 主动对账的取数：状态是「钱到了、积分没发完」（`paid_pending` / `grant_failed`），
    * 且**钱到的时刻**落在这个重试窗口里的订单，最旧的在前。
@@ -477,18 +493,10 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       const row = await prisma.recharge_orders.findFirst({
         where: {
           user_id: BigInt(identity.userId),
-          // ⚠️ 三种状态都算「活跃单」，理由见接口注释：
-          //   · pending      —— 还没付，就是「用户点了两次」；
-          //   · paid_pending / grant_failed —— **钱已经收了**、积分还没发出去。
-          // 漏掉后两种会造成真实的重复收款（用户以为那一笔不存在了，再买一笔再付一次）。
-          // ⚠️ `paid` 不在里面：那是已完成的一笔，用户再买一次是正常的。
-          status: {
-            in: [
-              RECHARGE_ORDER_STATUS.pending,
-              RECHARGE_ORDER_STATUS.paidPending,
-              RECHARGE_ORDER_STATUS.grantFailed,
-            ],
-          },
+          // ⚠️ **只找未支付的**（2026-09-27 收窄）：`paid_pending` / `grant_failed` 那条
+          // 「钱已经收了」的判定被绑在商品身份上时，用户在途时运营一改价再点一次就不命中
+          // —— 建新单、能付款 = 重复收款。那条判定已搬到 findUnsettledPaidOrder（不看身份）。
+          status: RECHARGE_ORDER_STATUS.pending,
           is_delete: 0,
           product_type: identity.productType,
           // tier_id 传 null 时 Prisma 生成 IS NULL —— 自定义充值单正是这一支
@@ -500,6 +508,28 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         // 同一件商品理论上只会有一笔活跃单，但历史数据/并发下可能有第二笔：
         // 复用**最新**那笔（次级键 id 不是可选项：DATETIME 只到秒，同秒两笔是常态）
         orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      });
+      return row ? toView(row) : null;
+    },
+
+    async findUnsettledPaidOrder(userId) {
+      const row = await prisma.recharge_orders.findFirst({
+        where: {
+          user_id: BigInt(userId),
+          // 钱已收、未落地。⚠️ `paid` 不在里面（已完成的一笔不该拦住下一次购买）；
+          // ⚠️ 商品身份与金额**都不在 where 里** —— 这条判定回答的是「这个人有没有
+          //    一笔已付未落地的钱」，与他这次想买什么无关（见接口注释）
+          status: {
+            in: [
+              RECHARGE_ORDER_STATUS.paidPending,
+              RECHARGE_ORDER_STATUS.grantFailed,
+            ],
+          },
+          is_delete: 0,
+        },
+        // 多笔时给**最早**的那一笔：那是钱最早进来、也该最先被处理的一张单
+        // （次级键 id 不是可选项：DATETIME 只到秒，同秒两笔是常态）
+        orderBy: [{ gmt_create: "asc" }, { id: "asc" }],
       });
       return row ? toView(row) : null;
     },

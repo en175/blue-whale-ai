@@ -42,6 +42,14 @@ export interface RechargeTier {
   can_purchase: boolean | null;
   /** 不能买时展示的文案（后台可配，未配则由服务端给默认文案） */
   denied_hint: string;
+  /**
+   * 这一档到账积分的有效期（**月**，PRD §9.5）。
+   *
+   * ⚠️ **按商品可配**，所以只能显示**这一档自己的**那个数：页面上写死任何一个年数
+   * 都会对某些档位变成假话（运营把某档配成 6 个月，那句「2 年」当场就不成立了）。
+   * 与自定义充值那条 `RechargeCustomConfig.credits_valid_months` 同一个形状。
+   */
+  credits_valid_months: number;
 }
 
 /** 档位目录 + 当前生效的换算率（1 元 = 多少积分，来自 billing 定价目录，**不是常量**） */

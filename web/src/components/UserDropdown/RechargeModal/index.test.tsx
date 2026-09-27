@@ -85,6 +85,8 @@ beforeEach(() => {
         // 权限信号由服务端算（`canPurchaseTier`）：默认「全部登录用户」可买
         can_purchase: true,
         denied_hint: '当前账号暂不可购买该档位',
+        // 这一档的有效期（月）：卡片上标的就是它，页面级不再写死任何年数
+        credits_valid_months: 24,
       },
     ],
   });
@@ -138,14 +140,88 @@ describe('RechargeModal', () => {
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
 
     // 到账积分只说「以各档位标注为准」：它现在是后台配置值，与定价目录那条消费锚点不成比例
-    expect(document.body.textContent).toContain('到账积分以各档位标注为准');
-    // 有效期是充值本金的真实策略（2 年），不是原来的「永久有效」那句假话
-    expect(document.body.textContent).toContain('积分自到账起 2 年内有效');
+    expect(document.body.textContent).toContain('到账积分与有效期以各档位标注为准');
+    // ⚠️ 页面级**不再**承诺任何具体年数：有效期是按商品可配的，写死一个数必然对某些档位是假话
+    //    （原先那句「积分自到账起 2 年内有效」已删；「永久有效」是更早的假话）
+    expect(document.body.textContent).not.toContain('积分自到账起');
     expect(document.body.textContent).not.toContain('永久有效');
     expect(document.body.textContent).not.toContain('1 元 =');
+    // 有效期标在**卡片自己**那一行，值从接口来（这一档配的是 24 个月）
+    expect(document.body.textContent).toContain('有效期 2 年');
     // 档位卡片：到账积分 + 实付价
     expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).toContain('¥10');
+  });
+
+  it('★ 有效期按档位可配：配 6 个月的档位，卡片上出现的是 6 个月而不是 2 年', async () => {
+    // 「文案与配置不一致」是这条要抓的缺陷：C 把 `credits_valid_months` 接通之后，
+    // 运营配 6 个月就**真的**按 6 个月发 —— 而页面级那句写死的「2 年」当场变成假话。
+    // 所以卡片上必须出现**这一档自己**的那个数，不是任何一个整页共用的年数。
+    rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
+      credits_per_yuan: 10,
+      tiers: [
+        {
+          id: TIER_ID,
+          name: '基础套餐',
+          amount: 100,
+          price: 10,
+          original_price: null,
+          discount: 1,
+          is_recommended: false,
+          sort_order: 1,
+          can_purchase: true,
+          denied_hint: '当前账号暂不可购买该档位',
+          credits_valid_months: 6,
+        },
+      ],
+    });
+    await renderRechargeModal();
+    await flush();
+
+    expect(document.body.textContent).toContain('有效期 6 个月');
+    // 一个「2 年」都不该出现：这一档根本不是 2 年
+    expect(document.body.textContent).not.toContain('2 年');
+    // 同一个页面上不再有第二条关于有效期的说法（那句话本身就是被删掉的那条假话）
+    expect(document.body.textContent).not.toContain('积分自到账起');
+  });
+
+  it('★ 有效期逐档各说各的：两张卡各自标自己的月数，不会被同一句话覆盖', async () => {
+    rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
+      credits_per_yuan: 10,
+      tiers: [
+        {
+          id: 'short',
+          name: '短效套餐',
+          amount: 100,
+          price: 10,
+          original_price: null,
+          discount: 1,
+          is_recommended: false,
+          sort_order: 1,
+          can_purchase: true,
+          denied_hint: '不可购买',
+          credits_valid_months: 6,
+        },
+        {
+          id: 'long',
+          name: '长效套餐',
+          amount: 200,
+          price: 20,
+          original_price: null,
+          discount: 1,
+          is_recommended: false,
+          sort_order: 2,
+          can_purchase: true,
+          denied_hint: '不可购买',
+          credits_valid_months: 24,
+        },
+      ],
+    });
+    await renderRechargeModal();
+    await flush();
+
+    expect(document.body.textContent).toContain('有效期 6 个月');
+    expect(document.body.textContent).toContain('有效期 2 年');
   });
 
   it('只有一个渠道：没有微信/支付宝切换段', async () => {
@@ -226,7 +302,92 @@ describe('RechargeModal', () => {
     expect(setCredits).not.toHaveBeenCalled();
   });
 
-  it('订单过期展示过期态并允许重新支付', async () => {    rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
+  it('★ 到账异常（grant_failed）：说「发放异常、请联系客服」，不再说「发放中」', async () => {
+    // 「发放中」与「发放异常」的差别是**还会不会自己好**：paid_pending 还有人重试
+    // （扫描器 / 用户轮询都在推），grant_failed 是重试也失败、要人工介入的状态。
+    // 继续让用户等，等于让他等一件不会自己发生的事（PRD §11.1「展示处理中或联系客服」）。
+    rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
+      trade_no: 'trade-1',
+      status: 'grant_failed',
+      credits_after: null,
+    });
+
+    await renderRechargeModal();
+    await flush();
+    await clickButton('100 积分');
+    await clickButton('确认支付 ¥10');
+    await flush();
+
+    expect(document.body.textContent).toContain('积分发放异常，请联系客服');
+    expect(document.body.textContent).not.toContain('发放中');
+    // 仍然不是成功：积分没到账，不能报成功、也不能刷余额
+    expect(document.body.textContent).not.toContain('支付成功');
+    expect(toastApi.success).not.toHaveBeenCalled();
+    expect(setCredits).not.toHaveBeenCalled();
+    // ⚠️ 仓里没有可跳转的客服入口，就**不编**一个：这句话里不该出现任何链接
+    const hints = [...document.body.querySelectorAll('a')].filter((a) =>
+      a.textContent?.includes('客服'),
+    );
+    expect(hints).toHaveLength(0);
+  });
+
+  it('★ 发放异常之后又补发成功：话要跟着状态回到「已到账」（它不是一个单向的坏状态）', async () => {
+    rechargeApi.fetchRechargeOrderStatus
+      .mockResolvedValueOnce({ trade_no: 'trade-1', status: 'grant_failed', credits_after: null })
+      .mockResolvedValue({ trade_no: 'trade-1', status: 'paid', credits_after: 1234 });
+
+    await renderRechargeModal();
+    await flush();
+    await clickButton('100 积分');
+    vi.useFakeTimers();
+    await clickButton('确认支付 ¥10');
+    await flush();
+    expect(document.body.textContent).toContain('积分发放异常，请联系客服');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain('支付成功');
+    expect(document.body.textContent).not.toContain('积分发放异常');
+  });
+
+  it('★ B-1：下单回来的价与页面上显示的不一致 → 提示「价格已更新」，不让用户自己猜该付哪个数', async () => {
+    // 运营在用户点下「确认支付 ¥10」之后、订单创建之前改了价。服务端按**新价**建单
+    // （PRD §7.5 以服务端最新配置为准），于是卡片上还是 ¥10、二维码面板是 ¥12。
+    // 两个金额同屏必须解释清楚，否则用户不知道该照哪个付（PRD §6.7「需要刷新或提示」）。
+    rechargeApi.createRechargeOrder.mockResolvedValue({
+      trade_no: 'trade-1',
+      qr_code_url: 'https://example.com/cashier',
+      expire_time: '2026-08-28T12:00:00+08:00',
+      amount: 12,
+      points: 100,
+    });
+
+    await renderRechargeModal();
+    await flush();
+    await clickButton('100 积分');
+    await clickButton('确认支付 ¥10');
+    await flush();
+
+    expect(document.body.textContent).toContain('价格已更新为 ¥12，请确认后再支付');
+    // 面板上就是服务端算的那个价（用户实际要付的钱，只有一个）
+    expect(document.body.textContent).toContain('¥12');
+  });
+
+  it('B-1：价没变就不提示（正常的下单不该多出一句吓人的话）', async () => {
+    await renderRechargeModal();
+    await flush();
+    await clickButton('100 积分');
+    await clickButton('确认支付 ¥10');
+    await flush();
+
+    expect(document.body.textContent).not.toContain('价格已更新');
+  });
+
+  it('订单过期展示过期态并允许重新支付', async () => {
+    rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
       trade_no: 'trade-1',
       status: 'expired',
       credits_after: null,
@@ -307,6 +468,7 @@ describe('RechargeModal — 档位购买权限', () => {
           sort_order: 1,
           can_purchase: false,
           denied_hint: hint,
+          credits_valid_months: 24,
         },
       ],
     });
@@ -355,6 +517,7 @@ describe('RechargeModal — 档位购买权限', () => {
           sort_order: 1,
           can_purchase: null,
           denied_hint: '当前账号暂不可购买该档位',
+          credits_valid_months: 24,
         },
       ],
     });

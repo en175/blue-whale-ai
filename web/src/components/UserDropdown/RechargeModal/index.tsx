@@ -27,6 +27,7 @@ import {
   type RechargeOrder,
   type RechargeTierCatalog,
 } from '@/api/recharge';
+import { customPriceFen } from '@/lib/customRecharge';
 import { useAuthStore } from '@/stores/auth';
 
 interface RechargeModalProps {
@@ -36,21 +37,27 @@ interface RechargeModalProps {
 /**
  * 套餐权益。
  *
- * ⚠️ 这里**刻意不写有效期**：充值本金的策略是 billing 的 `GrantPolicy` 按来源
- *    （`purchased`）给的 **2 年**（自支付成功起算），与「是不是买了加赠档」无关，
- *    也没有按档位不同的差别 —— 它是整页一条口径，写在卡片上会变成重复三遍的同一条。
- *    原先那句「积分永久有效」是旧策略留下的假话，已删。
+ * ⚠️ 这里**刻意不写有效期**：有效期是**按商品可配**的（`topup_tiers.credits_valid_months`），
+ *    写在这一组「所有档位共有」的权益里就成了一句对所有档位都成立的话 —— 而它对配了
+ *    6 个月的那一档就不成立。它标在**每张卡片自己**的那一行（见下方 `planValidity`），
+ *    值从接口来。
+ *    （原先那句「积分永久有效」是旧策略留下的假话，早已删。）
  */
 const PERKS = ['积分即时到账', '支持全部模型调用'];
 
 /**
- * 充值到账积分的有效期（＝ billing `GrantPolicy` 对 `source = purchased` 的策略）。
+ * 到账异常（`grant_failed`）时给用户看的话 —— **不是**「发放中」。
  *
- * <p>写死在文案里是**有意的**：这条策略不由本仓决定，用户也不该看到「2 年」随某个
- * 接口抖动。它变了（PRD §9.5 改口径）就得连着这句文案一起改 —— 这与「档位到账积分」
- * 那种**后台可配**的值不同，那个必须从接口读。
+ * <p>两者的差别是「还会不会自己好」：`paid_pending` 还有人会重试（扫描器 / 用户轮询都在推），
+ * 而 `grant_failed` 是重试也失败、需要**人工介入**的状态（PRD §11.1「展示处理中或联系客服」）。
+ * 继续写「发放中…」等于让用户一直等一件不会自己发生的事。
+ *
+ * <p>⚠️ 本仓**没有**统一的客服入口（没有可跳转的客服页/工单链接），所以这里**如实写一句话**，
+ * 不编一个假链接、也不编一个不存在的页面 —— 一个点了没用的「联系客服」比不写更糟。
+ * 它集中在这一个常量里：将来有了真实入口，或者要改成后台可配（照 `permission_denied_hint`
+ * 那套：代码里有默认值、后台可覆盖），改的是这一处，不是散在模板里的字符串。
  */
-const CREDITS_VALIDITY_TEXT = '积分自到账起 2 年内有效';
+const GRANT_FAILED_HINT = '积分发放异常，请联系客服';
 
 /** 支付流程状态：idle 未下单 / creating 下单中 / waiting 待支付 / paid / expired / failed */
 type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
@@ -85,6 +92,22 @@ function fmtExpiry(iso: string) {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mm} 后过期`;
 }
+
+/**
+ * 有效期月数 → 卡片上的那句话（PRD §6.2「适用说明」）。
+ *
+ * <p>⚠️ **一律从接口给的那个数派生**，组件里不出现任何一个写死的年数：有效期是
+ * 按商品可配的，写死任何一个数都会对某些档位变成假话（运营把某档配成 6 个月，
+ * 「2 年」当场就不成立）。整年才说「年」，否则如实说「个月」——
+ * 12 的整数倍才换单位，免得把 6 个月说成「0.5 年」这种没人这么讲的数。
+ */
+function fmtValidMonths(months: number) {
+  if (!Number.isFinite(months) || months <= 0) return '';
+  return months % 12 === 0 ? `${months / 12} 年` : `${months} 个月`;
+}
+
+/** 元 → 分：两个金额只在这里比一次（浮点直接比会把 ¥0.1 与 ¥0.10 判成不同） */
+const toFen = (yuan: number) => Math.round(yuan * 100);
 
 /**
  * 拉一次余额写回全局 store（顶栏与其它页面读的就是它）。
@@ -131,6 +154,24 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
    * 两种情况都继续轮询（不是终态），但说的话不一样。
    */
   const [creditsPending, setCreditsPending] = useState(false);
+  /**
+   * 后端说的是 `grant_failed`（重试也没发出去、要人工介入）—— 与「发放中」再分一层。
+   *
+   * <p>⚠️ 它不是终态：扫描器还在窗口内重试，补发成功后会回到 `paid`，所以轮询不停。
+   * 但用户此刻看到的话必须是「异常，请联系客服」——继续显示「发放中…」是在让他
+   * 等一件不会自己发生的事（PRD §11.1）。
+   */
+  const [grantFailed, setGrantFailed] = useState(false);
+  /**
+   * 下单回来发现**服务端算的价与页面上显示的不一致**（运营在这中间改了价）。
+   *
+   * <p>⚠️ 这里选「提示」而不是「下单后重拉目录」：重拉是一次额外请求，它自己失败时
+   * 卡片会**静默**留着旧价、而二维码面板显示新价 —— 那个双金额的现象原样回来，且更难查。
+   * 比对只依赖手上已有的两个数（下单前显示的、下单回来的），没有第二处会漏。
+   * 自定义充值那条同理：它的展示价由配置反算，比对同样覆盖（重拉目录覆盖不到那条路）。
+   * 见 PRD §6.7「若前端展示过期，需要刷新或提示」。
+   */
+  const [priceChanged, setPriceChanged] = useState(false);
 
   /** 可用余额（billing 账本的整数积分）；未拉取到为 null，显示 -- */
   const credits = useAuthStore((s) => s.credits);
@@ -205,7 +246,8 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   // ⚠️ `paid_pending`（钱到了、积分还没发）**不是终态**：后端会重试发放，界面继续等，
   //    提前报成功等于骗用户。但它的**话**与「还没付钱」必须不一样 ——
   //    钱已经收了，用户此刻该看到的不是「等待支付结果…」（他付过了），而是「发放中」。
-  //    服务端超窗之后仍会如实回这个状态（超窗只是不再重试，不是「没收到钱」）。
+  // ⚠️ `grant_failed` 再分一层（不再是「发放中」）：它是**重试也失败**、要人工介入的状态，
+  //    后端超窗之后也不再自动重试。继续转圈等于让用户等一件不会自己发生的事（PRD §11.1）。
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
     let alive = true;
@@ -215,12 +257,18 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           if (!alive) return;
           if (st.status === 'paid') {
             setPhase('paid');
+            setGrantFailed(false);
             toast.success('支付成功，积分已到账');
             void refreshCredits();
           } else if (st.status === 'expired' || st.status === 'failed') {
             setPhase(st.status);
-          } else if (st.status === 'paid_pending' || st.status === 'grant_failed') {
+          } else if (st.status === 'paid_pending') {
             setCreditsPending(true);
+            setGrantFailed(false);
+          } else if (st.status === 'grant_failed') {
+            // 补发成功会回到 paid（上面的分支把这一位清掉），所以它跟着状态走、不是单向的
+            setCreditsPending(true);
+            setGrantFailed(true);
           }
         })
         .catch(() => undefined);
@@ -239,10 +287,18 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     // （服务端也会再判一次 —— 两层都要有，前端的错在于「点了没反应」而不是安全）
     if (!selected || paying || phase === 'paid' || selectedDenied) return;
     setOrderError('');
+    // 新订单从干净的状态开始：三位都是**上一笔**的结论，跟着新单走就会说谎
+    // （比如上一笔是发放异常，新单一出码就顶着「积分发放异常」）
+    setPriceChanged(false);
+    setCreditsPending(false);
+    setGrantFailed(false);
     setPhase('creating');
+    // 下单前用户看到的那个价：服务端回来的若与它不同，说明运营在这中间改了价
+    const shownFen = toFen(selected.price);
     createRechargeOrder(selected.id)
       .then((o) => {
         setOrder(o);
+        setPriceChanged(toFen(o.amount) !== shownFen);
         setPhase('waiting');
       })
       .catch((e) => {
@@ -261,11 +317,21 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     if (paying) return;
     setCustomError('');
     setOrderError('');
+    // 同 `handleConfirm`：上一笔的结论不能跟着新单走
+    setPriceChanged(false);
+    setCreditsPending(false);
+    setGrantFailed(false);
     setCustomSubmitting(true);
     setPhase('creating');
+    // 展示价与服务端**同一个式子**（`customPriceFen`），所以两者只会在运营改了配置时不同。
+    // 拿不到配置就不比对：宁可不说，也不要报一个自己没验证过的「价变了」
+    const shownFen = customConfig
+      ? customPriceFen(customCredits, customConfig.credits_per_yuan)
+      : null;
     createCustomRechargeOrder(customCredits)
       .then((o) => {
         setOrder(o);
+        setPriceChanged(shownFen !== null && toFen(o.amount) !== shownFen);
         setPhase('waiting');
       })
       .catch((e) => {
@@ -353,9 +419,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 2026-09-27 起是后台按活动配的**配置值**（PRD §6.1 的 6 档都高于该比例，
                 如 ¥499 到账 7,500 而 499 × 15 = 7,485）。摆在卡片上方只会让人拿它去核算，
                 一遇到有折扣的档位就像「少给了」。现在统一说「以各档位标注为准」。
+
+                ⚠️ 同理**不写具体年数**：有效期自 2026-09-27 起也是按商品可配的
+                （C 把 `credits_valid_months` 接通之后，配了是真的生效）。页面级写死
+                「2 年」在运营把某档配成 6 个月时就是假话 —— 它现在标在每张卡片自己那行。
               */}
               <p className={styles.unitHint}>
-                到账积分以各档位标注为准 · {CREDITS_VALIDITY_TEXT}
+                到账积分与有效期以各档位标注为准
               </p>
 
               {/* 套餐卡片（真实档位） */}
@@ -402,14 +472,21 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                           // 无权限时不列权益：这张卡现在买不了，列一堆权益等于在推销一个买不到的东西
                           <span className={styles.planDeniedHint}>{t.denied_hint}</span>
                         ) : (
-                          <div className={styles.perkList}>
-                            {PERKS.map((perk) => (
-                              <span key={perk} className={styles.perkItem}>
-                                <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
-                                {perk}
-                              </span>
-                            ))}
-                          </div>
+                          <>
+                            {/* ⚠️ 有效期**标在这一档自己身上**（PRD §6.2「适用说明」）：
+                                它按商品可配，卡片之外的任何一句话都覆盖不了所有档位 */}
+                            <span className={styles.planValidity}>
+                              有效期 {fmtValidMonths(t.credits_valid_months)}
+                            </span>
+                            <div className={styles.perkList}>
+                              {PERKS.map((perk) => (
+                                <span key={perk} className={styles.perkItem}>
+                                  <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
+                                  {perk}
+                                </span>
+                              ))}
+                            </div>
+                          </>
                         )}
                       </button>
                     );
@@ -492,6 +569,14 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
                 {/* 银行统一收银台：渠道由用户在银行页面上选，我们这边提示到「都能扫」为止 */}
                 <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
+                {/* ⚠️ 下单回来的金额若与页面上原来显示的不同（运营刚改过价），必须说一声：
+                    否则用户看到的是「卡片上的价 vs 这里的价」两个数，而不知道该照哪个付。
+                    提示而不是静默——支付订单已经是按服务端算的价建的（PRD §7.5）。 */}
+                {priceChanged && (
+                  <span className={styles.qrPriceChanged}>
+                    价格已更新为 ¥{fmtPrice(order.amount)}，请确认后再支付
+                  </span>
+                )}
                 <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
                 <span className={styles.qrPoints}>
                   获得 {order.points.toLocaleString()} 积分
@@ -501,8 +586,12 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                   <span />
                   <span />
                 </div>
-                <span className={styles.waiting}>
-                  {creditsPending ? '已收到付款，积分发放中…' : '等待支付结果...'}
+                <span className={grantFailed ? styles.waitingBad : styles.waiting}>
+                  {grantFailed
+                    ? GRANT_FAILED_HINT
+                    : creditsPending
+                      ? '已收到付款，积分发放中…'
+                      : '等待支付结果...'}
                 </span>
               </>
             )}

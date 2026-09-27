@@ -6,10 +6,12 @@
  * 与 UserManage / SiteConfig 同一条纪律：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { RefreshCw, Search } from 'lucide-react';
 import {
+  adminRechargeRecordKeys,
   adminRechargeRecordsOptions,
+  retryAdminRechargeGrant,
   type AdminRechargeRecordQuery,
   type AdminRechargeStatus,
 } from '@/api/adminRechargeRecords';
@@ -85,11 +87,49 @@ interface Filters {
 
 const EMPTY_FILTERS: Filters = { userId: '', status: 'all', tradeNo: '' };
 
+/**
+ * 哪些状态的单值得给「重试发放」（E-1 的那条出口）。
+ *
+ * ⚠️ 只有 `paid_pending` / `grant_failed`：这两种才是「**钱收到了、积分没发出去**」。
+ * 给每一行都摆一个按钮是错的 —— 对 `pending`（用户还没付钱）点它等于无中生有地发积分，
+ * 对 `paid`（早就到账了）点它是纯粹的噪声。**判据与后端 `retryGrantForAdmin` 的那道闸
+ * 必须一致**：前端多放一个按钮，运营就会撞上一次 400。
+ */
+const RETRYABLE: readonly AdminRechargeStatus[] = ['paid_pending', 'grant_failed'];
+
 export default function RechargeRecords() {
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
   // 查询条件与输入框分离：否则每敲一个字符都发一次请求
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
+  /**
+   * 人工补发的结果横幅（成功/失败都在这一处说）。
+   *
+   * <p>用页面级横幅而不是 toast：补发是一次**明确的操作**，它的结果要留在屏幕上让人
+   * 对照着那一行看（尤其是失败时——运营往往要连着再点一次别的单）。
+   */
+  const [retryNotice, setRetryNotice] = useState('');
+  const [retryError, setRetryError] = useState('');
+
+  const queryClient = useQueryClient();
+  const retry = useMutation({
+    mutationFn: (tradeNo: string) => retryAdminRechargeGrant(tradeNo),
+    onSuccess: (result) => {
+      setRetryError('');
+      setRetryNotice(
+        result.status === 'paid'
+          ? `${result.tradeNo} 补发成功，积分已到账`
+          // 补发**不代表**一定成：服务端回的是回读后的真实状态。说成成功就是骗人
+          : `${result.tradeNo} 补发已执行，但订单仍停在「${STATUS_LABELS[result.status]}」，`
+            + '需继续排查（详见服务端日志）',
+      );
+      void queryClient.invalidateQueries({ queryKey: adminRechargeRecordKeys.all });
+    },
+    onError: (error) => {
+      setRetryNotice('');
+      setRetryError(isApiError(error) ? error.message : '补发失败，请稍后重试');
+    },
+  });
 
   const query: AdminRechargeRecordQuery = {
     page,
@@ -130,7 +170,9 @@ export default function RechargeRecords() {
               </div>
               <div>
                 <b>到账异常 = 重试也没发出去，需要人工介入。</b>
-                由对账任务写入，不会再自愈。
+                由对账任务写入，不会再自愈。这两种状态的行上有<b>「重试发放」</b>按钮 ——
+                它是这笔钱**唯一**的人工出口：自动重试窗口（2 小时）用尽之后，
+                再没有任何自动路径会碰它。
               </div>
               <div>
                 <b>「支付失败」是另一回事</b>：用户压根没付成钱，平台没有资金在途。
@@ -192,6 +234,9 @@ export default function RechargeRecords() {
         </Alert>
       )}
 
+      {retryNotice && <Alert tone="success">{retryNotice}</Alert>}
+      {retryError && <Alert tone="danger">{retryError}</Alert>}
+
       <Table>
         <thead>
           <tr>
@@ -203,19 +248,20 @@ export default function RechargeRecords() {
             <th>网关订单号</th>
             <th>创建时间</th>
             <th>支付时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
           {list.isPending && (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={9}>
                 <Empty message="加载中…" />
               </td>
             </tr>
           )}
           {!list.isPending && list.isError && (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={9}>
                 <Empty
                   message="充值记录加载失败"
                   extra={
@@ -229,7 +275,7 @@ export default function RechargeRecords() {
           )}
           {!list.isPending && !list.isError && rows.length === 0 && (
             <tr>
-              <td colSpan={8}>
+              <td colSpan={9}>
                 <Empty
                   message={
                     applied.userId || applied.tradeNo || applied.status !== 'all'
@@ -254,6 +300,23 @@ export default function RechargeRecords() {
               <td>{row.payOrderId ?? '—'}</td>
               <td>{fmtTime(row.createdAt)}</td>
               <td>{fmtTime(row.paidAt)}</td>
+              <td>
+                {/* ⚠️ 这是「钱收到了、积分始终发不出去」的单**唯一**的人工出口：
+                    自动重试窗口用尽之后，没有任何别的路径会再碰它（E-1）。
+                    只对这两种状态出现 —— 别的状态点了没有意义，服务端也会拒。
+                    不做二次确认：补发是幂等的（billing 的 purchased:{tradeNo} 幂等键），
+                    点错一行不会多发积分，弹一个确认框只会让救火时多一步。 */}
+                {RETRYABLE.includes(row.status) && (
+                  <Button
+                    size="sm"
+                    icon={<RefreshCw size={14} strokeWidth={2} />}
+                    disabled={retry.isPending}
+                    onClick={() => retry.mutate(row.tradeNo)}
+                  >
+                    重试发放
+                  </Button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

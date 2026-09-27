@@ -294,8 +294,10 @@ describe("createRechargeOrderRepo — 活跃单的身份（下单防重）", () 
     expect(findFirst).toHaveBeenCalledWith({
       where: {
         user_id: 9001n,
-        // 三种状态都算活跃：pending（没付） + paid_pending/grant_failed（**钱已经收了**）
-        status: { in: ["pending", "paid_pending", "grant_failed"] },
+        // ⚠️ 只找 `pending`（2026-09-27 收窄）：`paid_pending` / `grant_failed` 那条
+        // 「钱已经收了」的判定被绑在商品身份上时，用户在途时运营一改价再点一次就不命中
+        // —— 建新单、能付款 = 重复收款。那条判定搬到了 findUnsettledPaidOrder（不看身份）
+        status: "pending",
         is_delete: 0,
         product_type: "tier",
         tier_id: 7n,
@@ -336,7 +338,55 @@ describe("createRechargeOrderRepo — 活跃单的身份（下单防重）", () 
       amountFen: 49_900,
     });
 
+    // 收窄之后这条更强：不只是「不包含 paid」，而是**只**认 pending
+    expect(findFirst.mock.calls[0]![0].where.status).toBe("pending");
+  });
+});
+
+describe("createRechargeOrderRepo — 已付未落地的单（重复收款防护，B-2）", () => {
+  function build(rows: unknown[] = []) {
+    const findFirst = vi.fn().mockResolvedValue(rows[0] ?? null);
+    return {
+      findFirst,
+      repo: createRechargeOrderRepo({ recharge_orders: { findFirst } } as never),
+    };
+  }
+
+  it("★ 判据只看「谁的、什么状态」：**商品身份与金额都不进 where**", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findUnsettledPaidOrder(9001);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        user_id: 9001n,
+        // 钱已收、未落地
+        status: { in: ["paid_pending", "grant_failed"] },
+        is_delete: 0,
+      },
+      // 多笔时给**最早**那笔（次级键 id：DATETIME 只到秒，同秒两笔是常态）
+      orderBy: [{ gmt_create: "asc" }, { id: "asc" }],
+    });
+  });
+
+  it("★ 商品身份不在判据里：运营在用户在途时改价，也绕不开这道闸", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findUnsettledPaidOrder(9001);
+
+    const where = findFirst.mock.calls[0]![0].where as Record<string, unknown>;
+    // 这四个维度只要有一个进来，改价/换档/改积分就能把「已付未落地」的单藏起来，
+    // 于是用户再买一笔、再付一次 —— 而这正是 B-2 要堵的那条路
+    expect(Object.keys(where).sort()).toEqual(["is_delete", "status", "user_id"]);
+  });
+
+  it("★ `paid` 不在里面：已完成的一笔不该拦住下一次购买", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findUnsettledPaidOrder(9001);
+
     const status = findFirst.mock.calls[0]![0].where.status as { in: string[] };
     expect(status.in).not.toContain("paid");
+    expect(status.in).not.toContain("pending");
   });
 });

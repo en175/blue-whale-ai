@@ -44,6 +44,7 @@ const CATALOG = {
       sortOrder: 1,
       canPurchase: null as boolean | null,
       deniedHint: "当前账号暂不可购买该档位",
+      creditsValidMonths: 6,
     },
   ],
 };
@@ -107,6 +108,9 @@ describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3�
           original_price: 500,
           can_purchase: null,
           denied_hint: "当前账号暂不可购买该档位",
+          // ⚠️ 有效期**逐档**回给前端（C-1）：卡片上要标这一档自己的那个数，
+          // 页面级写死任何一个年数都会对某些档位变成假话
+          credits_valid_months: 6,
         },
       ],
     });
@@ -131,6 +135,28 @@ describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3�
     expect(res.data).toMatchObject({
       tiers: [{ can_purchase: false, denied_hint: "该档位仅限内测用户" }],
     });
+  });
+
+  it("★ 有效期逐档不同：卡片上的那个数必须来自**这一档**，不是页面级的一个写死的年数", async () => {
+    const { controller } = makeController({
+      listTiers: vi.fn().mockResolvedValue({
+        ...CATALOG,
+        tiers: [
+          { ...CATALOG.tiers[0]!, id: "7", creditsValidMonths: 6 },
+          { ...CATALOG.tiers[0]!, id: "8", creditsValidMonths: 24 },
+        ],
+      }),
+    });
+
+    const res = await controller.tiers(reqWith());
+    const tiers = (res.data as { tiers: { id: string; credits_valid_months: number }[] })
+      .tiers;
+
+    // 配 6 个月的那一档回 6，配 24 的回 24 —— 前端据此标在各自的卡片上
+    expect(tiers.map((t) => [t.id, t.credits_valid_months])).toEqual([
+      ["7", 6],
+      ["8", 24],
+    ]);
   });
 
   it("会话解析失败当游客处理，不抛错（cookie 过期不该让充值页多一块红色错误）", async () => {

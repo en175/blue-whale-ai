@@ -15,6 +15,11 @@ import { TIER, makeHttp, makeService, type Tier } from "./recharge.testlib.js";
  *
  * ⚠️ 网关侧不允许同一个 `mchOrderNo` 重下一次单（`Uni_MchNo_MchOrderNo`），
  * 所以「复用」只能是**把存下来的那条链接还给他**，不能是「拿同一个单号再下一次」。
+ *
+ * ⚠️ 这里有**两类**问题，判据不同（2026-09-27 分清）：
+ *   · 「这件商品要不要复用那张未支付单」—— 看商品身份（类型 + 档位 + 积分 + **金额**）；
+ *   · 「这个人是不是已经有一笔钱付了还没落地」—— **不看身份也不看金额**（B-2）：
+ *     绑上身份的话，运营在用户在途时改一次价就能绕开它，同一笔钱会被收两次。
  * ============================================ */
 
 vi.mock("@connectrpc/connect-node", async (importOriginal) => {
@@ -200,7 +205,7 @@ describe("RechargeService — 下单防重", () => {
     expect(unifiedOrders(http)).toHaveLength(1);
   });
 
-  it("★ 钱已收到、还卡在发放中的单（paid_pending）：**既不建新单也不复用二维码**，409 让他去看那一笔", async () => {
+  it("★ 钱已收到、还卡在发放中的单（paid_pending）：**既不建新单也不复用二维码**，409 拦住他", async () => {
     // 重复收款的真实路径：用户付了钱、发放失败 → 界面一直「等待支付结果…」→ 他关掉弹窗
     // 再打开，看到的是干净的空闲态 → 再买一笔、再付一次；旧单之后又被对账任务补发成功,
     // 于是用户被扣两次钱、走客服退款。这道闸必须在服务端。
@@ -212,12 +217,35 @@ describe("RechargeService — 下单防重", () => {
     orders.get(first.tradeNo)!.status = "paid_pending";
 
     await expect(service.createOrder({ userId: 9001, tierId: TIER.id })).rejects.toThrow(
-      /已支付/,
+      /正在处理中/,
     );
     // 一笔新单都没建、网关一次都没打（更不会给他一张能再付一次的二维码）
     expect(orders.size).toBe(1);
     expect(unifiedOrders(http)).toHaveLength(1);
     expect(orders.get(first.tradeNo)?.status).toBe("paid_pending");
+  });
+
+  it("★ 409 的文案不再指向「充值记录」：那里是 billing 账本，未发放的单没有任何分录", async () => {
+    // 用户照着一句「请前往『充值记录』查看进度」点过去，看到的是「暂无充值记录」——
+    // 指了一个**看不到该单**的地方，比不说还糟。文案必须给一个真实可达的下一步。
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+
+    const first = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(first.tradeNo)!.status = "paid_pending";
+
+    const message = await service
+      .createOrder({ userId: 9001, tierId: TIER.id })
+      .then(() => "")
+      .catch((e: Error) => e.message);
+
+    expect(message).not.toContain("充值记录");
+    // 单号要带上：用户找客服时这是唯一能把两边对上的东西
+    expect(message).toContain(first.tradeNo);
+    // 真实可达的下一步：等（我们还在自愈），或者找人
+    expect(message).toContain("稍后重试");
+    expect(message).toContain("联系客服");
   });
 
   it("★ 到账异常（grant_failed）同样算活跃单：钱没退，再买一次就是重复收款", async () => {
@@ -230,12 +258,15 @@ describe("RechargeService — 下单防重", () => {
     orders.get(first.tradeNo)!.status = "grant_failed";
 
     await expect(service.createOrder({ userId: 9001, tierId: TIER.id })).rejects.toThrow(
-      /已支付/,
+      /正在处理中/,
     );
     expect(orders.size).toBe(1);
   });
 
-  it("★ 换一档仍能买：已支付的活跃单只拦「同一件商品」", async () => {
+  it("★ B-2：换一档**也拦** —— 判据是「已经付过一笔还没落地的钱」，与他想买什么无关", async () => {
+    // 上一版把这条判定绑在「同一件商品」上，于是换一档 / 改价就能绕开它：
+    // 用户在途时运营一改价，他再点一次不命中 → 建新单 → 再付一次 → 两笔都会到账。
+    // 重复收款的依据不是「他这次想买什么」，而是「他有一笔钱付了还没落地」。
     makeHttp();
     grpcActiveCatalog();
     const { service, orders, addTier } = await makeService();
@@ -244,9 +275,45 @@ describe("RechargeService — 下单防重", () => {
     const stuck = await service.createOrder({ userId: 9001, tierId: TIER.id });
     orders.get(stuck.tradeNo)!.status = "paid_pending";
 
-    // 另一个档位是另一件商品：不该被那一笔卡住
+    // 另一个档位也拦（钱没退，再付一次就是重复收款）
+    await expect(
+      service.createOrder({ userId: 9001, tierId: TIER_B.id }),
+    ).rejects.toThrow(/正在处理中/);
+    // 自定义充值那条路同样拦：判据与商品无关
+    await expect(service.createOrder({ userId: 9001, credits: 600 })).rejects.toThrow(
+      /正在处理中/,
+    );
+    expect(orders.size).toBe(1);
+  });
+
+  it("★ B-2：运营在用户在途时**改价**也绕不开（这是上一版被削弱的那个口子）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+
+    const stuck = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(stuck.tradeNo)!.status = "paid_pending";
+
+    // 改价会把「金额身份」整个换掉：若判定还绑在身份上，这一下就绕过去了
+    setTier({ price: 120 });
+
+    await expect(service.createOrder({ userId: 9001, tierId: TIER.id })).rejects.toThrow(
+      /正在处理中/,
+    );
+    expect(orders.size).toBe(1);
+  });
+
+  it("★ 钱已到账（paid）之后换一档照常买：拦的是「在途」，不是「买过」", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, addTier } = await makeService();
+    addTier(TIER_B);
+
+    const done = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(done.tradeNo)!.status = "paid";
+
     const other = await service.createOrder({ userId: 9001, tierId: TIER_B.id });
-    expect(other.tradeNo).not.toBe(stuck.tradeNo);
+    expect(other.tradeNo).not.toBe(done.tradeNo);
     expect(orders.size).toBe(2);
   });
 

@@ -19,6 +19,7 @@ import {
   signed,
 } from "./recharge.testlib.js";
 import { creditsExpireAt } from "./credits-validity.js";
+import { buildCustomOrderPlan } from "@lib/shared/recharge-custom/order-spec.js";
 import { RechargeService } from "./recharge.service.js";
 /* ============================================
  * 自定义充值下单（模块 B，PRD §7）：从「用户点了买 N 积分」到「订单落库 + 交给网关」。
@@ -84,6 +85,9 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     expect(order?.tier_id).toBeNull();
     // §7.1「第一版默认不对自定义充值发放首购赠送积分」
     expect(order?.bonus_credits).toBe(0n);
+    // ⚠️ 权限结果与档位那条**同一个口径**（M-3）：它是判出来的 allowed，不是 repo 的
+    // 默认常量。此前只有档位那条传真值，同一列在两条购买路径上口径不同
+    expect(order?.permission_result).toBe("allowed");
   });
 
   it("★ 价格按 1 元 = 15 积分刷新：900 积分 = ¥60，6000 积分 = ¥400", async () => {
@@ -309,5 +313,46 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const expected = creditsExpireAt(paidAt, 6);
     expect(row?.credits_expire_at).toEqual(expected);
     expect(http.grantBodies[0]?.expiresAt).toBe(expected.toISOString());
+  });
+});
+
+describe("buildCustomOrderPlan — 权限结果快照（M-3）", () => {
+  /**
+   * ⚠️ 为什么单独钉在**纯函数**这一层：`RECHARGE_ORDER_SNAPSHOT_DEFAULTS.permissionResult`
+   * 恰好也是 `allowed`，所以「落库那一列是 allowed」这条断言在**没接上判定**时同样是绿的。
+   * 真正要钉的是「这个字段由 plan 给出」，而不是留给 repo 的默认常量 ——
+   * 这一列回答的是「这单当时到底判过权限没有」，写死常量就是一句假话。
+   */
+  const baseConfig = {
+    enabled: true,
+    minCredits: 600,
+    maxCredits: 499_995,
+    defaultCredits: 600,
+    stepCredits: 15,
+    creditsPerYuan: 15,
+    creditsValidMonths: 24,
+    permission: "all",
+    permissionAllowlist: [],
+    permissionDeniedHint: "",
+    version: 5,
+  } as unknown as Parameters<typeof buildCustomOrderPlan>[0];
+
+  it("★ plan 自己带上判定结果（不是留给 repo 的默认常量）", () => {
+    const plan = buildCustomOrderPlan(baseConfig, 9001, 600);
+    expect(plan.permissionResult).toBe("allowed");
+    // 键**存在**才算带上了：`undefined` 会被 repo 兜成默认值，
+    // 于是「判定过没有」这个问题又回到答不上来的状态
+    expect(Object.keys(plan)).toContain("permissionResult");
+  });
+
+  it("白名单外的用户根本建不出单（所以落库的值只可能是 allowed，见 plan 注释）", () => {
+    const restricted = {
+      ...baseConfig,
+      permission: "user_group",
+      permissionAllowlist: ["9001"],
+    } as Parameters<typeof buildCustomOrderPlan>[0];
+
+    expect(() => buildCustomOrderPlan(restricted, 7007, 600)).toThrow(/暂不可购买/);
+    expect(buildCustomOrderPlan(restricted, 9001, 600).permissionResult).toBe("allowed");
   });
 });
