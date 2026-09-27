@@ -23,6 +23,7 @@ SOURCE_PRE_PUSH = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
 SOURCE_SYNC = Path(__file__).resolve().parents[1] / "lib" / "release_line_sync.py"
 SOURCE_STATE = Path(__file__).resolve().parents[1] / "lib" / "release-line-state.py"
 SOURCE_METADATA = Path(__file__).resolve().parents[1] / "lib" / "task_metadata.py"
+SOURCE_MERGE_CHILD = Path(__file__).resolve().parents[1] / "merge-implement-spec-child.py"
 
 
 def run(*args, cwd, check=True):
@@ -341,6 +342,34 @@ class StartTaskWorktreeTest(unittest.TestCase):
         parent_plan = json.loads(run("node", parent / "scripts/verify-change-scope.mjs", "plan", "--json",
                                      cwd=parent).stdout)
         self.assertEqual(sorted(["child.txt", "parent.txt"]), parent_plan["changedFiles"])
+
+    def test_real_integration_child_merges_without_losing_parent_or_child(self):
+        parent_start = self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        )
+        self.assertEqual(0, parent_start.returncode, parent_start.stderr)
+        parent = self.repo.parent / "feature-ikparent"
+        parent_head = self.commit(parent, "parent.txt", "parent\n", "feat: parent change")
+        child_start = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+        self.assertEqual(0, child_start.returncode, child_start.stderr)
+        child = self.repo.parent / "feature-ikchild"
+        inherited = self.read_metadata(child)["inherited_sha"]
+        self.assertEqual(2, len(run("git", "show", "-s", "--format=%P", inherited,
+                                    cwd=child).stdout.split()))
+        self.commit(child, "child.txt", "child\n", "feat: child change")
+
+        merged = run(sys.executable, SOURCE_MERGE_CHILD, "--child-worktree", child,
+                     "--json", cwd=parent, check=False)
+
+        self.assertEqual(0, merged.returncode, merged.stdout + merged.stderr)
+        self.assertEqual("parent\n", (parent / "parent.txt").read_text(encoding="utf-8"))
+        self.assertEqual("child\n", (parent / "child.txt").read_text(encoding="utf-8"))
+        self.assertEqual(parent_head, self.read_metadata(child)["inherited_sha"])
+        self.assertEqual("", run("git", "rev-list", "--merges", f"{self.read_metadata(child)['start_sha']}..HEAD",
+                                 cwd=parent).stdout.strip())
 
     def test_integration_child_rejects_dirty_parent(self):
         self.assertEqual(0, self.invoke(

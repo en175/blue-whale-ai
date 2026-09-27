@@ -438,20 +438,37 @@ class PublishReviewPackageTest(unittest.TestCase):
             remote_head,
         )
 
-    def implement_spec_child(self) -> tuple[str, Path]:
+    def implement_spec_child(self, *, inherited: bool = False,
+                             extra_merge: bool = False) -> tuple[str, Path]:
         child_branch = "fix/IKIOS6-受控线性化子任务"
         child_root = self.root / "blue-whale-worktrees" / "child"
         self.git("worktree", "add", "-b", child_branch, str(child_root), "release/prod", cwd=self.main)
         self.configure(child_root)
         metadata = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child_root)) / "blue-whale/task-base.json"
         metadata.parent.mkdir(parents=True)
-        metadata.write_text(json.dumps({
+        payload = {
             "version": 1, "task_branch": child_branch, "target_branch": "release/prod",
             "start_sha": self.git("rev-parse", "release/prod", cwd=self.main),
-        }), encoding="utf-8")
+        }
+        if inherited:
+            self.git("merge", "--no-ff", "--no-edit", "-m", "chore: 继承整包父整合提交",
+                     self.git("rev-parse", "HEAD"), cwd=child_root)
+            payload["inherited_sha"] = self.git("rev-parse", "HEAD", cwd=child_root)
+            metadata.with_name("task-integration-sha").write_text(
+                payload["inherited_sha"] + "\n", encoding="utf-8"
+            )
+        metadata.write_text(json.dumps(payload), encoding="utf-8")
         (child_root / "child.txt").write_text("child\n", encoding="utf-8")
         self.git("add", "child.txt", cwd=child_root)
         self.git("commit", "-m", "fix: child", cwd=child_root)
+        if extra_merge:
+            self.git("branch", "fix/额外合并", payload["inherited_sha"], cwd=child_root)
+            self.git("switch", "fix/额外合并", cwd=child_root)
+            (child_root / "extra.txt").write_text("extra\n", encoding="utf-8")
+            self.git("add", "extra.txt", cwd=child_root)
+            self.git("commit", "-m", "fix: extra", cwd=child_root)
+            self.git("switch", child_branch, cwd=child_root)
+            self.git("merge", "--no-ff", "--no-edit", "fix/额外合并", cwd=child_root)
         self.git("merge", "--no-ff", "--no-edit", child_branch)
         return child_branch, child_root
 
@@ -490,6 +507,33 @@ class PublishReviewPackageTest(unittest.TestCase):
         published = self.invoke_update(snapshot)
         self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
         self.assertEqual(self.response(published)["status"], "PUSHED_UPDATE_PR")
+
+    def test_linearization_accepts_verified_child_inheritance_merge(self) -> None:
+        child_branch, child_root = self.implement_spec_child(inherited=True)
+        inherited = json.loads((Path(self.git("rev-parse", "--absolute-git-dir", cwd=child_root))
+                                / "blue-whale/task-base.json").read_text(encoding="utf-8"))["inherited_sha"]
+        original = self.git("rev-parse", "HEAD")
+        original_tree = self.git("rev-parse", "HEAD^{tree}")
+        self.assertIn(inherited, self.git("rev-list", "--merges", f"origin/release/prod..{original}"))
+        self.git("push", "origin", BRANCH)
+
+        result = self.invoke_linearize(self.pr_snapshot(), child_branch, "--user-authorized")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.response(result)["status"], "LINEARIZED")
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}"), original_tree)
+        self.assertEqual(self.git("rev-list", "--merges", "origin/release/prod..HEAD"), "")
+
+    def test_linearization_rejects_extra_child_merge(self) -> None:
+        child_branch, _ = self.implement_spec_child(inherited=True, extra_merge=True)
+        original = self.git("rev-parse", "HEAD")
+        self.git("push", "origin", BRANCH)
+
+        result = self.invoke_linearize(self.pr_snapshot(), child_branch, "--user-authorized")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("无法对应子任务继承记录", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
 
     def test_linearization_rejects_untracked_merge_parent_and_scope_expansion(self) -> None:
         child_branch, child_root = self.implement_spec_child()

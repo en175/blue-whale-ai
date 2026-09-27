@@ -111,9 +111,11 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
                          self.git(self.child_two, "rev-parse", "HEAD"))
 
     def test_inherited_children_merge_and_cleanup_without_losing_parent_content(self):
-        inherited = self.commit(self.integration, "integration.txt", "integration\n")
+        parent = self.commit(self.integration, "integration.txt", "integration\n")
         for child in (self.child_one, self.child_two):
-            self.git(child, "merge", "--ff-only", inherited)
+            self.git(child, "merge", "--no-ff", "--no-edit", "-m",
+                     "chore: 继承整包父整合提交", parent)
+            inherited = self.git(child, "rev-parse", "HEAD")
             git_dir = Path(self.git(child, "rev-parse", "--absolute-git-dir"))
             metadata_path = git_dir / "blue-whale" / "task-base.json"
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -127,8 +129,14 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.commit(self.child_two, "two.txt", "two\n")
         first = self.invoke(self.child_one)
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        first_head = self.git(self.integration, "rev-parse", "HEAD")
         second = self.invoke(self.child_two)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        for child in (self.child_one, self.child_two):
+            metadata_path = Path(self.git(child, "rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(parent if child == self.child_one else first_head,
+                             metadata["inherited_sha"])
         source_head = self.git(self.integration, "rev-parse", "HEAD")
         self.assertEqual(self.git(self.integration, "rev-list", "--merges", f"{self.base}..HEAD"), "")
         self.assertEqual((self.integration / "integration.txt").read_text(), "integration\n")
@@ -139,6 +147,40 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         cleaned = self.cleanup(self.snapshot(source_head))
         self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
         self.assertFalse(self.child_one.exists())
+
+    def test_inherited_child_waits_for_release_sync_then_keeps_both_sides(self):
+        parent = self.commit(self.integration, "integration.txt", "integration\n")
+        self.git(self.main, "switch", "release/test")
+        release = self.commit(self.main, "release.txt", "release\n")
+        self.git(self.main, "push", "origin", "release/test")
+        self.git(self.child_one, "merge", "--ff-only", release)
+        self.git(self.child_one, "merge", "--no-ff", "--no-edit", "-m",
+                 "chore: 继承整包父整合提交", parent)
+        inherited = self.git(self.child_one, "rev-parse", "HEAD")
+        metadata_path = Path(self.git(self.child_one, "rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["start_sha"] = release
+        metadata["inherited_sha"] = inherited
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        (metadata_path.parent / "task-integration-sha").write_text(inherited + "\n", encoding="utf-8")
+        child_head = self.commit(self.child_one, "one.txt", "one\n")
+
+        stopped = self.invoke(self.child_one)
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("先同步父整合分支", stopped.stdout)
+        self.assertEqual(self.git(self.integration, "rev-parse", "HEAD"), parent)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+
+        self.git(self.integration, "rebase", release)
+        merged = self.invoke(self.child_one)
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual((self.integration / "release.txt").read_text(), "release\n")
+        self.assertEqual((self.integration / "integration.txt").read_text(), "integration\n")
+        self.assertEqual((self.integration / "one.txt").read_text(), "one\n")
+        self.assertEqual(self.git(self.integration, "rev-list", "--merges", f"{release}..HEAD"), "")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        cleaned = self.cleanup(self.snapshot(self.git(self.integration, "rev-parse", "HEAD")))
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
 
     def test_conflict_keeps_both_branches_and_original_child_head(self):
         self.commit(self.integration, "shared.txt", "integration\n")

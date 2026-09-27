@@ -355,11 +355,12 @@ def linearize(
     commit_range = f"{upstream_sha}..{original_head}"
     merges = git_output(root, "rev-list", "--merges", commit_range).splitlines()
     first_parent_merges = git_output(root, "rev-list", "--first-parent", "--merges", commit_range).splitlines()
-    if not merges or set(merges) != set(first_parent_merges):
-        raise WorkflowError("merge commit 不是本 PR 集成分支的可核对合回记录。")
-    if len(child_branches) != len(merges) or len(set(child_branches)) != len(child_branches):
+    if not first_parent_merges:
+        raise WorkflowError("PR 集成分支没有可核对的子任务合回提交。")
+    if len(child_branches) != len(first_parent_merges) or len(set(child_branches)) != len(child_branches):
         raise WorkflowError("必须为每个 merge commit 指定唯一的 --child-branch。")
     child_tips = {}
+    child_metadata = {}
     for child_branch in child_branches:
         if not re.match(r"^(feature|fix|hotfix|docs|chore)/[^/]+$", child_branch) or child_branch == branch:
             raise WorkflowError(f"子任务分支名无效：{child_branch}")
@@ -368,14 +369,37 @@ def linearize(
         if child_meta["task_branch"] != child_branch:
             raise WorkflowError(f"子任务元数据不匹配：{child_branch}")
         child_tips[child_branch] = git_output(root, "rev-parse", f"refs/heads/{child_branch}")
+        child_metadata[child_branch] = child_meta
+    if len(set(child_tips.values())) != len(child_tips):
+        raise WorkflowError("多个子任务分支指向同一提交，无法逐一核对合回来源。")
     second_parents = []
-    for merge_sha in merges:
+    for merge_sha in first_parent_merges:
         parents = git_output(root, "show", "-s", "--format=%P", merge_sha).split()
         if len(parents) != 2 or parents[1] not in child_tips.values():
             raise WorkflowError(f"无法证明 merge commit 属于指定子任务：{merge_sha}")
         second_parents.append(parents[1])
     if set(second_parents) != set(child_tips.values()):
         raise WorkflowError("子任务提交与 merge commit 未一一对应。")
+    inherited_merges = set(merges) - set(first_parent_merges)
+    inherited_by_branch = {
+        child_branch: str(child_meta["inherited_sha"])
+        for child_branch, child_meta in child_metadata.items() if child_meta.get("inherited_sha")
+    }
+    if len(set(inherited_by_branch.values())) != len(inherited_by_branch):
+        raise WorkflowError("多个子任务共用同一继承提交，无法逐一核对来源。")
+    if inherited_merges != (set(inherited_by_branch.values()) & set(merges)):
+        raise WorkflowError("PR 含无法对应子任务继承记录的 merge commit。")
+    first_parent_history = set(git_output(root, "rev-list", "--first-parent", commit_range).splitlines())
+    first_parent_history.add(upstream_sha)
+    for child_branch, inherited_sha in inherited_by_branch.items():
+        if inherited_sha not in inherited_merges:
+            continue
+        parents = git_output(root, "show", "-s", "--format=%P", inherited_sha).split()
+        if (len(parents) != 2 or parents[0] != child_metadata[child_branch]["start_sha"]
+                or parents[1] not in first_parent_history
+                or git(root, "merge-base", "--is-ancestor", inherited_sha,
+                       child_tips[child_branch], check=False).returncode):
+            raise WorkflowError(f"子任务继承提交无法核对：{child_branch}")
     for commit_sha in git_output(root, "rev-list", "--no-merges", commit_range).splitlines():
         paths = set(git_output(root, "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha).splitlines())
         if paths - frozen_files:

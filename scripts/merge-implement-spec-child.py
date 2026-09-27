@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from lib.task_metadata import TaskMetadataError, read_task_metadata
+from lib.task_metadata import (TaskMetadataError, integration_marker_path,
+                               metadata_path, read_task_metadata)
 
 
 class MergeError(RuntimeError):
@@ -44,6 +47,37 @@ def ensure_task_worktree(root: Path) -> dict[str, object]:
     return read_task_metadata(root)
 
 
+def rebind_inherited_child(child: Path, metadata: dict[str, object], integration_sha: str) -> None:
+    path = metadata_path(child)
+    marker = integration_marker_path(child)
+    if not marker.is_file():
+        raise MergeError("子任务缺少开工入口的继承标记；保留恢复引用。")
+    original = path.read_text(encoding="utf-8")
+    original_marker = marker.read_text(encoding="utf-8")
+    if json.loads(original) != metadata or original_marker.strip() != metadata["inherited_sha"]:
+        raise MergeError("子任务继承记录在合回期间变化；保留恢复引用。")
+    updated = {**metadata, "inherited_sha": integration_sha}
+
+    def replace(target: Path, content: str) -> None:
+        fd, temporary = tempfile.mkstemp(prefix="task-integration-", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    try:
+        replace(path, json.dumps(updated, ensure_ascii=False, indent=2) + "\n")
+        replace(marker, integration_sha + "\n")
+        read_task_metadata(child)
+    except (OSError, TaskMetadataError, ValueError) as exc:
+        replace(path, original)
+        replace(marker, original_marker)
+        raise MergeError("更新子任务继承记录失败；保留恢复引用：" + str(exc)) from exc
+
+
 def merge(root: Path, child: Path) -> dict[str, object]:
     integration = ensure_task_worktree(root)
     child_metadata = ensure_task_worktree(child)
@@ -66,8 +100,22 @@ def merge(root: Path, child: Path) -> dict[str, object]:
     base = output(root, "merge-base", integration_sha, child_sha)
     if git(root, "merge-base", "--is-ancestor", child_sha, integration_sha, check=False).returncode == 0:
         raise MergeError("子任务提交已进入集成分支。")
-    if output(root, "rev-list", "--merges", f"{base}..{child_sha}"):
-        raise MergeError("子任务分支含 merge commit，拒绝受控 rebase。")
+    inherited_sha = child_metadata.get("inherited_sha")
+    if inherited_sha:
+        parents = output(root, "show", "-s", "--format=%P", str(inherited_sha)).split()
+        if (len(parents) != 2 or parents[0] != child_metadata["start_sha"]
+                or output(root, "rev-list", "--first-parent", "--merges",
+                          f"{child_metadata['start_sha']}..{child_sha}").splitlines() != [inherited_sha]
+                or output(root, "rev-list", "--merges", f"{inherited_sha}..{child_sha}")):
+            raise MergeError("子任务继承历史不符或含其他 merge commit，拒绝受控 rebase。")
+        if git(root, "merge-base", "--is-ancestor", str(child_metadata["start_sha"]),
+               integration_sha, check=False).returncode:
+            raise MergeError("父整合分支尚未包含子任务的发布线起点；先同步父整合分支。")
+        replay_base = str(inherited_sha)
+    else:
+        if output(root, "rev-list", "--merges", f"{base}..{child_sha}"):
+            raise MergeError("子任务分支含 merge commit，拒绝受控 rebase。")
+        replay_base = base
 
     expected = git(root, "merge-tree", "--write-tree", integration_sha, child_sha, check=False)
     if expected.returncode:
@@ -78,7 +126,7 @@ def merge(root: Path, child: Path) -> dict[str, object]:
         raise MergeError(f"已有子任务恢复引用，先核查：{backup_ref}")
     git(root, "update-ref", backup_ref, child_sha, "")
 
-    rebased = git(child, "rebase", "--onto", integration_sha, base, check=False)
+    rebased = git(child, "rebase", "--onto", integration_sha, replay_base, check=False)
     if rebased.returncode:
         aborted = git(child, "rebase", "--abort", check=False)
         if aborted.returncode or output(child, "rev-parse", "HEAD") != child_sha:
@@ -97,6 +145,8 @@ def merge(root: Path, child: Path) -> dict[str, object]:
     if output(root, "rev-parse", "HEAD") != integration_sha or output(root, "status", "--porcelain"):
         raise MergeError(f"集成工作树在核验期间变化；保留恢复引用 {backup_ref}。")
 
+    if inherited_sha:
+        rebind_inherited_child(child, child_metadata, integration_sha)
     git(root, "merge", "--ff-only", child_branch)
     if output(root, "rev-parse", "HEAD") != new_sha:
         raise MergeError(f"快进后提交不符；保留恢复引用 {backup_ref}。")
@@ -124,7 +174,7 @@ def main() -> int:
         root = Path(output(Path.cwd(), "rev-parse", "--show-toplevel")).resolve()
         result = merge(root, args.child_worktree.resolve())
         code = 0
-    except (MergeError, TaskMetadataError, subprocess.CalledProcessError, ValueError) as exc:
+    except (MergeError, TaskMetadataError, subprocess.CalledProcessError, OSError, ValueError) as exc:
         result = {"status": "MERGE_STOPPED", "detail": str(exc)}
         code = 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
