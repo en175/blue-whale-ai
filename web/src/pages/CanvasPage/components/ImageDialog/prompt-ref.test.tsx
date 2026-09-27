@@ -9,7 +9,7 @@ import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
-import { promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+import { collapseCaretAt, promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -585,6 +585,48 @@ it('真实菜单键盘确认把已引用素材插入正文', async () => {
   await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
   expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+});
+
+/* IKIQ88：缩略图 @ 按钮启用「当前选区」回落——光标置于文本中间时 chip 原位插入；
+   无光标记录（未聚焦过输入框）仍追加末尾，插入后编辑器聚焦、光标落在 chip 之后 */
+describe('IKIQ88 缩略图 @ 光标处插入', () => {
+  it('光标置于文本中间：点击缩略图 @ 按钮，chip 插入光标处而非末尾', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
+    await typePromptRefText(container, '让衣服');
+    await collapseCaretAt(promptRefEditorInstance(container), 1);
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('让图片1衣服');
+    // 光标落在 chip 之后：继续输入接在标签后
+    await typePromptRefRaw(container, '！');
+    expect(readPromptRefText(container)).toBe('让图片1衣服！');
+    // 与手动 @ 菜单选择同一种 chip：asset_ref 绑定 101、文案 图片1
+    const patch = lastDocFromParams(onParamsChange);
+    expect(patch.promptDoc?.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '衣服！' },
+    ]);
+  });
+
+  it('未聚焦过输入框：chip 追加末尾，插入后编辑器聚焦、光标落在 chip 之后', async () => {
+    await renderDialog({ mediaRefs: [REF_A] });
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('图片1');
+    // 插入后编辑器聚焦
+    await vi.waitFor(() => {
+      expect(document.activeElement?.hasAttribute('contenteditable')).toBe(true);
+    });
+    // 光标落在 chip 之后：继续输入接在标签后
+    await typePromptRefRaw(container, '尾巴');
+    expect(readPromptRefText(container)).toBe('图片1尾巴');
+  });
 });
 
 /* IKFCKN：文本附件进参考栏——@ 与手动 @ 选择产出同一种 文本N 标签 chip、× 断开连线、只读态不渲染 */
