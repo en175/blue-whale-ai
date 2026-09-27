@@ -8,7 +8,13 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { DomainError, fail, ok, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
+import {
+  DomainError,
+  fail,
+  ok,
+  RESOURCE_NOT_FOUND_CODE,
+  type ResultEnvelope,
+} from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
@@ -105,9 +111,17 @@ export class SceneCardGenerateController {
         );
       }
     }
-    // IKIQGQ：业务拒绝不再写 200 + fail 信封——抛 DomainError 走 AllExceptionsFilter 统一投影
-    // （同 generation-jobs create/cancel/retry 口径），code、msg、HTTP 状态同出一张码表。
-    // 成功受理（含 job）保持 202 Accepted。
+    // IKIQGQ：业务拒绝/成功受理的写盘口径见 writeAcceptedOrThrow
+    this.writeAcceptedOrThrow(result, res);
+  }
+
+  /** IKIQGQ：业务拒绝不再写 200 + fail 信封——抛 DomainError 走 AllExceptionsFilter 统一投影
+   *  （同 generation-jobs create/cancel/retry 口径），code、msg、HTTP 状态同出一张码表。
+   *  成功受理（含 job）保持 202 Accepted。 */
+  private writeAcceptedOrThrow(
+    result: ResultEnvelope<unknown>,
+    res: Response,
+  ): void {
     if (result.code !== 200) {
       throw new DomainError(result.code, result.msg ?? undefined);
     }
@@ -196,13 +210,8 @@ export class SceneCardGenerateController {
       );
     }
 
-    // IKIQGQ：业务拒绝不再写 200 + fail 信封——抛 DomainError 走 AllExceptionsFilter 统一投影
-    // （同 generate 与 generation-jobs create/cancel/retry 口径），code、msg、HTTP 状态同出
-    // 一张码表。成功受理（含 job）保持 202 Accepted。
-    if (result.code !== 200) {
-      throw new DomainError(result.code, result.msg ?? undefined);
-    }
-    res.status(202).json(result);
+    // IKIQGQ：业务拒绝/成功受理的写盘口径见 writeAcceptedOrThrow
+    this.writeAcceptedOrThrow(result, res);
   }
 
   /** GET /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
