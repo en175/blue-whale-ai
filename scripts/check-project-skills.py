@@ -9,6 +9,7 @@ from pathlib import Path
 
 AUTHORITY = Path(".agents/skills")
 AGENTS_ROOT = AUTHORITY.parent
+GENERATED_BUILD = AUTHORITY / "deploy-blue-whale-api/.build"
 CLAUDE_ENTRY = Path(".claude/skills")
 CLIENT_ENTRIES = (
     Path(".codex/skills"),
@@ -48,6 +49,7 @@ def check(root, home):
     notices = []
     agents = root / AGENTS_ROOT
     authority = root / AUTHORITY
+    generated_build = root / GENERATED_BUILD
     claude = root / CLAUDE_ENTRY
     tracked = tracked_paths(root)
 
@@ -65,6 +67,9 @@ def check(root, home):
                 errors.append(f"{path.relative_to(root)}: 缺少 SKILL.md")
         for path in files_under(agents):
             relative = path.relative_to(root)
+            if (relative.is_relative_to(GENERATED_BUILD)
+                    and generated_build.is_dir() and not generated_build.is_symlink()):
+                continue
             if path.is_symlink():
                 errors.append(f"{relative}: .agents 包含符号链接，请改为入库文件")
             elif path.is_file() and relative not in tracked:

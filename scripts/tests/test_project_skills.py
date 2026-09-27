@@ -158,6 +158,24 @@ class ProjectSkillsTest(unittest.TestCase):
         tracked.unlink()
         self.assertIn(".agents/tracked.txt: Git 跟踪的文件缺失", self.check_skills(1))
 
+    def test_known_build_output_is_preserved_but_adjacent_unknown_file_fails(self):
+        skill = self.worktree / ".agents/skills/deploy-blue-whale-api"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("# Deploy\n", encoding="utf-8")
+        (skill / ".gitignore").write_text(".build/\n", encoding="utf-8")
+        run("git", "add", ".agents/skills/deploy-blue-whale-api", cwd=self.worktree)
+
+        build = skill / ".build"
+        build.mkdir()
+        for name in ("source-commit", "image-tag", "new-api"):
+            (build / name).write_text(f"{name}\n", encoding="utf-8")
+        self.assertIn("校验通过", self.check_skills())
+        self.assertEqual((build / "new-api").read_text(encoding="utf-8"), "new-api\n")
+
+        unknown = skill / "unknown.txt"
+        unknown.write_text("unknown\n", encoding="utf-8")
+        self.assertIn(".agents/skills/deploy-blue-whale-api/unknown.txt: 未纳入 Git", self.check_skills(1))
+
     def test_personal_same_name_reports_sources_and_preserves_files(self):
         personal = self.home / ".codex/skills/example"
         personal.mkdir(parents=True)
