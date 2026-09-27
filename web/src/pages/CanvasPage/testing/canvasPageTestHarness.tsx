@@ -9,7 +9,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/api/generation';
@@ -57,7 +57,8 @@ export const apiMocks = {
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
+  /** 参数签名供测试断言 calls 元组（IKIIWN confirmEmpty 在 payload 上） */
+  saveCanvasDoc: vi.fn(async (_projectId: string, _payload: { viewport: unknown; nodes: unknown[]; edges: unknown[]; confirmEmpty?: boolean }, _version: number | null) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
   cancelGenerationJob: vi.fn(async () => null),
@@ -115,7 +116,10 @@ vi.mock('@/api/assets', () => ({
     getNextPageParam: () => undefined,
   }),
 }));
-vi.mock('@/api/canvas', () => ({
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  // IKILUE：readCanvasConflictVersion 等纯函数沿用真实现（412 信封解析口径与线上一致），
+  // 仅覆盖需要打桩的请求函数与序列化助手
+  ...(await importOriginal<typeof import('@/api/canvas')>()),
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
@@ -152,11 +156,20 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-/** 画布文档接缝（useCanvasDoc 打桩）：各测试文件的 seed 函数改写 current 注入专属画布 */
-export const canvasDocMock = {
+/** 画布文档接缝（useCanvasDoc 打桩）：各测试文件的 seed 函数改写 current 注入专属画布；
+ *  loadFailed（IKIIWN 空覆盖防护）缺省视为水合成功，需要失败场景的测试显式置 true。 */
+export const canvasDocMock: {
   current: {
-    doc: null as unknown,
-    assets: {} as Record<string, unknown>,
+    doc: unknown;
+    assets: Record<string, unknown>;
+    refetch: () => Promise<unknown>;
+    acceptDoc: (doc: unknown) => void;
+    loadFailed?: boolean;
+  };
+} = {
+  current: {
+    doc: null,
+    assets: {},
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   },
@@ -173,10 +186,13 @@ export function enableReactActEnvironment() {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移） */
+/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移）；
+ *  locationRef 供断言导航是否真的发生（IKILUE 切换中止用例） */
 export let navigateRef: ((to: string) => void) | null = null;
+export let locationRef: { search: string } | null = null;
 function NavProbe() {
   navigateRef = useNavigate();
+  locationRef = { search: useLocation().search };
   return null;
 }
 
@@ -208,6 +224,7 @@ export async function unmountPage() {
   root = null;
   container = null;
   navigateRef = null;
+  locationRef = null;
 }
 
 export function textNodes(): Node[] {
