@@ -80,11 +80,14 @@ base_sha="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --
   || fail "任务起点元数据读取失败；请按上方指引修复。"
 target_branch="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field target_branch)" \
   || fail "任务目标发布线读取失败；请按上方指引修复。"
+inherited_sha="$("${PYTHON3_COMMAND[@]}" "$ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT" --field inherited_sha)" \
+  || fail "任务继承提交读取失败；请按上方指引修复。"
+own_base_sha="${inherited_sha:-$base_sha}"
 
 branch_has_own_commit() {
   local head_sha target_ref target_sha found_target=0
   head_sha="$(git -C "$ROOT" rev-parse HEAD)"
-  [ "$base_sha" != "$head_sha" ] || return 1
+  [ "$own_base_sha" != "$head_sha" ] || return 1
   # 同步任务后，HEAD 可能只是前进的 release 提交。只允许修订尚未进入
   # 本地或已抓取远端目标发布线的任务顶端提交。
   for target_ref in "refs/heads/$target_branch" "refs/remotes/origin/$target_branch"; do
@@ -111,9 +114,13 @@ else
   fi
   git -C "$ROOT" add -A
   git -C "$ROOT" commit -m "$MESSAGE"
-  commit_count="$(git -C "$ROOT" rev-list --count "$base_sha"..HEAD)"
+  commit_count="$(git -C "$ROOT" rev-list --count "$own_base_sha"..HEAD)"
   # ${} 包起来：紧跟其后的全角括号是多字节字符，裸 $branch 会被 bash 当成变量名的一部分。
   echo "✅ 已提交任务验收分支：${branch}（本分支第 ${commit_count} 个 commit）"
 fi
 
-echo "下一步：用户确认后，运行 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch ${target_branch}。"
+if [ -n "$inherited_sha" ]; then
+  echo "下一步：将子票提交合回父整合分支，由父整合分支统一验证和发布整包 PR。"
+else
+  echo "下一步：用户确认后，运行 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch ${target_branch}。"
+fi
