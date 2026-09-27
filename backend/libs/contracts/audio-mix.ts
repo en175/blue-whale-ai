@@ -27,10 +27,3 @@ export const audioMixCreateSchema = z.object({
 });
 
 export type AudioMixCreate = z.infer<typeof audioMixCreateSchema>;
-
-/**
- * 任务失败 error.details 的上游 HTTP 状态键（IKIHGQ）：上游非 2xx 时 worker 写入，
- * backend 重试换凭证判定读它（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；
- * 既有 message 文案正则仅作旧任务数据兼容。与 worker-java AudioMixContract 对齐。
- */
-export const AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS = "http_status";

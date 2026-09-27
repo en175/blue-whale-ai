@@ -329,7 +329,8 @@ class AudioMixJobProcessorTest {
     void upstreamUnauthorizedSubmitPersistsHttpStatusDetail() {
         when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
-        MediaExtractError unauthorized = new MediaExtractError("provider_failed", "上游凭证被拒绝");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed",
+                "音频混合任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
         unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
         when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .thenThrow(unauthorized);
@@ -340,8 +341,11 @@ class AudioMixJobProcessorTest {
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
         assertThat(failure.getValue().code()).isEqualTo("audio_mix_failed");
+        // 生产文案剥离状态码字样（IKIMS6）：判定只依赖结构化 details.http_status，
+        // 上游原因与 request_id 原样保留
+        assertThat(failure.getValue().message()).doesNotContain("401").contains("上游凭证被拒绝");
         assertThat(failure.getValue().details())
-                .containsEntry("raw", "上游凭证被拒绝")
+                .containsEntry("raw", "音频混合任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
 
@@ -349,7 +353,9 @@ class AudioMixJobProcessorTest {
     void upstreamUnauthorizedPollPersistsHttpStatusDetailWithoutRelyingOnMessageWording() {
         when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
-        MediaExtractError unauthorized = new MediaExtractError("provider_failed", "上游拒绝了这次查询");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed",
+                "MediaKit 音频混合任务查询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}"
+                        + " request_id=req-poll-3");
         unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
         when(gateway.poll("sk-frozen", "provider-1")).thenThrow(unauthorized);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
@@ -359,8 +365,11 @@ class AudioMixJobProcessorTest {
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
         // 文案不含「401」字样：换凭证判定只依赖结构化 details.http_status，措辞变化不影响重试
-        assertThat(failure.getValue().message()).doesNotContain("401");
-        assertThat(failure.getValue().details()).containsEntry("http_status", 401);
+        assertThat(failure.getValue().message()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(failure.getValue().details())
+                .containsEntry("raw", "MediaKit 音频混合任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     @Test

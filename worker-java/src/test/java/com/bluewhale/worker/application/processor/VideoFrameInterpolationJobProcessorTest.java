@@ -621,7 +621,7 @@ class VideoFrameInterpolationJobProcessorTest {
     // ========== IKHSFI：瞬时错误续排与 processing 续排共用轮询预算（超限即终态） ==========
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（timeout + pollCount=720）→ 1049 终态，不续排不重提交（IKHSFI）")
+    @DisplayName("poll 瞬时错误达上限（timeout + pollCount=720）→ 1049 终态，不续排不重提交，不写 http_status（无 cause 不推断，IKIN6X）")
     void pollTransientTimeoutAtLimit_timesOut() {
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -630,9 +630,12 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
-                contains("持续瞬时错误"), any(), eq("worker-1"), eq(5L));
+                contains("持续瞬时错误"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
         // 不新增自动重新提交供应商任务的行为：超限只落终态，用户手动重试才走新 job
@@ -640,7 +643,7 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1049 + details.http_status=503，message 剥状态码字样（IKIN6X）")
     void pollTransient503AtLimit_timesOut() {
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
         VideoFrameInterpolationError unavailable = new VideoFrameInterpolationError(
@@ -650,15 +653,26 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
+        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
-                contains("503"), any(), eq("worker-1"), eq(5L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("503")
+                .isEqualTo("视频插帧轮询超时（超过 "
+                        + VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS
+                        + " 次持续瞬时错误: MediaKit 视频插帧任务查询失败:）");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 503);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 429 + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 429 + pollCount=720）→ 1049 + details.http_status=429，message 剥状态码字样（IKIN6X）")
     void pollTransient429AtLimit_timesOut() {
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
         VideoFrameInterpolationError rateLimited = new VideoFrameInterpolationError(
@@ -668,15 +682,25 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
+        // 与 503 用例同口径（IKIN6X）：429 也经 cause 链结构化透传，message 剥状态码字样
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
-                contains("429"), any(), eq("worker-1"), eq(5L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("429")
+                .isEqualTo("视频插帧轮询超时（超过 "
+                        + VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS
+                        + " 次持续瞬时错误: MediaKit 视频插帧任务查询失败:）");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 429);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（连接错误 ConnectException + pollCount=720）→ 1049 终态，不续排（IKHSFI）")
+    @DisplayName("poll 瞬时错误达上限（连接错误 ConnectException + pollCount=720）→ 1049 终态，不续排，不写 http_status（无 HTTP cause，IKIN6X）")
     void pollTransientConnectErrorAtLimit_timesOut() {
         stubPollClaim(input(60), VideoFrameInterpolationJobProcessor.MAX_VIDEO_FRAME_INTERPOLATION_POLLS);
         VideoFrameInterpolationError connectError = new VideoFrameInterpolationError(
@@ -686,9 +710,12 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
-                contains("连接被拒"), any(), eq("worker-1"), eq(5L));
+                contains("连接被拒"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：连接失败 cause 非 HttpStatusException → 不写 http_status 键
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
         // 超限只落终态，不自动重新提交供应商任务（用户手动重试才走新 job）
@@ -823,6 +850,34 @@ class VideoFrameInterpolationJobProcessorTest {
                         null, "copyright reference detected"));
         processor.handle("100");
         assertFailCode(GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input(60), 3);
+        VideoFrameInterpolationError unauthorized = new VideoFrameInterpolationError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 视频插帧任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 视频插帧任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========

@@ -8,7 +8,8 @@ import java.util.concurrent.TimeUnit;
  * new-api 三路客户端共享 HTTP 装配（刀③ 去重）。
  * <p>
  * 覆盖三处跨客户端重复：baseUrl 校验/去尾斜杠、OkHttpClient 超时构建、标准请求头三元组
- * （Authorization: Bearer / X-Trace-Id / X-Client-System: bluewhale，契约 §5 + ADR-0080）。
+ * （Authorization: Bearer / X-Trace-Id / X-Client-System: bluewhale，契约 §5 + ADR-0080）；
+ * 另收敛全族共用的上游 HTTP 状态静态解析（{@link #upstreamHttpStatus}，IKIMN8）。
  * <p>
  * 变化轴：网关接入点（image / video / audio 各自超时不同——保留各客户端独立取值，不在此塌缩）。
  */
@@ -49,5 +50,22 @@ public final class NewApiHttpSupport {
         b.header("Authorization", "Bearer " + bearerToken)
                 .header("X-Trace-Id", traceId)
                 .header("X-Client-System", "bluewhale");
+    }
+
+    /**
+     * 沿 cause 链解析上游 HTTP 状态：网关 !2xx 抛错时以
+     * {@link NewApiVideoClient.HttpStatusException} cause 携带状态（唯一事实源，网关异常形态不变）。
+     * <p>
+     * 返回 {@code null} = 非 HTTP 失败（超时 / 连接失败 / 业务信封失败等链上无该 cause）或无
+     * cause——调用方据此不写 error.details 的 http_status 键（IKIMN8 / IKIMS2，起源于
+     * IKIHGQ audio_mix 的内联实现收口共享）。
+     */
+    public static Integer upstreamHttpStatus(Throwable error) {
+        for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof NewApiVideoClient.HttpStatusException http) {
+                return http.getStatus();
+            }
+        }
+        return null;
     }
 }

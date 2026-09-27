@@ -10,7 +10,7 @@ import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
   AUDIO_MIX_JOB_TYPE,
   AUDIO_MIX_SOURCE,
-  AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS,
+  GENERATION_ERROR_DETAIL_HTTP_STATUS,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
@@ -318,7 +318,7 @@ function isUpstreamUnauthorized(previousError: unknown): boolean {
   const record = previousError as Record<string, unknown>;
   const details = record.details;
   if (details && typeof details === "object" && !Array.isArray(details)) {
-    const status = (details as Record<string, unknown>)[AUDIO_MIX_ERROR_DETAIL_HTTP_STATUS];
+    const status = (details as Record<string, unknown>)[GENERATION_ERROR_DETAIL_HTTP_STATUS];
     if (typeof status === "number") return status === 401;
   }
   return typeof record.message === "string" && /\bHTTP 401\b/.test(record.message);

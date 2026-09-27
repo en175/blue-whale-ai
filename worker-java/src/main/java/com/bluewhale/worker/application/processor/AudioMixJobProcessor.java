@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -10,6 +11,7 @@ import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -85,18 +87,18 @@ public class AudioMixJobProcessor implements JobProcessor {
         } catch (Exception error) {
             String code = error instanceof MediaExtractError domain && PRESERVED_CODES.contains(domain.getCode())
                     ? domain.getCode() : AudioMixContract.ERROR_AUDIO_MIX_FAILED;
-            if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音频混合失败",
-                    upstreamHttpStatus(error))) {
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(error);
+            String message = error.getMessage() != null ? error.getMessage() : "音频混合失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS6），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
+            if (!fail(job, code, message, httpStatus)) {
                 // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
                 log.info("[audio_mix] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
             }
         }
-    }
-
-    /** 上游 HTTP 状态（网关 !2xx 时经 cause 携带）；非 HTTP 失败返回 null。 */
-    private static Integer upstreamHttpStatus(Throwable error) {
-        return error.getCause() instanceof NewApiVideoClient.HttpStatusException http
-                ? http.getStatus() : null;
     }
 
     private void runStep(ClaimedMediaExtractJobDto job) {
@@ -285,7 +287,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         if (httpStatus != null) {
-            details.put(AudioMixContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
         log.warn("[audio_mix] job 失败 jobId={} code={} message={}", job.id(), code, message);
         return stateMachine.failMediaExtractJob(new FailMediaExtractDto(

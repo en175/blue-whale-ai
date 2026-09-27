@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
@@ -10,6 +11,7 @@ import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoFrameInterpolationError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitInterpolateVideoClient.InterpolateVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -146,10 +148,16 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频插帧失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS4），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_frame_interpolation] 终态失败 jobId={} code={}: {}",
                     claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -277,7 +285,11 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
                             ? pollError.getMessage() : "上游持续瞬时错误";
                     log.warn("[video_frame_interpolation] 轮询瞬时错误且预算耗尽 jobId={} pollCount={} err={}，落终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failPollBudgetExhausted(claim, "持续瞬时错误: " + reason);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段，无 cause（超时 / 连接失败）不写键。
+                    failPollBudgetExhausted(claim, "持续瞬时错误: " + reason,
+                            NewApiHttpSupport.upstreamHttpStatus(pollError));
                     return;
                 }
                 log.warn("[video_frame_interpolation] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
@@ -491,19 +503,46 @@ public class VideoFrameInterpolationJobProcessor implements JobProcessor {
 
     /** 轮询预算耗尽的统一终态落点（IKHSFI）：瞬时错误续排与 processing 续排两路共用，
      *  一律归并兜底 1049 并停止续排（不 reschedule / 不 enqueue）。detail 为空串时即
-     *  processing 超限原文案；非空时追加瞬时错误原因（上游可读，随 message 透传投影）。 */
+     *  processing 超限原文案；非空时追加瞬时错误原因（上游可读，随 message 透传投影）。
+     *  无上游 HTTP 状态的重载（processing 耗尽 / 瞬时错误无 HTTP cause）不写状态键。 */
     private void failPollBudgetExhausted(ClaimedVideoFrameInterpolationJobDto claim, String detail) {
+        failPollBudgetExhausted(claim, detail, null);
+    }
+
+    /** 带上游 HTTP 状态重载（IKIN6X）：预算耗尽分支与顶层 catch 同一透传口径——cause 链
+     *  携带状态即写 details.http_status，并剥文案「: HTTP <code>」片段（上游原因保留）。 */
+    private void failPollBudgetExhausted(ClaimedVideoFrameInterpolationJobDto claim, String detail,
+                                         Integer httpStatus) {
+        String message = "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS
+                + " 次" + detail + "）";
+        if (httpStatus != null) {
+            message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+        }
         failClaimed(claim, VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
-                "视频插帧轮询超时（超过 " + MAX_VIDEO_FRAME_INTERPOLATION_POLLS + " 次" + detail + "）");
+                message, httpStatus);
     }
 
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at；插帧无输出槽位，
      *  槽位段天然空转；details.raw 透传原始原因）。守卫要求 status='processing'，故已取消 /
      *  已终态任务的失败写入同样不会生效（终态权威）。 */
     private void failClaimed(ClaimedVideoFrameInterpolationJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
+     *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
+     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
+     *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
+     *  瞬时错误耗尽预算且 cause 携带状态即写（failPollBudgetExhausted 带状态重载），
+     *  processing 耗尽无 cause 不写。 */
+    private void failClaimed(ClaimedVideoFrameInterpolationJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_frame_interpolation job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
