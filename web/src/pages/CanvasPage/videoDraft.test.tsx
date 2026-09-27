@@ -1112,12 +1112,24 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     expect((newDraft.data as Record<string, unknown>).draftMode).toBe('prompt');
     // 面板显示与落盘一致：新建默认文生视频
     expect(container.textContent).toContain('文生视频');
+
+    // 不止页面内节点状态：编辑驱动自动保存后，画布保存请求体中该新草稿同样携带
+    // 与面板默认显示一致的模式值（payload.nodes 为节点对象数组，见 saveCanvasDoc 调用）
+    await typePrompt('新建草稿保存');
+    await vi.waitFor(() => {
+      const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as
+        [string, { nodes: Node[] }] | undefined;
+      expect(last).toBeTruthy();
+      const saved = last![1].nodes.find((n) => n.id === newDraft.id);
+      expect((saved?.data as Record<string, unknown> | undefined)?.draftMode).toBe('prompt');
+    }, { timeout: 3000 });
   });
 
   it('存量无 draftMode 草稿经面板发送：提交时按当前面板选中模式兜底写入', async () => {
-    // seed 的 d1 草稿 data 无 draftMode（模拟 2026-09-13 前的存量旧草稿）
-    expect(draftDataOf('d1').draftMode).toBeUndefined();
+    // seed 的 d1 草稿 data 无 draftMode（模拟 2026-09-13 前的存量旧草稿）；
+    // 画布渲染后读节点——单跑时 flowProps.current 尚未赋值，不得在 renderPage 前读取
     await renderPage();
+    expect(draftDataOf('d1').draftMode).toBeUndefined();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     // 不碰模式选择器，面板默认显示「文生视频」
