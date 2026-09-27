@@ -32,9 +32,17 @@
   <!--
     Σ 全部批次的 remaining。
 
-    ⚠️ 不加 expires_at 条件：过期批次只是被查询条件排除，**没有被扣掉**；
-       账本侧同样没有因过期而减少（过期核销这条分录还没落地）。
-       加了条件就等于把「核销未落地」伪装成「账不平」——那是最容易被忽略的假警报。
+    ⚠️ 仍然**不加 expires_at 条件**，但理由已经变了，别照旧注释办事：
+      · 2026-09 之前：过期只被查询条件排除，批次 untouched、账本也没动——
+        加了条件等于把「核销未落地」伪装成「账不平」，那是最容易被忽略的假警报。
+      · 现在：过期核销已经落地（CreditExpirySweeper → CreditService.expireLot），
+        它**同时**扣 remaining 与记 `借 wallet / 贷 cost` 分录，两侧等量减少。
+        所以 Σ remaining 与账本余额**依然逐分相等**，只是等式两边都变小了。
+        此时若加上 expires_at 条件，反而会把已核销的批次再多排除一次——
+        凭空造出一个差额（等于核销额），把一个好账报成不平。
+
+    一句话：核销是**两侧同时减**，因此本语句与账本侧的取数口径都不需要、也不该有
+    expires_at 条件。真正的口径写在 Account.FROZEN 的恒等式注释里。
   -->
   <select id="sumLotsRemaining" resultType="long">
     SELECT COALESCE(SUM(remaining), 0)

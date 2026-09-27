@@ -41,15 +41,30 @@ public class BillingApplicationService {
     private static final Logger log = LoggerFactory.getLogger(BillingApplicationService.class);
 
     /**
-     * 临期提醒的时间窗。
+     * 临期提醒的时间窗：**到期前 31 天**。
      *
-     * <p>⚠️ <b>必须严格大于 {@link GrantPolicy#DEFAULT_GIFT_DAYS}</b>，不能相等：
-     * 相等时，刚按默认策略发出的那批积分恰好压在窗口边界上——DATETIME 列会把小数秒
-     * 四舍五入，而查询用的是执行那一刻的 {@code NOW()}，两者先后不定。
-     * 结果就是同一批积分时而出现在「即将过期」里、时而消失。
-     * 多留一天，边界就不再落在任何正常发放的批次上。
+     * <p>此前它是从 {@link GrantPolicy#DEFAULT_GIFT_DAYS} 推导的（{@code + 1}），
+     * 那个推导在「本金永久、赠送 30 天」的口径下是对的；本金改成 2 年后，
+     * 只按最长的那条策略定窗口会得出一个没用的数，所以这里改成一条**独立的产品常量**，
+     * 并保留它必须满足的两条约束：
+     *
+     * <ol>
+     *   <li><b>不得等于任何一种默认有效期</b>（30 / 365 / 730 天）。
+     *       相等时，刚按那条策略发出的批次恰好压在窗口边界上——DATETIME 列会把小数秒
+     *       四舍五入，而查询用的是执行那一刻的 {@code NOW()}，两者先后不定，
+     *       同一批积分时而出现在「即将过期」里、时而消失。31 天避开了这三个值。</li>
+     *   <li><b>必须远小于 2 年</b>。窗口一旦接近有效期本身，任何买过卡的用户
+     *       在整整两年里都会看到「即将过期」——那个面板就不再是提醒，而是背景噪音，
+     *       真正需要行动的那一批反而被淹掉（{@code CreditLotMapper.listExpiring}
+     *       的注释把这条叫「太远的别提示」）。</li>
+     * </ol>
+     *
+     * <p>为什么是 31 天而不是更短：这是**用户还来得及行动**的下限——
+     * 他需要看到提醒、决定要不要把它花掉或再充一笔，而 31 天≈一个自然月，
+     * 是这类提醒的通行做法。再短（比如 7 天）会让人来不及安排；
+     * 再长（比如 半年）就撞上上面第 2 条。
      */
-    private static final int EXPIRING_WINDOW_DAYS = GrantPolicy.DEFAULT_GIFT_DAYS + 1;
+    private static final int EXPIRING_WINDOW_DAYS = 31;
 
     /** 最多提示几条。 */
     private static final int EXPIRING_LIMIT = 5;

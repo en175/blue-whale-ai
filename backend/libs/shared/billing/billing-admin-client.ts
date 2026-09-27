@@ -285,9 +285,11 @@ export interface GrantCreditsResult {
 /**
  * 发放积分（`POST /admin/credits/grants`，`source = purchased`）。
  *
- * <p>`source = purchased` 决定这批积分的有效期策略（充值本金**永久**），
- * 由 billing 的 `GrantPolicy` 按来源决定，这里不传 `expiresAt`——
- * 传了就是让「充值本金永久」这条产品约定变成每个调用点各自记得的事。
+ * <p>`source = purchased` 决定这批积分的有效期策略（**2 年**，自支付成功时刻起算，
+ * 见 PRD §9.5），由 billing 的 `GrantPolicy` 按来源决定，这里不传 `expiresAt`——
+ * 传了就是让「充值本金 2 年」这条产品约定变成每个调用点各自记得的事。
+ * 有效期是**来源的属性**，不是入口的属性：改口径时只改 billing 那一处，
+ * 所有调用点自动正确（包括将来新增的到账入口）。
  *
  * <p>⚠️ 409（幂等键已存在）在这里被翻译成 `duplicated: true` 的**正常返回**，不是异常：
  *    重复的回调是必然会发生的（网关最多重投 6 次），把它当失败会让调用方反复重试、

@@ -29,9 +29,16 @@ public class CreditLotRepository {
         this.mapper = mapper;
     }
 
-    /** 批次（读模型）。 */
+    /**
+     * 批次（读模型）。
+     *
+     * @param version 行的版本号，由每次写入自增。它是**过期核销幂等键**的一部分：
+     *                同一批次可能被核销不止一次（冻结部分解冻回可用后再次到期），
+     *                而版本号是做一次写就变一次的单调量，天然能区分两次核销。
+     * @see #lockById(long)
+     */
     public record Lot(long id, long userId, CreditSource source, long amount,
-                      long remaining, long frozen, Instant expiresAt) {
+                      long remaining, long frozen, Instant expiresAt, int version) {
         public long available() {
             return remaining - frozen;
         }
@@ -44,6 +51,29 @@ public class CreditLotRepository {
      */
     public List<Lot> lockActiveLots(long userId) {
         return mapper.lockActiveLots(userId).stream()
+                .map(CreditLotRepository::toLot)
+                .toList();
+    }
+
+    /**
+     * 按主键读一行并**锁住它**（过期核销用）。
+     *
+     * <p>与 {@link #lockActiveLots} 的差别是**不筛有效期**：核销正要看的就是已过期的那一行。
+     *
+     * @return 不存在时 {@code null}
+     */
+    public Lot lockById(long lotId) {
+        CreditLotEntity entity = mapper.lockById(lotId);
+        return entity == null ? null : toLot(entity);
+    }
+
+    /**
+     * 已到期、仍有可核销量的批次（跨全部用户，最久到期的在前）。
+     *
+     * @param limit 本轮最多取几条
+     */
+    public List<Lot> listDueLots(int limit) {
+        return mapper.listDueLots(limit).stream()
                 .map(CreditLotRepository::toLot)
                 .toList();
     }
@@ -73,6 +103,16 @@ public class CreditLotRepository {
     /** 解冻：返还用。**只动 frozen**，且保留批次原有的有效期。 */
     public void releaseFrozen(long lotId, long amount) {
         mapper.releaseFrozen(lotId, amount);
+    }
+
+    /**
+     * 核销：把已到期的可用量从 {@code remaining} 扣掉，**冻结部分不动**。
+     *
+     * <p>只动 {@code remaining}，且金额由调用方按 {@link #lockById} 读到的快照算好传入——
+     * 见 {@link CreditLotMapper#expireLot}。
+     */
+    public void expire(long lotId, long amount) {
+        mapper.expireLot(lotId, amount);
     }
 
     /**
@@ -138,6 +178,9 @@ public class CreditLotRepository {
                 entity.getAmount(),
                 entity.getRemaining(),
                 entity.getFrozen(),
-                DbTime.fromDb(entity.getExpiresAt()));
+                DbTime.fromDb(entity.getExpiresAt()),
+                // 取 version 的语句都显式 SELECT 了它；缺列时的 0 只是兜底，
+                // 不会造成「同一批次的两次核销撞同一个幂等键」以外的后果（那也只是漏销一次）
+                entity.getVersion() == null ? 0 : entity.getVersion());
     }
 }

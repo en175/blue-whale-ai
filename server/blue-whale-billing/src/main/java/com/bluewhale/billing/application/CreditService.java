@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 积分账户的写操作入口 —— 预扣 / 结算 / 返还（《计费逻辑详细设计》§4.2 – §4.4）。
+ * 积分账户的写操作入口 —— 预扣 / 结算 / 返还 / 过期核销（《计费逻辑详细设计》§4.2 – §4.4）。
  *
  * <h2>为什么是「预扣」而不是「直接扣」</h2>
  *
@@ -35,7 +35,7 @@ import java.util.Map;
  * 完成时按实际消耗结算，失败时原样解冻。用户只看到一行
  * 「处理中 · 预计消耗 40」变成「已完成 · 消耗 30」。
  *
- * <h2>三个方法都在一个事务里</h2>
+ * <h2>几个方法都在一个事务里</h2>
  *
  * 批次冻结、预留写库、账本记账必须同生共死。任一失败整体回滚——
  * 最怕的中间态是「冻结了但没记账」：钱少了却查不出原因，人工只能猜。
@@ -343,5 +343,69 @@ public class CreditService {
                 .build());
 
         reservations.markReleased(jobId, reason);
+    }
+
+    /**
+     * 核销一条**已到期**批次里的可用余额（《通用积分卡 PRD》§9.5「过期处理」）。
+     *
+     * <p>此前过期只靠查询条件派生：{@code expires_at <= NOW()} 的批次被
+     * {@code lockActiveLots} / {@code sumAvailable} 排除，用户确实用不了了，
+     * 但账上没有任何一处记录它「没了」——余额的可用侧少了、账本的 wallet 没少，
+     * 差额只以「已过期未核销」的形态悬着。本方法就是那个此前空着的落点。
+     *
+     * <h2>金额 = {@code remaining − frozen}，且 frozen 不动</h2>
+     *
+     * <p>预扣锁定中的 frozen **不受过期影响**（§10 决策 7）：在途任务仍要能结算成功
+     * （用户为已经发生的生成付费）。所以只核销可用部分，批次行留着
+     * {@code remaining == frozen} 等它自己去结算或返还。
+     *
+     * <h2>为什么幂等键里带批次版本号，而不是 {@code expire:{lotId}}</h2>
+     *
+     * <p>「一个批次只核销一次」不成立：批次在到期时若有 frozen，核销只带走可用部分；
+     * 那笔预扣之后若**失败返还**，解冻的钱回到可用余额——而它仍然是已过期的积分，
+     * 必须**再核销一次**。用 {@code expire:{lotId}} 做键的话，第二次会被判成重放而静默跳过，
+     * 那笔钱就永远留在批次与账本里（对账恒等式仍然成立，所以没有任何告警会响）。
+     * 版本号每写一次自增一次，是「这是第几次核销」的天然编号。
+     *
+     * <p>幂等键形如 {@code expire:{lotId}:{version}}，读侧的流水投影从行上的科目
+     * 反推分组键，因此每一笔核销都会独立成一行「积分过期」——这不是重复，
+     * 而是两次真实发生过的事件。
+     *
+     * @return 本次核销的积分；无需核销（未到期 / 不存在 / 可核销量为 0 / 已核销过）时返回 0
+     */
+    @Transactional
+    public long expireLot(long lotId) {
+        CreditLotRepository.Lot lot = lots.lockById(lotId);
+        if (lot == null) {
+            return 0;
+        }
+        // 到期才核销。本方法只由过期扫描调用（它已经筛过一遍），但管理端/测试也能直接调，
+        // 少这一道判据就多一条「提前核销」的路径——那等于把用户**还能用**的积分提前作废掉。
+        // 宁可在两处各判一次。
+        if (lot.expiresAt() == null || lot.expiresAt().isAfter(Instant.now())) {
+            return 0;
+        }
+        long amount = lot.available();
+        if (amount <= 0) {
+            // 全部冻着（或已空）。等它结算/解冻之后下一轮再处理——那时版本号已变，
+            // 不会与这一轮撞幂等键。
+            return 0;
+        }
+        String idempotencyKey = "expire:" + lotId + ":" + lot.version();
+        if (ledger.existsByVoucherBase(idempotencyKey)) {
+            return 0;
+        }
+
+        lots.expire(lotId, amount);
+
+        // 复式分录（§3 分录 10）：过期把当初发放时「借 cost / 贷 wallet」记的那一笔**反向**
+        // 冲掉——用户侧的负债消失（借 wallet），平台侧当初确认的成本也一并冲回（贷 cost）。
+        // 不能用 revenue：收入是**被消耗**时才确认的，过期的积分从未被消耗，没有收入可冲。
+        ledger.insert(Voucher.base(idempotencyKey, lot.userId(), BizType.EXPIRE, String.valueOf(lotId))
+                .debit(Account.WALLET, amount, "积分过期核销")
+                .credit(Account.COST, amount, "积分过期核销")
+                .build());
+
+        return amount;
     }
 }

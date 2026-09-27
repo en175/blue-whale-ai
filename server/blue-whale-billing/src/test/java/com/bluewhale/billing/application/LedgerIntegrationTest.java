@@ -67,7 +67,7 @@ class LedgerIntegrationTest {
     private static final Instant SOON = Instant.now().plus(1, ChronoUnit.DAYS);
     /** 30 天后到期。 */
     private static final Instant LATER = Instant.now().plus(30, ChronoUnit.DAYS);
-    /** 早已过期——只有查询条件排除它，没有定时任务清理它。 */
+    /** 早已过期——查询条件排除它；核销任务本类不触发（见 {@link #assertInvariant()}）。 */
     private static final Instant PAST = Instant.now().minus(30, ChronoUnit.DAYS);
 
     @Autowired private JdbcTemplate jdbc;
@@ -126,7 +126,8 @@ class LedgerIntegrationTest {
 
         assertThat(frozenOf(expired)).isZero();
         assertThat(frozenOf(purchased)).isEqualTo(60);
-        // 过期靠 WHERE 排除，不需要（也没有）任何清理任务
+        // 过期靠 WHERE 排除，**不靠删行**（行要留着回答「那 500 分是怎么没的」）；
+        // 核销任务只写分录、不参与扣费路径，所以这里不触发它也照样成立
         assertThat(lots.availableCredits(USER)).isEqualTo(40);
         assertInvariant();
     }
@@ -462,16 +463,21 @@ class LedgerIntegrationTest {
      *
      * <h2>为什么第二行要带上「已过期未核销」</h2>
      *
-     * 批次过期**不是自动的**：过期的批次只是被查询条件排除，它账上的积分
-     * （{@code remaining − frozen}）在**过期核销分录**（§3 分录 10，{@code expire:{lotId}}）
-     * 落库之前，仍然计入账本的 wallet 余额。
-     *
-     * <p>所以真正恒成立的是：
+     * <p>批次的**能不能用**是查询条件派生的（{@code expires_at <= NOW()} 被
+     * {@code lockActiveLots} / {@code sumAvailable} 排除），而它账上的积分
+     * （{@code remaining − frozen}）在核销分录落库之前仍然计入账本 wallet 余额。
+     * 所以恒等式写成：
      * <pre>
      *   wallet == 未过期可用 + 已过期未核销
      * </pre>
-     * 本切片没做核销，等式右边第二项非零——**这个非零值本身就是待办的可见证据**。
-     * 若哪天它不再为 0，说明核销落地了，这条断言要跟着改。
+     *
+     * <p>⚠️ 这一行**在核销落地前后都成立**，两侧是等量减少的：
+     * 核销同时扣 {@code remaining} 与记 {@code 借 wallet / 贷 cost}
+     * （见 {@code CreditExpirySweeper} / {@code CreditService#expireLot}）。
+     * 也是因为这个，本类里的用例不必关心核销任务跑没跑过——
+     * 它只改「待核销」与「wallet」各自的大小，不改它们的**和**。
+     * 本类不主动触发核销：那一路的行为单独由
+     * {@code CreditExpirySweeperIntegrationTest} 覆盖。
      */
     private void assertInvariant() {
         long wallet = ledger.balanceOf(USER, Account.WALLET);

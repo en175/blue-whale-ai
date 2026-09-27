@@ -16,12 +16,17 @@ import java.util.List;
  * 调用方用 {@code LambdaQueryWrapper} 拼条件即可——**这类 SQL 是纯样板**，
  * 手写只会多一处改列名时要同步的地方。
  *
- * <p>下面这五个方法例外，它们各自带着 Wrapper 表达不了的东西，
+ * <p>下面这八个方法例外，它们各自带着 Wrapper 表达不了的东西，
  * 因此语句落在 {@code resources/mapper/CreditLotMapper.xml}：
  * <ul>
  *   <li>{@link #lockActiveLots} —— 四级 ORDER BY（含 {@code expires_at IS NULL} 这种布尔排序）
  *       与 {@code FOR UPDATE} 行锁</li>
  *   <li>{@link #sumAvailable} —— 聚合表达式 {@code SUM(remaining - frozen)}</li>
+ *   <li>{@link #listDueLots} —— 全表范围的 {@code expires_at} 区间扫描 + LIMIT（过期核销用），
+ *       与下面三个「只针对某个用户」的取数不是一回事</li>
+ *   <li>{@link #lockById} —— 按主键读并锁住该行（核销要「读到什么就销掉什么」）</li>
+ *   <li>{@link #expireLot} —— 自引用表达式 {@code remaining = remaining - ?}，
+ *       与下面三个相对更新同类</li>
  *   <li>三个相对更新 —— {@code SET frozen = frozen + ?} 这类**自引用表达式**，
  *       Wrapper 的 set 只能赋常量</li>
  * </ul>
@@ -35,12 +40,43 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
      * <p>三级 tie-break：{@code (expires_at IS NULL)} → {@code expires_at ASC}
      * → {@code source_priority ASC} → {@code id ASC}。
      *
-     * <p>过期批次靠 WHERE 天然排除，不需要定时任务清理。
+     * <p>过期批次靠 WHERE 天然排除，**不靠定时任务删行**（行不删，见 {@link #expireLot}）。
      */
     List<CreditLotEntity> lockActiveLots(@Param("userId") long userId);
 
     /** 可用余额 = Σ(remaining − frozen)，仅计未过期的批次。 */
     long sumAvailable(@Param("userId") long userId);
+
+    /**
+     * 已到期、仍有可核销量的批次（**跨全部用户**，最久到期的在前）。
+     *
+     * <p>它不是「某个用户的余额」类取数，所以不带 userId：核销是平台侧按批次推的
+     * 定时动作，逐用户分片只会把同一件事拆成 N 次全表扫描。
+     *
+     * @param limit 本轮最多取几条（防止一次把积压几年、早已到期的批次全拉进内存）
+     */
+    List<CreditLotEntity> listDueLots(@Param("limit") int limit);
+
+    /**
+     * 按主键读一行并**锁住它**（{@code FOR UPDATE}）。
+     *
+     * <p>核销必须「读到什么就销掉什么」：金额由读到的
+     * {@code remaining − frozen} 算出，读与写之间的任何并发都会让这个差失去意义。
+     *
+     * @return 不存在时 {@code null}
+     */
+    CreditLotEntity lockById(@Param("lotId") long lotId);
+
+    /**
+     * 核销：把 {@code remaining} 减掉已算好的量，**冻结部分原封不动**。
+     *
+     * <p>为什么必须动 {@code remaining} 而不是只写一条账本分录：批次表是余额的唯一权威，
+     * 而每日自检钉的恒等式是 {@code Σ lots.remaining == ledger(wallet) + ledger(frozen)}。
+     * 只销账本不改批次，两边当场差一个「已核销额」——那是最像真事的假警报。
+     *
+     * <p>调用方先按 {@link #lockById} 读到的值算好 {@code amount}，再来这里扣。
+     */
+    int expireLot(@Param("lotId") long lotId, @Param("amount") long amount);
 
     /**
      * 临期批次 —— 前端展示「X 积分将于 Y 日过期」用。

@@ -3,6 +3,7 @@ package com.bluewhale.billing.adapter.inbound.grpc;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.domain.ledger.Account;
 import com.bluewhale.billing.domain.ledger.BizType;
+import com.bluewhale.billing.application.CreditExpirySweeper;
 import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import com.bluewhale.billing.adapter.outbound.persistence.repository.LedgerRepository;
@@ -28,6 +29,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -116,6 +119,7 @@ class ListTransactionsIntegrationTest {
     @Autowired private Server grpcServer;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CreditService credits;
+    @Autowired private CreditExpirySweeper expirySweeper;
     @Autowired private LedgerRepository ledger;
     @Autowired private CatalogHolder catalog;
 
@@ -433,6 +437,30 @@ class ListTransactionsIntegrationTest {
         assertThat(expired.getAmount()).isEqualTo(500);
         assertThat(expired.getStatus()).isEqualTo("done");
         assertThat(expired.getSettledAt()).isNotEmpty();
+    }
+
+    @Test
+    void 过期核销_走真实核销路径_流水里出一行积分过期() {
+        // 上一条用的是手工凭证（钉投影的分组键）；这一条从**核销任务**走一遍，
+        // 钉的是「任务真的写出了能被投影认出来的凭证」——中间任何一环改了键的形态，
+        // 用户就会看不到这行流水，而账上看起来一切正常。
+        long lot = credits.grant(USER, CreditSource.GIFT, 700,
+                Instant.now().minus(1, ChronoUnit.HOURS), "grant", "exp-live", "exp-live");
+
+        CreditExpirySweeper.SweepResult result = expirySweeper.sweepOnce();
+        assertThat(result.expiredCredits()).as("到期的 700 分应被核销").isEqualTo(700);
+
+        List<UserTransaction> items = list("expire", USER).getItemsList();
+
+        assertThat(items).hasSize(1);
+        UserTransaction expired = items.get(0);
+        assertThat(expired.getType()).isEqualTo("expire");
+        assertThat(expired.getTitle()).isEqualTo("积分过期");
+        assertThat(expired.getDirection()).as("过期是用户资产减少").isEqualTo("out");
+        assertThat(expired.getAmount()).isEqualTo(700);
+        assertThat(expired.getId())
+                .as("一凭证一行：键由行上的科目反推（expire:{lotId}:{version}），不是按位置切割")
+                .startsWith("led:expire:" + lot);
     }
 
     // ─────────────────────────────────────────────────────────────

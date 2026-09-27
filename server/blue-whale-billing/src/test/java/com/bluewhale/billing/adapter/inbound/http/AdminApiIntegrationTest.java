@@ -4,6 +4,7 @@ import com.bluewhale.billing.application.BillingApplicationService;
 import com.bluewhale.billing.application.command.HoldCommand;
 import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.application.CreditService;
+import com.bluewhale.billing.domain.DbTime;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -188,8 +189,37 @@ class AdminApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableCredits").value(1000))
                 .andExpect(jsonPath("$.frozenCredits").value(0))
-                // 充值本金永久，不出现在临期列表里
+                // 本金有效期 2 年 ≫ 临期窗口（31 天），所以不出现在临期列表里。
+                // ⚠️ 这条断言证明的是「窗口远小于有效期」，不是「本金没有有效期」——
+                //    后者由下面那条用例直接读 expires_at 钉住。
                 .andExpect(jsonPath("$.expiring").isEmpty());
+    }
+
+    @Test
+    void 充值本金_按两年策略带有效期_而不是永久() throws Exception {
+        mvc.perform(post("/admin/credits/grants")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":9311,"source":"purchased","amount":1000,"bizId":"exp-1"}
+                                """))
+                .andExpect(status().isOk());
+
+        // 有效期由 GrantPolicy 决定，不由调用方传 —— 入口只该关心「发什么、发多少」。
+        // ★ 这条用例的存在理由：本金此前是**永久**（expires_at 为 NULL），
+        //   改成 2 年之后，任何一处「忘了让本金带上有效期」（比如某个调用点自己
+        //   传了 expiresAt=null 覆盖策略）都会在这里当场红。
+        java.sql.Timestamp expiresAt = jdbc.queryForObject(
+                "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9311",
+                java.sql.Timestamp.class);
+        assertThat(expiresAt).as("本金批次必须带有效期（永久 = expires_at 为 NULL）").isNotNull();
+        // 按**日历年**算：自支付成功时刻起 2 年后的同一时刻。
+        // 用 DbTime.ZONE 而不是自己写 "Asia/Shanghai"：时区口径全模块只有那一处，
+        // 测试自己写一份就等于放了一份会分叉的第二实现进来。
+        // 容差 1 分钟：夹具与断言之间隔着一次 HTTP 往返，秒级差异是正常的
+        Instant expected = Instant.now().atZone(DbTime.ZONE).plusYears(2).toInstant();
+        assertThat(expiresAt.toInstant())
+                .as("到期时刻应≈2 年后（日历口径，不是 730 天）")
+                .isBetween(expected.minusSeconds(60), expected.plusSeconds(60));
     }
 
     @Test

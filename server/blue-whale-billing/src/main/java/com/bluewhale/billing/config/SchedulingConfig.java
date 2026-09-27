@@ -4,7 +4,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * 定时任务的装配（目前只有对账的两条：{@code ReservationSweeper} / {@code LedgerSelfCheck}）。
+ * 定时任务的装配（目前三条：{@code ReservationSweeper} / {@code LedgerSelfCheck} /
+ * {@code CreditExpirySweeper}）。
  *
  * <h2>为什么 {@code @EnableScheduling} 单独一个类，而不是挂在启动类上</h2>
  *
