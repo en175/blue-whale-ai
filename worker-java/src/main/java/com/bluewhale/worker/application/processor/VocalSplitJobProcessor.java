@@ -7,11 +7,13 @@ import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto.PublishVocalSplitTrackDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient.SeparateVoiceTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -143,9 +145,15 @@ public class VocalSplitJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "人声背景分离失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[vocal_split] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failVocalSplit(claim, code, message);
+            failVocalSplit(claim, code, message, httpStatus);
         }
     }
 
@@ -289,9 +297,15 @@ public class VocalSplitJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
                     log.warn("[vocal_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
-                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED,
-                            "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
+                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED, message, httpStatus);
                     return;
                 }
                 log.warn("[vocal_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
@@ -511,9 +525,20 @@ public class VocalSplitJobProcessor implements JobProcessor {
      *  轮询型任务语义完备；details.raw 透传原始原因——跨工具复用同款守卫，video_enhance
      *  复用 failVideoJob 同例）。 */
     private void failVocalSplit(ClaimedVocalSplitJobDto claim, String code, String message) {
+        failVocalSplit(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failVocalSplit(ClaimedVocalSplitJobDto claim, String code, String message,
+                                Integer httpStatus) {
         log.warn("vocal_split job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVocalSplitJob(new FailMediaExtractDto(
                 claim.id(),
                 claim.workerId(),

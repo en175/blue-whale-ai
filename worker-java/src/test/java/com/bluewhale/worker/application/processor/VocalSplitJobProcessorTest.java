@@ -314,6 +314,33 @@ class VocalSplitJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input("audio"));
+        stubSourceAsset("video");
+        VocalSplitError unauthorized = new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
+                "人声背景分离任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
+                .thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "人声背景分离任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89R / ADR-0114；平移家族定型票先例）==========
 
     @Test
@@ -575,12 +602,14 @@ class VocalSplitJobProcessorTest {
                 .isEqualTo("人声背景分离轮询超时（超过 "
                         + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
         VocalSplitError gatewayBusy = new VocalSplitError(
@@ -590,7 +619,22 @@ class VocalSplitJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        ArgumentCaptor<FailMediaExtractDto> gatewayCaptor =
+                ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
+        assertThat(gatewayCaptor.getValue().message())
+                .isEqualTo("人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

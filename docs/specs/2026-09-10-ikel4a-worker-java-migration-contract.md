@@ -581,3 +581,38 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - Worker 以冻结顺序提交 `POST /v1/mediakit/mix-audio`：`{"model":"mediakit-mix-audio","audio_urls":["https://.../a.mp3","https://.../b.mp3"],"format":"mp3"}`。出站键恒为 **`format`**，不是 `output_format`。提交成功取 `task_id` 持久化，查询 `GET /v1/mediakit/tasks/{task_id}`；提交同步失败即使有 `request_id` 而无 `task_id` 也须将 `request_id` 留在错误中，不得进入轮询。
 - 查询 `status=completed` 时读取 `result.audio_url` 与 `result.duration`（秒）；结果 URL 先安全下载并转存我方 TOS、设置公开 ACL，再创建 Asset、以 `round(duration * 1000)` 写 `duration_ms`、发布终态。临时供应商 URL 不写成长期资产。验收须对 Asset URL 做实际 GET 并核验媒体字节；失败保留上游可读原因与 `request_id`。
 - 现有 1 GiB 内存式音频转存上限及 RecoveryService 全局 2 小时扫描窗口仍是上线前容量/长任务验收项，由 IKI696 制定扩容与超时/退避口径；本节不改全局策略。
+
+## 20. 冻结增量（2026-09-26，IKIMN8）：`error.details.http_status` 键名双端单源与适用家族
+
+生成任务失败详情键 `http_status` 由 audio_mix 专属（IKIHGQ / §19）提升为全族共享契约；本节冻结键名、单源落点、写入/读取方与缺省语义。适用家族的实际写入接入已由 IKIMN8 子卡（IKIMS2–IKIMS5）全部落地，IKIMS6 收口音频混合并记录双端对账结论（§20.5）。
+
+### 20.1 键名与单源落点
+
+- 键名冻结为 **`http_status`**（JSON 传输 snake_case），值 = 上游网关响应的数值 HTTP 状态码（整数），写入 `generation_jobs.error.details`。
+- **worker-java 唯一来源**：`worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS`（全族共享契约类）；audio_mix 先行的 `AudioMixContract.ERROR_DETAIL_HTTP_STATUS` 定义已删除并改引用本类。
+- **backend 唯一来源**：`backend/libs/contracts/error-codes.ts` 的 `GENERATION_ERROR_DETAIL_HTTP_STATUS`（与生成域错误码同文件，经 `contracts/index.ts` re-export）；audio_mix 先行的 `audio-mix.ts` 定义已删除并改引用。双端禁止在别处发明 `"http_status"` 字面量。
+
+### 20.2 写入方 / 读取方 / 缺省语义
+
+- **写入方**：worker-java 各族 processor 失败路径——失败异常链带 `NewApiVideoClient.HttpStatusException` cause（上游非 2xx）时写入数值状态；**其余情况不写该键**（网络超时、连接失败、2xx 业务信封失败、上游任务 failed 观察分支均无 cause 可读）。11 族写入已全部落地（IKIHGQ 先行 audio_mix，IKIMS2–IKIMS5 补齐其余 10 族）；解析统一走共享函数 `NewApiHttpSupport.upstreamHttpStatus`（沿 cause 链取状态，audio_mix 的内联实现已收口删除）。写入结构化状态时生产文案同步净化：message 只剥网关文案的「`: HTTP <code>`」片段（上游原因 / body / request_id 等排查信息原样保留），状态码字样不再与新文案耦合。瞬时轮询错误且预算耗尽的内层失败分支（异步 MediaKit 九族 poll + 视频生成 poll 的「轮询超时，上游持续错误」终态）与常规失败路径**同一透传口径**——有 cause 即写键并净化文案对应片段，无 cause 不写键、文案不动；此前为审查遗漏，IKIN6H 修订补齐（§20.6）。
+- **读取方**：backend 重试换凭证判定（先例 `audio-mixes.service.ts` `isUpstreamUnauthorized`，当前唯一读取方）——`details.http_status` 为数值时以其为准（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；无数值状态时回退 `error.message` 文案正则 `/\bHTTP 401\b/`（仅旧任务数据兼容）。
+- **缺省语义**：键不存在 = **没有可用的结构化 HTTP 状态**（非 HTTP 失败、链上无状态 cause 或旧数据），读取方不得把缺键解释为任何状态值，也不得据此跨家族判断上游是否发生 HTTP 失败——视频生成 submit 链（§20.3 冻结口径：HTTP 失败不挂 cause，同样缺键）与 §20.4 缺省 6 族的 HTTP 失败均属既定例外；音频混合对旧任务数据的 message 文案正则兜底行为不变。
+
+### 20.3 适用家族清单（11 族）
+
+音频混合 `audio_mix`、音频变速 `audio_speed`、音频裁剪 `audio_trim`、人声分离 `vocal_split`、音频提取 `media_extract`、画质增强 `video_enhance`、视频插帧 `video_frame_interpolation`、视频抠像 `video_matting`、场景分割 `video_scene_split`、字幕擦除 `video_subtitle_erase`，以及视频生成 `video`（11 族写入均已落地）。各族网关链（异步 MediaKit 模板 submit/poll、`NewApiVideoClient` poll）均带 `HttpStatusException` cause；唯视频生成 submit 链不带 cause（`NewApiVideoClient.submit` 非 2xx 只构造 message）——IKIMS5 已冻结口径：不为 submit 补挂 cause（网关异常形态不变），该路径缺键 = 无状态可读，透传覆盖 poll 链（401 换凭证判定的轮询重现场）。
+
+### 20.4 缺省家族清单（6 族，不透传）
+
+图片抠图 `image_cutout`、图片擦除 `image_erase`、图片扩图 `image_outpaint`、图片高清放大 `image_enhance`、图片生成 `image`、音频生成 `audio`。缺省原因 = 网关异常链不带 `HttpStatusException` cause（同步模板 `NewApiMediaKitSyncClient` 非 2xx 只构造 message 不挂 cause；`NewApiImageClient` / `NewApiAudioClient` 全链无 initCause）——worker 无状态可写，是契约口径而非遗漏，不为其补透传。
+
+### 20.5 双端对账结论（2026-09-26，IKIMS6 收口）
+
+- **worker 写入方**：11 族全部落地——audio_mix（IKIHGQ 先行，IKIMS6 收口文案净化与共享解析函数）+ IKIMS2（media_extract + `NewApiHttpSupport.upstreamHttpStatus` 共享函数）+ IKIMS3/4（异步 MediaKit 八族）+ IKIMS5（video，poll 链）。各族写入语义一致：有状态 cause → `details.http_status` 数值 + message 剥「`: HTTP <code>`」片段；无 cause → 不写键、文案不动。
+- **backend 读取方**：当前唯一读取方 = 音频混合重试换凭证判定（`audio-mixes.service.ts` `isUpstreamUnauthorized`，结构化优先）。其余 10 族 backend 暂无读取方——写入先行属预期，后续各族重试/换凭证能力接入时直接消费 §20.1 双端常量，不再新建键名。
+- **缺省 6 族**：零透传、实现零改动（`git diff cf3f61a20…HEAD` 核验 6 个 processor 路径无变更，见 IKIMS6 交付记录）；未来若同步网关补挂 cause，须先回本节修订清单再实施。
+
+### 20.6 冻结增量（2026-09-26，IKIN6H）：轮询预算耗尽分支透传与缺键定义校正
+
+- 10 族（异步 MediaKit 九族 poll + 视频生成 poll）「瞬时轮询错误且预算耗尽」内层失败分支纳入 §20.2 透传口径：有状态 cause 即写 `details.http_status` 并剥 message 的「`: HTTP <code>`」片段（与顶层 catch 同款），无 cause 不写键、文案不动——此前该分支直接写终态绕过状态解析，属审查遗漏（音频四族 IKIN6W 落地，视频五族与视频生成见同批子卡）。
+- §20.2 缺键定义校正为「没有可用的结构化 HTTP 状态」：不得据此跨家族判断上游是否发生 HTTP 失败；视频生成 submit 链与 §20.4 缺省 6 族的 HTTP 失败同样缺键属既定例外。

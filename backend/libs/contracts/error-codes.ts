@@ -119,6 +119,13 @@ export const ERROR_EXTRACT_FAILED = "extract_failed";
 export const ERROR_UPLOAD_FAILED = "upload_failed";
 export const ERROR_ENQUEUE_FAILED = "enqueue_failed";
 
+/** 任务失败 error.details 的上游 HTTP 状态键（IKIHGQ 起源于 audio_mix，IKIMN8 全族收口）：
+ *  worker 在上游非 2xx（失败异常链带 HttpStatusException cause）时写入数值状态，非 HTTP 失败
+ *  不写该键；重试换凭证判定读它（401 = 当前凭证失效，重试替换为请求头带来的新凭证），
+ *  message 文案正则仅作旧任务数据兼容。适用/缺省家族清单见迁移契约 §20；
+ *  与 worker-java GenerationErrorDetailContract 对齐。 */
+export const GENERATION_ERROR_DETAIL_HTTP_STATUS = "http_status";
+
 /** HTTP 限流（IKDPHS）：NewApiError 第三参；过滤器按 status=429 透传。 */
 export const RATE_LIMITED = "rate_limited";
 

@@ -314,6 +314,33 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        AudioTrimError unauthorized = new AudioTrimError(GenerationError.ERROR_PROVIDER_FAILED,
+                "音频截取任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(trimAudioClient.submit(anyString(), anyString(), any(), any(), anyString()))
+                .thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
+        verify(stateMachine).failAudioTrimJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailAudioTrimDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "音频截取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89Q / ADR-0114；平移 IKI89P 定型用例）==========
 
     @Test
@@ -574,12 +601,14 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .isEqualTo("音频截取轮询超时（超过 "
                         + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
                         + " 次），上游持续错误: MediaKit 音频截取任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1048（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1048 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input(), AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS, 7);
         AudioTrimError gatewayBusy = new AudioTrimError(
@@ -589,7 +618,22 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> gatewayCaptor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
+        verify(stateMachine).failAudioTrimJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
+        assertThat(gatewayCaptor.getValue().message())
+                .isEqualTo("音频截取轮询超时（超过 "
+                        + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
+                        + " 次），上游持续错误: MediaKit 音频截取任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "音频截取轮询超时（超过 "
+                        + AudioTrimJobProcessor.MAX_AUDIO_TRIM_POLLS
+                        + " 次），上游持续错误: MediaKit 音频截取任务查询失败:");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }

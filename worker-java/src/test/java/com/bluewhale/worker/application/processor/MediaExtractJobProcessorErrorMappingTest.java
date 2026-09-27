@@ -535,12 +535,14 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .isEqualTo("音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
                         + " 次），上游持续错误: MediaKit 音频提取任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1044（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1044 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input(), MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS, 7);
         MediaExtractError gatewayBusy = new MediaExtractError(
@@ -550,7 +552,22 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> gatewayCaptor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
+        assertThat(gatewayCaptor.getValue().message())
+                .isEqualTo("音频提取轮询超时（超过 "
+                        + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
+                        + " 次），上游持续错误: MediaKit 音频提取任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "音频提取轮询超时（超过 "
+                        + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
+                        + " 次），上游持续错误: MediaKit 音频提取任务查询失败:");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -583,6 +600,76 @@ class MediaExtractJobProcessorErrorMappingTest {
         processor.handle("100");
 
         assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS2；对齐音频混合 IKIHGQ 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        MediaExtractError unauthorized = new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
+                "音频提取任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(extractAudioClient.submit(anyString(), anyString(), anyString())).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "音频提取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input(), 3, 7);
+        MediaExtractError unauthorized = new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 音频提取任务查询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}"
+                        + " request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(extractAudioClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        assertThat(failure.message()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(failure.details())
+                .containsEntry("raw", "MediaKit 音频提取任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("submit 超时（非 HTTP 失败，链上无状态 cause）→ details 不写 http_status 键")
+    void submitTimeout_noHttpStatusDetailKey() {
+        stubSubmitClaim(input());
+        stubSourceAsset();
+        when(extractAudioClient.submit(anyString(), anyString(), anyString()))
+                .thenThrow(new MediaExtractError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 音频提取提交超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        // 反例钉住缺键语义：非 HTTP 失败（超时/连接失败/业务异常）不写 http_status，只留 raw
+        assertThat(failure.details()).doesNotContainKey("http_status").containsKey("raw");
     }
 
     // ========== poll 相：火山任务 failed（§18.4 第二类映射） ==========

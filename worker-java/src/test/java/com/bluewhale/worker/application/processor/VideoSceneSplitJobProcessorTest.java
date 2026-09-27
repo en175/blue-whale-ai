@@ -582,7 +582,7 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1046 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1046 轮询超时文案不变 + 不写 http_status（无 cause 不推断，IKIN6X）")
     void pollTransientErrorAtLimit_fails() {
         stubPollClaim(input("standard"), VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
@@ -591,17 +591,20 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
         verify(stateMachine).failVideoJob(eq("100"),
                 eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
                 eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
                         + " 次），上游持续错误: MediaKit 场景切分任务查询超时"),
-                any(), eq("worker-1"), eq(5L));
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1046（瞬时错误各形态同受上限约束）")
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1046 + details.http_status=503，message 剥状态码字样（IKIN6X）")
     void pollTransientHttp503AtLimit_fails() {
         stubPollClaim(input("standard"), VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS);
         VideoSceneSplitError gatewayBusy = new VideoSceneSplitError(
@@ -611,7 +614,19 @@ class VideoSceneSplitJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED);
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
+        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("503")
+                .isEqualTo("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 场景切分任务查询失败:");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 503);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -674,6 +689,34 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input("standard"), 3);
+        VideoSceneSplitError unauthorized = new VideoSceneSplitError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 场景切分任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 场景切分任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     // ========== poll 相：completed → 逐段转存 + 终态发布（链接 24h 有效） ==========

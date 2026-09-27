@@ -5,11 +5,13 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSubtitleEraseError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSubtitleEraseClient.SubtitleEraseTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -139,9 +141,15 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频去字幕失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS4），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_subtitle_erase] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -262,9 +270,17 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
                 if (claim.pollCount() >= MAX_SUBTITLE_ERASE_POLLS) {
                     log.warn("[video_subtitle_erase] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
                             claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段（上游原因保留），无 cause 不写键。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "去字幕轮询超时（超过 " + MAX_SUBTITLE_ERASE_POLLS
+                            + " 次），上游持续错误: " + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
                     failClaimed(claim, VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED,
-                            "去字幕轮询超时（超过 " + MAX_SUBTITLE_ERASE_POLLS + " 次），上游持续错误: "
-                                    + pollError.getMessage());
+                            message, httpStatus);
                     return;
                 }
                 log.warn("[video_subtitle_erase] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
@@ -466,9 +482,22 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  去字幕无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
     private void failClaimed(ClaimedVideoSubtitleEraseJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
+     *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
+     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
+     *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
+     *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
+    private void failClaimed(ClaimedVideoSubtitleEraseJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_subtitle_erase job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
