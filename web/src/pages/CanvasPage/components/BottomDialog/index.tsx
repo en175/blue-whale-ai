@@ -697,7 +697,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   /** 当前模式下有效的参考（帧、普通素材与文本）；过滤统一由菜单完成。 */
   const mentionItems = useMemo(() => {
-    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text'; textPreview?: string }> = [];
+    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text'; searchText?: string }> = [];
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
       if (!item) continue;
       const id = refIdOf(item);
@@ -709,7 +709,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     // IKIQGR：带正文全文，无标题文本附件可按内容检索（不截断，忽略大小写）
     for (let i = 0; i < (attachments ?? []).length; i += 1) {
       const a = attachments![i]!;
-      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', textPreview: a.text });
+      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', searchText: a.text });
     }
     return out;
   }, [videoMediaRefs, attachments, reconcileKey]);
@@ -870,7 +870,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             editorQuery={mention.query}
             referencedItems={mentionItems.map(r => ({
               id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
-              kind: r.mediaType, badge: r.badge, textPreview: r.textPreview,
+              kind: r.mediaType, badge: r.badge, searchText: r.searchText,
             }))}
             onSelectReferenced={(item) => pickMentionRef(item.id)}
             onSelect={(item) => {

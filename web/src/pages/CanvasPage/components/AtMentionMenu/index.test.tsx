@@ -62,8 +62,8 @@ it('统一搜索保留跨分区重复项、类型分组及禁用状态，点击�
 it('IKIPWV：无标题文本附件按正文关键词命中，既有标题/编号匹配不变', async () => {
   await render({ referencedItems: [
     { ...image, badge: '图片1' },
-    { id: 'ta1', kind: 'text', name: '', badge: '文本1', textPreview: '深海之下，一只蓝鲸缓缓游过，尾鳍轻摆' },
-    { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', textPreview: '开场：城市夜景空镜' },
+    { id: 'ta1', kind: 'text', name: '', badge: '文本1', searchText: '深海之下，一只蓝鲸缓缓游过，尾鳍轻摆' },
+    { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', searchText: '开场：城市夜景空镜' },
   ] });
   const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
   const search = (text: string) => act(async () => {
@@ -94,7 +94,7 @@ const LONG_BODY = `${'雾'.repeat(220)}OceanWhale ${LONG_BODY_TAIL}`;
 it('IKIQGR：已引用文本附件按全文检索——超过前 200 字的尾段命中且忽略大小写，行内不展示正文片段', async () => {
   await render({ referencedItems: [
     { ...image, badge: '图片1' },
-    { id: 'ta-long', kind: 'text', name: '', badge: '文本1', textPreview: LONG_BODY },
+    { id: 'ta-long', kind: 'text', name: '', badge: '文本1', searchText: LONG_BODY },
   ] });
   const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
   const search = (text: string) => act(async () => {

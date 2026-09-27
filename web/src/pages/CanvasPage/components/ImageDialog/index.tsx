@@ -418,10 +418,10 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
    *  IKIQGR：文本附件带正文全文，@ 检索按内容命中（不截断，忽略大小写） */
   const replaceItems: Array<{
     assetId: string; url: string; name: string; badge: string;
-    mediaType: 'image' | 'text'; textPreview?: string;
+    mediaType: 'image' | 'text'; searchText?: string;
   }> = [
     ...orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
-    ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const, textPreview: a.text })),
+    ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const, searchText: a.text })),
   ];
   /** IKFXOR：Esc 取消（restoreFocus=true）把光标落回 @ 后并还焦编辑器；点外关闭维持现状不抢焦 */
   const closeMention = (restoreFocus = false) => {
@@ -601,7 +601,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
             editorQuery={mention.query}
             referencedItems={replaceItems.map(r => ({
               id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
-              kind: r.mediaType, badge: r.badge, textPreview: r.textPreview,
+              kind: r.mediaType, badge: r.badge, searchText: r.searchText,
             }))}
             onSelectReferenced={(item) => pickMentionRef(item.id)}
             disabledKinds={['audio']}
