@@ -71,7 +71,7 @@ import {
   supportsVideoReferenceOf,
   checkReferenceLimits,
 } from '@/lib/model-reference-limits';
-import AtMentionMenu, { MENTION_TEXT_PREVIEW_CHARS } from '../AtMentionMenu';
+import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import {
   VIDEO_FOLLOW_MODE_LABEL,
@@ -706,10 +706,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       out.push({ assetId: id, url: item.url, name: item.name, badge, mediaType: item.mediaType });
     }
     // IKFA1P：文本附件项（编号跟附件顺序，与服务端 text_attachments 同源）；
-    // IKIPWV：带正文摘要（截断一次），无标题文本附件可按内容检索
+    // IKIQGR：带正文全文，无标题文本附件可按内容检索（不截断，忽略大小写）
     for (let i = 0; i < (attachments ?? []).length; i += 1) {
       const a = attachments![i]!;
-      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', textPreview: a.text.slice(0, MENTION_TEXT_PREVIEW_CHARS) });
+      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text', textPreview: a.text });
     }
     return out;
   }, [videoMediaRefs, attachments, reconcileKey]);

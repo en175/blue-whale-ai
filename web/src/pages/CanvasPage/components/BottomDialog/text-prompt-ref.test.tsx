@@ -147,6 +147,25 @@ describe('IKFA1P 生视频文本附件索引（A2 文本部分）', () => {
     expect(sendButton().disabled).toBe(false);
   });
 
+  it('IKIQGR：@ 查询命中长正文尾段（超过前 200 字）的文本附件，选择后插入 文本N 标签', async () => {
+    const ATT_LONG: ImageTextAttachment = {
+      nodeId: 'text-long',
+      title: '观浪笔记',
+      text: `${'浪'.repeat(260)}OceanWhale 深海观测日志`,
+    };
+    await renderDialog({ attachments: [ATT_STYLE, ATT_LONG] });
+    await typePromptRefRaw(container, '结合@深海观测');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const items = mentionMenuItems();
+    expect(items.map((b) => b.textContent)).toEqual(['观浪笔记文本2']);
+    // 菜单行不展示正文片段
+    expect(items[0]!.textContent).not.toContain('深海观测');
+    await act(async () => {
+      items[0]!.click();
+    });
+    expect(readPromptRefText(container)).toBe('结合文本2');
+  });
+
   it('媒体与文本混排正文发送携带 prompt_doc：text_ref 与 asset_ref 片段原样上送（D5 文本）', async () => {
     const { onSend } = await renderDialog({
       videoMediaRefs: { reference: [IMG_A] },

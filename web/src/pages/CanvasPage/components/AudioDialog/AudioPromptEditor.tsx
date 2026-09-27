@@ -76,7 +76,8 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
         thumbUrl: r.src,
         assetId: String(r.assetId),
       })),
-      ...attachments.map(a => ({ id: a.nodeId, kind: 'text' as const, name: a.title })),
+      // IKIQGR：文本附件带正文全文（searchText），与画布分区同一过滤谓词命中；媒体项不带
+      ...attachments.map(a => ({ id: a.nodeId, kind: 'text' as const, name: a.title, searchText: a.text })),
     ];
     return [...selected, ...mentionItems.filter(item => !selected.some(s => s.kind === item.kind && s.id === item.id))];
   }, [refs, attachments, mentionItems]);

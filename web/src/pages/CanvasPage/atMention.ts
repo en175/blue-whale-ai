@@ -15,6 +15,8 @@ export interface AtMentionItem {
   assetId?: string;
   /** 能力失效（如合规未通过）时置灰不可选 */
   disabled?: boolean;
+  /** 文本节点正文全文（IKIQGR）：仅文本类候选携带，@ 检索按正文命中；媒体项不带、不按正文误命中 */
+  searchText?: string;
 }
 
 /** 画布来源参考音频 → @ 菜单同形态素材项（IKFCKS：缩略图 @ 与手动 @ 选择走同一
@@ -60,9 +62,10 @@ export function stripTrailingAtQuery(text: string): string {
   return text.replace(AT_QUERY_RE, '');
 }
 
-/** 按名称模糊过滤（忽略大小写） */
+/** 按名称或文本正文全文模糊过滤（忽略大小写；正文仅文本类候选携带，IKIQGR） */
 export function filterAtMentionItems(items: AtMentionItem[], query: string): AtMentionItem[] {
   const q = query.trim().toLowerCase();
   if (!q) return items;
-  return items.filter((item) => item.name.toLowerCase().includes(q));
+  return items.filter((item) => item.name.toLowerCase().includes(q)
+    || (item.searchText?.toLowerCase().includes(q) ?? false));
 }

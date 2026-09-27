@@ -692,6 +692,45 @@ describe('IKFCKN 文本附件进参考栏', () => {
   });
 });
 
+/* IKIQGR：文本附件 @ 检索按正文全文命中（>200 字尾段、忽略大小写），选择后产出 text_ref 标签 */
+describe('IKIQGR 文本附件全文检索', () => {
+  const ATT_PLAIN: ImageTextAttachment = { nodeId: 'text-plain', title: '风格要求', text: '胶片感' };
+  const ATT_LONG: ImageTextAttachment = {
+    nodeId: 'text-long',
+    title: '观浪笔记',
+    text: `${'浪'.repeat(260)}OceanWhale 深海观测日志`,
+  };
+
+  it('@ 查询命中长正文尾段：菜单出现该已引用项，选择后原位替换查询并绑定 text_ref', async () => {
+    const { onParamsChange } = await renderDialog({ attachments: [ATT_PLAIN, ATT_LONG] });
+    await typePromptRefRaw(container, '结合@深海观测');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const rows = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('文本2');
+    // 菜单不展示正文片段：行内只有名称与编号
+    expect(rows[0].textContent).not.toContain('深海观测');
+    await act(async () => {
+      rows[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('结合文本2');
+    const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
+    expect(patch.promptDoc.segments).toEqual([
+      { kind: 'text', text: '结合' },
+      { kind: 'text_ref', node_id: 'text-long', label: '文本2' },
+    ]);
+  });
+
+  it('正文匹配忽略大小写：大写查询命中正文中的混合大小写关键词', async () => {
+    await renderDialog({ attachments: [ATT_LONG] });
+    await typePromptRefRaw(container, '@OCEANWHALE');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const rows = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('文本1');
+  });
+});
+
 /* IKFCKK：附件条共享缩略图集成——× 走既有断开连线链路、@ 与手动 @ 选择产出同一素材标签 */
 describe('IKFCKK 附件条三态集成', () => {
   it('点击 × 立即删除：仅断开当前引用（onRemoveMediaRef 携带来源节点），无确认弹窗', async () => {
