@@ -279,10 +279,16 @@ export class GenerationJobsController {
     @Param("projectId") projectId: string,
     @Param("jobId") jobId: string,
   ) {
-    return handleCancelGenerationJob(user.userId, projectId, jobId, {
+    const result = await handleCancelGenerationJob(user.userId, projectId, jobId, {
       projects: this.project,
       command: this.command.repo,
     });
+    // IKIPWT：与 create（IKG57P）同款口径——业务失败走 AllExceptionsFilter 统一投影，
+    // 不让 fail() 信封透传成 HTTP 201。
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
+    }
+    return result;
   }
 
   @Post(":jobId/retry")
@@ -340,6 +346,11 @@ export class GenerationJobsController {
             .catch(() => {});
         }
       }
+    }
+    // IKIPWT：与 create（IKG57P）同款口径——业务失败走 AllExceptionsFilter 统一投影，
+    // 不让 fail() 信封透传成 HTTP 201。
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
     }
     return result;
   }
