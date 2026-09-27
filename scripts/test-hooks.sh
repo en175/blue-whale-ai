@@ -2760,7 +2760,7 @@ assert_file_has_text "scripts/start-task-worktree.py" 'with release_line_lock(ro
 assert_file_has_text "scripts/start-task-worktree.py" 'synced = sync_current_release(root)' "workflow: 开工前同步活动发布线"
 assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, synced["sha"]' "workflow: worktree 基于同步后的精确 SHA"
 assert_file_has_text "scripts/start-task-worktree.py" 'write_task_metadata(target, synced["branch"], synced["sha"],' "workflow: 开工后记录目标发布线与起点"
-assert_file_has_text "AGENTS.md" '`CLAUDE.md` 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
+assert_file_has_text "AGENTS.md" '@CLAUDE.md 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/check-hook-closed-loop.py" "workflow: 新人路径包含三端闭环检查"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/query-hook-audit.py" "workflow: 新人路径包含审计查询入口"
 assert_file_has_text "docs/agents/hooks/README.md" "未进入仓库 Hook 执行链" "workflow: 新人路径包含缺失调用标识诊断"

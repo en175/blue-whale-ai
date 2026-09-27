@@ -17,7 +17,7 @@
 
 ## Gitee ID 兜底常量
 
-本仓固定 ID（长期稳定，模型可直接用；碰到 401 或疑似变更时以 `list` API 为准，校验走 `scripts/gitee-resolve-ids.sh`）：
+本仓日常可直接使用下表 ID。遇到 401 或疑似变更，先按 `docs/agents/issue-tracker.md`「ID 解析约定」核对 token，再用 `list` API 核对 ID；`scripts/gitee-resolve-ids.sh` 可识别 URL 路由 ID：
 
 | ID | 值 | 含义 | 动态查法 |
 | --- | --- | --- | --- |
