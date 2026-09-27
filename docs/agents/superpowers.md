@@ -63,9 +63,22 @@ Codex 已通过官方插件市场安装并启用（`~/.codex/config.toml` → `[
 
 ### `.claude/skills/` 与 `.zcode/skills/` 物理一致
 
-两端目录 = 2 个 superpowers（本文件）+ mattpocock 全量。mattpocock skill 的权威源是 `.claude/skills/`（已含 Gitee 适配，git 跟踪、团队共享），需同步到 `.zcode/skills/` 以保证 ZCode 客户端可发现——`.agents/skills/` 被 `.gitignore` 忽略、仅为本地副本。注意：Kimi Code 实际从 `.agents/skills/` 发现技能（2026-09-26 实证），且无同步脚本覆盖——修改技能后除同步 `.zcode/skills/` 外，还要把变更文件复制到各现存 worktree 的 `.agents/skills/` 副本（新 worktree 无 `.agents/`，不受影响）。
+mattpocock skill 的权威源是 `.claude/skills/`，团队副本位于 `.zcode/skills/`。Codex 和 Kimi Code 从项目 `.agents/skills/` 发现技能，Qoder 从 `.qoder/skills/` 发现技能。这两个目录保持 Git 忽略，不写入用户全局技能目录。其他 mattpocock 技能仍需按使用端手动同步完整目录。
 
-> 维护提示：新增或修改 mattpocock skill 后，需手动同步 `.claude/skills/` → `.zcode/skills/`（本仓库尚无 mattpocock 专用同步脚本，不像 superpowers 有 `sync-superpowers-skills.sh`）。
+### implement-spec 的五端同步
+
+修改 `.claude/skills/implement-spec/` 后，在当前任务 worktree 执行：
+
+```bash
+python3 scripts/sync-implement-spec-skill.py
+python3 scripts/sync-implement-spec-skill.py --check
+```
+
+入口只同步 `implement-spec`，包含 `SKILL.md`、`references/` 和 `agents/openai.yaml`。目标为 `.zcode/skills/implement-spec/`、`.agents/skills/implement-spec/` 和 `.qoder/skills/implement-spec/`。已有 `.kimi-code/skills/implement-spec/` 时也同步该副本，避免 Kimi 优先读取旧内容。`--dry-run` 只列差异，`--check` 在缺失或内容不一致时返回非零。目标中的额外文件或符号链接须先核查，入口保留它们并停止，不删除未知内容。
+
+新建 worktree 后，需要使用本技能的 Codex、Kimi Code、Qoder 客户端先在该 worktree 运行同步入口。修改合入发布线后，再在需要使用技能的其他 worktree 同步各自已检出的版本；不将尚未合入的技能复制到发布线工作树。此入口不自动遍历其他工作树，也不调用模型或发布 PR。
+
+客户端发现目录的依据见 [Codex 技能文档](https://developers.openai.com/codex/skills)、[Kimi Code 技能文档](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html) 和 [Qoder 技能文档](https://docs.qoder.com/cli/Skills)。同步后核对各客户端的技能列表、来源路径及显式调用设置；复制成功本身不证明客户端已加载。已有会话未刷新时新建会话或重启客户端。五端读取相同的英文正文，客户端特有的调用限制由原有 frontmatter 和 `agents/openai.yaml` 保留。
 
 ## 维护契约
 

@@ -370,7 +370,8 @@ test("classifies the release sync entrypoints as control-plane at both stages", 
   for (const stage of ["completion", "pr"]) {
     assert.deepEqual(
       classifyChanges(["scripts/sync-release-line.py", "scripts/sync-release-line.sh",
-        "scripts/merge-implement-spec-child.py", "scripts/cleanup-implement-spec-child.py"], { stage }),
+        "scripts/merge-implement-spec-child.py", "scripts/cleanup-implement-spec-child.py",
+        "scripts/sync-implement-spec-skill.py"], { stage }),
       { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
     );
   }
@@ -512,6 +513,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_sync_release_line",
       "scripts.tests.test_cleanup_task_worktree",
       "scripts.tests.test_implement_spec_child_merge",
+      "scripts.tests.test_sync_implement_spec_skill",
       "scripts.tests.test_release_task_workflow",
     ],
   ]);
@@ -538,6 +540,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "scripts.tests.test_sync_release_line",
       "scripts.tests.test_cleanup_task_worktree",
       "scripts.tests.test_implement_spec_child_merge",
+      "scripts.tests.test_sync_implement_spec_skill",
       "scripts.tests.test_release_task_workflow",
     ],
     ["pnpm", "verify"],
@@ -690,6 +693,7 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "scripts.tests.test_sync_release_line",
         "scripts.tests.test_cleanup_task_worktree",
         "scripts.tests.test_implement_spec_child_merge",
+        "scripts.tests.test_sync_implement_spec_skill",
         "scripts.tests.test_release_task_workflow",
       ],
     ],

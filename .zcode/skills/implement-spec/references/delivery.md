@@ -25,7 +25,7 @@ A changed HEAD or target invalidates prior evidence. Repeat the affected review 
 
 ## Publish
 
-Prepare the body using the repository's [pr skill](../../pr/SKILL.md). Link the spec and every delivered ticket with their acceptance and verification evidence. Use the [issue tracker rules](../../../../docs/agents/issue-tracker.md) for states and labels; parent requirements remain for the human to close. Local integration and PR creation do not mean the tickets have merged into the release.
+Prepare the body using the repository's [pr skill](../../../../.claude/skills/pr/SKILL.md). Link the spec and every delivered ticket with their acceptance and verification evidence. Use the [issue tracker rules](../../../../docs/agents/issue-tracker.md) for states and labels; parent requirements remain for the human to close. Local integration and PR creation do not mean the tickets have merged into the release.
 
 Once the current conversation authorizes publication, run:
 
