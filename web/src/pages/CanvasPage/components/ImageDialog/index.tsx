@@ -39,7 +39,7 @@ import PromptRefEditor, {
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
-import RefThumbnail from '../RefThumbnail';
+import RefThumbnail, { INSERT_REF_APPEND_TITLE } from '../RefThumbnail';
 import { useMixedRefStrip, orderRefStripItems, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { refOverflowToast } from '@/utils/ref-overflow';
@@ -796,7 +796,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     onLocate={r.textNodeId != null && onLocateTextSource ? () => onLocateTextSource(r.textNodeId!) : undefined}
                     onRemove={!readOnly && r.textNodeId == null ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
                     onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
-                    insertTitle="插入引用（追加到正文末尾）"
+                    insertTitle={INSERT_REF_APPEND_TITLE}
                     dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
                 ))
@@ -809,7 +809,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     number={f.type === 'image' ? fileNumberOf.get(f.id) : undefined}
                     onRemove={!readOnly ? () => handleRemoveFile(f.id) : undefined}
                     onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
-                    insertTitle="插入引用（追加到正文末尾）"
+                    insertTitle={INSERT_REF_APPEND_TITLE}
                     dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
                 )),
@@ -828,7 +828,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
                     : undefined
                 }
                 onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
-                insertTitle="插入引用（追加到正文末尾）"
+                insertTitle={INSERT_REF_APPEND_TITLE}
               />
             )))}
           </div>

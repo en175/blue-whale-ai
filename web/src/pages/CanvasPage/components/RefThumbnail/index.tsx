@@ -48,6 +48,9 @@ export interface RefThumbnailProps {
   className?: string;
 }
 
+/** @ 按钮 hover/读屏提示文案：插入落点为「追加到正文末尾」的面板参考栏共用（RefThumbnail 缺省「插入引用」） */
+export const INSERT_REF_APPEND_TITLE = '插入引用（追加到正文末尾）';
+
 /** 悬停满 200ms 才浮出预览；媒体移出立即消失（close 0ms，规格不引入关闭延迟） */
 const PREVIEW_OPEN_DELAY = 200;
 /** 文本预览（IKFCX4）：移出图标后的关闭延迟——给鼠标移入浮层留时间窗，移入即取消关闭 */

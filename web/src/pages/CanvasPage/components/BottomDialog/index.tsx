@@ -41,7 +41,7 @@ import PromptRefEditor, {
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
-import RefThumbnail from '../RefThumbnail';
+import RefThumbnail, { INSERT_REF_APPEND_TITLE } from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
@@ -803,7 +803,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         ? () => (isLibraryOnlyVideoRef(item) ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
         : undefined}
       onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
-      insertTitle="插入引用（追加到正文末尾）"
+      insertTitle={INSERT_REF_APPEND_TITLE}
       dragProps={dragProps}
     />
   );
@@ -834,7 +834,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           : undefined
       }
       onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
-      insertTitle="插入引用（追加到正文末尾）"
+      insertTitle={INSERT_REF_APPEND_TITLE}
       dragProps={stripDrag.itemProps(mixedStrip.index(stripIndex))}
     />
   );
