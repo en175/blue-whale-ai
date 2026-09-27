@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
+import { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
 import type { AtMentionItem } from '../../atMention';
 
@@ -106,7 +107,7 @@ function removeButton(name: string): HTMLButtonElement | null {
 }
 
 function atButton(name: string): HTMLButtonElement | null {
-  return container.querySelector(`button[aria-label="插入引用 ${name}"]`);
+  return container.querySelector(`button[aria-label="${INSERT_REF_AT_SELECTION_TITLE} ${name}"]`);
 }
 
 beforeEach(() => {
@@ -303,6 +304,15 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     await act(async () => promptRefEditorInstance(container).update(() => { $getRoot().getAllTextNodes()[0].select(1, 1); }));
     await act(async () => atButton('雨声白噪音')!.click());
     expect(readPromptRefText(container)).toBe('前音频1后');
+  });
+  it('IKIQGU 缩略图 @ 提示按音频真实落点说明（记忆点优先、否则当前光标）：媒体与文本同文案', async () => {
+    await renderDialog({ attachments: [TEXT_ATTACHMENT] });
+    const mediaAt = atButton('雨声白噪音')!;
+    expect(mediaAt).not.toBeNull();
+    expect(mediaAt.getAttribute('title')).toBe(INSERT_REF_AT_SELECTION_TITLE);
+    const textAt = atButton('旁白文案')!;
+    expect(textAt).not.toBeNull();
+    expect(textAt.getAttribute('title')).toBe(INSERT_REF_AT_SELECTION_TITLE);
   });
 });
 

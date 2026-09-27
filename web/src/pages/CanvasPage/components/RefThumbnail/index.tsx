@@ -35,7 +35,7 @@ export interface RefThumbnailProps {
   onRemove?: () => void;
   /** @ 插入提示词（调用方走 insertRefAtPending：记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落）；缺省不渲染 @ */
   onInsertRef?: () => void;
-  /** @ 按钮 hover/读屏提示：按调用方插入落点语义提供（追加末尾面板传「插入引用（追加到正文末尾）」）；缺省「插入引用」 */
+  /** @ 按钮 hover/读屏提示：按调用方插入落点语义提供（图片/视频面板传 INSERT_REF_APPEND_TITLE、音频面板传 INSERT_REF_AT_SELECTION_TITLE）；缺省「插入引用」 */
   insertTitle?: string;
   /** 音频预览时长（秒） */
   audioDuration?: number;
@@ -48,8 +48,10 @@ export interface RefThumbnailProps {
   className?: string;
 }
 
-/** @ 按钮 hover/读屏提示文案：插入落点为「追加到正文末尾」的面板参考栏共用（RefThumbnail 缺省「插入引用」） */
-export const INSERT_REF_APPEND_TITLE = '插入引用（追加到正文末尾）';
+/** @ 按钮 hover/读屏提示文案（IKIQGU）：先落「正文 @ 添加新素材」记下的插入点；
+ *  无记忆点的常见路径差异——图片/视频面板追加到正文末尾，音频面板插入到当前光标处（RefThumbnail 缺省「插入引用」） */
+export const INSERT_REF_APPEND_TITLE = '插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）';
+export const INSERT_REF_AT_SELECTION_TITLE = '插入引用（优先插入上次 @ 的位置，否则插入到当前光标处）';
 
 /** 悬停满 200ms 才浮出预览；媒体移出立即消失（close 0ms，规格不引入关闭延迟） */
 const PREVIEW_OPEN_DELAY = 200;

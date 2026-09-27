@@ -290,7 +290,7 @@ describe('IKDMQS 组合冲突与只读', () => {
     await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
-    expect(mountNode.querySelector('button[title="插入引用（追加到正文末尾）"]')).toBeNull();
+    expect(mountNode.querySelector('button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')).toBeNull();
     // IKGB7W：添加入口常显但置灰（操作条 aria-disabled + 悬停原因），替代旧「+」隐藏
     expect(slotButton(REF_SOURCE_ENTRY_TITLE)).toBeUndefined();
     const pickCanvas = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
@@ -335,7 +335,7 @@ describe('IKFCKQ 共享缩略图接入', () => {
 
   it('缩略图 @ 按钮走 insertRefAtPending 记忆光标路径（媒体身份 asset_ref）', async () => {
     await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] } });
-    const atBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用（追加到正文末尾）"]')!;
+    const atBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
     expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-m1' }]);
   });
@@ -344,7 +344,7 @@ describe('IKFCKQ 共享缩略图接入', () => {
     await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
     const thumb = mountNode.querySelector('[data-testid="dock-video-ref"]')!;
     expect(thumb.querySelector('[data-testid="ref-thumb-badge"]')!.textContent).toBe('首帧');
-    const atBtn = thumb.querySelector<HTMLButtonElement>('button[title="插入引用（追加到正文末尾）"]')!;
+    const atBtn = thumb.querySelector<HTMLButtonElement>('button[title="插入引用（优先插入上次 @ 的位置，否则追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
     expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-f1' }]);
   });
