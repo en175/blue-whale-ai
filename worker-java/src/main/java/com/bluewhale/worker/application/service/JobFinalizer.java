@@ -148,18 +148,19 @@ public class JobFinalizer {
     }
 
     /**
-     * 核实音视频合成转存对象的权威发布状态（IKIN03）：发布调用抛异常或守卫拒绝时，本地
-     * 返回值不能单边决定删除，先查库。判据 = assets 存在 generation_job_id + storage_key
-     * 精确匹配行（发布事务原子提交，Asset 行即「已发布」的权威记录——事务提交后才断网的
-     * 场景查询仍命中）；GenerationJob 终态一并读取入日志（可观测性，非判据：接管者/重试
-     * 的新对象 key 含各自随机 uuid，不会与本查询交叉）。
+     * 核实转存对象的权威发布状态（IKIN03 建于音视频合成，IKIN7Z 起 video_matting 复用）：
+     * 发布调用抛异常或守卫拒绝时，本地返回值不能单边决定删除，先查库。判据 = assets 存在
+     * generation_job_id + storage_key 精确匹配行（发布事务原子提交，Asset 行即「已发布」
+     * 的权威记录——事务提交后才断网的场景查询仍命中）；GenerationJob 终态一并读取入日志
+     * （可观测性，非判据：接管者/重试的新对象 key 含各自随机 uuid，不会与本查询交叉）。
      */
     public boolean hasPublishedAsset(String jobId, String storageKey) {
         Long jobIdLong = Long.parseLong(jobId);
         Long assetId = assetMapper.findReferencingAssetId(jobIdLong, storageKey);
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        log.info("[audio_video_mux] 转存对象权威状态核实 jobId={} storageKey={} referencedAssetId={} jobStatus={}",
-                jobId, storageKey, assetId, job != null ? job.getStatus() : null);
+        log.info("[job-finalizer] 转存对象权威状态核实 jobId={} storageKey={} referencedAssetId={} jobType={} jobStatus={}",
+                jobId, storageKey, assetId,
+                job != null ? job.getType() : null, job != null ? job.getStatus() : null);
         return assetId != null;
     }
 
