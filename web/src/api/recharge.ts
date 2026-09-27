@@ -32,6 +32,16 @@ export interface RechargeTier {
   is_recommended: boolean;
   /** 排序权重，越小越靠前 */
   sort_order: number;
+  /**
+   * 当前用户能不能买这一档（PRD §6.3「无权限的档位置灰并展示提示」）。
+   *
+   * ⚠️ `null` = **未判定**（游客），不是「不能买」：价格表是公开信息，游客照样看得到
+   * 整张目录，只是不能下单 —— 与自定义充值那条（`RechargeCustomConfig.can_purchase`）
+   * 同一个口径。把 null 当 false，会把一张可看的价目表显示成一排灰卡片。
+   */
+  can_purchase: boolean | null;
+  /** 不能买时展示的文案（后台可配，未配则由服务端给默认文案） */
+  denied_hint: string;
 }
 
 /** 档位目录 + 当前生效的换算率（1 元 = 多少积分，来自 billing 定价目录，**不是常量**） */

@@ -1,6 +1,7 @@
 import type {
   TopupTierPermission,
   TopupTierStatus,
+  TopupTierView,
 } from "@lib/shared/persistence/index.js";
 
 /** 解析档位原价：只接受正整数，其余 → null。 */
@@ -60,6 +61,56 @@ export function tierPermissionLabel(permission: string): string {
   if (permission === "user_group") return "指定用户群";
   if (permission === "member_tier") return "指定会员等级";
   return "全部登录用户";
+}
+
+/** 无权限时的兜底文案（后台没配 `permission_denied_hint` 时用它）。 */
+export const DEFAULT_TIER_PERMISSION_DENIED_HINT = "当前账号暂不可购买该档位";
+
+/**
+ * 「这个用户能不能买」的**唯一**判定 —— 固定档位与自定义充值共用（PRD §10.3「与固定积分卡一致」）。
+ *
+ * <p>为什么必须是一处：两条购买路径（档位卡 / 自定义充值）**共用同一个枚举与同一份白名单
+ * 归一规则**，各写一份就会出现「同一批白名单用户在档位能买、在自定义充值买不了」——
+ * 这种差异没有任何人会预期到，而且两边各自的单测都是绿的
+ * （`recharge-custom/constants.ts` 的 `canPurchaseCustom` 直接委托这里）。
+ *
+ * <p>⚠️ `member_tier`（指定会员等级）**本阶段放行**，不放行是错的：PRD §10.4 明说它是
+ * 「为后续会员模块预留（阶段 2 生效，本阶段仅保留配置项）」，而会员体系现在还没有 ——
+ * 按它拒绝等于把所有用户挡在门外，且现场表现是「配置看着没问题、人人都买不了」。
+ * 阶段 2 接会员时，这里才该变成真实判断。
+ *
+ * <p>`user_group` 是**本阶段真生效**的那一条：名单为空 = 谁都不能买，
+ * 这是运营的显式配置，不做兜底放行。
+ */
+export function canPurchaseByPermission(
+  permission: TopupTierPermission,
+  allowlist: readonly string[],
+  userId: number,
+): boolean {
+  if (permission === "user_group") {
+    return allowlist.includes(String(userId));
+  }
+  return true;
+}
+
+/**
+ * 这个用户能不能买这个档位（PRD §6.3 / §10.4）。
+ *
+ * <p>⚠️ 判定必须发生在**下单路径**上，而不是只在管理端保存时校验：这一列在管理端
+ * 可编辑、有审计文案、`readCardFields` 也校验得很严 —— 唯独没人读它的话，
+ * 运营配的「仅限白名单」在用户侧完全不存在，且没有任何报错。
+ */
+export function canPurchaseTier(
+  tier: Pick<TopupTierView, "permission" | "permissionAllowlist">,
+  userId: number,
+): boolean {
+  return canPurchaseByPermission(tier.permission, tier.permissionAllowlist, userId);
+}
+
+/** 无权限时给用户看的提示：后台配了就用后台的，没配才用默认文案。 */
+export function tierDeniedHint(tier: Pick<TopupTierView, "permissionDeniedHint">): string {
+  const hint = tier.permissionDeniedHint.trim();
+  return hint || DEFAULT_TIER_PERMISSION_DENIED_HINT;
 }
 
 /** 单个 userId 归一：数字取安全整数、字符串取纯数字，统一成**掐掉前导零的十进制串**。 */

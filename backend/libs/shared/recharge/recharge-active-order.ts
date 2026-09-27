@@ -23,7 +23,7 @@ import type { OrderSpec, RechargeOrderCreated } from "./recharge.service.js";
 export const CASHIER_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 export interface ActiveOrderReuseDeps {
-  repo: Pick<RechargeOrderRepo, "findActivePending">;
+  repo: Pick<RechargeOrderRepo, "findActiveOrder">;
   /** 把一笔 `pending` 单往终态推一步（问网关 + 过期判定）；复用判定要用它的结果 */
   reconcile: (order: RechargeOrderView) => Promise<RechargeOrderView>;
   logger: Logger;
@@ -48,14 +48,26 @@ export interface ActiveOrderReuseDeps {
  *
  * <p>── 什么才算「同一件商品」 ─────────────────────────────────────────────────
  *
- * 商品身份 = 商品类型 + 档位 + **到账积分**（见 `ActiveOrderIdentity`）。所以：
+ * 商品身份 = 商品类型 + 档位 + **到账积分** + **实付金额**（见 `ActiveOrderIdentity`）。所以：
  *   · 同一档位再点一次 → 复用（这就是重复点击）；
  *   · 换了档位、或档位还是那个档位但运营改过配置（到账积分数变了）→ **算换了商品**，
  *     照常建新单。把「想换一档再买」当成重复而拦下，用户就再也换不了档了；
  *   · 档位 ↔ 自定义充值之间同理（商品类型不同）。
  *
- * 金额**不算**身份：订单行里冻结的是下单那一刻的价，运营在待支付期间改价不该改口，
- * 复用的就是那一笔已经报过价的单。
+ * <p>⚠️ 金额**算**身份（2026-09-27 修正，此前写的是「不算」）。此前那条注释只看到了复用
+ * 这一侧（「冻结的是下单那一刻的价」），漏了用户看到的东西：他照着 ¥499 点了下单、运营随后
+ * 改到 ¥599，再点一次时复用的旧单带着**旧价**回来，而界面上的目录价已经是新价 ——
+ * 同一个屏幕上于是同时出现两个金额，违反本仓「用户可见界面永远只出现一个金额」，
+ * 而且方向可能多收用户的钱。价变了就是另一件商品，照常建新单（旧单留给它自己过期）。
+ *
+ * <p>── 已有活跃单，但**钱已经收了**（`paid_pending` / `grant_failed`）怎么办 ────────
+ *
+ * 不复用它的二维码，也不建新单，而是 409 让用户去看那一笔。两个理由各管一件事：
+ *   · **不复用码**：钱已经付过了，再给他一张能扫的码 = 让他再付一次（网关那边这笔单
+ *     已成功，扫码只会撞上「订单已支付」或者更糟）；
+ *   · **不建新单**：这正是「用户付了钱卡在发放中 → 关掉弹窗再打开看到空闲态 → 再买一笔
+ *     再付一次 → 旧单随后又被补发成功 → 被扣两次钱走客服退款」那条路。拦在服务端。
+ * 与「未支付单」的区别是**话不一样**：那一句让用户去继续支付，这一句告诉他不用再买。
  *
  * <p>── 令牌过期了怎么办 ───────────────────────────────────────────────────────
  *
@@ -71,13 +83,30 @@ export function createActiveOrderReuse(
   deps: ActiveOrderReuseDeps,
 ): (userId: number, spec: OrderSpec) => Promise<RechargeOrderCreated | null> {
   return async function reuseActiveOrder(userId, spec) {
-    const active = await deps.repo.findActivePending({
+    const active = await deps.repo.findActiveOrder({
       userId,
       productType: spec.productType,
       tierId: spec.tierId,
       credits: spec.credits,
+      amountFen: spec.amountFen,
     });
     if (!active) return null;
+
+    // ⚠️ **钱已经收了**的活跃单（paid_pending / grant_failed）先处理，且排在下面那条
+    //    「没拿到过链接」的判断**之前**：那种单本来就不该被放行成新单。
+    //    用户的正确动作是去充值记录看那一笔的到账进度，不是再买一次（见文件头）。
+    if (active.status !== RECHARGE_ORDER_STATUS.pending) {
+      deps.logger.warn(
+        `用户重复下单命中一笔已支付的活跃单 tradeNo=${active.tradeNo} `
+          + `userId=${active.userId} 状态=${active.status}：不建新单、不复用二维码`,
+      );
+      throw new NewApiError(
+        `您有一笔已支付、正在到账的订单（${active.tradeNo}），`
+          + `请前往「充值记录」查看进度，无需重复购买`,
+        409,
+        "recharge_order_paid",
+      );
+    }
 
     // 网关订单号与收银台链接是同一次更新写进去的，所以「没有网关订单号」= 这张单
     // **从来没拿到过**链接（下单那次网关调用就失败了，比如超时）。那不是一笔有效订单，

@@ -7,6 +7,7 @@
  * ============================================ */
 import type { RechargeCustomConfigView } from "@lib/shared/persistence/index.js";
 import {
+  canPurchaseByPermission,
   parseNonNegativeInt,
   parseTierAllowlist,
   parseTierPermission,
@@ -133,22 +134,15 @@ export function validateCustomConfig(next: CustomConfigNumbers): string | null {
 /**
  * 这个用户能不能买自定义充值（PRD §7.4「登录后校验权限」/ §7.5「无购买权限 → 不创建订单」）。
  *
- * <p>⚠️ `member_tier`（指定会员等级）**本阶段放行**，不放行是错的：PRD §10.4 明说它是
- * 「为后续会员模块预留（阶段 2 生效，本阶段仅保留配置项）」，而会员体系现在还没有 ——
- * 按它拒绝等于把所有用户挡在门外，且现场表现是「配置看着没问题、人人都买不了」。
- * 阶段 2 接会员时，这里才该变成真实判断。
- *
- * <p>`user_group` 是**本阶段真生效**的那一条：名单为空 = 谁都不能买，
- * 这是运营的显式配置，不做兜底放行。
+ * <p>判定**委托给 `canPurchaseByPermission`**（档位与自定义充值共用的那一份）：
+ * 两处只能是同一个实现，否则「同一批白名单用户在档位能买、在这里买不了」。
+ * 放行 `member_tier` 的理由、`user_group` 名单为空的口径都写在那边，别在这里重写一遍。
  */
 export function canPurchaseCustom(
   config: Pick<RechargeCustomConfigView, "permission" | "permissionAllowlist">,
   userId: number,
 ): boolean {
-  if (config.permission === "user_group") {
-    return config.permissionAllowlist.includes(String(userId));
-  }
-  return true;
+  return canPurchaseByPermission(config.permission, config.permissionAllowlist, userId);
 }
 
 /** 无权限时给用户看的提示：后台配了就用后台的，没配才用默认文案。 */
@@ -157,21 +151,4 @@ export function customDeniedHint(
 ): string {
   const hint = config.permissionDeniedHint.trim();
   return hint || DEFAULT_PERMISSION_DENIED_HINT;
-}
-
-/**
- * 下单时刻的积分到期时间（PRD §7.4 快照「有效期」/ §9.5「自订单支付成功时间起算」）。
- *
- * <p>按**月**加：`Date.setMonth` 在 8/31 + 6 个月时会溢出到 3/3，
- * 那是 `new Date` 的既有语义，这里不做「钳到月末」的特殊处理 ——
- * 有效期是一个承诺的量级（2 年后），不是精确到日的对账口径。
- *
- * <p>⚠️ 落地范围：本函数只负责**把承诺写进订单快照**。
- * 「到期批次一次性过期并写过期流水」（§9.5）是 #43 的事，尚未实现 ——
- * 也就是说这一列现在**只被记录、不被执行**。
- */
-export function customCreditsExpireAt(paidAt: Date, creditsValidMonths: number): Date {
-  const expire = new Date(paidAt.getTime());
-  expire.setMonth(expire.getMonth() + creditsValidMonths);
-  return expire;
 }

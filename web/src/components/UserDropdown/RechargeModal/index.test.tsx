@@ -82,6 +82,9 @@ beforeEach(() => {
         discount: 1,
         is_recommended: false,
         sort_order: 1,
+        // 权限信号由服务端算（`canPurchaseTier`）：默认「全部登录用户」可买
+        can_purchase: true,
+        denied_hint: '当前账号暂不可购买该档位',
       },
     ],
   });
@@ -201,8 +204,29 @@ describe('RechargeModal', () => {
     expect(setCredits).toHaveBeenCalledWith(1234);
   });
 
-  it('订单过期展示过期态并允许重新支付', async () => {
+  it('★ 钱已收到、积分还在发（paid_pending）：话术换成「发放中」，仍不算成功', async () => {
+    // 钱已经付了，此刻说「等待支付结果…」是在让用户怀疑自己没付成功；
+    // 但也不能报成功（积分还没到账）—— 两种都不是，就如实说「发放中」
     rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
+      trade_no: 'trade-1',
+      status: 'paid_pending',
+      credits_after: null,
+    });
+
+    await renderRechargeModal();
+    await flush();
+    await clickButton('100 积分');
+    await clickButton('确认支付 ¥10');
+    await flush();
+
+    expect(document.body.textContent).toContain('已收到付款，积分发放中…');
+    expect(document.body.textContent).not.toContain('等待支付结果...');
+    expect(document.body.textContent).not.toContain('支付成功');
+    expect(toastApi.success).not.toHaveBeenCalled();
+    expect(setCredits).not.toHaveBeenCalled();
+  });
+
+  it('订单过期展示过期态并允许重新支付', async () => {    rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
       trade_no: 'trade-1',
       status: 'expired',
       credits_after: null,
@@ -262,6 +286,85 @@ describe('RechargeModal', () => {
     );
     expect(link?.getAttribute('target')).toBe('_blank');
     expect(link?.rel.split(' ')).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+  });
+});
+
+// 档位购买权限（PRD §6.3）：无权限的卡片置灰 + 展示后台配的提示，与自定义充值面板同一套做法
+describe('RechargeModal — 档位购买权限', () => {
+  /** 让目录只返回一张「当前用户买不了」的档位卡 */
+  function deniedCatalog(hint = '该档位仅限内测用户') {
+    rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
+      credits_per_yuan: 10,
+      tiers: [
+        {
+          id: TIER_ID,
+          name: '基础套餐',
+          amount: 100,
+          price: 10,
+          original_price: null,
+          discount: 1,
+          is_recommended: false,
+          sort_order: 1,
+          can_purchase: false,
+          denied_hint: hint,
+        },
+      ],
+    });
+  }
+
+  it('★ 无权限的档位：置灰不可点、展示后台配的提示，点了也不会下单', async () => {
+    deniedCatalog();
+    await renderRechargeModal();
+    await flush();
+
+    // 卡片是禁用的（`disabled` 是给键盘/鼠标两层都拦住的），并带上提示文案
+    const card = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('100 积分'),
+    );
+    expect(card?.disabled).toBe(true);
+    expect(document.body.textContent).toContain('该档位仅限内测用户');
+
+    // 点也点不动：不会选中、底部不会出现「确认支付 ¥10」
+    await clickButton('100 积分');
+    expect(document.body.textContent).not.toContain('确认支付 ¥10');
+    expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
+  });
+
+  it('★ 无权限时不列权益：这张卡买不了，不该还在推销它', async () => {
+    deniedCatalog();
+    await renderRechargeModal();
+    await flush();
+
+    expect(document.body.textContent).not.toContain('积分即时到账');
+  });
+
+  it('★ `can_purchase` 为 null（游客未判定）不是无权限：卡片照常可选可买', async () => {
+    // null 是「不知道你是谁」，不是「你不能买」—— 价格表本来就该看得见，
+    // 把它当成 false 会让一张公开价目表变成一排灰卡片
+    rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
+      credits_per_yuan: 10,
+      tiers: [
+        {
+          id: TIER_ID,
+          name: '基础套餐',
+          amount: 100,
+          price: 10,
+          original_price: null,
+          discount: 1,
+          is_recommended: false,
+          sort_order: 1,
+          can_purchase: null,
+          denied_hint: '当前账号暂不可购买该档位',
+        },
+      ],
+    });
+    await renderRechargeModal();
+    await flush();
+
+    await clickButton('100 积分');
+    await clickButton('确认支付 ¥10');
+
+    expect(rechargeApi.createRechargeOrder).toHaveBeenCalledWith(TIER_ID);
   });
 });
 

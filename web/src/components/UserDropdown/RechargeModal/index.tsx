@@ -124,6 +124,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [customSubmitting, setCustomSubmitting] = useState(false);
   /** 自定义充值下单失败：展示在面板里（与 orderError 一样，就地、不弹 toast） */
   const [customError, setCustomError] = useState('');
+  /**
+   * 后端已确认「钱到了、积分还在发」（`paid_pending` / `grant_failed`）。
+   *
+   * <p>与「等待支付结果…」分开：那时用户**可能还没付钱**，这时他已经付了。
+   * 两种情况都继续轮询（不是终态），但说的话不一样。
+   */
+  const [creditsPending, setCreditsPending] = useState(false);
 
   /** 可用余额（billing 账本的整数积分）；未拉取到为 null，显示 -- */
   const credits = useAuthStore((s) => s.credits);
@@ -131,6 +138,14 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const tiers = catalog?.tiers ?? [];
   const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
+  /**
+   * 选中的这一档没有购买权限（后台把它限到了白名单，而当前用户不在名单里）。
+   *
+   * ⚠️ 判定与后端**同一个来源**（`can_purchase`，服务端用 `canPurchaseTier` 算的）：
+   *    前端自己拿白名单再算一遍，就会出现「界面可点、下单被拒」或反过来。
+   *    `null`（游客）**不算无权限** —— 那是「未判定」，价格表本来就该看得见。
+   */
+  const selectedDenied = selected?.can_purchase === false;
   /** 仅 order 成功后出右侧支付码；下单中不出「正在创建订单…」 */
   const showQrPanel =
     phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
@@ -187,8 +202,10 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   }, []);
 
   // 待支付态轮询订单状态（立即一次 + 每 3s），直到落成 paid / expired / failed
-  // ⚠️ `paid_pending`（钱到了、积分还没发）**不是终态**，刻意不在这里分支：
-  //    后端会重试发放，界面继续显示「等待支付结果…」才是对的（提前报成功等于骗用户）。
+  // ⚠️ `paid_pending`（钱到了、积分还没发）**不是终态**：后端会重试发放，界面继续等，
+  //    提前报成功等于骗用户。但它的**话**与「还没付钱」必须不一样 ——
+  //    钱已经收了，用户此刻该看到的不是「等待支付结果…」（他付过了），而是「发放中」。
+  //    服务端超窗之后仍会如实回这个状态（超窗只是不再重试，不是「没收到钱」）。
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
     let alive = true;
@@ -202,6 +219,8 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             void refreshCredits();
           } else if (st.status === 'expired' || st.status === 'failed') {
             setPhase(st.status);
+          } else if (st.status === 'paid_pending' || st.status === 'grant_failed') {
+            setCreditsPending(true);
           }
         })
         .catch(() => undefined);
@@ -216,7 +235,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
   /** 确认支付 / 重新支付：接口成功后再展开二维码；失败就地提示，不出码区 */
   const handleConfirm = () => {
-    if (!selected || paying || phase === 'paid') return;
+    // 无权限的档位不该下单：按钮那个 `disabled` 只是界面，这里才是真正的闸
+    // （服务端也会再判一次 —— 两层都要有，前端的错在于「点了没反应」而不是安全）
+    if (!selected || paying || phase === 'paid' || selectedDenied) return;
     setOrderError('');
     setPhase('creating');
     createRechargeOrder(selected.id)
@@ -269,9 +290,11 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       ? '支付中...'
       : phase === 'paid'
         ? '支付成功'
-        : phase === 'expired' || phase === 'failed'
-          ? '重新支付'
-          : `确认支付 ¥${fmtPrice(selected.price)}`;
+        : selectedDenied
+          ? '暂不可购买'
+          : phase === 'expired' || phase === 'failed'
+            ? '重新支付'
+            : `确认支付 ¥${fmtPrice(selected.price)}`;
 
   return (
     <Modal
@@ -344,12 +367,18 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
                   {tiers.map((t) => {
                     const discount = fmtDiscount(t.discount);
+                    // 无权限的档位（后台把它限到了白名单，而当前用户不在名单里）：
+                    // 置灰 + 不可选 + 展示后台配的提示（PRD §6.3），做法与自定义充值面板一致。
+                    // `null`（游客未判定）**不算**无权限 —— 价格表本来就该看得见
+                    const denied = t.can_purchase === false;
                     return (
                       <button
                         key={t.id}
-                        className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''}`}
+                        className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''} ${denied ? styles.planDisabled : ''}`}
+                        disabled={denied}
+                        aria-disabled={denied}
                         onClick={() => {
-                          if (!paying) setSelectedId(t.id);
+                          if (!paying && !denied) setSelectedId(t.id);
                         }}
                       >
                         {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
@@ -369,14 +398,19 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                             原价 ¥{fmtPrice(t.original_price)}
                           </span>
                         )}
-                        <div className={styles.perkList}>
-                          {PERKS.map((perk) => (
-                            <span key={perk} className={styles.perkItem}>
-                              <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
-                              {perk}
-                            </span>
-                          ))}
-                        </div>
+                        {denied ? (
+                          // 无权限时不列权益：这张卡现在买不了，列一堆权益等于在推销一个买不到的东西
+                          <span className={styles.planDeniedHint}>{t.denied_hint}</span>
+                        ) : (
+                          <div className={styles.perkList}>
+                            {PERKS.map((perk) => (
+                              <span key={perk} className={styles.perkItem}>
+                                <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
+                                {perk}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </button>
                     );
                   })}
@@ -430,11 +464,11 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 </div>
               )}
               <div className={styles.barRight}>
-                {/* 确认支付（未选套餐时禁用）。渠道没法选：银行收银台统一收单 */}
+                {/* 确认支付（未选套餐 / 选中的档位无购买权限时禁用）。渠道没法选：银行收银台统一收单 */}
                 <button
-                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
+                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' || selectedDenied ? styles.confirmBtnDisabled : ''}`}
                   onClick={handleConfirm}
-                  disabled={!selected || paying || phase === 'paid'}
+                  disabled={!selected || paying || phase === 'paid' || selectedDenied}
                 >
                   {confirmLabel}
                 </button>
@@ -467,7 +501,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                   <span />
                   <span />
                 </div>
-                <span className={styles.waiting}>等待支付结果...</span>
+                <span className={styles.waiting}>
+                  {creditsPending ? '已收到付款，积分发放中…' : '等待支付结果...'}
+                </span>
               </>
             )}
 

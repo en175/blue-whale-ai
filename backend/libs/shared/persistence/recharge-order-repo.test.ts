@@ -20,6 +20,7 @@ const ROW = {
   status: "paid",
   paid_at: new Date("2026-09-25T00:05:00Z"),
   paid_pending_at: new Date("2026-09-25T00:04:00Z"),
+  credits_valid_months: 24,
   grant_lot_id: 12n,
   notify_count: 2,
   gmt_create: new Date("2026-09-25T00:00:00Z"),
@@ -115,6 +116,8 @@ describe("createRechargeOrderRepo.list", () => {
       createdAt: "2026-09-25T00:00:00.000Z",
       // 钱到的时刻（不是 paid_at）：主动对账靠它算「持有分钟数」
       paidPendingAt: "2026-09-25T00:04:00.000Z",
+      // 有效期**月数**快照：起算点是支付成功时刻，所以订单存的是月数而不是算好的时刻
+      creditsValidMonths: 24,
     });
   });
 
@@ -133,7 +136,7 @@ describe("createRechargeOrderRepo.list", () => {
 });
 
 describe("createRechargeOrderRepo — 下单快照与状态机", () => {
-  it("create 写入 8 个快照列；调用方不传的取快照默认值（不靠列默认值）", async () => {
+  it("create 写入 9 个快照列；调用方不传的取快照默认值（不靠列默认值）", async () => {
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
       snapshotRow(data),
     );
@@ -155,10 +158,13 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
       status: "pending",
       product_type: "tier",
       product_name: "1500积分",
-      // 首购两列与有效期此刻是常量：写默认值而不是省略，省略时列默认值会静默生效，
+      // 首购两列与权限结果此刻是常量：写默认值而不是省略，省略时列默认值会静默生效，
       // 「快照写全了没有」就没人能验
       bonus_credits: 0n,
+      // ⚠️ 下单时到期**时刻**写不了（起算点是支付成功时刻）：显式写 NULL，
+      // 由发放那一步按「月数 + 钱到的时刻」算出来补上
       credits_expire_at: null,
+      credits_valid_months: null,
       first_purchase_state: "unknown",
       first_purchase_eligible: 0,
       permission_result: "allowed",
@@ -182,13 +188,17 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
       productType: "custom",
       productName: "自定义充值",
       configVersion: 5,
-      creditsExpireAt: new Date("2028-09-27T00:00:00Z"),
+      // 有效期快照只存**月数**（配置表自己那份），到期时刻发放时才算
+      creditsValidMonths: 24,
     });
 
     // 编一个 0/1 顶上去，会让按 tier_id 聚合的对账把全部自定义充值算到某个无辜档位上
     expect(create.mock.calls[0]![0].data.tier_id).toBeNull();
     expect(view.tierId).toBeNull();
     expect(create.mock.calls[0]![0].data.product_type).toBe("custom");
+    expect(create.mock.calls[0]![0].data.credits_valid_months).toBe(24);
+    // 下单时到期时刻仍是 NULL：它由发放那一步写上（不是下单时按当时时间估一个）
+    expect(create.mock.calls[0]![0].data.credits_expire_at).toBeNull();
   });
 
   it("可空 tier_id 的读回：NULL 原样投影成 null（不是 \"null\" 字符串，也不抛错）", async () => {
@@ -226,5 +236,107 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
         gmt_modified: expect.any(Date),
       },
     });
+  });
+
+  it("★ markPaid 把**真实发给 billing 的**到期时刻写进快照（与批次同一处落地）", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
+    const expiresAt = new Date("2028-09-27T10:00:00.000Z");
+
+    await repo.markPaid({ tradeNo: "RC20260926001", grantLotId: "42", creditsExpireAt: expiresAt });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { trade_no: "RC20260926001", status: { not: "paid" } },
+      data: {
+        status: "paid",
+        paid_at: expect.any(Date),
+        grant_lot_id: 42n,
+        // 这一列记的必须是「真实发出去那批积分什么时候到期」，而不是下单时估的另一个数
+        credits_expire_at: expiresAt,
+        gmt_modified: expect.any(Date),
+      },
+    });
+  });
+
+  it("markPaid 不传到到期时刻（存量单走 billing 来源策略）时不写那一列", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
+
+    await repo.markPaid({ tradeNo: "RC20260926001" });
+
+    // 传 `credits_expire_at: undefined` 与不传在 Prisma 里等价，但**写 null 不是**：
+    // 那会把早先一次成功发放留下的到期时刻抹掉
+    const data = updateMany.mock.calls[0]![0].data as Record<string, unknown>;
+    expect("credits_expire_at" in data).toBe(false);
+  });
+});
+
+describe("createRechargeOrderRepo — 活跃单的身份（下单防重）", () => {
+  function build(rows: unknown[] = []) {
+    const findFirst = vi.fn().mockResolvedValue(rows[0] ?? null);
+    return {
+      findFirst,
+      repo: createRechargeOrderRepo({ recharge_orders: { findFirst } } as never),
+    };
+  }
+
+  it("★ 身份四个维度全部进 where：含**金额**（改价 = 换了商品，见 B 条修正）", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findActiveOrder({
+      userId: 9001,
+      productType: "tier",
+      tierId: 7,
+      credits: 7500,
+      amountFen: 49_900,
+    });
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        user_id: 9001n,
+        // 三种状态都算活跃：pending（没付） + paid_pending/grant_failed（**钱已经收了**）
+        status: { in: ["pending", "paid_pending", "grant_failed"] },
+        is_delete: 0,
+        product_type: "tier",
+        tier_id: 7n,
+        credits: 7500n,
+        // ⚠️ 金额必须在 where 里：少了它，运营改价后用户再点一次会复用到**旧价**那笔单，
+        // 界面上同时出现两个金额（目录价 vs 旧单价），方向还可能多收用户的钱
+        amount_fen: 49_900n,
+      },
+      // 次级键 id：DATETIME 只到秒，同秒两笔是常态
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+    });
+  });
+
+  it("自定义充值单：tier_id 用 IS NULL 匹配，amount_fen 同样进 where", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findActiveOrder({
+      userId: 9001,
+      productType: "custom",
+      tierId: null,
+      credits: 600,
+      amountFen: 4_000,
+    });
+
+    const where = findFirst.mock.calls[0]![0].where as Record<string, unknown>;
+    expect(where.tier_id).toBeNull();
+    expect(where.amount_fen).toBe(4_000n);
+  });
+
+  it("★ `paid` 不在活跃状态里：那是一笔已完成的交易，用户再买一笔是正常的", async () => {
+    const { findFirst, repo } = build();
+
+    await repo.findActiveOrder({
+      userId: 9001,
+      productType: "tier",
+      tierId: 7,
+      credits: 7500,
+      amountFen: 49_900,
+    });
+
+    const status = findFirst.mock.calls[0]![0].where.status as { in: string[] };
+    expect(status.in).not.toContain("paid");
   });
 });

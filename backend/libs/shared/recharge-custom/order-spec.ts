@@ -9,7 +9,6 @@ import { NewApiError } from "@lib/core";
 import type { RechargeCustomConfigView } from "@lib/shared/persistence/index.js";
 import {
   canPurchaseCustom,
-  customCreditsExpireAt,
   customDeniedHint,
   customPriceFen,
   parseCustomCredits,
@@ -28,8 +27,14 @@ export interface CustomOrderPlan {
   productType: "custom";
   productName: string;
   configVersion: number;
-  /** PRD §7.4「订单快照：记录…有效期」。⚠️ 这一列现在只被记录、不被执行（到期核销是 #43） */
-  creditsExpireAt: Date;
+  /**
+   * 到账积分的有效期快照，单位**月**（PRD §7.4「订单快照：记录…有效期」）。
+   *
+   * <p>⚠️ 存的是月数而不是算好的时刻：起算点是**支付成功时刻**（§9.5），而下单这一刻
+   * 还不知道它。真正的到期时刻由发放路径按 `paid_pending_at + 这个月数` 算出来
+   * （见 `recharge/credits-validity.ts`），算完同时交给 billing 与订单快照。
+   */
+  creditsValidMonths: number;
   /** 恒 0：PRD §7.1「第一版默认不对自定义充值发放首购赠送积分」 */
   bonusCredits: number;
   subject: string;
@@ -110,7 +115,8 @@ export function buildCustomOrderPlan(
     // 快照要回答的是「用户当时看到的是哪件商品」
     productName: "自定义充值",
     configVersion: config.version,
-    creditsExpireAt: customCreditsExpireAt(new Date(), config.creditsValidMonths),
+    // 快照的是**月数**（运营配多少就记多少），到期时刻发放那一刻按支付成功时间折出来
+    creditsValidMonths: config.creditsValidMonths,
     bonusCredits: 0,
     subject: "自定义充值",
     body: `自定义充值 ${credits} 积分`,

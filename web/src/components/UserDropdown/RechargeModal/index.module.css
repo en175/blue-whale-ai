@@ -223,6 +223,25 @@
   flex-shrink: 0;
 }
 
+/* 无购买权限（后台把这一档限到了白名单，当前用户不在名单里）：整卡置灰、不可点。
+   与自定义充值面板的 `denied` 同一条做法 —— 两条购买路径的体验要对齐。 */
+.planDisabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.planDisabled:hover {
+  border-color: #2a2a2a;
+}
+
+/* 无权限的提示文案（后台可配）。用与 CustomRecharge 一致的警示色，
+   不写死「暂不可购买」这类字：那是服务端给的文案 */
+.planDeniedHint {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+  line-height: 1.5;
+}
+
 /* ---- 底部结算栏 ---- */
 .bottomBar {
   margin-top: 36px;

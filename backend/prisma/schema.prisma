@@ -697,8 +697,14 @@ model recharge_orders {
   /// 本单应发的赠送积分（首购加赠），没有则 0。与 credits 分开记：退款只退本金，
   /// 且两者将来的有效期策略可能不同
   bonus_credits           BigInt    @default(0)
-  /// 本单积分的到期时刻；NULL = 永久（存量行为，2 年有效期落地后新单才会非空）
+  /// 本单积分的到期时刻（**真实发给 billing 的那个时刻**），由发放那一步按
+  /// `paid_pending_at + credits_valid_months` 算出并写上；下单时先写 NULL。
+  /// NULL = 还没发放（或本列上线前的存量单，那种单按 billing 的来源策略发）
   credits_expire_at       DateTime? @db.DateTime(0)
+  /// 到账积分有效期快照，单位**月**（来自档位 / 自定义充值配置）。
+  /// ⚠️ 存月数不存时刻：起算点是**支付成功时刻**（PRD §9.5），下单那一刻还不知道它。
+  /// NULL = 本列上线前的存量单（发放时由 billing 按来源策略决定有效期）
+  credits_valid_months    Int?
   /// 下单时服务端判定的首购状态：unknown 未判定（功能未上线）| first | repeat
   first_purchase_state    String    @default("unknown") @db.VarChar(16)
   /// 该商品是否参与首购加赠（配置快照）。与 state 分开：一个说人，一个说商品

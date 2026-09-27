@@ -46,6 +46,24 @@
  *   **不参与任何积分计算**：档位到账积分读 `base_credits`（配置值），自定义充值的价格
  *   由配置表自己的 `credits_per_yuan` 反算（见下）。
  *
+ * ── 有效期：快照存**月数**，到期时刻在发放那一刻算 ─────────────────────────────
+ *
+ * 档位（`topup_tiers.credits_valid_months`）与自定义充值（配置表同名列）都可以配有效期，
+ * PRD §9.5 的起算点是「**支付成功**时刻」——而下单那一刻根本还没有它（用户可能几十分钟后
+ * 才付）。所以：
+ *   · 下单时快照的是**月数**（`recharge_orders.credits_valid_months`），不是算好的时刻；
+ *   · 发放时（{@link RechargeService.fulfill}）按 `paid_pending_at + 月数` 折出到期时刻，
+ *     同一个值**既发给 billing**（显式 `expiresAt`，否则运营配 6 个月会被 billing 的
+ *     来源策略按 2 年发）**又写进订单快照**（`credits_expire_at`）。
+ * 换算只有一处（`credits-validity.ts`）——两处各算一次就会出现两个到期时间。
+ *
+ * ── 购买权限：两条路同一个判定 ──────────────────────────────────────────────────
+ *
+ * `permission` / `permission_allowlist` / `permission_denied_hint` 在档位与自定义充值
+ * 配置上都有，判定也必须只有一份（`canPurchaseByPermission`）：各判各的就会出现
+ * 「同一批白名单用户在档位能买、在自定义充值买不了」。判定**在下单路径上**发生
+ * （不是只在管理端保存时），被拒的用户连单都建不出来。
+ *
  * ── 两种商品类型走同一条链路（模块 B）─────────────────────────────────────────
  *
  * `createOrder` 收两种输入：`{tierId}`（固定档位）与 `{credits}`（自定义充值）。
@@ -94,7 +112,12 @@ import {
   CASHIER_TOKEN_TTL_MS,
   createActiveOrderReuse,
 } from "./recharge-active-order.js";
-import { createGrantSweeper, type GrantSweepResult } from "./recharge-grant-sweeper.js";
+import { creditsExpireAt } from "./credits-validity.js";
+import {
+  createGrantSweeper,
+  GRANT_RETRY_WINDOW_MS,
+  type GrantSweepResult,
+} from "./recharge-grant-sweeper.js";
 import {
   PAY_IF_CODE_HCCB,
   PAY_ORDER_STATE,
@@ -104,7 +127,11 @@ import {
   verifyPaySign,
 } from "@lib/shared/pay-server/index.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
-import { displayTierName } from "@lib/shared/topup-tier/constants.js";
+import {
+  canPurchaseTier,
+  displayTierName,
+  tierDeniedHint,
+} from "@lib/shared/topup-tier/constants.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 
 /**
@@ -139,6 +166,15 @@ export interface RechargeTierOffer {
   discount: number;
   isRecommended: boolean;
   sortOrder: number;
+  /**
+   * 当前用户能不能买这一档（PRD §6.3「无权限的档位置灰并展示提示」）。
+   *
+   * <p>`null` = **未判定**（游客）：价格表是公开信息，游客照样看得到整张目录，
+   * 只是不能下单 —— 与自定义充值那条（`can_purchase: null`）同一个口径。
+   */
+  canPurchase: boolean | null;
+  /** 不能买时展示的文案（后台可配，未配则由服务端给默认文案） */
+  deniedHint: string;
 }
 
 export interface RechargeCatalog {
@@ -201,8 +237,23 @@ export interface OrderSpec {
   configVersion: number;
   /** 赠送积分；不传 = 走 repo 的默认值 0 */
   bonusCredits?: number;
-  /** 积分到期时刻；不传 = 走 repo 的默认值 null（永久） */
-  creditsExpireAt?: Date | null;
+  /**
+   * 到账积分有效期快照，单位**月**（档位读 `credits_valid_months`，自定义充值读配置）。
+   *
+   * <p>⚠️ 存月数不存时刻：起算点是**支付成功时刻**（PRD §9.5），下单这一刻还不知道它。
+   * 不传 / null = 没有这个快照（存量单），发放时由 billing 按来源策略决定。
+   */
+  creditsValidMonths?: number | null;
+  /**
+   * 下单时服务端判定的权限结果快照。
+   *
+   * <p>⚠️ 它**必须由真实判定算出来**，不能是个写死的常量：这一列要回答的是
+   * 「这单当时到底判过权限没有」。写死 `allowed` 会让一笔本应被拒的单也记「权限通过」，
+   * 事后对账/客服拿这一列去查，查到的是一句假话。
+   * （当前实现里被拒的用户根本建不了单，所以落库的值只可能是 `allowed`；
+   * 但它是**判定出来的** allowed，不是常量——将来加入别的判定分支时这一列自动正确。）
+   */
+  permissionResult?: string;
   /** 网关订单标题 / 内容 */
   subject: string;
   body: string;
@@ -273,7 +324,15 @@ export class RechargeService {
 
   /* ---------- 档位目录 ---------- */
 
-  async listTiers(): Promise<RechargeCatalog> {
+  /**
+   * 档位目录（PRD §6.1 价格表）。
+   *
+   * <p>`userId` 传 null = **游客**：价格表是公开信息，游客照样看得全，
+   * 只是 `canPurchase` 为 null（未判定）—— 与自定义充值那条同一个口径
+   * （PRD §7.4「游客可见不可买」）。传了 userId 就带上该用户的权限判定，
+   * 用户侧据此置灰并展示提示（PRD §6.3）。
+   */
+  async listTiers(userId: number | null = null): Promise<RechargeCatalog> {
     const creditsPerYuan = await fetchCreditsPerYuan();
     const rows = await this.topupTier.listActive();
     return {
@@ -292,6 +351,10 @@ export class RechargeService {
           discount: t.discount,
           isRecommended: t.isRecommended,
           sortOrder: t.sortOrder,
+          // 与下单路径**同一个判定函数**（`canPurchaseTier`）：两侧各判一次就会
+          // 「界面上可点、下单被拒」或者反过来（界面灰着、接口其实放行）
+          canPurchase: userId === null ? null : canPurchaseTier(t, userId),
+          deniedHint: tierDeniedHint(t),
         };
       }),
     };
@@ -351,6 +414,16 @@ export class RechargeService {
       throw new NewApiError("该档位已过期", 400);
     }
 
+    // ⚠️ **购买权限**（PRD §6.3 / §10.4）。这一列在管理端可编辑、有审计文案、
+    // 保存时校验得也很严 —— 但它此前**一次都没被读过**：运营配「仅限白名单」，
+    // 用户侧照样人人都能买，且没有任何报错。判定与自定义充值那条**同一个函数**，
+    // 同一批白名单用户在两条路上必须得到同一个答案。
+    const allowed = canPurchaseTier(tier, input.userId);
+    if (!allowed) {
+      // 403 不是 400：这不是「你填错了」，是「这个账号没有购买资格」（与自定义充值同口径）
+      throw new NewApiError(tierDeniedHint(tier), 403);
+    }
+
     // ⚠️ **到账积分 = 档位配的基础积分**（配置值），不是「原价 × 换算率」：
     //    充值常有折扣，¥499 的档到账 7,500 积分（499×15=7,485）。原价与折扣只为展示划线价。
     const credits = tier.baseCredits;
@@ -373,6 +446,12 @@ export class RechargeService {
       productType: "tier",
       productName: displayTierName(tier.name, credits),
       configVersion: tier.version,
+      // 有效期快照的是**月数**（运营在后台配的那个数），到期时刻发放那一刻按
+      // 支付成功时间折出来 —— 起算点见 `credits-validity.ts`
+      creditsValidMonths: tier.creditsValidMonths,
+      // 真实判定结果落快照（上面刚判过；被拒的单根本到不了这里）。
+      // 写成常量 `allowed` 的话，这一列就回答不了「当时到底判没判」
+      permissionResult: allowed ? "allowed" : "denied",
       subject: tier.name || "积分充值",
       body: tier.name || `积分充值 ${credits} 积分`,
     };
@@ -406,7 +485,8 @@ export class RechargeService {
 
     // 落库时把**商品快照**一起写死（PRD §9.3）：商品名用展示名（用户此刻看到的那串字），
     // 配置版本取配置行此刻的 version（运营之后改价/改名都 +1，据此可判「这单是改价前还是改价后」）。
-    // 其余几列（首购、赠送、权限结果）此刻还是常量，取值在 repo 的写入侧一处。
+    // 首购与赠送那几列此刻仍是常量，取值在 repo 的写入侧一处；权限结果与有效期月数
+    // 由各自的 spec 带过来（那里才是判定发生的地方）。
     const tradeNo = generateTradeNo();
     await this.repo.create({
       tradeNo,
@@ -419,8 +499,13 @@ export class RechargeService {
       productName: spec.productName,
       configVersion: spec.configVersion,
       ...(spec.bonusCredits !== undefined ? { bonusCredits: spec.bonusCredits } : {}),
-      ...(spec.creditsExpireAt !== undefined
-        ? { creditsExpireAt: spec.creditsExpireAt }
+      // 有效期只存**月数**：到期时刻的起算点是支付成功时刻，下单这一刻算不出来
+      // （见 `credits-validity.ts`）
+      ...(spec.creditsValidMonths !== undefined
+        ? { creditsValidMonths: spec.creditsValidMonths }
+        : {}),
+      ...(spec.permissionResult !== undefined
+        ? { permissionResult: spec.permissionResult }
         : {}),
     });
 
@@ -687,8 +772,46 @@ export class RechargeService {
    *
    * <p>⚠️ 失败**不抛**：补发失败不该让「查这笔单到哪一步了」这个请求也失败 ——
    * 「发放中」本身就是一个有效且正确的答案。异常记日志，下一次轮询接着试。
+   *
+   * <p>⚠️ **窗口 + 限流**（2026-09-27 补）。这条路径是**用户每 3 秒轮询**触发的，
+   * 而补发本身是一次真实的 billing 调用。此前它两条都没有：billing 挂掉时，一个开着
+   * 充值弹窗的用户每天会打出 2.8 万次注定失败的调用，而且每 3 秒往日志里写一行 ——
+   * 「超窗就不再重试」那条规则当时只对定时任务（扫描器）成立。
+   *
+   * <p>两件事都对齐扫描器那一套（单子坏了的时候，两条自愈路径的行为不该不一样）：
+   *   · **限流**用 `claimQuerySlot`，间隔取 {@link RECONCILE_INTERVAL_MS}（30 秒）——
+   *     与「查单补偿」同一个名额、同一个间隔。**刻意不用**扫描器的 `GRANT_STALE_AFTER_MS`
+   *     （30 分钟）：那是扫描器的「够格重试」下界，套到用户这条路上等于把一次瞬时的
+   *     billing 抖动延迟半小时才重试（而用户正盯着「等待支付结果…」）；
+   *   · **窗口**用扫描器的 `GRANT_RETRY_WINDOW_MS`（2 小时），起点同样是「钱到的时刻」
+   *     （`paid_pending_at`）。超窗就不再打 billing，只把**如实的状态**回给前端
+   *     （订单仍是 `paid_pending`，等主动对账/人工处理），让界面能说「发放异常」，
+   *     而不是永远转圈、也不是我们编一个「已到账」。
+   *
+   * <p>⚠️ 先抢名额**再**判窗口：名额同时给那条 WARN 限流。顺序反了的话，一个超窗的单
+   * 会被开着页面的用户每 3 秒灌一条 WARN（扫描器那边一条 WARN 是一轮一次，这里不是）。
    */
   private async retryFulfill(order: RechargeOrderView): Promise<RechargeOrderView> {
+    // 抢不到名额 = 30 秒内已经有谁（本进程的另一次轮询、扫描器、别的副本）在管这一笔了。
+    // 直接回当前状态：不打 billing、也不写日志。
+    if (!(await this.repo.claimQuerySlot(order.tradeNo, RECONCILE_INTERVAL_MS))) {
+      return order;
+    }
+
+    // 起点是「钱到账的时刻」（`paid_pending_at`）；存量行没有那一列就退回下单时刻
+    // （与扫描器的 `heldMinutes` 同一口径：宁可在日志里显得久一点，也不要漏判）
+    const held = Date.now() - Date.parse(order.paidPendingAt ?? order.createdAt);
+    if (held > GRANT_RETRY_WINDOW_MS) {
+      this.logger.warn(
+        `补发已超出 ${Math.round(GRANT_RETRY_WINDOW_MS / 60_000)} 分钟重试窗口，不再打 billing：`
+          + `tradeNo=${order.tradeNo} 已等=${Math.round(held / 60_000)} 分钟`
+          + `（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，等主动对账或人工处理）`,
+        { event: "recharge.grant_retry_window_exceeded", trade_no: order.tradeNo },
+      );
+      // 如实回状态：前端据此显示「发放异常」，而不是我们编一个「已到账」
+      return order;
+    }
+
     try {
       await this.fulfill(order);
     } catch (error) {
@@ -706,16 +829,36 @@ export class RechargeService {
     // 「状态是否 >= 待到账」判定（`paid_pending` 上的重投要重试发放），不是由它判。
     await this.repo.markPaidPending(order.tradeNo);
 
+    // ── 到期时刻：起算点是**支付成功时刻**（PRD §9.5），不是下单时刻 ──────────────
+    //
+    // ⚠️ 重读一次订单：`paid_pending_at` 正是上面那一步写进去的，而调用方传进来的 `order`
+    //    是**写之前**读的（首次回调时它还是 null）。拿不到就退回「此刻」——
+    //    绝不退回下单时刻，那正是这次要修的口径（用户犹豫的那半小时不该从有效期里扣掉）。
+    const settled = (await this.repo.getByTradeNo(order.tradeNo)) ?? order;
+    const paidAt = new Date(settled.paidPendingAt ?? Date.now());
+    // 快照没有月数（本列上线前的存量单）→ 不传，由 billing 按来源策略决定有效期
+    const expiresAt =
+      settled.creditsValidMonths === null
+        ? null
+        : creditsExpireAt(paidAt, settled.creditsValidMonths);
+
     const { lotId, duplicated } = await grantCredits({
       userId: Number(order.userId),
       credits: order.credits,
       // 幂等键用我们自己的交易单号：它先于调用存在，且事后能回答「这积分是从哪来的」
       bizId: order.tradeNo,
+      // 显式传到期时刻：运营在档位 / 自定义充值上配的有效期月数**真的生效**了。
+      // 不传的话 billing 会按 source=purchased 的默认策略（2 年）发 ——
+      // 运营配 6 个月就只是个摆设（这正是评审提的那条：配了不生效）
+      ...(expiresAt ? { expiresAt } : {}),
     });
 
     const updated = await this.repo.markPaid({
       tradeNo: order.tradeNo,
       ...(lotId ? { grantLotId: lotId } : {}),
+      // 与发给 billing 的**同一个值**：订单快照记的必须是真实发出去那批积分的到期时刻，
+      // 而不是下单时估的另一个数（那两个数必然差一截，快照就成了一句假话）
+      ...(expiresAt ? { creditsExpireAt: expiresAt } : {}),
     });
     if (!updated) {
       // 不是错误：并发/重投下另一个请求已经记过了。billing 的幂等键保证只发了一次

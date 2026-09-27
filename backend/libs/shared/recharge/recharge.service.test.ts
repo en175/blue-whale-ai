@@ -20,6 +20,7 @@ import {
   notifyParams,
   signed,
 } from "./recharge.testlib.js";
+import { creditsExpireAt } from "./credits-validity.js";
 import { deriveCredits, RechargeService } from "./recharge.service.js";
 /* ============================================
  * 充值到账的账实一致：这是钱路径，测的是「会不会多发一次」「会不会按错的数发」。
@@ -99,7 +100,7 @@ describe("RechargeService — 下单", () => {
     expect(order?.credits).toBe(7500n);
   });
 
-  it("下单写入 8 个快照字段：config_version 取档位**当时**的 version", async () => {
+  it("下单写入 9 个快照字段：config_version 取档位**当时**的 version", async () => {
     makeHttp();
     grpcActiveCatalog();
     const { service, orders, setTierVersion } = await makeService();
@@ -111,13 +112,17 @@ describe("RechargeService — 下单", () => {
     // 商品名是**用户当时看到的展示名**，不是库里那列原始名——自动生成的名字会随积分
     // 重新派生（`displayTierName`），快照要回答的是「用户当时看到的是哪件商品」
     expect(row?.product_name).toBe("7500积分");
-    // 下面这几列此刻还是常量：#40 首购加赠 / #43 有效期落地后才变成计算值
+    // 首购两列此刻还是常量（#40 首购加赠落地后才变成计算值）
     expect(row?.bonus_credits).toBe(0n);
-    expect(row?.credits_expire_at).toBeNull();
     expect(row?.first_purchase_state).toBe("unknown");
     expect(row?.first_purchase_eligible).toBe(0);
+    // 权限结果是**判出来的**（不是写死的常量）：这一列要能回答「当时到底判没判」
     expect(row?.permission_result).toBe("allowed");
     expect(row?.config_version).toBe(3);
+    // ⚠️ 有效期快照的是**月数**（运营在后台配的那个数），不是算好的时刻：
+    // 起算点是支付成功时刻（PRD §9.5），下单这一刻根本还不知道它
+    expect(row?.credits_valid_months).toBe(24);
+    expect(row?.credits_expire_at).toBeNull();
 
     // 运营改配置（保存一次 version +1）之后：新单记新版本，**老单不动**——快照的意义就在这
     //
@@ -129,6 +134,94 @@ describe("RechargeService — 下单", () => {
     const second = await service.createOrder({ userId: 9001, tierId: TIER.id });
     expect(orders.get(second.tradeNo)?.config_version).toBe(4);
     expect(orders.get(first.tradeNo)?.config_version).toBe(3);
+  });
+
+  it("★ 档位配的有效期月数进快照：换一档就是换一个数（不是写死的 2 年）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+
+    setTier({ creditsValidMonths: 6 });
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+
+    expect(orders.get(created.tradeNo)?.credits_valid_months).toBe(6);
+  });
+
+  it("★ 档位购买权限：不在白名单 → 403 带后台配的提示，且**一笔单都不建**", async () => {
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+    setTier({
+      permission: "user_group",
+      permissionAllowlist: ["9001"],
+      permissionDeniedHint: "该档位仅限内测用户",
+    });
+
+    // 判定的落点必须在**下单路径**上：这一列在管理端可编辑、保存时校验得很严，
+    // 但此前没有任何人读它 —— 运营配「仅限白名单」，用户侧人人都能买且没有报错
+    await expect(service.createOrder({ userId: 7007, tierId: TIER.id })).rejects.toThrow(
+      /该档位仅限内测用户/,
+    );
+    expect(orders.size).toBe(0);
+    expect(http.calls.some((c) => c.url.endsWith("/api/pay/unifiedOrder"))).toBe(false);
+
+    // 名单里的用户照常下单
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    expect(created.credits).toBe(7500);
+  });
+
+  it("★ 档位没配提示文案时用默认文案（不能把空串当提示展示）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, setTier } = await makeService();
+    setTier({ permission: "user_group", permissionAllowlist: [] });
+
+    await expect(service.createOrder({ userId: 9001, tierId: TIER.id })).rejects.toThrow(
+      /暂不可购买该档位/,
+    );
+  });
+
+  it("★ `member_tier` 权限本阶段只是占位：不拦人（PRD §10.4 阶段 2 生效）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, setTier } = await makeService();
+    setTier({ permission: "member_tier", permissionAllowlist: [] });
+
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    expect(created.credits).toBe(7500);
+  });
+
+  it("★ listTiers 带上权限信号：游客未判定、白名单外的用户 false（PRD §6.3 置灰）", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service, setTier } = await makeService();
+    setTier({
+      permission: "user_group",
+      permissionAllowlist: ["9001"],
+      permissionDeniedHint: "该档位仅限内测用户",
+    });
+
+    // 游客：价格表是公开的（能看），只是**未判定**——与自定义充值那条同一个口径
+    const guest = await service.listTiers(null);
+    expect(guest.tiers[0]?.canPurchase).toBeNull();
+    expect(guest.tiers[0]?.deniedHint).toBe("该档位仅限内测用户");
+
+    // 白名单外的登录用户：卡片要置灰，并带上后台配的提示
+    const denied = await service.listTiers(7007);
+    expect(denied.tiers[0]?.canPurchase).toBe(false);
+
+    // 名单里的用户：可买（目录与下单路径用的是同一个判定函数，不会两边打架）
+    const allowed = await service.listTiers(9001);
+    expect(allowed.tiers[0]?.canPurchase).toBe(true);
+  });
+
+  it("★ 默认不传 userId = 游客视角：`can_purchase` 为 null（未判定），不是 false", async () => {
+    makeHttp();
+    grpcActiveCatalog();
+    const { service } = await makeService();
+
+    // false 的意思是「这个用户不能买」，而「不知道是谁」不该被显示成一张灰卡片
+    expect((await service.listTiers()).tiers[0]?.canPurchase).toBeNull();
   });
 
   it("档位下架 → 拒绝下单", async () => {
@@ -245,6 +338,42 @@ describe("RechargeService — 回调到账", () => {
     // 顺序本身要钉住：只看最终值是 paid 的话，「先写 paid、事后补一次 paid_pending」也是绿的。
     // 发放失败时订单必须**看得见**地停在 paid_pending，这个顺序就是那个保证。
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
+  });
+
+  it("★ 到账把配的有效期**真的**传给了 billing，起算点是支付成功时刻（PRD §9.5）", async () => {
+    // 这条守的是「运营配了 6 个月却按 2 年发」那个缺陷：`credits_valid_months` 在整条
+    // 下单/到账链路上曾经**没有任何读方**，配置是个摆设。现在发放时按
+    // `paid_pending_at + 月数` 算出 expiresAt 显式传过去（billing 的 GrantPolicy 支持覆盖）。
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders, setTier } = await makeService();
+    setTier({ creditsValidMonths: 6 });
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+
+    expect(await service.handleNotify(await signed(notifyParams(created.tradeNo)))).toBe(true);
+
+    const row = orders.get(created.tradeNo);
+    const paidPendingAt = row?.paid_pending_at as Date;
+    // 起算点 = 钱到的时刻（不是下单时刻）：用户犹豫的那半小时不该从有效期里扣掉
+    const expected = creditsExpireAt(paidPendingAt, 6);
+    expect(row?.credits_expire_at).toEqual(expected);
+    // 传给 billing 的必须是**同一个值**：订单快照与真实发放不能是两个数
+    expect(http.grantBodies[0]?.expiresAt).toBe(expected.toISOString());
+  });
+
+  it("有效期快照缺失（本列上线前的存量单）→ 不显式传 expiresAt，由 billing 按来源策略发", async () => {
+    const http = makeHttp();
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    // 模拟本列上线前建的行：没有有效期月数快照
+    orders.get(created.tradeNo)!.credits_valid_months = null;
+
+    await service.handleNotify(await signed(notifyParams(created.tradeNo)));
+
+    // 不传 ≠ 传 null：后者会让报文里多一个我们不打算表达的空值
+    expect("expiresAt" in (http.grantBodies[0] ?? {})).toBe(false);
+    expect(orders.get(created.tradeNo)?.credits_expire_at).toBeNull();
   });
 
   it("重复回调（网关重投）：积分只发一次，且仍应答 SUCCESS", async () => {
@@ -460,6 +589,64 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 
     expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
     expect(state.status).toBe("paid");
+  });
+
+  it("★ 补发走限流：30 秒内用户轮询多次，只打一次 billing", async () => {
+    // 这段守的是「billing 挂掉时被打爆」：前端每 3 秒轮一次，每次补发都是一次真实的
+    // billing 调用 —— 不限流的话一个开着弹窗的用户每天就是 2.8 万次注定失败的调用
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "paid_pending";
+    // 让发放一直失败：订单留在 paid_pending，才谈得上「下一次轮询还要不要重试」
+    http.failNextGrants(10);
+
+    await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+    await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+    await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+
+    // 名额与「查单补偿」共用（claimQuerySlot / 30 秒），所以是**一次**真实的发放请求
+    expect(http.grantBodies).toHaveLength(1);
+    // 状态如实回 paid_pending：发放失败不该让查单接口也失败，「发放中」本身就是有效答案
+    expect(orders.get(created.tradeNo)?.status).toBe("paid_pending");
+  });
+
+  it("★ 超出重试窗口的 paid_pending：只回状态，**不再打 billing**（也不改状态）", async () => {
+    // 「超窗就不再重试」这条规则此前只对定时任务成立：用户轮询那条路**每次**都打 billing。
+    // 一个坏掉的单因此会被开着页面的用户永远重试下去（每 3 秒一次）。
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = orders.get(created.tradeNo)!;
+    row.status = "paid_pending";
+    // 钱到的时刻拨到 3 小时前（窗口是 2 小时）
+    row.paid_pending_at = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+
+    expect(http.grantBodies).toHaveLength(0);
+    // 如实回状态：没有「放弃」这个状态，也不该替人把它标成某种「处理过」
+    expect(state.status).toBe("paid_pending");
+    expect(orders.get(created.tradeNo)?.status).toBe("paid_pending");
+  });
+
+  it("存量单没有 paid_pending_at：退回按下单时刻判窗口（更宽松，好过永远扫不到）", async () => {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = orders.get(created.tradeNo)!;
+    row.status = "paid_pending";
+    row.paid_pending_at = null; // 本列上线前进入该状态的行
+    // 下单时刻拨到 3 小时前 —— 已经超窗，不再打 billing
+    row.gmt_create = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+
+    expect(http.grantBodies).toHaveLength(0);
+    expect(state.status).toBe("paid_pending");
   });
 
   it("别人的订单当作不存在：不泄漏「这个单号存在」", async () => {

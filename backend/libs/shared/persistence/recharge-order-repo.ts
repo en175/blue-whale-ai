@@ -62,17 +62,21 @@ export const PAID_REACHED_STATUSES: readonly RechargeOrderStatus[] = [
 /**
  * 订单快照（PRD §9.3）里此刻还是常量的那几列。
  *
- * <p>首购两列写 `unknown` / `0`（#40 首购加赠上线时才变成计算值），有效期默认写 `null`
- * （永久）：档位单的 2 年有效期是 #43 的事，**自定义充值单不走这个默认值** ——
- * PRD §7.4 明确要求自定义充值订单快照有效期，那条路径用
- * `RechargeService.buildCustomOrderSnapshot` 显式传 `creditsExpireAt`。
- * 取值集中在写入侧一处，是为了那几件事落地时只改这里，不必再动表。
+ * <p>首购两列写 `unknown` / `0`（#40 首购加赠上线时才变成计算值）；`creditsValidMonths`
+ * 写 `null` = 没有这个快照（只有本列上线前的存量单会是这样，发放时退回 billing 的来源策略）。
+ *
+ * <p>⚠️ `creditsExpireAt` **不在这个常量里了**：到期时刻不再是下单时算出来的值
+ * （起算点是**支付成功时刻**，下单那一刻还不知道它）。它由发放那一步按
+ * `paid_pending_at + credits_valid_months` 算出来写进 `credits_expire_at`
+ * （见 `recharge/credits-validity.ts`），所以下单时那一列先显式写 NULL。
+ *
+ * <p>取值集中在写入侧一处，是为了那几件事落地时只改这里，不必再动表。
  */
 export const RECHARGE_ORDER_SNAPSHOT_DEFAULTS = {
   productType: "tier",
   productName: "",
   bonusCredits: 0,
-  creditsExpireAt: null,
+  creditsValidMonths: null,
   firstPurchaseState: "unknown",
   firstPurchaseEligible: 0,
   permissionResult: "allowed",
@@ -123,6 +127,15 @@ export interface RechargeOrderView {
   notifyCount: number;
   createdAt: string;
   /**
+   * 积分有效期的**月数**快照（下单时从档位 / 自定义充值配置抄下来）。
+   *
+   * <p>⚠️ 存月数不存算好的时刻：起算点是**支付成功时刻**（PRD §9.5），而下单那一刻
+   * 还不知道它。真正的到期时刻在发放那一步折出来，同时写进 `credits_expire_at`。
+   *
+   * <p>`null` = 本列上线前的存量单：发放时不显式传有效期，由 billing 按来源策略决定。
+   */
+  creditsValidMonths: number | null;
+  /**
    * **首次**进入「支付成功待到账」的时刻；主动对账据此算「持有分钟数」。
    *
    * <p>不能用 `gmt_modified` 顶替：回调到达、查单名额都会改它。也不能用 `paid_at`
@@ -157,8 +170,13 @@ export interface CreateRechargeOrderInput {
   productName?: string;
   /** 本单应发的赠送积分快照（首购加赠）；#40 上线前恒为 0 */
   bonusCredits?: number;
-  /** 积分到期时刻；`null` = 永久 */
-  creditsExpireAt?: Date | null;
+  /**
+   * 到账积分有效期快照，单位**月**（PRD §7.4/§10.2「积分有效期」）。
+   *
+   * <p>`null` / 不传 = 没有这个快照（存量单），发放时由 billing 按来源策略决定有效期。
+   * ⚠️ 这里**只收月数**：真实的到期时刻由发放那一步算（起算点是支付成功时刻）。
+   */
+  creditsValidMonths?: number | null;
   /** 下单时服务端判定的首购状态：`unknown` 未判定（功能未上线）| `first` | `repeat` */
   firstPurchaseState?: string;
   /** 该商品是否参与首购加赠（配置快照）。0 / 1 */
@@ -182,15 +200,26 @@ export interface RechargeOrderListFilter {
 /**
  * 找「同一用户、同一商品的活跃单」时用的商品身份。
  *
- * <p>`credits` 也算身份的一部分：它能分辨「同一档位在配置改过之后下的单」（到账积分变了
- * 就是另一件商品）。`amountFen` **刻意不在**里面 —— 同一件商品在待支付期间被运营改了价，
- * 订单行里冻结的仍是下单那一刻的价，复用就等于按原价卖，不会凭空改口。
+ * <p>身份 = 商品类型 + 档位 + 到账积分 + **实付金额**。前两项分辨「换了一档」，
+ * `credits` 分辨「同一档位在配置改过之后下的单」（到账积分变了就是另一件商品）。
+ *
+ * <p>⚠️ **金额是身份的一部分**（2026-09-27 修正，推翻此前「金额刻意不在里面」）。此前的理由是
+ * 「订单行里冻结的是下单那一刻的价，改价不该改口」，但那个理由只看到了**复用那一侧**，
+ * 漏了用户看到的东西：用户看着 ¥499 下单、运营随后改到 ¥599，他再点一次时复用的旧单
+ * 会带着**旧价**回来，而界面上的目录价已经是新价 —— 于是同一个屏幕上同时出现两个金额
+ * （「确认支付 ¥499」与二维码面板的价）。这违反本仓「用户可见界面永远只出现一个金额」，
+ * 而且方向可能多收用户的钱（目录价降了、复用的还是高价单）。
+ *
+ * <p>所以：**价变了就不是同一件商品**，照常建新单（旧单留给它自己过期）。订单冻结的
+ * 仍是下单那一刻的价，这一条没变 —— 变的是「价格不同的两笔单不再互相顶替」。
  */
 export interface ActiveOrderIdentity {
   userId: number;
   productType: string;
   tierId: number | null;
   credits: number;
+  /** 实付金额（分）。改了价就是换了一件商品，见接口注释 */
+  amountFen: number;
 }
 
 export interface RechargeOrderPage {
@@ -222,12 +251,20 @@ export interface RechargeOrderRepo {
   /** 管理端列表（offset 分页，时间倒序）。**不供用户端使用**——用户只看得到自己那份。 */
   list(filter: RechargeOrderListFilter): Promise<RechargeOrderPage>;
   /**
-   * 该用户这件商品**尚未支付**的那一笔（没有则 null）。
+   * 该用户这件商品的**活跃单**（没有则 null）。
    *
-   * <p>下单前先问它：命中就不建新单（PRD §7.5「服务端避免重复有效订单」）。只认 `pending` ——
-   * `paid_pending` / `paid` 说明钱已经收了，那是一笔已完成的交易，不是「用户点重复了」。
+   * <p>下单前先问它：命中就不建新单（PRD §7.5「服务端避免重复有效订单」）。
+   *
+   * <p>⚠️ 活跃 = `pending`（还没付）+ `paid_pending` / `grant_failed`（**钱已经收了**、
+   * 积分还没发出去）。后两者也要算进来，否则会出现真实的重复收款：用户付了钱卡在
+   * 「发放中」，界面一直显示「等待支付结果…」，他关掉弹窗再打开看到的是干净的空闲态，
+   * 于是再买一笔、再付一次 —— 旧单之后又被对账任务补发成功，用户被扣两次钱。
+   *
+   * <p>⚠️ `paid` **不在**里面：那是一笔已经完成的交易，用户再买一笔是正常的。
+   * 命中 `paid_pending` / `grant_failed` 时的处置（复用还是 409）由调用方决定，
+   * 见 `recharge-active-order.ts`。
    */
-  findActivePending(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
+  findActiveOrder(identity: ActiveOrderIdentity): Promise<RechargeOrderView | null>;
   /**
    * 主动对账的取数：状态是「钱到了、积分没发完」（`paid_pending` / `grant_failed`），
    * 且**钱到的时刻**落在这个重试窗口里的订单，最旧的在前。
@@ -290,8 +327,18 @@ export interface RechargeOrderRepo {
    * <p>⚠️ 它现在**只**回答「本次是否由我把订单推到已到账」，**不再**是「该不该发积分」的答案：
    * 发放与否由调用方按「当前状态是否 >= 待到账」判断（`paid_pending` 上的重复回调要**重试发放**，
    * 那是一次白给的重试机会）。重复发放仍由 billing 的幂等键兜底，两层都要有。
+   *
+   * <p>`creditsExpireAt` 是刚发给 billing 的那个到期时刻（起算点 = 支付成功时刻）：
+   * 与批次同时落地，订单快照才是「**真实**发出去的那批积分什么时候到期」，
+   * 而不是下单时估的一个值（那个值与真实发放必然差一截 —— 见 `credits_valid_months`）。
+   * 幂等命中（409）时拿不到新批次，但同一单的 `paid_pending_at` 是稳定的，
+   * 重算出来是同一个值，覆盖不会把它改坏。
    */
-  markPaid(input: { tradeNo: string; grantLotId?: string }): Promise<boolean>;
+  markPaid(input: {
+    tradeNo: string;
+    grantLotId?: string;
+    creditsExpireAt?: Date;
+  }): Promise<boolean>;
   /**
    * 标记到账异常（`paid_pending` → `grant_failed`，进核验队列）。
    * 返回**本次是否由我标记**（已是异常状态时返回 false，调用方据此决定要不要叫人）。
@@ -341,6 +388,12 @@ function toView(row: any): RechargeOrderView {
     grantLotId: row.grant_lot_id === null ? null : row.grant_lot_id.toString(),
     notifyCount: row.notify_count,
     createdAt: new Date(row.gmt_create).toISOString(),
+    // 存量行没有这一列（本列上线前建的）→ null，不是 0：0 个月是个「立即过期」的承诺，
+    // 而 null 的意思是「没有这个快照」，两者在发放那一步的处置完全不同
+    creditsValidMonths:
+      row.credits_valid_months === null || row.credits_valid_months === undefined
+        ? null
+        : Number(row.credits_valid_months),
     paidPendingAt: row.paid_pending_at
       ? new Date(row.paid_pending_at).toISOString()
       : null,
@@ -362,7 +415,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
           credits: BigInt(input.credits),
           credits_per_yuan: input.creditsPerYuan,
           status: RECHARGE_ORDER_STATUS.pending,
-          // 快照 8 列在**下单这一处**写全（PRD §9.3）。不靠列默认值：默认值只在
+          // 快照 9 列在**下单这一处**写全（PRD §9.3）。不靠列默认值：默认值只在
           // INSERT 语句里缺列时生效，而缺列本身没有任何报错——快照列静默为空，
           // 「后台改配置不影响已创建订单」这条保证就悄悄失效了。
           product_type:
@@ -372,8 +425,12 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
           bonus_credits: BigInt(
             input.bonusCredits ?? RECHARGE_ORDER_SNAPSHOT_DEFAULTS.bonusCredits,
           ),
-          credits_expire_at:
-            input.creditsExpireAt ?? RECHARGE_ORDER_SNAPSHOT_DEFAULTS.creditsExpireAt,
+          // ⚠️ 到期**时刻**此刻写不了：它的起算点是支付成功时刻（PRD §9.5），而下单这一刻
+          // 还没付钱。所以这里显式写 NULL，由发放那一步（markPaid）写上算出来的真实值；
+          // 下单时冻结的是**月数**（下一列）。
+          credits_expire_at: null,
+          credits_valid_months:
+            input.creditsValidMonths ?? RECHARGE_ORDER_SNAPSHOT_DEFAULTS.creditsValidMonths,
           first_purchase_state:
             input.firstPurchaseState ??
             RECHARGE_ORDER_SNAPSHOT_DEFAULTS.firstPurchaseState,
@@ -416,20 +473,31 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return { items: rows.map(toView), total };
     },
 
-    async findActivePending(identity) {
+    async findActiveOrder(identity) {
       const row = await prisma.recharge_orders.findFirst({
         where: {
           user_id: BigInt(identity.userId),
-          // 只认 pending：paid_pending / paid 是「钱已经收了」的已完成交易，
-          // 不是「用户点了两次」。异常单同理（它更不该被当成新单的挡板）
-          status: RECHARGE_ORDER_STATUS.pending,
+          // ⚠️ 三种状态都算「活跃单」，理由见接口注释：
+          //   · pending      —— 还没付，就是「用户点了两次」；
+          //   · paid_pending / grant_failed —— **钱已经收了**、积分还没发出去。
+          // 漏掉后两种会造成真实的重复收款（用户以为那一笔不存在了，再买一笔再付一次）。
+          // ⚠️ `paid` 不在里面：那是已完成的一笔，用户再买一次是正常的。
+          status: {
+            in: [
+              RECHARGE_ORDER_STATUS.pending,
+              RECHARGE_ORDER_STATUS.paidPending,
+              RECHARGE_ORDER_STATUS.grantFailed,
+            ],
+          },
           is_delete: 0,
           product_type: identity.productType,
           // tier_id 传 null 时 Prisma 生成 IS NULL —— 自定义充值单正是这一支
           tier_id: identity.tierId === null ? null : BigInt(identity.tierId),
           credits: BigInt(identity.credits),
+          // 金额也是身份的一部分：改了价就是换了一件商品（见 ActiveOrderIdentity）
+          amount_fen: BigInt(identity.amountFen),
         },
-        // 同一件商品理论上只会有一笔 pending，但历史数据/并发下可能有第二笔：
+        // 同一件商品理论上只会有一笔活跃单，但历史数据/并发下可能有第二笔：
         // 复用**最新**那笔（次级键 id 不是可选项：DATETIME 只到秒，同秒两笔是常态）
         orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
       });
@@ -522,7 +590,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return r.count > 0;
     },
 
-    async markPaid({ tradeNo, grantLotId }) {
+    async markPaid({ tradeNo, grantLotId, creditsExpireAt }) {
       const r = await prisma.recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: { not: RECHARGE_ORDER_STATUS.paid } },
         data: {
@@ -531,6 +599,9 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
           // 只有真拿到批次 id 时才写：幂等命中（409）那条路径拿不到它，
           // 写 null 会把早先那次成功留下的批次号抹掉
           ...(grantLotId ? { grant_lot_id: BigInt(grantLotId) } : {}),
+          // 到期时刻：与刚发给 billing 的那个值是**同一个**（调用方算一次、传两处），
+          // 订单快照记的才是「真实发出去的那批积分什么时候到期」
+          ...(creditsExpireAt ? { credits_expire_at: creditsExpireAt } : {}),
           gmt_modified: new Date(),
         },
       });

@@ -11,6 +11,7 @@
  *    同一条注意事项。
  * ============================================ */
 import { vi } from "vitest";
+import type { TopupTierPermission } from "@lib/shared/persistence/index.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import type { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
@@ -223,6 +224,12 @@ export function defaultCustomConfigRow(overrides: Row = {}): Row {
 /** 网关 + 发放（HTTP）的桩，按 URL 分流并记录调用。目录与余额都走 gRPC，不在这里。 */
 export function makeHttp(gatewayState = 1) {
   const granted: { amount: number; bizId: string }[] = [];
+  /**
+   * 发放请求的**原始报文**（与 `granted` 分开：那个只留 amount/bizId，被一堆用例用
+   * `toEqual` 精确断言着）。`expiresAt` 这条显式覆盖（运营配的有效期月数有没有真的
+   * 生效）要看它 —— 它是本次最容易被漏掉的一个字段：不传也能「发放成功」。
+   */
+  const grantBodies: Record<string, unknown>[] = [];
   const calls: { url: string; body: Record<string, unknown> }[] = [];
   /** 接下来 N 次发放请求返回 500（模拟 billing 抖动），用来观测「发放失败后重投」那条路。 */
   let grantFailures = 0;
@@ -235,6 +242,7 @@ export function makeHttp(gatewayState = 1) {
     calls.push({ url: target, body });
 
     if (target.endsWith("/admin/credits/grants")) {
+      grantBodies.push(body);
       if (grantFailures > 0) {
         grantFailures -= 1;
         return new Response("boom", { status: 500 });
@@ -281,6 +289,7 @@ export function makeHttp(gatewayState = 1) {
     setGatewayState: (v: number) => {
       gatewayState = v;
     },
+    grantBodies,
     failNextGrants: (n: number) => {
       grantFailures = n;
     },
@@ -314,6 +323,17 @@ export const TIER = {
   endTime: null,
   sortOrder: 1,
   version: 3,
+  /**
+   * 到账积分有效期（月）：运营在后台配的那个数。它就是「配了要生效」的那条 ——
+   * 发放时按支付成功时刻 + 它折出 `expiresAt` 交给 billing（PRD §9.5）。
+   */
+  creditsValidMonths: 24,
+  /** 购买权限的三个字段（PRD §10.4）：默认「全部登录用户」，白名单用例自己覆盖。
+   *  `permission` 标注成联合类型而不是字面量 `"all"`：否则 `setTier({permission: "user_group"})`
+   *  会被 `Partial<Tier>` 卡住，白名单那条路根本写不出用例 */
+  permission: "all" as TopupTierPermission,
+  permissionAllowlist: [] as string[],
+  permissionDeniedHint: "",
   createdAt: "2026-09-01T00:00:00.000Z",
   updatedAt: "2026-09-01T00:00:00.000Z",
 };

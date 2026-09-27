@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PERMISSION_DENIED_HINT,
   canPurchaseCustom,
-  customCreditsExpireAt,
   customDeniedHint,
   customPriceFen,
   parseCustomCredits,
@@ -188,13 +187,7 @@ describe("customDeniedHint — 无权限提示", () => {
   });
 });
 
-describe("customCreditsExpireAt — 订单快照里的有效期", () => {
-  it("按支付成功时间起算，加配置的月数（PRD §9.5）", () => {
-    const paidAt = new Date("2026-09-27T10:00:00.000Z");
-    const expire = customCreditsExpireAt(paidAt, 24);
-    expect(expire.getUTCFullYear()).toBe(2028);
-    expect(expire.getUTCMonth()).toBe(8); // 9 月（0 基）
-    // 不修改传入的 Date（快照是只读的输入）
-    expect(paidAt.toISOString()).toBe("2026-09-27T10:00:00.000Z");
-  });
-});
+// 有效期换算（原 `customCreditsExpireAt`）已抽到 `recharge/credits-validity.ts`：
+// 档位单与自定义单共用同一份（起算点是支付成功时刻，见那里的文件头），
+// 用例随之搬到 `recharge/credits-validity.test.ts`。
+

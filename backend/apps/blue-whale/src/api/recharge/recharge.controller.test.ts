@@ -30,21 +30,41 @@ const CREATED = {
   credits: 600,
 };
 
+const CATALOG = {
+  creditsPerYuan: 15,
+  tiers: [
+    {
+      id: "7",
+      name: "7500积分",
+      amount: 7500,
+      price: 499,
+      originalPrice: 500,
+      discount: 1,
+      isRecommended: false,
+      sortOrder: 1,
+      canPurchase: null as boolean | null,
+      deniedHint: "当前账号暂不可购买该档位",
+    },
+  ],
+};
+
 function makeController(overrides: {
   createOrder?: ReturnType<typeof vi.fn>;
   buildOffer?: ReturnType<typeof vi.fn>;
+  listTiers?: ReturnType<typeof vi.fn>;
   resolveSession?: ReturnType<typeof vi.fn>;
 } = {}) {
   const createOrder = overrides.createOrder ?? vi.fn().mockResolvedValue(CREATED);
   const buildOffer = overrides.buildOffer ?? vi.fn().mockResolvedValue(OFFER);
+  const listTiers = overrides.listTiers ?? vi.fn().mockResolvedValue(CATALOG);
   const resolveSession =
     overrides.resolveSession ?? vi.fn().mockResolvedValue(null);
   const controller = new RechargeController(
-    { createOrder } as never,
+    { createOrder, listTiers } as never,
     { buildOffer } as never,
     { resolveSession } as never,
   );
-  return { controller, createOrder, buildOffer, resolveSession };
+  return { controller, createOrder, buildOffer, listTiers, resolveSession };
 }
 
 const reqWith = (cookies: Record<string, string> = {}) => ({ cookies }) as never;
@@ -61,6 +81,68 @@ describe("RechargeController — 路由鉴权姿态", () => {
     expect(
       Reflect.getMetadata(IS_PUBLIC_KEY, RechargeController.prototype.customOffer),
     ).toBe(true);
+  });
+
+  it("★ 档位目录也是公开路由：价格表本来就是公开信息", () => {
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, RechargeController.prototype.tiers)).toBe(
+      true,
+    );
+  });
+});
+
+describe("RechargeController.tiers — 档位目录 + 权限信号（PRD §6.3）", () => {
+  it("无 cookie = 游客：价格表照给，can_purchase 为 null（未判定）", async () => {
+    const { controller, listTiers } = makeController();
+
+    const res = await controller.tiers(reqWith());
+
+    expect(listTiers).toHaveBeenCalledWith(null);
+    expect(res.data).toMatchObject({
+      credits_per_yuan: 15,
+      tiers: [
+        {
+          id: "7",
+          amount: 7500,
+          price: 499,
+          original_price: 500,
+          can_purchase: null,
+          denied_hint: "当前账号暂不可购买该档位",
+        },
+      ],
+    });
+  });
+
+  it("★ 有会话 cookie：带上该用户的权限判定（白名单外的用户拿到 false + 提示）", async () => {
+    const { controller, listTiers } = makeController({
+      listTiers: vi.fn().mockResolvedValue({
+        ...CATALOG,
+        tiers: [{ ...CATALOG.tiers[0]!, canPurchase: false, deniedHint: "该档位仅限内测用户" }],
+      }),
+      resolveSession: vi.fn().mockResolvedValue({ userId: 9001n }),
+    });
+
+    const res = await controller.tiers(
+      reqWith({ [SESSION_COOKIE_NAME]: "tok" }) as never,
+    );
+
+    // 判定必须按**这个人**来：@Public 路由上 AuthGuard 不填 request.user，
+    // 所以这里靠会话 cookie 自己解析（与 customOffer 同一条做法）
+    expect(listTiers).toHaveBeenCalledWith(9001);
+    expect(res.data).toMatchObject({
+      tiers: [{ can_purchase: false, denied_hint: "该档位仅限内测用户" }],
+    });
+  });
+
+  it("会话解析失败当游客处理，不抛错（cookie 过期不该让充值页多一块红色错误）", async () => {
+    const { controller, listTiers } = makeController({
+      resolveSession: vi.fn().mockRejectedValue(new Error("session down")),
+    });
+
+    const res = await controller.tiers(reqWith({ [SESSION_COOKIE_NAME]: "expired" }));
+
+    expect(listTiers).toHaveBeenCalledWith(null);
+    expect((res.data as { tiers: { can_purchase: boolean | null }[] }).tiers[0]?.can_purchase)
+      .toBeNull();
   });
 });
 

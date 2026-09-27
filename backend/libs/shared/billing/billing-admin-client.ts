@@ -273,6 +273,20 @@ export interface GrantCreditsInput {
    * 同一笔交易重复回调时，同一个 bizId 会被 billing 拒成 409。
    */
   bizId: string;
+  /**
+   * **显式覆盖**这批积分的到期时刻；不传 = 按来源（`purchased`）的默认策略。
+   *
+   * <p>什么时候必须传：有效期是**商品配置**的一部分（档位 / 自定义充值各自配的
+   * `credits_valid_months`，PRD §10.2 把它列为必填）。不传的话运营配 6 个月仍会按
+   * `GrantPolicy` 的 `purchased` 策略发 2 年 —— 配置就成了摆设。
+   *
+   * <p>⚠️ 只覆盖**有效期**这一项：幂等键、来源、批次语义仍由 billing 决定。
+   * billing 侧的实现是「`expiresAt != null` 时用它，否则按 `GrantPolicy`」
+   * （`AdminCreditController` 的 `GrantRequest.expiresAt` → `BillingApplicationService.grant`），
+   * 所以调用方要自己保证「传了就得对」——起算点与月数由 `recharge/credits-validity.ts`
+   * 那一处算，不要在各个入口各算一遍。
+   */
+  expiresAt?: Date;
 }
 
 export interface GrantCreditsResult {
@@ -285,11 +299,14 @@ export interface GrantCreditsResult {
 /**
  * 发放积分（`POST /admin/credits/grants`，`source = purchased`）。
  *
- * <p>`source = purchased` 决定这批积分的有效期策略（**2 年**，自支付成功时刻起算，
- * 见 PRD §9.5），由 billing 的 `GrantPolicy` 按来源决定，这里不传 `expiresAt`——
- * 传了就是让「充值本金 2 年」这条产品约定变成每个调用点各自记得的事。
- * 有效期是**来源的属性**，不是入口的属性：改口径时只改 billing 那一处，
- * 所有调用点自动正确（包括将来新增的到账入口）。
+ * <p>`source = purchased` 决定这批积分的**默认**有效期策略（2 年，见 PRD §9.5），
+ * 由 billing 的 `GrantPolicy` 按来源决定 —— 不传 `expiresAt` 时就用它。
+ *
+ * <p>⚠️ **但「充值本金 2 年」不是唯一的合法口径**：商品可以配自己的有效期
+ * （档位 / 自定义充值的 `credits_valid_months`，PRD §10.2 必填）。所以到账路径会
+ * 显式传 `expiresAt`（按支付成功时刻 + 配置月数算），billing 那条「显式覆盖」通道
+ * 正是为这种情形留的（`GrantPolicy` 的类注释：「需要一次性特殊有效期时，
+ * 管理端发放接口支持显式传入 expiresAt 覆盖本策略」）。
  *
  * <p>⚠️ 409（幂等键已存在）在这里被翻译成 `duplicated: true` 的**正常返回**，不是异常：
  *    重复的回调是必然会发生的（网关最多重投 6 次），把它当失败会让调用方反复重试、
@@ -308,6 +325,10 @@ export async function grantCredits(
       amount: input.credits,
       bizId: input.bizId,
       bizType: "recharge",
+      // 不传时这个键**整个不出现在报文里**（`undefined` 会被 JSON.stringify 丢掉）：
+      // 显式传 `null` 是另一回事（billing 的 `Instant expiresAt` 收 null 是「不覆盖」，
+      // 但让报文里多一个我们并不打算表达的空值没有意义）
+      ...(input.expiresAt ? { expiresAt: input.expiresAt.toISOString() } : {}),
     }),
     env,
   };

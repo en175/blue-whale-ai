@@ -46,12 +46,20 @@ export class RechargeController {
     private readonly sessions: SessionService,
   ) {}
 
-  /** 档位目录 + 当前换算率（1 元 = 多少积分）。价格表是公开信息，不需要登录。 */
+  /**
+   * 档位目录 + 当前换算率（1 元 = 多少积分）。价格表是公开信息，不需要登录。
+   *
+   * <p>⚠️ 游客与登录用户拿到的是**同一张价格表**，区别只在权限信号：
+   * `can_purchase` 为 `null`（游客，未判定）/ `true` / `false`（PRD §6.3 置灰并展示提示）。
+   * 所以这里像 `customOffer` 一样自己看一眼会话 cookie（best-effort，读不出来当游客），
+   * 而不是用 `@CurrentUser()`：`@Public()` 路由上 AuthGuard 直接放行、不填 `request.user`，
+   * 那样登录用户也会被当成「未判定」，白名单用户照样看到灰卡片。
+   */
   @Public()
   @Get("tiers")
-  async tiers() {
+  async tiers(@Req() req: Request) {
     try {
-      const catalog = await this.recharge.listTiers();
+      const catalog = await this.recharge.listTiers(await this.optionalUserId(req));
       return ok({
         tiers: catalog.tiers.map((t) => ({
           id: t.id,
@@ -62,6 +70,10 @@ export class RechargeController {
           discount: t.discount,
           is_recommended: t.isRecommended,
           sort_order: t.sortOrder,
+          // null = 游客（未判定）。前端据此把卡片置灰并展示提示 ——
+          // 与自定义充值那条（`can_purchase`）同一个形状，两条购买路径体验对称
+          can_purchase: t.canPurchase,
+          denied_hint: t.deniedHint,
         })),
         credits_per_yuan: catalog.creditsPerYuan,
       });

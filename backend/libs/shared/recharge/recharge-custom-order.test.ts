@@ -18,6 +18,7 @@ import {
   notifyParams,
   signed,
 } from "./recharge.testlib.js";
+import { creditsExpireAt } from "./credits-validity.js";
 import { RechargeService } from "./recharge.service.js";
 /* ============================================
  * 自定义充值下单（模块 B，PRD §7）：从「用户点了买 N 积分」到「订单落库 + 交给网关」。
@@ -72,7 +73,10 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     // 快照四项（§7.4「记录积分数量、换算比例、价格、有效期」）
     expect(order?.credits_per_yuan).toBe(15);
     expect(order?.config_version).toBe(5);
-    expect(order?.credits_expire_at).toBeInstanceOf(Date);
+    // ⚠️ 有效期快照的是**月数**（配置表里那个数），不是算好的时刻：起算点是支付成功
+    // 时刻（§9.5），下单这一刻还不知道它 —— 到期时刻由发放那一步按钱到的时刻折出来
+    expect(order?.credits_valid_months).toBe(24);
+    expect(order?.credits_expire_at).toBeNull();
     // 商品类型与名称快照（§9.3「商品类型：自定义充值」「商品名称：自定义充值」）
     expect(order?.product_type).toBe("custom");
     expect(order?.product_name).toBe("自定义充值");
@@ -284,5 +288,26 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     // 首购两列仍是默认值 —— 「占用首购资格」刻意没做，理由见 recharge.service.ts 文件头
     expect(order?.first_purchase_state).toBe("unknown");
     expect(order?.first_purchase_eligible).toBe(0);
+  });
+
+  it("★ 自定义充值的有效期也真的生效：按支付成功时刻 + 配置月数算，与档位单同一条口径", async () => {
+    const http = makeHttp();
+    const { service, orders, setCustomConfig } = await makeService();
+    setCustomConfig({ credits_valid_months: 6 });
+    const created = await service.createOrder({ userId: 9001, credits: 600 });
+
+    await service.handleNotify(
+      await signed(
+        notifyParams(created.tradeNo, {
+          amount: String(orders.get(created.tradeNo)?.amount_fen),
+        }),
+      ),
+    );
+
+    const row = orders.get(created.tradeNo);
+    const paidAt = row?.paid_pending_at as Date;
+    const expected = creditsExpireAt(paidAt, 6);
+    expect(row?.credits_expire_at).toEqual(expected);
+    expect(http.grantBodies[0]?.expiresAt).toBe(expected.toISOString());
   });
 });
