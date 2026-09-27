@@ -179,7 +179,7 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
             var frozen = json.readTree(readJob(Long.parseLong(jobId)).getInput());
             var outbound = json.readTree(submitted.get());
 
-            // 出站映射（迁移契约 §20.3）：snake_case 出站、camel 冻结、sync 档钉死、client_token 幂等键。
+            // 出站映射（迁移契约 §21.3）：snake_case 出站、camel 冻结、sync 档钉死、client_token 幂等键。
             assertThat(outbound.path("model").asText()).isEqualTo("mediakit-mux-audio-video");
             assertThat(outbound.path("video_url").asText()).isEqualTo(frozen.path("video").path("url").asText());
             assertThat(outbound.path("audio_url").asText()).isEqualTo(frozen.path("audio").path("url").asText());

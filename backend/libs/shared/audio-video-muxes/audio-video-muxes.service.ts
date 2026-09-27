@@ -19,7 +19,7 @@ import {
   ok,
 } from "@lib/contracts";
 
-/** 冻结快照里的单输入（对象内 camel 命名 + 服务端解析 URL；迁移契约 §20.2）。 */
+/** 冻结快照里的单输入（对象内 camel 命名 + 服务端解析 URL；迁移契约 §21.2）。 */
 type FrozenMuxInput = { assetId: string; nodeId?: string; url: string };
 
 @Injectable()
@@ -110,7 +110,7 @@ export class AudioVideoMuxesService {
       if (asset.project_id !== BigInt(projectId) && asset.project_id !== 0n && !linkedIds.has(input.assetId)) {
         throw new DomainError(RESOURCE_NOT_FOUND_CODE);
       }
-      // 协议白名单与迁移契约 §20.1 冻结一致（https/mediakit/vod/tos，不含 http）：http URL
+      // 协议白名单与迁移契约 §21.1 冻结一致（https/mediakit/vod/tos，不含 http）：http URL
       // 即使 storage_key 存在也不放行——冻结 url 恒取 inspectObject 的 https publicUrl，
       // http 的 asset.url 从来不能成为任务输入（无 storage_key 时 TOS origin 还原也只认 https）。
       if (asset.type !== expectedType || !/^(https:\/\/|mediakit:\/\/|vod:\/\/|tos:\/\/)/i.test(asset.url)) {
@@ -339,7 +339,7 @@ export class AudioVideoMuxesService {
   }
 }
 
-/** 超时预算（迁移契约 §20.1）：max(1d, 4×估算+6h)、未知 7d、上限 365d。 */
+/** 超时预算（迁移契约 §21.1）：max(1d, 4×估算+6h)、未知 7d、上限 365d。 */
 function audioVideoMuxDeadline(estimatedDurationMs: number | null): Date {
   const day = 24 * 60 * 60 * 1000;
   const budget = estimatedDurationMs !== null && Number.isFinite(estimatedDurationMs) && estimatedDurationMs > 0

@@ -32,7 +32,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /** audio_video_mux 独立 MQ 步进：提交（sync 档映射 + client_token 幂等键）、持久化 task_id、
- * 查询、视频转存（10 GiB 上限）、发布长期视频 Asset（迁移契约 §20）。 */
+ * 查询、视频转存（10 GiB 上限）、发布长期视频 Asset（迁移契约 §21）。 */
 @Component
 public class AudioVideoMuxJobProcessor implements JobProcessor {
     private static final Logger log = LoggerFactory.getLogger(AudioVideoMuxJobProcessor.class);
@@ -132,7 +132,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         }
     }
 
-    /** 冻结快照防御校验（迁移契约 §20.2）：audio/video 恒有 assetId+url、audio 必有 nodeId、
+    /** 冻结快照防御校验（迁移契约 §21.2）：audio/video 恒有 assetId+url、audio 必有 nodeId、
      *  is_audio_reserve/sync/submit_attempt 恒显式；sync 三档之外视为脏快照。 */
     private static FrozenSnapshot frozenSnapshot(Map<String, Object> input) {
         Object audioRaw = input.get(AudioVideoMuxContract.INPUT_KEY_AUDIO);
@@ -191,7 +191,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
             return;
         }
         if (observed.videoUrl() == null || observed.videoUrl().isBlank()) {
-            // 无有效视频结果不假成功；时长/分辨率缺失不失败，回落源资产（迁移契约 §20.4）。
+            // 无有效视频结果不假成功；时长/分辨率缺失不失败，回落源资产（迁移契约 §21.4）。
             fail(job, AudioVideoMuxContract.ERROR_AUDIO_VIDEO_MUX_FAILED, "音视频合成任务缺少有效视频结果"
                     + (observed.requestId() != null ? " request_id=" + observed.requestId() : ""));
             return;
@@ -414,7 +414,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         return Math.min(60_000L, POLL_INTERVAL_MS << Math.min(4, Math.max(0, pollCount / 3)));
     }
 
-    /** 超时预算（迁移契约 §20.1）：execution_deadline_at 优先；否则 max(1d, 4×估算+6h)、未知 7d、
+    /** 超时预算（迁移契约 §21.1）：execution_deadline_at 优先；否则 max(1d, 4×估算+6h)、未知 7d、
      *  上限 365d（本家族把 365d 上限补齐到 worker fallback，消除与 backend 的不对称）。 */
     private static boolean timedOut(ClaimedMediaExtractJobDto job) {
         if (job.executionDeadlineAt() != null) {

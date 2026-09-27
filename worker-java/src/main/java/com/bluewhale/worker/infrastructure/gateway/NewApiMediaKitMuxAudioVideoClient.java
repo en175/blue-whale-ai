@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** MediaKit 音视频合成网关客户端。网关路由由独立网关票实现；此处按冻结对客契约调用（迁移契约 §20.3）。 */
+/** MediaKit 音视频合成网关客户端。网关路由由独立网关票实现；此处按冻结对客契约调用（迁移契约 §21.3）。 */
 @Component
 public class NewApiMediaKitMuxAudioVideoClient extends NewApiMediaKitAsyncTaskClient {
     static final String MODEL = "mediakit-mux-audio-video";
@@ -24,7 +24,7 @@ public class NewApiMediaKitMuxAudioVideoClient extends NewApiMediaKitAsyncTaskCl
     @Override protected RuntimeException error(String code, String message) { return new MediaExtractError(code, message); }
 
     /**
-     * 出站 payload 组装（§20.3 映射钉死）：冻结快照 camel 命名不出网，出站恒为供应商 snake_case；
+     * 出站 payload 组装（§21.3 映射钉死）：冻结快照 camel 命名不出网，出站恒为供应商 snake_case；
      * {@code sync="none"} 不传 is_video_audio_sync/sync_mode/sync_method，
      * {@code sync="video"/"audio"} 传 is_video_audio_sync=true + sync_mode=<值> + sync_method="trim"
      * （总是显式 trim，永不 speed）；is_audio_reserve 与 client_token 总是显式；

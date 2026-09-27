@@ -101,7 +101,7 @@ public class JobFinalizer {
     }
 
     /**
-     * 音视频合成成功：单槽免费视频资产（IKIHPJ，迁移契约 §20.4）。
+     * 音视频合成成功：单槽免费视频资产（IKIHPJ，迁移契约 §21.4）。
      * <p>
      * 秒→毫秒换算在此收口：{@code duration_ms = round(result.duration × 1000)}；宽高由
      * {@code result.resolution}（"WxH"）解析。时长/分辨率缺失回落源视频资产（去字幕先例）；
@@ -1094,7 +1094,7 @@ public class JobFinalizer {
             String successMessage,
             /** 终态日志附加键值（可 null）；结果字段入库的承载位先例。 */
             Map<String, Object> extraLogPayload,
-            /** 结果资产名（可 null = 不命名）；音视频合成按迁移契约 §20.4 落「视频名(音视频合成).mp4」。 */
+            /** 结果资产名（可 null = 不命名）；音视频合成按迁移契约 §21.4 落「视频名(音视频合成).mp4」。 */
             String name
     ) {
         /** 无命名家族的旧形构造（name=null）：既有注册点零改动。 */

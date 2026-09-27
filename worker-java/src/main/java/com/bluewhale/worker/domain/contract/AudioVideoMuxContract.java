@@ -2,7 +2,7 @@ package com.bluewhale.worker.domain.contract;
 
 import java.util.List;
 
-/** IKIHPJ（父规格 IKIHMX）: 与 backend/libs/contracts/audio-video-mux.ts 对齐的跨进程常量（迁移契约 §20）。
+/** IKIHPJ（父规格 IKIHMX）: 与 backend/libs/contracts/audio-video-mux.ts 对齐的跨进程常量（迁移契约 §21）。
  * 冻结快照对象内 camel（assetId/nodeId），顶层 is_audio_reserve/sync；网关出站键另按供应商
  * snake_case（video_url/audio_url/...），两套命名不混。 */
 public final class AudioVideoMuxContract {

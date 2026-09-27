@@ -33,7 +33,7 @@ public enum GenerationMqRouteEnum {
     /** 音频混合。 */
     AUDIO_MIX("generation-task", "audio_mix"),
 
-    /** 音视频合成（IKIHPJ，父规格 IKIHMX；契约 = backend/libs/contracts/audio-video-mux.ts，迁移契约 §20）。 */
+    /** 音视频合成（IKIHPJ，父规格 IKIHMX；契约 = backend/libs/contracts/audio-video-mux.ts，迁移契约 §21）。 */
     AUDIO_VIDEO_MUX("generation-task", "audio_video_mux"),
 
     /** 音频截取（IKHB6S，父单 IKHB08；契约 = backend/libs/contracts/audio-trim.ts，ADR-0111）。 */

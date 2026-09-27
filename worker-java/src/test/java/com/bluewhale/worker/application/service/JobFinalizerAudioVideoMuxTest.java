@@ -23,7 +23,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** IKIHPJ：结果资产命名（拍板⑤）+ 秒→毫秒收口 + 元数据回落（迁移契约 §20.4）。 */
+/** IKIHPJ：结果资产命名（拍板⑤）+ 秒→毫秒收口 + 元数据回落（迁移契约 §21.4）。 */
 @ExtendWith(MockitoExtension.class)
 class JobFinalizerAudioVideoMuxTest {
     @Mock GenerationJobMapper jobMapper;

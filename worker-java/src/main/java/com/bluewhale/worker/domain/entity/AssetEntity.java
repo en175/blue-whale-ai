@@ -33,7 +33,7 @@ public class AssetEntity {
     private String type;
 
     @TableField("name")
-    /** 展示名（可空）；音视频合成结果 = 视频名(音视频合成).mp4（IKIHPJ，迁移契约 §20.4） */
+    /** 展示名（可空）；音视频合成结果 = 视频名(音视频合成).mp4（IKIHPJ，迁移契约 §21.4） */
     private String name;
 
     @TableField("storage_key")

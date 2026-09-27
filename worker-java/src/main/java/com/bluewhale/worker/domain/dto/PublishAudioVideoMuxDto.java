@@ -5,7 +5,7 @@ package com.bluewhale.worker.domain.dto;
  * <p>
  * 视频产物：type='video' + 宽高由 {@code resolution} 解析（缺失回落源视频资产）、
  * duration 秒入 duration_ms（缺失回落源视频资产）；结果资产命名与回落查询以
- * {@code sourceVideoAssetId} 指向的源资产为准（迁移契约 §20.4）。
+ * {@code sourceVideoAssetId} 指向的源资产为准（迁移契约 §21.4）。
  */
 public record PublishAudioVideoMuxDto(
         /** 目标任务 id（字符串承载 BigInt） */

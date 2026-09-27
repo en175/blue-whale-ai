@@ -40,7 +40,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
       storage_key: "uploads/9/video/source.mp4", url: "https://our-tos/video.mp4", duration_ms: 7_200_000,
     } });
     createdAssets.push(audio.id, video.id);
-    // 冻结快照（迁移契约 §20.2）：对象内 camel 身份 + 服务端解析 URL，顶层 snake 参数。
+    // 冻结快照（迁移契约 §21.2）：对象内 camel 身份 + 服务端解析 URL，顶层 snake 参数。
     snapshot = {
       audio: { assetId: String(audio.id), nodeId: "node-audio", url: "https://our-tos/audio.mp3" },
       video: { assetId: String(video.id), nodeId: "node-video", url: "https://our-tos/video.mp4" },

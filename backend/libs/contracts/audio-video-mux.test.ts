@@ -20,7 +20,7 @@ const javaRoute = readFileSync(new URL("../../../worker-java/src/main/java/com/b
 const javaClient = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/infrastructure/gateway/NewApiMediaKitMuxAudioVideoClient.java", import.meta.url), "utf8");
 const javaFinalizer = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/application/service/JobFinalizer.java", import.meta.url), "utf8");
 
-describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §20）", () => {
+describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §21）", () => {
   it("keeps task type, queue tag, routes and gateway endpoints aligned with Java", () => {
     expect(AUDIO_VIDEO_MUX_JOB_TYPE).toBe(AUDIO_VIDEO_MUX_TAG);
     expect(javaRoute).toContain('AUDIO_VIDEO_MUX("generation-task", "audio_video_mux")');
@@ -60,7 +60,7 @@ describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §20）", () =
   });
 
   it("pins the result-name suffix so the TS constant and the Java literal cannot drift apart", () => {
-    // §20.4 结果资产命名 = 源视频名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，空白回落「视频」）。
+    // §21.4 结果资产命名 = 源视频名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，空白回落「视频」）。
     // Java 无法 import TS 常量，JobFinalizer.composeAudioVideoMuxResultName 持同一字面——
     // 两侧任一改写未同步即红（TS 侧 web/audioVideoMux.ts 的回填命名同源引用本常量）。
     expect(AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX).toBe("(音视频合成).mp4");
