@@ -147,6 +147,8 @@ def emit(as_json: bool, status: str, **details: object) -> None:
 def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
     git_dir, branch = worktree_context(root)
     metadata = read_task_metadata(root, target_branch)
+    if metadata.get("inherited_sha"):
+        raise WorkflowError("整包子票不能独立同步；请在父整合工作树同步并发布整包 PR。")
     target_branch = metadata["target_branch"]
     start_sha = metadata["start_sha"]
     ensure_clean(root)
@@ -265,6 +267,8 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
 
 def rollback(root: Path, as_json: bool) -> int:
     git_dir, branch = worktree_context(root)
+    if read_task_metadata(root).get("inherited_sha"):
+        raise WorkflowError("整包子票不能独立运行任务同步入口；请在父整合工作树操作。")
     ensure_clean(root)
     ensure_no_git_operation(git_dir)
     marker, backup_ref = recovery_paths(git_dir, branch)
@@ -287,6 +291,8 @@ def rollback(root: Path, as_json: bool) -> int:
 
 def finalize(root: Path, as_json: bool) -> int:
     git_dir, branch = worktree_context(root)
+    if read_task_metadata(root).get("inherited_sha"):
+        raise WorkflowError("整包子票不能独立运行任务同步入口；请在父整合工作树操作。")
     ensure_clean(root)
     ensure_no_git_operation(git_dir)
     marker, backup_ref = recovery_paths(git_dir, branch)

@@ -72,6 +72,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
         shutil.copy2(SOURCE_LIB, lib / SOURCE_LIB.name)
         for source in (SOURCE_SYNC, SOURCE_STATE, SOURCE_METADATA):
             shutil.copy2(source, lib / source.name)
+        for name in ("verify-change-scope.mjs", "verification-policy.mjs"):
+            shutil.copy2(SOURCE.parent / name, scripts / name)
         shutil.copy2(Path(__file__).resolve().parents[1] / "manage-release-branch.sh", scripts / "manage-release-branch.sh")
         hooks = self.main / ".githooks"
         hooks.mkdir()
@@ -301,6 +303,148 @@ class StartTaskWorktreeTest(unittest.TestCase):
         metadata = self.read_metadata(task)
         self.assertEqual(self.release_branch, metadata["target_branch"])
         self.assertEqual(local_sha, metadata["start_sha"])
+
+    def test_integration_child_inherits_fixed_parent_commit_after_release_sync(self):
+        parent_start = self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        )
+        self.assertEqual(0, parent_start.returncode, parent_start.stderr)
+        parent = self.repo.parent / "feature-ikparent"
+        parent_head = self.commit(parent, "parent.txt", "parent\n", "feat: parent change")
+        release_head = self.commit(self.actor, "release.txt", "release\n", "chore: advance release")
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+
+        child_start = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+
+        self.assertEqual(0, child_start.returncode, child_start.stderr)
+        child = self.repo.parent / "feature-ikchild"
+        child_head = run("git", "rev-parse", "HEAD", cwd=child).stdout.strip()
+        metadata = self.read_metadata(child)
+        self.assertEqual(release_head, metadata["start_sha"])
+        self.assertEqual(child_head, metadata["inherited_sha"])
+        self.assertEqual(
+            [release_head, parent_head],
+            run("git", "show", "-s", "--format=%P", "HEAD", cwd=child).stdout.strip().split(),
+        )
+        self.assertEqual(parent_head, run("git", "rev-parse", "HEAD", cwd=parent).stdout.strip())
+        self.commit(child, "child.txt", "child\n", "feat: child change")
+        child_plan = json.loads(run("node", child / "scripts/verify-change-scope.mjs", "plan", "--json",
+                                    cwd=child).stdout)
+        self.assertEqual(child_head, child_plan["base"])
+        self.assertEqual(["child.txt"], child_plan["changedFiles"])
+
+        run("git", "merge", "--no-ff", "--no-edit", "-m", "feat: merge child",
+            run("git", "rev-parse", "HEAD", cwd=child).stdout.strip(), cwd=parent)
+        parent_plan = json.loads(run("node", parent / "scripts/verify-change-scope.mjs", "plan", "--json",
+                                     cwd=parent).stdout)
+        self.assertEqual(sorted(["child.txt", "parent.txt"]), parent_plan["changedFiles"])
+
+    def test_integration_child_rejects_dirty_parent(self):
+        self.assertEqual(0, self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        ).returncode)
+        parent = self.repo.parent / "feature-ikparent"
+        (parent / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+        child_start = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+
+        self.assertNotEqual(0, child_start.returncode)
+        self.assertIn("父工作树不干净", child_start.stderr)
+        self.assertFalse((self.repo.parent / "feature-ikchild").exists())
+        self.assertEqual(1, len(self.task_worktrees()))
+
+    def test_integration_child_repair_keeps_inherited_commit(self):
+        self.assertEqual(0, self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        ).returncode)
+        parent = self.repo.parent / "feature-ikparent"
+        self.commit(parent, "parent.txt", "parent\n", "feat: parent change")
+        created = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+        self.assertEqual(0, created.returncode, created.stderr)
+        child = self.repo.parent / "feature-ikchild"
+        metadata = self.read_metadata(child)
+        git_dir = Path(run("git", "rev-parse", "--absolute-git-dir", cwd=child).stdout.strip())
+        metadata_path = git_dir / "blue-whale/task-base.json"
+
+        stripped = dict(metadata)
+        stripped.pop("inherited_sha")
+        metadata_path.write_text(json.dumps(stripped), encoding="utf-8")
+        rejected = run(sys.executable, child / "scripts/lib/task_metadata.py", "read", "--worktree", child,
+                       cwd=child, check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("继承标记", rejected.stderr)
+
+        metadata_path.unlink()
+        repaired = run(sys.executable, child / "scripts/lib/task_metadata.py", "repair", "--worktree", child,
+                       "--target-branch", metadata["target_branch"], "--start-sha", metadata["start_sha"],
+                       "--user-authorized", cwd=child, check=False)
+        self.assertEqual(0, repaired.returncode, repaired.stderr)
+        self.assertEqual(metadata, self.read_metadata(child))
+
+    def test_integration_child_rejects_other_repository_and_target(self):
+        other_repo = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(self.actor),
+        )
+        self.assertNotEqual(0, other_repo.returncode)
+        self.assertIn("不属于同一仓库", other_repo.stderr)
+
+        self.assertEqual(0, self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        ).returncode)
+        parent = self.repo.parent / "feature-ikparent"
+        git_dir = Path(run("git", "rev-parse", "--absolute-git-dir", cwd=parent).stdout.strip())
+        metadata_path = git_dir / "blue-whale/task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["target_branch"] = "release/other"
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        before_sync = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        after_sync = self.commit(self.actor, "release.txt", "release\n", "chore: advance release")
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+
+        other_target = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+        self.assertNotEqual(0, other_target.returncode)
+        self.assertIn("目标发布线", other_target.stderr)
+        self.assertIn(before_sync, other_target.stderr)
+        self.assertIn(after_sync, other_target.stderr)
+        self.assertFalse((self.repo.parent / "feature-ikchild").exists())
+        self.assertEqual(after_sync, run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip())
+
+    def test_integration_conflict_cleans_child_and_keeps_synced_release(self):
+        self.assertEqual(0, self.invoke(
+            "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
+        ).returncode)
+        parent = self.repo.parent / "feature-ikparent"
+        parent_head = self.commit(parent, "shared.txt", "parent\n", "feat: parent change")
+        before_sync = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        after_sync = self.commit(self.actor, "shared.txt", "release\n", "chore: advance release")
+        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+
+        child_start = self.invoke(
+            "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
+            "--integration-worktree", str(parent),
+        )
+
+        self.assertNotEqual(0, child_start.returncode)
+        self.assertIn(before_sync, child_start.stderr)
+        self.assertIn(after_sync, child_start.stderr)
+        self.assertFalse((self.repo.parent / "feature-ikchild").exists())
+        self.assertNotEqual(0, run("git", "show-ref", "--verify", "refs/heads/feature/IKCHILD-继承整包集成提交",
+                                   cwd=self.repo, check=False).returncode)
+        self.assertEqual(after_sync, run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip())
+        self.assertEqual(parent_head, run("git", "rev-parse", "HEAD", cwd=parent).stdout.strip())
 
     def read_metadata(self, task, *args):
         result = run(sys.executable, task / "scripts/lib/task_metadata.py", "read",

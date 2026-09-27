@@ -213,6 +213,20 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(self.response(result)["status"], "INVALID_MODE")
 
+    def test_integration_child_cannot_create_or_update_pr(self) -> None:
+        metadata_path = Path(self.git("rev-parse", "--absolute-git-dir")) / "blue-whale/task-base.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["inherited_sha"] = metadata["start_sha"]
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        updated = self.invoke_update(self.pr_snapshot())
+
+        self.assertEqual(self.response(created)["status"], "INTEGRATION_CHILD_NO_PR")
+        self.assertEqual(self.response(updated)["status"], "INTEGRATION_CHILD_NO_PR")
+        self.assertFalse(self.publish_marker().exists())
+        self.assertFalse(self.git("ls-remote", "--heads", "origin", "refs/heads/{}".format(BRANCH)))
+
     def test_create_and_update_modes_are_mutually_exclusive(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--update-pr", "65", "--json")
 
