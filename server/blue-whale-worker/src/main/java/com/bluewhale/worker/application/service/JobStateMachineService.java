@@ -43,10 +43,10 @@ public class JobStateMachineService {
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
 
-    /** video_scene_split 进度续租秒数（与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值）。 */
+    /** video_scene_split 进度续租秒数（与 VideoSceneSplitJobProcessor 的 ClaimSpec 租约同值）。 */
     private static final int VIDEO_SCENE_SPLIT_PROGRESS_LEASE_SECONDS = 420;
 
-    /** video_matting 进度续租秒数（与 JobClaimService.VIDEO_MATTING_LEASE_SECONDS 同值）。 */
+    /** video_matting 进度续租秒数（与 VideoMattingJobProcessor 的 ClaimSpec 租约同值）。 */
     private static final int VIDEO_MATTING_PROGRESS_LEASE_SECONDS = 420;
 
     /** 八个 MediaKit 家族原有的 420 秒租约，长于上游 submit 的 30 秒超时。 */
@@ -217,7 +217,7 @@ public class JobStateMachineService {
      * 会在租约过期后判孤儿重投，新 claim 从头重新下载全部段（每轮重复带宽消耗）；
      * 非重试任务在创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后不再扫描；
      * 重试任务有 IKIDEK 的 10 分钟有界接手期。
-     * 续租秒数与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值（单段转存窗口），
+     * 续租秒数与 VideoSceneSplitJobProcessor 的 ClaimSpec 租约同值（单段转存窗口），
      * 不复用 LEASE_SECONDS(120s)——大段下载+TOS 上传可超 120s，段中途即会过期。
      */
     public boolean updateVideoSceneSplitProgress(
