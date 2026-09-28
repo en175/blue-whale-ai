@@ -15,7 +15,12 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { textInputSignatureOf, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE } from "@lib/contracts";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 // 入队函数在测试中被 stub（对齐 audio-draft.integration.test.ts 先例）：任务停在 queued，
 // 终态由测试直接翻 DB——音频 IKCR78 fail-fast（无 MQ 入队异常 → markFailed「任务入队失败」）
@@ -29,6 +34,21 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   createRocketMqGenerationProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
   closeGenerationQueue: vi.fn(async () => {}),
 }));
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 /* IKFM3S 文本索引下游同步契约 v1 集成（隔离 MySQL，IKFM3S_DATABASE_URL 门控）：
    真实保存 + 提交 API → 数据库核对——契约见 docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md。
@@ -68,6 +88,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: { reference_image: true },
+        // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
+        channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024", features: { reference_image: true } },
     });
@@ -84,6 +106,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: { image_reference_max: 1 },
+        // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
+        channel: "seedream-image",
       },
       update: { features: { image_reference_max: 1 } },
     });
@@ -111,6 +135,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
           default_size: "1024x1024",
           default_aspect_ratio: "1:1",
           features,
+          // channel 为必填封闭枚举；video 行的渠道就是媒介本身（无解析器/协议之分）
+          channel: "seedream-video",
           sort_order: sortOrder,
         },
         update: { features, supported_durations: [5, 10, 1], default_duration: 5 },
@@ -135,6 +161,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
           default_size: "mp3",
           default_aspect_ratio: "1:1",
           features,
+          // channel 为必填封闭枚举；audio 行的渠道就是媒介本身（无解析器/协议之分）
+          channel: "seedream-audio",
         },
         update: { features },
       });
@@ -142,7 +170,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const canvasService = new CanvasService(prisma, projects);
     const jobsService = new JobsService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
@@ -155,8 +183,12 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {

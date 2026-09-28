@@ -3,7 +3,7 @@ import { Module } from "@nestjs/common";
 import { APP_FILTER } from "@nestjs/core";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GenerationJobsController } from "./generation-jobs.controller.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -14,6 +14,22 @@ import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 // IKG57P「素材软删后提交生成未拦截、HTTP 201 与信封 400 分裂」公开接口集成：
 // 真 NestFactory 挂载生产 GenerationJobsController + AllExceptionsFilter（与 app.module 的
@@ -53,6 +69,8 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           default_size: "1024x1024",
           default_aspect_ratio: "1:1",
           features: { reference_image: true },
+          // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
+          channel: "seedream-image",
         },
         update: {
           supported_sizes: sizes,
@@ -71,6 +89,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           CanvasService,
           MaterialService,
           AssetService,
+          IdentityService,
         ],
         GenerationJobsController,
       );
@@ -96,6 +115,10 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           {
             provide: AssetService,
             useValue: new AssetService(prisma, new AssetStorageService()),
+          },
+          {
+            provide: IdentityService,
+            useValue: new IdentityService(prisma),
           },
         ],
       })(HarnessModule);

@@ -6,15 +6,35 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { FAILURE_CODE } from "@lib/contracts";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AudioMixesService } from "@lib/shared/audio-mixes/audio-mixes.service.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
+import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AudioMixesController } from "./audio-mixes.controller.js";
 import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJob: vi.fn() }));
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 const databaseUrl = process.env.IKI5ZC_TEST_DATABASE_URL;
 const previousDatabaseUrl = process.env.DATABASE_URL;
@@ -43,14 +63,21 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     const service = new AudioMixesService(prisma, projects, assets, storage as never);
     Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
     Reflect.defineMetadata("design:paramtypes", [
-      ProjectService, GenerationCommandService, Object, Object, Object, Object, Object,
+      ProjectService, GenerationCommandService, ModelCapabilityReadService,
+      CanvasService, MaterialService, AssetService, IdentityService,
     ], GenerationJobsController);
     class HarnessModule {}
     Module({ controllers: [AudioMixesController, GenerationJobsController], providers: [
       { provide: AudioMixesService, useValue: service },
       { provide: ProjectService, useValue: projects },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
-      { provide: Object, useValue: {} },
+      { provide: CanvasService, useValue: new CanvasService(prisma, projects) },
+      { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
+      // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析
+      // 本地素材绑定；无输入素材的建单路径只建门不发起上游调用。
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json());

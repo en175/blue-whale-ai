@@ -13,6 +13,26 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 // IKDLQG「文本附件驱动视频生成」公开接口集成（契约「验证」节服务端项）：
 // 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKDLQG_DATABASE_URL 门控）。
@@ -47,12 +67,14 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
         default_aspect_ratio: "16:9",
         default_duration: 5,
         features: {},
+        // channel 为必填封闭枚举；video 行的渠道就是媒介本身（无解析器/协议之分）
+        channel: "seedream-video",
       },
       update: { supported_sizes: sizes, default_size: "720p" },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
@@ -63,8 +85,12 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -168,6 +194,8 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
         default_size: "",
         default_aspect_ratio: "",
         features: {},
+        // channel 为必填封闭枚举；audio 行的渠道就是媒介本身（无解析器/协议之分）
+        channel: "seedream-audio",
       },
       update: {},
     });
