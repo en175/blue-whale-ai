@@ -1,4 +1,9 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
+// 五端 commands/ 下的 slash command Markdown（如 `.agents/commands/ponytail.md`）此前没有任何
+// 归类规则：不命中 skills 白名单，sourceArea 也够不着，于是在 PR 阶段落进「未归类」兜底升为
+// full——治理类改动误升全量验证（!905 发布复盘，与 backend / worker-java / contracts 那几个洞
+// 同形）。slash command 是技能的入口文档，归类与技能 SKILL.md 同走 documentation；当前只覆盖
+// 实际存在的形态（commands/ 直下单层 .md），出现子目录等新形态再放宽。
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml|\.(?:agents|claude|superpowers|zcode|qoder)\/commands\/[^/]+\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 // `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
 // `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。

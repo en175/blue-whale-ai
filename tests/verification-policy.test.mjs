@@ -275,6 +275,33 @@ test("classifies skill Markdown as documentation (docs) at completion and PR sta
   });
 });
 
+// !905 发布复盘：`.agents/commands/*.md` 此前没有任何归类规则，PR 阶段被「未归类」兜底升为
+// full，治理类改动误升全量验证。slash command 与技能 SKILL.md 同为入口文档，分类必须一致。
+test("classifies slash command Markdown as documentation like skill Markdown", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  for (const file of [
+    ".agents/commands/ponytail.md",
+    ".claude/commands/ponytail-audit.md",
+    ".zcode/commands/ponytail-review.md",
+  ]) {
+    assert.deepEqual(classifyChanges([file]), {
+      tier: "docs",
+      reasons: ["only documentation files changed"],
+    });
+    const classification = classifyChanges([file], { stage: "pr" });
+    assert.deepEqual(classification, {
+      tier: "docs",
+      reasons: ["only documentation files changed"],
+    });
+    // 与技能 SKILL.md 的分类逐字段一致，且不再落「未归类」兜底。
+    assert.deepEqual(
+      classification,
+      classifyChanges([".agents/skills/ponytail/SKILL.md"], { stage: "pr" }),
+    );
+  }
+});
+
 test("classifies known Node source changes as scoped verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const files = [
@@ -829,7 +856,13 @@ test("full verification reports each existing stage without changing the command
   try {
     const fakeBin = join(directory, "bin");
     const stageLog = join(directory, "stages.jsonl");
+    // 契约产物 backend/libs/contracts/gen/ 不入库，脚本在缺失时已改为提前指路退出；
+    // 该用例必须在自带产物目录的受控 cwd 里跑，不依赖本机是否恰好生成过契约。
+    const worktree = join(directory, "worktree");
     mkdirSync(fakeBin);
+    mkdirSync(join(worktree, "backend", "libs", "contracts", "gen", "billing"), {
+      recursive: true,
+    });
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(
       fakePnpm,
@@ -845,7 +878,7 @@ test("full verification reports each existing stage without changing the command
     chmodSync(fakePnpm, 0o755);
 
     const result = spawnSync("bash", [FULL_VERIFY], {
-      cwd: ROOT,
+      cwd: worktree,
       encoding: "utf8",
       env: {
         ...childEnvironment(),
