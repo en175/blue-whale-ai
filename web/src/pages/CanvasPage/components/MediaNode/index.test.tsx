@@ -1786,3 +1786,144 @@ describe('MediaNode 样片卡徽标（IKIZQB）', () => {
     expect(badge!.className).not.toContain('sampleBadgeExpired');
   });
 });
+
+describe('MediaNode 样片卡标题行成片按钮（IKIZQE）', () => {
+  function ctaButton(): HTMLButtonElement | null {
+    return mountNode.querySelector<HTMLButtonElement>('[data-testid="finalize-cta"]');
+  }
+
+  it('ready：按钮唯一渲染在标题行，展示成片预计积分，点击派发 onFinalizeSample', async () => {
+    const onFinalizeSample = vi.fn();
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4',
+        finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        finalizeCta: { phase: 'ready', credits: 80 }, onFinalizeSample,
+      },
+    });
+    const btn = ctaButton();
+    expect(btn).toBeTruthy();
+    // 唯一入口：整卡只有一个成片按钮，且挂在标题行内
+    expect(mountNode.querySelectorAll('[data-testid="finalize-cta"]')).toHaveLength(1);
+    expect(titleRow().contains(btn!)).toBe(true);
+    expect(btn!.textContent).toBe('生成 1080P 成片 · 80 积分');
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toContain('预计消耗 80 积分');
+    await act(async () => { btn!.click(); });
+    expect(onFinalizeSample).toHaveBeenCalledTimes(1);
+    expect(onFinalizeSample).toHaveBeenCalledWith('video-node');
+  });
+
+  it('loading/submitting/running/checking/expired/unavailable：禁用且不派发，文案随态切换', async () => {
+    const onFinalizeSample = vi.fn();
+    const base = {
+      videoStage: 'sample' as const, jobId: '9001', src: 'http://vid/s.mp4',
+      finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      onFinalizeSample,
+    };
+    await renderNode('video', { data: { ...base, finalizeCta: { phase: 'loading' } } });
+    expect(ctaButton()!.textContent).toBe('生成 1080P 成片');
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('正在获取成片报价');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'running' } } });
+    expect(ctaButton()!.textContent).toBe('成片生成中…');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'checking' } } });
+    expect(ctaButton()!.textContent).toBe('状态核对中…');
+    expect(ctaButton()!.title).toContain('请勿重复提交');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'expired' } } });
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('期限已过');
+
+    await rerenderNode('video', { data: { ...base, finalizeCta: { phase: 'unavailable' } } });
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('暂不能生成成片');
+
+    // 禁用态点击不派发（生成中/核对中禁止再次点击）
+    for (const phase of ['running', 'checking', 'expired', 'unavailable'] as const) {
+      await rerenderNode('video', { data: { ...base, finalizeCta: { phase } } });
+      await act(async () => { ctaButton()!.click(); });
+    }
+    expect(onFinalizeSample).not.toHaveBeenCalled();
+  });
+
+  it('缺截止时间（expired 且 finalizeDeadlineAt=null）：title 说明缺可信创建时间', async () => {
+    await renderNode('video', {
+      data: { videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4', finalizeDeadlineAt: null, finalizeCta: { phase: 'expired' } },
+    });
+    expect(ctaButton()!.disabled).toBe(true);
+    expect(ctaButton()!.title).toContain('缺少可信创建时间');
+  });
+
+  it('未注入 finalizeCta（普通卡/生成中样片）：不渲染成片按钮', async () => {
+    await renderNode('video', { data: { src: 'http://vid/n.mp4' } });
+    expect(ctaButton()).toBeNull();
+    await renderNode('video', { genStatus: 'generating', progress: 10, data: { videoStage: 'sample', jobId: '9001' } });
+    expect(ctaButton()).toBeNull();
+  });
+});
+
+describe('MediaNode 成片卡与两阶段状态呈现（IKIZQE）', () => {
+  it('成功成片卡：普通视频卡体验 + 「成片 1080P」角标，已结算合并实际费用', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'final', sourceSampleJobId: '9001', src: 'http://vid/f.mp4',
+        fileName: '成片', width: 1920, height: 1080, jobId: '9002',
+        chargeState: 'settled', actualCredits: 80,
+      },
+    });
+    const badge = mountNode.querySelector('[data-testid="video-final-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toBe('成片 1080P · 已用 80 积分');
+    // 成片卡不渲染样片徽标，也不渲染成片按钮（100% 普通卡）
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="finalize-cta"]')).toBeNull();
+  });
+
+  it('成片生成中/失败卡：角标仍在；失败显示原因与退费状态，不提供重试', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 5, data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002' } });
+    expect(mountNode.querySelector('[data-testid="video-final-badge"]')!.textContent).toBe('成片 1080P');
+
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002', errorText: '上游生成失败', chargeState: 'released' },
+    });
+    expect(mountNode.textContent).toContain('上游生成失败');
+    expect(mountNode.querySelector('[data-testid="charge-refund-note"]')!.textContent).toContain('预扣已退回');
+    // 成片失败不提供同 Draft ID 重试（重新生成入口归 IKIZQG）
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(false);
+  });
+
+  it('样片失败卡：标样片、显示退费状态，保留重试（普通失败卡形态不受本票影响）', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      data: { videoStage: 'sample', jobId: '9001', errorText: '样片生成失败', chargeState: 'released' },
+    });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeTruthy();
+    expect(mountNode.querySelector('[data-testid="charge-refund-note"]')!.textContent).toContain('预扣已退回');
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true);
+  });
+
+  it('checking 态（提交结果不明）：占位显示「状态核对中」与勿重复提交说明，无取消按钮', async () => {
+    await renderNode('video', { genStatus: 'checking', data: { videoStage: 'final', sourceSampleJobId: '9001', jobId: '9002' } });
+    const box = mountNode.querySelector('[data-testid="job-checking-box"]');
+    expect(box).toBeTruthy();
+    expect(box!.textContent).toContain('状态核对中');
+    expect(box!.textContent).toContain('请勿重复提交');
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent === '取消生成')).toBe(false);
+  });
+
+  it('样片徽标：已结算（settled）时合并该阶段实际费用（两阶段分别显示费用）', async () => {
+    await renderNode('video', {
+      data: {
+        videoStage: 'sample', jobId: '9001', src: 'http://vid/s.mp4',
+        finalizeDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        chargeState: 'settled', actualCredits: 20,
+      },
+    });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')!.textContent)
+      .toMatch(/样片 480P · 截止 .+ · 已用 20 积分$/);
+  });
+});

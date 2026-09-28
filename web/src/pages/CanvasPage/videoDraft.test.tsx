@@ -189,6 +189,9 @@ vi.mock('@/api/jobs', () => ({
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
+  // IKIZQE：样片成功卡会请求成片报价（本文件不覆盖成片流，恒空报价禁用入口）
+  quoteVideoFinalize: vi.fn(async () => ({ credits: null, quote_revision: null })),
+  finalizeVideoJob: vi.fn(),
   createVideoEnhancement: apiMocks.createVideoEnhancement,
   createMediaExtraction: apiMocks.createMediaExtraction,
   createAudioTrim: apiMocks.createAudioTrim,

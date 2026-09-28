@@ -56,6 +56,7 @@ import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, compliancePatchFromMaterialStatus
 import { mediaContentBox, MEDIA_CONTENT_SHORT_SIDE, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf, resolveDownloadMime } from './components/cardName';
 import type { MediaGenStatus, MediaNodeData } from './components/MediaNode';
+import { sampleDeadlineExpired } from './components/MediaNode';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import NodeFollowToolbar from './components/NodeFollowToolbar';
 import AssetCardToolbar from './components/AssetCardNode/Toolbar';
@@ -356,6 +357,8 @@ import {
   cancelGenerationJob,
   retryGenerationJob,
   fetchJobStatus,
+  finalizeVideoJob,
+  quoteVideoFinalize,
   createImageEnhancement,
   createImageErase,
   createImageCutout,
@@ -781,6 +784,17 @@ export default function CanvasPage() {
   /** 失败重试（retry 接口）的幂等键台账：scope 取卡片 id，签名取被重试的那个任务 id——
    *  同一张失败卡上「响应丢了再点一次」复用同一把；受理成功后换新任务 id，天然另起一把。 */
   const jobRetryKeysRef = useRef(createSubmitIntentKeys());
+  /** IKIZQE 成片（finalize）链路的页面态：按样片卡 node id 记报价，按样片任务 id 记
+   *  已受理尝试（会话内）；「提交中/结果不明」是渲染期派生 CTA 状态的数据源。
+   *  报价 = 服务端唯一权威门（空报价双 null 即禁用），不随画布持久化——刷新后重新报价。 */
+  const [finalizeQuotes, setFinalizeQuotes] = useState<
+    Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
+  >({});
+  const finalizeQuoteInflightRef = useRef(new Set<string>());
+  /** 提交窗口同步防重（双击/并发点击至多一次提交）；提交中视觉态由占位成片卡推导（running） */
+  const finalizeInflightRef = useRef(new Set<string>());
+  const [finalizeUnknownSamples, setFinalizeUnknownSamples] = useState<ReadonlySet<string>>(() => new Set());
+  const finalizeAttemptedJobIdsRef = useRef(new Set<string>());
   /** 创建已受理、但结果卡尚未随画布事务落盘的窗口。 */
   const audioMixUnpersistedCardsRef = useRef(new Set<string>());
   const audioMixFirstSaveRef = useRef(new Map<string, Promise<boolean>>());
@@ -2946,10 +2960,11 @@ export default function CanvasPage() {
         serializeEdges(hydratedEdges);
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
+    // IKIZQE：checking（提交结果不明核对锁定）同样恢复轮询——核对定夺后终态照常收敛。
     m
       .filter(
         (n) =>
-          n.data.genStatus === 'generating' &&
+          (n.data.genStatus === 'generating' || n.data.genStatus === 'checking') &&
           !((n.data ?? {}) as Record<string, unknown>).frameInterpolation &&
           (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
           !settledExtractNodesRef.current.has(n.id),
@@ -7032,8 +7047,15 @@ export default function CanvasPage() {
         ...(muxIdentity ? { audioVideoMux: undefined } : {}),
         // IKIZQB：阶段身份以服务端持久投影为准（父规格「投影与兼容」）——样片成功回填实际
         // 截止时间（finalize_deadline_at，缺可信时间时 null 但样片仍保留）；普通成功清样片标记。
-        videoStage: detail.video_stage === 'sample' ? 'sample' : undefined,
+        // IKIZQE：成片成功标 final 并按投影回填来源样片关系（本地建卡值仅兜底）；
+        // 两阶段卡另回填该阶段费用状态（settled + actual_credits → 角标「已用 N 积分」）。
+        videoStage: detail.video_stage === 'sample' ? 'sample' : detail.video_stage === 'final' ? 'final' : undefined,
         finalizeDeadlineAt: detail.video_stage === 'sample' ? (detail.finalize_deadline_at ?? null) : undefined,
+        ...(detail.video_stage === 'final' && detail.source_sample_job_id != null
+          ? { sourceSampleJobId: detail.source_sample_job_id }
+          : {}),
+        chargeState: detail.charge_state ?? undefined,
+        actualCredits: detail.actual_credits ?? undefined,
       });
       // IKFM3S §4：成功任务把快照冻结的文本输入签名回写目标（刷新持久、提示按签名派生清除）；
       // 乱序保护（nextUsedInputState）：仅更新的 jobId 覆盖——旧任务成功不清除更晚编辑的提示。
@@ -7066,11 +7088,25 @@ export default function CanvasPage() {
             : audioVideoMuxIdentityOf(node)
               ? audioVideoMuxErrorText(detail.error)
               : readJobFailText(detail.error),
-        // IKIZQB：失败卡同样按服务端投影标注阶段（样片失败卡标样片；普通失败清标记）
-        videoStage: detail.video_stage === 'sample' ? 'sample' : undefined,
+        // IKIZQB：失败卡同样按服务端投影标注阶段（样片失败卡标样片；普通失败清标记）。
+        // IKIZQE：成片失败卡标 final（保留失败原因与退费状态，不提供同 Draft ID 重试）；
+        // 两阶段卡回填该阶段费用状态（released → 失败卡注明「预扣已退回」）。
+        videoStage: detail.video_stage === 'sample' ? 'sample' : detail.video_stage === 'final' ? 'final' : undefined,
         finalizeDeadlineAt: undefined,
+        ...(detail.video_stage === 'final' && detail.source_sample_job_id != null
+          ? { sourceSampleJobId: detail.source_sample_job_id }
+          : {}),
+        chargeState: detail.charge_state ?? undefined,
+        actualCredits: detail.actual_credits ?? undefined,
       });
       return 'terminal';
+    }
+    if (detail.status === 'checking') {
+      // IKIZQD/IKIZQE：提交结果不明核对锁定——任务不重发、预扣不动，轮询继续等核对定夺
+      //（明确成功恢复原任务 / 明确失败释放该阶段预扣）。卡片收敛为「状态核对中」占位，
+      // 样片卡成片按钮经 final 卡在场关系同步禁点（勿重复提交）。
+      patchMediaNode(nodeId, { genStatus: 'checking', progress: undefined });
+      return 'processing';
     }
     if (detail.status === 'cancelled') {
       stopJobPolling(nodeId, jobTimersRef.current);
@@ -7156,6 +7192,196 @@ export default function CanvasPage() {
     };
     tick();
   };
+
+  /** ═══ IKIZQE 成片（finalize）提交链路 ═══
+   *  唯一入口 = 样片卡标题行「生成 1080P 成片」：报价就绪（服务端门——空报价双 null 即
+   *  禁用）+ 截止有效才可点；点击直接提交无二次确认。提交即在样片卡右侧 +60px 建关联
+   *  成片占位卡（videoStage=final + sourceSampleJobId 两卡关系），受理后回填 jobId 走
+   *  既有轮询（final 阶段投影由 applyJobTerminal 回填）。
+   *  并发/重复防线：inflight ref 同步挡住双击与两页并发（服务端来源唯一约束 1057 兜底）。
+   *  错误收敛（silent 传输、本处统一提示一次）：1056 变价 → 重报价后再由用户点击；
+   *  1057/1058 → 重报价折空报价禁用；1014 → 「状态核对中」禁点；传输结果不明（408/网络）
+   *  → 同幂等键原样重发一次（服务端重放首次结果，不双扣），仍不明 → 状态核对中禁点。 */
+  const handleFinalizeSample = (sampleNodeId: string): boolean => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法生成成片');
+      return false;
+    }
+    const sample = mediaNodesRef.current.find((n) => n.id === sampleNodeId);
+    const sampleData = (sample?.data ?? {}) as Record<string, unknown>;
+    if (sampleData.videoStage !== 'sample' || sampleData.jobId == null) return false;
+    const sampleJobId = String(sampleData.jobId);
+    // 提交结果不明（核对中）：禁止再次点击——服务端 1014 同口径拒再提交
+    if (finalizeUnknownSamples.has(sampleNodeId)) return false;
+    // 同步防重：提交窗口内双击/并发点击直接忽略（至多一次提交）
+    if (finalizeInflightRef.current.has(sampleNodeId)) return false;
+    if (mediaNodesRef.current.some(
+      (n) =>
+        ((n.data ?? {}) as Record<string, unknown>).videoStage === 'final'
+        && String(((n.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === sampleJobId,
+    )) return false;
+    const quote = finalizeQuotes[sampleNodeId];
+    if (quote?.phase !== 'ready') return false;
+    if (sampleData.finalizeDeadlineAt == null || sampleDeadlineExpired(sampleData.finalizeDeadlineAt as string)) {
+      showToast('warn', '样片已过转成片期限或缺可信截止时间，无法生成成片');
+      return false;
+    }
+    finalizeInflightRef.current.add(sampleNodeId);
+    /** 占位成片卡：样片卡右侧 +60px（同截取/调速落位口径），宽高比沿用样片卡 */
+    const box = mediaContentBox({
+      mediaType: 'video',
+      width: typeof sampleData.width === 'number' ? sampleData.width : undefined,
+      height: typeof sampleData.height === 'number' ? sampleData.height : undefined,
+      ratio: typeof sampleData.targetRatio === 'string' ? sampleData.targetRatio : undefined,
+    });
+    const finalNodeId = newNodeId('media-gen');
+    const placeholder = attachCallbacks({
+      id: finalNodeId,
+      type: 'mediaNode' as const,
+      position: {
+        x: Math.round(sample.position.x + box.width + 60),
+        y: Math.round(sample.position.y),
+      },
+      data: {
+        src: '',
+        fileName: '成片生成中',
+        mediaType: 'video' as const,
+        genStatus: 'generating' as MediaGenStatus,
+        progress: 0,
+        videoStage: 'final' as const,
+        sourceSampleJobId: sampleJobId,
+        targetRatio: typeof sampleData.targetRatio === 'string' ? sampleData.targetRatio : undefined,
+      },
+    } as Node);
+    const current = mediaNodesRef.current;
+    mediaNodesRef.current = [...current, placeholder];
+    setMediaNodes(mediaNodesRef.current);
+    if (currentId) void flushCanvasSave(currentId).catch(() => {});
+
+    const scope = `finalize:${sampleJobId}`;
+    const signature = JSON.stringify({ expected_credits: quote.credits, quote_revision: quote.revision });
+    /** 一次用户意图一把（submitIntentKeys 台账）：响应丢失原样重发复用同键 → 服务端重放 */
+    const idempotencyKey = jobSubmitKeysRef.current.keyFor(scope, signature);
+    const send = () => finalizeVideoJob(
+      currentId,
+      sampleJobId,
+      { expected_credits: quote.credits, quote_revision: quote.revision },
+      idempotencyKey,
+      { silent: true },
+    );
+    const clearSubmitting = () => {
+      finalizeInflightRef.current.delete(sampleNodeId);
+    };
+    const removePlaceholder = () => {
+      stopJobPolling(finalNodeId, jobTimersRef.current);
+      mediaNodesRef.current = mediaNodesRef.current.filter((n) => n.id !== finalNodeId);
+      setMediaNodes(mediaNodesRef.current);
+      if (currentId) void flushCanvasSave(currentId).catch(() => {});
+    };
+    const markUnknown = () => {
+      setFinalizeUnknownSamples((prev) => new Set(prev).add(sampleNodeId));
+    };
+    /** 报价重取：删 entry 触发报价 effect 重查（1056 变价 → 新价可见后再由用户点击） */
+    const refreshQuote = () => {
+      setFinalizeQuotes((prev) => {
+        if (!(sampleNodeId in prev)) return prev;
+        const next = { ...prev };
+        delete next[sampleNodeId];
+        return next;
+      });
+    };
+    send()
+      .then((created) => {
+        // 任务已受理：这次意图到此为止，之后要再提交需另起一把钥匙
+        jobSubmitKeysRef.current.settle(scope);
+        finalizeAttemptedJobIdsRef.current.add(sampleJobId);
+        clearSubmitting();
+        if (!mediaNodesRef.current.some((n) => n.id === finalNodeId)) return; // 卡已被删：不复活
+        patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
+        pollJob(finalNodeId, created.generation_job_id);
+        if (currentId) void flushCanvasSave(currentId).catch(() => {});
+        showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
+      })
+      .catch(async (e: unknown) => {
+        clearSubmitting();
+        if (isApiError(e) && e.status !== 408 && e.status !== 0) {
+          // 服务端已回答（信封错误）：占位卡撤回，按钮状态交还报价/截止推导
+          removePlaceholder();
+          if (Number(e.code) === 1014) {
+            // 上次提交结果不明、核对锁定期间——保持禁点（状态核对中）
+            markUnknown();
+            showToast('warn', e.message);
+            return;
+          }
+          showToast('error', e.message);
+          refreshQuote();
+          return;
+        }
+        // 传输结果不明（408 超时 / 网络失败）：同幂等键原样重发一次——服务端重放首次
+        // 结果（只建一个 job、只扣一次钱）；重发受理/失败各自收敛，不再递归重试。
+        try {
+          const created = await send();
+          jobSubmitKeysRef.current.settle(scope);
+          finalizeAttemptedJobIdsRef.current.add(sampleJobId);
+          if (mediaNodesRef.current.some((n) => n.id === finalNodeId)) {
+            patchMediaNode(finalNodeId, { jobId: created.generation_job_id });
+            pollJob(finalNodeId, created.generation_job_id);
+            if (currentId) void flushCanvasSave(currentId).catch(() => {});
+          }
+          showToast('success', `已提交成片生成，预计消耗 ${quote.credits} 积分`);
+        } catch {
+          // 仍不明：占位卡撤回（无可核实任务），样片按钮「状态核对中」禁点——刷新后以
+          // 报价端点（已尝试 → 空报价禁用）恢复与服务端一致的状态。
+          removePlaceholder();
+          markUnknown();
+          showToast('warn', '无法确认成片任务是否已提交，状态核对中，请勿重复提交');
+        }
+      });
+    return true;
+  };
+
+  /** IKIZQE：成片报价获取——成功样片卡（无成片卡在场、截止有效、未受理过）进 CTA 前先问价。
+   *  空报价（双 null）= 服务端判不可提交（已有成片尝试/未转存/模型未放行/算不出价），
+   *  据此禁用按钮；报价失败同样折空报价（无报价不提交，不按未知金额扣费）。 */
+  useEffect(() => {
+    if (!currentId) return;
+    for (const n of mediaNodes) {
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      if (d.videoStage !== 'sample' || d.jobId == null) continue;
+      // 仅成功样片卡提供入口（生成中/失败/草稿无 CTA）
+      if (d.genStatus != null || d.draft === true) continue;
+      const jobId = String(d.jobId);
+      if (finalizeAttemptedJobIdsRef.current.has(jobId)) continue;
+      if (
+        mediaNodes.some(
+          (m) =>
+            ((m.data ?? {}) as Record<string, unknown>).videoStage === 'final'
+            && String(((m.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === jobId,
+        )
+      ) continue;
+      if (finalizeUnknownSamples.has(n.id)) continue;
+      if (finalizeQuotes[n.id] != null || finalizeQuoteInflightRef.current.has(n.id)) continue;
+      // 缺可信截止 / 已过期：客户端直接判禁用，无需问价
+      if (typeof d.finalizeDeadlineAt !== 'string' || sampleDeadlineExpired(d.finalizeDeadlineAt)) continue;
+      const nodeId = n.id;
+      finalizeQuoteInflightRef.current.add(nodeId);
+      quoteVideoFinalize(currentId, jobId, { silent: true })
+        .then((q) => {
+          setFinalizeQuotes((prev) => ({
+            ...prev,
+            [nodeId]: q.credits != null && q.quote_revision != null
+              ? { phase: 'ready', credits: q.credits, revision: q.quote_revision }
+              : { phase: 'empty' },
+          }));
+        })
+        .catch(() => {
+          setFinalizeQuotes((prev) => ({ ...prev, [nodeId]: { phase: 'empty' } }));
+        })
+        .finally(() => {
+          finalizeQuoteInflightRef.current.delete(nodeId);
+        });
+    }
+  }, [mediaNodes, currentId, finalizeQuotes, finalizeUnknownSamples]);
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
    *  mediaRefs 仅 image/video/audio：单数组 references（保序），与 input_asset_ids 等旧参考字段互斥。
@@ -12769,6 +12995,52 @@ export default function CanvasPage() {
       .map((n) => audioVideoMuxIdentityOf(n)!.sourceNodeId),
   );
 
+  /** IKIZQE：样片卡标题行成片按钮的渲染期派生状态（不持久化，口径同 soloToolbarHidden）。
+   *  推导链（服务端报价 + 截止 + 两卡关系三重门）：成片卡在场且生成中/核对中 → 按钮禁用
+   *  （成片生成中…/状态核对中…）；成片卡已终态（成功/失败/取消）或本会话已受理过 → 不再
+   *  渲染（首版一张样片至多一条成片，服务端 1057/空报价兜底）；其余按报价/截止落
+   *  ready/loading/empty/expired/checking。 */
+  const finalizeCtaByNodeId = new Map<string, NonNullable<MediaNodeData['finalizeCta']>>();
+  if (currentId) {
+    for (const n of mediaNodes) {
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      if (d.videoStage !== 'sample' || d.jobId == null) continue;
+      if (d.genStatus != null || d.draft === true) continue; // 仅成功样片卡提供入口
+      const jobId = String(d.jobId);
+      const finalNode = mediaNodes.find(
+        (m) =>
+          ((m.data ?? {}) as Record<string, unknown>).videoStage === 'final'
+          && String(((m.data ?? {}) as Record<string, unknown>).sourceSampleJobId ?? '') === jobId,
+      );
+      if (finalizeUnknownSamples.has(n.id)) {
+        finalizeCtaByNodeId.set(n.id, { phase: 'checking' });
+        continue;
+      }
+      const finalGen = (finalNode?.data ?? {}) as Record<string, unknown> | undefined;
+      if (finalGen?.genStatus === 'generating') {
+        finalizeCtaByNodeId.set(n.id, { phase: 'running' });
+        continue;
+      }
+      if (finalGen?.genStatus === 'checking') {
+        finalizeCtaByNodeId.set(n.id, { phase: 'checking' });
+        continue;
+      }
+      if (finalNode != null || finalizeAttemptedJobIdsRef.current.has(jobId)) {
+        continue; // 已有成片卡（终态）或本会话已受理过：不再渲染（重新生成归 IKIZQG）
+      }
+      if (typeof d.finalizeDeadlineAt !== 'string' || sampleDeadlineExpired(d.finalizeDeadlineAt)) {
+        finalizeCtaByNodeId.set(n.id, { phase: 'expired' });
+        continue;
+      }
+      const quote = finalizeQuotes[n.id];
+      finalizeCtaByNodeId.set(n.id, quote == null
+        ? { phase: 'loading' }
+        : quote.phase === 'ready'
+          ? { phase: 'ready', credits: quote.credits }
+          : { phase: 'unavailable' });
+    }
+  }
+
   return (
     <div className={styles.canvasPage}>
       {/* 顶部工具栏 */}
@@ -12844,6 +13116,7 @@ export default function CanvasPage() {
               || vocalSplitTargetNodeId || sceneSplitTargetNodeId
               || smartMattingTargetNodeId || audioVideoMuxDraftId != null
               || audioVideoMuxInFlightSourceIds.size > 0
+              || finalizeCtaByNodeId.size > 0
               ? mediaNodes.map((n) => {
                   const hideToolbar =
                     n.id === eraseTargetNodeId
@@ -12864,6 +13137,7 @@ export default function CanvasPage() {
                     && n.id !== audioSpeedTargetNodeId
                     && !hideToolbar
                     && !audioVideoMuxInFlightSourceIds.has(n.id)
+                    && !finalizeCtaByNodeId.has(n.id)
                   ) return n;
                   const data: Record<string, unknown> = { ...n.data };
                   if (n.id === eraseTargetNodeId) {
@@ -12917,6 +13191,12 @@ export default function CanvasPage() {
                   // 在途合成源卡（IKIHMX 审查修复 1）：工具条「音视频合成」按钮保留高亮的
                   //  观测标记（MediaNodeToolbar 消费）
                   if (audioVideoMuxInFlightSourceIds.has(n.id)) data.audioVideoMuxInFlight = true;
+                  // IKIZQE：样片卡标题行成片按钮派生状态注入（唯一链式入口，不持久化）
+                  const finalizeCta = finalizeCtaByNodeId.get(n.id);
+                  if (finalizeCta) {
+                    data.finalizeCta = finalizeCta;
+                    data.onFinalizeSample = handleFinalizeSample;
+                  }
                   if (hideToolbar) data.soloToolbarHidden = true;
                   return { ...n, data };
                 })

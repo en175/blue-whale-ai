@@ -340,6 +340,64 @@
   color: #c86220;
 }
 
+/* ---- IKIZQE：样片卡标题行成片按钮（两阶段链式动作唯一入口，原型定稿 titleCta） ---- */
+.finalizeCta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 6px;
+  background-color: #3464d9;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.finalizeCta:hover:not(:disabled) {
+  background-color: #2c55c0;
+}
+
+.finalizeCta:disabled {
+  background-color: #2a2a2a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* ---- IKIZQE：成片卡身份角标（100% 普通卡，仅多此角标；对齐样片徽标形态） ---- */
+.finalBadge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background-color: rgba(125, 82, 217, 0.16);
+  color: #9d74e0;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---- IKIZQE：提交结果不明「状态核对中」占位（IKIZQD checking 态卡片呈现） ---- */
+.checkingSpinner {
+  border-top-color: #d9a441;
+}
+
+.checkingText {
+  color: #d9a441;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 失败/核对占位的次行说明（退费状态/勿重复提交） */
+.genSub {
+  color: #8a8f99;
+  font-size: 11px;
+  max-width: 240px;
+  text-align: center;
+}
+
 /* ============================================
  * 音频播放器（IKH8PU 横矩形改版：480×240，深槽波形区占主区 +
  * 底部「左时间 / 居中播放钮」控制行，视觉对齐 audio-card-landscape 原型）
