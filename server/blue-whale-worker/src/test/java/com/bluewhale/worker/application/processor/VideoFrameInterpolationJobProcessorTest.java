@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -54,6 +55,7 @@ class VideoFrameInterpolationJobProcessorTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitInterpolateVideoClient interpolateVideoClient;
@@ -74,9 +76,9 @@ class VideoFrameInterpolationJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoFrameInterpolationJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, interpolateVideoClient, mediaRelay, producer);
-        when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
+        when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
@@ -125,7 +127,7 @@ class VideoFrameInterpolationJobProcessorTest {
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failVideoJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failVideoJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -140,7 +142,7 @@ class VideoFrameInterpolationJobProcessorTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -152,9 +154,9 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
     // ========== 取消（生成中可取消：软取消 → 确定终态；迟到结果不得复活） ==========
@@ -170,7 +172,7 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(stateMachine).cancelVideoFrameInterpolation("100", "worker-1", 5L, null);
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
         verify(interpolateVideoClient, never()).poll(anyString(), anyString());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -187,8 +189,8 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(stateMachine).cancelVideoFrameInterpolation("100", "worker-1", 5L, "amk-task-1");
         verify(interpolateVideoClient, never()).poll(anyString(), anyString());
         verify(mediaRelay, never()).persist(anyString(), anyString());
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -205,12 +207,12 @@ class VideoFrameInterpolationJobProcessorTest {
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
         // 守卫未命中 = 任务已被取消（status='cancelled'，非 processing）或 fencing 失效
-        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(false);
+        when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine).publishVideoFrameInterpolationResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -237,9 +239,9 @@ class VideoFrameInterpolationJobProcessorTest {
 
             processor.handle("100");
 
-            verify(stateMachine).failVideoJob(eq("100"), eq(GenerationError.ERROR_INVALID_INPUT),
+            verify(finalizer).failVideoJob(eq("100"), eq(GenerationError.ERROR_INVALID_INPUT),
                     anyString(), any(), eq("worker-1"), eq(5L));
-            clearInvocations(stateMachine);
+            clearInvocations(stateMachine, finalizer);
         }
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
     }
@@ -292,7 +294,7 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(interpolateVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4", 120);
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -403,7 +405,7 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(true);
+        when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -411,7 +413,7 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(mediaRelay).persist("https://volc/old-out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
                 ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
-        verify(stateMachine).publishVideoFrameInterpolationResult(captor.capture());
+        verify(finalizer).publishVideoFrameInterpolationResult(captor.capture());
         PublishVideoFrameInterpolationDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp4");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
@@ -424,7 +426,7 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("1080p");
         assertThat(published.fps()).isEqualTo(60.0);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         // 收割即终态：不自投下一步
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -447,7 +449,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(60));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -484,7 +486,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(60));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -543,7 +545,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(interpolateVideoClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(60));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -560,7 +562,7 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(false);
+        when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(false);
 
         processor.handle("100");
 
@@ -568,7 +570,7 @@ class VideoFrameInterpolationJobProcessorTest {
         // 任务保持 processing 由新 worker 重新领取继续收割
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -588,7 +590,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -621,7 +623,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -638,7 +640,7 @@ class VideoFrameInterpolationJobProcessorTest {
         processor.handle("100");
 
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 contains("持续瞬时错误"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
@@ -664,7 +666,7 @@ class VideoFrameInterpolationJobProcessorTest {
         // 「: HTTP 503」片段（冒号保留），上游可读原因保留
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         assertThat(messageCaptor.getValue()).doesNotContain("503")
@@ -692,7 +694,7 @@ class VideoFrameInterpolationJobProcessorTest {
         // 与 503 用例同口径（IKIN6X）：429 也经 cause 链结构化透传，message 剥状态码字样
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         assertThat(messageCaptor.getValue()).doesNotContain("429")
@@ -718,7 +720,7 @@ class VideoFrameInterpolationJobProcessorTest {
         processor.handle("100");
 
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 contains("连接被拒"), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 反例（IKIN6X）：连接失败 cause 非 HttpStatusException → 不写 http_status 键
@@ -743,7 +745,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoFrameInterpolationJobProcessor.VIDEO_FRAME_INTERPOLATION_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -762,7 +764,7 @@ class VideoFrameInterpolationJobProcessorTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -775,7 +777,7 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenThrow(new VideoFrameInterpolationError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                         "MediaKit 视频插帧任务查询超时"));
         processor.handle("100");
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 anyString(), any(), eq("worker-1"), eq(5L));
 
@@ -784,15 +786,15 @@ class VideoFrameInterpolationJobProcessorTest {
         // 租约) 且 next_action_at 到期——failed 终态一律不命中 → claim 返回空 → 处理器静默
         // 返回，不产生任何状态机写或自投（claimReturnsEmpty_silentReturn 同款语义，
         // 锚定超限终态场景：claim 与 recovery 两条唤醒路径都不复活已终态任务）。
-        clearInvocations(stateMachine, interpolateVideoClient, producer);
+        clearInvocations(stateMachine, finalizer, interpolateVideoClient, producer);
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
         verify(interpolateVideoClient, never()).poll(anyString(), anyString());
         verify(interpolateVideoClient, never()).submit(anyString(), anyString(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -822,7 +824,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 eq("The 'fps' parameter is out of range [15, 120]"),
                 any(), eq("worker-1"), eq(5L));
@@ -876,7 +878,7 @@ class VideoFrameInterpolationJobProcessorTest {
 
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
@@ -901,7 +903,7 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(true);
+        when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -909,7 +911,7 @@ class VideoFrameInterpolationJobProcessorTest {
         verify(mediaRelay).persist("https://volc/out.mp4?auth_key=...", "9");
         ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
                 ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
-        verify(stateMachine).publishVideoFrameInterpolationResult(captor.capture());
+        verify(finalizer).publishVideoFrameInterpolationResult(captor.capture());
         PublishVideoFrameInterpolationDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp4");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.mp4");
@@ -922,7 +924,7 @@ class VideoFrameInterpolationJobProcessorTest {
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("1080p");
         assertThat(published.fps()).isEqualTo(120.0);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -939,13 +941,13 @@ class VideoFrameInterpolationJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
-        when(stateMachine.publishVideoFrameInterpolationResult(any())).thenReturn(true);
+        when(finalizer.publishVideoFrameInterpolationResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVideoFrameInterpolationDto> captor =
                 ArgumentCaptor.forClass(PublishVideoFrameInterpolationDto.class);
-        verify(stateMachine).publishVideoFrameInterpolationResult(captor.capture());
+        verify(finalizer).publishVideoFrameInterpolationResult(captor.capture());
         assertThat(captor.getValue().durationSec()).isEqualTo(65.0); // 源 65000ms 换算
         assertThat(captor.getValue().fps()).isEqualTo(30.0);         // 冻结 input fps 回落
         assertThat(captor.getValue().width()).isNull();
@@ -965,14 +967,14 @@ class VideoFrameInterpolationJobProcessorTest {
 
         assertFailCode(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED);
         verify(mediaRelay, never()).persist(anyString(), anyString());
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
     @Test
     @DisplayName("TOS 未配置 → 1049（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoFrameInterpolationJobProcessor noRelayProcessor = new VideoFrameInterpolationJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, interpolateVideoClient, null, producer);
         stubPollClaim(input(60), 3);
         when(interpolateVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -981,10 +983,10 @@ class VideoFrameInterpolationJobProcessorTest {
 
         noRelayProcessor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED),
                 eq("视频插帧转存存储未配置"), any(), eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
     @Test
@@ -1000,7 +1002,7 @@ class VideoFrameInterpolationJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoFrameInterpolationContract.ERROR_VIDEO_FRAME_INTERPOLATION_FAILED);
-        verify(stateMachine, never()).publishVideoFrameInterpolationResult(any());
+        verify(finalizer, never()).publishVideoFrameInterpolationResult(any());
     }
 
     // ========== 冻结 input 解析（整型 fps 兜底，契约三档） ==========

@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
@@ -134,6 +135,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             });
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -154,6 +156,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitMatteVideoClient matteVideoClient,
@@ -162,6 +165,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.bySources(
                 VideoMattingContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
@@ -557,7 +561,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
 
         boolean published;
         try {
-            published = stateMachine.publishVideoMattingResult(new PublishVideoMattingDto(
+            published = finalizer.publishVideoMattingResult(new PublishVideoMattingDto(
                     claim.id(),
                     claim.projectId(),
                     claim.userId(),
@@ -638,7 +642,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
                     }
                     case SETTLED_UNREFERENCED -> { /* 事务已结束且无引用，向下删除 */ }
                 }
-            } else if (stateMachine.hasPublishedAsset(claim.id(), stored.storageKey())) {
+            } else if (finalizer.hasPublishedAsset(claim.id(), stored.storageKey())) {
                 log.warn("[video_matting] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
                         claim.id(), stored.storageKey());
                 return;
@@ -673,7 +677,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
      */
     private UnpublishedTransferCheck awaitPublishSettledAndUnreferenced(String jobId, String storageKey) {
         for (int attempt = 1; ; attempt++) {
-            if (stateMachine.hasInFlightJobWriteTransaction(jobId)) {
+            if (finalizer.hasInFlightJobWriteTransaction(jobId)) {
                 if (attempt >= publishSettleProbeAttempts) return UnpublishedTransferCheck.UNCONFIRMED;
                 try {
                     Thread.sleep(publishSettleProbeDelayMs);
@@ -683,7 +687,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
                 }
                 continue;
             }
-            return stateMachine.hasPublishedAsset(jobId, storageKey)
+            return finalizer.hasPublishedAsset(jobId, storageKey)
                     ? UnpublishedTransferCheck.REFERENCED
                     : UnpublishedTransferCheck.SETTLED_UNREFERENCED;
         }
@@ -807,7 +811,7 @@ public class VideoMattingJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVideoJob(claim.id(), code, msg, details,
+        finalizer.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

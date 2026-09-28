@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -80,6 +81,7 @@ class VideoMattingTransferCleanupTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
@@ -113,10 +115,10 @@ class VideoMattingTransferCleanupTest {
         tosClient = mock(TOSV2.class);
         relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         processor = new VideoMattingJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, relay, producer);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
-        when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
+        when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(new ClaimedJob(
@@ -125,8 +127,8 @@ class VideoMattingTransferCleanupTest {
         // 默认放行租约与「无引用、无在飞事务」权威结论；专项用例按需覆写
         when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
                 .thenReturn(true);
-        when(stateMachine.hasPublishedAsset(anyString(), anyString())).thenReturn(false);
-        when(stateMachine.hasInFlightJobWriteTransaction(anyString())).thenReturn(false);
+        when(finalizer.hasPublishedAsset(anyString(), anyString())).thenReturn(false);
+        when(finalizer.hasInFlightJobWriteTransaction(anyString())).thenReturn(false);
     }
 
     @AfterEach
@@ -215,7 +217,7 @@ class VideoMattingTransferCleanupTest {
     private String publishedStorageKey() {
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
-        verify(stateMachine).publishVideoMattingResult(captor.capture());
+        verify(finalizer).publishVideoMattingResult(captor.capture());
         return captor.getValue().storageKey();
     }
 
@@ -249,7 +251,7 @@ class VideoMattingTransferCleanupTest {
     void successfulPublishKeepsTheUploadedObject() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(true);
         List<String> tempBefore = relayTempFiles();
 
         processor.handle("100");
@@ -257,7 +259,7 @@ class VideoMattingTransferCleanupTest {
         String storageKey = publishedStorageKey();
         assertThat(tosObjects).containsKey(storageKey);
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
@@ -267,16 +269,16 @@ class VideoMattingTransferCleanupTest {
     void guardRejectionDeletesUnreferencedUpload() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
         List<String> tempBefore = relayTempFiles();
 
         processor.handle("100");
 
         String storageKey = publishedStorageKey();
         // 删除前先经权威核实（同 jobId + storageKey 判据），确认未被 Asset 引用
-        verify(stateMachine).hasPublishedAsset("100", storageKey);
+        verify(finalizer).hasPublishedAsset("100", storageKey);
         assertThat(tosObjects).doesNotContainKey(storageKey);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
@@ -286,8 +288,8 @@ class VideoMattingTransferCleanupTest {
     void guardRejectionKeepsUploadWhenAssetReferencesIt() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
-        when(stateMachine.hasPublishedAsset(eq("100"), anyString())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.hasPublishedAsset(eq("100"), anyString())).thenReturn(true);
         List<String> tempBefore = relayTempFiles();
 
         processor.handle("100");
@@ -295,7 +297,7 @@ class VideoMattingTransferCleanupTest {
         String storageKey = publishedStorageKey();
         assertThat(tosObjects).containsKey(storageKey);
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
@@ -305,8 +307,8 @@ class VideoMattingTransferCleanupTest {
     void guardRejectionWithAuthorityCheckErrorKeepsUploadAndLogsPendingRecord() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
-        when(stateMachine.hasPublishedAsset(eq("100"), anyString()))
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.hasPublishedAsset(eq("100"), anyString()))
                 .thenThrow(new RuntimeException("核实查询断连"));
         List<String> tempBefore = relayTempFiles();
 
@@ -315,7 +317,7 @@ class VideoMattingTransferCleanupTest {
         String storageKey = publishedStorageKey();
         assertThat(tosObjects).containsKey(storageKey);
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
                 .anySatisfy(message -> assertThat(message)
@@ -330,7 +332,7 @@ class VideoMattingTransferCleanupTest {
     void deleteFailureLeavesRelayLogAndRetainsUpload() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
         doThrow(new RuntimeException("TOS 删除 5xx")).when(tosClient).deleteObject(any(DeleteObjectInput.class));
         List<String> tempBefore = relayTempFiles();
 
@@ -341,7 +343,7 @@ class VideoMattingTransferCleanupTest {
         String storageKey = publishedStorageKey();
         // 删除失败不得记为成功：对象仍在
         assertThat(tosObjects).containsKey(storageKey);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(logs.stream().filter(message -> message.contains("清理未发布 TOS 对象失败")).toList())
                 .anySatisfy(message -> assertThat(message)
@@ -365,8 +367,8 @@ class VideoMattingTransferCleanupTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         // 中止时 PUT 已发起：relay 内部幂等清理后对象表无该 key（PUT 未完整落地本就不成对象，
         // 清理幂等通过——两种到达形态的最终状态一致：无孤儿）
@@ -384,10 +386,10 @@ class VideoMattingTransferCleanupTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED), anyString(), any(),
                 eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).publishVideoMattingResult(any());
         assertThat(signRequests).isEmpty();
         assertThat(tosObjects).isEmpty();
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -400,7 +402,7 @@ class VideoMattingTransferCleanupTest {
     void publishExceptionDeletesAfterSettledAndUnreferenced() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any()))
+        when(finalizer.publishVideoMattingResult(any()))
                 .thenThrow(new RuntimeException("发布事务结果不明"));
         processor.publishSettleProbeDelayMs = 5;
         List<String> tempBefore = relayTempFiles();
@@ -409,11 +411,11 @@ class VideoMattingTransferCleanupTest {
 
         String storageKey = publishedStorageKey();
         // 不凭本地异常直接删除：先核实「可能发布该键的事务」已结束（行锁空闲）且无 Asset 引用
-        verify(stateMachine).hasInFlightJobWriteTransaction("100");
-        verify(stateMachine).hasPublishedAsset("100", storageKey);
+        verify(finalizer).hasInFlightJobWriteTransaction("100");
+        verify(finalizer).hasPublishedAsset("100", storageKey);
         assertThat(tosObjects).doesNotContainKey(storageKey);
         // 异常不吞：继续上抛由 handle 归并 1050 落失败终态（守卫仍 fencing，语义不变）
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED), anyString(), any(),
                 eq("worker-1"), eq(5L));
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
@@ -424,11 +426,11 @@ class VideoMattingTransferCleanupTest {
     void publishExceptionKeepsUploadWhenAssetAppearsAfterSettle() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any()))
+        when(finalizer.publishVideoMattingResult(any()))
                 .thenThrow(new RuntimeException("commit 窗口断连"));
         // 首次探测：可能发布该键的事务仍在服务端进行（行锁被占）；短延时重查后事务已提交结束
-        when(stateMachine.hasInFlightJobWriteTransaction("100")).thenReturn(true, false);
-        when(stateMachine.hasPublishedAsset(eq("100"), anyString())).thenReturn(true);
+        when(finalizer.hasInFlightJobWriteTransaction("100")).thenReturn(true, false);
+        when(finalizer.hasPublishedAsset(eq("100"), anyString())).thenReturn(true);
         processor.publishSettleProbeDelayMs = 5;
         List<String> tempBefore = relayTempFiles();
 
@@ -437,7 +439,7 @@ class VideoMattingTransferCleanupTest {
         String storageKey = publishedStorageKey();
         assertThat(tosObjects).containsKey(storageKey);
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
-        verify(stateMachine).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }
@@ -447,9 +449,9 @@ class VideoMattingTransferCleanupTest {
     void publishExceptionKeepsUploadWithPendingRecordWhenTransactionNeverSettles() throws Exception {
         stubCompletedPoll(serveSourceVideo(4));
         wireTosDouble();
-        when(stateMachine.publishVideoMattingResult(any()))
+        when(finalizer.publishVideoMattingResult(any()))
                 .thenThrow(new RuntimeException("发布事务结果不明"));
-        when(stateMachine.hasInFlightJobWriteTransaction("100")).thenReturn(true);
+        when(finalizer.hasInFlightJobWriteTransaction("100")).thenReturn(true);
         processor.publishSettleProbeAttempts = 2;
         processor.publishSettleProbeDelayMs = 5;
         List<String> tempBefore = relayTempFiles();
@@ -458,7 +460,7 @@ class VideoMattingTransferCleanupTest {
 
         String storageKey = publishedStorageKey();
         // 权威状态暂不可确认：保留对象，不进入 Asset 引用查询与删除
-        verify(stateMachine, never()).hasPublishedAsset(anyString(), anyString());
+        verify(finalizer, never()).hasPublishedAsset(anyString(), anyString());
         verify(tosClient, never()).deleteObject(any(DeleteObjectInput.class));
         assertThat(tosObjects).containsKey(storageKey);
         assertThat(logs.stream().filter(message -> message.contains("[pending-cleanup]")).toList())
@@ -466,7 +468,7 @@ class VideoMattingTransferCleanupTest {
                         .contains("jobId=100")
                         .contains("storageKey=" + storageKey)
                         .contains("resolution=retain-pending"));
-        verify(stateMachine).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(relayTempFiles()).isEqualTo(tempBefore);
     }

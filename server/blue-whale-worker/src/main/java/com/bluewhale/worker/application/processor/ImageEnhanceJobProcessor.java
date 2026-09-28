@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
@@ -73,6 +74,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
 
     private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
@@ -85,6 +87,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitClient mediaKitClient,
@@ -92,6 +95,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     ) {
         this.stateMachine = stateMachine;
         this.claimService = claimService;
+        this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 ImageEnhanceContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
@@ -251,7 +255,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
 
         // 8. 终态收口：建 Asset（type=image / source=generated / generation_job_id）→ succeeded
         //    （免费工具无结算联动，同 extract 的 publishMediaExtractResult 形态，§14.5）
-        boolean published = stateMachine.publishImageEnhanceResult(new PublishImageEnhanceDto(
+        boolean published = finalizer.publishImageEnhanceResult(new PublishImageEnhanceDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -337,7 +341,7 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     private void failClaimed(ClaimedJob claim, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
-        stateMachine.failJob(claim.id(), code, msg, details,
+        finalizer.failJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

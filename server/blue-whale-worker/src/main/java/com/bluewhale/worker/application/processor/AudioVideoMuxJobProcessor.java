@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
@@ -58,6 +59,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final GenerationCredentialService credentials;
     private final NewApiMediaKitMuxAudioVideoClient gateway;
@@ -72,12 +74,14 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
     public AudioVideoMuxJobProcessor(JobStateMachineService stateMachine,
                                      JobClaimService claimService,
                                      GenerationJobMapper jobMapper,
+                                     JobFinalizer finalizer,
                                      GenerationCredentialService credentials,
                                      NewApiMediaKitMuxAudioVideoClient gateway,
                                      TosVideoMediaRelay relay,
                                      @Qualifier("audioVideoMuxMessageProducer") GenerationMessageProducer producer) {
         this.stateMachine = stateMachine;
         this.claimService = claimService;
+        this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 AudioVideoMuxContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.credentials = credentials;
@@ -298,7 +302,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         }
         boolean published;
         try {
-            published = stateMachine.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
+            published = finalizer.publishAudioVideoMuxResult(new PublishAudioVideoMuxDto(
                     job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                     stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                     observed.durationSec(), observed.resolution(), snapshot.videoAssetId()));
@@ -357,7 +361,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                     }
                     case SETTLED_UNREFERENCED -> { /* 事务已结束且无引用，向下删除 */ }
                 }
-            } else if (stateMachine.hasPublishedAsset(job.id(), stored.storageKey())) {
+            } else if (finalizer.hasPublishedAsset(job.id(), stored.storageKey())) {
                 log.warn("[audio_video_mux] 转存对象已被 Asset 引用，保留不清理 jobId={} storageKey={}",
                         job.id(), stored.storageKey());
                 return;
@@ -391,7 +395,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
      */
     private UnpublishedTransferCheck awaitPublishSettledAndUnreferenced(String jobId, String storageKey) {
         for (int attempt = 1; ; attempt++) {
-            if (stateMachine.hasInFlightJobWriteTransaction(jobId)) {
+            if (finalizer.hasInFlightJobWriteTransaction(jobId)) {
                 if (attempt >= publishSettleProbeAttempts) return UnpublishedTransferCheck.UNCONFIRMED;
                 try {
                     Thread.sleep(publishSettleProbeDelayMs);
@@ -401,7 +405,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                 }
                 continue;
             }
-            return stateMachine.hasPublishedAsset(jobId, storageKey)
+            return finalizer.hasPublishedAsset(jobId, storageKey)
                     ? UnpublishedTransferCheck.REFERENCED
                     : UnpublishedTransferCheck.SETTLED_UNREFERENCED;
         }
@@ -474,7 +478,10 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         log.warn("[audio_video_mux] job 失败 jobId={} code={} message={}", job.id(), code, message);
-        return stateMachine.failMediaExtractJob(new FailMediaExtractDto(
-                job.id(), job.workerId(), job.fencingToken(), code, message, details));
+        FailMediaExtractDto failInput = new FailMediaExtractDto(
+                job.id(), job.workerId(), job.fencingToken(), code, message, details);
+        return finalizer.failMediaExtractJob(
+                failInput.jobId(), failInput.code(), failInput.message(), failInput.details(),
+                failInput.workerId(), failInput.fencingToken());
     }
 }

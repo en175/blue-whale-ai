@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
@@ -58,6 +59,7 @@ class ImageEnhanceJobProcessorTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitClient mediaKitClient;
@@ -70,10 +72,10 @@ class ImageEnhanceJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageEnhanceJobProcessor(
-                stateMachine, claimService, jobMapper,
+                stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
                 credentialService, mediaKitClient, tosService);
-        when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
+        when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
         // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
@@ -127,7 +129,7 @@ class ImageEnhanceJobProcessorTest {
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -142,7 +144,7 @@ class ImageEnhanceJobProcessorTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -153,9 +155,9 @@ class ImageEnhanceJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishImageEnhanceResult(any());
+        verify(finalizer, never()).publishImageEnhanceResult(any());
     }
 
     // ========== input 冻结六键兜底校验（§14.2；权威复核在创建入口 IKGM99） ==========
@@ -315,7 +317,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), eq("image/png"), eq("9")))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/enhanced.png", "uploads/9/image/enhanced.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -323,7 +325,7 @@ class ImageEnhanceJobProcessorTest {
         verify(mediaKitClient).enhance(eq("sk-frozen-token"), eq("https://example.com/src.png"),
                 eq("max"), eq(4), eq("fidelity_first"), eq(false));
         ArgumentCaptor<PublishImageEnhanceDto> captor = ArgumentCaptor.forClass(PublishImageEnhanceDto.class);
-        verify(stateMachine).publishImageEnhanceResult(captor.capture());
+        verify(finalizer).publishImageEnhanceResult(captor.capture());
         PublishImageEnhanceDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/enhanced.png");
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/enhanced.png");
@@ -334,7 +336,7 @@ class ImageEnhanceJobProcessorTest {
         // IKGS73：md5 必须从 stored 穿透到发布入参。没有这条，processor 哪天传了 null，
         // 全套测试照样绿，而 assets.md5 会静默变空 —— 正是本单要消灭的那类失效。
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -352,7 +354,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -375,7 +377,7 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(true);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -400,7 +402,7 @@ class ImageEnhanceJobProcessorTest {
 
         assertFailCode(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageEnhanceResult(any());
+        verify(finalizer, never()).publishImageEnhanceResult(any());
     }
 
     @Test
@@ -413,11 +415,11 @@ class ImageEnhanceJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishImageEnhanceResult(any())).thenReturn(false);
+        when(finalizer.publishImageEnhanceResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 }

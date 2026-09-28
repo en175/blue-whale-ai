@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSubtitleEraseDto;
@@ -93,6 +94,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
     public static final int MAX_SUBTITLE_ERASE_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -106,6 +108,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitSubtitleEraseClient subtitleEraseClient,
@@ -114,6 +117,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.bySources(
                 VideoSubtitleEraseContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
@@ -397,7 +401,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : sourceDurationSec;
 
-        boolean published = stateMachine.publishVideoSubtitleEraseResult(new PublishVideoSubtitleEraseDto(
+        boolean published = finalizer.publishVideoSubtitleEraseResult(new PublishVideoSubtitleEraseDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -520,7 +524,7 @@ public class VideoSubtitleEraseJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVideoJob(claim.id(), code, msg, details,
+        finalizer.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

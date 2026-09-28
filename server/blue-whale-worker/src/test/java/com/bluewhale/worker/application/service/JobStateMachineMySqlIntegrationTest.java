@@ -126,6 +126,7 @@ class JobStateMachineMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService service;
+    static JobFinalizer finalizer;
     /** 工具族领取管道（IKIWP8）：与 service 共用同一个真库 jobMapper。 */
     static JobClaimService claimService;
     static JdbcTemplate jdbc;
@@ -211,6 +212,23 @@ class JobStateMachineMySqlIntegrationTest {
             return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm);
         }
 
+        /**
+         * 真库 JobFinalizer（IKIWP8 ③）：终态收口方法已从 JobStateMachineService 删除，
+         * 测试直连 finalizer；本方法按 7-mapper 兼容构造的内部装配逐项复制，共用同一批真库 mapper。
+         */
+        @Bean
+        JobFinalizer finalizer(
+                GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
+                GenerationOutputSlotMapper sm, ProjectEventMapper pem,
+                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
+            ProjectEventPublisher events = new ProjectEventPublisher(pem);
+            return new JobFinalizer(jm, am, jlm, sm,
+                    new SceneCardGenerationRecordSync(sm, rm, events),
+                    new StoryboardPreviewSync(sm, pm, events),
+                    events,
+                    JobSettlementPublisher.noop());
+        }
+
         @SuppressWarnings({"unchecked", "rawtypes"})
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
                 throws Exception {
@@ -228,6 +246,7 @@ class JobStateMachineMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         service = ctx.getBean(JobStateMachineService.class);
+        finalizer = ctx.getBean(JobFinalizer.class);
         jobMapper = ctx.getBean(GenerationJobMapper.class);
         claimService = new JobClaimService(jobMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
@@ -699,10 +718,10 @@ class JobStateMachineMySqlIntegrationTest {
         void completeJob_alreadySucceeded_false() {
             long id = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             // 先正常 complete
-            service.completeJob(String.valueOf(id), List.of("1001"), "worker-1", 1L);
+            finalizer.completeJob(String.valueOf(id), List.of("1001"), "worker-1", 1L);
 
             // 再次 complete → false
-            boolean second = service.completeJob(
+            boolean second = finalizer.completeJob(
                     String.valueOf(id), List.of("1001"), "worker-1", 1L);
             assertThat(second).isFalse();
         }
@@ -711,9 +730,9 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("failJob 在已 failed 行 → false")
         void failJob_alreadyFailed_false() {
             long id = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
-            service.failJob(String.valueOf(id), "ERR", "err", null, "worker-1", 1L);
+            finalizer.failJob(String.valueOf(id), "ERR", "err", null, "worker-1", 1L);
 
-            boolean second = service.failJob(
+            boolean second = finalizer.failJob(
                     String.valueOf(id), "ERR", "err", null, "worker-1", 1L);
             assertThat(second).isFalse();
         }
@@ -786,7 +805,7 @@ class JobStateMachineMySqlIntegrationTest {
             seedStoryboardPreview(jobId, 99L);
 
             long assetA = 2001L, assetB = 2002L;
-            boolean ok = service.completeJob(
+            boolean ok = finalizer.completeJob(
                     String.valueOf(jobId),
                     List.of(String.valueOf(assetA), String.valueOf(assetB)),
                     "worker-1", 1L);
@@ -818,7 +837,7 @@ class JobStateMachineMySqlIntegrationTest {
             long slot0 = seedSlot(jobId, 99L, 0, "pending");
             long slot1 = seedSlot(jobId, 99L, 1, "pending");
 
-            boolean ok = service.completeJob(
+            boolean ok = finalizer.completeJob(
                     String.valueOf(jobId), List.of("3001"), "worker-1", 1L);
 
             assertThat(ok).isTrue();
@@ -838,7 +857,7 @@ class JobStateMachineMySqlIntegrationTest {
             long slot0 = seedSlot(jobId, 99L, 0, "pending");
             long slot1 = seedSlot(jobId, 99L, 1, "pending");
 
-            boolean ok = service.completeJob(
+            boolean ok = finalizer.completeJob(
                     String.valueOf(jobId), List.of(), "worker-1", 1L);
 
             assertThat(ok).isTrue();
@@ -855,7 +874,7 @@ class JobStateMachineMySqlIntegrationTest {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             seedSlot(jobId, 99L, 0, "pending");
 
-            boolean ok = service.completeJob(
+            boolean ok = finalizer.completeJob(
                     String.valueOf(jobId), List.of("4001"), "worker-1", 999L);
 
             assertThat(ok).isFalse();
@@ -869,7 +888,7 @@ class JobStateMachineMySqlIntegrationTest {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             jdbc.update("UPDATE generation_jobs SET project_id=NULL WHERE id=?", jobId);
 
-            boolean ok = service.completeJob(
+            boolean ok = finalizer.completeJob(
                     String.valueOf(jobId), List.of("5001"), "worker-1", 1L);
 
             assertThat(ok).isTrue();
@@ -890,7 +909,7 @@ class JobStateMachineMySqlIntegrationTest {
             long slot0 = seedSlot(jobId, 99L, 0, "pending");
             long slot1 = seedSlot(jobId, 99L, 1, "pending");
 
-            boolean ok = service.failJob(String.valueOf(jobId),
+            boolean ok = finalizer.failJob(String.valueOf(jobId),
                     "provider_failed", "上游挂了", null, "worker-1", 1L);
 
             assertThat(ok).isTrue();
@@ -918,7 +937,7 @@ class JobStateMachineMySqlIntegrationTest {
         void failJob_stale() {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
 
-            boolean ok = service.failJob(String.valueOf(jobId),
+            boolean ok = finalizer.failJob(String.valueOf(jobId),
                     "ERR", "err", null, "worker-1", 999L);
 
             assertThat(ok).isFalse();
@@ -1147,7 +1166,7 @@ class JobStateMachineMySqlIntegrationTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         NewApiMediaKitMixAudioClient gateway = mock(NewApiMediaKitMixAudioClient.class);
         TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
-        var processor = new AudioMixJobProcessor(service, claimService, jobMapper,
+        var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
                 new GenerationCredentialService(), gateway, relay, producer);
         for (String providerTaskId : new String[] { null, "provider-already-submitted" }) {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
@@ -1161,7 +1180,7 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getStatus()).isEqualTo("cancelled");
             assertThat(row.getNextActionAt()).isNull();
             assertThat(row.getLeaseOwner()).isNull();
-            assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+            assertThat(finalizer.publishAudioMixResult(new PublishMediaExtractDto(
                     String.valueOf(jobId), "99", "9", "mix-stale", row.getFencingToken(),
                     "https://late.invalid/out.mp3", "generated/9/audio/late.mp3", "audio/mpeg",
                     10L, "0123456789abcdef0123456789abcdef", 1.0))).isFalse();
@@ -1227,7 +1246,7 @@ class JobStateMachineMySqlIntegrationTest {
         when(relay.persist("https://volc/old.mp3", "9", "mp3"))
                 .thenReturn(new TosAudioMediaRelay.StoredAudio("https://cdn/old.mp3", "gen/old.mp3",
                         "audio/mpeg", 500L, "0123456789abcdef0123456789abcdef"));
-        var processor = new MediaExtractJobProcessor(service, claimService, jobMapper,
+        var processor = new MediaExtractJobProcessor(service, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper), credentials, client, relay, producer);
 
         processor.handle(String.valueOf(retryId));
@@ -1238,10 +1257,10 @@ class JobStateMachineMySqlIntegrationTest {
         verify(client).poll("sk-frozen-token", "amk-parent");
         verify(client, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), org.mockito.ArgumentMatchers.anyLong());
-        assertThat(service.publishMediaExtractResult(new PublishMediaExtractDto(
+        assertThat(finalizer.publishMediaExtractResult(
                 String.valueOf(retryId), "99", "9", "worker-old", 4L,
                 "https://cdn/old.mp3", "gen/old.mp3", "audio/mpeg", 500L,
-                "0123456789abcdef0123456789abcdef", 12.5))).isFalse();
+                "0123456789abcdef0123456789abcdef", 12.5)).isFalse();
         processor.handle(String.valueOf(retryId));
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
@@ -1339,6 +1358,7 @@ class JobStateMachineMySqlIntegrationTest {
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
         String retry = String.valueOf(retryId);
         var spiedService = spy(service);
+        var spiedFinalizer = spy(finalizer);
 
         // 旧 Worker 真实领取（不打桩）：fencing token 0→1，携父任务上游 taskId
         var staleClaim = spiedService.claimVideoJobById(retry, "video-worker-old");
@@ -1379,7 +1399,7 @@ class JobStateMachineMySqlIntegrationTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo("http://cdn/video.mp4", "gen/video.mp4",
                         "video/mp4", 500L, "0123456789abcdef0123456789abcdef"));
         var newProcessor = VideoJobProcessorFixtures.withWorkerId(
-                spiedService, new AssetSourceService(assetMapper),
+                spiedService, spiedFinalizer, new AssetSourceService(assetMapper),
                 credentials, client, relay, producer, "video-worker-new");
 
         newProcessor.handle(retry);
@@ -1392,7 +1412,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(countLogs(retryId)).isEqualTo(1);
 
         // 旧 Worker 携旧领取身份/旧 fencing token 的迟到收割发布 → publishVideoGuard CAS 拒绝，零迟到 Finalize 写入
-        assertThat(spiedService.publishVideoResult(retry, "99", "9",
+        assertThat(spiedFinalizer.publishVideoResult(retry, "99", "9",
                 "video-worker-old", 1L,
                 "http://cdn/video.mp4", "gen/video.mp4", "video/mp4", 500L,
                 "0123456789abcdef0123456789abcdef", 1280, 720, 5.0, null)).isFalse();
@@ -1406,13 +1426,13 @@ class JobStateMachineMySqlIntegrationTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
 
         // 两次发布分别携带对应领取身份与 fencing token（两次领取均走真实实现先后落库）
-        var handoff = inOrder(spiedService);
+        var handoff = inOrder(spiedService, spiedFinalizer);
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-old");
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-new");
-        handoff.verify(spiedService).publishVideoResult(eq(retry), eq("99"), eq("9"),
+        handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(), any(),
                 anyString(), anyInt(), anyInt(), anyDouble(), any());
-        handoff.verify(spiedService).publishVideoResult(eq(retry), eq("99"), eq("9"),
+        handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(), any(),
                 anyString(), anyInt(), anyInt(), anyDouble(), any());
     }
@@ -1576,7 +1596,7 @@ class JobStateMachineMySqlIntegrationTest {
                 String.valueOf(jobId), "mix-worker");
         assertThat(second).isPresent();
         assertThat(second.get().providerTaskId()).isEqualTo("provider-mix-1");
-        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+        assertThat(finalizer.publishAudioMixResult(new PublishMediaExtractDto(
                 String.valueOf(jobId), "99", "9", "mix-worker", second.get().fencingToken(),
                 "https://our-tos.example/audio.mp3", "generated/9/audio/out.mp3", "audio/mpeg",
                 500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
@@ -1644,7 +1664,7 @@ class JobStateMachineMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-            var processor = new AudioMixJobProcessor(service, claimService, jobMapper,
+            var processor = new AudioMixJobProcessor(service, claimService, jobMapper, finalizer,
                     new GenerationCredentialService(),
                     new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
 
@@ -1726,17 +1746,17 @@ class JobStateMachineMySqlIntegrationTest {
                 String.valueOf(jobId), "mix-worker-b").orElseThrow();
         assertThat(second.fencingToken()).isEqualTo(first.fencingToken() + 1);
 
-        assertThat(service.failMediaExtractJob(new FailMediaExtractDto(
-                String.valueOf(jobId), "mix-worker-a", first.fencingToken(),
-                "audio_mix_failed", "迟到失败", Map.of()))).isFalse();
-        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+        assertThat(finalizer.failMediaExtractJob(
+                String.valueOf(jobId), "audio_mix_failed", "迟到失败", Map.of(),
+                "mix-worker-a", first.fencingToken())).isFalse();
+        assertThat(finalizer.publishAudioMixResult(new PublishMediaExtractDto(
                 String.valueOf(jobId), "99", "9", "mix-worker-a", first.fencingToken(),
                 "https://our-tos.example/stale.mp3", "generated/9/audio/stale.mp3", "audio/mpeg",
                 500L, "0123456789abcdef0123456789abcdef", 12.5))).isFalse();
         assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
         assertThat(countAssets(jobId)).isZero();
 
-        assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
+        assertThat(finalizer.publishAudioMixResult(new PublishMediaExtractDto(
                 String.valueOf(jobId), "99", "9", "mix-worker-b", second.fencingToken(),
                 "https://our-tos.example/final.mp3", "generated/9/audio/final.mp3", "audio/mpeg",
                 500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
@@ -1753,10 +1773,10 @@ class JobStateMachineMySqlIntegrationTest {
         void publish_happy() {
             long jobId = seedClaimedJob(9L, "media_extract", "dock", "worker-1", 1L);
 
-            boolean ok = service.publishMediaExtractResult(new PublishMediaExtractDto(
+            boolean ok = finalizer.publishMediaExtractResult(
                     String.valueOf(jobId), "99", "9", "worker-1", 1L,
                     "https://cdn/audio.mp3", "gen/audio.mp3", "audio/mpeg",
-                    50_000L, "0123456789abcdef0123456789abcdef", 12.5));
+                    50_000L, "0123456789abcdef0123456789abcdef", 12.5);
 
             assertThat(ok).isTrue();
             GenerationJobEntity row = readJob(jobId);
@@ -1774,9 +1794,9 @@ class JobStateMachineMySqlIntegrationTest {
         void failExtract_happy() {
             long jobId = seedClaimedJob(9L, "media_extract", "dock", "worker-1", 1L);
 
-            boolean ok = service.failMediaExtractJob(new FailMediaExtractDto(
-                    String.valueOf(jobId), "worker-1", 1L,
-                    "video_has_no_audio_track", "视频无音轨", null));
+            boolean ok = finalizer.failMediaExtractJob(
+                    String.valueOf(jobId), "video_has_no_audio_track", "视频无音轨", null,
+                    "worker-1", 1L);
 
             assertThat(ok).isTrue();
             GenerationJobEntity row = readJob(jobId);

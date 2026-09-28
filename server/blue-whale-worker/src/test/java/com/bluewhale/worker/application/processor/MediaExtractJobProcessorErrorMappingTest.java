@@ -3,9 +3,9 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
-import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -58,6 +58,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitExtractAudioClient extractAudioClient;
@@ -77,10 +78,11 @@ class MediaExtractJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new MediaExtractJobProcessor(
-                stateMachine, claimService, jobMapper,
+                stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
                 credentialService, extractAudioClient, mediaRelay, producer);
-        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+        when(finalizer.failMediaExtractJob(anyString(), anyString(), anyString(), any(), anyString(),
+                anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
@@ -120,10 +122,10 @@ class MediaExtractJobProcessorErrorMappingTest {
     }
 
     private void assertFailCode(String expectedCode) {
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        assertThat(captor.getValue().code()).isEqualTo(expectedCode);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), anyString(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(expectedCode);
     }
 
     // ========== claim 语义（沿用 IKC9EJ：DB 异常上抛保重投） ==========
@@ -137,7 +139,8 @@ class MediaExtractJobProcessorErrorMappingTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -148,8 +151,10 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failMediaExtractJob(any());
-        verify(stateMachine, never()).publishMediaExtractResult(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        verify(finalizer, never()).publishMediaExtractResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any());
     }
 
     // ========== input 业务键兜底校验（§18.2；权威复核在创建入口） ==========
@@ -226,7 +231,8 @@ class MediaExtractJobProcessorErrorMappingTest {
         verify(extractAudioClient).submit("sk-frozen-token", "https://example.com/src.mp4", "mp3");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", MediaExtractJobProcessor.MEDIA_EXTRACT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -300,23 +306,31 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
+        when(finalizer.publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(true);
 
         processor.handle("100");
 
         verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
         verify(mediaRelay).persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3");
-        ArgumentCaptor<PublishMediaExtractDto> captor =
-                ArgumentCaptor.forClass(PublishMediaExtractDto.class);
-        verify(stateMachine).publishMediaExtractResult(captor.capture());
-        PublishMediaExtractDto published = captor.getValue();
-        assertThat(published.url()).isEqualTo("https://tos/out.mp3");
-        assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
-        assertThat(published.mime()).isEqualTo("audio/mpeg");
-        assertThat(published.size()).isEqualTo(123_456L);
-        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        assertThat(published.duration()).isEqualTo(65.5);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> storageKey = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> mime = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> size = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<String> md5 = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Double> duration = ArgumentCaptor.forClass(Double.class);
+        verify(finalizer).publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), url.capture(), storageKey.capture(), mime.capture(), size.capture(),
+                md5.capture(), duration.capture());
+        assertThat(url.getValue()).isEqualTo("https://tos/out.mp3");
+        assertThat(storageKey.getValue()).isEqualTo("generated/9/audio/abc.mp3");
+        assertThat(mime.getValue()).isEqualTo("audio/mpeg");
+        assertThat(size.getValue()).isEqualTo(123_456L);
+        assertThat(md5.getValue()).isEqualTo("0123456789abcdef0123456789abcdef");
+        assertThat(duration.getValue()).isEqualTo(65.5);
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -336,7 +350,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(extractAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("mp3"));
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -372,7 +387,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(extractAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("mp3"));
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -429,7 +445,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(extractAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq("mp3"));
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -444,7 +461,9 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishMediaExtractResult(any())).thenReturn(false);
+        when(finalizer.publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(false);
         stubSourceAsset();
 
         processor.handle("100");
@@ -453,7 +472,8 @@ class MediaExtractJobProcessorErrorMappingTest {
         // 任务保持 processing 由新 worker 重新领取继续收割
         verify(extractAudioClient, never()).submit(anyString(), anyString(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐去字幕） ==========
@@ -471,7 +491,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", MediaExtractJobProcessor.MEDIA_EXTRACT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -502,7 +523,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", MediaExtractJobProcessor.MEDIA_EXTRACT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -519,7 +541,8 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", MediaExtractJobProcessor.MEDIA_EXTRACT_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -532,17 +555,19 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        assertThat(captor.getValue().message())
+        assertThat(message.getValue())
                 .isEqualTo("音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
                         + " 次），上游持续错误: MediaKit 音频提取任务查询超时");
         // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
-        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
+        assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -558,18 +583,20 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> gatewayCaptor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(gatewayCaptor.capture());
-        assertThat(gatewayCaptor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
         // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
-        assertThat(gatewayCaptor.getValue().message())
+        assertThat(message.getValue())
                 .isEqualTo("音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
                         + " 次），上游持续错误: MediaKit 音频提取任务查询失败:")
                 .doesNotContain("503");
-        assertThat(gatewayCaptor.getValue().details())
+        assertThat(details.getValue())
                 .containsEntry("http_status", 503)
                 .containsEntry("raw", "音频提取轮询超时（超过 "
                         + MediaExtractJobProcessor.MAX_MEDIA_EXTRACT_POLLS
@@ -591,7 +618,8 @@ class MediaExtractJobProcessorErrorMappingTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -622,14 +650,15 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
-        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
         // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
-        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
-        assertThat(failure.details())
+        assertThat(message.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(details.getValue())
                 .containsEntry("raw", "音频提取任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
                 .containsEntry("http_status", 401);
     }
@@ -646,13 +675,14 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
-        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        assertThat(failure.message()).doesNotContain("401").contains("Incorrect API key");
-        assertThat(failure.details())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        assertThat(message.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(details.getValue())
                 .containsEntry("raw", "MediaKit 音频提取任务查询失败:"
                         + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
                 .containsEntry("http_status", 401);
@@ -669,13 +699,13 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
-        assertThat(failure.code()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.captor();
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), anyString(),
+                details.capture(), eq("worker-1"), eq(5L));
+        assertThat(code.getValue()).isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
         // 反例钉住缺键语义：非 HTTP 失败（超时/连接失败/业务异常）不写 http_status，只留 raw
-        assertThat(failure.details()).doesNotContainKey("http_status").containsKey("raw");
+        assertThat(details.getValue()).doesNotContainKey("http_status").containsKey("raw");
     }
 
     // ========== poll 相：火山任务 failed（§18.4 第二类映射） ==========
@@ -690,12 +720,13 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("输入视频解析失败，请更换素材后重试");
+        assertThat(message.getValue()).isEqualTo("输入视频解析失败，请更换素材后重试");
     }
 
     @Test
@@ -720,12 +751,13 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("音频提取任务失败");
+        assertThat(message.getValue()).isEqualTo("音频提取任务失败");
     }
 
     // ========== poll 相：completed → 立即转存 + 终态发布（URL 24h 有效） ==========
@@ -742,23 +774,31 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
+        when(finalizer.publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(true);
 
         processor.handle("100");
 
         // URL 24h 有效：completed 后立即转存（同步链路，无续排）
         verify(mediaRelay).persist("https://volc/out.mp3?auth_key=...", "9", "mp3");
-        ArgumentCaptor<PublishMediaExtractDto> captor =
-                ArgumentCaptor.forClass(PublishMediaExtractDto.class);
-        verify(stateMachine).publishMediaExtractResult(captor.capture());
-        PublishMediaExtractDto published = captor.getValue();
-        assertThat(published.url()).isEqualTo("https://tos/out.mp3");
-        assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
-        assertThat(published.mime()).isEqualTo("audio/mpeg");
-        assertThat(published.size()).isEqualTo(123_456L);
-        assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
-        assertThat(published.duration()).isEqualTo(65.5);
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> storageKey = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> mime = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> size = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<String> md5 = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Double> duration = ArgumentCaptor.forClass(Double.class);
+        verify(finalizer).publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), url.capture(), storageKey.capture(), mime.capture(), size.capture(),
+                md5.capture(), duration.capture());
+        assertThat(url.getValue()).isEqualTo("https://tos/out.mp3");
+        assertThat(storageKey.getValue()).isEqualTo("generated/9/audio/abc.mp3");
+        assertThat(mime.getValue()).isEqualTo("audio/mpeg");
+        assertThat(size.getValue()).isEqualTo(123_456L);
+        assertThat(md5.getValue()).isEqualTo("0123456789abcdef0123456789abcdef");
+        assertThat(duration.getValue()).isEqualTo(65.5);
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -773,14 +813,17 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 1L, null));
-        when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
+        when(finalizer.publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(true);
 
         processor.handle("100");
 
-        ArgumentCaptor<PublishMediaExtractDto> captor =
-                ArgumentCaptor.forClass(PublishMediaExtractDto.class);
-        verify(stateMachine).publishMediaExtractResult(captor.capture());
-        assertThat(captor.getValue().duration()).isEqualTo(65.0);
+        ArgumentCaptor<Double> duration = ArgumentCaptor.forClass(Double.class);
+        verify(finalizer).publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(),
+                duration.capture());
+        assertThat(duration.getValue()).isEqualTo(65.0);
     }
 
     @Test
@@ -800,7 +843,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @DisplayName("TOS 未配置 → 1044（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         MediaExtractJobProcessor noRelayProcessor = new MediaExtractJobProcessor(
-                stateMachine, claimService, jobMapper,
+                stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
                 credentialService, extractAudioClient, null, producer);
         stubPollClaim(input(), 3, 7);
@@ -810,13 +853,15 @@ class MediaExtractJobProcessorErrorMappingTest {
 
         noRelayProcessor.handle("100");
 
-        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
-                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
-        verify(stateMachine).failMediaExtractJob(captor.capture());
-        assertThat(captor.getValue().code())
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
+        verify(finalizer).failMediaExtractJob(eq("100"), code.capture(), message.capture(), any(),
+                eq("worker-1"), eq(5L));
+        assertThat(code.getValue())
                 .isEqualTo(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        assertThat(captor.getValue().message()).isEqualTo("音频转存存储未配置");
-        verify(stateMachine, never()).publishMediaExtractResult(any());
+        assertThat(message.getValue()).isEqualTo("音频转存存储未配置");
+        verify(finalizer, never()).publishMediaExtractResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -831,11 +876,14 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 1L, null));
-        when(stateMachine.publishMediaExtractResult(any())).thenReturn(false);
+        when(finalizer.publishMediaExtractResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failMediaExtractJob(any());
+        verify(finalizer, never()).failMediaExtractJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
     }
 
     @Test
@@ -851,7 +899,8 @@ class MediaExtractJobProcessorErrorMappingTest {
         processor.handle("100");
 
         assertFailCode(MediaExtractContract.ERROR_MEDIA_EXTRACT_PROVIDER_FAILED);
-        verify(stateMachine, never()).publishMediaExtractResult(any());
+        verify(finalizer, never()).publishMediaExtractResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any());
     }
 
     // ========== 瞬时轮询错误判定（视频骨架同语义） ==========

@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioTrimDto;
@@ -54,6 +55,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitTrimAudioClient trimAudioClient;
@@ -75,9 +77,9 @@ class AudioTrimJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new AudioTrimJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, trimAudioClient, mediaRelay, producer);
-        when(stateMachine.failAudioTrimJob(any())).thenReturn(true);
+        when(finalizer.failAudioTrimJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
@@ -119,7 +121,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     private void assertFailCode(String expectedCode) {
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         assertThat(captor.getValue().code()).isEqualTo(expectedCode);
     }
 
@@ -134,7 +136,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -145,8 +147,8 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failAudioTrimJob(any());
-        verify(stateMachine, never()).publishAudioTrimResult(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).publishAudioTrimResult(any());
     }
 
     // ========== input 业务键兜底校验（权威复核在创建入口） ==========
@@ -207,7 +209,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 null, null, "mp3");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     // ========== 源素材 / 凭证 ==========
@@ -258,7 +260,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 60.5, 180.75, "mp3");
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -336,7 +338,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         com.bluewhale.worker.domain.dto.FailAudioTrimDto failure = captor.getValue();
         assertThat(failure.code()).isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
@@ -360,7 +362,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishAudioTrimResult(any())).thenReturn(true);
+        when(finalizer.publishAudioTrimResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -368,7 +370,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(mediaRelay).persist("https://volc/old-out.mp3?auth_key=...", "9", "mp3");
         ArgumentCaptor<PublishAudioTrimDto> captor =
                 ArgumentCaptor.forClass(PublishAudioTrimDto.class);
-        verify(stateMachine).publishAudioTrimResult(captor.capture());
+        verify(finalizer).publishAudioTrimResult(captor.capture());
         PublishAudioTrimDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp3");
         assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
@@ -376,7 +378,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         assertThat(published.durationSec()).isEqualTo(120.25);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -397,7 +399,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(trimAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -434,7 +436,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(trimAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -494,7 +496,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(trimAudioClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp3"), eq(60.5), eq(180.75), eq("mp3"));
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -509,7 +511,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishAudioTrimResult(any())).thenReturn(false);
+        when(finalizer.publishAudioTrimResult(any())).thenReturn(false);
         stubSourceAsset();
 
         processor.handle("100");
@@ -518,7 +520,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         // 任务保持 processing 由新 worker 重新领取继续收割
         verify(trimAudioClient, never()).submit(anyString(), anyString(), any(), any(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     // ========== poll 相：状态机 + 进度口径（家族对齐） ==========
@@ -536,7 +538,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -567,7 +569,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -584,7 +586,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioTrimJobProcessor.AUDIO_TRIM_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -599,7 +601,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         assertThat(captor.getValue().message())
@@ -625,7 +627,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> gatewayCaptor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(gatewayCaptor.capture());
+        verify(finalizer).failAudioTrimJob(gatewayCaptor.capture());
         assertThat(gatewayCaptor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
@@ -656,7 +658,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -687,7 +689,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         assertThat(captor.getValue().message())
@@ -718,7 +720,7 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         assertThat(captor.getValue().message()).isEqualTo("音频截取任务失败");
@@ -738,7 +740,7 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishAudioTrimResult(any())).thenReturn(true);
+        when(finalizer.publishAudioTrimResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -746,7 +748,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         verify(mediaRelay).persist("https://volc/out.mp3?auth_key=...", "9", "mp3");
         ArgumentCaptor<PublishAudioTrimDto> captor =
                 ArgumentCaptor.forClass(PublishAudioTrimDto.class);
-        verify(stateMachine).publishAudioTrimResult(captor.capture());
+        verify(finalizer).publishAudioTrimResult(captor.capture());
         PublishAudioTrimDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.mp3");
         assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.mp3");
@@ -754,7 +756,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         assertThat(published.durationSec()).isEqualTo(120.25);
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -769,13 +771,13 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 1L, null));
-        when(stateMachine.publishAudioTrimResult(any())).thenReturn(true);
+        when(finalizer.publishAudioTrimResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishAudioTrimDto> captor =
                 ArgumentCaptor.forClass(PublishAudioTrimDto.class);
-        verify(stateMachine).publishAudioTrimResult(captor.capture());
+        verify(finalizer).publishAudioTrimResult(captor.capture());
         assertThat(captor.getValue().durationSec()).isNull();
     }
 
@@ -796,7 +798,7 @@ class AudioTrimJobProcessorErrorMappingTest {
     @DisplayName("TOS 未配置 → 1048（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         AudioTrimJobProcessor noRelayProcessor = new AudioTrimJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, trimAudioClient, null, producer);
         stubPollClaim(input(), 3, 7);
         when(trimAudioClient.poll("sk-frozen-token", "amk-task-1"))
@@ -807,11 +809,11 @@ class AudioTrimJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioTrimDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioTrimDto.class);
-        verify(stateMachine).failAudioTrimJob(captor.capture());
+        verify(finalizer).failAudioTrimJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
         assertThat(captor.getValue().message()).isEqualTo("音频转存存储未配置");
-        verify(stateMachine, never()).publishAudioTrimResult(any());
+        verify(finalizer, never()).publishAudioTrimResult(any());
     }
 
     @Test
@@ -826,11 +828,11 @@ class AudioTrimJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.mp3", "generated/9/audio/abc.mp3",
                         "audio/mpeg", 1L, null));
-        when(stateMachine.publishAudioTrimResult(any())).thenReturn(false);
+        when(finalizer.publishAudioTrimResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failAudioTrimJob(any());
+        verify(finalizer, never()).failAudioTrimJob(any());
     }
 
     @Test
@@ -846,7 +848,7 @@ class AudioTrimJobProcessorErrorMappingTest {
         processor.handle("100");
 
         assertFailCode(AudioTrimContract.ERROR_AUDIO_TRIM_FAILED);
-        verify(stateMachine, never()).publishAudioTrimResult(any());
+        verify(finalizer, never()).publishAudioTrimResult(any());
     }
 
     // ========== 瞬时轮询错误判定（视频骨架同语义） ==========

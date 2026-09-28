@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -184,6 +185,7 @@ public class VideoJobProcessor implements JobProcessor {
     private static final Pattern SIZE_PATTERN = Pattern.compile("^([0-9]+)x([0-9]+)$", Pattern.CASE_INSENSITIVE);
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiVideoClient videoClient;
@@ -194,6 +196,7 @@ public class VideoJobProcessor implements JobProcessor {
     @org.springframework.beans.factory.annotation.Autowired
     public VideoJobProcessor(
             JobStateMachineService stateMachine,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiVideoClient videoClient,
@@ -201,12 +204,13 @@ public class VideoJobProcessor implements JobProcessor {
             @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
-        this(stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+        this(stateMachine, finalizer, assetSource, credentialService, videoClient, mediaRelay, producer,
                 "video-" + hostname() + "-" + ProcessHandle.current().pid());
     }
 
     VideoJobProcessor(
             JobStateMachineService stateMachine,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiVideoClient videoClient,
@@ -215,6 +219,7 @@ public class VideoJobProcessor implements JobProcessor {
             String workerId
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.videoClient = videoClient;
@@ -510,7 +515,7 @@ public class VideoJobProcessor implements JobProcessor {
         // publishVideoResult（:504-512）。
         // 上游真实 token 一并交给终态收口：它是**结算的权威用量**（按 token 计价的模型靠它），
         // 而这里正是**唯一**拿得到轮询结果的地方——终态事件由 finalizer 发出，晚了就没了。
-        boolean published = stateMachine.publishVideoResult(
+        boolean published = finalizer.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
@@ -543,7 +548,7 @@ public class VideoJobProcessor implements JobProcessor {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
         // 修正一：releaseNote 整体省略（video-job-runner.ts:545 releaseNote 参数删除）
-        stateMachine.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
+        finalizer.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
     }
 
     /**

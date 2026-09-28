@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
@@ -63,6 +64,7 @@ public class AudioMixJobProcessor implements JobProcessor {
 
     private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final GenerationCredentialService credentials;
     private final NewApiMediaKitMixAudioClient gateway;
@@ -74,12 +76,14 @@ public class AudioMixJobProcessor implements JobProcessor {
     public AudioMixJobProcessor(JobStateMachineService stateMachine,
                                 JobClaimService claimService,
                                 GenerationJobMapper jobMapper,
+                                JobFinalizer finalizer,
                                 GenerationCredentialService credentials,
                                 NewApiMediaKitMixAudioClient gateway,
                                 TosAudioMediaRelay relay,
                                 @Qualifier("audioMixMessageProducer") GenerationMessageProducer producer) {
         this.stateMachine = stateMachine;
         this.claimService = claimService;
+        this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 AudioMixContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.credentials = credentials;
@@ -242,7 +246,7 @@ public class AudioMixJobProcessor implements JobProcessor {
             heartbeat.cancel(false);
         }
         if (lostLease.get() || cancelIfRequested(job) || !renewLease(job)) return;
-        boolean published = stateMachine.publishAudioMixResult(new PublishMediaExtractDto(
+        boolean published = finalizer.publishAudioMixResult(new PublishMediaExtractDto(
                 job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                 observed.durationSec()));
@@ -312,7 +316,10 @@ public class AudioMixJobProcessor implements JobProcessor {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
         log.warn("[audio_mix] job 失败 jobId={} code={} message={}", job.id(), code, message);
-        return stateMachine.failMediaExtractJob(new FailMediaExtractDto(
-                job.id(), job.workerId(), job.fencingToken(), code, message, details));
+        FailMediaExtractDto failInput = new FailMediaExtractDto(
+                job.id(), job.workerId(), job.fencingToken(), code, message, details);
+        return finalizer.failMediaExtractJob(
+                failInput.jobId(), failInput.code(), failInput.message(), failInput.details(),
+                failInput.workerId(), failInput.fencingToken());
     }
 }

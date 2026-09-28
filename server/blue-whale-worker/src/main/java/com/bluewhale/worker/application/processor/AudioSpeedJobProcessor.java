@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailAudioSpeedDto;
@@ -90,6 +91,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
     public static final int MAX_AUDIO_SPEED_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -103,6 +105,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitAdjustAudioSpeedClient adjustAudioSpeedClient,
@@ -111,6 +114,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.typeOnly(AudioSpeedContract.TAG, LEASE_SECONDS, jobMapper);
         this.assetSource = assetSource;
@@ -352,7 +356,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
         // 时长只取官方 result.duration 精确值（秒→ms；宽高恒 null——音频无画面维度，
         // publishAudioSpeedResult 内部落定）；不做源时长回落（调速产物时长 = 源时长/speed
         // ≠ 源时长，见类注释）
-        boolean published = stateMachine.publishAudioSpeedResult(new PublishAudioSpeedDto(
+        boolean published = finalizer.publishAudioSpeedResult(new PublishAudioSpeedDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -464,7 +468,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failAudioSpeedJob(new FailAudioSpeedDto(
+        finalizer.failAudioSpeedJob(new FailAudioSpeedDto(
                 claim.id(),
                 claim.workerId(),
                 claim.fencingToken(),

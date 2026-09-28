@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
@@ -65,6 +66,7 @@ class VideoMattingJobProcessorTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
@@ -97,9 +99,9 @@ class VideoMattingJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoMattingJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, mediaRelay, producer);
-        when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
+        when(finalizer.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         // 结果转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
@@ -145,7 +147,7 @@ class VideoMattingJobProcessorTest {
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failVideoJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failVideoJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -160,7 +162,7 @@ class VideoMattingJobProcessorTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -172,9 +174,9 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).publishVideoMattingResult(any());
     }
 
     // ========== input 业务键兜底校验（权威复核在创建入口 IKHK98） ==========
@@ -286,7 +288,7 @@ class VideoMattingJobProcessorTest {
                 "portrait", "WEBM", null);
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -385,7 +387,7 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -397,7 +399,7 @@ class VideoMattingJobProcessorTest {
                 eq(VideoMattingContract.MAX_RESULT_BYTES), any());
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
-        verify(stateMachine).publishVideoMattingResult(captor.capture());
+        verify(finalizer).publishVideoMattingResult(captor.capture());
         PublishVideoMattingDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.webm");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.webm");
@@ -408,7 +410,7 @@ class VideoMattingJobProcessorTest {
         assertThat(published.height()).isEqualTo(1080);
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("1080p");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -430,7 +432,7 @@ class VideoMattingJobProcessorTest {
 
         verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 "portrait", "WEBM", null);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -452,7 +454,7 @@ class VideoMattingJobProcessorTest {
 
         verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 "portrait", "WEBM", null);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -535,7 +537,7 @@ class VideoMattingJobProcessorTest {
 
         verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
                 "portrait", "WEBM", null);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -551,7 +553,7 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 1L, null));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
         stubSourceAsset(1920, 1080);
 
         processor.handle("100");
@@ -561,10 +563,10 @@ class VideoMattingJobProcessorTest {
         verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
                 anyString(), any());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
         // IKIN7Z：收割语境守卫未命中同样核实后清理本次上传对象（复用同一放弃路径）
-        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(finalizer).hasPublishedAsset("100", "generated/9/video/abc.webm");
         verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
     }
 
@@ -584,8 +586,8 @@ class VideoMattingJobProcessorTest {
         verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong(), any());
         verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
                 anyString(), any());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -613,8 +615,8 @@ class VideoMattingJobProcessorTest {
 
         verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
                 anyString(), any());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -648,8 +650,8 @@ class VideoMattingJobProcessorTest {
         verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
                 anyString(), any());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -673,8 +675,8 @@ class VideoMattingJobProcessorTest {
         verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
                 anyString(), any());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -698,7 +700,7 @@ class VideoMattingJobProcessorTest {
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(),
                 anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
 
@@ -718,7 +720,7 @@ class VideoMattingJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -751,7 +753,7 @@ class VideoMattingJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -768,7 +770,7 @@ class VideoMattingJobProcessorTest {
         // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键；
         // 本族预算耗尽文案不附上游摘要，与 processing 超限同文案
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
                 eq("智能抠像轮询超时（超过 " + VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS + " 次）"),
                 detailsCaptor.capture(), eq("worker-1"), eq(5L));
@@ -792,7 +794,7 @@ class VideoMattingJobProcessorTest {
         // message 与原文案完全一致，仅 details 多出 http_status
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         assertThat(messageCaptor.getValue())
@@ -819,7 +821,7 @@ class VideoMattingJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoMattingJobProcessor.VIDEO_MATTING_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -847,7 +849,7 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
                 eq("视频画质过低无法识别人像"),
                 any(), eq("worker-1"), eq(5L));
@@ -883,7 +885,7 @@ class VideoMattingJobProcessorTest {
 
         ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
         ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
                 messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
         // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
@@ -909,7 +911,7 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -926,7 +928,7 @@ class VideoMattingJobProcessorTest {
                 eq(VideoMattingContract.MAX_RESULT_BYTES), any());
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
-        verify(stateMachine).publishVideoMattingResult(captor.capture());
+        verify(finalizer).publishVideoMattingResult(captor.capture());
         PublishVideoMattingDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.webm");
         assertThat(published.storageKey()).isEqualTo("generated/9/video/abc.webm");
@@ -938,7 +940,7 @@ class VideoMattingJobProcessorTest {
         assertThat(published.height()).isEqualTo(1080);
         assertThat(published.durationSec()).isEqualTo(65.5);
         assertThat(published.resolution()).isEqualTo("1080p");
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -954,13 +956,13 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 1L, null));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishVideoMattingDto> captor =
                 ArgumentCaptor.forClass(PublishVideoMattingDto.class);
-        verify(stateMachine).publishVideoMattingResult(captor.capture());
+        verify(finalizer).publishVideoMattingResult(captor.capture());
         assertThat(captor.getValue().durationSec()).isEqualTo(65.0);
         assertThat(captor.getValue().width()).isEqualTo(1080);
         assertThat(captor.getValue().height()).isEqualTo(1920);
@@ -979,8 +981,8 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         verify(mediaRelay, never()).persistStreaming(anyString(), anyString(), anyLong(), any());
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -1023,15 +1025,15 @@ class VideoMattingJobProcessorTest {
                     assertThat(renewals.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
                     return stored;
                 });
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(true);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(true);
         processor.leaseRenewIntervalMs = 40;
 
         processor.handle("100");
 
         // 首次续租 + 传输期心跳 ≥2 次：跨原单次续租窗口的所有权保持是本票要钉的行为
         verify(stateMachine, atLeast(3)).updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class));
-        verify(stateMachine).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -1056,8 +1058,8 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -1077,11 +1079,11 @@ class VideoMattingJobProcessorTest {
                             "generated/9/video/a.webm", "video/webm", 1L, null);
                 });
         processor.handle("100");
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         // IKIN7Z：转存返回前刚失租的静默终局同样清理本次上传对象（核实无 Asset 引用后删除）
-        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(finalizer).hasPublishedAsset("100", "generated/9/video/a.webm");
         verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
     }
 
@@ -1104,10 +1106,10 @@ class VideoMattingJobProcessorTest {
                             "generated/9/video/a.webm", "video/webm", 1L, null);
                 });
         processor.handle("100");
-        verify(stateMachine, never()).publishVideoMattingResult(any());
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(finalizer).hasPublishedAsset("100", "generated/9/video/a.webm");
         verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
     }
 
@@ -1143,7 +1145,7 @@ class VideoMattingJobProcessorTest {
     @DisplayName("TOS 未配置 → 1050（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoMattingJobProcessor noRelayProcessor = new VideoMattingJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, null, producer);
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -1152,10 +1154,10 @@ class VideoMattingJobProcessorTest {
 
         noRelayProcessor.handle("100");
 
-        verify(stateMachine).failVideoJob(eq("100"),
+        verify(finalizer).failVideoJob(eq("100"),
                 eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
                 eq("智能抠像转存存储未配置"), any(), eq("worker-1"), eq(5L));
-        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).publishVideoMattingResult(any());
     }
 
     @Test
@@ -1170,14 +1172,14 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 1L, null));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         // IKIN7Z：守卫未命中核实无 Asset 引用后清理本次上传对象
-        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(finalizer).hasPublishedAsset("100", "generated/9/video/abc.webm");
         verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
     }
 
@@ -1193,8 +1195,8 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(new TosVideoMediaRelay.StoredVideo(
                         "https://tos/out.webm", "generated/9/video/abc.webm",
                         "video/webm", 1L, null));
-        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
-        when(stateMachine.hasPublishedAsset("100", "generated/9/video/abc.webm")).thenReturn(false);
+        when(finalizer.publishVideoMattingResult(any())).thenReturn(false);
+        when(finalizer.hasPublishedAsset("100", "generated/9/video/abc.webm")).thenReturn(false);
         // 真实 relay 的 deleteUnpublishedObject 内部吞错只记日志；本用例钉「删除异常一旦
         // 到达 processor」的防御分支（IKIN8Z 结构化待处理记录同型）
         doThrow(new RuntimeException("TOS 删除 5xx")).when(mediaRelay)
@@ -1213,7 +1215,7 @@ class VideoMattingJobProcessorTest {
             logger.detachAppender(appender);
         }
 
-        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
         assertThat(appender.list.stream()
                 .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
@@ -1238,7 +1240,7 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
-        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(finalizer, never()).publishVideoMattingResult(any());
     }
 
     // ========== 瞬时轮询错误判定（视频骨架同语义） ==========

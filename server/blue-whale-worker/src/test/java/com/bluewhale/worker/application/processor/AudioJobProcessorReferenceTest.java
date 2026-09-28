@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
@@ -33,13 +34,14 @@ import static org.mockito.Mockito.when;
 class AudioJobProcessorReferenceTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetSourceService assetSource;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiAudioClient audioClient;
     @Mock private TosMediaStorage tosService;
 
     private AudioJobProcessor createProcessor() {
-        return new AudioJobProcessor(stateMachine, assetSource, credentialService, audioClient, tosService);
+        return new AudioJobProcessor(stateMachine, finalizer, assetSource, credentialService, audioClient, tosService);
     }
 
     @Test

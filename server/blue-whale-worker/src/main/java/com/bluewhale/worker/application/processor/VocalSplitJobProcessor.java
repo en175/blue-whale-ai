@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -94,6 +95,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
     public static final int MAX_VOCAL_SPLIT_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -107,6 +109,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitSeparateVoiceClient separateVoiceClient,
@@ -115,6 +118,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.bySources(
                 VocalSplitContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
@@ -424,7 +428,7 @@ public class VocalSplitJobProcessor implements JobProcessor {
                     stored.size(), stored.md5(), durationSec));
         }
 
-        boolean published = stateMachine.publishVocalSplitResult(new PublishVocalSplitDto(
+        boolean published = finalizer.publishVocalSplitResult(new PublishVocalSplitDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -560,14 +564,17 @@ public class VocalSplitJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVocalSplitJob(new FailMediaExtractDto(
+        FailMediaExtractDto input = new FailMediaExtractDto(
                 claim.id(),
                 claim.workerId(),
                 claim.fencingToken(),
                 code,
                 message,
                 details
-        ));
+        );
+        finalizer.failMediaExtractJob(
+                input.jobId(), input.code(), input.message(), input.details(),
+                input.workerId(), input.fencingToken());
     }
 
     /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */

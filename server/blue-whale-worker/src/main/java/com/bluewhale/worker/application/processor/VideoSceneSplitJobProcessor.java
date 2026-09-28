@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
@@ -103,6 +104,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
     private static final List<String> CLAIM_SOURCES = List.of(VideoSceneSplitContract.SOURCE);
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -116,6 +118,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitSegmentScenesClient segmentScenesClient,
@@ -124,6 +127,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.bySources(
                 VideoSceneSplitContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
@@ -459,7 +463,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         log.info("[video_scene_split] 全段转存完成 jobId={} segments={} durationSec={}",
                 claim.id(), segments.size(), durationSec);
 
-        boolean published = stateMachine.publishVideoSceneSplitResult(new PublishVideoSceneSplitDto(
+        boolean published = finalizer.publishVideoSceneSplitResult(new PublishVideoSceneSplitDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -584,7 +588,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failVideoJob(claim.id(), code, msg, details,
+        finalizer.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

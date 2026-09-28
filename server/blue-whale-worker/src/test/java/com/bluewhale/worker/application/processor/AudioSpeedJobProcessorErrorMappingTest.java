@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioSpeedDto;
@@ -54,6 +55,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitAdjustAudioSpeedClient adjustAudioSpeedClient;
@@ -73,9 +75,9 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new AudioSpeedJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, adjustAudioSpeedClient, mediaRelay, producer);
-        when(stateMachine.failAudioSpeedJob(any())).thenReturn(true);
+        when(finalizer.failAudioSpeedJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
     }
 
@@ -110,7 +112,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     private void assertFailCode(String expectedCode) {
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         assertThat(captor.getValue().code()).isEqualTo(expectedCode);
     }
 
@@ -125,7 +127,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -136,8 +138,8 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failAudioSpeedJob(any());
-        verify(stateMachine, never()).publishAudioSpeedResult(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).publishAudioSpeedResult(any());
     }
 
     // ========== input 业务键兜底校验（权威复核在创建入口） ==========
@@ -184,7 +186,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 null);
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioSpeedJobProcessor.AUDIO_SPEED_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     // ========== 源素材 / 凭证 ==========
@@ -234,7 +236,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
         verify(adjustAudioSpeedClient).submit("sk-frozen-token", "https://example.com/src.mp3", 1.35);
         verify(stateMachine).markProviderSubmitted("100", "worker-1", 5L, "amk-task-1");
         verify(producer).enqueue("100", AudioSpeedJobProcessor.AUDIO_SPEED_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -311,7 +313,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         com.bluewhale.worker.domain.dto.FailAudioSpeedDto failure = captor.getValue();
         assertThat(failure.code()).isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
@@ -336,7 +338,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioSpeedJobProcessor.AUDIO_SPEED_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -367,7 +369,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioSpeedJobProcessor.AUDIO_SPEED_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -384,7 +386,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", AudioSpeedJobProcessor.AUDIO_SPEED_POLL_INTERVAL_MS);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -399,7 +401,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         assertThat(captor.getValue().message())
@@ -425,7 +427,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> gatewayCaptor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(gatewayCaptor.capture());
+        verify(finalizer).failAudioSpeedJob(gatewayCaptor.capture());
         assertThat(gatewayCaptor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
@@ -456,7 +458,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
         processor.handle("100");
 
         verify(producer, never()).enqueue(anyString(), anyLong());
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -487,7 +489,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         assertThat(captor.getValue().message())
@@ -518,7 +520,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         assertThat(captor.getValue().message()).isEqualTo("音频调速任务失败");
@@ -539,7 +541,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.m4a", "generated/9/audio/abc.m4a",
                         "audio/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
-        when(stateMachine.publishAudioSpeedResult(any())).thenReturn(true);
+        when(finalizer.publishAudioSpeedResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -549,7 +551,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 AudioSpeedContract.TRANSFER_OUTPUT_FORMAT);
         ArgumentCaptor<PublishAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(PublishAudioSpeedDto.class);
-        verify(stateMachine).publishAudioSpeedResult(captor.capture());
+        verify(finalizer).publishAudioSpeedResult(captor.capture());
         PublishAudioSpeedDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/out.m4a");
         assertThat(published.storageKey()).isEqualTo("generated/9/audio/abc.m4a");
@@ -557,7 +559,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
         assertThat(published.size()).isEqualTo(123_456L);
         assertThat(published.md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         assertThat(published.durationSec()).isEqualTo(47.5);
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -572,13 +574,13 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.m4a", "generated/9/audio/abc.m4a",
                         "audio/mp4", 1L, null));
-        when(stateMachine.publishAudioSpeedResult(any())).thenReturn(true);
+        when(finalizer.publishAudioSpeedResult(any())).thenReturn(true);
 
         processor.handle("100");
 
         ArgumentCaptor<PublishAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(PublishAudioSpeedDto.class);
-        verify(stateMachine).publishAudioSpeedResult(captor.capture());
+        verify(finalizer).publishAudioSpeedResult(captor.capture());
         assertThat(captor.getValue().durationSec()).isNull();
     }
 
@@ -599,7 +601,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @DisplayName("TOS 未配置 → 1051（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         AudioSpeedJobProcessor noRelayProcessor = new AudioSpeedJobProcessor(
-                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, finalizer, new AssetSourceService(assetMapper),
                 credentialService, adjustAudioSpeedClient, null, producer);
         stubPollClaim(input(), 3, 7);
         when(adjustAudioSpeedClient.poll("sk-frozen-token", "amk-task-1"))
@@ -610,11 +612,11 @@ class AudioSpeedJobProcessorErrorMappingTest {
 
         ArgumentCaptor<com.bluewhale.worker.domain.dto.FailAudioSpeedDto> captor =
                 ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailAudioSpeedDto.class);
-        verify(stateMachine).failAudioSpeedJob(captor.capture());
+        verify(finalizer).failAudioSpeedJob(captor.capture());
         assertThat(captor.getValue().code())
                 .isEqualTo(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
         assertThat(captor.getValue().message()).isEqualTo("音频转存存储未配置");
-        verify(stateMachine, never()).publishAudioSpeedResult(any());
+        verify(finalizer, never()).publishAudioSpeedResult(any());
     }
 
     @Test
@@ -629,11 +631,11 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio(
                         "https://tos/out.m4a", "generated/9/audio/abc.m4a",
                         "audio/mp4", 1L, null));
-        when(stateMachine.publishAudioSpeedResult(any())).thenReturn(false);
+        when(finalizer.publishAudioSpeedResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failAudioSpeedJob(any());
+        verify(finalizer, never()).failAudioSpeedJob(any());
     }
 
     @Test
@@ -649,7 +651,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
         processor.handle("100");
 
         assertFailCode(AudioSpeedContract.ERROR_AUDIO_SPEED_FAILED);
-        verify(stateMachine, never()).publishAudioSpeedResult(any());
+        verify(finalizer, never()).publishAudioSpeedResult(any());
     }
 
     // ========== 瞬时轮询错误判定（视频骨架同语义） ==========

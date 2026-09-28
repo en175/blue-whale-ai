@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
@@ -85,6 +86,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
 
     private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
@@ -97,6 +99,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitEraseClient mediaKitEraseClient,
@@ -104,6 +107,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
     ) {
         this.stateMachine = stateMachine;
         this.claimService = claimService;
+        this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(
                 ImageEraseContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
@@ -268,7 +272,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
 
         // 8. 终态收口：建 Asset（type=image / source=generated / generation_job_id）→ succeeded
         //    （免费工具无结算联动，同 extract/enhance 的单槽双事件形态，§15.5）
-        boolean published = stateMachine.publishImageEraseResult(new PublishImageEraseDto(
+        boolean published = finalizer.publishImageEraseResult(new PublishImageEraseDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -359,7 +363,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
     private void failClaimed(ClaimedJob claim, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
-        stateMachine.failJob(claim.id(), code, msg, details,
+        finalizer.failJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }
 

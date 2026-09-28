@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
@@ -58,6 +59,7 @@ class ImageOutpaintJobProcessorTest {
     @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
+    @Mock private JobFinalizer finalizer;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitOutpaintClient mediaKitClient;
@@ -70,10 +72,10 @@ class ImageOutpaintJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageOutpaintJobProcessor(
-                stateMachine, claimService, jobMapper,
+                stateMachine, claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
                 credentialService, mediaKitClient, tosService);
-        when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
+        when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
 
         // 结果图桩（24h 有效的火山 URL 用本地 HttpServer 模拟）
@@ -127,7 +129,7 @@ class ImageOutpaintJobProcessorTest {
     }
 
     private void assertFailCode(String expectedCode) {
-        verify(stateMachine).failJob(eq("100"), eq(expectedCode), anyString(),
+        verify(finalizer).failJob(eq("100"), eq(expectedCode), anyString(),
                 any(), eq("worker-1"), eq(5L));
     }
 
@@ -142,7 +144,7 @@ class ImageOutpaintJobProcessorTest {
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
 
         assertThat(thrown).hasMessageContaining("DB connection refused");
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -153,9 +155,9 @@ class ImageOutpaintJobProcessorTest {
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
-        verify(stateMachine, never()).publishImageOutpaintResult(any());
+        verify(finalizer, never()).publishImageOutpaintResult(any());
     }
 
     // ========== input 冻结键兜底校验（创建入口复核是权威，worker 兜底防御） ==========
@@ -331,7 +333,7 @@ class ImageOutpaintJobProcessorTest {
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/expanded.png", "uploads/9/image/expanded.png", "image/png", PNG_1X1.length,
                         "md5-expanded"));
-        when(stateMachine.publishImageOutpaintResult(any())).thenReturn(true);
+        when(finalizer.publishImageOutpaintResult(any())).thenReturn(true);
 
         processor.handle("100");
 
@@ -341,7 +343,7 @@ class ImageOutpaintJobProcessorTest {
                 eq(0.1), eq(0.0), eq(0.25), eq(0.4));
         ArgumentCaptor<PublishImageOutpaintDto> captor =
                 ArgumentCaptor.forClass(PublishImageOutpaintDto.class);
-        verify(stateMachine).publishImageOutpaintResult(captor.capture());
+        verify(finalizer).publishImageOutpaintResult(captor.capture());
         PublishImageOutpaintDto published = captor.getValue();
         assertThat(published.url()).isEqualTo("https://tos/expanded.png");
         assertThat(published.storageKey()).isEqualTo("uploads/9/image/expanded.png");
@@ -351,7 +353,7 @@ class ImageOutpaintJobProcessorTest {
         assertThat(published.md5()).isEqualTo("md5-expanded");
         assertThat(published.width()).isEqualTo(1);
         assertThat(published.height()).isEqualTo(1);
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 
@@ -373,7 +375,7 @@ class ImageOutpaintJobProcessorTest {
 
         assertFailCode(ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
         verify(tosService, never()).uploadImageBytes(any(), anyString(), anyString());
-        verify(stateMachine, never()).publishImageOutpaintResult(any());
+        verify(finalizer, never()).publishImageOutpaintResult(any());
     }
 
     @Test
@@ -387,11 +389,11 @@ class ImageOutpaintJobProcessorTest {
         when(tosService.uploadImageBytes(any(), anyString(), anyString()))
                 .thenReturn(new TosMediaStorage.UploadResult(
                         "https://tos/e.png", "uploads/9/image/e.png", "image/png", PNG_1X1.length, "md5-stub"));
-        when(stateMachine.publishImageOutpaintResult(any())).thenReturn(false);
+        when(finalizer.publishImageOutpaintResult(any())).thenReturn(false);
 
         processor.handle("100");
 
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(),
+        verify(finalizer, never()).failJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }
 }

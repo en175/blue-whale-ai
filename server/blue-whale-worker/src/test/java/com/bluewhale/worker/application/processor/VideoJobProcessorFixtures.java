@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.processor;
 
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -21,13 +22,14 @@ public final class VideoJobProcessorFixtures {
 
     public static VideoJobProcessor withWorkerId(
             JobStateMachineService stateMachine,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiVideoClient videoClient,
             TosVideoMediaRelay mediaRelay,
             GenerationMessageProducer producer,
             String workerId) {
-        return new VideoJobProcessor(stateMachine, assetSource, credentialService,
+        return new VideoJobProcessor(stateMachine, finalizer, assetSource, credentialService,
                 videoClient, mediaRelay, producer, workerId);
     }
 }

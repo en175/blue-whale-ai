@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -92,6 +93,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
     private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
+    private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
@@ -104,6 +106,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitExtractAudioClient extractAudioClient,
@@ -113,6 +116,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
     ) {
         this.stateMachine = stateMachine;
         this.claimService = claimService;
+        this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.typeOnly(
                 MediaExtractContract.TAG, LEASE_SECONDS, jobMapper, jobMapper::claimMediaExtractCas);
         this.assetSource = assetSource;
@@ -387,7 +391,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
         Double durationSec = observation.durationSec() != null
                 ? observation.durationSec() : sourceDurationSec;
 
-        boolean published = stateMachine.publishMediaExtractResult(new PublishMediaExtractDto(
+        PublishMediaExtractDto publishInput = new PublishMediaExtractDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -398,7 +402,12 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 stored.mime(),
                 stored.size(),
                 stored.md5(),
-                durationSec));
+                durationSec);
+        boolean published = finalizer.publishMediaExtractResult(
+                publishInput.jobId(), publishInput.projectId(), publishInput.userId(),
+                publishInput.workerId(), publishInput.fencingToken(),
+                publishInput.url(), publishInput.storageKey(), publishInput.mime(),
+                publishInput.size(), publishInput.md5(), publishInput.duration());
         if (published) {
             log.info("[media_extract] 发布成功 jobId={}", claim.id());
         } else {
@@ -500,14 +509,17 @@ public class MediaExtractJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failMediaExtractJob(new FailMediaExtractDto(
+        FailMediaExtractDto failInput = new FailMediaExtractDto(
                 claim.id(),
                 claim.workerId(),
                 claim.fencingToken(),
                 code,
                 message,
                 details
-        ));
+        );
+        finalizer.failMediaExtractJob(
+                failInput.jobId(), failInput.code(), failInput.message(), failInput.details(),
+                failInput.workerId(), failInput.fencingToken());
     }
 
     /** MQ 自投延迟消息（视频骨架 scheduleNext 同款；错误上抛保持不 ack 由 broker 重投兜底）。 */

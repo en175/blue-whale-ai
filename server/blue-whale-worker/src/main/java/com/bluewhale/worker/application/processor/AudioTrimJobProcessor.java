@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
+import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailAudioTrimDto;
@@ -90,6 +91,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
     public static final int MAX_AUDIO_TRIM_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobFinalizer finalizer;
     private final JobClaimService claimService;
     private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
@@ -103,6 +105,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
             JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
+            JobFinalizer finalizer,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitTrimAudioClient trimAudioClient,
@@ -111,6 +114,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.finalizer = finalizer;
         this.claimService = claimService;
         this.claimSpec = ClaimSpec.typeOnly(AudioTrimContract.TAG, LEASE_SECONDS, jobMapper);
         this.assetSource = assetSource;
@@ -382,7 +386,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
 
         // 时长只取官方 result.duration 精确值（秒→ms；宽高恒 null——音频无画面维度，
         // publishAudioTrimResult 内部落定）；不做源时长回落（截取片段 ≠ 源全长，见类注释）
-        boolean published = stateMachine.publishAudioTrimResult(new PublishAudioTrimDto(
+        boolean published = finalizer.publishAudioTrimResult(new PublishAudioTrimDto(
                 claim.id(),
                 claim.projectId(),
                 claim.userId(),
@@ -505,7 +509,7 @@ public class AudioTrimJobProcessor implements JobProcessor {
         if (httpStatus != null) {
             details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
         }
-        stateMachine.failAudioTrimJob(new FailAudioTrimDto(
+        finalizer.failAudioTrimJob(new FailAudioTrimDto(
                 claim.id(),
                 claim.workerId(),
                 claim.fencingToken(),
