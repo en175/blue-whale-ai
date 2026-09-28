@@ -473,16 +473,20 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
 
     def test_sync_accepts_linear_commits_after_pending_rebase(self) -> None:
-        original_head = self.commit_task_change()
+        child_head = self.commit_task_change()
         child = self.root / "blue-whale-worktrees" / "child"
-        self.git("worktree", "add", "-b", "feature/child", str(child), original_head)
+        self.git("worktree", "add", "-b", "feature/child", str(child), child_head)
         child_git_dir = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child))
         child_metadata = child_git_dir / "blue-whale" / "task-base.json"
         child_metadata.parent.mkdir(parents=True)
         child_metadata.write_text(json.dumps({
             "version": 1, "task_branch": "feature/child",
-            "target_branch": "release/prod", "start_sha": original_head,
+            "target_branch": "release/prod", "start_sha": child_head,
         }), encoding="utf-8")
+        (self.worktree / "integration.txt").write_text("integration\n", encoding="utf-8")
+        self.git("add", "integration.txt")
+        self.git("commit", "-m", "fix: integration followup")
+        original_head = self.git("rev-parse", "HEAD")
         self.advance_release("upstream-one.txt", "one\n")
         first = self.invoke("sync", "--json")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -507,6 +511,15 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(recovery["rebase_proofs"][0]["original_head"], original_head)
         self.assertEqual(recovery["rebase_input_head"], review_head)
         self.assertEqual((self.worktree / "review.txt").read_text(encoding="utf-8"), "review\n")
+
+        second_head = self.git("rev-parse", "HEAD")
+        self.advance_release("upstream-three.txt", "three\n")
+        third = self.invoke("sync", "--json")
+        self.assertEqual(third.returncode, 0, third.stderr)
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(len(recovery["rebase_proofs"]), 2)
+        self.assertEqual(recovery["rebase_proofs"][1]["original_head"], review_head)
+        self.assertEqual(recovery["rebase_input_head"], second_head)
 
     def test_sync_rejects_merge_commit_after_pending_rebase(self) -> None:
         self.commit_task_change()
@@ -540,6 +553,39 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         result = self.invoke("sync", "--json")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("远端源分支变化", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+    def test_linearized_pr_rejects_rename_outside_frozen_diff(self) -> None:
+        self.advance_release("a", "same\n")
+        self.advance_release("x", "same\n")
+        self.git("merge", "--ff-only", "release/prod")
+        (self.worktree / "a").unlink()
+        self.git("add", "a")
+        self.git("commit", "-m", "fix: delete a")
+        self.advance_release("upstream.txt", "upstream\n")
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        recovery.update(linearized_pr=123, frozen_files=["a"])
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+        synced_head = self.git("rev-parse", "HEAD")
+
+        self.git("mv", "x", "a")
+        self.git("commit", "-m", "fix: rename x to a")
+        self.assertEqual(self.git("diff", "--name-only", f"{synced_head}..HEAD"), "a")
+        self.assertEqual(self.git("diff", "--name-only", "origin/release/prod...HEAD"), "x")
+        before = marker.read_bytes()
+
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("冻结文件范围", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+        self.advance_release("upstream-two.txt", "two\n")
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("冻结文件范围", str(self.response(result)["detail"]))
         self.assertEqual(marker.read_bytes(), before)
 
 

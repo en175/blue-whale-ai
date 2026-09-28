@@ -204,7 +204,7 @@ def remove_recovery(root: Path, marker: Path, backup_ref: str) -> None:
 
 
 def pending_recovery(root: Path, marker: Path, branch: str, target_branch: str,
-                     current_head: str, backup_ref: str) -> dict[str, object]:
+                     current_head: str, backup_ref: str, upstream_ref: str) -> dict[str, object]:
     recovery = read_recovery(marker, branch)
     if recovery.get("target_branch", "master") != target_branch:
         raise WorkflowError("已有同步事务绑定其他 PR 目标分支，拒绝切换基线。")
@@ -229,6 +229,11 @@ def pending_recovery(root: Path, marker: Path, branch: str, target_branch: str,
                                      f"{expected_head}..{current_head}").splitlines())
             if changed - set(recovery["frozen_files"]):
                 raise WorkflowError("线性化后的修订超出 PR 冻结文件范围，拒绝更新恢复点。")
+    if recovery.get("linearized_pr"):
+        changed = set(git_output(root, "diff", "--name-only",
+                                 f"{upstream_ref}...{current_head}").splitlines())
+        if changed - set(recovery["frozen_files"]):
+            raise WorkflowError("线性化后的修订超出 PR 冻结文件范围，拒绝更新恢复点。")
     if remote_branch_sha(root, branch) != recovery.get("remote_branch_sha", ""):
         raise WorkflowError("远端源分支变化，拒绝更新同步恢复点。")
     proofs = recovery.get("rebase_proofs", [])
@@ -278,7 +283,8 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         raise WorkflowError("origin/{} 尚未包含任务起点 {}；待共享基线提交：\n{}".format(target_branch, start_sha, pending))
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
-    recovery = (pending_recovery(root, marker, branch, target_branch, original_head, backup_ref)
+    recovery = (pending_recovery(root, marker, branch, target_branch, original_head,
+                                 backup_ref, upstream_ref)
                 if marker.exists() else None)
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode == 0:
         if recovery and recovery.get("synced_head") == original_head:
