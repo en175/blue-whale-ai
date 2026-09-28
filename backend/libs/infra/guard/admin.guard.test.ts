@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("AdminGuard（权威来源 = identity_user_roles）", () => {
+describe("AdminGuard（权威来源 = bw_user_roles）", () => {
   it("持有 admin 角色就放行", async () => {
     const isAdmin = vi.fn().mockResolvedValue(true);
     await expect(createGuard(isAdmin).canActivate(contextFor(USER))).resolves.toBe(true);

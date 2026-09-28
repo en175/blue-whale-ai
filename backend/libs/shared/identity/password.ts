@@ -2,7 +2,7 @@
  * 口令哈希 —— bcrypt 的**唯一**入口
  *
  * 为什么是 bcrypt 而不是 scrypt / argon2：
- * `identity_users.password` 里的存量哈希是从 new-api 搬过来的，而 new-api 是
+ * `bw_users.password` 里的存量哈希是从 new-api 搬过来的，而 new-api 是
  * Go 写的、用的 `golang.org/x/crypto/bcrypt`（`$2a$10$...`）。
  * 换成别的算法意味着存量用户全部登不上——那不是「技术选型」，那是清库。
  *
@@ -79,7 +79,7 @@ export async function hashPassword(plain: string): Promise<string> {
  * 校验口令。
  *
  * @param plain 用户提交的明文
- * @param storedHash `identity_users.password`；**为 null / 空表示这个账号没有口令**
+ * @param storedHash `bw_users.password`；**为 null / 空表示这个账号没有口令**
  *                   （手机号注册、或新-api 迁来的纯 OAuth 账号），一律返回 false
  * @returns 是否匹配。**任何异常都视作不匹配**——哈希格式损坏时的正确反应是「登不上」，
  *          不是「放行」

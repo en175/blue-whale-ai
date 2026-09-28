@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 /** Auth 用例的 db port 实现（Prisma-backed），满足 core 里 requestSmsCode/loginWithCode 的 db 依赖形状。
- *  字段映射真实表：identity_verification_codes(gmt_expire,is_used) / identity_users(username 唯一, phone 可空, status)。 */
+ *  字段映射真实表：bw_verification_codes(gmt_expire,is_used) / bw_users(username 唯一, phone 可空, status)。 */
 
 export interface AuthRepo {
   createVerificationCode(record: {
@@ -39,7 +39,7 @@ function isUniqueViolation(error: unknown): boolean {
 export function createAuthRepo(prisma: PrismaClient): AuthRepo {
   return {
     async createVerificationCode(record) {
-      await prisma.identity_verification_codes.create({
+      await prisma.bw_verification_codes.create({
         data: {
           phone: record.phone,
           code: record.code,
@@ -50,7 +50,7 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
       });
     },
     async findValidCode(phone, code) {
-      const row = await prisma.identity_verification_codes.findFirst({
+      const row = await prisma.bw_verification_codes.findFirst({
         where: { phone, code, is_used: false, gmt_expire: { gt: new Date() } },
         orderBy: { id: "desc" },
       });
@@ -72,14 +72,14 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
      * 而唯一索引已经给了我们一个**精确的**碰撞信号（P2002），直接用它即可。
      */
     async upsertUser(phone) {
-      const existing = await prisma.identity_users.findFirst({ where: { phone } });
+      const existing = await prisma.bw_users.findFirst({ where: { phone } });
       if (existing) {
         return { id: existing.id.toString(), username: existing.username, phone };
       }
 
       for (let attempt = 0; attempt < USERNAME_RETRIES; attempt++) {
         try {
-          const created = await prisma.identity_users.create({
+          const created = await prisma.bw_users.create({
             data: { phone, username: randomUsername(), status: "NORMAL" },
           });
           return { id: created.id.toString(), username: created.username, phone };
@@ -97,7 +97,7 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
     },
 
     async markCodeUsed(codeId) {
-      await prisma.identity_verification_codes.update({
+      await prisma.bw_verification_codes.update({
         where: { id: BigInt(codeId) },
         data: { is_used: true },
       });

@@ -101,7 +101,7 @@ export class IdentityService {
    * <ul>
    *   <li><b>用户不存在也要烧掉一次 bcrypt</b>：否则「查无此人」比「密码错」快 60ms，
    *       响应时间就成了一个用户名枚举接口。</li>
-   *   <li><b>没有口令的账号一律登不上</b>：`identity_users.password` 允许为 null
+   *   <li><b>没有口令的账号一律登不上</b>：`bw_users.password` 允许为 null
    *       （手机号注册、以及刚从 new-api 迁来还没设口令的行）。把 null 当作
    *       「都能登」是把一个数据状态变成一次越权。</li>
    *   <li><b>停用账号照常返回身份</b>，由 Guard 拦。登录处判状态会多一份判定，
@@ -138,7 +138,7 @@ export class IdentityService {
    * <h2>为什么登录切了、注册也必须跟着切</h2>
    *
    * 只切一半是最糟的状态：新用户注册进的是 new-api 的库，而我们登录查的是
-   * `identity_users`——**注册完立刻登不上**，且报的还是「用户名或密码错误」，
+   * `bw_users`——**注册完立刻登不上**，且报的还是「用户名或密码错误」，
    * 用户只会以为自己记错了密码。
    *
    * <h2>口令策略的最小集</h2>
@@ -188,7 +188,7 @@ export class IdentityService {
   }
 
   /**
-   * 修改口令 —— 校验原密码后写**我们自己的库**（`identity_users.password`）。
+   * 修改口令 —— 校验原密码后写**我们自己的库**（`bw_users.password`）。
    *
    * <h2>为什么不再转发 new-api</h2>
    *
@@ -227,7 +227,7 @@ export class IdentityService {
   }
 
   /**
-   * 冻结 / 解冻账号 —— 写 `identity_users.status`。
+   * 冻结 / 解冻账号 —— 写 `bw_users.status`。
    *
    * <p>原先这条和「加扣余额」挤在 new-api 的同一个 manage 接口里。new-api 独立后
    * 这两件事必须分开：**状态是我们自己的账号属性，余额是计费域的事**——

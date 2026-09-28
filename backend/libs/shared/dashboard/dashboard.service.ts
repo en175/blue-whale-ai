@@ -5,7 +5,7 @@
  *
  * | 指标         | 表 / 端点                                | 字段                          |
  * | ------------ | ---------------------------------------- | ----------------------------- |
- * | 总用户       | 本地 `identity_users`（IdentityService）  | `count`                       |
+ * | 总用户       | 本地 `bw_users`（IdentityService）  | `count`                       |
  * | 任务数       | 本地 `generation_jobs`                    | `count`，按 `gmt_create` 落区间 |
  * | 总使用积分   | billing `billing_cost_reservations`       | `status='settled'` 的 `actual_credits` 求和 |
  * | 总充值积分   | 本地 `recharge_orders`                    | `status='paid'` 的 `credits` 求和 |

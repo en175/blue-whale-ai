@@ -72,7 +72,7 @@ describe("verifyPassword", () => {
   });
 
   it("★ 没有口令的账号一律 false —— null 不是「都能登」", async () => {
-    // identity_users.password 可空（手机号注册、刚从 new-api 迁来的行）。
+    // bw_users.password 可空（手机号注册、刚从 new-api 迁来的行）。
     // 把 null 当成放行是把一个**数据状态**变成一次越权。
     await expect(verifyPassword("anything", null)).resolves.toBe(false);
     await expect(verifyPassword("anything", undefined)).resolves.toBe(false);

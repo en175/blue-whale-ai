@@ -5,7 +5,7 @@ import { createAuthRepo } from "./auth-repo.js";
 /**
  * 自动注册的用户名重试。
  *
- * <p>背景：`identity_users.username` 变成唯一索引之后，随机用户名（`randomInt(0, 10000)`）
+ * <p>背景：`bw_users.username` 变成唯一索引之后，随机用户名（`randomInt(0, 10000)`）
  * 的撞车从「静默产生两个同名用户」变成了「注册直接失败」。这个文件钉住修复。
  */
 
@@ -30,8 +30,8 @@ function fakePrisma(create?: CreateImpl) {
 
   return {
     prisma: {
-      identity_users: { findFirst, create: createMock },
-      identity_verification_codes: { create: codeCreate, update: codeUpdate },
+      bw_users: { findFirst, create: createMock },
+      bw_verification_codes: { create: codeCreate, update: codeUpdate },
     } as never,
     findFirst,
     createMock,
@@ -41,7 +41,7 @@ function fakePrisma(create?: CreateImpl) {
 }
 
 describe("auth-repo 表名（identity_ 前缀）", () => {
-  it("验证码读写走 identity_verification_codes", async () => {
+  it("验证码读写走 bw_verification_codes", async () => {
     const { prisma, codeCreate, codeUpdate } = fakePrisma();
     const repo = createAuthRepo(prisma);
 
@@ -57,7 +57,7 @@ describe("auth-repo 表名（identity_ 前缀）", () => {
     expect(codeUpdate).toHaveBeenCalled();
   });
 
-  it("用户查询走 identity_users", async () => {
+  it("用户查询走 bw_users", async () => {
     const { prisma, findFirst } = fakePrisma();
     await createAuthRepo(prisma).upsertUser("13800000000");
     expect(findFirst).toHaveBeenCalledWith({ where: { phone: "13800000000" } });

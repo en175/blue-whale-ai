@@ -58,17 +58,19 @@ describe("identity_users 三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源", () => {
-    expect(schemaPrisma).toContain("model identity_users {");
-    expect(schemaPrisma).toContain("model identity_verification_codes {");
-    expect(schemaPrisma).toContain('map: "uk_identity_users__username"');
+    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
+    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
+    expect(schemaPrisma).toContain("model bw_users {");
+    expect(schemaPrisma).toContain("model bw_verification_codes {");
+    expect(schemaPrisma).toContain('map: "uk_bw_users__username"');
     // phone 可空：Prisma 侧漏了 `?` 会让下一次 migrate 试图把列改回 NOT NULL
     expect(schemaPrisma).toMatch(/phone\s+String\?\s+@unique\(map: "idx_phone"\)/);
   });
 
   it("TS 侧不再引用旧表名", () => {
     // 表改了名而代码没跟上，是最典型的「编译过、运行时炸」。
-    expect(authRepo).toContain("prisma.identity_users");
-    expect(authRepo).toContain("prisma.identity_verification_codes");
+    expect(authRepo).toContain("prisma.bw_users");
+    expect(authRepo).toContain("prisma.bw_verification_codes");
     expect(authRepo).not.toMatch(/prisma\.users\b/);
     expect(authRepo).not.toMatch(/prisma\.verification_codes\b/);
   });

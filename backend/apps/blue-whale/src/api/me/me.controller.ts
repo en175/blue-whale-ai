@@ -42,7 +42,7 @@ export class MeController {
       // 每次现查而不是从会话快照取——会员到期没有「用户重新登录」这一步，
       // 会话里带的等级会一直停在登录那一刻。
       tier: await this.identity.resolveTier(user.userId),
-      // 角色：**我们自己的**权威（identity_user_roles/identity_roles），与 is_admin 同源。
+      // 角色：**我们自己的**权威（bw_user_roles/bw_roles），与 is_admin 同源。
       // 两者只是形态不同：is_admin 回答「有没有管理权限」（判定走 `roles.isAdmin` 的
       // code 集合成员），roles 给出原始 code 列表供管理端展示与细粒度判断。
       roles: await this.identity.listRoleCodes(user.userId),
@@ -51,7 +51,7 @@ export class MeController {
 
   /**
    * 修改密码（IKBRCK）：原密码校验与新口令写入都在**我们自己的库**
-   * （`identity_users.password`，bcrypt），不再转发网关的 `PUT /api/user/self`。
+   * （`bw_users.password`，bcrypt），不再转发网关的 `PUT /api/user/self`。
    *
    * <p>响应形状与错误映射保持不变：账号域数值码（1101 原密码错误 / 1102 口令格式 /
    * 1103 未设密码）+ 中文。口令长度口径也回到我们自己的口径（bcrypt 72 字节上限），

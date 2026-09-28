@@ -8,7 +8,7 @@ import {
 import { MeController } from "./me.controller.js";
 
 // IKBRCK：PUT /me/password 改密端点的入口校验 + 本地改密 + 账号域错误映射单测。
-// 关键回归：原密码与口令策略都由**我们自己的库**判定（identity_users.password），
+// 关键回归：原密码与口令策略都由**我们自己的库**判定（bw_users.password），
 // 不再拿会话里那把项目级统一 key 去代打网关；错误对外仍是账号域数值码 + 中文。
 // 改密成功后应吊销该用户全部会话（best-effort，失败不阻断改密）。
 

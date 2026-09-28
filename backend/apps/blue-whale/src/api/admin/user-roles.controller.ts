@@ -30,7 +30,7 @@ function parseUserId(raw: string): string {
 /**
  * 用户角色的授予 / 撤销（管理端）。
  *
- * <p>在它之前，`identity_user_roles` **只有读者没有写者**——角色只能靠写库给。
+ * <p>在它之前，`bw_user_roles` **只有读者没有写者**——角色只能靠写库给。
  * 而这个接口同时也是「超管锁死保护」的落点：没有撤销入口，那条规则就无从谈起。
  *
  * <p>⚠️ 权限判定在 {@link AdminGuard}（查我们的角色表），不是 new-api 的 role。

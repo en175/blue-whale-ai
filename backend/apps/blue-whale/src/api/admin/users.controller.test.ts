@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import { AdminUsersController } from "./users.controller.js";
 
-// 冻结强制登出：freeze 在本地把 identity_users.status 置为 DISABLED 后 best-effort
+// 冻结强制登出：freeze 在本地把 bw_users.status 置为 DISABLED 后 best-effort
 // 踢该用户全部会话，审计 detail 记 revokedSessions；unfreeze 不碰会话。
 // 加扣余额（adjustBalance）属计费域，尚未实现——必须显式报错，不能静默成功。
 

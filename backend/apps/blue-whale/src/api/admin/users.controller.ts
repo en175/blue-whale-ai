@@ -111,7 +111,7 @@ export class AdminUsersController {
 
     try {
       if (action === "freeze") {
-        // ★ 冻结 = 写我们自己的库（identity_users.status）。
+        // ★ 冻结 = 写我们自己的库（bw_users.status）。
         //   原先转发 new-api 的 manage 接口，而 new-api 独立后那边不再有我们的用户；
         //   而且那条链路要求「调用者在 new-api 那边也是管理员」——查得到列表却冻不了人。
         const found = await this.identity.setUserStatus(
