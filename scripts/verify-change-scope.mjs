@@ -85,7 +85,7 @@ function pythonForVerification() {
   throw new Error("脚本验证需要 Python 3.11+；请安装后重试。");
 }
 
-function currentScope({ baseRef, risk, stage }) {
+function currentScope({ baseRef, risk, stage, requireTargetSync = false }) {
   const head = git("rev-parse", "HEAD");
   const metadata = taskBaseline();
   const startSha = metadata.start_sha;
@@ -96,6 +96,10 @@ function currentScope({ baseRef, risk, stage }) {
   }
   const targetBranch = metadata.target_branch;
   const targetSha = remoteTargetSha(targetBranch);
+  if (requireTargetSync && stage === "pr" &&
+      !gitSucceeds("merge-base", "--is-ancestor", targetSha, head)) {
+    throw new Error(`PR_TARGET_NOT_SYNCED: HEAD 尚未包含 origin/${targetBranch} 的 ${targetSha}；先运行 scripts/sync-task-from-origin.sh sync --target-branch ${targetBranch} --json`);
+  }
   const base = metadata.inherited_sha ?? (gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
     gitSucceeds("merge-base", "--is-ancestor", targetSha, head)
     ? targetSha
@@ -305,7 +309,8 @@ function main() {
     process.exitCode = 3;
     return;
   }
-  const scope = currentScope({ baseRef, risk, stage });
+  const scope = currentScope({ baseRef, risk, stage,
+    requireTargetSync: command === "plan" || command === "run" });
   if (command === "plan") {
     if (asJson) {
       process.stdout.write(`${JSON.stringify(scope)}\n`);

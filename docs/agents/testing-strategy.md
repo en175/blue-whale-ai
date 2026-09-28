@@ -8,7 +8,7 @@
 2. 通过 `scripts/commit-task-for-review.sh` 形成干净 HEAD；运行 `node scripts/verify-change-scope.mjs plan` 检查自动分层。
 3. 运行 `node scripts/verify-change-scope.mjs run`（默认收口阶段）；代码失败则修复并 amend，基础设施或已知 flaky 才对同一 HEAD 显式重试。
 4. 报告完成前运行 `node scripts/verify-change-scope.mjs check --json`；`VERIFIED` 才算完成。
-5. 创建或更新 PR 前运行 `node scripts/verify-change-scope.mjs run --stage pr`；发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
+5. 创建或更新 PR 前先运行 `scripts/sync-task-from-origin.sh sync --json`，再运行 `node scripts/verify-change-scope.mjs run --stage pr`；`plan/run --stage pr` 对尚未包含远端目标提交的 HEAD 返回 `PR_TARGET_NOT_SYNCED`，避免按旧任务起点误选大范围验证。发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
 
 完成标准：凭证状态为 `passed`，且 HEAD、合并基线、changed-files 哈希、输入指纹、验证层级、计划和通过结果均与当前状态一致。
 
@@ -22,7 +22,7 @@
 | `scoped/worker-java` | `server/blue-whale-worker/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f server/pom.xml -pl blue-whale-worker -am -q test` |
 | `scoped/web` | Web app/components/hooks/lib/workers、`web/src` 下的契约副本 JSON、`web/scripts` 工具脚本 | Web typecheck + Web lint + Web Vitest `--changed` |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
-| `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和技能同步 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |
+| `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和工程技能校验 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |
 | `scoped/operations` | 探针、隧道、一次性修复和维护工具 | `scripts/tests` 下的脚本单测 |
 | `full` | 产品构建、运行时、数据库、部署、整栈验收入口或显式高风险 | 当前影响面的定向检查 + `pnpm verify` |
 
@@ -50,7 +50,7 @@ PR 阶段只有产品影响路径或显式高风险改动进入 `full`，并执�
 - 鉴权路径、全栈验收、Playwright 配置；
 - 产品运行时构建、数据库和验收入口。
 
-Git/Agent Hook 不属于产品影响路径，归 `scoped/control-plane`。本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`。Agent 技能等未识别的非脚本 Markdown 在 PR 阶段仍使用未知非可执行路径兜底。
+Git/Agent Hook 不属于产品影响路径，归 `scoped/control-plane`。本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`。`.agents/skills` 下已知的 Markdown、客户端元数据和工程脚本分别按文档或定向工具分类；未知可执行路径继续失败并要求补分类。
 
 Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接受 `auto` 或 `high`，禁止通过参数、改写凭证或删减命令降级。低层级凭证不得覆盖高层级要求；带验收的全量凭证可覆盖不带验收的全量要求，反之不成立。
 
