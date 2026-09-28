@@ -27,11 +27,15 @@ import {
   AdminConsumedCreditsResponseSchema,
   AdminGetActiveCatalogResponseSchema,
   BillingAdminService,
+  BillingService,
   type AdminConsumedCreditsRequest,
 } from "../../contracts/gen/billing/v1/billing_pb.js";
 
 /** 管理面各方法的实现，允许只给一部分（没给的会回 UNIMPLEMENTED）。 */
 export type AdminServiceHandlers = Partial<ServiceImpl<typeof BillingAdminService>>;
+
+/** 用户面各方法的实现，同上。`QueryBalance`（余额与按来源拆分）走这里。 */
+export type BillingServiceHandlers = Partial<ServiceImpl<typeof BillingService>>;
 
 /**
  * 当前测试绑定的内存 router；没装过就是 `undefined`。
@@ -47,7 +51,8 @@ let currentRouter: Transport | undefined;
 export function grpcStubTransport(): Transport {
   if (!currentRouter) {
     throw new Error(
-      "测试没先装 gRPC 桩：先调 grpcAdminService / grpcActiveCatalog / grpcConsumedCredits",
+      "测试没先装 gRPC 桩：先调 grpcAdminService / grpcBillingService / "
+        + "grpcActiveCatalog / grpcConsumedCredits",
     );
   }
   return currentRouter;
@@ -79,6 +84,20 @@ export function freshGrpcUrl(): void {
 export function grpcAdminService(handlers: AdminServiceHandlers): void {
   currentRouter = createRouterTransport(({ service }) => {
     service(BillingAdminService, handlers);
+  });
+}
+
+/**
+ * 装一个只在内存里的**用户面** `BillingService`（`QueryBalance` 那条）。
+ *
+ * <p>为什么需要它：TS 这一跳（proto → `BillingBalance`）此前**没有任何用例**——
+ * Java 适配器有测试、Nest 控制器有测试，中间这层映射写错的话三边同时绿，
+ * 而界面上只是「分类那部分永远不出现」。内存 router 会真过一遍 protobuf 序列化，
+ * 所以 int64 → `bigint` → `Number()` 这条折算也一并钉住了。
+ */
+export function grpcBillingService(handlers: BillingServiceHandlers): void {
+  currentRouter = createRouterTransport(({ service }) => {
+    service(BillingService, handlers);
   });
 }
 

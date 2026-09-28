@@ -5,6 +5,37 @@
  * ============================================ */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+// ⚠️ 只导入**类型**：`api/auth` → `api/http` → `utils/auth` 会绕回来引用本模块，
+//    值导入会构成运行时循环。类型导入在编译期被抹掉，环就断了。
+import type { UsageTokenData } from '@/api/auth';
+
+/**
+ * 界面要显示的总积分 = **各类型相加**。
+ *
+ * <p>`by_source` 缺失或为空（老服务端）时退回服务端的 `credits`——没有分项可加，
+ * 只能信它给的那个数。
+ *
+ * <p>⚠️ **服务端保证 `Σ by_source === credits`**（同一条 SQL 的两种投影，Java 侧有
+ * 不变量测试钉住）。两条路只在「这个保证被破坏」时才分叉，而那时必须**说出来**：
+ * 静默地照常返回，界面看起来一切正常，服务端两处谓词分叉这件事就永远没人发现
+ * ——那正是这个功能最该防的失败模式。分叉时显示**账本那个数**（它才是权威）。
+ *
+ * <p>放在 store 而不是 API 层：它是**展示口径**，而且三个渲染点读的是同一个 store 字段，
+ * 相加逻辑只此一处（将来做明细 UI 也不会冒出第二个算法）。
+ */
+export function totalCreditsOf(data: UsageTokenData): number {
+  const items = data.by_source;
+  if (!items || items.length === 0) return data.credits;
+
+  const summed = items.reduce((sum, item) => sum + item.credits, 0);
+  if (summed !== data.credits) {
+    console.warn(
+      `[credits] by_source 之和（${summed}）与账本总额（${data.credits}）不一致，以账本为准`,
+    );
+    return data.credits;
+  }
+  return summed;
+}
 
 /** 会话用户（对应 GET /api/me 返回结构） */
 export interface SessionUser {
@@ -42,8 +73,14 @@ interface AuthState {
   setSession: (user: SessionUser | null) => void;
   /** 清空会话（退出登录/401 失效） */
   clearSession: () => void;
-  /** 写入 /api/usage/token 的余额 */
-  setCredits: (credits: number | null) => void;
+  /**
+   * 写入 /api/usage/token 的余额结果；传 null = 没拉到（清空）。
+   *
+   * <p>显示用的总数在这里按「各类型相加」算出来（`totalCreditsOf`），
+   * 与后端账本那个数不一致时以账本为准 —— 三个渲染点读的是同一个字段，
+   * 相加逻辑只此一处。
+   */
+  setUsage: (data: UsageTokenData | null) => void;
   /** 局部更新用户信息（如修改昵称后回写） */
   updateUser: (patch: Partial<SessionUser>) => void;
 }
@@ -66,7 +103,8 @@ export const useAuthStore = create<AuthState>()(
       clearSession: () =>
         set({ isNewUser: false, user: null, credits: null }),
 
-      setCredits: (credits) => set({ credits }),
+      setUsage: (data) =>
+        set({ credits: data ? totalCreditsOf(data) : null }),
 
       updateUser: (patch) =>
         set((s) => (s.user ? { user: { ...s.user, ...patch } } : s)),

@@ -10,6 +10,7 @@ import com.bluewhale.contracts.billing.v1.QueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.QueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.QuoteRequest;
 import com.bluewhale.contracts.billing.v1.QuoteResponse;
+import com.bluewhale.contracts.billing.v1.SourceCredits;
 import com.bluewhale.contracts.common.v1.SpecAttrs;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -219,6 +220,31 @@ class BillingGrpcIntegrationTest {
         assertThat(balance.getExpiring(0).getSource()).isEqualTo(CreditSource.DAILY.key());
         // RFC3339 带时区（契约约定：时间不用 unix 秒，免时区歧义）
         assertThat(balance.getExpiring(0).getExpiresAt()).contains("+08:00");
+    }
+
+    @Test
+    void 查余额_按来源拆分的分项之和等于总额() {
+        // 这条走的是**线上那条路**：Service → gRPC 适配器 → 生成的 stub → 客户端读到的报文。
+        // 上面那条服务层的不变量用例证明「SQL 两处谓词没分叉」，这条证明
+        // 「分项真的被投影出去了」—— 少了它，适配器忘了映射也会全绿。
+        credits.grant(USER, CreditSource.PURCHASED, 1_500, null, "grant", "bs-p", "bs-p");
+        credits.grant(USER, CreditSource.BONUS, 1_000,
+                Instant.now().plus(30, ChronoUnit.DAYS), "grant", "bs-b", "bs-b");
+
+        QueryBalanceResponse balance = stub.queryBalance(
+                QueryBalanceRequest.newBuilder().setUserId(USER).build());
+
+        // 基线是 setUp 里那笔 gift 1,000（永久）
+        assertThat(balance.getBySourceList())
+                .extracting(SourceCredits::getSource, SourceCredits::getCredits)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(CreditSource.GIFT.key(), 1_000L),
+                        org.assertj.core.groups.Tuple.tuple(CreditSource.PURCHASED.key(), 1_500L),
+                        org.assertj.core.groups.Tuple.tuple(CreditSource.BONUS.key(), 1_000L));
+
+        // ★ 契约的核心不变量：分项加起来**就是**总额（不是第二个独立算出来的数）
+        long sum = balance.getBySourceList().stream().mapToLong(SourceCredits::getCredits).sum();
+        assertThat(sum).isEqualTo(balance.getAvailableCredits());
     }
 
     // ─────────────────────────────────────────────────────────────

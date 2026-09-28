@@ -21,6 +21,9 @@ const ROW = {
   paid_at: new Date("2026-09-25T00:05:00Z"),
   paid_pending_at: new Date("2026-09-25T00:04:00Z"),
   credits_valid_months: 24,
+  bonus_credits: 1000n,
+  first_purchase_eligible: 1,
+  first_purchase_state: "first",
   grant_lot_id: 12n,
   notify_count: 2,
   gmt_create: new Date("2026-09-25T00:00:00Z"),
@@ -118,6 +121,12 @@ describe("createRechargeOrderRepo.list", () => {
       paidPendingAt: "2026-09-25T00:04:00.000Z",
       // 有效期**月数**快照：起算点是支付成功时刻，所以订单存的是月数而不是算好的时刻
       creditsValidMonths: 24,
+      // 首购加赠三列：`bonusCredits` 是「这单挂着多少赠送」，`firstPurchaseEligible`
+      // 是档位是否参与，`firstPurchaseState` 是**实际判定结果**。
+      // 三条一起投影才讲得清一单：只看前两个会把「用户已经用过了」误读成「发了」。
+      bonusCredits: 1000,
+      firstPurchaseEligible: 1,
+      firstPurchaseState: "first",
     });
   });
 

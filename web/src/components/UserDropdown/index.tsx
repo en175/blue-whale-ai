@@ -39,28 +39,28 @@ export default function UserDropdown() {
   const [showLogin, setShowLogin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const credits = useAuthStore((s) => s.credits);
-  const setCredits = useAuthStore((s) => s.setCredits);
+  const setUsage = useAuthStore((s) => s.setUsage);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   // 登录后拉取可用余额写入全局存储（下拉余额/账号弹窗/画布顶栏共用）
   useEffect(() => {
     if (!user) {
-      setCredits(null);
+      setUsage(null);
       return;
     }
     let alive = true;
     fetchCredits()
       .then((d) => {
-        if (alive) setCredits(d.credits);
+        if (alive) setUsage(d);
       })
       .catch(() => {
-        if (alive) setCredits(null);
+        if (alive) setUsage(null);
       });
     return () => {
       alive = false;
     };
-  }, [user, setCredits]);
+  }, [user, setUsage]);
 
   // 点击外部关闭
   useEffect(() => {

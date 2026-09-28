@@ -27,12 +27,24 @@ describe("UsageController.token（billing 余额）", () => {
       availableCredits: 120,
       frozenCredits: 30,
       expiring: [],
+      bySource: [
+        { source: "purchased", credits: 100 },
+        { source: "bonus", credits: 20 },
+      ],
     });
 
     const response = await controller.token(USER);
 
     // 展示的余额 = 冻结之外真正可用的那部分：待结算的预扣不该被当成能花的钱。
-    expect(response.data).toEqual({ credits: 120 });
+    // `by_source` 是**同一笔钱的分项**（Σ 必须等于 credits）—— 前端按它相加得到总数；
+    // `credits` 保留，是为了既有消费端（画布顶栏、额度闸）不必跟着改。
+    expect(response.data).toEqual({
+      credits: 120,
+      by_source: [
+        { source: "purchased", credits: 100 },
+        { source: "bonus", credits: 20 },
+      ],
+    });
     expect(queryBalance).toHaveBeenCalledWith(42);
   });
 

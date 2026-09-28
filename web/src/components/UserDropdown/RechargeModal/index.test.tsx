@@ -14,7 +14,7 @@ const rechargeApi = vi.hoisted(() => ({
 
 const authApi = vi.hoisted(() => ({ fetchCredits: vi.fn() }));
 
-const setCredits = vi.hoisted(() => vi.fn());
+const setUsage = vi.hoisted(() => vi.fn());
 
 const toastApi = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
@@ -24,7 +24,7 @@ vi.mock('@/api/auth', () => authApi);
 vi.mock('@/stores/auth', () => {
   const store = Object.assign(
     <T,>(selector: (state: { credits: number | null }) => T) => selector({ credits: 500 }),
-    { getState: () => ({ setCredits }) },
+    { getState: () => ({ setUsage }) },
   );
   return { useAuthStore: store };
 });
@@ -277,7 +277,9 @@ describe('RechargeModal', () => {
     expect(toastApi.success).toHaveBeenCalledWith('支付成功，积分已到账');
     // fresh=true：绕开 GET 在途去重，否则拿回支付前的旧余额
     expect(authApi.fetchCredits).toHaveBeenCalledWith({ fresh: true });
-    expect(setCredits).toHaveBeenCalledWith(1234);
+    // 写回的是整个 usage 结果（含按来源拆分），不只是那个数 —— store 里按
+    // 「各类型相加」算显示用的总额，相加逻辑只此一处
+    expect(setUsage).toHaveBeenCalledWith({ credits: 1234 });
   });
 
   it('★ 钱已收到、积分还在发（paid_pending）：话术换成「发放中」，仍不算成功', async () => {
@@ -299,7 +301,7 @@ describe('RechargeModal', () => {
     expect(document.body.textContent).not.toContain('等待支付结果...');
     expect(document.body.textContent).not.toContain('支付成功');
     expect(toastApi.success).not.toHaveBeenCalled();
-    expect(setCredits).not.toHaveBeenCalled();
+    expect(setUsage).not.toHaveBeenCalled();
   });
 
   it('★ 到账异常（grant_failed）：说「发放异常、请联系客服」，不再说「发放中」', async () => {
@@ -323,7 +325,7 @@ describe('RechargeModal', () => {
     // 仍然不是成功：积分没到账，不能报成功、也不能刷余额
     expect(document.body.textContent).not.toContain('支付成功');
     expect(toastApi.success).not.toHaveBeenCalled();
-    expect(setCredits).not.toHaveBeenCalled();
+    expect(setUsage).not.toHaveBeenCalled();
     // ⚠️ 仓里没有可跳转的客服入口，就**不编**一个：这句话里不该出现任何链接
     const hints = [...document.body.querySelectorAll('a')].filter((a) =>
       a.textContent?.includes('客服'),
@@ -401,7 +403,7 @@ describe('RechargeModal', () => {
 
     expect(document.body.textContent).toContain('二维码已过期');
     expect(document.body.textContent).toContain('重新支付');
-    expect(setCredits).not.toHaveBeenCalled();
+    expect(setUsage).not.toHaveBeenCalled();
   });
 
   it('下单失败就地提示且不出二维码', async () => {

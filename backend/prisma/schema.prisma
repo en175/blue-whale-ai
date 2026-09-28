@@ -707,7 +707,9 @@ model recharge_orders {
   /// ⚠️ 存月数不存时刻：起算点是**支付成功时刻**（PRD §9.5），下单那一刻还不知道它。
   /// NULL = 本列上线前的存量单（发放时由 billing 按来源策略决定有效期）
   credits_valid_months    Int?
-  /// 下单时服务端判定的首购状态：unknown 未判定（功能未上线）| first | repeat
+  /// **发放时**服务端判定的首购状态：unknown 未判定（档位不参与，或拿不到归属）|
+  /// first 本单是该档位首次、赠送已发 | repeat 该档位已用过赠送。
+  /// ⚠️ 不在下单时定：两笔未支付单都会自认首单，真正的裁决在发放那一步（billing 唯一索引）
   first_purchase_state    String    @default("unknown") @db.VarChar(16)
   /// 该商品是否参与首购加赠（配置快照）。与 state 分开：一个说人，一个说商品
   first_purchase_eligible Int       @default(0) @db.TinyInt

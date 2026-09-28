@@ -43,6 +43,17 @@ export interface MeData {
 export interface UsageTokenData {
   /** 可用余额，**整数积分** —— billing 账本里那个数，与后端记的完全一致 */
   credits: number;
+  /**
+   * 同一笔余额**按来源拆开**的分量（充值 / 充值赠送 / 每日赠送…）。
+   *
+   * <p>`source` 用的是**批次**的取名（`purchased` / `bonus` / `daily`…），
+   * 与流水的类型（`recharge` / `bonus`…）不是同一组字面量。
+   *
+   * <p>⚠️ 它不是第二个金额：**Σ by_source 逐字等于 `credits`**（服务端同一条 SQL 的
+   * 两种投影）。界面上的总积分按它相加得到，与 `credits` 对不上就是 bug。
+   * 老服务端没有这个字段时是 `undefined`，此时按 `credits` 显示。
+   */
+  by_source?: { source: string; credits: number }[];
 }
 
 /** /api/me 结构转本地会话用户 */

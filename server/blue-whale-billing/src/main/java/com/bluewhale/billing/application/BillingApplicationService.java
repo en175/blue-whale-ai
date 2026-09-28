@@ -344,6 +344,13 @@ public class BillingApplicationService {
      *
      * <p>哪些字段投影到哪个契约由适配器决定：{@code receivableCredits} 只进管理面
      * （用户面永远只出现一个金额，见 {@link BalanceView}）。
+     *
+     * <p>⚠️ <b>「Σ bySource == availableCredits」是谓词层面的保证，不是这条方法的一次调用的快照保证。</b>
+     * 三次聚合是三条独立语句、没有共同事务；恰好有预扣/结算提交在它们之间时，
+     * 分项与总额可能来自不同的瞬间。这不影响用户界面：消费端在两者不一致时会退回
+     * 服务端的 {@code availableCredits}（见 web 的 {@code totalCreditsOf}），
+     * 显示的仍是权威的那个数。要消灭这个窗口就得给本方法套一个只读事务，
+     * 那是另一件事，别把它当成正确性缺陷去"修"。
      */
     public BalanceView balance(long userId) {
         // 冻结总额取自账本账户，而不是再扫一遍批次表：
@@ -364,7 +371,32 @@ public class BillingApplicationService {
                 .map(lot -> new BalanceView.ExpiringLot(
                         lot.available(), lot.expiresAt(), lot.source().key()))
                 .toList();
-        return new BalanceView(lots.availableCredits(userId), frozen, receivable, expiring);
+
+        // ★ 按来源拆开的可用积分。与下面的 availableCredits 出自**同一条 SQL 的两种投影**
+        //   （谓词逐字相同，只差 GROUP BY），所以 Σ bySource == availableCredits 是构造出来的，
+        //   不是碰巧。这正是用户界面「总积分 = 各类型之和」能成立的前提 ——
+        //   两边一旦各自改成不同条件，界面上就会出现一个凑不出来的总数。
+        var bySource = lots.availableCreditsBySource(userId).stream()
+                .map(item -> new BalanceView.SourceCredits(item.source().key(), item.credits()))
+                .toList();
+
+        return new BalanceView(lots.availableCredits(userId), frozen, receivable, expiring, bySource);
+    }
+
+    /**
+     * 按发放幂等键查「**是谁发的**」——即该键对应批次的 {@code biz_id}。
+     *
+     * <p>幂等键撞车（409）本身只说明「这个键用过了」。调用方常需要再进一步：
+     * 「是<b>我自己</b>发的，还是<b>别人</b>先占的」——这两件事的业务含义完全相反
+     * （前者=我这一笔已经发过，后者=我这一笔不该发）。只有归属能分辨，见
+     * {@link com.bluewhale.billing.adapter.outbound.persistence.repository.CreditLotRepository#findBizIdByGrantKey}。
+     *
+     * <p>放在应用层而非让 HTTP 适配器直连持久化适配器：控制器只经应用服务取数。
+     *
+     * @return 该键对应批次的 {@code biz_id}；键不存在（撞的是别的唯一索引）时 {@code null}
+     */
+    public String findGrantOwner(String grantKey) {
+        return lots.findBizIdByGrantKey(grantKey);
     }
 
     /**

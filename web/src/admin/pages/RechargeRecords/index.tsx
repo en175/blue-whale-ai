@@ -12,6 +12,7 @@ import {
   adminRechargeRecordKeys,
   adminRechargeRecordsOptions,
   retryAdminRechargeGrant,
+  type AdminRechargeRecord,
   type AdminRechargeRecordQuery,
   type AdminRechargeStatus,
 } from '@/api/adminRechargeRecords';
@@ -97,6 +98,28 @@ const EMPTY_FILTERS: Filters = { userId: '', status: 'all', tradeNo: '' };
  */
 const RETRYABLE: readonly AdminRechargeStatus[] = ['paid_pending', 'grant_failed'];
 
+/**
+ * 首购加赠那一格：显示**这一单挂着多少赠送**与**实际发没发**。
+ *
+ * <p>⚠️ 两者缺一不可。只看额度会把「用户已经用过了」误读成「发了」；
+ * 只看结果则看不出「这一单本来该有多少」。这正是本工单要修的那类事——
+ * 运营配了赠送、界面上却无处确认它生没生效。
+ *
+ * <p>没有赠送的单显示「—」而不是「0」：「送 0 分」与「没有赠送」是两件事。
+ */
+function BonusCell({ row }: { row: AdminRechargeRecord }) {
+  if (row.firstPurchaseEligible !== 1 || row.bonusCredits <= 0) return <>—</>;
+  const amount = fmt(row.bonusCredits);
+  if (row.firstPurchaseState === 'first') {
+    return <Badge tone="success">+{amount} 已发</Badge>;
+  }
+  if (row.firstPurchaseState === 'repeat') {
+    return <Badge tone="neutral">{amount} 未发 · 该档位已用过</Badge>;
+  }
+  // unknown：还没走到发放那一步（未支付），或撞了幂等键但拿不到归属
+  return <Badge tone="warning">{amount} 未判定</Badge>;
+}
+
 export default function RechargeRecords() {
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
   // 查询条件与输入框分离：否则每敲一个字符都发一次请求
@@ -178,6 +201,22 @@ export default function RechargeRecords() {
                 <b>「支付失败」是另一回事</b>：用户压根没付成钱，平台没有资金在途。
               </div>
             </Hint>
+            <Hint title="赠送积分怎么读">
+              <div>
+                档位配了「首购加赠」时，<b>该档位的第一笔成功支付</b>会额外发一批赠送积分。
+                这一列显示的是<b>这一单挂着多少赠送</b>与<b>实际发没发</b>——
+                只看额度会把「用户已经用过了」误读成「发了」。
+              </div>
+              <div>
+                <b>已发</b>：本单就是该档位首单，赠送已入账。
+                <b>未发 · 该档位已用过</b>：赠送已被同档位的另一笔单拿走。
+                <b>未判定</b>：还没到发放那一步（未支付），或结算撞车但没拿到归属。
+              </div>
+              <div>
+                <b>「—」= 这单没有赠送这回事</b>（档位不参与，或没配额度）。
+                不写 0 —— 「送 0 分」与「没有赠送」是两件事。
+              </div>
+            </Hint>
           </>
         }
         subtitle="全站充值订单：到账积分在下单时冻结，落库后不随换算率变动"
@@ -244,6 +283,7 @@ export default function RechargeRecords() {
             <th>用户 ID</th>
             <th>支付金额</th>
             <th>到账积分</th>
+            <th>赠送积分</th>
             <th>状态</th>
             <th>网关订单号</th>
             <th>创建时间</th>
@@ -254,14 +294,14 @@ export default function RechargeRecords() {
         <tbody>
           {list.isPending && (
             <tr>
-              <td colSpan={9}>
+              <td colSpan={10}>
                 <Empty message="加载中…" />
               </td>
             </tr>
           )}
           {!list.isPending && list.isError && (
             <tr>
-              <td colSpan={9}>
+              <td colSpan={10}>
                 <Empty
                   message="充值记录加载失败"
                   extra={
@@ -275,7 +315,7 @@ export default function RechargeRecords() {
           )}
           {!list.isPending && !list.isError && rows.length === 0 && (
             <tr>
-              <td colSpan={9}>
+              <td colSpan={10}>
                 <Empty
                   message={
                     applied.userId || applied.tradeNo || applied.status !== 'all'
@@ -292,6 +332,9 @@ export default function RechargeRecords() {
               <td>{row.userId}</td>
               <td>{fmtYuan(row.amountFen)}</td>
               <td>{fmt(row.credits)}</td>
+              <td>
+                <BonusCell row={row} />
+              </td>
               <td>
                 <Badge dot tone={STATUS_TONES[row.status]}>
                   {STATUS_LABELS[row.status]}

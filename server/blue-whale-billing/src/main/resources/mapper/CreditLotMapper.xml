@@ -53,6 +53,21 @@
   </select>
 
   <!--
+    可用余额按来源拆开（用户界面「总积分 = 各类型之和」的数据源）。
+
+    ⚠️ **WHERE 与上面的 sumAvailable 逐字相同**，只多一个 GROUP BY —— 这不是巧合，
+       是「Σ 分项 == 总额」那条等式赖以成立的东西。两处谓词一旦分叉，
+       界面上就会出现一个凑不出来的总数，而且不报错。要改就两处一起改。
+  -->
+  <select id="sumAvailableBySource" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow">
+    SELECT source, COALESCE(SUM(remaining - frozen), 0) AS credits
+    FROM billing_credit_lots
+    WHERE user_id = #{userId}
+      AND (expires_at IS NULL OR expires_at > NOW())
+    GROUP BY source
+  </select>
+
+  <!--
     ★ 已到期、仍有可核销量的批次（过期核销任务用）。
 
     三个条件：

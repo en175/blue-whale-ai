@@ -1,13 +1,31 @@
 import { Code, ConnectError } from '@connectrpc/connect';
+import { create } from '@bufbuild/protobuf';
 import { DomainError } from '@lib/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   BILLING_URL_ENV,
   billingEndpoint,
+  createBillingClient,
   missingBillingConfig,
   toBillingHoldError,
 } from './billing-client.js';
+import {
+  freshGrpcUrl,
+  grpcBillingService,
+  grpcStubTransport,
+} from './billing-admin-grpc-stub.testlib.js';
+import {
+  QueryBalanceResponseSchema,
+  SourceCreditsSchema,
+} from '../../contracts/gen/billing/v1/billing_pb.js';
+
+// 真 gRPC 客户端这一跳要走内存 router 桩（见 billing-admin-grpc-stub.testlib.ts 的文件头）：
+// 走真 transport 会真连出去，而「忘了装桩」会表现成一次网络抖动，而不是测试自己写漏了。
+vi.mock('@connectrpc/connect-node', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@connectrpc/connect-node')>();
+  return { ...actual, createGrpcTransport: () => grpcStubTransport() };
+});
 
 /**
  * 计费地址的**存在性**守卫。
@@ -141,5 +159,59 @@ describe('toBillingHoldError（Hold 的三条失败语义）', () => {
   it('认不出的错误返回 null —— 我们自己的 bug 不伪装成上游故障（照旧 500）', () => {
     expect(toBillingHoldError(new Error('BigInt 转换炸了'))).toBeNull();
     expect(toBillingHoldError('boom')).toBeNull();
+  });
+});
+
+/**
+ * 真 gRPC 客户端这一跳的映射（proto → `BillingBalance`）。
+ *
+ * <p>为什么单独钉：Java 适配器有测试、Nest 控制器有测试，**中间这一层此前一条都没有**。
+ * 漏一个字段、少一次 `Number()` 的话三边同时绿，而界面上只是「余额分类那部分永远不出现」
+ * ——不报错、不掉数，最难发现的那种。
+ *
+ * <p>桩是**内存 router**（真过一遍 protobuf 序列化），所以 int64 → `bigint` → `Number()`
+ * 这条折算也一并钉住了；手写假 client 会把这一层整个跳过。
+ */
+describe('queryBalance 的投影', () => {
+  it('★ 按来源拆分的分项逐项映射出来，且不丢精度（int64 → number）', async () => {
+    freshGrpcUrl();
+    grpcBillingService({
+      queryBalance: (req) => {
+        expect(Number(req.userId)).toBe(9001);
+        return create(QueryBalanceResponseSchema, {
+          availableCredits: 2_500n,
+          frozenCredits: 100n,
+          expiring: [],
+          bySource: [
+            create(SourceCreditsSchema, { source: 'purchased', credits: 1_500n }),
+            create(SourceCreditsSchema, { source: 'bonus', credits: 1_000n }),
+          ],
+        });
+      },
+    });
+
+    const balance = await createBillingClient(billingEndpoint()).queryBalance(9001);
+
+    expect(balance.availableCredits).toBe(2_500);
+    expect(balance.frozenCredits).toBe(100);
+    // ⚠️ 这里必须是 number 而不是 bigint：`by_source` 的和要拿去与
+    //    `availableCredits` 相加比较，混进 bigint 会让 `sum !== credits` 恒真，
+    //    于是前端永远走「退回服务端总额」那条分支、分类数字永远不显示。
+    expect(balance.bySource).toEqual([
+      { source: 'purchased', credits: 1_500 },
+      { source: 'bonus', credits: 1_000 },
+    ]);
+  });
+
+  it('老 billing 不带 by_source → 空数组，不是 undefined（消费端不必判空）', async () => {
+    freshGrpcUrl();
+    grpcBillingService({
+      queryBalance: () =>
+        create(QueryBalanceResponseSchema, { availableCredits: 7n, frozenCredits: 0n }),
+    });
+
+    const balance = await createBillingClient(billingEndpoint()).queryBalance(9001);
+
+    expect(balance.bySource).toEqual([]);
   });
 });

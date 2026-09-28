@@ -60,10 +60,15 @@ export const PAID_REACHED_STATUSES: readonly RechargeOrderStatus[] = [
 ];
 
 /**
- * 订单快照（PRD §9.3）里此刻还是常量的那几列。
+ * 订单快照（PRD §9.3）里**下单时还没有值**的那几列。
  *
- * <p>首购两列写 `unknown` / `0`（#40 首购加赠上线时才变成计算值）；`creditsValidMonths`
- * 写 `null` = 没有这个快照（只有本列上线前的存量单会是这样，发放时退回 billing 的来源策略）。
+ * <p>`creditsValidMonths` 写 `null` = 没有这个快照（只有本列上线前的存量单会是这样，
+ * 发放时退回 billing 的来源策略）。
+ *
+ * <p>⚠️ **首购两列不再在这里**：档位单由 `buildTierOrderSpec` 带过来
+ * （`firstPurchaseEligible` = 配置快照、`bonusCredits` = 本单挂着的额度），
+ * 自定义充值单仍落到这里的默认值（没有档位就没有「每档」可言）。
+ * 而 **`firstPurchaseState`（判定结果）永远走默认的 `unknown`** —— 它由发放那一步回写。
  *
  * <p>⚠️ `creditsExpireAt` **不在这个常量里了**：到期时刻不再是下单时算出来的值
  * （起算点是**支付成功时刻**，下单那一刻还不知道它）。它由发放那一步按
@@ -111,6 +116,26 @@ export interface RechargeOrderView {
   amountFen: number;
   /** 下单时冻结的到账积分 */
   credits: number;
+  /**
+   * 本单**应发的**赠送积分快照（首购加赠）；档位不参与首购时为 0。
+   *
+   * <p>⚠️ 它是「这单挂着多少赠送」，**不是最终发放额**。档位参与首购、但用户已经在这个
+   * 档位用过赠送时，本列仍是配置值而实际没发 —— 「到底发没发」看
+   * {@link firstPurchaseState}（`first` 发了 / `repeat` 没发）。两列合起来才讲得清这一单。
+   */
+  bonusCredits: number;
+  /**
+   * 该档位是否参与首购加赠（配置快照，0 / 1）。档位后来改了配置也不回溯。
+   */
+  firstPurchaseEligible: number;
+  /**
+   * 本单相对首购的状态：`unknown` 未判定 | `first` 是该档位首次（赠送已发）| `repeat` 重复购买。
+   *
+   * <p>由**发放那一步**写死，不下单时猜：判据是「这个用户在这个档位有没有成功支付过的单」，
+   * 而下单那一刻可能同时存在两笔未支付单 —— 两笔都判「首单」是必然的，
+   * 真正的裁决在 billing 的 `uk_lots__grant_key` 上（见 `fulfill`）。
+   */
+  firstPurchaseState: string;
   creditsPerYuan: number;
   /**
    * 商品类型快照：`tier` 固定积分卡 | `custom` 自定义充值。
@@ -168,7 +193,7 @@ export interface CreateRechargeOrderInput {
    *  因为自动生成的名字会随换算率重派生（见 `displayTierName`），
    *  而快照要回答的是「用户当时看到的是哪件商品」 */
   productName?: string;
-  /** 本单应发的赠送积分快照（首购加赠）；#40 上线前恒为 0 */
+  /** 本单应发的赠送积分快照（首购加赠）；不参与首购或没配额度时 0 */
   bonusCredits?: number;
   /**
    * 到账积分有效期快照，单位**月**（PRD §7.4/§10.2「积分有效期」）。
@@ -177,7 +202,14 @@ export interface CreateRechargeOrderInput {
    * ⚠️ 这里**只收月数**：真实的到期时刻由发放那一步算（起算点是支付成功时刻）。
    */
   creditsValidMonths?: number | null;
-  /** 下单时服务端判定的首购状态：`unknown` 未判定（功能未上线）| `first` | `repeat` */
+  /**
+   * 首购判定结果：`unknown` 未判定（档位不参与 / 还没发放 / 撞键但拿不到归属）|
+   * `first` 本单是该档位首次、赠送已发 | `repeat` 该档位已用过赠送。
+   *
+   * <p>⚠️ **不在下单时写**：判据是「这个用户在这个档位上有没有发过赠送」，而下单那一刻
+   * 可能同时存在两笔未支付单——两笔都会自认首单。真正的裁决在发放那一步
+   * （billing 的 `uk_lots__grant_key`），结果回写到这里。所以下单路径**永远不传**这个字段。
+   */
   firstPurchaseState?: string;
   /** 该商品是否参与首购加赠（配置快照）。0 / 1 */
   firstPurchaseEligible?: number;
@@ -354,6 +386,11 @@ export interface RechargeOrderRepo {
     tradeNo: string;
     grantLotId?: string;
     creditsExpireAt?: Date;
+    /**
+     * 首购判定结果（`first` / `repeat`）；不传 = 这一单没有首购这回事，保持 `unknown`。
+     * 由发放那一步裁决后回写，见 {@link RechargeOrderView.firstPurchaseState}。
+     */
+    firstPurchaseState?: string;
   }): Promise<boolean>;
   /**
    * 标记到账异常（`paid_pending` → `grant_failed`，进核验队列）。
@@ -396,6 +433,9 @@ function toView(row: any): RechargeOrderView {
     tierId: row.tier_id === null ? null : row.tier_id.toString(),
     amountFen: Number(row.amount_fen),
     credits: Number(row.credits),
+    bonusCredits: Number(row.bonus_credits),
+    firstPurchaseEligible: Number(row.first_purchase_eligible),
+    firstPurchaseState: row.first_purchase_state,
     creditsPerYuan: row.credits_per_yuan,
     productType: row.product_type,
     productName: row.product_name,
@@ -620,7 +660,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
       return r.count > 0;
     },
 
-    async markPaid({ tradeNo, grantLotId, creditsExpireAt }) {
+    async markPaid({ tradeNo, grantLotId, creditsExpireAt, firstPurchaseState }) {
       const r = await prisma.recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: { not: RECHARGE_ORDER_STATUS.paid } },
         data: {
@@ -632,6 +672,10 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
           // 到期时刻：与刚发给 billing 的那个值是**同一个**（调用方算一次、传两处），
           // 订单快照记的才是「真实发出去的那批积分什么时候到期」
           ...(creditsExpireAt ? { credits_expire_at: creditsExpireAt } : {}),
+          // 首购判定结果：由发放那一步裁决后回写（`first` 发了 / `repeat` 重复购买）。
+          // ⚠️ 只在真判定过时传：不传 = 这一单没有首购这回事（档位不参与），
+          // 保持默认的 `unknown`，别把「没这回事」写成「判定为重复」。
+          ...(firstPurchaseState ? { first_purchase_state: firstPurchaseState } : {}),
           gmt_modified: new Date(),
         },
       });

@@ -93,12 +93,33 @@ export interface BillingExpiringLot {
   source: string;
 }
 
+/**
+ * 一个来源的可用积分（充值 / 充值赠送 / 每日赠送…）。
+ *
+ * <p>`source` 用的是**批次**的取名（`CreditSource.key()`：`purchased` / `bonus` / `daily`…），
+ * 与流水那套（`recharge` / `bonus` / …）**不是同一组字面量**——展示文案按批次口径映射，
+ * 别照抄 `BillingTransaction.type` 的表。
+ */
+export interface BillingSourceCredits {
+  source: string;
+  /** 该类可用积分 Σ(remaining − frozen)；全被冻结时为 0 */
+  credits: number;
+}
+
 /** QueryBalance 的读侧形状。**单位一律是整数积分**，与用户看到的账本同一个数。 */
 export interface BillingBalance {
   /** Σ(remaining − frozen) */
   availableCredits: number;
   frozenCredits: number;
   expiring: BillingExpiringLot[];
+  /**
+   * 可用积分**按来源拆开**。
+   *
+   * <p>⚠️ 它不是第二个金额，是 `availableCredits` 的分项：**Σ 必须等于它**
+   * （服务端由同一条 SQL 的两种投影保证）。用户界面「总积分 = 各类型之和」
+   * 靠的就是这个等式——前端相加与服务端总额对不上，就是 bug，不是口径差异。
+   */
+  bySource: BillingSourceCredits[];
 }
 
 /**
@@ -277,6 +298,10 @@ export function createBillingClient(baseUrl: string): BillingClient {
           credits: Number(lot.credits),
           expiresAt: lot.expiresAt,
           source: lot.source,
+        })),
+        bySource: response.bySource.map((item) => ({
+          source: item.source,
+          credits: Number(item.credits),
         })),
       };
     },

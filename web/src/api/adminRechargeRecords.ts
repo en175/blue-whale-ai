@@ -46,6 +46,22 @@ export interface AdminRechargeRecord {
   amountFen: number;
   /** 下单时冻结的到账积分（按档位原价 × 当时的换算率算定，之后改口径不追溯） */
   credits: number;
+  /**
+   * 本单**挂着**的首购加赠额度（下单时的配置快照）；0 = 这单没有赠送。
+   *
+   * <p>⚠️ 它是「挂着多少」，**不是「发了多少」**——「到底发没发」看
+   * {@link firstPurchaseState}。只看本列会把「用户已经用过了」误读成「发了」。
+   */
+  bonusCredits: number;
+  /** 该档位是否参与首购加赠（配置快照，0/1）。与 state 分开：一个说商品，一个说结果 */
+  firstPurchaseEligible: number;
+  /**
+   * 首购判定结果：`unknown` 未判定 | `first` 本单是该档位首次、赠送已发 |
+   * `repeat` 该档位已用过赠送（赠送被**别的**单拿走了）。
+   *
+   * <p>`unknown` 也包含「撞了幂等键但拿不到归属」——那时宁可不下结论，也不猜。
+   */
+  firstPurchaseState: string;
   creditsPerYuan: number;
   status: AdminRechargeStatus;
   paidAt: string | null;

@@ -2,6 +2,7 @@ package com.bluewhale.billing.adapter.outbound.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bluewhale.billing.adapter.outbound.persistence.entity.CreditLotEntity;
+import com.bluewhale.billing.adapter.outbound.persistence.row.SourceAvailableRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -46,6 +47,18 @@ public interface CreditLotMapper extends BaseMapper<CreditLotEntity> {
 
     /** 可用余额 = Σ(remaining − frozen)，仅计未过期的批次。 */
     long sumAvailable(@Param("userId") long userId);
+
+    /**
+     * 可用余额**按来源拆开**：同一条 WHERE、同一个 {@code SUM(remaining - frozen)}，
+     * 多一个 {@code GROUP BY source}。
+     *
+     * <p>⚠️ 与 {@link #sumAvailable} 共用谓词是**要求**而不是巧合：用户界面上的总额与
+     * 各来源的分量必须对得上（Σ 分项 == 总额）。要改条件就两处一起改，
+     * 只改一处会让界面上多出一个凑不出来的数。
+     *
+     * <p>返回的来源是「仍持有未过期批次」的那些；某来源可用为 0（全被冻结）时仍会返回。
+     */
+    List<SourceAvailableRow> sumAvailableBySource(@Param("userId") long userId);
 
     /**
      * 已到期、仍有可核销量的批次（**跨全部用户**，最久到期的在前）。

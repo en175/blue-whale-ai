@@ -120,7 +120,7 @@ describe("billing-admin-client", () => {
       bizId: "RC1",
       bizType: "recharge",
     });
-    expect(result).toEqual({ lotId: "77", duplicated: false });
+    expect(result).toEqual({ lotId: "77", duplicated: false, existingBizId: null });
   });
 
   it("重复发放（billing 409）→ 当成「已经发过了」的正常结果，不当成故障", async () => {
@@ -128,7 +128,19 @@ describe("billing-admin-client", () => {
     await expect(grantCredits({ userId: 1, credits: 1500, bizId: "RC1" })).resolves.toEqual({
       lotId: "",
       duplicated: true,
+      // 老版本 billing 不带这个字段 → null = 「拿不到归属」，不是「没有归属」
+      existingBizId: null,
     });
+  });
+
+  it("★ 409 带上 existingBizId：调用方靠它分辨「我自己发过」与「别人先占了」", async () => {
+    stub({ code: "DUPLICATE", existingBizId: "RC-FIRST" }, 409);
+
+    const result = await grantCredits({ userId: 1, credits: 1000, bizId: "RC-SECOND" });
+
+    // 两者在 wire 上都是 409、duplicated 都是 true，差别只在这个字段。
+    // 丢了它，调用方就只能把两种情况混成一个结论 —— 而它们的业务含义正好相反。
+    expect(result).toEqual({ lotId: "", duplicated: true, existingBizId: "RC-FIRST" });
   });
 
   it("其它错误码 → 抛错（调用方要让网关重投）", async () => {

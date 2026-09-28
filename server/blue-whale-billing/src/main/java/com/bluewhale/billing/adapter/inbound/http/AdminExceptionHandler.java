@@ -85,6 +85,18 @@ public class AdminExceptionHandler {
                         "该幂等键已存在：这次操作之前已经成功过，未重复执行"));
     }
 
+    /**
+     * 幂等键撞车**且已知归属**（发放路径会先查一下键归谁再抛，见 {@code AdminCreditController}）。
+     *
+     * <p>与上面那条同码同文案，只多一个 {@code existingBizId}：调用方靠它区分
+     * 「我自己发过」与「别人先占了」。这两件事在业务上是相反的结论，而 409 本身分不出来。
+     */
+    @ExceptionHandler(DuplicateGrantKeyException.class)
+    public ResponseEntity<ErrorBody> duplicateGrant(DuplicateGrantKeyException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorBody(CODE_DUPLICATE, e.getMessage(), e.existingBizId()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorBody> invalid(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(new ErrorBody(CODE_INVALID, e.getMessage()));
@@ -111,5 +123,10 @@ public class AdminExceptionHandler {
     }
 
     /** 错误响应体。{@code code} 稳定可判、{@code message} 只用于人读。 */
-    public record ErrorBody(String code, String message) {}
+    public record ErrorBody(String code, String message, String existingBizId) {
+        /** 多数错误没有「归属」可言，给个两参构造器，免得八处调用点都得写个 null。 */
+        public ErrorBody(String code, String message) {
+            this(code, message, null);
+        }
+    }
 }

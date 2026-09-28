@@ -120,7 +120,7 @@ const toFen = (yuan: number) => Math.round(yuan * 100);
 async function refreshCredits() {
   try {
     const d = await fetchCredits({ fresh: true });
-    useAuthStore.getState().setCredits(d.credits);
+    useAuthStore.getState().setUsage(d);
   } catch {
     /* 保持原余额，不打断成功提示 */
   }

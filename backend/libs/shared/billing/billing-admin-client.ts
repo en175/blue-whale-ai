@@ -287,6 +287,24 @@ export interface GrantCreditsInput {
    * 那一处算，不要在各个入口各算一遍。
    */
   expiresAt?: Date;
+  /**
+   * 批次来源（`CreditSource.key()`）；不传 = `purchased`（充值本金）。
+   *
+   * <p>来源决定三件事：扣减优先级、财报口径（付费=收入 / 赠送=成本）、**默认有效期**。
+   * 所以它不是一个标签，是这批积分的性质 —— 发赠送积分必须显式传 `bonus`，
+   * 否则那批分会被当成用户花的钱记账。
+   */
+  source?: string;
+  /**
+   * 幂等键；不传 = billing 按 `source:bizId` 生成。
+   *
+   * <p>什么时候必须传：当「只能发一次」的判据**不是某一笔业务**，而是某个跨业务的
+   * 总量时。例：档位的「首购加赠」—— 判据是「这个用户在这个档位上的第一次」，
+   * 而不是「这一笔订单第一次」。此时用 `bonus:tier:{userId}:{tierId}` 作键，
+   * 让 `uk_lots__grant_key` 唯一索引去**原子地**决定谁是首单：
+   * 并发的第二笔必然拿到 409（`duplicated: true`），不需要新表、不需要行锁。
+   */
+  grantKey?: string;
 }
 
 export interface GrantCreditsResult {
@@ -294,13 +312,25 @@ export interface GrantCreditsResult {
   lotId: string;
   /** 幂等命中：这笔之前已经发过了（409），本次没有重复发放 */
   duplicated: boolean;
+  /**
+   * 幂等命中时：**既有那一笔是谁发的**（billing 回带 `existingBizId`，即批次上的 `biz_id`）。
+   *
+   * <p>为什么需要它：409 只说明「这个键用过了」，而调用方常常要区分两件相反的事——
+   * 「<b>我自己</b>之前发过」（重放，业务上已经做过了）与「<b>别人</b>先占了这个键」
+   * （这一笔不该发）。撞键时的两句话完全相反，只有归属能分辨。
+   *
+   * <p>`null` = 拿不到归属（老版本 billing 不带这个字段，或撞的是别的唯一索引）。
+   * 此时调用方应如实记「不知道」，**不要猜**——猜错会往审计列里写一个假事实。
+   */
+  existingBizId: string | null;
 }
 
 /**
- * 发放积分（`POST /admin/credits/grants`，`source = purchased`）。
+ * 发放积分（`POST /admin/credits/grants`）。
  *
- * <p>`source = purchased` 决定这批积分的**默认**有效期策略（2 年，见 PRD §9.5），
- * 由 billing 的 `GrantPolicy` 按来源决定 —— 不传 `expiresAt` 时就用它。
+ * <p>`source` 决定这批积分的**默认**有效期策略（`purchased` 2 年、`bonus` 30 天…，
+ * 见 PRD §9.5），由 billing 的 `GrantPolicy` 按来源决定 —— 不传 `expiresAt` 时就用它。
+ * 不传 `source` 时为 `purchased`（充值本金），与拆分来源之前的报文逐字一致。
  *
  * <p>⚠️ **但「充值本金 2 年」不是唯一的合法口径**：商品可以配自己的有效期
  * （档位 / 自定义充值的 `credits_valid_months`，PRD §10.2 必填）。所以到账路径会
@@ -321,10 +351,13 @@ export async function grantCredits(
     method: "POST",
     body: JSON.stringify({
       userId: input.userId,
-      source: "purchased",
+      source: input.source ?? "purchased",
       amount: input.credits,
       bizId: input.bizId,
       bizType: "recharge",
+      // 不传时这个键**整个不出现在报文里**（`undefined` 会被 JSON.stringify 丢掉），
+      // billing 便按 `source:bizId` 生成默认键 —— 与改动前逐字一致。
+      ...(input.grantKey ? { grantKey: input.grantKey } : {}),
       // 不传时这个键**整个不出现在报文里**（`undefined` 会被 JSON.stringify 丢掉）：
       // 显式传 `null` 是另一回事（billing 的 `Instant expiresAt` 收 null 是「不覆盖」，
       // 但让报文里多一个我们并不打算表达的空值没有意义）
@@ -335,13 +368,20 @@ export async function grantCredits(
 
   const response = await send(path, init);
   if (response.status === 409) {
-    return { lotId: "", duplicated: true };
+    // 读回带里的 `existingBizId`：既有那一笔**是谁发的**。读不出来（老版本 billing /
+    // 撞的是别的唯一索引）就给 null —— 调用方据此记「不知道」，而不是猜一个。
+    const body = (await response.json().catch(() => null)) as { existingBizId?: unknown } | null;
+    return {
+      lotId: "",
+      duplicated: true,
+      existingBizId: typeof body?.existingBizId === "string" ? body.existingBizId : null,
+    };
   }
   if (!response.ok) {
     throw new BillingAdminError(`发放积分失败：billing 管理端返回 HTTP ${response.status}`);
   }
   const data = (await response.json()) as { lotId?: number | string };
-  return { lotId: String(data.lotId ?? ""), duplicated: false };
+  return { lotId: String(data.lotId ?? ""), duplicated: false, existingBizId: null };
 }
 
 /* ---------- 账本：读流水（管理端全局） ---------- */
