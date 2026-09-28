@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import {
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_INVALID_INPUT,
+  errorCodeToNumeric,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
@@ -59,13 +62,14 @@ export async function handleStoryboardPreviewCreate(
   try {
     jsonBody = JSON.parse(body);
   } catch {
-    return fail(400, "请求参数无效");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   }
   const parsed = storyboardPreviewCreateRequestSchema.safeParse(jsonBody);
-  if (!parsed.success) return fail(400, "请求参数无效");
+  if (!parsed.success)
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   // URL 路径资源身份为权威，body 的 scene_card_id 必须与之相符。
   if (parsed.data.scene_card_id !== sceneCardId)
-    return fail(400, "场景卡不一致");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "场景卡不一致");
   // 图片 worker 必须持有明文凭证（修正四：去密）；缺失时在任何事务写入前拒绝，避免创建必然失败的预览与 Job。
   if (!options?.providerCredential) {
     return fail(PARAM_MISSING_CODE, "缺少生成凭证");
@@ -114,7 +118,12 @@ export async function handleStoryboardPreviewCreate(
         "生成能力已变化，需刷新能力后重试",
       );
     case "capability_limit":
-      return fail(400, result.reason);
+      // 图片能力上限（count/size/aspect_ratio）归 capability_unsupported_param（1030），
+      // reason 原文外显。
+      return fail(
+        errorCodeToNumeric(ERROR_CAPABILITY_UNSUPPORTED_PARAM),
+        result.reason,
+      );
     case "quota_insufficient":
       return fail(PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE, "余额不足");
     case "forbidden":

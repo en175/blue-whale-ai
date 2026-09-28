@@ -19,7 +19,7 @@ import type { FollowDialogAnchor } from '../../followDialog';
 import type { AtMentionItem } from '../../atMention';
 import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
-import RefThumbnail from '../RefThumbnail';
+import RefThumbnail, { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { composeImageSendPrompt, type ImageTextAttachment } from '../ImageDialog';
@@ -539,6 +539,7 @@ export default function AudioDialog({
                 ? () => editorRef.current?.insert({ kind: 'asset_ref', id: String(r.assetId) })
                 : undefined
             }
+            insertTitle={INSERT_REF_AT_SELECTION_TITLE}
             dragProps={stripDrag.itemProps(mixedStrip.index(i))}
           />
         )),
@@ -551,6 +552,7 @@ export default function AudioDialog({
             number={mixedStrip.order.filter(key => key.startsWith('text:')).indexOf(`text:${a.nodeId}`) + 1}
             textPreview={a.text}
             onInsertRef={!readOnly ? () => editorRef.current?.insert({ kind: 'text_ref', id: a.nodeId }) : undefined}
+            insertTitle={INSERT_REF_AT_SELECTION_TITLE}
             dragProps={stripDrag.itemProps(mixedStrip.index(currentRefs.length + i))}
             onRemove={
               !readOnly && onRemoveAttachment ? () => onRemoveAttachment(a.nodeId) : undefined

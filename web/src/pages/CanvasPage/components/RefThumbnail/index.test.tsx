@@ -4,7 +4,7 @@
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import RefThumbnail, { type RefThumbnailKind, type RefThumbnailProps } from './index';
+import RefThumbnail, { INSERT_REF_APPEND_TITLE, INSERT_REF_AT_SELECTION_TITLE, type RefThumbnailKind, type RefThumbnailProps } from './index';
 import PromptRefEditor, { type PromptRefEditorHandle } from '../PromptRefEditor';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
@@ -422,6 +422,33 @@ describe('RefThumbnail @ 插入两路（IKFCKK）', () => {
     // 插入后光标落在标签之后：继续输入接在原位插入的标签后
     await typePromptRefRaw(mountNode, '尾巴');
     expect(readPromptRefText(mountNode)).toBe('AB图片1尾巴');
+  });
+
+  it('IKIPWW insertTitle 覆盖 @ 按钮 hover 与读屏提示（图片/视频面板文案含记忆点与末尾两路）；缺省「插入引用」由上方台架用例覆盖', async () => {
+    await renderSingle({
+      kind: 'image',
+      url: 'https://x/a.png',
+      name: '角色图',
+      number: 1,
+      onInsertRef: () => {},
+      insertTitle: INSERT_REF_APPEND_TITLE,
+    });
+    const atBtn = mountNode.querySelector<HTMLButtonElement>(`button[title="${INSERT_REF_APPEND_TITLE}"]`)!;
+    expect(atBtn).toBeTruthy();
+    expect(atBtn.getAttribute('aria-label')).toBe(`${INSERT_REF_APPEND_TITLE} 角色图`);
+  });
+
+  it('IKIQGU 音频 insertTitle：title 与 aria-label 用「记忆点优先、否则当前光标」文案', async () => {
+    await renderSingle({
+      kind: 'audio',
+      name: '雨声白噪音',
+      number: 1,
+      onInsertRef: () => {},
+      insertTitle: INSERT_REF_AT_SELECTION_TITLE,
+    });
+    const atBtn = mountNode.querySelector<HTMLButtonElement>(`button[title="${INSERT_REF_AT_SELECTION_TITLE}"]`)!;
+    expect(atBtn).toBeTruthy();
+    expect(atBtn.getAttribute('aria-label')).toBe(`${INSERT_REF_AT_SELECTION_TITLE} 雨声白噪音`);
   });
 });
 

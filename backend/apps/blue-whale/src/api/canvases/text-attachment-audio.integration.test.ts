@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -85,6 +85,11 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -192,11 +197,11 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const missing = await createJob(projectId, audioJobBody("ghost", "哼一段旋律"));
-    expect(missing.code).toBe(400);
+    expect(missing.code).toBe(1002);
     expect(missing.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     const videoTarget = await createJob(projectId, audioJobBody("media-v", "哼一段旋律"));
-    expect(videoTarget.code).toBe(400);
+    expect(videoTarget.code).toBe(1002);
     expect(videoTarget.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
@@ -209,7 +214,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, audioJobBody("media-1", ""));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1002);
     expect(created.msg).toBe("prompt 无效");
     expect(await jobCount(projectId)).toBe(0);
   });

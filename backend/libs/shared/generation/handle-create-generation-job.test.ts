@@ -99,7 +99,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("视频/音频生成仅支持一个输出");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -131,7 +131,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("音频生成暂不支持旧参考字段，请使用 references");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -202,7 +202,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("音频生成不支持素材库引用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -218,7 +218,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -234,7 +234,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -256,7 +256,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("音频与图片参考不可混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -280,7 +280,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考音频最多 3 个");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -302,7 +302,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考图最多 1 个");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -344,7 +344,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1005);
     expect(result.msg).toBe("model_id 不在可用模型白名单或已停用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -448,7 +448,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("参考图最多 10 张");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -464,7 +464,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("参考图最多 3 张");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -497,7 +497,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
       null,
       failDeps,
     );
-    expect(fail.code).toBe(400);
+    expect(fail.code).toBe(1004);
     expect(fail.msg).toBe("参考图最多 10 张");
     expect(failCreate).not.toHaveBeenCalled();
   });
@@ -538,7 +538,7 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("素材库引用仅支持视频生成");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -554,7 +554,7 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -570,7 +570,7 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("参考图最多 2 张");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -798,7 +798,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1004);
     expect(result.msg).toBe("素材库引用仅支持视频生成");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -816,7 +816,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -830,7 +830,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("尾帧必须与首帧一起使用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -848,7 +848,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("首帧只能指定一个来源");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -866,7 +866,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -884,7 +884,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -928,7 +928,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -969,7 +969,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1035);
     expect(result.msg).toBe("参考素材库引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -987,7 +987,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1106,7 +1106,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("首帧只能指定一个");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1123,7 +1123,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("尾帧必须与首帧一起使用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1140,7 +1140,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1218,13 +1218,13 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       parameters: { ...VIDEO_BODY.parameters, aspect_ratio: aspect },
     });
 
-    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 400，文案带可用值", async () => {
+    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 登记码 1002，文案带可用值", async () => {
       const { deps, createJob } = buildVideoDeps({
         supported_aspect_ratios: ["16:9", "adaptive"],
         features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
       });
       const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
-      expect(result.code).toBe(400);
+      expect(result.code).toBe(1002);
       expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
       expect(createJob).not.toHaveBeenCalled();
     });
@@ -1266,7 +1266,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         null,
         deps,
       );
-      expect(both.code).toBe(400);
+      expect(both.code).toBe(1002);
       expect(both.msg).toContain("first_last_frame");
       expect(createJob).not.toHaveBeenCalled();
 
@@ -1287,7 +1287,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         null,
         deps,
       );
-      expect(result.code).toBe(400);
+      expect(result.code).toBe(1002);
       expect(result.msg).toBe("aspect_ratio 无效");
       expect(createJob).not.toHaveBeenCalled();
     });
@@ -1302,7 +1302,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1324,7 +1324,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考图最多 12 张");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1342,7 +1342,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("references 不能与旧参考字段混用");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1356,7 +1356,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材不能为空");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1405,7 +1405,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1503,7 +1503,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "media-404" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1515,7 +1515,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "text-a" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1527,7 +1527,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "media-2" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1543,7 +1543,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1583,7 +1583,7 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1657,7 +1657,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
       "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-1" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1669,7 +1669,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
       "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-404" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1684,7 +1684,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1704,7 +1704,7 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1776,7 +1776,7 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
       "u1", "p1", { ...AUDIO_TARGET_BODY, target_node_id: "media-2" }, null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("目标节点不存在或不是音频媒体节点");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1790,7 +1790,7 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1808,7 +1808,7 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
       null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -1929,7 +1929,7 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1031);
     expect(result.data?.code).toBe("capability_unsupported_resolution");
     expect(result.msg).toContain("8k");
     expect(result.msg).toContain("720p");
@@ -1948,7 +1948,7 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1032);
     expect(result.data?.code).toBe("capability_unsupported_ratio");
     expect(result.msg).toContain("4:3");
     expect(createJob).not.toHaveBeenCalled();
@@ -1966,7 +1966,7 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1033);
     expect(result.data?.code).toBe("capability_unsupported_duration");
     expect(result.msg).toContain("12");
     expect(createJob).not.toHaveBeenCalled();
@@ -2130,7 +2130,7 @@ describe("handleCreateGenerationJob 图片交叉格前置（IKE7JP）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1035);
     expect(result.data?.code).toBe("invalid_reference_type");
     expect(result.msg).toBe("模型、分辨率与宽高比组合不受支持");
     expect(createJob).not.toHaveBeenCalled();
@@ -2184,7 +2184,7 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.data?.code).toBe("invalid_reference");
     expect(result.msg).toBe("参考素材不存在或无权访问");
     expect(createJob).not.toHaveBeenCalled();
@@ -2202,7 +2202,7 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
       null,
       deps,
     );
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1035);
     expect(result.data?.code).toBe("invalid_reference_type");
     expect(result.msg).toBe("参考素材必须是图片");
     expect(createJob).not.toHaveBeenCalled();
@@ -2218,7 +2218,7 @@ describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () =>
     const { deps, createJob, resolveInputAssets } = buildImageDeps();
     resolveInputAssets.mockResolvedValue([]);
     const result = await handleCreateGenerationJob("u1", "p1", imageBody(1), null, deps);
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.data?.code).toBe("invalid_reference");
     expect(result.msg).toBe("参考素材不存在或无权访问");
     expect(createJob).not.toHaveBeenCalled();
@@ -2245,7 +2245,7 @@ describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () =>
       deps,
     );
     // IKG6EK：doc 退役后不再按 doc 声明细化索引文案，视频与图片同口径走通用信封
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.data?.code).toBe("invalid_reference");
     expect(result.msg).toBe("参考素材不存在或无权访问");
     expect(createJob).not.toHaveBeenCalled();
@@ -2289,7 +2289,7 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
       "u1", "p1", imageBodyWithPrompt(promptOf(32001)), null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -2303,7 +2303,7 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
       "u1", "p1", imageBodyWithPrompt(promptOf(4001)), null, deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1002);
     expect(result.msg).toBe("prompt 无效");
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -2320,7 +2320,7 @@ describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () =>
       "u1", "p1", imageBodyWithPrompt(promptOf(500)), null, deps,
     );
 
-    expect(over.code).toBe(400);
+    expect(over.code).toBe(1002);
     expect(exact.code).toBe(200);
   });
 });
@@ -2396,7 +2396,7 @@ it.each([32000, 32001])("正文遵循模型 32000 字边界：%i", async (length
     type: "image", expected_output_count: 1,
     parameters: { prompt: "a".repeat(length), model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
   }, null, deps);
-  expect(result.code).toBe(length === 32000 ? 200 : 400);
+  expect(result.code).toBe(length === 32000 ? 200 : 1002);
   expect(createJob).toHaveBeenCalledTimes(length === 32000 ? 1 : 0);
 });
 
@@ -2439,7 +2439,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
       ...VIDEO_BODY,
       references: [1, 2, 3, 4].map(imageRef),
     }, null, deps);
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toContain('参考图最多 3 张');
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -2459,7 +2459,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
       ...VIDEO_BODY,
       references: [{ role: 'reference', asset_id: '9', type: 'video' }],
     }, null, deps);
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toContain('当前模型不支持视频素材参考');
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -2477,7 +2477,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
         { role: 'reference', asset_id: '10', type: 'video', duration: 10 },
       ],
     }, null, deps);
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1034);
     expect(result.msg).toContain('参考素材总时长超过 15 秒');
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -2513,7 +2513,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
       ...VIDEO_BODY,
       references: refs,
     }, null, strict.deps);
-    expect(rejected.code).toBe(400);
+    expect(rejected.code).toBe(1034);
     expect(rejected.msg).toContain('参考图最多 3 张');
     expect(strict.createJob).not.toHaveBeenCalled();
 
@@ -2543,7 +2543,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
       ...VIDEO_BODY,
       references: Array.from({ length: 6 }, (_, i) => imageRef(i + 1)),
     }, null, strict.deps);
-    expect(rejected.code).toBe(400);
+    expect(rejected.code).toBe(1034);
     expect(rejected.msg).toContain('参考图最多 5 张');
     expect(strict.createJob).not.toHaveBeenCalled();
   });
@@ -2595,7 +2595,7 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
       parameters: { ...VIDEO_BODY.parameters, model_id: 'seedance-2' },
     }, null, deps);
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(1005);
     expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
     expect(result.data?.code).toBe(ERROR_MODEL_UNAVAILABLE);
     expect(createJob).not.toHaveBeenCalled();
@@ -2766,7 +2766,7 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
     expect(createJob).toHaveBeenCalled();
   });
 
-  it("Idempotency-Key 超过列宽（128）→ 400，不是拖到落库那一刻以截断/500 收场", async () => {
+  it("Idempotency-Key 超过列宽（128）→ 参数登记码（100000），不是拖到落库那一刻以截断/500 收场", async () => {
     const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
 
     const result = await handleCreateGenerationJob(
@@ -2777,7 +2777,7 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(100000);
     expect(lookupCreateIdempotency).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
   });

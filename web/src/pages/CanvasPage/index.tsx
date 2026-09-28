@@ -12008,6 +12008,8 @@ export default function CanvasPage() {
         id: node.id,
         kind: 'text',
         name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
+        // IKIQGR：正文全文参与 @ 检索——无标题文本节点显示为「文本节点」也能按正文关键词命中
+        searchText: extractTextNodeText(data),
       });
     }
     return items;

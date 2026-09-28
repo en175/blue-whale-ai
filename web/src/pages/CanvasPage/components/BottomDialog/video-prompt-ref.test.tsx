@@ -140,7 +140,7 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
 
   it('IKFCKQ 缩略图 @ 按钮与手动 @ 选择产出同一种素材标签 chip', async () => {
     await renderDialog({ videoMediaRefs: ALL_REFS });
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用（优先插入上次 @ 的位置，其次当前光标处，否则追加到正文末尾）"]')!;
     await act(async () => { atBtn.click(); });
     // 无记忆光标（未输入过正文）→ 追加末尾，chip 文案与手动 @ 选择一致（首个缩略图为图片1）
     expect(readPromptRefText(container)).toBe('图片1');
@@ -275,7 +275,7 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
     const { onParamsChange } = await renderDialog({ videoMediaRefs: ALL_REFS });
     await typePromptRefText(container, '让衣服');
     await collapseCaretAt(promptRefEditorInstance(container), 1);
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title^="插入引用"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
@@ -295,7 +295,7 @@ describe('IKIQ88 缩略图 @ 光标处插入', () => {
   it('未聚焦过输入框：chip 追加末尾，插入后编辑器聚焦、光标落在 chip 之后', async () => {
     await renderDialog({ videoMediaRefs: ALL_REFS });
     (document.activeElement as HTMLElement | null)?.blur?.();
-    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title^="插入引用"]')!;
     await act(async () => {
       atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });

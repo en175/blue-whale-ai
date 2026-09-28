@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -176,6 +176,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, JobsController, ProjectsController], providers: [
+      // IKIPWT：业务失败经 DomainError → AllExceptionsFilter 统一投影（与 app.module 的 APP_FILTER 同款），
+      // 台架不挂过滤器时 DomainError 落 Nest 默认 500 处理，信封 code/msg 均不可见。
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -415,7 +420,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedIndexedCanvas("IKFM3S invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -424,7 +429,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedIndexedCanvas("IKFM3S unsupported", { videoRef: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -433,7 +438,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedIndexedCanvas("IKFM3S overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId], LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1004);
     expect(created.msg).toBe("参考图最多 1 张");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -476,7 +481,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     // 素材被删（软删）后提交：文本带入素材存在性复核拒绝（阻止发送，不静默丢）
     await prisma.client.assets.update({ where: { id: BigInt(imageAssetId) }, data: { is_delete: true } });
     const third = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
-    expect(third.code).toBe(400);
+    expect(third.code).toBe(1034);
     expect(third.msg).toBe("参考素材不存在或无权访问");
   });
 
@@ -729,7 +734,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedVideoIndexedCanvas("IKFM3W invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -740,7 +745,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", [
       { role: "first_frame", asset_id: directAssetId, type: "image" },
     ], VIDEO_MODEL_ID, "adaptive"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE);
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -749,7 +754,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W novid", { refMediaType: "video" });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId), VIDEO_NOVID_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -758,7 +763,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId), VIDEO_LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("参考图最多 1 张");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -777,7 +782,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const videoBlocked = await createJob(projectId, videoJobBody("gen-v", "暮色", [
       { role: "first_frame", asset_id: directAssetId, type: "image" },
     ], VIDEO_MODEL_ID, "adaptive"));
-    expect(videoBlocked.code).toBe(400);
+    expect(videoBlocked.code).toBe(1034);
     expect(videoBlocked.msg).toBe(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE);
     const imageOk = await createJob(projectId, imageJobBody("gen-i", "暮色"));
     expect(imageOk.code).toBe(200);
@@ -839,7 +844,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       reference_asset_ids: [directAssetId],
       parameters: { prompt: "暮色", model_id: VIDEO_MODEL_ID, aspect_ratio: "1:1" },
     });
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本带入参考与旧参考字段不能混用，请使用 references 提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -848,12 +853,12 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, indexedAssetId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W missing");
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: true } });
     const blocked = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
-    expect(blocked.code).toBe(400);
+    expect(blocked.code).toBe(1034);
     expect(blocked.msg).toBe("参考素材不存在或无权访问");
     // 恢复素材但替换为视频类型（文本声明 image）：类型复核拒绝
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: false, type: "video" } });
     const mismatch = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
-    expect(mismatch.code).toBe(400);
+    expect(mismatch.code).toBe(1035);
     expect(mismatch.msg).toBe("参考素材类型与声明不符");
   });
 
@@ -1123,7 +1128,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1132,7 +1137,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 unsupported", { refMediaType: "video" });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1141,7 +1146,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 mix refs", { withImageMention: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("音频与图片参考不可混用");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1152,7 +1157,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", [
       { role: "reference", asset_id: directAssetId, type: "image" },
     ]));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("音频与图片参考不可混用");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1161,7 +1166,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId), AUDIO_LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("参考音频最多 1 个");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1180,7 +1185,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const audioOk = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
     expect(audioOk.code).toBe(200);
     const imageBlocked = await createJob(projectId, imageJobBody("gen-i", "暮色"));
-    expect(imageBlocked.code).toBe(400);
+    expect(imageBlocked.code).toBe(1035);
     expect(imageBlocked.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
   });
 
@@ -1256,12 +1261,12 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 missing");
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: true } });
     const blocked = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
-    expect(blocked.code).toBe(400);
+    expect(blocked.code).toBe(1034);
     expect(blocked.msg).toBe("参考素材不存在或无权访问");
     // 恢复素材但替换为 video 类型（文本声明 audio）：类型复核拒绝
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: false, type: "video" } });
     const mismatch = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
-    expect(mismatch.code).toBe(400);
+    expect(mismatch.code).toBe(1035);
     expect(mismatch.msg).toBe("参考素材类型与声明不符");
   });
 

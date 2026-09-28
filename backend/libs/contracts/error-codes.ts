@@ -125,6 +125,12 @@ export const ERROR_EXTRACT_FAILED = "extract_failed";
 export const ERROR_UPLOAD_FAILED = "upload_failed";
 export const ERROR_ENQUEUE_FAILED = "enqueue_failed";
 
+/** IKIPWU：重试接口命中任务存在但状态不可重试（非终态 failed/partially_succeeded）——
+ *  与「资源不存在」（越权/不存在隐藏口径）分开，用户可区分真实原因。 */
+export const ERROR_JOB_NOT_RETRYABLE_STATUS = "job_not_retryable_status";
+/** IKIPWU：重试接口无可补失败槽——失败项已全部由历史重试补成功，再点重试没有可补的对象。 */
+export const ERROR_JOB_ALREADY_RETRIED = "job_already_retried";
+
 /** 任务失败 error.details 的上游 HTTP 状态键（IKIHGQ 起源于 audio_mix，IKIMN8 全族收口）：
  *  worker 在上游非 2xx（失败异常链带 HttpStatusException cause）时写入数值状态，非 HTTP 失败
  *  不写该键；重试换凭证判定读它（401 = 当前凭证失效，重试替换为请求头带来的新凭证），
@@ -218,6 +224,10 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_AUDIO_SPEED_FAILED]: 1052,
   // IKIHPJ 注：落码前全仓 grep 1053 零命中（无并行分支撞号），音视频合成兜底码取下一空号 1053（父规格 IKIHMX）。
   [ERROR_AUDIO_VIDEO_MUX_FAILED]: 1053,
+  // IKIPWU 注：1053 已由音视频合成占用（落码前全仓 grep 1054/1055 零命中，无并行分支撞号），
+  // 重试接口「任务存在但不可重试」两类真实原因专用码取下一空号 1054/1055。
+  [ERROR_JOB_NOT_RETRYABLE_STATUS]: 1054,
+  [ERROR_JOB_ALREADY_RETRIED]: 1055,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -509,6 +519,8 @@ export const ERROR_CODES: Record<number, string> = {
   1051: "音频混合失败，请重试", // audio_mix_failed
   1052: "音频调速失败，请重试", // audio_speed_failed（火山 MediaKit adjust-audio-speed；1051 已由音频混合占用）
   1053: "音视频合成失败，请重试", // audio_video_mux_failed（火山 MediaKit mux-audio-video）
+  1054: "当前状态不允许重试，仅失败或部分成功的任务可重试", // job_not_retryable_status（IKIPWU 重试接口专用）
+  1055: "该任务的失败项已全部重试，无需再次重试", // job_already_retried（IKIPWU 重试接口专用）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
@@ -640,8 +652,8 @@ const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   // 这里是数值→状态），而按名字取会受 noUncheckedIndexedAccess 影响。域内改码时两处一起改。
   [1001]: 402,
   // 同键异载荷是**冲突**（同一把钥匙配了不同载荷），不是参数写错：409 让客户端一眼分辨
-  // 「重试没带上原样的载荷」与「载荷本身不合法」。走这条投影的是建任务端点
-  // （重试端点目前不抛 DomainError，不经过这里）。
+  // 「重试没带上原样的载荷」与「载荷本身不合法」。建任务与重试端点的业务失败都抛
+  // DomainError 经过这里（IKIPWT）。
   [IDEMPOTENCY_CONFLICT_CODE]: 409,
 };
 

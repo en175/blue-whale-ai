@@ -2,9 +2,14 @@ import { createHash } from "node:crypto";
 
 import {
   ERROR_INVALID_REFERENCE,
+  ERROR_JOB_ALREADY_RETRIED,
+  ERROR_JOB_NOT_RETRYABLE_STATUS,
   IDEMPOTENCY_CONFLICT_CODE,
+  PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
+  errorCodeToNumeric,
   fail,
+  messageOf,
   ok,
 } from "@lib/contracts";
 import type {
@@ -37,7 +42,7 @@ export async function handleRetryGenerationJob(
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if (idempotencyKey.trim() === "") {
-    return fail(400, "Idempotency-Key 不能为空");
+    return fail(PARAM_MISSING_CODE, "Idempotency-Key 不能为空");
   }
   const requestHash = generationRetryRequestHash(projectId, jobId, body);
   const gate = deps.materialGate;
@@ -57,7 +62,19 @@ export async function handleRetryGenerationJob(
     return ok(retry);
   }
   if (retry.kind === "material_blocked") {
-    return fail(400, retry.reason, { code: ERROR_INVALID_REFERENCE });
+    return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), retry.reason, {
+      code: ERROR_INVALID_REFERENCE,
+    });
+  }
+  if (retry.kind === "not_retryable_status" || retry.kind === "already_retried") {
+    // IKIPWU：任务存在但不可重试——专用错误码 + 码表文案，与「资源不存在」分开可区分。
+    // null 仍只留给不存在/非本人（越权隐藏口径），不泄露存在性。
+    const stringCode =
+      retry.kind === "not_retryable_status"
+        ? ERROR_JOB_NOT_RETRYABLE_STATUS
+        : ERROR_JOB_ALREADY_RETRIED;
+    const code = errorCodeToNumeric(stringCode);
+    return fail(code, messageOf(code));
   }
   // 剩余分支：{ kind: "idempotency_conflict" }
   return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");

@@ -391,7 +391,7 @@ describe("generation command repo retry", () => {
     });
   });
 
-  it("逻辑槽已由历史重试补成功时不再创建重试 Job", async () => {
+  it("逻辑槽已由历史重试补成功时不再创建重试 Job（IKIPWU：带 already_retried 原因返回）", async () => {
     const createJob = vi.fn();
     const createSlot = vi.fn();
     const tx = {
@@ -460,9 +460,49 @@ describe("generation command repo retry", () => {
       "hash-303",
     );
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: "already_retried" });
     expect(createJob).not.toHaveBeenCalled();
     expect(createSlot).not.toHaveBeenCalled();
+  });
+
+  it("原 job 状态非终态 failed/partially_succeeded 时带 not_retryable_status 原因返回（IKIPWU）", async () => {
+    const createJob = vi.fn();
+    const tx = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: 55n,
+          user_id: 9n,
+          type: "image",
+          source: "bottom_dock",
+          status: "succeeded",
+          input: {},
+          expected_output_count: 1,
+        }),
+        create: createJob,
+      },
+      generation_output_slots: { findMany: vi.fn(), create: vi.fn() },
+      cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
+      command_idempotency: { findUnique: vi.fn(), create: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    };
+    const repo = createGenerationCommandRepo(prisma as never);
+
+    const result = await repo.retryJob(
+      "300",
+      "55",
+      "9",
+      "retry-304",
+      "hash-304",
+    );
+
+    expect(result).toEqual({ kind: "not_retryable_status" });
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   it("replays the committed receipt after a concurrent idempotency race", async () => {

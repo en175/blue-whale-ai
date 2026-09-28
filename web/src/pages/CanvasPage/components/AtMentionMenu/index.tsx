@@ -83,10 +83,12 @@ export default function AtMentionMenu({
   const searching = query.trim().length > 0;
   const matched = filterAtMentionItems(items, query);
   const normalizedQuery = query.trim().toLowerCase();
-  // 两个分区独立过滤，不跨分区去重。
+  // 两个分区独立过滤，不跨区去重。IKIQGR：已引用文本附件按名称/编号/正文全文匹配——全文走基类
+  // searchText（与画布分区同一通道，忽略大小写只 includes）；仅用于匹配，菜单行不展示正文片段。
   const matchedRefs = referencedItems.filter(item => !normalizedQuery
     || item.name.toLowerCase().includes(normalizedQuery)
-    || item.badge.toLowerCase().includes(normalizedQuery));
+    || item.badge.toLowerCase().includes(normalizedQuery)
+    || (item.searchText?.toLowerCase().includes(normalizedQuery) ?? false));
 
   useEffect(() => {
     setQuery(editorQuery);

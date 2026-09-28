@@ -16,7 +16,9 @@ import {
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
+  PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
+  errorCodeToNumeric,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoTaskType,
@@ -1513,7 +1515,7 @@ export async function handleCreateGenerationJob(
   // 每次提交都是新任务，不强制要求这个头（老客户端不受影响）。
   const normalizedKey = (idempotencyKey ?? "").trim();
   if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
-    return fail(400, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
+    return fail(PARAM_MISSING_CODE, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
   }
   const idempotency: CreateJobIdempotency | null =
     normalizedKey === ""
@@ -1535,11 +1537,16 @@ export async function handleCreateGenerationJob(
   const type = body.type as GenerationType;
   const strategy = strategies[type];
   if (!strategy)
-    return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
+    return fail(errorCodeToNumeric(ERROR_UNSUPPORTED_TYPE), "暂不支持该生成类型", {
+      code: ERROR_UNSUPPORTED_TYPE,
+    });
   // IKG6EK / ADR-0088：`prompt_doc` 已退役——提交方给正文全文，引用标记转移在接纳管线完成。
   // 为兼容当前版本前端，**携带时不报错、直接不读**（发了也不生效）；前端票要求其停止发送。
   const validateErr = strategy.validate(body);
-  if (validateErr) return fail(400, validateErr.message, { code: validateErr.code });
+  if (validateErr)
+    return fail(errorCodeToNumeric(validateErr.code), validateErr.message, {
+      code: validateErr.code,
+    });
 
   // 4. 模型白名单（别名解析 + 能力目录命中）
   const params = body.parameters as GenerationParameters;
@@ -1548,7 +1555,7 @@ export async function handleCreateGenerationJob(
   const resolvedModelId = resolveModelId(type, params.model_id);
   const whitelist = await deps.models.listEnabledByType(type);
   if (!whitelist.some((m) => m.model_id === resolvedModelId)) {
-    return fail(400, "model_id 不在可用模型白名单或已停用", {
+    return fail(errorCodeToNumeric(ERROR_MODEL_UNAVAILABLE), "model_id 不在可用模型白名单或已停用", {
       code: ERROR_MODEL_UNAVAILABLE,
     });
   }
@@ -1571,14 +1578,18 @@ export async function handleCreateGenerationJob(
         ? validateVideo(body, capability)
         : validateAudioReferences(body, capability.features);
     if (revalidated)
-      return fail(400, revalidated.message, { code: revalidated.code });
+      return fail(errorCodeToNumeric(revalidated.code), revalidated.message, {
+        code: revalidated.code,
+      });
   }
   // ADR-0085（IKESD6）/ IKH4B8：提示词长度上限**模型配置优先**，未配置回落缺省
   // （图片/视频 4000、音频 3000）；错误码与旧 validateCommon 一致。
   // 「提示词」= 提交上来的正文全文（ADR-0088：前端已把附件与输入拼好），故全仓只此一道闸。
   const maxPromptLength = resolvePromptMaxLength(type, capability?.features?.max_prompt_length ?? null);
   if (promptText.length > maxPromptLength)
-    return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "prompt 无效", {
+      code: ERROR_INVALID_INPUT,
+    });
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
   // 越界值在接纳当下 4xx 返回（capability_unsupported_* 细分码 + 可用值文案），不拖到 worker 执行期。
   // 仅视频校验时长；图片无时长。SceneCard 路径已有同源 checkCapabilityLimit（下一步迁移共享）。
@@ -1618,7 +1629,7 @@ export async function handleCreateGenerationJob(
         videoTaskType ? { ...checked, task_type: videoTaskType } : checked,
       );
       if (limitErr) {
-        return fail(400, limitErr.reason, {
+        return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
           code: limitErr.code,
         });
       }
@@ -1639,9 +1650,13 @@ export async function handleCreateGenerationJob(
       const ratioId = isStr(params.aspect_ratio) ? params.aspect_ratio : null;
       const mapped = mapImageChannelRequest(mapping, sizeId, ratioId);
       if (!mapped.ok) {
-        return fail(400, "模型、分辨率与宽高比组合不受支持", {
-          code: ERROR_INVALID_REFERENCE_TYPE,
-        });
+        return fail(
+          errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE),
+          "模型、分辨率与宽高比组合不受支持",
+          {
+            code: ERROR_INVALID_REFERENCE_TYPE,
+          },
+        );
       }
     }
   }
@@ -1651,7 +1666,7 @@ export async function handleCreateGenerationJob(
   // 否则上游档位命名不遵循 <N>p 时会被误伤（如火山 Seedance 2.0 的 4k 档）。
   const refs = resolveReferenceAssets(body, type, imageReferenceMax);
   if (!refs.ok) {
-    return fail(400, refs.value.message, {
+    return fail(errorCodeToNumeric(refs.value.code), refs.value.message, {
       code: refs.value.code,
       params: refs.value.params,
     });
@@ -1669,12 +1684,16 @@ export async function handleCreateGenerationJob(
     ...(capability ? { capability } : {}),
   });
   if (!textIndexRefs.ok) {
-    return fail(400, textIndexRefs.value.message, {
-      code: textIndexRefs.value.code,
-      ...(textIndexRefs.value.params
-        ? { params: textIndexRefs.value.params }
-        : {}),
-    });
+    return fail(
+      errorCodeToNumeric(textIndexRefs.value.code),
+      textIndexRefs.value.message,
+      {
+        code: textIndexRefs.value.code,
+        ...(textIndexRefs.value.params
+          ? { params: textIndexRefs.value.params }
+          : {}),
+      },
+    );
   }
   const referenceAssetIds = textIndexRefs.value.merged;
   // IKFM3W §10 / IKFM41 §11：视频/音频目标以合并后的 references 供 composeInput 与正文标签
@@ -1696,14 +1715,14 @@ export async function handleCreateGenerationJob(
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
       // IKG6EK / ADR-0088：doc 退役后不再按 doc 声明细化缺失索引文案，统一走通用信封。
-      return fail(400, "参考素材不存在或无权访问", {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
     }
     // 图片参考必须是图片（worker 同源校验）；视频参考允许图/视频（首尾帧必须图片已由
     // strategy.validate 校验 role 类型，普通参考可含视频/音频）。
     if (type === "image" && resolved.some((a) => a.type !== "image")) {
-      return fail(400, "参考素材必须是图片", {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材必须是图片", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
     }
@@ -1720,13 +1739,13 @@ export async function handleCreateGenerationJob(
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
       // IKG6EK / ADR-0088：doc 退役后不再按 doc 声明细化缺失索引文案，统一走通用信封。
-      return fail(400, "参考素材不存在或无权访问", {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
     }
     const resolvedTypes = new Map(ids.map((id, i) => [id, resolved[i]!.type]));
     if (textProvided.some((item) => resolvedTypes.get(item.assetId) !== item.mediaType)) {
-      return fail(400, "参考素材类型与声明不符", {
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
     }
@@ -1742,7 +1761,7 @@ export async function handleCreateGenerationJob(
     if (localIds.length > 0) {
       const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
       if (resolvedRefs.length !== localIds.length) {
-        return fail(400, "参考素材不存在或无权访问", {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
           code: ERROR_INVALID_REFERENCE,
         });
       }
@@ -1751,7 +1770,7 @@ export async function handleCreateGenerationJob(
         (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
       );
       if (mismatch) {
-        return fail(400, "参考素材类型与声明不符", {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
           code: ERROR_INVALID_REFERENCE_TYPE,
         });
       }
@@ -1789,10 +1808,14 @@ export async function handleCreateGenerationJob(
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...effectiveBody, parameters: { ...params, prompt: promptText } });
     if (promptText.length > maxPromptLength) {
-      return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
+      return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "prompt 无效", {
+        code: ERROR_INVALID_INPUT,
+      });
     }
     if (compiledError) {
-      return fail(400, compiledError.message, { code: compiledError.code });
+      return fail(errorCodeToNumeric(compiledError.code), compiledError.message, {
+        code: compiledError.code,
+      });
     }
   }
   // IKG6EK / ADR-0088：正文引用标记转移。提交方给的正文里素材引用写作 &<身份>&，
@@ -1822,7 +1845,9 @@ export async function handleCreateGenerationJob(
       : {}),
   });
   if (!target.ok) {
-    return fail(400, target.value.message, { code: target.value.code });
+    return fail(errorCodeToNumeric(target.value.code), target.value.message, {
+      code: target.value.code,
+    });
   }
 
   const parsedPlanRefs = parseReferences(effectiveBody.references);
@@ -1889,7 +1914,9 @@ export async function handleCreateGenerationJob(
       jobType: type,
     });
     if (reason !== null) {
-      return fail(400, reason, { code: ERROR_INVALID_REFERENCE });
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), reason, {
+        code: ERROR_INVALID_REFERENCE,
+      });
     }
   }
 

@@ -2,12 +2,13 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import AtMentionMenu from './index';
+import AtMentionMenu, { type ReferencedMentionItem } from './index';
+import type { AtMentionItem } from '../../atMention';
 
 let root: Root;
 let host: HTMLDivElement;
 const image = { id: 'node-1', assetId: '101', kind: 'image' as const, name: '图片节点 1' };
-async function render(overrides: { onClose?: () => void; onEscapeClose?: () => void } = {}) {
+async function render(overrides: { onClose?: () => void; onEscapeClose?: () => void; items?: AtMentionItem[]; referencedItems?: Array<ReferencedMentionItem> } = {}) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   host = document.createElement('div');
   document.body.append(host);
@@ -17,13 +18,22 @@ async function render(overrides: { onClose?: () => void; onEscapeClose?: () => v
   await act(async () => root.render(createElement(AtMentionMenu, {
     anchorRef: { current: host }, editorQuery: '', onClose: overrides.onClose ?? vi.fn(), onSelect,
     onEscapeClose: overrides.onEscapeClose,
-    items: [image, { id: 'v1', kind: 'video', name: '视频节点 1' }, { id: 't1', kind: 'text', name: '文本节点 1' }],
-    referencedItems: [{ ...image, badge: '图片1' }], onSelectReferenced,
+    items: overrides.items ?? [image, { id: 'v1', kind: 'video', name: '视频节点 1' }, { id: 't1', kind: 'text', name: '文本节点 1' }],
+    referencedItems: overrides.referencedItems ?? [{ ...image, badge: '图片1' }], onSelectReferenced,
     disabledKinds: ['video'],
   })));
   return { onSelect, onSelectReferenced };
 }
 afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); });
+
+/** 在搜索框输入检索词（原生 value setter + input 事件触发 React onChange） */
+async function search(text: string) {
+  const input = document.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 it('同一菜单直接呈现已引用和原有四种素材分类', async () => {
   await render();
@@ -57,6 +67,71 @@ it('统一搜索保留跨分区重复项、类型分组及禁用状态，点击�
   expect(onSelect).toHaveBeenCalledWith(image);
 });
 
+
+it('IKIPWV：无标题文本附件按正文关键词命中，既有标题/编号匹配不变', async () => {
+  await render({ referencedItems: [
+    { ...image, badge: '图片1' },
+    { id: 'ta1', kind: 'text', name: '', badge: '文本1', searchText: '深海之下，一只蓝鲸缓缓游过，尾鳍轻摆' },
+    { id: 'ta2', kind: 'text', name: '分镜草稿', badge: '文本2', searchText: '开场：城市夜景空镜' },
+  ] });
+  const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
+  // 正文关键词 → 命中无标题文本附件（标题与编号均不含该词）
+  await search('蓝鲸');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本1');
+  // 画布素材分区不误报（画布节点名不含该词）
+  expect([...document.querySelectorAll('[data-testid="at-mention-canvas-item"]')]).toHaveLength(0);
+  // 既有编号匹配不变
+  await search('文本2');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本2');
+  // 既有标题匹配不变
+  await search('分镜');
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本2');
+});
+
+/** IKIQGR：正文检索通道为全文（不截断），构造 >200 字正文验证尾段命中 */
+const LONG_BODY_TAIL = '深海观测日志';
+const LONG_BODY = `${'雾'.repeat(220)}OceanWhale ${LONG_BODY_TAIL}`;
+
+it('IKIQGR：已引用文本附件按全文检索——超过前 200 字的尾段命中且忽略大小写，行内不展示正文片段', async () => {
+  await render({ referencedItems: [
+    { ...image, badge: '图片1' },
+    { id: 'ta-long', kind: 'text', name: '', badge: '文本1', searchText: LONG_BODY },
+  ] });
+  const refRows = () => [...document.querySelectorAll('[data-testid="mention-ref-item"]')];
+  // 尾段关键词（第 200 字之后）命中无标题文本附件
+  await search(LONG_BODY_TAIL);
+  expect(refRows()).toHaveLength(1);
+  expect(refRows()[0].textContent).toContain('文本1');
+  // 菜单只显示名称+编号，不展示正文片段
+  expect(refRows()[0].textContent).not.toContain(LONG_BODY_TAIL);
+  // 忽略大小写：正文 OceanWhale 与查询互为大小写变体仍命中
+  await search('oceanwhale');
+  expect(refRows()).toHaveLength(1);
+  await search('OCEANWHALE');
+  expect(refRows()).toHaveLength(1);
+});
+
+it('IKIQGR：画布分区无标题文本节点按正文全文命中；媒体项不按正文误命中', async () => {
+  await render({
+    items: [
+      image,
+      { id: 't-plain', kind: 'text', name: '文本节点', searchText: LONG_BODY },
+    ],
+    referencedItems: [],
+  });
+  const canvasRows = () => [...document.querySelectorAll('[data-testid="at-mention-canvas-item"]')];
+  await search(LONG_BODY_TAIL);
+  expect(canvasRows()).toHaveLength(1);
+  expect(canvasRows()[0].textContent).toContain('文本节点');
+  // 媒体项不携带正文检索字段：名称不含关键词即不出现
+  expect(canvasRows().some((row) => row.textContent?.includes('图片节点 1'))).toBe(false);
+  // 大小写不敏感同样命中画布文本节点
+  await search('oceanwhale');
+  expect(canvasRows()).toHaveLength(1);
+});
 
 it('搜索框向上导航从最后一个可选项开始，跳过禁用分类', async () => {
   await render();
