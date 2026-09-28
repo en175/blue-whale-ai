@@ -10,7 +10,7 @@ In the integration worktree, synchronize to the target recorded in task metadata
 scripts/sync-task-from-origin.sh sync --target-branch <recorded-release> --json
 ```
 
-If the target changed a path that this task removed or replaced, use `sync --keep-conflicts` to leave the rebase active. Inspect both versions and resolve every conflicted path, stage the result, then run `git -c core.editor=true rebase --continue` until the branch is restored. Run `scripts/sync-task-from-origin.sh complete-resolved --json` and require `SYNCED_RESOLVED`. This checks that the final tree differs from Git's automatic merge only within the recorded conflict paths and retains the recovery references; review the content of those paths before proceeding.
+If the target changed a path that this task removed or replaced, use `sync --keep-conflicts` to leave the rebase active. Inspect both versions and resolve every conflicted path, stage the result, then run `git -C <integration-worktree> -c core.editor=true rebase --continue` until the branch is restored. The explicit task directory lets Git hooks identify the worktree while HEAD is detached. Run `scripts/sync-task-from-origin.sh complete-resolved --json` and require `SYNCED_RESOLVED`. This checks that the final tree differs from Git's automatic merge only within the recorded conflict paths and retains the recovery references; review the content of those paths before proceeding.
 
 Record the resulting HEAD and fixed diff baseline for step 7. After review fixes, commit through `scripts/commit-task-for-review.sh`. Run the testing strategy's completion verification and check its receipt against the current HEAD.
 
