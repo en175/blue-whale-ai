@@ -58,6 +58,8 @@ Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接�
 
 `run` 将 JSON 凭证写到 Git common dir 下的 `blue-whale/verification/<HEAD>.json`，权限为仅当前用户可读写，不提交仓库。凭证记录：
 
+定位指针：`$(git rev-parse --git-common-dir)/blue-whale/verification/$(git rev-parse HEAD).json`，JSON 含 `status` 字段；跑长验证后读该凭证文件确认结论，不要依赖管道尾输出或 shell 退出码。
+
 - HEAD、merge-base、changed-files 哈希和验证层级；
 - 实际命令、每次尝试的退出码与耗时，以及 full 内部分阶段耗时；
 - Node/平台/架构、缓存开关和外部输入摘要组成的输入指纹；
