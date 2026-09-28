@@ -652,8 +652,8 @@ const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   // 这里是数值→状态），而按名字取会受 noUncheckedIndexedAccess 影响。域内改码时两处一起改。
   [1001]: 402,
   // 同键异载荷是**冲突**（同一把钥匙配了不同载荷），不是参数写错：409 让客户端一眼分辨
-  // 「重试没带上原样的载荷」与「载荷本身不合法」。走这条投影的是建任务端点
-  // （重试端点目前不抛 DomainError，不经过这里）。
+  // 「重试没带上原样的载荷」与「载荷本身不合法」。建任务与重试端点的业务失败都抛
+  // DomainError 经过这里（IKIPWT）。
   [IDEMPOTENCY_CONFLICT_CODE]: 409,
 };
 
