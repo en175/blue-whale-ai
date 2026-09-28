@@ -182,4 +182,36 @@ describe("createFinalizeJob（IKIZQC）", () => {
       output_asset_ids: [901n],
     });
   });
+
+  it("★ IKIZQD: 已有成片尝试 → 附带取该成片任务当前状态（checking 判 1014 的数据源）", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ status: "checking" });
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue(jobRow({ final_job_id: 305n })),
+        findUnique,
+      },
+    } as never;
+
+    const repo = createFinalizeCommandRepo(prisma);
+    const sample = await repo.findFinalizeSourceJob({ projectId: "1", userId: "42", jobId: "302" });
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 305n }, select: { status: true } }),
+    );
+    expect(sample).toMatchObject({ final_job_id: "305", final_job_status: "checking" });
+  });
+
+  it("IKIZQD: 成片行已删/不存在 → final_job_status 为 null（回落 already_attempted 语义）", async () => {
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue(jobRow({ final_job_id: 305n })),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    } as never;
+
+    const repo = createFinalizeCommandRepo(prisma);
+    const sample = await repo.findFinalizeSourceJob({ projectId: "1", userId: "42", jobId: "302" });
+
+    expect(sample).toMatchObject({ final_job_id: "305", final_job_status: null });
+  });
 });

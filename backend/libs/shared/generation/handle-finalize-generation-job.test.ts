@@ -47,6 +47,7 @@ function sampleJob(overrides: Partial<FinalizeSourceJob> = {}): FinalizeSourceJo
     type: "video",
     video_stage: "sample",
     final_job_id: null,
+    final_job_status: null,
     finalize_deadline_ms: DEADLINE_FUTURE,
     output_asset_ids: [901n],
     input: SAMPLE_INPUT,
@@ -286,6 +287,34 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     const res = await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "key-1", deps);
 
     expect(res.code).toBe(1057);
+  });
+
+  it("★ IKIZQD: 上次成片提交结果不明（final job 停在 checking 锁定）→ 1014 submission_unknown，零创建零扣费", async () => {
+    const { deps, createFinalizeJob } = buildDeps({
+      sample: sampleJob({ final_job_id: "305", final_job_status: "checking" }),
+      quote: quoteStub().quote,
+    });
+
+    const res = await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "key-2", deps);
+
+    // 契约 §六：核对锁定期间再次提交被拒（1014）——不发第二条上游尝试，预扣不动。
+    expect(res.code).toBe(1014);
+    expect(res.msg).toBe("无法确认视频任务是否已提交");
+    expect(createFinalizeJob).not.toHaveBeenCalled();
+  });
+
+  it("★ IKIZQD: 成片 checking 期间报价 → 空报价双 null（按钮禁用，不报错）", async () => {
+    const { quote } = quoteStub();
+    const { deps } = buildDeps({
+      sample: sampleJob({ final_job_id: "305", final_job_status: "checking" }),
+      quote,
+    });
+
+    const res = await handleFinalizeGenerationJobQuote("42", "1", "302", {}, deps);
+
+    expect(res.code).toBe(200);
+    expect(res.data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
   });
 
   it("★ G06: 缺可信截止 → 1058；已过期 → 1058（码表文案）", async () => {

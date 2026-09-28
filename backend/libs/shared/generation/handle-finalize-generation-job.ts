@@ -19,7 +19,9 @@ import {
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_QUOTE_STALE,
+  ERROR_SUBMISSION_UNKNOWN,
   IDEMPOTENCY_CONFLICT_CODE,
+  JOB_STATUS_CHECKING,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_FINAL_RESOLUTION,
@@ -130,6 +132,12 @@ export function finalizePreconditionOf(sample: FinalizeSourceJob):
     return { ok: false, code: ERROR_INVALID_INPUT, message: "仅样片任务可生成成片" };
   }
   if (sample.final_job_id !== null) {
+    if (sample.final_job_status === JOB_STATUS_CHECKING) {
+      // IKIZQD（契约 §六）：上次成片提交结果不明、任务核对锁定期间——再次提交按
+      // submission_unknown(1014) 拒绝，绝不发第二条上游尝试，也释放不了那笔预扣（核对定夺）。
+      const numeric = errorCodeToNumeric(ERROR_SUBMISSION_UNKNOWN);
+      return { ok: false, code: ERROR_SUBMISSION_UNKNOWN, message: messageOf(numeric) };
+    }
     // G05/G08：已有成片尝试（含失败占位）——首版一张样片至多一条，不复用同 Draft ID 重试。
     const numeric = errorCodeToNumeric(ERROR_FINALIZE_ALREADY_ATTEMPTED);
     return { ok: false, code: ERROR_FINALIZE_ALREADY_ATTEMPTED, message: messageOf(numeric) };

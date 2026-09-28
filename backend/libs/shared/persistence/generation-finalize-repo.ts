@@ -34,6 +34,9 @@ export interface FinalizeSourceJob {
   type: string;
   video_stage: string | null;
   final_job_id: string | null;
+  /** IKIZQD：已有成片尝试时该成片任务此刻的状态——'checking'（提交结果不明锁定）时
+   *  提交侧按 1014 submission_unknown 拒绝再次提交；无成片尝试为 null。 */
+  final_job_status: string | null;
   finalize_deadline_ms: bigint | null;
   /** 已转存判定：publishVideoResult 在同事务里写 output_asset_ids 与 succeeded。 */
   output_asset_ids: PrismaJsonArray | null;
@@ -86,6 +89,16 @@ export async function findFinalizeSourceJob(
     },
   });
   if (!row) return null;
+  // IKIZQD：成片尝试在核对锁定（checking）期间，再次提交须按 1014 拒绝——这里顺带取
+  // 该成片任务的当前状态（无尝试 / 行已删为 null）。
+  let finalJobStatus: string | null = null;
+  if (row.final_job_id != null) {
+    const finalRow = await prisma.generation_jobs.findUnique({
+      where: { id: row.final_job_id },
+      select: { status: true },
+    });
+    finalJobStatus = finalRow?.status ?? null;
+  }
   return {
     id: row.id.toString(),
     project_id: row.project_id?.toString() ?? "0",
@@ -94,6 +107,7 @@ export async function findFinalizeSourceJob(
     type: row.type,
     video_stage: row.video_stage,
     final_job_id: row.final_job_id?.toString() ?? null,
+    final_job_status: finalJobStatus,
     finalize_deadline_ms: row.finalize_deadline_ms,
     output_asset_ids: (row.output_asset_ids ?? null) as PrismaJsonArray | null,
     input: (row.input ?? {}) as Record<string, unknown>,

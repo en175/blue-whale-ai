@@ -193,8 +193,12 @@ public class NewApiVideoClient {
             if (!response.isSuccessful()) {
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
+                // IKIZQD：非 2xx 挂 HttpStatusException cause（与 poll 同款）——提交相据此区分
+                // 「网关已明确拒绝」（有 HTTP 答复，可按明确失败释放）与「结果不明」（超时/
+                // 网络中断无可用响应，进 checking 锁定）。超时/网络分支不挂 cause，缺键即不明。
                 throw new VideoProviderError(code,
-                        "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated);
+                        "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated,
+                        new HttpStatusException(response.code()));
             }
 
             JsonNode parsed;
@@ -268,8 +272,11 @@ public class NewApiVideoClient {
             if (!response.isSuccessful()) {
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
+                // IKIZQD：非 2xx 挂 HttpStatusException cause（submit/poll 同款）——提交相据此
+                // 区分「网关已明确拒绝」与「结果不明」（见 submit 注释）。
                 throw new VideoProviderError(code,
-                        "new-api 成片提交失败: HTTP " + response.code() + " body=" + truncated);
+                        "new-api 成片提交失败: HTTP " + response.code() + " body=" + truncated,
+                        new HttpStatusException(response.code()));
             }
 
             JsonNode parsed;

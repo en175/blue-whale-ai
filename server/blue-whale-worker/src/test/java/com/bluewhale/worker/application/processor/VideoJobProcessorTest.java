@@ -70,6 +70,9 @@ class VideoJobProcessorTest {
         processor = new VideoJobProcessor(
                 stateMachine, finalizer, assetSource, credentialService,
                 videoClient, mediaRelay, producer);
+        // IKIZQD：提交相统一先落「提交中」标记——默认放行，个别用例覆写为 false 测失租停止。
+        lenient().doReturn(true).when(stateMachine)
+                .markSubmissionAttempt(anyString(), anyString(), anyLong());
     }
 
     // ========== cancel-before-dispatch ==========
@@ -2096,6 +2099,165 @@ class VideoJobProcessorTest {
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
                 anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
+
+    // ========== IKIZQD：提交结果不明 → checking 锁定（超时/响应丢失/落库失败/失租） ==========
+
+    @Test
+    @DisplayName("IKIZQD: finalize 超时（无可用响应）→ 留 checking：不 failVideo、不落句柄、不重排、记 submission_unknown")
+    void finalSubmitTimeoutStaysChecking() {
+        ClaimedVideoJobDto claim = finalClaim("145", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("145"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 成片提交超时"))
+                .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
+
+        processor.handle("145");
+
+        // ★ 调网关前先落「提交中」标记；超时 = 结果不明 → checking 锁定：
+        //   不按空 provider_task_id 重提（markProviderSubmitted 零调用）、不自动退款
+        //   （failVideoJob 零调用——它会把 charge_state 置 released）。
+        verify(stateMachine).markSubmissionAttempt(eq("145"), anyString(), eq(1L));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verifyNoInteractions(producer);
+        verify(stateMachine).appendLog(eq("145"), eq("submission_unknown"), eq("checking"),
+                anyString(), any());
+    }
+
+    @Test
+    @DisplayName("IKIZQD: finalize 响应丢失（2xx 但缺 task_id / 非 JSON）→ 同超时：留 checking 锁定")
+    void finalSubmitResponseLostStaysChecking() {
+        ClaimedVideoJobDto claim = finalClaim("146", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("146"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        // 网关已受理但响应不可用（无 HTTP 状态 cause）——与超时同为「结果不明」。
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 视频提交响应缺少 task_id"))
+                .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
+
+        processor.handle("146");
+
+        verify(videoClient, times(1)).finalize(eq("token"), eq("task-sample-9"));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verifyNoInteractions(producer);
+    }
+
+    @Test
+    @DisplayName("IKIZQD: finalize 已受理但 markProviderSubmitted 落库失败 → 留 checking（绝不 failVideo 退款）")
+    void finalSubmitPersistFailureStaysChecking() {
+        ClaimedVideoJobDto claim = finalClaim("147", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("147"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-final-x", "queued")).when(videoClient)
+                .finalize(eq("token"), eq("task-sample-9"));
+        doThrow(new RuntimeException("DB down"))
+                .when(stateMachine).markProviderSubmitted(eq("147"), anyString(), eq(1L), eq("task-final-x"));
+
+        processor.handle("147");
+
+        // ★ 落库失败 = 网关已受理但句柄未落——结果不明：failVideo 守卫此刻能命中 checking 行，
+        //   一旦放行就是「提前退款」，必须截在 processor 里。
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verifyNoInteractions(producer);
+        verify(stateMachine).appendLog(eq("147"), eq("submission_unknown"), eq("checking"),
+                anyString(), any());
+    }
+
+    @Test
+    @DisplayName("IKIZQD: 失租（markSubmissionAttempt 守卫未命中）→ 停止：零网关调用、零句柄、零重排")
+    void submissionMarkerMissStopsBeforeGateway() {
+        ClaimedVideoJobDto claim = finalClaim("148", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("148"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(false).when(stateMachine)
+                .markSubmissionAttempt(eq("148"), anyString(), eq(1L));
+
+        processor.handle("148");
+
+        // ★ 迟到 Worker 的 fence：核对标记未落 = 失租/已提交/已终态——绝不发网关。
+        verify(videoClient, never()).finalize(anyString(), anyString());
+        verify(videoClient, never()).submit(anyString(), any());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verifyNoInteractions(producer);
+    }
+
+    @Test
+    @DisplayName("IKIZQD: 网关明确拒绝（带 HTTP 状态 cause）→ 明确失败：failVideoJob 释放该阶段预扣")
+    void finalSubmitDefiniteRejectionFailsStage() {
+        ClaimedVideoJobDto claim = finalClaim("149", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("149"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_QUOTA_EXHAUSTED,
+                "new-api 成片提交失败: HTTP 403 body=quota",
+                new NewApiVideoClient.HttpStatusException(403)))
+                .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
+
+        processor.handle("149");
+
+        // ★ 网关已答复业务回绝 = 明确失败（未建任务）→ 顶层 catch → failVideoJob
+        //   （failVideoGuard 已放宽到 checking，落 failed + charge released）。
+        verify(stateMachine).failVideoJob(eq("149"), eq(GenerationError.ERROR_QUOTA_EXHAUSTED),
+                anyString(), any(), eq("video-worker"), eq(1L));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("IKIZQD: 提交顺序——「提交中」标记先于网关调用（持久化先于副作用）")
+    void submissionMarkerPrecedesGatewayCall() {
+        ClaimedVideoJobDto claim = finalClaim("150", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("150"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 成片提交超时"))
+                .when(videoClient).finalize(eq("token"), eq("task-sample-9"));
+
+        processor.handle("150");
+
+        org.mockito.InOrder order = inOrder(stateMachine, videoClient);
+        order.verify(stateMachine).markSubmissionAttempt(eq("150"), anyString(), eq(1L));
+        order.verify(videoClient).finalize(eq("token"), eq("task-sample-9"));
+    }
+
+    @Test
+    @DisplayName("IKIZQD: 普通视频 submit 超时 → 同骨架留 checking（样片 draft 提交共用此路径）")
+    void normalSubmitTimeoutStaysChecking() {
+        Map<String, Object> input = baseInput();
+        ClaimedVideoJobDto claim = videoClaim("151", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("151"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "new-api 视频提交超时"))
+                .when(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
+
+        processor.handle("151");
+
+        verify(stateMachine).markSubmissionAttempt(eq("151"), anyString(), eq(1L));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verifyNoInteractions(producer);
+    }
+
+    @Test
+    @DisplayName("IKIZQD: 本地前置校验失败（final 缺样片任务 ID）→ 不落提交标记、不占上游尝试")
+    void finalSubmitLocalValidationSkipsMarker() {
+        ClaimedVideoJobDto claim = finalClaim("152", null, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("152"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+
+        processor.handle("152");
+
+        // ★ 仅本地前置校验且未发网关 → 直接失败释放，不进入 checking（不占尝试）。
+        verify(stateMachine, never()).markSubmissionAttempt(anyString(), anyString(), anyLong());
+        verify(stateMachine).failVideoJob(eq("152"), eq(GenerationError.ERROR_INVALID_INPUT),
+                anyString(), any(), eq("video-worker"), eq(1L));
+    }
+
 
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
                                            String providerTaskId, int pollCount,
