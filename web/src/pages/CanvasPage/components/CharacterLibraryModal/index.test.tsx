@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CharacterLibraryModal from './index';
@@ -27,14 +27,26 @@ vi.mock('@/api/http', () => ({ isApiError: () => false }));
 let root: Root;
 let mountNode: HTMLDivElement;
 
-async function renderLibrary() {
+async function renderLibrary(props?: Partial<ComponentProps<typeof CharacterLibraryModal>>) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(CharacterLibraryModal, { onClose: vi.fn() }));
+    root.render(createElement(CharacterLibraryModal, { onClose: vi.fn(), ...props }));
     await Promise.resolve();
   });
+}
+
+async function flushEffects() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function expectImgWithoutCrossOrigin(img: Element | null): asserts img is HTMLImageElement {
+  if (!(img instanceof HTMLImageElement)) throw new Error('preview img missing');
+  expect(img.getAttribute('crossorigin')).toBeNull();
 }
 
 beforeEach(() => {
@@ -109,5 +121,45 @@ describe('CharacterLibraryModal', () => {
     expect(uploadMaterialLibraryFiles).toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith('素材服务异常，请重试');
     toastError.mockRestore();
+  });
+
+  it('虚拟人像库缩略图不带 crossorigin', async () => {
+    await renderLibrary();
+    await flushEffects();
+
+    expectImgWithoutCrossOrigin(document.body.querySelector('img[alt="人像图片"]'));
+  });
+
+  it('真人人像库分组内缩略图不带 crossorigin', async () => {
+    listAssetGroups.mockImplementation(({ Filter }: { Filter: { GroupType: string } }) =>
+      Promise.resolve({
+        Items: Filter.GroupType === 'LivenessFace'
+          ? [{ Id: 'lg-1', Name: '真人A', GroupType: 'LivenessFace' }]
+          : [{ Id: 'group-1', Name: '虚拟人像', GroupType: 'AIGC' }],
+      }),
+    );
+    listAssets.mockImplementation(({ Filter }: { Filter: { GroupType: string } }) =>
+      Promise.resolve({
+        Items: Filter.GroupType === 'LivenessFace'
+          ? [{ Id: 'live-1', Name: '真人图片', URL: 'https://example.test/live.jpg', GroupId: 'lg-1', AssetType: 'Image', Status: 'Active' }]
+          : [{ Id: 'image-1', Name: '人像图片', URL: 'https://example.test/image.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' }],
+      }),
+    );
+
+    await renderLibrary({ enableRealPersonTab: true });
+    await flushEffects();
+
+    const realTab = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('真人人像库'));
+    if (!(realTab instanceof HTMLButtonElement)) throw new Error('real tab missing');
+    await act(async () => { realTab.click(); });
+    await flushEffects();
+
+    const groupCard = document.body.querySelector<HTMLElement>(`.${styles.groupCard}`);
+    if (!groupCard) throw new Error('group card missing');
+    await act(async () => { groupCard.click(); });
+    await flushEffects();
+
+    expectImgWithoutCrossOrigin(document.body.querySelector('img[alt="真人图片"]'));
   });
 });
