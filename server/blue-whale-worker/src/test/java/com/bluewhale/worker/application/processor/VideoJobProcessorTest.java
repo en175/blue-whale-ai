@@ -1920,6 +1920,57 @@ class VideoJobProcessorTest {
                 any(), anyString(), anyLong());
     }
 
+    // ========== IKIZQ9：样片快照 × 带参考素材（三模式 Draft 组装） ==========
+
+    /** IKIZQ9：样片 job 的 input 快照——sample_mode + 480p + adaptive + 首帧与三类普通参考 + 冻结上限。 */
+    private Map<String, Object> sampleInputWithReferences() {
+        Map<String, Object> input = baseInput();
+        input.put("sample_mode", true);
+        input.put("resolution", "480p");
+        input.put("aspect_ratio", "adaptive");
+        input.put("references", List.of(
+                Map.of("role", "first_frame", "type", "image", "asset_id", "11"),
+                Map.of("role", "reference", "type", "image", "asset_id", "21"),
+                Map.of("role", "reference", "type", "video", "asset_id", "31"),
+                Map.of("role", "reference", "type", "audio", "asset_id", "32")));
+        input.put("reference_limits", Map.of(
+                "image_reference_max", 30,
+                "video_reference_max", 10,
+                "audio_reference_max", 10,
+                "max_reference_duration_sec", 30));
+        return input;
+    }
+
+    @Test
+    @DisplayName("IKIZQ9: 样片快照带参考素材 → Draft 提交体保住 firstFrame/references 且带 draft 标记")
+    void sampleSnapshotWithReferencesKeepsRolesAndDraftFlag() {
+        doAnswer(inv -> {
+            Map<String, AssetEntity> map = new HashMap<>();
+            map.put("11", imageAsset("11", "https://tos.test/first.png"));
+            map.put("21", imageAsset("21", "https://tos.test/ref.png"));
+            map.put("31", videoAsset(1024L, 4000, 1280, 720, "video/mp4"));
+            map.put("32", audioAsset());
+            return map;
+        }).when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+        VideoSubmitInput request = processor.buildSubmitRequest(
+                videoClaim("135", false, null, 0, 0, null, sampleInputWithReferences()));
+
+        // 样片增量（draft/480p）与参考组装互不干扰。单数组语义：帧不落独立字段，
+        // 而是作为带 role 的 reference 条目保序并入（NewApiVideoClient 按 role 出站）。
+        assertThat(request.draft()).isTrue();
+        assertThat(request.resolution()).isEqualTo("480p");
+        assertThat(request.firstFrameImage()).isNull();
+        assertThat(request.lastFrameImage()).isNull();
+        assertThat(request.references()).hasSize(4);
+        assertThat(request.references().get(0).type()).isEqualTo("image");
+        assertThat(request.references().get(0).role()).isEqualTo("first_frame");
+        assertThat(request.references().get(0).url()).isEqualTo("https://tos.test/first.png");
+        assertThat(request.references().get(1).type()).isEqualTo("image");
+        assertThat(request.references().get(2).type()).isEqualTo("video");
+        assertThat(request.references().get(3).type()).isEqualTo("audio");
+    }
+
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
                                            String providerTaskId, int pollCount,
                                            int progress, String parentProviderTaskId) {

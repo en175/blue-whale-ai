@@ -3224,3 +3224,282 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
     expect(quote).not.toHaveBeenCalled();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKIZQ9：样片 × 其余三模式（图生首帧 / 首尾帧 / 全能参考）。
+// 机制本身模式无关（ruleSampleMode 只判 video/480p/单输出/能力位；references 的
+// role 结构、比例闸与分类上限由 validateVideo 复核对样片请求照常执行）——本组钉
+// 的是**组合证据**：三模式样片请求被受理为 video_stage=sample 且 references 原样
+// 冻结；各自素材数量/类型限制在样片下同样 fail closed；入口默认关闭对三模式生效；
+// 同一能力行的普通模式与既有参考素材规则零变化。不创建第五种视频模式。
+// ═══════════════════════════════════════════════════════════════
+describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () => {
+  /** Seedance 2.5 形态能力行：样片位放行（测试注入，运营目录默认仍关闭）+ 首帧/首尾帧
+   *  锁 adaptive + 图/视频/音频参考全开（数量上限对齐官方全能参考边界）。 */
+  const S25_FEATURES = {
+    sample_mode: true,
+    image_reference_max: 30,
+    video_reference: true,
+    video_reference_max: 10,
+    audio_reference: true,
+    audio_reference_max: 10,
+    max_reference_duration_sec: 30,
+    task_types: {
+      first_frame: { allowed_ratios: ["adaptive"] },
+      first_last_frame: { allowed_ratios: ["adaptive"] },
+    },
+  };
+  const S25_CAPABILITY = { features: S25_FEATURES };
+
+  /** 样片化视频 body：480p + sample_mode + 可覆盖比例。 */
+  const sampleBodyWith = (
+    references: unknown,
+    aspectRatio = "adaptive",
+    parameters: Record<string, unknown> = {},
+  ) => ({
+    ...VIDEO_BODY,
+    references,
+    parameters: {
+      ...VIDEO_BODY.parameters,
+      resolution: "480p",
+      sample_mode: true,
+      aspect_ratio: aspectRatio,
+      ...parameters,
+    },
+  });
+
+  /** 按 asset_id 返回对应类型资产（R 组三类素材都能解析出 url 与时长）。 */
+  const typedAssets = vi.fn(async (ids: string[]) =>
+    ids.map((id) => {
+      if (id === "31") return { id, type: "video", url: "https://tos.test/ref.mp4", mime: "video/mp4", size: 100, width: 1280, height: 720, duration: 4, material_id: null };
+      if (id === "32") return { id, type: "audio", url: "https://tos.test/ref.mp3", mime: "audio/mpeg", size: 100, width: null, height: null, duration: 3, material_id: null };
+      return { id, type: "image", url: "https://tos.test/img.png", mime: "image/png", size: 100, width: 1024, height: 1024, duration: null, material_id: null };
+    }));
+
+  const buildSampleVideoDeps = (
+    modelRow: Record<string, unknown> = S25_CAPABILITY,
+    quote?: unknown,
+  ) => {
+    const built = buildVideoDeps(modelRow, quote);
+    vi.mocked(built.deps.assets.resolveInputAssets).mockImplementation(typedAssets);
+    return built;
+  };
+
+  it("★ I 图生首帧样片：references 首帧 + adaptive → 200，受理为 sample 且 references 原样冻结", async () => {
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const body = sampleBodyWith([{ role: "first_frame", asset_id: "11", type: "image" }]);
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.input.sample_mode).toBe(true);
+    expect(cmdArg.input.resolution).toBe("480p");
+    expect(cmdArg.videoStage).toBe("sample");
+    // 不创建第五种模式：沿用既有 references 结构，首帧冻结原样（Worker 按同一 role 组装 Draft）。
+    expect(cmdArg.input.references).toEqual([
+      { role: "first_frame", asset_id: "11", type: "image" },
+    ]);
+  });
+
+  it("★ FL 首尾帧样片：两帧 + adaptive → 200，video_stage=sample 且两帧冻结", async () => {
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const body = sampleBodyWith([
+      { role: "first_frame", asset_id: "11", type: "image" },
+      { role: "last_frame", asset_id: "12", type: "image" },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.input.sample_mode).toBe(true);
+    expect(cmdArg.videoStage).toBe("sample");
+    expect(cmdArg.input.references).toEqual([
+      { role: "first_frame", asset_id: "11", type: "image" },
+      { role: "last_frame", asset_id: "12", type: "image" },
+    ]);
+  });
+
+  it("★ R2 纯音频参考样片 → 200，音频参考冻结（resolveInputAssets 按类型解析 url/时长）", async () => {
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const body = sampleBodyWith(
+      [{ role: "reference", asset_id: "32", type: "audio", duration: 3 }],
+      "16:9",
+    );
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.videoStage).toBe("sample");
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", asset_id: "32", type: "audio", duration: 3 },
+    ]);
+  });
+
+  it("★ R4 图+视频+音频混合参考样片 → 200，三类素材冻结原样", async () => {
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const body = sampleBodyWith(
+      [
+        { role: "reference", asset_id: "21", type: "image" },
+        { role: "reference", asset_id: "31", type: "video", duration: 4 },
+        { role: "reference", asset_id: "32", type: "audio", duration: 3 },
+      ],
+      "16:9",
+    );
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.videoStage).toBe("sample");
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", asset_id: "21", type: "image" },
+      { role: "reference", asset_id: "31", type: "video", duration: 4 },
+      { role: "reference", asset_id: "32", type: "audio", duration: 3 },
+    ]);
+  });
+
+  it("★ 未放行（能力行无 sample_mode 位）+ 首帧 → 400 当前模型未开放样片模式（入口默认关闭对三模式生效）", async () => {
+    const { deps, createJob } = buildSampleVideoDeps({
+      features: { ...S25_FEATURES, sample_mode: undefined },
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", sampleBodyWith([{ role: "first_frame", asset_id: "11", type: "image" }]), null, deps,
+    );
+
+    expect(result.code).toBe(1030);
+    expect(result.msg).toBe("当前模型未开放样片模式");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("样片 + 首帧比例 16:9（2.5 形态锁 adaptive）→ 400 比例闸照常执行", async () => {
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const body = sampleBodyWith([{ role: "first_frame", asset_id: "11", type: "image" }], "16:9");
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(1002);
+    expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("样片 + 音频参考超能力行上限 → 400 分类上限照常执行（不因样片放宽）", async () => {
+    const strict = { features: { ...S25_FEATURES, audio_reference_max: 1 } };
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(strict, quote);
+
+    const body = sampleBodyWith(
+      [
+        { role: "reference", asset_id: "32", type: "audio", duration: 3 },
+        { role: "reference", asset_id: "33", type: "audio", duration: 3 },
+      ],
+      "16:9",
+    );
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, strict, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(1034);
+    expect(result.msg).toContain("参考音频最多 1 个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("样片 + 视频参考但模型 video_reference=false → 400 类型闸照常执行", async () => {
+    const noVideo = { features: { ...S25_FEATURES, video_reference: false } };
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(noVideo, quote);
+
+    const body = sampleBodyWith(
+      [{ role: "reference", asset_id: "31", type: "video", duration: 4 }],
+      "16:9",
+    );
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, noVideo, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(1034);
+    expect(result.msg).toContain("当前模型不支持视频素材参考");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("样片 + 首帧与普通参考并存（单数组 references 现有语义）→ 200 原样冻结，样片分支不新增拦截", async () => {
+    // 现有行为：单数组 references 路径不设「帧 vs 普通参考」互斥（那是旧字段路径的闸）；
+    // 样片分支沿用同一语义——本票只做组合扩展，不在样片下收紧或放宽任何参考规则。
+    const { result: quoteResult, quote } = sampleQuoteStub();
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY, quote);
+
+    const refs = [
+      { role: "first_frame", asset_id: "11", type: "image" },
+      { role: "reference", asset_id: "21", type: "image" },
+    ];
+    const body = sampleBodyWith(refs);
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...body, ...sampleConfirmationOf(body, S25_CAPABILITY, quoteResult) }, null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.videoStage).toBe("sample");
+    expect(cmdArg.input.references).toEqual(refs);
+  });
+
+  it("★ 兼容：同一能力行、同样混合 references 的普通模式（无 sample_mode）→ 200 普通语义零变化", async () => {
+    const { deps, createJob } = buildSampleVideoDeps(S25_CAPABILITY);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      {
+        ...VIDEO_BODY,
+        references: [
+          { role: "reference", asset_id: "21", type: "image" },
+          { role: "reference", asset_id: "31", type: "video", duration: 4 },
+          { role: "reference", asset_id: "32", type: "audio", duration: 3 },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+      videoStage?: string;
+    };
+    expect(cmdArg.videoStage).toBeUndefined();
+    expect(cmdArg.input.sample_mode).toBeUndefined();
+    expect(cmdArg.input.resolution).toBe("720p");
+  });
+});
