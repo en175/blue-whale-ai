@@ -377,6 +377,15 @@ describe("features 扩展键闸门（i2i_model_name / max_prompt_length）", () 
     });
     expect(parsed.ok).toBe(true);
   });
+
+  // IKIZQ7：样片放行位（布尔）——运营在能力行显式声明 true 才放行样片模式。
+  it("create/update：sample_mode 布尔通过、非布尔拒绝、null 放行（清除=回到默认关闭）", () => {
+    const videoBase = { ...createBase, capability_type: "video" };
+    expect(parseModelCreateBody({ ...videoBase, features: { sample_mode: true } }).ok).toBe(true);
+    expect(parseModelCreateBody({ ...videoBase, features: { sample_mode: "yes" } }).ok).toBe(false);
+    expect(parseModelUpdateBody({ features: { sampleMode: 1 } }).ok).toBe(false);
+    expect(parseModelUpdateBody({ features: { sample_mode: null } }).ok).toBe(true);
+  });
 });
 
 describe("seedream 矩阵键闸门（写侧）", () => {

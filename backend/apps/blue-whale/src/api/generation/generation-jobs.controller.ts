@@ -267,7 +267,8 @@ export class GenerationJobsController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return ok({ credits: null });
+      // IKIZQ7：空报价双 null（契约 StageQuoteView：不存在「有版本无价格」）。
+      return ok({ credits: null, quote_revision: null });
     }
     return handleQuoteGenerationJob(user.userId, projectId, body, {
       projects: this.project,

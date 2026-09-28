@@ -16,6 +16,8 @@ import {
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  VIDEO_SAMPLE_RESOLUTION,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
@@ -115,6 +117,9 @@ export interface GenerationParameters {
   duration?: unknown;
   /** IKG0LP：视频是否带音频（用户选择，缺省 true）。能力位 features.audio 允许时才冻结进快照。 */
   generate_audio?: unknown;
+  /** IKIZQ7：样片模式增量参数（契约 video-sample-mode.ts）。undefined/false = 普通视频语义；
+   *  字面 true 时须为 video + 480p + 单输出且能力行已声明 features.sample_mode（默认关闭）。 */
+  sample_mode?: unknown;
 }
 
 export interface CreateGenerationJobBody {
@@ -610,6 +615,57 @@ function validateVideo(
 }
 
 // ---- 策略：按生成类型分派 validate + composeInput。
+
+/** IKIZQ7：样片增量参数的统一判定（报价与创建共用一条；契约 video-sample-mode.ts，金标 G01）。
+ *
+ *  - `absent`：未传或 false → 普通视频语义（现状不动，其他模型/旧请求零影响）；
+ *  - `sample`：字面 true + video + 480p + 单输出 + 能力行已声明 `features.sample_mode`；
+ *  - `rejected`：其余一律拒绝（不降级、不静默改写）——创建侧 400，报价侧空报价。
+ *
+ *  能力位缺省 false = **样片默认关闭**（toFeatures 归一）；放行 = 运营在能力行 features
+ *  里声明 `sample_mode: true`，服务端同步执行门控（父规格 IKIZPZ「范围与门控」）。 */
+export type SampleModeRuling =
+  | { kind: "absent" }
+  | { kind: "sample" }
+  | { kind: "rejected"; code: string; message: string };
+
+export function ruleSampleMode(args: {
+  type: GenerationType;
+  sampleMode: unknown;
+  resolution: unknown;
+  expectedOutputCount: number;
+  /** exactOptionalPropertyTypes：创建侧的 capability 变量可能是 undefined（显式传入合法）。 */
+  capability?: ModelCapabilityView | undefined;
+}): SampleModeRuling {
+  if (args.sampleMode === undefined || args.sampleMode === false) {
+    return { kind: "absent" };
+  }
+  if (args.sampleMode !== true) {
+    return { kind: "rejected", code: ERROR_INVALID_INPUT, message: "sample_mode 无效" };
+  }
+  if (args.type !== "video") {
+    return { kind: "rejected", code: ERROR_UNSUPPORTED_INPUT, message: "样片模式仅支持视频生成" };
+  }
+  if (args.resolution !== VIDEO_SAMPLE_RESOLUTION) {
+    return {
+      kind: "rejected",
+      code: ERROR_INVALID_INPUT,
+      message: `样片模式分辨率必须为 ${VIDEO_SAMPLE_RESOLUTION}`,
+    };
+  }
+  if (args.expectedOutputCount !== 1) {
+    return { kind: "rejected", code: ERROR_INVALID_INPUT, message: "样片仅支持单个输出" };
+  }
+  if (args.capability?.features?.sample_mode !== true) {
+    return {
+      kind: "rejected",
+      code: ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+      message: "当前模型未开放样片模式",
+    };
+  }
+  return { kind: "sample" };
+}
+
 // 新增生成类型只需新增一个 strategy 并注册到 strategies，不再改动既有校验器（IKDZI1）。 ----
 
 interface ComposeInputContext {
@@ -1448,7 +1504,7 @@ const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
  *  scene-cards.controller 的 method:path:content）；那边键少可以逐个拼，建任务的载荷是
  *  一整个生成参数对象、键还随类型变，所以这里用「排序后序列化」达到同一效果。
  *  （重试端点摘要的是**原始 body 字符串**，天然没这个问题；建任务拿到的是已解析对象。） */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
@@ -1564,6 +1620,21 @@ export async function handleCreateGenerationJob(
   // IKHEXG：上限键并入 `image_reference_max`（原 max_reference_images 不复存在）；
   // 图片/视频链路的缺省是 DEFAULT_IMAGE_REFERENCE_MAX = 10（音频链路的 1 是另一个常量）。
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
+  // IKIZQ7：样片增量门控（fail closed）——与报价入口共用 ruleSampleMode 一条判定。
+  // 能力行未声明 features.sample_mode（默认关闭）或请求形态不合契约（非 video / 非 480p /
+  // 非字面 true）→ 400 明确拒绝样片提交；未传或 false 零影响（普通视频创建语义）。
+  const sampleRuling = ruleSampleMode({
+    type,
+    sampleMode: params.sample_mode,
+    resolution: params.resolution,
+    expectedOutputCount,
+    capability,
+  });
+  if (sampleRuling.kind === "rejected") {
+    return fail(errorCodeToNumeric(sampleRuling.code), sampleRuling.message, {
+      code: sampleRuling.code,
+    });
+  }
   const imageReferenceMax =
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
   // ADR-0086 / IKHBDO：视频/音频参考限制**只认能力行 features**。上方 strategy.validate 的预检

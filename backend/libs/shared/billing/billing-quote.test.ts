@@ -70,7 +70,8 @@ describe('createBillingQuote', () => {
     expect(quote).toHaveBeenCalledWith(expect.objectContaining({ tier: 'free' }));
     // 少给折扣是钱漏，不能静默
     expect(warn).toHaveBeenCalled();
-    expect(result).toEqual({ credits: 100n, catalogVersion: 3 });
+    // IKIZQ7：结果附报价侧实际生效的 tier（quote_revision 组成要素），等级解析失败时为 free
+    expect(result).toEqual({ credits: 100n, catalogVersion: 3, tier: 'free' });
   });
 
   it('★ 算不出价（UNPRICEABLE，定价漏配）→ 返回 null，不抛不阻断', async () => {
@@ -114,7 +115,7 @@ describe('createBillingQuote', () => {
     })(CTX);
 
     // 余额为 0 也照样报得出价：契约里报价与余额无关（余额是 Hold 的职责）
-    expect(result).toEqual({ credits: 9_999n, catalogVersion: 4 });
+    expect(result).toEqual({ credits: 9_999n, catalogVersion: 4, tier: 'free' });
     expect(queryBalance).not.toHaveBeenCalled();
   });
 });

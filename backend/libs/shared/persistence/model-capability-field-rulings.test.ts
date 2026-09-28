@@ -200,6 +200,16 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/generation/handle-create-generation-job.test.ts",
   },
+  sample_mode: {
+    consumer:
+      "backend/libs/shared/generation/handle-create-generation-job.ts（ruleSampleMode：创建侧样片门控，" +
+      "位不为 true → 400 capability_unsupported_param）与 handle-quote-generation-job.ts（报价侧同一判定，" +
+      "未放行 → 空报价双 null）。契约 backend/libs/contracts/video-sample-mode.ts（IKIZQ7）。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr 布尔裁定）",
+    fallback: "false（样片默认关闭：能力行未声明即拒绝样片提交/不给样片报价；放行 = 运营显式配置）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
 };
 
 /** 能力行里存在、但 `toFeatures` 不产出的字段：上面的枚举机制**看不见**它们，改动不会被拦。

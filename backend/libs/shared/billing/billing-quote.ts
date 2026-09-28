@@ -45,7 +45,12 @@ export interface BillingQuoteDeps {
   logger?: { warn: (message: string) => void };
 }
 
-export type BillingQuote = (ctx: BillingQuoteContext) => Promise<BillingQuoteResult | null>;
+/** 报价结果（附报价侧实际生效的 tier）。tier 是装配层解析的，随结果带回——
+ *  IKIZQ7：报价入口要用「同一份等级」组装 quote_revision（契约 §2：冻结输入 +
+ *  能力规则 + 用户等级 + 目录版本），不能在入口再解析一次（两次解析可能不一致）。 */
+export type BillingQuote = (
+  ctx: BillingQuoteContext,
+) => Promise<(BillingQuoteResult & { tier: string }) | null>;
 
 export function createBillingQuote(deps: BillingQuoteDeps): BillingQuote {
   return async (ctx) => {
@@ -63,7 +68,7 @@ export function createBillingQuote(deps: BillingQuoteDeps): BillingQuote {
     }
 
     try {
-      return await deps.client.quote({
+      const result = await deps.client.quote({
         userId: Number(ctx.userId),
         modelId: ctx.modelId,
         taskType: ctx.taskType,
@@ -71,6 +76,7 @@ export function createBillingQuote(deps: BillingQuoteDeps): BillingQuote {
         tier,
         ...(ctx.ruleSnapshot !== undefined ? { ruleSnapshot: ctx.ruleSnapshot } : {}),
       });
+      return { ...result, tier };
     } catch (error) {
       // 算不出价多半是**定价漏配**（契约：INVALID_ARGUMENT / UNPRICEABLE），
       // 也可能是 billing 不可用（UNAVAILABLE）。两者都降级，但都要留下痕迹：

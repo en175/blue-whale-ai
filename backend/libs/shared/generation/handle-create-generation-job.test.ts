@@ -2935,3 +2935,117 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
     ]);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKIZQ7：样片增量门控（fail closed）——能力未放行 / 形态不合契约一律 400 明确拒绝；
+// 未传或 false 零影响（普通视频创建语义）。与报价入口共用 ruleSampleMode 一条判定。
+// ═══════════════════════════════════════════════════════════════
+describe("handleCreateGenerationJob 样片门控（IKIZQ7）", () => {
+  const SAMPLE_BODY = (parameters: Record<string, unknown> = {}) => ({
+    ...VIDEO_BODY,
+    parameters: {
+      ...VIDEO_BODY.parameters,
+      resolution: "480p",
+      sample_mode: true,
+      ...parameters,
+    },
+  });
+
+  it("★ 未放行（能力行无 sample_mode 位，默认关闭）→ 400 capability_unsupported_param，不建任务", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob("u1", "p1", SAMPLE_BODY(), null, deps);
+
+    expect(result.code).toBe(1030);
+    expect(result.msg).toBe("当前模型未开放样片模式");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ 放行（features.sample_mode=true）+ 480p → 200，受理为单输出 480p 视频任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: { sample_mode: true } });
+
+    const result = await handleCreateGenerationJob("u1", "p1", SAMPLE_BODY(), null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as {
+      type: string;
+      expectedOutputCount: number;
+      input: Record<string, unknown>;
+    };
+    expect(cmdArg.type).toBe("video");
+    expect(cmdArg.expectedOutputCount).toBe(1);
+    expect(cmdArg.input.resolution).toBe("480p");
+  });
+
+  it("resolution 非 480p → 400（样片固定 480p，不降级、不静默改写）", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: { sample_mode: true } });
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      SAMPLE_BODY({ resolution: "1080p" }),
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(1002);
+    expect(result.msg).toBe("样片模式分辨率必须为 480p");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["字符串 \"true\"", "true"],
+    ["null", null],
+    ["数字 1", 1],
+  ])("sample_mode 非字面 true（%s）→ 400", async (_label, bad) => {
+    const { deps, createJob } = buildVideoDeps({ features: { sample_mode: true } });
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      SAMPLE_BODY({ sample_mode: bad }),
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(1002);
+    expect(result.msg).toBe("sample_mode 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("非视频类型携带 sample_mode=true → 400（样片仅视频四模式）", async () => {
+    const deps = buildDeps().deps;
+    const createJob = (deps as { command: { createJob: ReturnType<typeof vi.fn> } }).command.createJob;
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        parameters: { ...AUDIO_BODY.parameters, sample_mode: true },
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(1004);
+    expect(result.msg).toBe("样片模式仅支持视频生成");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ 旧请求兼容：sample_mode=false → 普通视频创建语义（与现有 720p 路径同形）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      SAMPLE_BODY({ sample_mode: false, resolution: "720p" }),
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.resolution).toBe("720p");
+  });
+});
