@@ -7,6 +7,12 @@ const WEB_SOURCE = /^web\/src\/.*\.(?:ts|tsx|css|json)$/;
 // 于是改 BFF 的 controller 会落进「未归类」，门禁一条 backend 的 typecheck 或测试都不会跑。
 // 这和 web/scripts 那个洞是同一个形状——有验证手段，只是选择器够不着它。
 const BACKEND_SOURCE = /^backend\/(?:apps|libs)\/.*\.ts$/;
+// backend 的**构建/启动守卫脚本**（`backend/package.json` 的 `prestart` 等挂钩）。
+// ⚠️ 与上面**同一个形状的洞的第三个实例**：`BACKEND_SOURCE` 只认 `apps|libs` 下的 `.ts`，
+// 而 `backend/scripts/check-dist-aliases.mjs` 是 `.mjs`、且在 `scripts/` 下 —— 两个条件都不满足，
+// 于是改它落进「未归类」→ `verify-change-scope` 直接抛 `UNCLASSIFIED_PATH` 退出码 2。
+// （前两个实例：`scripts/check-contract-breaking.sh`、web 的 tooling 脚本。）
+const BACKEND_TOOLING_FILE = /^backend\/scripts\/.*\.mjs$/;
 // Java 生成 worker（`server/blue-whale-worker/`，独立 Maven 工程，不在 pnpm workspace 内）。
 // **整棵树此前没有归类规则**：改它会在 PR 阶段落进「未归类」兜底升为 full，看似安全，
 // 但构建出的计划里一条 Java 命令都没有——TS 侧的改动有 typecheck/测试兜底，
@@ -71,7 +77,7 @@ function sourceArea(file) {
   if (BILLING_SOURCE.test(file)) return "billing-java";
   if (CONTRACTS_SOURCE.test(file)) return "contracts";
   if (NODE_SOURCE.test(file)) return "node";
-  if (BACKEND_SOURCE.test(file)) return "backend";
+  if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
   if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file)) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
