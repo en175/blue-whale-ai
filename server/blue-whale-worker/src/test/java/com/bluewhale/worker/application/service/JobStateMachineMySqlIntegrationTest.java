@@ -1,10 +1,12 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
-import com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.AudioTrimContract;
+import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -124,6 +126,8 @@ class JobStateMachineMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService service;
+    /** 工具族领取管道（IKIWP8）：与 service 共用同一个真库 jobMapper。 */
+    static JobClaimService claimService;
     static JdbcTemplate jdbc;
     static GenerationJobMapper jobMapper;
     static AssetMapper assetMapper;
@@ -224,8 +228,9 @@ class JobStateMachineMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         service = ctx.getBean(JobStateMachineService.class);
-        jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
         jobMapper = ctx.getBean(GenerationJobMapper.class);
+        claimService = new JobClaimService(jobMapper);
+        jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
         assetMapper = ctx.getBean(AssetMapper.class);
         jobLogMapper = ctx.getBean(GenerationJobLogMapper.class);
         projectEventMapper = ctx.getBean(ProjectEventMapper.class);
@@ -454,7 +459,8 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
                     WorkerClock.now().minusSeconds(10));
 
-            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
                     String.valueOf(id), "worker-1");
 
             assertThat(result).isPresent();
@@ -471,7 +477,8 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedJob(7L, "audio_trim", "unexpected_source", "queued", 0L,
                     WorkerClock.now().minusSeconds(10));
 
-            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
                     String.valueOf(id), "worker-1");
 
             assertThat(result).isPresent();
@@ -485,7 +492,8 @@ class JobStateMachineMySqlIntegrationTest {
                     WorkerClock.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
 
-            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
                     String.valueOf(id), "worker-new");
 
             assertThat(result).isPresent();
@@ -498,7 +506,9 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedJob(7L, "audio", "dock", "queued", 0L,
                     WorkerClock.now().minusSeconds(10));
 
-            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
+            assertThat(claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                    String.valueOf(id), "w")).isEmpty();
         }
 
         @Test
@@ -512,7 +522,9 @@ class JobStateMachineMySqlIntegrationTest {
                     """,
                     WorkerClock.now().plusMinutes(5), id);
 
-            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
+            assertThat(claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                    String.valueOf(id), "w")).isEmpty();
         }
 
         @Test
@@ -526,7 +538,8 @@ class JobStateMachineMySqlIntegrationTest {
                     """,
                     WorkerClock.now().minusMinutes(1), id);
 
-            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
                     String.valueOf(id), "worker-fresh");
 
             assertThat(result).isPresent();
@@ -544,11 +557,12 @@ class JobStateMachineMySqlIntegrationTest {
                     WHERE id=?
                     """, id);
 
-            Optional<ClaimedAudioTrimJobDto> result = service.claimAudioTrim(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
                     String.valueOf(id), "worker-1");
 
             assertThat(result).isPresent();
-            ClaimedAudioTrimJobDto dto = result.get();
+            ClaimedJob dto = result.get();
             assertThat(dto.fencingToken()).isEqualTo(1L);
             assertThat(dto.pollCount()).isEqualTo(7);
             assertThat(dto.progress()).isEqualTo(33);
@@ -561,7 +575,9 @@ class JobStateMachineMySqlIntegrationTest {
             long id = seedJob(7L, "audio_trim", "dock", "queued", 0L,
                     WorkerClock.now().plusMinutes(5));
 
-            assertThat(service.claimAudioTrim(String.valueOf(id), "w")).isEmpty();
+            assertThat(claimService.claim(
+                    ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                    String.valueOf(id), "w")).isEmpty();
         }
     }
 
@@ -609,13 +625,15 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Test
-        @DisplayName("media_extract 孤儿（processing + lease null）→ claimMediaExtract 接管")
+        @DisplayName("media_extract 孤儿（processing + lease null）→ claim 接管")
         void orphan_mediaExtract() {
             long id = seedJob(9L, "media_extract", "dock", "processing", 0L,
                     WorkerClock.now().minusSeconds(10));
             jdbc.update("UPDATE generation_jobs SET lease_owner='old' WHERE id=?", id);
 
-            Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract(
+            Optional<ClaimedJob> result = claimService.claim(
+                    ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                            jobMapper::claimMediaExtractCas),
                     String.valueOf(id), "worker-x");
 
             assertThat(result).isPresent();
@@ -1129,7 +1147,8 @@ class JobStateMachineMySqlIntegrationTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         NewApiMediaKitMixAudioClient gateway = mock(NewApiMediaKitMixAudioClient.class);
         TosAudioMediaRelay relay = mock(TosAudioMediaRelay.class);
-        var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(), gateway, relay, producer);
+        var processor = new AudioMixJobProcessor(service, claimService, jobMapper,
+                new GenerationCredentialService(), gateway, relay, producer);
         for (String providerTaskId : new String[] { null, "provider-already-submitted" }) {
             long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
                     WorkerClock.now().minusSeconds(10), 99L, "{\"provider_credential\":\"sk-frozen\"}");
@@ -1208,8 +1227,8 @@ class JobStateMachineMySqlIntegrationTest {
         when(relay.persist("https://volc/old.mp3", "9", "mp3"))
                 .thenReturn(new TosAudioMediaRelay.StoredAudio("https://cdn/old.mp3", "gen/old.mp3",
                         "audio/mpeg", 500L, "0123456789abcdef0123456789abcdef"));
-        var processor = new MediaExtractJobProcessor(service, new AssetSourceService(assetMapper),
-                credentials, client, relay, producer);
+        var processor = new MediaExtractJobProcessor(service, claimService, jobMapper,
+                new AssetSourceService(assetMapper), credentials, client, relay, producer);
 
         processor.handle(String.valueOf(retryId));
 
@@ -1501,7 +1520,10 @@ class JobStateMachineMySqlIntegrationTest {
         // 复活租约（IKIHKH：owner+fence 未变即放行，真实通道）→ 旧快照参数 CAS 必须拒绝。
         long renewedId = seedJob(9L, "media_extract", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
-        var claimed = service.claimMediaExtract(String.valueOf(renewedId), "worker-old");
+        var claimed = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                String.valueOf(renewedId), "worker-old");
         assertThat(claimed).isPresent();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 renewedId);
@@ -1517,7 +1539,10 @@ class JobStateMachineMySqlIntegrationTest {
         // 场景二（对照，孤儿接管语义保持）：领取 → 租约过期 → 读候选快照 → 不续租 → 同参数 CAS 成功
         long orphanId = seedJob(9L, "media_extract", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
-        assertThat(service.claimMediaExtract(String.valueOf(orphanId), "worker-old")).isPresent();
+        assertThat(claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                String.valueOf(orphanId), "worker-old")).isPresent();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 orphanId);
         GenerationJobEntity orphanSnap = jobMapper.findCandidateByTypeOnly(orphanId, "media_extract");
@@ -1534,7 +1559,9 @@ class JobStateMachineMySqlIntegrationTest {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10), 99L,
                 "{\"source_node_id\":\"source\",\"output_format\":\"mp3\",\"inputs\":[{\"asset_id\":\"11\",\"node_id\":\"source\",\"url\":\"https://tos/a.mp3\"},{\"asset_id\":\"12\",\"url\":\"https://tos/b.mp3\"}]}");
-        var first = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        var first = claimService.claim(
+                ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
+                String.valueOf(jobId), "mix-worker");
         assertThat(first).isPresent();
         assertThat(first.get().input().get("source_node_id")).isEqualTo("source");
         assertThat(service.markProviderSubmitted(String.valueOf(jobId), "mix-worker",
@@ -1544,7 +1571,9 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc.update("UPDATE generation_jobs SET next_action_at=? WHERE id=?",
                 WorkerClock.now().minusSeconds(10), jobId);
         assertThat(jobMapper.listDueAudioMixJobIds(100, 120)).contains(jobId);
-        var second = service.claimAudioMix(String.valueOf(jobId), "mix-worker");
+        var second = claimService.claim(
+                ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
+                String.valueOf(jobId), "mix-worker");
         assertThat(second).isPresent();
         assertThat(second.get().providerTaskId()).isEqualTo("provider-mix-1");
         assertThat(service.publishAudioMixResult(new PublishMediaExtractDto(
@@ -1615,7 +1644,8 @@ class JobStateMachineMySqlIntegrationTest {
                         "0123456789abcdef0123456789abcdef");
             });
             GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-            var processor = new AudioMixJobProcessor(service, new GenerationCredentialService(),
+            var processor = new AudioMixJobProcessor(service, claimService, jobMapper,
+                    new GenerationCredentialService(),
                     new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(base.get())), relay, producer);
 
             processor.handle(String.valueOf(jobId));
@@ -1660,8 +1690,14 @@ class JobStateMachineMySqlIntegrationTest {
                 eq(jobId), eq(AudioMixContract.TAG), anyList());
         var competingClaims = new JobClaimService(competingMapper);
         try (var pool = Executors.newFixedThreadPool(2)) {
-            var first = pool.submit(() -> competingClaims.claimAudioMix(String.valueOf(jobId), "mix-worker-a"));
-            var second = pool.submit(() -> competingClaims.claimAudioMix(String.valueOf(jobId), "mix-worker-b"));
+            var first = pool.submit(() -> competingClaims.claim(
+                    ClaimSpec.bySources(AudioMixContract.TAG, 420,
+                            List.of(AudioMixContract.SOURCE), competingMapper),
+                    String.valueOf(jobId), "mix-worker-a"));
+            var second = pool.submit(() -> competingClaims.claim(
+                    ClaimSpec.bySources(AudioMixContract.TAG, 420,
+                            List.of(AudioMixContract.SOURCE), competingMapper),
+                    String.valueOf(jobId), "mix-worker-b"));
             var claims = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
             assertThat(seenTokens).containsExactlyInAnyOrder(0L, 0L);
             assertThat(claims.stream().filter(Optional::isPresent).count()).isEqualTo(1);
@@ -1680,10 +1716,14 @@ class JobStateMachineMySqlIntegrationTest {
     void audioMixLateFenceCannotOverwriteNewOwner() {
         long jobId = seedJob(9L, "audio_mix", "dock", "queued", 0L,
                 WorkerClock.now().minusSeconds(10));
-        var first = service.claimAudioMix(String.valueOf(jobId), "mix-worker-a").orElseThrow();
+        var first = claimService.claim(
+                ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
+                String.valueOf(jobId), "mix-worker-a").orElseThrow();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=?, next_action_at=? WHERE id=?",
                 WorkerClock.now().minusSeconds(10), WorkerClock.now().minusSeconds(10), jobId);
-        var second = service.claimAudioMix(String.valueOf(jobId), "mix-worker-b").orElseThrow();
+        var second = claimService.claim(
+                ClaimSpec.bySources(AudioMixContract.TAG, 420, List.of(AudioMixContract.SOURCE), jobMapper),
+                String.valueOf(jobId), "mix-worker-b").orElseThrow();
         assertThat(second.fencingToken()).isEqualTo(first.fencingToken() + 1);
 
         assertThat(service.failMediaExtractJob(new FailMediaExtractDto(

@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageEraseContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageEraseError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEraseClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +28,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -75,7 +79,13 @@ public class ImageEraseJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
+    /** 领取规格（IKIWP8 / ADR-0119）。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(ImageEraseContract.SOURCE);
+
     private final JobStateMachineService stateMachine;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitEraseClient mediaKitEraseClient;
@@ -85,12 +95,17 @@ public class ImageEraseJobProcessor implements JobProcessor {
 
     public ImageEraseJobProcessor(
             JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitEraseClient mediaKitEraseClient,
             TosMediaStorage tosService
     ) {
         this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                ImageEraseContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.mediaKitEraseClient = mediaKitEraseClient;
@@ -108,6 +123,14 @@ public class ImageEraseJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 image_erase job。
      * <p>
      * claim 在 try 外（IKC9EJ 同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -115,16 +138,16 @@ public class ImageEraseJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedImageEraseJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimImageErase(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[image_erase] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedImageEraseJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[image_erase] 已领取 jobId={} token={}", claim.id(), claim.fencingToken());
 
         try {
@@ -137,7 +160,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
         }
     }
 
-    private void processClaimedJob(ClaimedImageEraseJobDto claim) {
+    private void processClaimedJob(ClaimedJob claim) {
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（§15.2：按场景三/四键恒在；此处为 worker 兜底防御）。
@@ -333,7 +356,7 @@ public class ImageEraseJobProcessor implements JobProcessor {
     }
 
     /** 失败处理：与图片任务同构走通用 failJob（details.raw 透传原始原因）。 */
-    private void failClaimed(ClaimedImageEraseJobDto claim, String code, String msg) {
+    private void failClaimed(ClaimedJob claim, String code, String msg) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
         stateMachine.failJob(claim.id(), code, msg, details,

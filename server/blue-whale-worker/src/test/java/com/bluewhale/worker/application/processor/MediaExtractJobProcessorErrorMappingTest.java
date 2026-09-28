@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
@@ -15,6 +17,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,6 +56,8 @@ import static org.mockito.Mockito.*;
 class MediaExtractJobProcessorErrorMappingTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitExtractAudioClient extractAudioClient;
@@ -72,7 +77,8 @@ class MediaExtractJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new MediaExtractJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper,
+                new AssetSourceService(assetMapper),
                 credentialService, extractAudioClient, mediaRelay, producer);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
@@ -90,26 +96,26 @@ class MediaExtractJobProcessorErrorMappingTest {
                 .thenReturn(source);
     }
 
-    private ClaimedMediaExtractJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount, int progress) {
         return makeClaim(input, providerTaskId, pollCount, progress, null);
     }
 
-    private ClaimedMediaExtractJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount, int progress,
                                                 String parentProviderTaskId) {
-        return new ClaimedMediaExtractJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "media_extract", providerTaskId, false,
+                "worker-1", 5L, pollCount, progress, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount, int progress) {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount, progress)));
     }
 
@@ -125,7 +131,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -137,7 +143,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
@@ -285,7 +291,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且结果 URL 齐全 → 不提交，直接转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-1")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded",
@@ -316,7 +322,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-fail")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new ExtractAudioTaskObservation("failed", null, null,
@@ -336,7 +342,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-race")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -352,7 +358,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-gone")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new MediaExtractError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -388,7 +394,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
     void parentReuseIncompleteResult_fallThrough() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-empty")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-empty"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded", null, null, null, null));
@@ -407,7 +413,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-stale")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded",
@@ -429,7 +435,7 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimMediaExtract(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input(), null, 0, 0, "amk-parent-guard")));
         when(extractAudioClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(new ExtractAudioTaskObservation("succeeded",
@@ -794,7 +800,8 @@ class MediaExtractJobProcessorErrorMappingTest {
     @DisplayName("TOS 未配置 → 1044（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         MediaExtractJobProcessor noRelayProcessor = new MediaExtractJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper,
+                new AssetSourceService(assetMapper),
                 credentialService, extractAudioClient, null, producer);
         stubPollClaim(input(), 3, 7);
         when(extractAudioClient.poll("sk-frozen-token", "amk-task-1"))

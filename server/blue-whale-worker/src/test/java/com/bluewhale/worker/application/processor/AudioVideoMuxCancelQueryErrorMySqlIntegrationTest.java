@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
@@ -106,6 +107,9 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
+    /** 工具族领取管道（IKIWP8）：与 realService 共用同一个真库 jobMapper（取自同一 Spring 上下文）。 */
+    static JobClaimService claimService;
+    static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
     /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、直连 service）。 */
@@ -194,6 +198,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         realService = ctx.getBean(JobStateMachineService.class);
+        realJobMapper = ctx.getBean(GenerationJobMapper.class);
+        claimService = new JobClaimService(realJobMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -285,7 +291,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
             return null;
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper,
+                credentials, gateway, relay, producer);
         return new WiredProcessor(processor, spyService, objects);
     }
 
@@ -431,8 +438,8 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
-                mock(GenerationMessageProducer.class));
+        var processor = new AudioVideoMuxJobProcessor(spyService, claimService, realJobMapper,
+                credentials, gateway, relay, mock(GenerationMessageProducer.class));
         throwOnPostTransferCancelQuery(spyService, jobId);
 
         processor.handle(String.valueOf(jobId));

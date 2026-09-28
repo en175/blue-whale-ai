@@ -1,9 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -13,6 +15,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.slf4j.Logger;
@@ -24,6 +27,7 @@ import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -48,7 +52,13 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
+    /** 领取规格（IKIWP8 / ADR-0119）：候选 = type + 单源白名单；租约 420s。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(AudioVideoMuxContract.SOURCE);
+
     private final JobStateMachineService stateMachine;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final GenerationCredentialService credentials;
     private final NewApiMediaKitMuxAudioVideoClient gateway;
     private final TosVideoMediaRelay relay;
@@ -60,11 +70,16 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
     long publishSettleProbeDelayMs = 500;
 
     public AudioVideoMuxJobProcessor(JobStateMachineService stateMachine,
+                                     JobClaimService claimService,
+                                     GenerationJobMapper jobMapper,
                                      GenerationCredentialService credentials,
                                      NewApiMediaKitMuxAudioVideoClient gateway,
                                      TosVideoMediaRelay relay,
                                      @Qualifier("audioVideoMuxMessageProducer") GenerationMessageProducer producer) {
         this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                AudioVideoMuxContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.credentials = credentials;
         this.gateway = gateway;
         this.relay = relay;
@@ -74,11 +89,19 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     @Override public String tag() { return AudioVideoMuxContract.TAG; }
 
+    /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedMediaExtractJobDto> claimed = stateMachine.claimAudioVideoMux(jobId, workerId);
+        Optional<ClaimedJob> claimed = claimService.claim(claimSpec, jobId, workerId);
         if (claimed.isEmpty()) return;
-        ClaimedMediaExtractJobDto job = claimed.get();
+        ClaimedJob job = claimed.get();
         try {
             runStep(job);
         } catch (Exception error) {
@@ -99,7 +122,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         }
     }
 
-    private void runStep(ClaimedMediaExtractJobDto job) {
+    private void runStep(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
         Object credential = job.input().get("provider_credential");
         if (!(credential instanceof String frozen) || frozen.isBlank()) {
@@ -117,7 +140,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         else poll(job, token);
     }
 
-    private void submit(ClaimedMediaExtractJobDto job, String token) {
+    private void submit(ClaimedJob job, String token) {
         FrozenSnapshot snapshot = frozenSnapshot(job.input());
         if (snapshot == null) {
             fail(job, GenerationError.ERROR_INVALID_INPUT, "音视频合成输入快照非法");
@@ -162,7 +185,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
     private record FrozenSnapshot(String audioUrl, String videoUrl, String videoAssetId,
                                   boolean isAudioReserve, String sync, long submitAttempt) {}
 
-    private void poll(ClaimedMediaExtractJobDto job, String token) {
+    private void poll(ClaimedJob job, String token) {
         MuxAudioVideoTaskObservation observed;
         try {
             observed = gateway.poll(token, job.providerTaskId());
@@ -296,7 +319,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     /** 转存已成功返回但本次执行不再发布（取消 / 失租 / 续租异常 / 守卫拒绝）时的清理入口：
      *  发布事务从未开始或已同步结束，单次权威核实未被 Asset 引用即删（IKIN03 口径保持）。 */
-    private void discardUnpublishedTransfer(ClaimedMediaExtractJobDto job,
+    private void discardUnpublishedTransfer(ClaimedJob job,
                                             TosVideoMediaRelay.StoredVideo stored) {
         discardUnpublishedTransfer(job, stored, false);
     }
@@ -316,7 +339,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
      * </ul>
      * 核实或删除自身异常只留结构化待处理记录（含对象身份），不改变主语义、不落额外终态。
      */
-    private void discardUnpublishedTransfer(ClaimedMediaExtractJobDto job,
+    private void discardUnpublishedTransfer(ClaimedJob job,
                                             TosVideoMediaRelay.StoredVideo stored,
                                             boolean publishOutcomeUncertain) {
         try {
@@ -394,11 +417,11 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
                 jobId, storageKey, reason);
     }
 
-    private boolean renewLease(ClaimedMediaExtractJobDto job) {
+    private boolean renewLease(ClaimedJob job) {
         return stateMachine.renewAudioVideoMuxLease(job.id(), job.workerId(), job.fencingToken());
     }
 
-    private void scheduleNext(ClaimedMediaExtractJobDto job) {
+    private void scheduleNext(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
         long delayMs = pollDelayMs(job.pollCount());
         if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress(), delayMs)) {
@@ -406,7 +429,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         }
     }
 
-    private boolean cancelIfRequested(ClaimedMediaExtractJobDto job) {
+    private boolean cancelIfRequested(ClaimedJob job) {
         return stateMachine.cancelAudioVideoMuxIfRequested(job.id(), job.workerId(), job.fencingToken());
     }
 
@@ -416,7 +439,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
 
     /** 超时预算（迁移契约 §21.1）：execution_deadline_at 优先；否则 max(1d, 4×估算+6h)、未知 7d、
      *  上限 365d（本家族把 365d 上限补齐到 worker fallback，消除与 backend 的不对称）。 */
-    private static boolean timedOut(ClaimedMediaExtractJobDto job) {
+    private static boolean timedOut(ClaimedJob job) {
         if (job.executionDeadlineAt() != null) {
             return !WorkerClock.now().isBefore(job.executionDeadlineAt());
         }
@@ -447,7 +470,7 @@ public class AudioVideoMuxJobProcessor implements JobProcessor {
         return AudioVideoMuxContract.ERROR_AUDIO_VIDEO_MUX_FAILED;
     }
 
-    private boolean fail(ClaimedMediaExtractJobDto job, String code, String message) {
+    private boolean fail(ClaimedJob job, String code, String message) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         log.warn("[audio_video_mux] job 失败 jobId={} code={} message={}", job.id(), code, message);

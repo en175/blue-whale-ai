@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.domain.error.ImageOutpaintError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitOutpaintClient;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -53,6 +56,8 @@ class ImageOutpaintJobProcessorTest {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitOutpaintClient mediaKitClient;
@@ -65,7 +70,8 @@ class ImageOutpaintJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageOutpaintJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper,
+                new AssetSourceService(assetMapper),
                 credentialService, mediaKitClient, tosService);
         when(stateMachine.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
                 .thenReturn(true);
@@ -88,8 +94,9 @@ class ImageOutpaintJobProcessorTest {
         resultServer.stop(0);
     }
 
-    private ClaimedImageOutpaintJobDto makeClaim(Map<String, Object> input) {
-        return new ClaimedImageOutpaintJobDto("100", "42", "9", input, "worker-1", 5L);
+    private ClaimedJob makeClaim(Map<String, Object> input) {
+        return new ClaimedJob("100", "42", "9", input, "image_outpaint",
+                null, false, "worker-1", 5L, 0, 0, null, null, null);
     }
 
     private Map<String, Object> validInput() {
@@ -114,7 +121,7 @@ class ImageOutpaintJobProcessorTest {
     }
 
     private void stubClaim(Map<String, Object> input) {
-        when(stateMachine.claimImageOutpaint(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input)));
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
     }
@@ -129,7 +136,7 @@ class ImageOutpaintJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimImageOutpaint(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -142,7 +149,7 @@ class ImageOutpaintJobProcessorTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimImageOutpaint(eq("100"), anyString())).thenReturn(Optional.empty());
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString())).thenReturn(Optional.empty());
 
         processor.handle("100");
 

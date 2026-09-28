@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailAudioSpeedDto;
 import com.bluewhale.worker.domain.dto.PublishAudioSpeedDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -16,6 +18,7 @@ import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitAdjustAudioSpeedClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitAdjustAudioSpeedClient.AudioSpeedTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import org.slf4j.Logger;
@@ -33,7 +36,7 @@ import java.util.Set;
  * （IKHW5A，父单 IKHVYO；编排一对一抄 {@link AudioTrimJobProcessor}——火山异步链复用
  * 视频轮询骨架，每步 = 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件）：
  * <ol>
- *   <li>claimAudioSpeed（富投影：providerTaskId / pollCount / progress）</li>
+ *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源音频素材 → 网关提交（audio_url +
  *       speed 贴原速省略可选，返 task_id）→ markProviderSubmitted（存 provider_task_id +
  *       释放租约 + next+5s）→ scheduleNext(5s)</li>
@@ -76,6 +79,9 @@ public class AudioSpeedJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
+    /** 领取规格（IKIWP8 / ADR-0119）：候选 = 仅 type（不套 source 白名单）；租约 420s。 */
+    private static final int LEASE_SECONDS = 420;
+
     /** 轮询步调 5s（音频截取 AUDIO_TRIM_POLL_INTERVAL_MS 同值）。 */
     public static final long AUDIO_SPEED_POLL_INTERVAL_MS = 5_000;
 
@@ -84,6 +90,8 @@ public class AudioSpeedJobProcessor implements JobProcessor {
     public static final int MAX_AUDIO_SPEED_POLLS = 720;
 
     private final JobStateMachineService stateMachine;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitAdjustAudioSpeedClient adjustAudioSpeedClient;
@@ -93,6 +101,8 @@ public class AudioSpeedJobProcessor implements JobProcessor {
 
     public AudioSpeedJobProcessor(
             JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitAdjustAudioSpeedClient adjustAudioSpeedClient,
@@ -101,6 +111,8 @@ public class AudioSpeedJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.typeOnly(AudioSpeedContract.TAG, LEASE_SECONDS, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.adjustAudioSpeedClient = adjustAudioSpeedClient;
@@ -115,6 +127,14 @@ public class AudioSpeedJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 audio_speed job step（每步 = 一次 MQ 消费）。
      * <p>
      * claim 在 try 外（家族同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -122,9 +142,9 @@ public class AudioSpeedJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedAudioSpeedJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimAudioSpeed(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[audio_speed] claim 失败 jobId={}: {}",
                     jobId, error.getMessage(), error);
@@ -132,7 +152,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedAudioSpeedJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[audio_speed] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
                 claim.id(), claim.fencingToken(), claim.providerTaskId(), claim.pollCount());
 
@@ -155,7 +175,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
     /**
      * 分相主逻辑（家族 runStep 同构）：凭证 → submit 相 / poll 相。
      */
-    private void runStep(ClaimedAudioSpeedJobDto claim) {
+    private void runStep(ClaimedJob claim) {
         // 取明文凭证（基础设施键；与视频/截取同构，冻结在创建入口）
         Object credentialObj = claim.input().get("provider_credential");
         if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
@@ -186,7 +206,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源音频 → 网关提交（贴原速省略口径下 speed 可选）→
      * markProviderSubmitted → 续排轮询。
      */
-    private void submitPhase(ClaimedAudioSpeedJobDto claim, String providerToken) {
+    private void submitPhase(ClaimedJob claim, String providerToken) {
         Map<String, Object> input = claim.input();
 
         // 1. 解析冻结 input 业务键（source_asset_id 恒在、speed 可选〔贴原速省略，ADR-0113〕；
@@ -236,7 +256,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
      * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
      * completed 立即下载转存发布。
      */
-    private void pollPhase(ClaimedAudioSpeedJobDto claim, String providerToken) {
+    private void pollPhase(ClaimedJob claim, String providerToken) {
         AudioSpeedTaskObservation observation;
         try {
             observation = adjustAudioSpeedClient.poll(providerToken, claim.providerTaskId());
@@ -315,7 +335,7 @@ public class AudioSpeedJobProcessor implements JobProcessor {
      * 结果发布：立即下载转存（火山 audio_url 仅 24h 有效，官方明确「请及时下载保存」）→
      * 发布音频 Asset（type=audio / source='generated'）→ 终态 succeeded。
      */
-    private void publishResult(ClaimedAudioSpeedJobDto claim,
+    private void publishResult(ClaimedJob claim,
                                AudioSpeedTaskObservation observation) {
         // TOS 强依赖：结果 URL 24h 失效，不允许降级直存（家族强依赖口径）
         if (mediaRelay == null) {
@@ -429,14 +449,14 @@ public class AudioSpeedJobProcessor implements JobProcessor {
 
     /** 失败处理（沿用家族 fail 守卫：SET 清 next_action_at + next_poll_at，轮询型任务
      *  语义完备；details.raw 透传原始原因）。 */
-    private void failAudioSpeed(ClaimedAudioSpeedJobDto claim, String code, String message) {
+    private void failAudioSpeed(ClaimedJob claim, String code, String message) {
         failAudioSpeed(claim, code, message, null);
     }
 
     /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
      *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
      *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
-    private void failAudioSpeed(ClaimedAudioSpeedJobDto claim, String code, String message,
+    private void failAudioSpeed(ClaimedJob claim, String code, String message,
                                 Integer httpStatus) {
         log.warn("audio_speed job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();

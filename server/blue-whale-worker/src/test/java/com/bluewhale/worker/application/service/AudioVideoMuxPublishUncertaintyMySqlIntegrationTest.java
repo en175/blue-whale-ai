@@ -3,7 +3,7 @@ package com.bluewhale.worker.application.service;
 import com.bluewhale.worker.application.processor.AudioVideoMuxJobProcessor;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -120,6 +120,9 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
     static AnnotationConfigApplicationContext ctx;
     static JobStateMachineService realService;
+    /** 真实领取服务与真实 Mapper（IKIWP8：领取收敛为唯一管道 JobClaimService.claim）。 */
+    static JobClaimService realClaimService;
+    static GenerationJobMapper realJobMapper;
     static JdbcTemplate jdbc;
 
     /** 最小 Spring 上下文：与金标夹具同款（Hikari +08:00 会话、7 Mapper、7-mapper 测试直连 service）。 */
@@ -208,6 +211,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
         ctx = new AnnotationConfigApplicationContext(TestConfig.class);
         realService = ctx.getBean(JobStateMachineService.class);
+        realJobMapper = ctx.getBean(GenerationJobMapper.class);
+        realClaimService = new JobClaimService(realJobMapper);
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
     }
 
@@ -300,7 +305,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             return null;
         }).when(relay).deleteUnpublishedObject(anyString());
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper,
+                credentials, gateway, relay, producer);
         return new WiredProcessor(processor, spyService, objects);
     }
 
@@ -610,7 +616,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper,
+                credentials, gateway, relay,
                 mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
@@ -704,8 +711,9 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService, credentials,
-                gateway, relay, mock(GenerationMessageProducer.class));
+        AudioVideoMuxJobProcessor processor = new AudioVideoMuxJobProcessor(spyService,
+                realClaimService, realJobMapper, credentials, gateway, relay,
+                mock(GenerationMessageProducer.class));
 
         CountDownLatch rawTxOpen = new CountDownLatch(1);
         CountDownLatch failAttempted = new CountDownLatch(1);
@@ -768,14 +776,14 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
             // 恢复复判：状态恢复后再次调用同一清理决策（发布结果不明口径）——探测锁空闲 +
             // Asset 引用已可见 → REFERENCED 保留，对象不删
-            ClaimedMediaExtractJobDto jobDto = new ClaimedMediaExtractJobDto(String.valueOf(jobId),
-                    "99", "9", Map.of(), "mux-task-1", "amux-recheck", job.getFencingToken(),
-                    0, 0, WorkerClock.now(), null);
+            ClaimedJob jobDto = new ClaimedJob(String.valueOf(jobId),
+                    "99", "9", Map.of(), "audio_video_mux", "mux-task-1", false, "amux-recheck",
+                    job.getFencingToken(), 0, 0, WorkerClock.now(), null, null);
             TosVideoMediaRelay.StoredVideo stored = new TosVideoMediaRelay.StoredVideo(
                     "https://bkt.tos.example.com/" + realKey.get(), realKey.get(), "video/mp4",
                     (long) SOURCE_BLOCK_BYTES * SOURCE_BLOCK_COUNT, "md5");
             var decision = AudioVideoMuxJobProcessor.class.getDeclaredMethod(
-                    "discardUnpublishedTransfer", ClaimedMediaExtractJobDto.class,
+                    "discardUnpublishedTransfer", ClaimedJob.class,
                     TosVideoMediaRelay.StoredVideo.class, boolean.class);
             decision.setAccessible(true);
             decision.invoke(processor, jobDto, stored, true);
@@ -813,7 +821,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         when(gateway.poll("sk-frozen", "mux-task-1"))
                 .thenReturn(new MuxAudioVideoTaskObservation("succeeded", serveControlledSource(),
                         227.0, "1920x1080", null, null, "request-db-1"));
-        var processor = new AudioVideoMuxJobProcessor(spyService, credentials, gateway, relay,
+        var processor = new AudioVideoMuxJobProcessor(spyService, realClaimService, realJobMapper,
+                credentials, gateway, relay,
                 mock(GenerationMessageProducer.class));
         doAnswer(invocation -> {
             realKey.set(((PublishAudioVideoMuxDto) invocation.getArgument(0)).storageKey());

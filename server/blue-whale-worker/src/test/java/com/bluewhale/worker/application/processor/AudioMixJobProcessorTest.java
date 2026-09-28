@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.error.MediaExtractError;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +36,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class AudioMixJobProcessorTest {
     @Mock JobStateMachineService stateMachine;
+    @Mock JobClaimService claimService;
+    @Mock GenerationJobMapper jobMapper;
     @Mock GenerationCredentialService credentials;
     @Mock NewApiMediaKitMixAudioClient gateway;
     @Mock TosAudioMediaRelay relay;
@@ -48,17 +53,18 @@ class AudioMixJobProcessorTest {
                         Map.of("asset_id", "12", "url", "https://tos/b.mp3")));
     }
 
-    private ClaimedMediaExtractJobDto claim(String providerTaskId) {
-        return new ClaimedMediaExtractJobDto("70", "5", "9", input(), providerTaskId,
-                "worker-1", 3L, 0, 0);
+    private ClaimedJob claim(String providerTaskId) {
+        return new ClaimedJob(
+                "70", "5", "9", input(), "audio_mix", providerTaskId, false, "worker-1", 3L, 0, 0, null,
+                null, null);
     }
 
     @Test
     void cancellationBeforeSubmitStopsUpstreamWork() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verifyNoInteractions(gateway, relay, producer);
         verify(stateMachine, never()).failMediaExtractJob(any());
@@ -66,14 +72,14 @@ class AudioMixJobProcessorTest {
 
     @Test
     void cancellationAfterSubmitStopsPolling() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, true);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .thenReturn("provider-1");
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -83,15 +89,16 @@ class AudioMixJobProcessorTest {
     void keepsPollingA20HourMixAfter25HoursButBacksOffQueries() {
         Map<String, Object> frozen = new java.util.HashMap<>(input());
         frozen.put("estimated_duration_ms", 20L * 60 * 60 * 1000);
-        ClaimedMediaExtractJobDto longJob = new ClaimedMediaExtractJobDto("70", "5", "9", frozen,
-                "provider-1", "worker-1", 3L, 18000, 0, WorkerClock.now().minusHours(25));
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(longJob));
+        ClaimedJob longJob = new ClaimedJob(
+                "70", "5", "9", frozen, "audio_mix", "provider-1", false, "worker-1", 3L, 18000, 0,
+                WorkerClock.now().minusHours(25), null, null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(longJob));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("processing", null, null, null, null));
         when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L))).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 60_000L);
         verify(stateMachine).rescheduleProviderPoll(eq("70"), anyString(), eq(3L), eq(0), eq(60_000L));
@@ -102,15 +109,16 @@ class AudioMixJobProcessorTest {
     void eventuallyFailsAStalledOneHourMixByWallClockAfterRestart() {
         Map<String, Object> frozen = new java.util.HashMap<>(input());
         frozen.put("estimated_duration_ms", 60L * 60 * 1000);
-        ClaimedMediaExtractJobDto stale = new ClaimedMediaExtractJobDto("70", "5", "9", frozen,
-                "provider-1", "worker-1", 3L, 300, 0, WorkerClock.now().minusHours(25));
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(stale));
+        ClaimedJob stale = new ClaimedJob(
+                "70", "5", "9", frozen, "audio_mix", "provider-1", false, "worker-1", 3L, 300, 0,
+                WorkerClock.now().minusHours(25), null, null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(stale));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("processing", null, null, null, null));
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine).failMediaExtractJob(argThat(failure -> failure.message().contains("查询超时")));
         verify(producer, never()).enqueue(anyString(), anyLong());
@@ -120,16 +128,16 @@ class AudioMixJobProcessorTest {
     void retryGetsANewDeadlineWithoutChangingOriginalCreationTime() {
         Map<String, Object> frozen = new java.util.HashMap<>(input());
         frozen.put("estimated_duration_ms", 60L * 60 * 1000);
-        ClaimedMediaExtractJobDto retry = new ClaimedMediaExtractJobDto("70", "5", "9", frozen,
-                "provider-2", "worker-1", 9L, 1, 0,
-                WorkerClock.now().minusDays(3), WorkerClock.now().plusHours(23));
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(retry));
+        ClaimedJob retry = new ClaimedJob(
+                "70", "5", "9", frozen, "audio_mix", "provider-2", false, "worker-1", 9L, 1, 0,
+                WorkerClock.now().minusDays(3), WorkerClock.now().plusHours(23), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(retry));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-2"))
                 .thenReturn(new MixAudioTaskObservation("processing", null, null, null, null));
         when(stateMachine.rescheduleProviderPoll(eq("70"), anyString(), eq(9L), eq(0), eq(5_000L))).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 5_000L);
         verify(stateMachine, never()).failMediaExtractJob(any());
@@ -137,7 +145,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void relayFailureIncludesPollRequestId() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3",
@@ -147,7 +155,7 @@ class AudioMixJobProcessorTest {
         when(stateMachine.renewAudioMixLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine).failMediaExtractJob(argThat(failure ->
                 failure.message().contains("TOS 转存失败") && failure.message().contains("request-relay-1")));
@@ -155,7 +163,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void longResultTransferKeepsItsLeaseAndStopsHeartbeatsAfterPublishing() throws Exception {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
@@ -169,7 +177,7 @@ class AudioMixJobProcessorTest {
             assertThat(heartbeat.await(2, TimeUnit.SECONDS)).isTrue();
             return new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5");
         });
-        var processor = new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -183,7 +191,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void lostLeaseDuringTransferCannotPublishAnAsset() throws Exception {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
@@ -198,7 +206,7 @@ class AudioMixJobProcessorTest {
             assertThat(lost.await(2, TimeUnit.SECONDS)).isTrue();
             return new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5");
         });
-        var processor = new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -209,7 +217,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void cancellationDuringLongTransferReachesCancelledBeforeTransferReturns() throws Exception {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
@@ -227,7 +235,7 @@ class AudioMixJobProcessorTest {
             assertThat(cancelled.await(2, TimeUnit.SECONDS)).isTrue();
             return new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5");
         });
-        var processor = new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 20;
 
         processor.handle("70");
@@ -238,13 +246,13 @@ class AudioMixJobProcessorTest {
 
     @Test
     void submitPersistsProviderTaskIdAndSchedulesPoll() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .thenReturn("provider-1");
         when(stateMachine.markProviderSubmitted(eq("70"), anyString(), eq(3L), eq("provider-1"))).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(producer).enqueue("70", 5_000L);
         verify(stateMachine, never()).publishAudioMixResult(any());
@@ -252,7 +260,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void completedTaskPublishesOnlyTheStoredUrlAndProviderDuration() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
@@ -260,7 +268,7 @@ class AudioMixJobProcessorTest {
                 .thenReturn(new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5"));
         when(stateMachine.renewAudioMixLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<PublishMediaExtractDto> result = ArgumentCaptor.forClass(PublishMediaExtractDto.class);
         verify(stateMachine).publishAudioMixResult(result.capture());
@@ -270,14 +278,14 @@ class AudioMixJobProcessorTest {
 
     @Test
     void providerFailurePersistsRequestIdAndDoesNotCreateAsset() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("failed", null, null,
                         "provider_error", "上游处理失败", "request-42"));
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
@@ -289,14 +297,14 @@ class AudioMixJobProcessorTest {
 
     @Test
     void missingProviderResultFailsBeforeStorage() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", null, 12.5,
                         null, null, "request-43"));
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
@@ -307,7 +315,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void relayFailureMarksJobFailedWithoutPublishingTemporaryUrl() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
                 .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3",
@@ -317,7 +325,7 @@ class AudioMixJobProcessorTest {
         when(stateMachine.renewAudioMixLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine).failMediaExtractJob(argThat(failure ->
                 failure.code().equals("audio_mix_failed") && failure.message().contains("TOS 转存失败")
@@ -327,7 +335,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void upstreamUnauthorizedSubmitPersistsHttpStatusDetail() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         MediaExtractError unauthorized = new MediaExtractError("provider_failed",
                 "音频混合任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
@@ -336,7 +344,7 @@ class AudioMixJobProcessorTest {
                 .thenThrow(unauthorized);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
@@ -351,7 +359,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void upstreamUnauthorizedPollPersistsHttpStatusDetailWithoutRelyingOnMessageWording() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         MediaExtractError unauthorized = new MediaExtractError("provider_failed",
                 "MediaKit 音频混合任务查询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}"
@@ -360,7 +368,7 @@ class AudioMixJobProcessorTest {
         when(gateway.poll("sk-frozen", "provider-1")).thenThrow(unauthorized);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
-        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+        new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70");
 
         ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
         verify(stateMachine).failMediaExtractJob(failure.capture());
@@ -374,7 +382,7 @@ class AudioMixJobProcessorTest {
 
     @Test
     void lostFollowUpEnqueueReturnsWhenFenceIsNoLongerOwned() {
-        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
                 .thenReturn("provider-1");
@@ -382,7 +390,7 @@ class AudioMixJobProcessorTest {
                 .thenReturn(true);
         doThrow(new IllegalStateException("MQ 不可用")).when(producer).enqueue("70", 5_000L);
 
-        assertThatCode(() -> new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70"))
+        assertThatCode(() -> new AudioMixJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer).handle("70"))
                 .doesNotThrowAnyException();
         verify(stateMachine).failMediaExtractJob(any());
     }

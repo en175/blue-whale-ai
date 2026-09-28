@@ -1,9 +1,11 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.contract.VideoMattingContract;
-import com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -11,6 +13,7 @@ import com.bluewhale.worker.infrastructure.credential.GenerationCredentialServic
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMatteVideoClient.MatteVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import ch.qos.logback.classic.Logger;
@@ -75,6 +78,8 @@ import static org.mockito.Mockito.when;
 class VideoMattingTransferCleanupTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
@@ -108,14 +113,15 @@ class VideoMattingTransferCleanupTest {
         tosClient = mock(TOSV2.class);
         relay = new TosVideoMediaRelay(tosClient, "bkt", "tos.example.com");
         processor = new VideoMattingJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, relay, producer);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
-                .thenReturn(Optional.of(new ClaimedVideoMattingJobDto(
-                        "100", "42", "9", webmInput(), "amk-task-1", "worker-1", 5L, 3, 0, null)));
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
+                .thenReturn(Optional.of(new ClaimedJob(
+                        "100", "42", "9", webmInput(), "video_matting", "amk-task-1", false,
+                        "worker-1", 5L, 3, 0, null, null, null)));
         // 默认放行租约与「无引用、无在飞事务」权威结论；专项用例按需覆写
         when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
                 .thenReturn(true);

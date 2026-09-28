@@ -1,10 +1,12 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.error.GenerationError;
@@ -15,6 +17,7 @@ import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import org.slf4j.Logger;
@@ -54,7 +57,13 @@ public class AudioMixJobProcessor implements JobProcessor {
             GenerationError.ERROR_CONTENT_REJECTED,
             GenerationError.ERROR_CONTENT_REJECTED_REFERENCE);
 
+    /** 领取规格（IKIWP8 / ADR-0119）：候选 = type + 单源白名单；租约 420s。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(AudioMixContract.SOURCE);
+
     private final JobStateMachineService stateMachine;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final GenerationCredentialService credentials;
     private final NewApiMediaKitMixAudioClient gateway;
     private final TosAudioMediaRelay relay;
@@ -63,11 +72,16 @@ public class AudioMixJobProcessor implements JobProcessor {
     long leaseRenewIntervalMs = 60_000;
 
     public AudioMixJobProcessor(JobStateMachineService stateMachine,
+                                JobClaimService claimService,
+                                GenerationJobMapper jobMapper,
                                 GenerationCredentialService credentials,
                                 NewApiMediaKitMixAudioClient gateway,
                                 TosAudioMediaRelay relay,
                                 @Qualifier("audioMixMessageProducer") GenerationMessageProducer producer) {
         this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                AudioMixContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.credentials = credentials;
         this.gateway = gateway;
         this.relay = relay;
@@ -77,11 +91,19 @@ public class AudioMixJobProcessor implements JobProcessor {
 
     @Override public String tag() { return AudioMixContract.TAG; }
 
+    /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedMediaExtractJobDto> claimed = stateMachine.claimAudioMix(jobId, workerId);
+        Optional<ClaimedJob> claimed = claimService.claim(claimSpec, jobId, workerId);
         if (claimed.isEmpty()) return;
-        ClaimedMediaExtractJobDto job = claimed.get();
+        ClaimedJob job = claimed.get();
         try {
             runStep(job);
         } catch (Exception error) {
@@ -101,7 +123,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         }
     }
 
-    private void runStep(ClaimedMediaExtractJobDto job) {
+    private void runStep(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
         Object credential = job.input().get("provider_credential");
         if (!(credential instanceof String frozen) || frozen.isBlank()) {
@@ -119,7 +141,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         else poll(job, token);
     }
 
-    private void submit(ClaimedMediaExtractJobDto job, String token) {
+    private void submit(ClaimedJob job, String token) {
         Map<String, Object> input = job.input();
         Object formatRaw = input.get(AudioMixContract.INPUT_KEY_OUTPUT_FORMAT);
         if (!(formatRaw instanceof String format) || !AudioMixContract.SUPPORTED_OUTPUT_FORMATS.contains(format)) {
@@ -158,7 +180,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         return urls;
     }
 
-    private void poll(ClaimedMediaExtractJobDto job, String token) {
+    private void poll(ClaimedJob job, String token) {
         MixAudioTaskObservation observed;
         try {
             observed = gateway.poll(token, job.providerTaskId());
@@ -227,11 +249,11 @@ public class AudioMixJobProcessor implements JobProcessor {
         if (!published) log.warn("[audio_mix] 结果发布守卫未命中 jobId={}", job.id());
     }
 
-    private boolean renewLease(ClaimedMediaExtractJobDto job) {
+    private boolean renewLease(ClaimedJob job) {
         return stateMachine.renewAudioMixLease(job.id(), job.workerId(), job.fencingToken());
     }
 
-    private void scheduleNext(ClaimedMediaExtractJobDto job) {
+    private void scheduleNext(ClaimedJob job) {
         if (cancelIfRequested(job)) return;
         long delayMs = pollDelayMs(job.pollCount());
         if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress(), delayMs)) {
@@ -239,7 +261,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         }
     }
 
-    private boolean cancelIfRequested(ClaimedMediaExtractJobDto job) {
+    private boolean cancelIfRequested(ClaimedJob job) {
         return stateMachine.cancelAudioMixIfRequested(job.id(), job.workerId(), job.fencingToken());
     }
 
@@ -248,7 +270,7 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     /** 平均 RTF≈1 只作预算依据：已知最长源给四倍处理余量加六小时，至少一天；未知给七天。 */
-    private static boolean timedOut(ClaimedMediaExtractJobDto job) {
+    private static boolean timedOut(ClaimedJob job) {
         if (job.executionDeadlineAt() != null) {
             return !WorkerClock.now().isBefore(job.executionDeadlineAt());
         }
@@ -278,12 +300,12 @@ public class AudioMixJobProcessor implements JobProcessor {
         return AudioMixContract.ERROR_AUDIO_MIX_FAILED;
     }
 
-    private boolean fail(ClaimedMediaExtractJobDto job, String code, String message) {
+    private boolean fail(ClaimedJob job, String code, String message) {
         return fail(job, code, message, null);
     }
 
     /** details 落结构化上游 HTTP 状态（IKIHGQ）：backend 401 换凭证判定读它，不依赖文案。 */
-    private boolean fail(ClaimedMediaExtractJobDto job, String code, String message, Integer httpStatus) {
+    private boolean fail(ClaimedJob job, String code, String message, Integer httpStatus) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         if (httpStatus != null) {

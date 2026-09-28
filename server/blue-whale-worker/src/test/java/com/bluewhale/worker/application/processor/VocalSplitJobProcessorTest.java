@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -16,6 +18,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +54,8 @@ import static org.mockito.Mockito.*;
 class VocalSplitJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitSeparateVoiceClient separateVoiceClient;
@@ -71,7 +76,8 @@ class VocalSplitJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VocalSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper,
+                new AssetSourceService(assetMapper),
                 credentialService, separateVoiceClient, mediaRelay, producer);
         when(stateMachine.failVocalSplitJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
@@ -89,26 +95,26 @@ class VocalSplitJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVocalSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                               int pollCount, int progress) {
         return makeClaim(input, providerTaskId, pollCount, progress, null);
     }
 
-    private ClaimedVocalSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                               int pollCount, int progress,
                                               String parentProviderTaskId) {
-        return new ClaimedVocalSplitJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "vocal_split", providerTaskId, false,
+                "worker-1", 5L, pollCount, progress, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount, int progress) {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount, progress)));
     }
 
@@ -124,7 +130,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -136,7 +142,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
@@ -346,7 +352,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且轨数组齐全 → 不提交，直接逐轨转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-1")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(twoTrackObservation(65.5));
@@ -377,7 +383,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-fail")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new SeparateVoiceTaskObservation("failed", null, null,
@@ -398,7 +404,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-race")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -414,7 +420,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-gone")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -452,7 +458,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但轨数组不齐（drama 场景缺 sfx 轨）→ 回退正常重新提交")
     void parentReuseIncompleteResult_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("drama"), null, 0, 0, "amk-parent-empty")));
         // 三分法场景但父任务 result 只带两轨（缺 sfx）
         Map<String, String> trackUrls = new LinkedHashMap<>();
@@ -477,7 +483,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（轨转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-stale")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(twoTrackObservation(65.5));
@@ -499,7 +505,7 @@ class VocalSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-guard")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(twoTrackObservation(65.5));
@@ -856,7 +862,8 @@ class VocalSplitJobProcessorTest {
     @DisplayName("TOS 未配置 → 1047（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VocalSplitJobProcessor noRelayProcessor = new VocalSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper,
+                new AssetSourceService(assetMapper),
                 credentialService, separateVoiceClient, null, producer);
         stubPollClaim(input("audio"), 3, 7);
         when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))

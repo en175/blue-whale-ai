@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -17,6 +19,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +54,8 @@ import static org.mockito.Mockito.*;
 class VideoSceneSplitJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitSegmentScenesClient segmentScenesClient;
@@ -70,7 +75,7 @@ class VideoSceneSplitJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoSceneSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, segmentScenesClient, mediaRelay, producer);
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
@@ -94,25 +99,25 @@ class VideoSceneSplitJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                    int pollCount) {
         return makeClaim(input, providerTaskId, pollCount, null);
     }
 
-    private ClaimedVideoSceneSplitJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                    int pollCount, String parentProviderTaskId) {
-        return new ClaimedVideoSceneSplitJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "video_scene_split", providerTaskId, false, "worker-1",
+                5L, pollCount, 0, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount) {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount)));
     }
 
@@ -132,7 +137,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -145,7 +150,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
@@ -307,7 +312,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务已成功且切片数组非空 → 不提交，直接逐段转存发布（payload 与正常完成同型）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-1")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-1"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.5, List.of(
@@ -349,7 +354,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-fail")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new SceneSplitTaskObservation("failed", null, null,
@@ -369,7 +374,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
     void parentReuseLeaseLostBeforeSubmit_stops() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-race")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-race"))
                 .thenThrow(new RuntimeException("HTTP 503"));
@@ -385,7 +390,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-gone")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -420,7 +425,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但切片数组为空 → 回退正常重新提交")
     void parentReuseEmptySegments_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-empty")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-empty"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(),
@@ -441,7 +446,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（段切片下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-stale")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
@@ -464,7 +469,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-guard")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
@@ -487,7 +492,7 @@ class VideoSceneSplitJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
     void parentReuseSegmentLeaseRenewMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-renew")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-renew"))
                 .thenReturn(new SceneSplitTaskObservation("succeeded", 95.0, List.of(
@@ -907,7 +912,7 @@ class VideoSceneSplitJobProcessorTest {
     @DisplayName("TOS 未配置 → 1046（切片链接 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoSceneSplitJobProcessor noRelayProcessor = new VideoSceneSplitJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, segmentScenesClient, null, producer);
         stubPollClaim(input("standard"), 3);
         when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))

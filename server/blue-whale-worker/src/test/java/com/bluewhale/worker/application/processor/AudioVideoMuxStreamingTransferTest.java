@@ -1,15 +1,18 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMuxAudioVideoClient.MuxAudioVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.sun.net.httpserver.HttpServer;
 import com.volcengine.tos.TOSV2;
@@ -81,6 +84,8 @@ class AudioVideoMuxStreamingTransferTest {
     private final AtomicLong uploadedBytes = new AtomicLong();
     /** 有状态 TOS 替身的对象表（IKIN8Z）：key → 字节；deleteObject 查表真删，断言以对象存在性为准。 */
     private final ConcurrentHashMap<String, byte[]> tosObjects = new ConcurrentHashMap<>();
+    private final JobClaimService claimService = mock(JobClaimService.class);
+    private final GenerationJobMapper jobMapper = mock(GenerationJobMapper.class);
 
     private static byte[] patternBlock() {
         byte[] block = new byte[BLOCK_BYTES];
@@ -198,9 +203,10 @@ class AudioVideoMuxStreamingTransferTest {
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         // 截止时间给足（10 分钟）：慢流合法传输不受总时限约束，heartbeat 50ms 全程续租命中
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
@@ -210,7 +216,7 @@ class AudioVideoMuxStreamingTransferTest {
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L)))
                 .thenAnswer(invocation -> renewals.incrementAndGet() > 0);
         when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(true);
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 50;
         List<String> tempBefore = relayTempFiles();
         long startNanos = System.nanoTime();
@@ -243,9 +249,10 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
@@ -254,7 +261,7 @@ class AudioVideoMuxStreamingTransferTest {
         // 转存前续租命中；心跳里失租（recovery 已重新领取）→ abort 打断停滞中的真实下载
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true, false);
         when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(true);
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 50;
         List<String> tempBefore = relayTempFiles();
         long startNanos = System.nanoTime();
@@ -281,9 +288,10 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationCredentialService credentials = mock(GenerationCredentialService.class);
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         // runStep 入口 + poll 观察后 + 续租前共三次未命中；心跳里第四次命中取消
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false, true, true);
@@ -293,7 +301,7 @@ class AudioVideoMuxStreamingTransferTest {
                         227.0, "1920x1080", null, null, null));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.publishAudioVideoMuxResult(any())).thenReturn(true);
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 50;
         List<String> tempBefore = relayTempFiles();
         long startNanos = System.nanoTime();
@@ -319,9 +327,10 @@ class AudioVideoMuxStreamingTransferTest {
         NewApiMediaKitMuxAudioVideoClient gateway = mock(NewApiMediaKitMuxAudioVideoClient.class);
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         // 截止 300ms：慢流总长 ~1.2s，中途必撞截止 → 明确失败（区别于失租/取消的静默退出）
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusNanos(300_000_000));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusNanos(300_000_000), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
@@ -329,7 +338,7 @@ class AudioVideoMuxStreamingTransferTest {
                         227.0, "1920x1080", null, null, null));
         when(stateMachine.renewAudioVideoMuxLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 50;
         List<String> tempBefore = relayTempFiles();
 
@@ -352,9 +361,10 @@ class AudioVideoMuxStreamingTransferTest {
                                           GenerationMessageProducer producer,
                                           String sourceUrl) throws IOException {
         TOSV2 tosClient = tosStandin();
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(false);
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
         when(gateway.poll("sk-frozen", "provider-1"))
@@ -369,7 +379,7 @@ class AudioVideoMuxStreamingTransferTest {
                                                               NewApiMediaKitMuxAudioVideoClient gateway,
                                                               TosVideoMediaRelay relay,
                                                               GenerationMessageProducer producer) {
-        var processor = new AudioVideoMuxJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        var processor = new AudioVideoMuxJobProcessor(stateMachine, claimService, jobMapper, credentials, gateway, relay, producer);
         processor.leaseRenewIntervalMs = 5_000;
         return processor;
     }
@@ -611,9 +621,10 @@ class AudioVideoMuxStreamingTransferTest {
         GenerationMessageProducer producer = mock(GenerationMessageProducer.class);
         // fullyTransferredFixture 同款前置，但取消检查改为链式打桩（夹具打桩会被覆盖，触发严格模式）
         TOSV2 tosClient = tosStandin();
-        ClaimedMediaExtractJobDto claim = new ClaimedMediaExtractJobDto("70", "5", "9", frozenInput(),
-                "provider-1", "worker-1", 3L, 0, 0, WorkerClock.now(), WorkerClock.now().plusMinutes(10));
-        when(stateMachine.claimAudioVideoMux(eq("70"), anyString())).thenReturn(Optional.of(claim));
+        ClaimedJob claim = new ClaimedJob(
+                "70", "5", "9", frozenInput(), "audio_video_mux", "provider-1", false, "worker-1", 3L, 0, 0,
+                WorkerClock.now(), WorkerClock.now().plusMinutes(10), null);
+        when(claimService.claim(any(ClaimSpec.class), eq("70"), anyString())).thenReturn(Optional.of(claim));
         // 转存前三段取消检查未命中；转存返回后首次取消状态查询抛异常（发布调用尚未发出）
         when(stateMachine.cancelAudioVideoMuxIfRequested(eq("70"), anyString(), eq(3L)))
                 .thenReturn(false, false, false)

@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishAudioSpeedDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.AudioSpeedContract;
@@ -15,6 +17,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,6 +52,8 @@ import static org.mockito.Mockito.*;
 class AudioSpeedJobProcessorErrorMappingTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitAdjustAudioSpeedClient adjustAudioSpeedClient;
@@ -68,7 +73,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @BeforeEach
     void setUp() {
         processor = new AudioSpeedJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, adjustAudioSpeedClient, mediaRelay, producer);
         when(stateMachine.failAudioSpeedJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
@@ -85,19 +90,20 @@ class AudioSpeedJobProcessorErrorMappingTest {
                 .thenReturn(source);
     }
 
-    private ClaimedAudioSpeedJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                               int pollCount, int progress) {
-        return new ClaimedAudioSpeedJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, progress);
+        return new ClaimedJob(
+                "100", "42", "9", input, "audio_speed", providerTaskId, false, "worker-1", 5L, pollCount,
+                progress, null, null, null);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimAudioSpeed(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount, int progress) {
-        when(stateMachine.claimAudioSpeed(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount, progress)));
     }
 
@@ -113,7 +119,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimAudioSpeed(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -125,7 +131,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimAudioSpeed(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
@@ -593,7 +599,7 @@ class AudioSpeedJobProcessorErrorMappingTest {
     @DisplayName("TOS 未配置 → 1051（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         AudioSpeedJobProcessor noRelayProcessor = new AudioSpeedJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, adjustAudioSpeedClient, null, producer);
         stubPollClaim(input(), 3, 7);
         when(adjustAudioSpeedClient.poll("sk-frozen-token", "amk-task-1"))

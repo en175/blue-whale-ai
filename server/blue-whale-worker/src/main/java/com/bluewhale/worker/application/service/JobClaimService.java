@@ -1,24 +1,9 @@
 package com.bluewhale.worker.application.service;
 
-import com.bluewhale.worker.domain.contract.AudioMixContract;
-import com.bluewhale.worker.domain.contract.AudioSpeedContract;
-import com.bluewhale.worker.domain.contract.AudioTrimContract;
-import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
-import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
-import com.bluewhale.worker.domain.contract.MediaExtractContract;
-import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
-import com.bluewhale.worker.domain.contract.VideoSubtitleEraseContract;
-import com.bluewhale.worker.domain.contract.VocalSplitContract;
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedVideoFrameInterpolationJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSubtitleEraseJobDto;
-import com.bluewhale.worker.domain.dto.ClaimedVocalSplitJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -64,144 +49,9 @@ public class JobClaimService {
     /** image 租约 420s（> NEW_API_IMAGE_TIMEOUT_MS 300s + 转存余量，防 recovery 孤儿重投双跑双扣）。 */
     private static final int IMAGE_LEASE_SECONDS = 420;
 
-    /**
-     * image_enhance 租约 420s（契约 §14 / IKGM9D）：同步 enhance 调用（读超时默认 300s）
-     * + 结果图下载 + TOS 转存需在同一租约窗口内完成，否则 recovery 会把在跑任务判孤儿重投双跑
-     * （image 的 420s 语义同款：租约必须 > 上游读超时 + 转存余量）。
-     */
-    private static final int IMAGE_ENHANCE_LEASE_SECONDS = 420;
-
-    /**
-     * image_outpaint 租约 420s（IKGOQW）：同步扩图调用（读超时默认 300s）+ 结果图下载 +
-     * TOS 转存需在同一租约窗口内完成（与 image_enhance 的 420s 语义同款）。
-     */
-    private static final int IMAGE_OUTPAINT_LEASE_SECONDS = 420;
-
     /** image claim 的 source 白名单（claim-ops.ts:339 CLAIMABLE_JOB_SOURCES）。 */
     private static final List<String> IMAGE_CLAIM_SOURCES =
             List.of("bottom_dock", "plan_apply", "storyboard_preview");
-
-    /** image_enhance claim 的单源白名单（契约 §14.1：唯一创建入口 = 画布图片卡工具条）。 */
-    private static final List<String> IMAGE_ENHANCE_CLAIM_SOURCES =
-            List.of("image_enhance");
-
-    /**
-     * image_erase 租约 420s（契约 §15 / IKGOT6）：同步 erase 调用（读超时默认 300s）
-     * + 结果图下载 + TOS 转存需在同一租约窗口内完成（image_enhance 的 420s 语义同款）。
-     */
-    private static final int IMAGE_ERASE_LEASE_SECONDS = 420;
-
-    /** image_erase claim 的单源白名单（契约 §15.1：唯一创建入口 = 画布图片卡工具条「擦除」）。 */
-    private static final List<String> IMAGE_ERASE_CLAIM_SOURCES =
-            List.of("image_erase");
-
-    /**
-     * image_cutout 租约 420s（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
-     * 同步抠图调用读超时默认 300s，保守取与擦除同款 420s（> 超时 + 结果图下载 + TOS 转存余量，
-     * 防 recovery 孤儿重投双跑）。
-     */
-    private static final int IMAGE_CUTOUT_LEASE_SECONDS = 420;
-
-    /** image_cutout claim 的单源白名单（唯一创建入口 = 画布图片卡工具条「高清 ▾ → 抠图」）。 */
-    private static final List<String> IMAGE_CUTOUT_CLAIM_SOURCES =
-            List.of("image_cutout");
-    /** image_outpaint claim 的单源白名单（IKGOQW：唯一创建入口 = 画布图片卡「高清 ▾」菜单）。 */
-    private static final List<String> IMAGE_OUTPAINT_CLAIM_SOURCES =
-            List.of(ImageOutpaintContract.SOURCE);
-
-    /**
-     * video_subtitle_erase 租约 420s（迁移契约 §17 / IKGZ81）：轮询到点步是短查询，但 completed
-     * 步要在同一租约窗口内完成结果视频下载（可达 200MB）+ TOS 转存——取同步 MediaKit 家族的
-     * 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
-     */
-    private static final int VIDEO_SUBTITLE_ERASE_LEASE_SECONDS = 420;
-
-    /** video_subtitle_erase claim 的单源白名单（§17.1：唯一创建入口 = 画布视频卡工具条「智能去字幕」）。 */
-    private static final List<String> VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES =
-            List.of(VideoSubtitleEraseContract.SOURCE);
-
-    /**
-     * video_enhance 租约 420s（IKH3VF，父规格 IKH3VB）：轮询到点步是短查询，但 completed 步
-     * 要在同一租约窗口内完成增强结果视频下载（4K 产物体积大）+ TOS 转存——取 MediaKit 家族
-     * 的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投，去字幕同款语义）。
-     */
-    private static final int VIDEO_ENHANCE_LEASE_SECONDS = 420;
-
-    /** video_enhance claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「HD」单按钮）。 */
-    private static final List<String> VIDEO_ENHANCE_CLAIM_SOURCES =
-            List.of(VideoEnhanceContract.SOURCE);
-
-    /**
-     * video_scene_split 租约 420s（IKH8BP，父规格 IKH86V）：轮询到点步是短查询，但 completed
-     * 步要在同一租约窗口内完成 N 段切片逐段下载（单段可达源视频体量）+ TOS 转存——取 MediaKit
-     * 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投，去字幕/HD 同款语义）。
-     */
-    private static final int VIDEO_SCENE_SPLIT_LEASE_SECONDS = 420;
-
-    /** video_scene_split claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「场景切分」）。 */
-    private static final List<String> VIDEO_SCENE_SPLIT_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.contract.VideoSceneSplitContract.SOURCE);
-
-    /**
-     * video_frame_interpolation 租约 420s（IKHLKJ，父需求 IKHLES）：轮询到点步是短查询，但
-     * completed 步要在同一租约窗口内完成插帧结果视频下载（输出与源同规格，可达数 GB 体量）+
-     * TOS 转存——取 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判
-     * 孤儿重投，去字幕 / HD 高清 / 场景切分同款语义）。
-     */
-    private static final int VIDEO_FRAME_INTERPOLATION_LEASE_SECONDS = 420;
-
-    /** video_frame_interpolation claim 的单源白名单（唯一创建入口 = 画布视频卡「高清 ▾」
-     *  下拉第二项「插帧」；专属来源值口径，video_enhance 同款模式）。 */
-    private static final List<String> VIDEO_FRAME_INTERPOLATION_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.SOURCE);
-
-    /**
-     * video_matting 租约 420s（IKHK99，父规格 IKHJRC，契约 IKHK7F）：轮询到点步是短查询，但
-     * completed 步要在同一租约窗口内完成抠像结果视频下载（输入可达 10GB 级）+ TOS 转存——
-     * 取 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投；
-     * 转存前另有 updateVideoMattingProgress 心跳续租推回窗口）。
-     */
-    private static final int VIDEO_MATTING_LEASE_SECONDS = 420;
-
-    /** video_matting claim 的单源白名单（唯一创建入口 = 画布视频卡工具条「智能抠像 ▾」下拉）。 */
-    private static final List<String> VIDEO_MATTING_CLAIM_SOURCES =
-            List.of(com.bluewhale.worker.domain.contract.VideoMattingContract.SOURCE);
-
-    /**
-     * media_extract 租约 420s（迁移契约 §18 / IKH28W；火山异步链）：轮询到点步是短查询，但
-     * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
-     * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投）。
-     */
-    private static final int MEDIA_EXTRACT_LEASE_SECONDS = 420;
-
-    /**
-     * vocal_split 租约 420s（IKHA2J；火山异步链）：轮询到点步是短查询，但 completed 步要在
-     * 同一租约窗口内完成 **2/3 条**结果音轨逐轨下载 + TOS 转存——取 MediaKit 家族的 420s
-     * （> 超时 + 多轨下载转存余量，防 recovery 把在跑任务判孤儿重投，去字幕 / media_extract
-     * 同款语义）。
-     */
-    private static final int VOCAL_SPLIT_LEASE_SECONDS = 420;
-
-    /** vocal_split claim 的单源白名单（IKHA2J：唯一创建入口 = 画布媒体卡工具条「人声分离」；
-     *  专属来源值口径，video_subtitle_erase / video_enhance 同款模式）。 */
-    private static final List<String> VOCAL_SPLIT_CLAIM_SOURCES =
-            List.of(VocalSplitContract.SOURCE);
-
-    /**
-     * audio_trim 租约 420s（IKHB6S，父单 IKHB08；火山异步链）：轮询到点步是短查询，但
-     * completed 步要在同一租约窗口内完成结果音频下载（无损 wav 可达数百 MB）+ TOS 转存——
-     * 取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery 把在跑任务判孤儿重投，
-     * media_extract 同款语义）。
-     */
-    private static final int AUDIO_TRIM_LEASE_SECONDS = 420;
-
-    /**
-     * audio_speed 租约 420s（IKHW5A，父单 IKHVYO；火山异步链）：轮询到点步是短查询，但
-     * completed 步要在同一租约窗口内完成结果音频下载（默认 m4a 输出，无损源极端情况可达
-     * 数百 MB）+ TOS 转存——取同步 MediaKit 家族的 420s（> 超时 + 下载转存余量，防 recovery
-     * 把在跑任务判孤儿重投，audio_trim / media_extract 同款语义）。
-     */
-    private static final int AUDIO_SPEED_LEASE_SECONDS = 420;
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -225,170 +75,75 @@ public class JobClaimService {
         this.jobMapper = jobMapper;
     }
 
+    // ========== 工具族领取管道（IKIWP8 / ADR-0119，单一） ==========
+
     /**
-     * 领取 media_extract 作业（claim-ops.ts:447-502；迁移契约 §18 / IKH28W 起投影扩
-     * providerTaskId / pollCount / progress 三字段——火山异步链复用视频轮询骨架，分相判据
-     * 与超限判定需要富投影，形态对齐 claimVideoSubtitleErase；候选查询本就 SELECT *
-     * 全列，仅投影侧补字段，SQL 零改动）。
+     * 领取一个工具族作业——**全部 15 个工具家族共用的唯一管道**。
      * <p>
-     * IKI89P（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
+     * 本方法对具体家族**零知识**：家族差异全在 {@link ClaimSpec} 里（候选查询 / 租约秒 / CAS /
+     * type），本类不 import 任何家族 Contract、不认识任何家族名。
+     * <p>
+     * 语义与迁移契约附录 C 的「claim 两段式 CAS」逐字一致，行为保持：
+     * <ol>
+     *   <li>查候选；null 直接返回空（不抛）。</li>
+     *   <li>算租约到期时刻（{@code spec.leaseSeconds()}，image 家族每次读 env）。</li>
+     *   <li>执行 CAS 第二段；受影响行数 0 = 守卫失败，记日志后返回空（stale worker 效应交给
+     *       租约过期 + recovery，不抛）。</li>
+     *   <li>投影——**对全部家族同构**（同一 candidate 行 → 同一组字段），因为
+     *       {@link ClaimedJob} 是单一形态，没有按家族的投影分支。</li>
+     * </ol>
+     *
+     * @param spec     该家族的领取规格（由各处理器构造并持有）
+     * @param jobId    作业主键（字符串形态，管道内 parseLong）
+     * @param workerId 当前 worker 标识，领取成功后写入 lease_owner
+     * @return 领取成功返回投影；无候选 / CAS 未命中返回空
      */
-    public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
+    public Optional<ClaimedJob> claim(ClaimSpec spec, String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
-        return claimPollingAudioJob(jobIdLong, workerId, MediaExtractContract.TAG,
-                jobMapper.findCandidateByTypeOnly(jobIdLong, MediaExtractContract.TAG),
-                jobMapper::claimMediaExtractCas);
-    }
 
-    /** audio_mix 仅选择 type/source 候选，领取生命周期与 media_extract 共用。 */
-    public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, AudioMixContract.TAG, List.of(AudioMixContract.SOURCE));
-        return claimPollingAudioJob(jobIdLong, workerId, AudioMixContract.TAG, candidate, jobMapper::claimImageCas);
-    }
+        GenerationJobEntity candidate = spec.candidate(jobIdLong);
+        if (candidate == null) {
+            return Optional.empty();
+        }
 
-    /** audio_video_mux 仅选择 type/source 候选，领取生命周期与 media_extract 共用（IKIHPJ）。 */
-    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, AudioVideoMuxContract.TAG, List.of(AudioVideoMuxContract.SOURCE));
-        return claimPollingAudioJob(jobIdLong, workerId, AudioVideoMuxContract.TAG, candidate, jobMapper::claimImageCas);
-    }
-
-    @FunctionalInterface
-    private interface PollingAudioCas {
-        int claim(Long jobId, String workerId, LocalDateTime leaseExpiresAt,
-                  Long fencingToken, String candidateStatus);
-    }
-
-    /** 单段轮询型音频任务的唯一 claim/CAS/投影生命周期。 */
-    private Optional<ClaimedMediaExtractJobDto> claimPollingAudioJob(
-            Long jobIdLong, String workerId, String type,
-            GenerationJobEntity candidate, PollingAudioCas claimCas) {
-        if (candidate == null) return Optional.empty();
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(MEDIA_EXTRACT_LEASE_SECONDS);
-        int affected = claimCas.claim(jobIdLong, workerId, leaseExpiresAt,
+        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(spec.leaseSeconds());
+        int affected = spec.claimCas(jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
         if (affected == 0) {
             log.info("[{}] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    type, jobIdLong, candidate.getFencingToken());
+                    spec.type(), jobIdLong, candidate.getFencingToken());
             return Optional.empty();
         }
-        Map<String, Object> input = parseJson(candidate.getInput());
 
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new ClaimedMediaExtractJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(), workerId, candidate.getFencingToken() + 1,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                candidate.getGmtCreate(), candidate.getExecutionDeadlineAt(), parentProviderTaskId));
+        return Optional.of(project(candidate, workerId));
     }
 
     /**
-     * 领取 audio_trim 作业（IKHB6S，父单 IKHB08，附录 C 触点④）。
+     * candidate 行 → {@link ClaimedJob} 的**唯一投影**。
      * <p>
-     * 候选查询不套 source 白名单（type=audio_trim）——audio / media_extract 同形态：契约票
-     * 口径「任务来源值随接线票定死后补录」，专属来源值不在白名单，套了漏真卡任务（IKC9EJ）。
-     * 走 {@link GenerationJobMapper#findCandidateByTypeOnly}。
-     * <p>
-     * IKHPK9：原先传 {@code List.of()} 给参数化 {@code findCandidateByTypeAndSources} 表达
-     * 「不过滤」，但 MyBatis 对空集合什么都不输出，渲染成
-     * {@code ... AND source IN AND is_delete = false ...} 的坏 SQL，claim 恒失败、任务永久
-     * 卡 queued。如今「不套白名单」由方法本身（无 source 参数）表达，空列表路径不存在。
-     * <p>
-     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
-     * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
-     * 分相判据与超限判定，media_extract 同款富投影）。
-     * <p>
-     * IKI89Q（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
+     * 对全部工具家族同构。此前按家族各写一份投影、字段互有出入（media_extract 独有
+     * createdAt/executionDeadlineAt；video_frame_interpolation 独有 cancelRequested；audio_speed
+     * 漏了 parentProviderTaskId）——收敛后统一投影，处理器读不读某个字段由它自己决定。
+     *
+     * @param workerId 本次领取的 worker 标识（回填进投影，供处理器做后续状态推进）
      */
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeOnly(jobIdLong, AudioTrimContract.TAG);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(AUDIO_TRIM_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[audio_trim] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
+    private ClaimedJob project(GenerationJobEntity candidate, String workerId) {
         Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto(
+        return new ClaimedJob(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),
                 input != null ? input : Map.of(),
+                candidate.getType(),
                 candidate.getProviderTaskId(),
+                candidate.getCancelRequestedAt() != null,
                 workerId,
-                postIncrementToken,
+                candidate.getFencingToken() + 1,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 audio_speed 作业（IKHW5A，父单 IKHVYO；claimAudioTrim 同款形态）。
-     * <p>
-     * 候选查询不套 source 白名单（type=audio_speed）——audio_trim / media_extract 同形态：
-     * 专属来源值不在白名单，套了漏真卡任务（IKC9EJ）；「不套白名单」由
-     * {@link GenerationJobMapper#findCandidateByTypeOnly} 的签名表达（IKHPK9）。
-     * <p>
-     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
-     * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
-     * 分相判据与超限判定，media_extract / audio_trim 同款富投影）。
-     */
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto> claimAudioSpeed(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeOnly(jobIdLong, AudioSpeedContract.TAG);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(AUDIO_SPEED_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[audio_speed] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0));
+                candidate.getGmtCreate(),
+                candidate.getExecutionDeadlineAt(),
+                projectParentProviderTaskId(candidate));
     }
 
     /**
@@ -495,456 +250,6 @@ public class JobClaimService {
         }
 
         return Optional.of(new ClaimedVideoJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                candidate.getCancelRequestedAt() != null,
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 image_enhance 作业（契约 §14 / IKGM9D，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约用 image_enhance 专用 420s（> MediaKit 读超时 + 转存余量）。
-     */
-    public Optional<ClaimedImageEnhanceJobDto> claimImageEnhance(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, "image_enhance", IMAGE_ENHANCE_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_ENHANCE_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[image_enhance] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new ClaimedImageEnhanceJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                workerId,
-                postIncrementToken));
-    }
-
-    /**
-     * 领取 image_erase 作业（契约 §15 / IKGOT6，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租录用 image_erase 专用 420s（> MediaKit 读超时 + 转存余量）。
-     */
-    public Optional<ClaimedImageEraseJobDto> claimImageErase(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, "image_erase", IMAGE_ERASE_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_ERASE_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[image_erase] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new ClaimedImageEraseJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                workerId,
-                postIncrementToken));
-    }
-
-    /**
-     * 领取 image_cutout 作业（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约用 image_cutout 专用 420s（> MediaKit 读超时 + 转存余量）。
-     */
-    public Optional<ClaimedImageCutoutJobDto> claimImageCutout(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong, "image_cutout", IMAGE_CUTOUT_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_CUTOUT_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[image_cutout] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new ClaimedImageCutoutJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                workerId,
-                postIncrementToken));
-    }
-
-    /**
-     * 领取 image_outpaint 作业（IKGOQW，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约用 image_outpaint 专用 420s（> MediaKit 读超时 + 转存余量）。
-     */
-    public Optional<ClaimedImageOutpaintJobDto> claimImageOutpaint(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                ImageOutpaintContract.TAG,
-                IMAGE_OUTPAINT_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(IMAGE_OUTPAINT_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[image_outpaint] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-        return Optional.of(new ClaimedImageOutpaintJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                workerId,
-                postIncrementToken));
-    }
-
-    /**
-     * 领取 video_subtitle_erase 作业（迁移契约 §17 / IKGZ81，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
-     * <p>
-     * IKI89U（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
-     */
-    public Optional<ClaimedVideoSubtitleEraseJobDto> claimVideoSubtitleErase(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                VideoSubtitleEraseContract.TAG,
-                VIDEO_SUBTITLE_ERASE_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_SUBTITLE_ERASE_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[video_subtitle_erase] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new ClaimedVideoSubtitleEraseJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 video_enhance 作业（IKH3VF，父规格 IKH3VB，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
-     * <p>
-     * IKI89S（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
-     */
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto> claimVideoEnhance(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                VideoEnhanceContract.TAG,
-                VIDEO_ENHANCE_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_ENHANCE_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[video_enhance] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 vocal_split 作业（IKHA2J，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含 2/3 轨结果下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
-     * <p>
-     * IKI89R（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
-     */
-    public Optional<ClaimedVocalSplitJobDto> claimVocalSplit(String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                VocalSplitContract.TAG,
-                VOCAL_SPLIT_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VOCAL_SPLIT_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[vocal_split] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new ClaimedVocalSplitJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 video_scene_split 作业（IKH8BP，父规格 IKH86V，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含 N 段切片逐段下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
-     * <p>
-     * IKI89T（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
-     */
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto> claimVideoSceneSplit(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                com.bluewhale.worker.domain.contract.VideoSceneSplitContract.TAG,
-                VIDEO_SCENE_SPLIT_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_SCENE_SPLIT_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[video_scene_split] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 video_matting 作业（IKHK99，父规格 IKHJRC，契约 IKHK7F，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）。
-     * <p>
-     * IKI89Z（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 先例同款、IKI89P 定型形态平移），
-     * 处理器 submit 相据此收割。
-     */
-    public Optional<com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto> claimVideoMatting(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                com.bluewhale.worker.domain.contract.VideoMattingContract.TAG,
-                VIDEO_MATTING_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now().plusSeconds(VIDEO_MATTING_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[video_matting] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto(
-                candidate.getId().toString(),
-                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
-                candidate.getUserId().toString(),
-                input != null ? input : Map.of(),
-                candidate.getProviderTaskId(),
-                workerId,
-                postIncrementToken,
-                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
-                candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
-    }
-
-    /**
-     * 领取 video_frame_interpolation 作业（IKHLKJ，父需求 IKHLES，附录 C 触点④）。
-     * <p>
-     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
-     * 租约 420s（completed 步含结果视频下载 + TOS 转存，见常量注释）。
-     * 投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的分相判据与超限判定）
-     * 与 cancelRequested（软取消入口对本类型生效，处理器据它落 cancelled 终态）。
-     * <p>
-     * IKI8A0（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
-     * 二次查询父任务的 provider_task_id，视频 IKEA26 同款），处理器 submit 相据此收割。
-     */
-    public Optional<ClaimedVideoFrameInterpolationJobDto> claimVideoFrameInterpolation(
-            String jobId, String workerId) {
-        Long jobIdLong = Long.parseLong(jobId);
-
-        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
-                jobIdLong,
-                com.bluewhale.worker.domain.contract.VideoFrameInterpolationContract.TAG,
-                VIDEO_FRAME_INTERPOLATION_CLAIM_SOURCES);
-        if (candidate == null) {
-            return Optional.empty();
-        }
-
-        LocalDateTime leaseExpiresAt = WorkerClock.now()
-                .plusSeconds(VIDEO_FRAME_INTERPOLATION_LEASE_SECONDS);
-        int affected = jobMapper.claimImageCas(
-                jobIdLong, workerId, leaseExpiresAt,
-                candidate.getFencingToken(), candidate.getStatus());
-        if (affected == 0) {
-            log.info("[video_frame_interpolation] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
-                    jobId, candidate.getFencingToken());
-            return Optional.empty();
-        }
-
-        long postIncrementToken = candidate.getFencingToken() + 1;
-        Map<String, Object> input = parseJson(candidate.getInput());
-
-        // IKI8A0（ADR-0114）：重试收割投影——retry job 二次查父任务的 provider_task_id
-        // （视频 IKEA26 先例同款 mapper 方法，SQL 零新增；非重试 job 不查父任务）
-        String parentProviderTaskId = projectParentProviderTaskId(candidate);
-
-        return Optional.of(new ClaimedVideoFrameInterpolationJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),

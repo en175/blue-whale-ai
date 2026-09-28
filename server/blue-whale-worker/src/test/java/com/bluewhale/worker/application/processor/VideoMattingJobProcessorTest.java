@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoMattingJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoMattingDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -16,6 +18,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,8 @@ import static org.mockito.Mockito.*;
 class VideoMattingJobProcessorTest {
 
     @Mock private JobStateMachineService stateMachine;
+    @Mock private JobClaimService claimService;
+    @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
     @Mock private GenerationCredentialService credentialService;
     @Mock private NewApiMediaKitMatteVideoClient matteVideoClient;
@@ -92,7 +97,7 @@ class VideoMattingJobProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new VideoMattingJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, mediaRelay, producer);
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
@@ -117,25 +122,25 @@ class VideoMattingJobProcessorTest {
                 .thenReturn(source);
     }
 
-    private ClaimedVideoMattingJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount) {
         return makeClaim(input, providerTaskId, pollCount, null);
     }
 
-    private ClaimedVideoMattingJobDto makeClaim(Map<String, Object> input, String providerTaskId,
+    private ClaimedJob makeClaim(Map<String, Object> input, String providerTaskId,
                                                 int pollCount, String parentProviderTaskId) {
-        return new ClaimedVideoMattingJobDto(
-                "100", "42", "9", input, providerTaskId, "worker-1", 5L, pollCount, 0,
-                parentProviderTaskId);
+        return new ClaimedJob(
+                "100", "42", "9", input, "video_matting", providerTaskId, false, "worker-1",
+                5L, pollCount, 0, null, null, parentProviderTaskId);
     }
 
     private void stubSubmitClaim(Map<String, Object> input) {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, null, 0)));
     }
 
     private void stubPollClaim(Map<String, Object> input, int pollCount) {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input, "amk-task-1", pollCount)));
     }
 
@@ -149,7 +154,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("claim 抛 DB 异常 → 上抛（不 fail job，不 ack → 重投）")
     void claimThrowsDbError_propagates() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenThrow(new RuntimeException("DB connection refused"));
 
         Throwable thrown = catchThrowable(() -> processor.handle("100"));
@@ -162,7 +167,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("claim 返回空 → 静默返回（无可认领 / 重复唤醒）")
     void claimReturnsEmpty_silentReturn() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.empty());
 
         processor.handle("100");
@@ -369,7 +374,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 命中：父任务成功且 videoUrl+resolution 齐全 → 不提交，直接转存发布（payload 与正常完成同型，含转存前续租）")
     void parentReuseSuccess_publishesWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-1")));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-1"))
@@ -410,7 +415,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务 failed → 回退正常重新提交")
     void parentReuseFailed_fallThrough() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-fail")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-fail"))
                 .thenReturn(new MatteVideoTaskObservation("failed", null, null, null,
@@ -432,7 +437,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-gone")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-gone"))
                 .thenThrow(new VideoMattingError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -471,7 +476,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但结果 URL 为空（结果不齐全）→ 回退正常重新提交")
     void parentReuseIncompleteUrl_fallThrough() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-empty")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-empty"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded", null, "1080p", 65.5,
@@ -492,7 +497,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 父任务成功但缺分辨率档位（本家族齐全口径双条件，对齐轮询相）→ 回退正常重新提交")
     void parentReuseMissingResolution_fallThrough() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-nores")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-nores"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
@@ -513,7 +518,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布失败（转存下载 404，URL 超 24h 失效）→ 回退正常重新提交，不落失败终态")
     void parentReusePublishFails_fallThrough() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-stale")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-stale"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
@@ -537,7 +542,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0，与心跳失租同一停止语义）")
     void parentReusePublishGuardMissed_stopWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-guard")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
@@ -566,7 +571,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 收割转存前续租未命中（已被接管/终态）→ 静默退出：不提交、不转存、不落失败（租约丢失≠回退）")
     void parentReuseRenewMissed_silentExitWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-taken")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-taken"))
                 .thenReturn(new MatteVideoTaskObservation("succeeded",
@@ -588,7 +593,7 @@ class VideoMattingJobProcessorTest {
     @Timeout(30)
     @DisplayName("parent-reuse 收割转存中被接管（心跳未命中中止传输）→ 静默退出：不提交、不发布、不落失败（防双跑烧上游费）")
     void parentReuseLeaseLostDuringTransfer_silentExitWithoutSubmit() throws Exception {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-lost")));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-lost"))
@@ -617,7 +622,7 @@ class VideoMattingJobProcessorTest {
     @Timeout(10)
     @DisplayName("parent-reuse 转存抛普通异常时心跳已失租，旧 worker 停止而不重新提交")
     void parentReuseTransferFailureAfterHeartbeatLost_stopsWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-race")));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-race"))
@@ -651,7 +656,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 转存异常后续租状态无法确认，旧 worker 停止而不重新提交")
     void parentReuseTransferFailureThenLeaseUnknown_stopsWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-unknown")));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-unknown"))
@@ -676,7 +681,7 @@ class VideoMattingJobProcessorTest {
     @Test
     @DisplayName("parent-reuse 发布异常后提交前失租，旧 worker 不创建无人轮询的上游任务")
     void parentReuseLeaseLostBeforeFallbackSubmit_stopsWithoutSubmit() {
-        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+        when(claimService.claim(any(ClaimSpec.class), eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-before-submit")));
         stubSourceAsset(1920, 1080);
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-before-submit"))
@@ -1138,7 +1143,7 @@ class VideoMattingJobProcessorTest {
     @DisplayName("TOS 未配置 → 1050（结果 URL 24h 失效，强依赖不降级直存）")
     void tosMissing_failsWithoutPassthrough() {
         VideoMattingJobProcessor noRelayProcessor = new VideoMattingJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper),
+                stateMachine, claimService, jobMapper, new AssetSourceService(assetMapper),
                 credentialService, matteVideoClient, null, producer);
         stubPollClaim(webmInput("portrait"), 3);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))

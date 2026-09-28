@@ -1,11 +1,14 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
+import com.bluewhale.worker.domain.contract.AudioTrimContract;
+import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
-import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -87,10 +90,14 @@ class JobStateMachineServiceGoldenMirrorTest {
 
     private JobStateMachineService service;
 
+    /** 工具族领取管道（IKIWP8）：与 service 共用同一个被 mock 的 jobMapper。 */
+    private JobClaimService claimService;
+
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
                 projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper);
+        claimService = new JobClaimService(jobMapper);
     }
 
     @Test
@@ -117,11 +124,14 @@ class JobStateMachineServiceGoldenMirrorTest {
         )).thenReturn(1);
 
         // when
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         // then
         assertThat(result).isPresent();
-        ClaimedMediaExtractJobDto claimed = result.get();
+        ClaimedJob claimed = result.get();
         assertThat(claimed.fencingToken()).isEqualTo(5L); // 增后 token = 4 + 1
 
         // 断言 CAS where 含 status='processing'（不强制 queued）
@@ -223,7 +233,10 @@ class JobStateMachineServiceGoldenMirrorTest {
     void claimMediaExtract_noCandidate() {
         when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(null);
 
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -245,7 +258,10 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("queued")
         )).thenReturn(0); // CAS rejected
 
-        Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(MediaExtractContract.TAG, 420, jobMapper,
+                        jobMapper::claimMediaExtractCas),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -403,8 +419,9 @@ class JobStateMachineServiceGoldenMirrorTest {
     void claimAudioTrim_noCandidate() {
         when(jobMapper.findCandidateByTypeOnly(300L, "audio_trim")).thenReturn(null);
 
-        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
-                service.claimAudioTrim("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }
@@ -426,8 +443,9 @@ class JobStateMachineServiceGoldenMirrorTest {
                 eq("queued")
         )).thenReturn(0); // CAS rejected
 
-        Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
-                service.claimAudioTrim("300", "worker-1");
+        Optional<ClaimedJob> result = claimService.claim(
+                ClaimSpec.typeOnly(AudioTrimContract.TAG, 420, jobMapper),
+                "300", "worker-1");
 
         assertThat(result).isEmpty();
     }

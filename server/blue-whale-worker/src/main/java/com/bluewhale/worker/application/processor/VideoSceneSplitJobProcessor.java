@@ -1,8 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -17,6 +19,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesCl
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SceneSplitTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SegmentObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import org.slf4j.Logger;
@@ -38,7 +41,7 @@ import java.util.Set;
  * 一次 MQ 消费，fencing / 租约 / claim-by-id 全部走视频件，去字幕
  * {@link VideoSubtitleEraseJobProcessor} / 音视频分离 {@link MediaExtractJobProcessor} 同构）：
  * <ol>
- *   <li>claimVideoSceneSplit（富投影：providerTaskId / pollCount / progress）</li>
+ *   <li>claim（{@link ClaimSpec}：候选查询 / 租约秒 / CAS 见本类构造器）</li>
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（granularity 经契约
  *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
@@ -95,7 +98,13 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      */
     public static final int MAX_SCENE_SPLIT_POLLS = 720;
 
+    /** 领取规格（IKIWP8 / ADR-0119）。 */
+    private static final int LEASE_SECONDS = 420;
+    private static final List<String> CLAIM_SOURCES = List.of(VideoSceneSplitContract.SOURCE);
+
     private final JobStateMachineService stateMachine;
+    private final JobClaimService claimService;
+    private final ClaimSpec claimSpec;
     private final AssetSourceService assetSource;
     private final GenerationCredentialService credentialService;
     private final NewApiMediaKitSegmentScenesClient segmentScenesClient;
@@ -105,6 +114,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
     public VideoSceneSplitJobProcessor(
             JobStateMachineService stateMachine,
+            JobClaimService claimService,
+            GenerationJobMapper jobMapper,
             AssetSourceService assetSource,
             GenerationCredentialService credentialService,
             NewApiMediaKitSegmentScenesClient segmentScenesClient,
@@ -113,6 +124,9 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
+        this.claimService = claimService;
+        this.claimSpec = ClaimSpec.bySources(
+                VideoSceneSplitContract.TAG, LEASE_SECONDS, CLAIM_SOURCES, jobMapper);
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.segmentScenesClient = segmentScenesClient;
@@ -127,6 +141,14 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
     }
 
     /**
+     * 本家族的领取规格：供「一个处理器 ↔ 一份规格」一致性断言枚举（IKIWP8 / ADR-0119）。
+     */
+    @Override
+    public Optional<ClaimSpec> claimSpec() {
+        return Optional.of(claimSpec);
+    }
+
+    /**
      * 处理一个 video_scene_split step。
      * <p>
      * claim 在 try 外（视频骨架同构：DB 异常上抛 → consumer 不 ack → 重投）；
@@ -134,16 +156,16 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      */
     @Override
     public void handle(String jobId) {
-        Optional<ClaimedVideoSceneSplitJobDto> claimOpt;
+        Optional<ClaimedJob> claimOpt;
         try {
-            claimOpt = stateMachine.claimVideoSceneSplit(jobId, workerId);
+            claimOpt = claimService.claim(claimSpec, jobId, workerId);
         } catch (Exception error) {
             log.error("[video_scene_split] claim 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // 无可认领 / 重复唤醒
 
-        ClaimedVideoSceneSplitJobDto claim = claimOpt.get();
+        ClaimedJob claim = claimOpt.get();
         log.info("[video_scene_split] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
                 claim.id(), claim.fencingToken(), claim.providerTaskId(), claim.pollCount());
 
@@ -166,7 +188,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
     /**
      * 分相主逻辑（去字幕 runStep 同构）：凭证 → submit 相 / poll 相。
      */
-    private void runStep(ClaimedVideoSceneSplitJobDto claim) {
+    private void runStep(ClaimedJob claim) {
         // 取明文凭证（基础设施键；与视频/去字幕同构，修正四：明文直通）
         Object credentialObj = claim.input().get("provider_credential");
         if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
@@ -197,7 +219,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关提交（granularity → segment_threshold 在客户端
      * 单处映射）→ markProviderSubmitted → 续排轮询。
      */
-    private void submitPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
+    private void submitPhase(ClaimedJob claim, String providerToken) {
         // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
         //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
@@ -229,8 +251,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         // 2. 解析源视频素材：Asset url 落库即公网 public-read，直接作 video_url（去字幕同构）
         AssetEntity source = assetSource.resolve(
                 Long.parseLong(sourceAssetId),
-                Long.parseLong(claim.user_id()),
-                Long.parseLong(claim.project_id()));
+                Long.parseLong(claim.userId()),
+                Long.parseLong(claim.projectId()));
         if (source == null || !"video".equals(source.getType())
                 || source.getUrl() == null || source.getUrl().isEmpty()) {
             failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
@@ -260,7 +282,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 收割齐全判定（IKI8GN 家族差异参数）：切片数组非空，对齐轮询相 completed 成功判据。
      * 返回 null=齐全；非空=未齐原因短句（嵌进共享骨架「未命中(父任务{})」日志）。
      */
-    private String sceneSplitResultIncomplete(ClaimedVideoSceneSplitJobDto claim,
+    private String sceneSplitResultIncomplete(ClaimedJob claim,
                                               SceneSplitTaskObservation observation) {
         return observation.segments() == null || observation.segments().isEmpty()
                 ? "切片数组为空" : null;
@@ -272,7 +294,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 轮询相：查询任务 → 瞬时错误续排 / processing 续排（含超限）/ failed 终态 /
      * completed 逐段下载转存发布。
      */
-    private void pollPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
+    private void pollPhase(ClaimedJob claim, String providerToken) {
         SceneSplitTaskObservation observation;
         try {
             observation = segmentScenesClient.poll(providerToken, claim.providerTaskId());
@@ -365,7 +387,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 守卫丢弃前白付一次上游 submit，产生无人轮询的孤儿上游任务；任务保持 processing，
      * 由新 worker 重新领取后重新检查父任务继续收割）。
      */
-    private boolean publishResult(ClaimedVideoSceneSplitJobDto claim,
+    private boolean publishResult(ClaimedJob claim,
                                   SceneSplitTaskObservation observation) {
         // TOS 强依赖：切片链接 24h 失效，不允许降级直存（去字幕家族口径）
         if (mediaRelay == null) {
@@ -383,8 +405,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         if (sourceAssetId != null) {
             AssetEntity source = assetSource.resolve(
                     Long.parseLong(sourceAssetId),
-                    Long.parseLong(claim.user_id()),
-                    Long.parseLong(claim.project_id()));
+                    Long.parseLong(claim.userId()),
+                    Long.parseLong(claim.projectId()));
             if (source != null) {
                 width = source.getWidth();
                 height = source.getHeight();
@@ -412,7 +434,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             SegmentObservation segment = observed.get(i);
             TosVideoMediaRelay.StoredVideo stored;
             try {
-                stored = mediaRelay.persist(segment.segmentVideoUrl(), claim.user_id());
+                stored = mediaRelay.persist(segment.segmentVideoUrl(), claim.userId());
             } catch (Exception e) {
                 // 部分段失败 → 整体失败（契约口径）：包装段序后上抛，由 handle 归并兜底码；
                 // 已转存的段无 Asset 行，不留半成品资产悬挂（TOS 孤儿对象与家族先例同口径）
@@ -439,8 +461,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
         boolean published = stateMachine.publishVideoSceneSplitResult(new PublishVideoSceneSplitDto(
                 claim.id(),
-                claim.project_id(),
-                claim.user_id(),
+                claim.projectId(),
+                claim.userId(),
                 claim.workerId(),
                 claim.fencingToken(),
                 durationSec,
@@ -460,7 +482,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 静默退出，已转存 TOS 对象成孤儿与家族口径一致（无 Asset 行、不留半成品悬挂）。
      */
     private boolean renewLeaseForSegmentTransfer(
-            ClaimedVideoSceneSplitJobDto claim, int transferred, int total) {
+            ClaimedJob claim, int transferred, int total) {
         int progress = (int) Math.floor(transferred * 100.0 / total);
         try {
             boolean renewed = stateMachine.updateVideoSceneSplitProgress(
@@ -545,7 +567,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
 
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  场景切分无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
-    private void failClaimed(ClaimedVideoSceneSplitJobDto claim, String code, String msg) {
+    private void failClaimed(ClaimedJob claim, String code, String msg) {
         failClaimed(claim, code, msg, null);
     }
 
@@ -554,7 +576,7 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
      *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
      *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
-    private void failClaimed(ClaimedVideoSceneSplitJobDto claim, String code, String msg,
+    private void failClaimed(ClaimedJob claim, String code, String msg,
                              Integer httpStatus) {
         log.warn("video_scene_split job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
