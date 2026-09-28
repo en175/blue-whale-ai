@@ -133,7 +133,7 @@ def merge_tree_evidence(root: Path, upstream: str, original: str) -> tuple[str, 
 
 def conflict_covers(path: str, conflicts: list[str]) -> bool:
     for conflict in conflicts:
-        scope = conflict.removesuffix("~HEAD")
+        scope = re.sub(r"~(?:HEAD|[0-9a-f]{40})$", "", conflict)
         if path == conflict or path == scope or path.startswith(scope + "/"):
             return True
     return False

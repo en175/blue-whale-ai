@@ -97,7 +97,8 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
             else:
                 changed = output(root, "diff", "--name-only", auto_tree,
                                  str(record.get("merged_tree", ""))).splitlines()
-                scopes = [name.removesuffix("~HEAD") for name in conflicts]
+                scopes = [re.sub(r"~(?:HEAD|[0-9a-f]{40})$", "", name)
+                          for name in conflicts]
                 tree_valid = (isinstance(resolved, list) and expected.returncode != 0
                               and record.get("auto_tree") == auto_tree
                               and record.get("conflict_files") == conflicts

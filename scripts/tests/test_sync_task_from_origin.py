@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +37,19 @@ def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProce
 
 
 class SyncTaskFromOriginTest(unittest.TestCase):
+    def test_conflict_scope_accepts_git_sha_directory_alias(self) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        try:
+            conflict_covers = runpy.run_path(str(REPO_ROOT / "scripts/sync-task-from-origin.py"))[
+                "conflict_covers"
+            ]
+        finally:
+            sys.path.pop(0)
+        alias = ".claude/skills~" + "a" * 40
+        self.assertTrue(conflict_covers(".claude/skills", [alias]))
+        self.assertTrue(conflict_covers(".claude/skills/start-local-services/SKILL.md", [alias]))
+        self.assertFalse(conflict_covers("scripts/verification-policy.mjs", [alias]))
+
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
