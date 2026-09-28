@@ -35,7 +35,12 @@ import {
   GRANT_SWEEP_BATCH_SIZE,
   type GrantSweepResult,
 } from "./recharge-grant-sweeper.js";
-import type { RechargeService } from "./recharge.service.js";
+// ⚠️ **必须是值导入，不能写 `import type`** —— 本类靠构造函数注入拿到它，
+//    而 Nest 的注入读的是 `emitDecoratorMetadata` 发出的**运行时** `design:paramtypes`。
+//    `import type` 会被编译期整句擦除，元数据里那个引用就成了 undefined，
+//    启动时炸成 `UnknownDependenciesException: ... The argument Function at index [0] is not available`。
+//    —— 这类错误 `tsc` 与单测**都照不到**（单测直接 `new`、不走 DI），只有真正起一次服务才看得见。
+import { RechargeService } from "./recharge.service.js";
 
 /** 扫描间隔：默认 5 分钟。 */
 export const DEFAULT_GRANT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
