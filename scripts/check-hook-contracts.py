@@ -183,6 +183,13 @@ def normalized_contracts(
                 # 按 git-workflow.md「Hook 改动同步检查」排除于阻断等价比较。
                 if event == "PreToolUse" and command.startswith("graphify hook-"):
                     continue
+                # ponytail 官方 UserPromptSubmit 钩子（模式跟踪，恒 exit 0 不阻断）：
+                # node 前缀命令形态非本脚本 gate 契约，与 SessionStart 注入同源，
+                # 同样排除于阻断等价比较。
+                if event == "UserPromptSubmit" and command.startswith(
+                    'node "${CLAUDE_PROJECT_DIR}"/.claude/hooks/ponytail-'
+                ):
+                    continue
                 gate = command_parser(command)
                 if gate is None:
                     raise ValueError(
