@@ -397,7 +397,7 @@ describe('AigcFlatView 分页拉全（IKGC0K）', () => {
   });
 });
 
-function expectImgWithoutCrossOrigin(img: Element | null): asserts img is HTMLImageElement {
+function expectImgWithoutCrossOrigin(img: Element | null | undefined): asserts img is HTMLImageElement {
   if (!(img instanceof HTMLImageElement)) throw new Error('preview img missing');
   expect(img.getAttribute('crossorigin')).toBeNull();
 }
