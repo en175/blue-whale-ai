@@ -1,11 +1,10 @@
 import "reflect-metadata";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import ffmpegPath from "ffmpeg-static";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
@@ -72,9 +71,9 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
 
     beforeAll(async () => {
       temp = mkdtempSync(join(tmpdir(), "iki68w-browser-"));
-      if (!ffmpegPath) throw new Error("ffmpeg-static 缺少可执行文件");
-      execFileSync(ffmpegPath, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-        "-codec:a", "libmp3lame", "-q:a", "9", join(temp, "result.mp3")]);
+      // 混合结果夹具 = 检入的 1 秒 440Hz mp3（生成命令见 fixtures/README.md）。
+      // worker 只读取/转发这些字节、不解析音频，容器内仍要求挂成 /fixture/result.mp3。
+      copyFileSync(resolve(import.meta.dirname, "fixtures/sine-440-1s.mp3"), join(temp, "result.mp3"));
       expectedOutput = readFileSync(join(temp, "result.mp3"));
       const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
       mysqlId = execFileSync("docker", ["run", "-d", "--rm", "-e", "MYSQL_ROOT_PASSWORD=root",

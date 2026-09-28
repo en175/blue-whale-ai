@@ -11,9 +11,6 @@ FROM node:24-alpine
 RUN corepack enable
 WORKDIR /app
 
-# ffmpeg-static 二进制走 npmmirror 镜像（避免 postinstall 从 GitHub 下载，国内构建超时）
-ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
-
 # workspace 根 + backend package.json（pnpm install 解析 workspace:*；contracts/core 已并入 backend/libs）
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY backend/package.json backend/
