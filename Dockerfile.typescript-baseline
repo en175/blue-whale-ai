@@ -1,10 +1,13 @@
 FROM node:24.18.0-bookworm-slim
 
+# openssl：Prisma 引擎依赖。ca-certificates：debian slim 不带系统根证书，
+# 而 buf（Go 二进制，读 /etc/ssl/certs）拉 BSR 远程插件要走系统根证书链
+# —— 缺了它 buf generate 直接 x509: certificate signed by unknown authority。
 RUN sed -i \
         's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g; s|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
         /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install --yes --no-install-recommends openssl \
+    && apt-get install --yes --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global pnpm@11.17.0 --registry=https://registry.npmmirror.com
@@ -13,8 +16,17 @@ RUN npm install --global pnpm@11.17.0 --registry=https://registry.npmmirror.com
 # 只认 pnpm_config_* 前缀（同上游 IK6GLP 对 blue_whale_web/Dockerfile 的修法）。
 ENV pnpm_config_registry=https://registry.npmmirror.com
 
+# ffmpeg-static postinstall 默认从 GitHub 下二进制，国内构建超时（backend/Dockerfile 同款处置）。
+ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
+
 WORKDIR /workspace
 COPY . .
+
+# 跨进程契约（ADR-0113 决策 8）：生成物不入仓（.gitignore「跨进程契约生成物」），
+# 与 backend/Dockerfile 同一根因——backend/libs 直接 import ../../contracts/gen/**，
+# 不生成就 tsc -b 报 TS2307。buf 版本与那边对齐，两镜像产出一致。
+RUN npm install --global @bufbuild/buf@1.73.0 --registry=https://registry.npmmirror.com \
+    && (cd contracts && buf generate)
 
 RUN pnpm install --frozen-lockfile \
     && pnpm --dir backend exec prisma generate \
