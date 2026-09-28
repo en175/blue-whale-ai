@@ -24,16 +24,24 @@ import java.util.List;
 public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
 
     /**
-     * 领取 media_extract 作业：候选查询（claim-ops.ts:450-467）。
+     * 按 type 领取候选，**不套 source 白名单**（claim-ops.ts:450-467）。
      * <p>
-     * WHERE id = ? AND type = 'media_extract' AND is_delete = false
-     *   AND next_action_at <= now
-     *   AND (status = 'queued' OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < now)))
+     * media_extract / audio / audio_trim / audio_speed 四个原有专属查询 SQL 逐字同形、仅
+     * type 字面量不同，IKIWP8 收敛为参数化本方法。
+     * <p>
+     * 与 {@link #findCandidateByTypeAndSources} 的分工是**类型层面的**：本方法没有 source
+     * 参数，「不套白名单」这件事由「调用了没有 source 的方法」表达，而不是靠传空列表。
+     * IKHPK9 的坏 SQL（MyBatis 对空集合连括号都不输出，渲染成
+     * {@code ... AND source IN       AND is_delete = false ...} → MySQL 1064，claim 恒抛语法
+     * 错误、任务永久卡 queued）因此在类型上不再可能发生——空列表这个值不再有表达位置。
+     * <p>
+     * WHERE id=? AND type=? AND is_delete=false AND next_action_at&lt;=now
+     * AND (queued OR processing+孤儿)
      */
     @Select("""
             SELECT * FROM generation_jobs
             WHERE id = #{jobId}
-              AND type = 'media_extract'
+              AND type = #{type}
               AND is_delete = false
               AND next_action_at <= NOW()
               AND (
@@ -46,7 +54,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             ORDER BY id ASC
             LIMIT 1
             """)
-    GenerationJobEntity findMediaExtractCandidate(@Param("jobId") Long jobId);
+    GenerationJobEntity findCandidateByTypeOnly(
+            @Param("jobId") Long jobId,
+            @Param("type") String type);
 
     /**
      * 领取 media_extract 作业：CAS 更新（claim-ops.ts:472-486 + 租约复核）。
@@ -334,65 +344,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     // ========== 音频截取路径（IKHPK9） ==========
-
-    /**
-     * 领取 audio_trim 作业：候选查询（不套 source 白名单，对齐 findAudioCandidate /
-     * findMediaExtractCandidate）。
-     * <p>
-     * 与图片路径的参数化 {@code findCandidateByTypeAndSources} 不同，本方法**不拼接 source
-     * 条件**：audio_trim 的唯一创建入口落库 {@code source='dock'}，但按 IKCR78 / IKC9EJ
-     * 教训，套白名单会漏掉非预期来源的真卡任务。
-     * <p>
-     * 此前实现传 {@code List.of()} 给参数化方法来表达同一语义，而 MyBatis 对空集合
-     * **什么都不输出**（连 open / close 都不输出），渲染出
-     * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL，claim 恒抛
-     * 语法错误，任务永久卡 queued（IKHPK9）。专属查询是「不套白名单」在本仓的既有表达方式。
-     * <p>
-     * WHERE id=? AND type='audio_trim' AND is_delete=false AND next_action_at&lt;=now
-     * AND (queued OR processing+孤儿)
-     */
-    @Select("""
-            SELECT * FROM generation_jobs
-            WHERE id = #{jobId}
-              AND type = 'audio_trim'
-              AND is_delete = false
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (
-                  status = 'processing'
-                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
-                )
-              )
-            ORDER BY id ASC
-            LIMIT 1
-            """)
-    GenerationJobEntity findAudioTrimCandidate(@Param("jobId") Long jobId);
-
-    /**
-     * 领取 audio_speed 作业：候选查询（IKHW5A，父单 IKHVYO；不套 source 白名单，
-     * 对齐 findAudioTrimCandidate——IKHPK9 教训同源：专属查询是「不套白名单」的既有表达）。
-     * <p>
-     * WHERE id=? AND type='audio_speed' AND is_delete=false AND next_action_at&lt;=now
-     * AND (queued OR processing+孤儿)
-     */
-    @Select("""
-            SELECT * FROM generation_jobs
-            WHERE id = #{jobId}
-              AND type = 'audio_speed'
-              AND is_delete = false
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (
-                  status = 'processing'
-                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
-                )
-              )
-            ORDER BY id ASC
-            LIMIT 1
-            """)
-    GenerationJobEntity findAudioSpeedCandidate(@Param("jobId") Long jobId);
+    // 候选查询已收敛到 findCandidateByTypeOnly（IKIWP8）：audio_trim / audio_speed 的专属
+    // type-only 查询与 media_extract / audio 的 SQL 逐字同形，仅 type 字面量不同。
+    // 下方是各自的 CAS（UPDATE 的 WHERE 与媒体类型无关，仅 fencing_token / status / 租约复核）。
 
     // ========== 图片路径（blade-③ IKELJA） ==========
 
@@ -408,10 +362,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * ⚠️ {@code sources} **必须非空**。MyBatis 对空集合**什么都不输出**（连 {@code open} /
      * {@code close} 的括号都不输出），渲染成
      * {@code ... AND source IN       AND is_delete = false ...} 的坏 SQL → MySQL 1064。
-     * 想表达「不套 source 白名单」**不要传 {@code List.of()}**，改用专属 type-only 查询：
-     * {@code findMediaExtractCandidate} / {@code findAudioCandidate} /
-     * {@code findAudioTrimCandidate} / {@code findVideoCandidate}（IKHPK9 教训：audio_trim 曾
-     * 传空列表，claim 恒抛语法错误、recovery 无限重投，任务永久卡 queued）。
+     * 想表达「不套 source 白名单」**不要传 {@code List.of()}**，改用无 source 参数的
+     * {@link #findCandidateByTypeOnly}（IKHPK9 教训：audio_trim 曾传空列表，claim 恒抛语法
+     * 错误、recovery 无限重投，任务永久卡 queued）。
      * <p>
      * 本方法**不加** {@code <if>} 兜空：那会让「空列表 = 静默不过滤」成为隐藏语义，误传空列表时
      * source 过滤无声消失（漏真卡任务，IKC9EJ 同族风险）。

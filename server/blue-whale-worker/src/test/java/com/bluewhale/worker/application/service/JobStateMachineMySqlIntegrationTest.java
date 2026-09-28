@@ -1505,7 +1505,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(claimed).isPresent();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 renewedId);
-        GenerationJobEntity stale = jobMapper.findMediaExtractCandidate(renewedId);
+        GenerationJobEntity stale = jobMapper.findCandidateByTypeOnly(renewedId, "media_extract");
         assertThat(stale).isNotNull();
         assertThat(service.reserveParentReuseSubmit(String.valueOf(renewedId), "worker-old",
                 stale.getFencingToken())).isTrue();
@@ -1520,7 +1520,7 @@ class JobStateMachineMySqlIntegrationTest {
         assertThat(service.claimMediaExtract(String.valueOf(orphanId), "worker-old")).isPresent();
         jdbc.update("UPDATE generation_jobs SET lease_expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id=?",
                 orphanId);
-        GenerationJobEntity orphanSnap = jobMapper.findMediaExtractCandidate(orphanId);
+        GenerationJobEntity orphanSnap = jobMapper.findCandidateByTypeOnly(orphanId, "media_extract");
         assertThat(orphanSnap).isNotNull();
         assertThat(jobMapper.claimMediaExtractCas(orphanId, "new-worker",
                 WorkerClock.now().plusSeconds(420),

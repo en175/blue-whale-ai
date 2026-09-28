@@ -54,7 +54,7 @@ class JobClaimServiceParentReuseTest {
     @DisplayName("media_extract：retry job claim 二次查父任务并投影 provider_task_id")
     void mediaExtractRetryJobProjectsParentProviderTaskId() {
         service = new JobClaimService(jobMapper);
-        when(jobMapper.findMediaExtractCandidate(100L)).thenReturn(candidate(999L));
+        when(jobMapper.findCandidateByTypeOnly(100L, "media_extract")).thenReturn(candidate(999L));
         when(jobMapper.claimMediaExtractCas(eq(100L), anyString(), any(), anyLong(), anyString()))
                 .thenReturn(1);
         when(jobMapper.findProviderTaskId(999L)).thenReturn("parent-task-1");
@@ -71,7 +71,7 @@ class JobClaimServiceParentReuseTest {
     @DisplayName("media_extract：非重试 job 不查父任务，投影恒 null")
     void mediaExtractNonRetryJobSkipsParentLookup() {
         service = new JobClaimService(jobMapper);
-        when(jobMapper.findMediaExtractCandidate(100L)).thenReturn(candidate(null));
+        when(jobMapper.findCandidateByTypeOnly(100L, "media_extract")).thenReturn(candidate(null));
         when(jobMapper.claimMediaExtractCas(eq(100L), anyString(), any(), anyLong(), anyString()))
                 .thenReturn(1);
 

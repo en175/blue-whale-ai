@@ -1,6 +1,8 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.AudioSpeedContract;
+import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
@@ -38,22 +40,18 @@ import java.util.Optional;
  * - by-id 路径无 .catch（DB 异常上抛，契约 §3.1 不对称）；
  * - 返回投影用**增后** fencing_token（candidate + 1）。
  * <p>
- * 候选查询分两类：**专属 type-only 查询**用于条件各异、或**不套 source 白名单**的四个家族
- * （findMediaExtractCandidate / findAudioCandidate / findVideoCandidate / findAudioTrimCandidate，
- * 各自硬编码 type、无 source 子句）；其余 9 个家族
- * （image / image_enhance / image_erase / image_cutout / image_outpaint /
- * video_subtitle_erase / video_enhance / vocal_split / video_scene_split）共用参数化候选查询
- * findCandidateByTypeAndSources（各路径仅 type / source 白名单差异，防逐字复制漂移）。
+ * 候选查询分两类：**不套 source 白名单**的 findCandidateByTypeOnly（仅 type 参与匹配）与
+ * **type + source 白名单**的 findCandidateByTypeAndSources。二者的分工是类型层面的——「不套
+ * 白名单」由「调用了没有 source 参数的方法」表达，不是给参数化查询传空列表（IKHPK9 的坏 SQL）。
  * <p>
  * CAS 更新与媒体类型无关（WHERE 含 id / fencing_token / status，claimImageCas 与
  * claimMediaExtractCas 另含租约复核）：media_extract / audio / video
- * 用各自的 claimMediaExtractCas / claimAudioCas / claimVideoCas；**audio_trim 与上述 9 个家族
- * 复用 claimImageCas**。租约时长由本类按媒体类型传入。
+ * 用各自的 claimMediaExtractCas / claimAudioCas / claimVideoCas；**audio_trim、audio_speed
+ * 与其余家族复用 claimImageCas**。租约时长由本类按媒体类型传入。
  * <p>
- * 下一类媒体扩展触点：条件与既有路径仅 type/source 差异时复用参数化查询；**不套 source 白名单**
- * 或条件有别时，新增 find*Candidate（必要时再加 claim*Cas）+ 投影 Dto（契约附录 C）。注意
- * 「不套白名单」的正确表达是**专属查询**，不是给参数化查询传空列表——见
- * findCandidateByTypeAndSources javadoc 与 IKHPK9。
+ * 下一类媒体扩展触点：条件与既有路径仅 type / source 差异时复用参数化查询；**不套 source
+ * 白名单**时用 findCandidateByTypeOnly；条件另有差异时新增专属查询（必要时再加 claim*Cas）
+ * + 投影 Dto（契约附录 C）。
  */
 @Service
 public class JobClaimService {
@@ -239,7 +237,8 @@ public class JobClaimService {
     public Optional<ClaimedMediaExtractJobDto> claimMediaExtract(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
         return claimPollingAudioJob(jobIdLong, workerId, MediaExtractContract.TAG,
-                jobMapper.findMediaExtractCandidate(jobIdLong), jobMapper::claimMediaExtractCas);
+                jobMapper.findCandidateByTypeOnly(jobIdLong, MediaExtractContract.TAG),
+                jobMapper::claimMediaExtractCas);
     }
 
     /** audio_mix 仅选择 type/source 候选，领取生命周期与 media_extract 共用。 */
@@ -295,14 +294,14 @@ public class JobClaimService {
     /**
      * 领取 audio_trim 作业（IKHB6S，父单 IKHB08，附录 C 触点④）。
      * <p>
-     * 候选查询用专属 {@code findAudioTrimCandidate}（type=audio_trim，**不套 source
-     * 白名单**——audio / media_extract 同形态：契约票口径「任务来源值随接线票定死后补录」，
-     * 专属来源值不在白名单，套了漏真卡任务，IKC9EJ 教训）。
+     * 候选查询不套 source 白名单（type=audio_trim）——audio / media_extract 同形态：契约票
+     * 口径「任务来源值随接线票定死后补录」，专属来源值不在白名单，套了漏真卡任务（IKC9EJ）。
+     * 走 {@link GenerationJobMapper#findCandidateByTypeOnly}。
      * <p>
-     * IKHPK9：原先传 {@code List.of()} 给参数化 {@code findCandidateByTypeAndSources}
-     * 表达「不过滤」，但 MyBatis 对空集合什么都不输出，渲染成
+     * IKHPK9：原先传 {@code List.of()} 给参数化 {@code findCandidateByTypeAndSources} 表达
+     * 「不过滤」，但 MyBatis 对空集合什么都不输出，渲染成
      * {@code ... AND source IN AND is_delete = false ...} 的坏 SQL，claim 恒失败、任务永久
-     * 卡 queued。改为专属查询后空列表路径不再存在。
+     * 卡 queued。如今「不套白名单」由方法本身（无 source 参数）表达，空列表路径不存在。
      * <p>
      * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
      * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
@@ -315,7 +314,7 @@ public class JobClaimService {
             String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        GenerationJobEntity candidate = jobMapper.findAudioTrimCandidate(jobIdLong);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeOnly(jobIdLong, AudioTrimContract.TAG);
         if (candidate == null) {
             return Optional.empty();
         }
@@ -351,9 +350,9 @@ public class JobClaimService {
     /**
      * 领取 audio_speed 作业（IKHW5A，父单 IKHVYO；claimAudioTrim 同款形态）。
      * <p>
-     * 候选查询用专属 {@code findAudioSpeedCandidate}（type=audio_speed，**不套 source
-     * 白名单**——audio_trim / media_extract 同形态：专属来源值不在白名单，套了漏真卡任务，
-     * IKC9EJ 教训；专属查询是「不套白名单」在本仓的既有表达，IKHPK9）。
+     * 候选查询不套 source 白名单（type=audio_speed）——audio_trim / media_extract 同形态：
+     * 专属来源值不在白名单，套了漏真卡任务（IKC9EJ）；「不套白名单」由
+     * {@link GenerationJobMapper#findCandidateByTypeOnly} 的签名表达（IKHPK9）。
      * <p>
      * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
      * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
@@ -363,7 +362,7 @@ public class JobClaimService {
             String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        GenerationJobEntity candidate = jobMapper.findAudioSpeedCandidate(jobIdLong);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeOnly(jobIdLong, AudioSpeedContract.TAG);
         if (candidate == null) {
             return Optional.empty();
         }

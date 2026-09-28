@@ -107,7 +107,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setLeaseExpiresAt(null); // 孤儿
         candidate.setInput("{\"videoUrl\":\"https://example.com/video.mp4\"}");
 
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(candidate);
         when(jobMapper.claimMediaExtractCas(
                 eq(300L),
                 eq("worker-1"),
@@ -221,7 +221,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimMediaExtract: no candidate → empty")
     void claimMediaExtract_noCandidate() {
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(null);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(null);
 
         Optional<ClaimedMediaExtractJobDto> result = service.claimMediaExtract("300", "worker-1");
 
@@ -236,7 +236,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(4L);
         candidate.setStatus("queued");
 
-        when(jobMapper.findMediaExtractCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "media_extract")).thenReturn(candidate);
         when(jobMapper.claimMediaExtractCas(
                 eq(300L),
                 eq("worker-1"),
@@ -401,7 +401,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimAudioTrim: no candidate → empty")
     void claimAudioTrim_noCandidate() {
-        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(null);
+        when(jobMapper.findCandidateByTypeOnly(300L, "audio_trim")).thenReturn(null);
 
         Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> result =
                 service.claimAudioTrim("300", "worker-1");
@@ -417,7 +417,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setFencingToken(4L);
         candidate.setStatus("queued");
 
-        when(jobMapper.findAudioTrimCandidate(300L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeOnly(300L, "audio_trim")).thenReturn(candidate);
         when(jobMapper.claimImageCas(
                 eq(300L),
                 eq("worker-1"),
