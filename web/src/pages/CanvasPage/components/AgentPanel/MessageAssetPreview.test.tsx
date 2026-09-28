@@ -4,10 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageAssetPreview, rememberAssetUrl, isInlineMediaThumbnail } from './MessageAssetPreview';
 
-const fetchAllAssets = vi.hoisted(() => vi.fn(async (): Promise<{ id: string; url: string }[]> => []));
+const fetchAssetDetail = vi.hoisted(() => vi.fn(async (): Promise<{ id: string; url: string }> => {
+  throw new Error('asset not found');
+}));
 
 vi.mock('@/api/assets', () => ({
-  fetchAllAssets,
+  fetchAssetDetail,
 }));
 
 vi.mock('../ImageMentionChip', () => ({
@@ -37,8 +39,8 @@ async function renderPreview(
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  fetchAllAssets.mockReset();
-  fetchAllAssets.mockResolvedValue([]);
+  fetchAssetDetail.mockReset();
+  fetchAssetDetail.mockRejectedValue(new Error('asset not found'));
 });
 
 afterEach(async () => {
@@ -114,9 +116,7 @@ describe('MessageAssetPreview', () => {
   });
 
   it('resolves a sidebar-uploaded video thumbnail from the asset library after refresh', async () => {
-    fetchAllAssets.mockResolvedValueOnce([
-      { id: 'asset-up-4', url: 'https://cdn.example/r.mp4' },
-    ]);
+    fetchAssetDetail.mockResolvedValueOnce({ id: 'asset-up-4', url: 'https://cdn.example/r.mp4' });
     await renderPreview(
       [
         {
@@ -164,9 +164,7 @@ describe('MessageAssetPreview', () => {
   });
 
   it('does not turn a 图集 video into a thumbnail even if the asset library has its URL', async () => {
-    fetchAllAssets.mockResolvedValueOnce([
-      { id: 'asset-gallery-v', url: 'https://cdn.example/gallery.mp4' },
-    ]);
+    fetchAssetDetail.mockResolvedValueOnce({ id: 'asset-gallery-v', url: 'https://cdn.example/gallery.mp4' });
     await renderPreview(
       [
         {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchAllAssets } from '@/api/assets';
+import { fetchAssetDetail } from '@/api/assets';
 import type { SessionContentBlock } from '@/api/agentSessions';
 import { ImageMentionChip } from '../ImageMentionChip';
 import { VideoMentionChip } from '../VideoMentionChip';
@@ -20,8 +20,12 @@ import styles from './index.module.css';
  * 顺手把 URL 塞进缓存（`rememberAssetUrl`），于是刚发出的那张图不用等一次网络往返就能显示。
  */
 const urlCache = new Map<string, string>();
-let listPromise: Promise<void> | null = null;
+/** 已确认没有可展示 URL 的 id（删除、不存在、请求失败）。重挂载不再打接口。 */
+const missingIds = new Set<string>();
+const inflightById = new Map<string, Promise<void>>();
 const urlCacheListeners = new Set<() => void>();
+/** 与资产库全量翻页同一并发上限，避免历史消息里几十个 id 同时打爆浏览器。 */
+const DETAIL_CONCURRENCY = 6;
 
 function cacheKey(assetId: string): string {
   return String(assetId);
@@ -33,7 +37,9 @@ function notifyUrlCache(): void {
 
 /** 上传拿到 URL 时登记，省掉刚发出那张图的反查。 */
 export function rememberAssetUrl(assetId: string, url: string): void {
-  urlCache.set(cacheKey(assetId), url);
+  const id = cacheKey(assetId);
+  urlCache.set(id, url);
+  missingIds.delete(id);
   notifyUrlCache();
 }
 
@@ -74,22 +80,50 @@ export function isInlineMediaThumbnail(block: SessionContentBlock): boolean {
   return false;
 }
 
-/** 反查一次素材库并把 id → url 填进缓存；并发调用共用同一个请求。 */
-export function ensureAssetUrls(): Promise<void> {
-  if (!listPromise) {
-    listPromise = fetchAllAssets('')
-      .then((records) => {
-        for (const record of records) if (record.url) urlCache.set(cacheKey(String(record.id)), record.url);
-        notifyUrlCache();
-      })
-      .catch(() => {
-        // 反查失败不该让消息渲染崩掉：退回成只有文件名的方块。
-      })
-      .finally(() => {
-        listPromise = null;
-      });
-  }
-  return listPromise;
+function resolveOneAssetUrl(assetId: string): Promise<void> {
+  const id = cacheKey(assetId);
+  if (!id || urlCache.has(id) || missingIds.has(id)) return Promise.resolve();
+  const pending = inflightById.get(id);
+  if (pending) return pending;
+  const request = fetchAssetDetail(id, { silent: true })
+    .then((record) => {
+      if (record.url) urlCache.set(id, record.url);
+      else missingIds.add(id);
+    })
+    .catch(() => {
+      // 反查失败不该让消息渲染崩掉：退回成只有文件名的方块，并且不再对同一 id 全量重拉。
+      missingIds.add(id);
+    })
+    .finally(() => {
+      inflightById.delete(id);
+    });
+  inflightById.set(id, request);
+  return request;
+}
+
+/**
+ * 按消息里缺 URL 的 asset_id 拉详情，填进缓存。
+ * 不要走 fetchAllAssets：打开有历史的 Agent 栏会把整个资产库按 60 条一页打完。
+ */
+export function ensureAssetUrls(assetIds: readonly string[]): Promise<void> {
+  const needed = [...new Set(assetIds.map(cacheKey).filter(Boolean))].filter(
+    (id) => !urlCache.has(id) && !missingIds.has(id),
+  );
+  if (needed.length === 0) return Promise.resolve();
+
+  return (async () => {
+    let cursor = 0;
+    async function worker() {
+      while (cursor < needed.length) {
+        const index = cursor++;
+        await resolveOneAssetUrl(needed[index]);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(DETAIL_CONCURRENCY, needed.length) }, () => worker()),
+    );
+    notifyUrlCache();
+  })();
 }
 
 export function MessageAssetPreview({
@@ -132,7 +166,7 @@ export function MessageAssetPreview({
   useEffect(() => {
     if (!unresolvedAssetKey) return;
     let alive = true;
-    void ensureAssetUrls().then(() => {
+    void ensureAssetUrls(unresolvedAssetKey.split(',').filter(Boolean)).then(() => {
       if (alive) forceRender((n) => n + 1);
     });
     return () => {
