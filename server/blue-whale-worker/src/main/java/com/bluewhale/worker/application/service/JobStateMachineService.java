@@ -54,6 +54,9 @@ public class JobStateMachineService {
     /** video_matting 进度续租秒数（与 JobClaimService.VIDEO_MATTING_LEASE_SECONDS 同值）。 */
     private static final int VIDEO_MATTING_PROGRESS_LEASE_SECONDS = 420;
 
+    /** 八个 MediaKit 家族原有的 420 秒租约，长于上游 submit 的 30 秒超时。 */
+    private static final int PARENT_REUSE_SUBMIT_LEASE_SECONDS = 420;
+
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -116,6 +119,19 @@ public class JobStateMachineService {
     /** 以 audio_mix 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取，未命中返回空。 */
     public Optional<ClaimedMediaExtractJobDto> claimAudioMix(String jobId, String workerId) {
         return claimService.claimAudioMix(jobId, workerId);
+    }
+
+    public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
+        return jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
+    }
+
+    /** 以 audio_video_mux 类型和 dock 来源筛选候选；委托统一的轮询音频 CAS 领取（IKIHPJ）。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
+        return claimService.claimAudioVideoMux(jobId, workerId);
+    }
+
+    public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
+        return jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
     }
 
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioTrimJobDto> claimAudioTrim(
@@ -254,6 +270,21 @@ public class JobStateMachineService {
     /** 委托音频混合终态事务；仅当前租约与 fencing token 有效时创建长期 Asset 并成功，失效返回 false。 */
     public boolean publishAudioMixResult(com.bluewhale.worker.domain.dto.PublishMediaExtractDto input) {
         return finalizer.publishAudioMixResult(input);
+    }
+
+    /** 委托音视频合成终态事务；仅当前租约与 fencing token 有效时创建长期视频 Asset 并成功（IKIHPJ）。 */
+    public boolean publishAudioVideoMuxResult(com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto input) {
+        return finalizer.publishAudioVideoMuxResult(input);
+    }
+
+    /** 委托转存对象权威发布核实（IKIN03）：processor 清理未发布对象前的判据——已被 Asset 引用即保留。 */
+    public boolean hasPublishedAsset(String jobId, String storageKey) {
+        return finalizer.hasPublishedAsset(jobId, storageKey);
+    }
+
+    /** 委托「可能发布该对象键的事务已结束」核实（IKIN8Z）：generation_jobs 行写锁被占 = 仍可能提交。 */
+    public boolean hasInFlightJobWriteTransaction(String jobId) {
+        return finalizer.hasInFlightJobWriteTransaction(jobId);
     }
 
     public boolean failMediaExtractJob(com.bluewhale.worker.domain.dto.FailMediaExtractDto input) {
@@ -424,6 +455,12 @@ public class JobStateMachineService {
                 fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
     }
 
+    /** 音视频合成大产物转存期续租（IKIHPJ）：与 audio_mix 同 420s 窗口。 */
+    public boolean renewAudioVideoMuxLease(String jobId, String workerId, long fencingToken) {
+        return jobMapper.renewAudioVideoMuxLease(Long.parseLong(jobId), workerId,
+                fencingToken, WorkerClock.now().plusSeconds(420)) == 1;
+    }
+
     /**
      * 更新 video_scene_split 进度（IKH8BP 审查修复；属本类保留的 progress 续租族）：
      * 0-99 钳制 + 续租。
@@ -431,7 +468,8 @@ public class JobStateMachineService {
      * completed 相逐段下载转存是长窗口（N 段串行，单段可达源视频体量），claim 时的
      * 420s 租约覆盖不了全程——每段转存前调本方法把租约推回 now+420s，否则 recovery
      * 会在租约过期后判孤儿重投，新 claim 从头重新下载全部段（每轮重复带宽消耗）；
-     * 创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     * 非重试任务在创建后 120 分钟重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后不再扫描；
+     * 重试任务有 IKIDEK 的 10 分钟有界接手期。
      * 续租秒数与 JobClaimService.VIDEO_SCENE_SPLIT_LEASE_SECONDS 同值（单段转存窗口），
      * 不复用 LEASE_SECONDS(120s)——大段下载+TOS 上传可超 120s，段中途即会过期。
      */
@@ -453,8 +491,8 @@ public class JobStateMachineService {
      * <p>
      * completed 相单产物下载转存是长窗口（输入可达 10GB 级），claim 时的 420s 租约可能
      * 覆盖不了全程——转存前调本方法把租约推回 now+420s（progress 沿用 claim 快照不倒退），
-     * 否则 recovery 会在租约过期后判孤儿重投，新 claim 重复下载同一产物；创建后 120 分钟
-     * 重投窗口（RECOVERY_MAX_AGE_MINUTES）耗尽后任务静默卡 processing。
+     * 否则 recovery 会在租约过期后判孤儿重投，新 claim 重复下载同一产物；非重试任务
+     * 仍受创建后 120 分钟扫描窗口限制，重试任务有 IKIDEK 的 10 分钟有界接手期。
      */
     public boolean updateVideoMattingProgress(
             com.bluewhale.worker.domain.dto.UpdateVideoMattingProgressDto input) {
@@ -496,6 +534,25 @@ public class JobStateMachineService {
                     jobId, workerId, fencingToken);
         }
         return affected == 1;
+    }
+
+    /** 仅在重试收割回退提交前续租（IKIHKH：owner+fence 定执行权，租约过期不褫夺）；
+     *  无法确认执行权时禁止产生新的上游任务。 */
+    public boolean reserveParentReuseSubmit(String jobId, String workerId, long fencingToken) {
+        try {
+            LocalDateTime leaseExpiresAt = WorkerClock.now()
+                    .plusSeconds(PARENT_REUSE_SUBMIT_LEASE_SECONDS);
+            boolean reserved = jobMapper.reserveParentReuseSubmit(
+                    Long.parseLong(jobId), workerId, fencingToken, leaseExpiresAt) == 1;
+            if (!reserved) {
+                log.warn("[parent-reuse] 回退提交前执行权守卫未命中（owner/fence 已变或已提交），停止本次执行 jobId={}", jobId);
+            }
+            return reserved;
+        } catch (Exception error) {
+            log.warn("[parent-reuse] 回退提交前续租状态无法确认，停止本次执行 jobId={}: {}",
+                    jobId, error.getMessage(), error);
+            return false;
+        }
     }
 
     /**

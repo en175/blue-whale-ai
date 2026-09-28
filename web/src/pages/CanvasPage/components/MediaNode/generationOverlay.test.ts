@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mediaNodeGenerationOverlay } from './generationOverlay';
+import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 
 describe('mediaNodeGenerationOverlay', () => {
   it('hides fake progress and keeps cancel for image/video generation', () => {
@@ -16,5 +16,10 @@ describe('mediaNodeGenerationOverlay', () => {
       progressLabel: '音视频分离处理中',
       showCancel: false,
     });
+  });
+
+  it('音视频合成占位卡按画布工具卡口径（IKIHPM）：生成中不开放取消', () => {
+    expect(isCanvasToolGeneration({ audioVideoMux: { sourceNodeId: 'a1' } })).toBe(true);
+    expect(isCanvasToolGeneration({ mediaType: 'video', genStatus: 'generating' })).toBe(false);
   });
 });

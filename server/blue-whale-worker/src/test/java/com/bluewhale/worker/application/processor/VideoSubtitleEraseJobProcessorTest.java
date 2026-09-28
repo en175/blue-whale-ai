@@ -85,6 +85,7 @@ class VideoSubtitleEraseJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（宽高/时长供结果 Asset 近似回填）。 */
@@ -432,6 +433,22 @@ class VideoSubtitleEraseJobProcessorTest {
     }
 
     @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-race")));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(subtitleEraseClient, never()).submit(anyString(), anyString(), anyString(), anyList());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
         when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
@@ -515,8 +532,8 @@ class VideoSubtitleEraseJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoSubtitleErase(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("subtitle_smart", List.of()), null, 0, "amk-parent-guard")));
         when(subtitleEraseClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -528,15 +545,15 @@ class VideoSubtitleEraseJobProcessorTest {
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishVideoSubtitleEraseResult(any())).thenReturn(false);
-        when(subtitleEraseClient.submit(anyString(), anyString(), anyString(), anyList()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(subtitleEraseClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq("subtitle_smart"), anyList());
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(subtitleEraseClient, never()).submit(anyString(), anyString(), anyString(), anyList());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========
@@ -592,6 +609,94 @@ class VideoSubtitleEraseJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("subtitle_smart", List.of()),
+                VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS - 1);
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 去字幕任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoSubtitleEraseJobProcessor.SUBTITLE_ERASE_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1043 轮询超时文案不变 + 不写 http_status（无 cause 不推断，IKIN6X）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("subtitle_smart", List.of()),
+                VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS);
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 去字幕任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED),
+                eq("去字幕轮询超时（超过 " + VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS
+                        + " 次），上游持续错误: MediaKit 去字幕任务查询超时"),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1043 + details.http_status=503，message 剥状态码字样（IKIN6X）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("subtitle_smart", List.of()),
+                VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS);
+        VideoSubtitleEraseError gatewayBusy = new VideoSubtitleEraseError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 去字幕任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
+        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("503")
+                .isEqualTo("去字幕轮询超时（超过 " + VideoSubtitleEraseJobProcessor.MAX_SUBTITLE_ERASE_POLLS
+                        + " 次），上游持续错误: MediaKit 去字幕任务查询失败:");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 503);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("subtitle_smart", List.of()), 3);
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSubtitleEraseError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 去字幕任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 400 任务不存在）→ 1043 兜底")
     void pollHardError_fails() {
         stubPollClaim(input("subtitle_smart", List.of()), 3);
@@ -632,6 +737,34 @@ class VideoSubtitleEraseJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input("subtitle_smart", List.of()), 3);
+        VideoSubtitleEraseError unauthorized = new VideoSubtitleEraseError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 去字幕任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(subtitleEraseClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSubtitleEraseContract.ERROR_VIDEO_SUBTITLE_ERASE_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 去字幕任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     // ========== poll 相：completed → 立即下载转存 + 终态发布（URL 24h 有效） ==========

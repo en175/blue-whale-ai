@@ -103,6 +103,105 @@ public class JobFinalizer {
                 "音频混合完成", null));
     }
 
+    /**
+     * 音视频合成成功：单槽免费视频资产（IKIHPJ，迁移契约 §21.4）。
+     * <p>
+     * 秒→毫秒换算在此收口：{@code duration_ms = round(result.duration × 1000)}；宽高由
+     * {@code result.resolution}（"WxH"）解析。时长/分辨率缺失回落源视频资产（去字幕先例）；
+     * 结果资产命名 = 源视频资产名去扩展名 + "(音视频合成).mp4"（ASCII 圆括号，卡片回填取资产名）。
+     */
+    @Transactional
+    public boolean publishAudioVideoMuxResult(com.bluewhale.worker.domain.dto.PublishAudioVideoMuxDto input) {
+        AssetEntity source = assetMapper.selectById(Long.parseLong(input.sourceVideoAssetId()));
+        Integer width = null;
+        Integer height = null;
+        if (input.resolution() != null) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile("^(\\d+)[xX](\\d+)$").matcher(input.resolution().trim());
+            if (matcher.matches()) {
+                width = Integer.valueOf(matcher.group(1));
+                height = Integer.valueOf(matcher.group(2));
+            }
+        }
+        if (width == null || height == null) {
+            width = source != null ? source.getWidth() : null;
+            height = source != null ? source.getHeight() : null;
+        }
+        Integer durationMs = input.durationSec() != null && Double.isFinite(input.durationSec())
+                ? (int) Math.round(input.durationSec() * 1000)
+                : (source != null ? source.getDurationMs() : null);
+        Map<String, Object> extra = new java.util.HashMap<>();
+        if (input.resolution() != null) extra.put("resolution", input.resolution());
+        return publishSingleAssetResult(new SingleAssetPublish(
+                "[audio_video_mux] publishAudioVideoMuxResult",
+                input.jobId(), input.projectId(), input.userId(), input.workerId(),
+                input.fencingToken(), "video", input.url(), input.storageKey(), input.mime(),
+                input.size(), input.md5(), width, height, durationMs,
+                "音视频合成完成", extra.isEmpty() ? null : extra,
+                composeAudioVideoMuxResultName(source != null ? source.getName() : null)));
+    }
+
+    /** 结果资产命名（IKIHPJ 拍板⑤）：源视频资产名去扩展名 + "(音视频合成).mp4"；源名空白回落基名「视频」。 */
+    private static String composeAudioVideoMuxResultName(String sourceName) {
+        String base = sourceName == null ? "" : sourceName.trim();
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) base = base.substring(0, dot);
+        if (base.isEmpty()) base = "视频";
+        return base + "(音视频合成).mp4";
+    }
+
+    /**
+     * 核实转存对象的权威发布状态（IKIN03 建于音视频合成，IKIN7Z 起 video_matting 复用）：
+     * 发布调用抛异常或守卫拒绝时，本地返回值不能单边决定删除，先查库。判据 = assets 存在
+     * generation_job_id + storage_key 精确匹配行（发布事务原子提交，Asset 行即「已发布」
+     * 的权威记录——事务提交后才断网的场景查询仍命中）；GenerationJob 终态一并读取入日志
+     * （可观测性，非判据：接管者/重试的新对象 key 含各自随机 uuid，不会与本查询交叉）。
+     */
+    public boolean hasPublishedAsset(String jobId, String storageKey) {
+        Long jobIdLong = Long.parseLong(jobId);
+        Long assetId = assetMapper.findReferencingAssetId(jobIdLong, storageKey);
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        log.info("[job-finalizer] 转存对象权威状态核实 jobId={} storageKey={} referencedAssetId={} jobType={} jobStatus={}",
+                jobId, storageKey, assetId,
+                job != null ? job.getType() : null, job != null ? job.getStatus() : null);
+        return assetId != null;
+    }
+
+    /**
+     * 确认「可能发布该对象键的事务」是否仍未结束（IKIN8Z）：发布事务的第一条语句是对
+     * generation_jobs 行的 {@code publishResultGuard} CAS UPDATE，行 X 锁自那一刻起持有至
+     * 提交/回滚完成——以 NOWAIT 探测该行锁即可判断事务是否仍在服务端进行（如 commit 窗口
+     * 断连后的未决事务，对并发 Asset 查询在 REPEATABLE READ 下不可见）。
+     * <p>
+     * 锁被占用返回 true（保守视为可能有事务即将提交该键——占用者也可能是其他守卫写，如
+     * 接管者 claim / 续租，无法区分时不删除即正确取舍）；锁空闲返回 false = 可能发布该键
+     * 的事务已结束，随后的 {@link #hasPublishedAsset} 查询即权威结论（提交则命中 Asset 行，
+     * 回滚/未插入则查无）。行不存在同样返回 false（无从发布该键）。
+     * <p>
+     * 仅锁冲突（MySQL 3572/1205，识别经 cause 链，兼容 MyBatis 直抛与 Spring 翻译两种包装）
+     * 转为 true；其余异常原样上抛——数据库不可用 ≠ 事务进行中，由调用方按「暂不可确认」
+     * 保守保留对象并留待处理记录。
+     */
+    public boolean hasInFlightJobWriteTransaction(String jobId) {
+        try {
+            jobMapper.probeJobRowWriteLock(Long.parseLong(jobId));
+            return false;
+        } catch (RuntimeException error) {
+            if (isRowLockConflict(error)) return true;
+            throw error;
+        }
+    }
+
+    private static boolean isRowLockConflict(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof java.sql.SQLException sql
+                    && (sql.getErrorCode() == 3572 || sql.getErrorCode() == 1205)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ========== audio_trim 直通（IKHB6S，父单 IKHB08；publish/fail 守卫复用
     //            publishResultGuard / failMediaExtractGuard——两 SQL 均无 type 过滤，
     //            语义 = 单槽免费工具轮询型任务终态收口） ==========
@@ -968,7 +1067,7 @@ public class JobFinalizer {
 
         AssetEntity asset = buildAsset(jobIdLong, p.projectId(), p.userId(), p.assetType(),
                 p.url(), p.storageKey(), p.mime(), p.size(), p.md5(),
-                p.width(), p.height(), p.durationMs());
+                p.width(), p.height(), p.durationMs(), p.name());
         assetMapper.insert(asset);
 
         jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
@@ -1011,8 +1110,19 @@ public class JobFinalizer {
             Integer width, Integer height, Integer durationMs,
             String successMessage,
             /** 终态日志附加键值（可 null）；结果字段入库的承载位先例。 */
-            Map<String, Object> extraLogPayload
-    ) {}
+            Map<String, Object> extraLogPayload,
+            /** 结果资产名（可 null = 不命名）；音视频合成按迁移契约 §21.4 落「视频名(音视频合成).mp4」。 */
+            String name
+    ) {
+        /** 无命名家族的旧形构造（name=null）：既有注册点零改动。 */
+        SingleAssetPublish(String logTag, String jobId, String projectId, String userId, String workerId,
+                           long fencingToken, String assetType, String url, String storageKey, String mime,
+                           Long size, String md5, Integer width, Integer height, Integer durationMs,
+                           String successMessage, Map<String, Object> extraLogPayload) {
+            this(logTag, jobId, projectId, userId, workerId, fencingToken, assetType, url, storageKey, mime,
+                    size, md5, width, height, durationMs, successMessage, extraLogPayload, null);
+        }
+    }
 
     /**
      * 轮询型免费工具失败模板：failMediaExtractGuard（SET 清 next_action_at + next_poll_at）
@@ -1130,14 +1240,23 @@ public class JobFinalizer {
         settlementPublisher.publishTerminal(job, Map.of("status", job.getStatus()));
     }
 
+    /** 旧形签名（不命名家族）：name=null 委托，既有调用点零改动。 */
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
                                    String url, String storageKey, String mime, Long size, String md5,
                                    Integer width, Integer height, Integer durationMs) {
+        return buildAsset(jobIdLong, projectId, userId, type, url, storageKey, mime, size, md5,
+                width, height, durationMs, null);
+    }
+
+    private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
+                                   String url, String storageKey, String mime, Long size, String md5,
+                                   Integer width, Integer height, Integer durationMs, String name) {
         AssetEntity asset = new AssetEntity();
         asset.setUserId(Long.parseLong(userId));
         asset.setProjectId(Long.parseLong(projectId));
         asset.setGenerationJobId(jobIdLong);
         asset.setType(type);
+        asset.setName(name);
         asset.setUrl(url);
         asset.setStorageKey(storageKey);
         asset.setMime(mime);

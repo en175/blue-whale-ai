@@ -75,6 +75,7 @@ class VocalSplitJobProcessorTest {
                 credentialService, separateVoiceClient, mediaRelay, producer);
         when(stateMachine.failVocalSplitJob(any())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（时长供结果 duration 回落）。 */
@@ -313,6 +314,33 @@ class VocalSplitJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input("audio"));
+        stubSourceAsset("video");
+        VocalSplitError unauthorized = new VocalSplitError(GenerationError.ERROR_PROVIDER_FAILED,
+                "人声背景分离任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
+                .thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<com.bluewhale.worker.domain.dto.FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(com.bluewhale.worker.domain.dto.FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(captor.capture());
+        com.bluewhale.worker.domain.dto.FailMediaExtractDto failure = captor.getValue();
+        assertThat(failure.code()).isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(failure.message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.details())
+                .containsEntry("raw", "人声背景分离任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89R / ADR-0114；平移家族定型票先例）==========
 
     @Test
@@ -365,6 +393,22 @@ class VocalSplitJobProcessorTest {
         verify(separateVoiceClient).submit(eq("sk-frozen-token"),
                 eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
         verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVocalSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-race")));
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset("video");
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
@@ -453,8 +497,8 @@ class VocalSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVocalSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("audio"), null, 0, 0, "amk-parent-guard")));
         when(separateVoiceClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -462,15 +506,15 @@ class VocalSplitJobProcessorTest {
         when(mediaRelay.persist(anyString(), eq("9"), eq("aac"))).thenReturn(stored("v"));
         when(stateMachine.publishVocalSplitResult(any())).thenReturn(false);
         stubSourceAsset("video");
-        when(separateVoiceClient.submit(anyString(), anyString(), anyBoolean(), anyString(), anyString()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(separateVoiceClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq(true), eq("audio"), eq("aac"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(separateVoiceClient, never()).submit(anyString(), anyString(), anyBoolean(),
+                anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVocalSplitJob(any());
     }
 
     // ========== poll 相：状态机 + 进度口径（对齐家族） ==========
@@ -519,6 +563,95 @@ class VocalSplitJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
         verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS - 1, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 7);
+        verify(producer).enqueue("100", VocalSplitJobProcessor.VOCAL_SPLIT_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVocalSplitJob(any());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1047 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<FailMediaExtractDto> captor =
+                ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(captor.capture());
+        assertThat(captor.getValue().code())
+                .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        assertThat(captor.getValue().message())
+                .isEqualTo("人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询超时");
+        // 反例钉住缺键语义：无状态 cause（provider_timeout 形态）不写 http_status，只留 raw（IKIN6W）
+        assertThat(captor.getValue().details()).doesNotContainKey("http_status").containsKey("raw");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ 1047 + details.http_status=503，message 剥离状态码字样（IKIN6W：预算耗尽分支同透传口径）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("audio"), VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS, 7);
+        VocalSplitError gatewayBusy = new VocalSplitError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 人声背景分离任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        ArgumentCaptor<FailMediaExtractDto> gatewayCaptor =
+                ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failVocalSplitJob(gatewayCaptor.capture());
+        assertThat(gatewayCaptor.getValue().code())
+                .isEqualTo(VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED);
+        // 判定只依赖结构化字段：剥「: HTTP 503」后冒号保留，上游持续错误摘要仍在（可读原因）
+        assertThat(gatewayCaptor.getValue().message())
+                .isEqualTo("人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:")
+                .doesNotContain("503");
+        assertThat(gatewayCaptor.getValue().details())
+                .containsEntry("http_status", 503)
+                .containsEntry("raw", "人声背景分离轮询超时（超过 "
+                        + VocalSplitJobProcessor.MAX_VOCAL_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 人声背景分离任务查询失败:");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("audio"), 3, 7);
+        when(separateVoiceClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VocalSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 人声背景分离任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
         verify(stateMachine, never()).failVocalSplitJob(any());
     }
 

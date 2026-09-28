@@ -208,6 +208,7 @@ export default function Assets() {
           type,
           mime: file.type,
           size: file.size,
+          name: file.name,
           storage_key: presign.storage_key,
           ...meta,
         });

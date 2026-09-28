@@ -17,14 +17,15 @@ export class AudioMixesController {
     @Param("projectId") projectId: string,
     @Body() body: unknown,
     @Headers("authorization") authorization?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.audioMixes.create(
       user.userId,
       projectId,
       body ?? {},
-      sealProviderCredential(authorization),
+      { ...sealProviderCredential(authorization), idempotencyKey: idempotencyKey ?? "" },
     );
-    if (!result.data) return result;
+    if (!result.data?.enqueue_required) return result;
     const jobId = result.data.job_id;
     try {
       await enqueueAudioMixJob(jobId);
@@ -42,8 +43,9 @@ export class AudioMixesController {
     @Param("projectId") projectId: string,
     @Param("jobId") jobId: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("authorization") authorization?: string,
   ) {
-    const result = await this.audioMixes.retry(user.userId, projectId, jobId, idempotencyKey ?? "");
+    const result = await this.audioMixes.retry(user.userId, projectId, jobId, idempotencyKey ?? "", sealProviderCredential(authorization).providerCredential);
     if (result.data?.enqueue_required) {
       try {
         await enqueueAudioMixJob(jobId);

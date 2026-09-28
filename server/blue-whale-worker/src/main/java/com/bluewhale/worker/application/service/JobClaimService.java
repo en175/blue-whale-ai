@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.AudioVideoMuxContract;
 import com.bluewhale.worker.domain.contract.ImageOutpaintContract;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
@@ -44,7 +45,8 @@ import java.util.Optional;
  * video_subtitle_erase / video_enhance / vocal_split / video_scene_split）共用参数化候选查询
  * findCandidateByTypeAndSources（各路径仅 type / source 白名单差异，防逐字复制漂移）。
  * <p>
- * CAS 更新与媒体类型无关（WHERE 只含 id / fencing_token / status）：media_extract / audio / video
+ * CAS 更新与媒体类型无关（WHERE 含 id / fencing_token / status，claimImageCas 与
+ * claimMediaExtractCas 另含租约复核）：media_extract / audio / video
  * 用各自的 claimMediaExtractCas / claimAudioCas / claimVideoCas；**audio_trim 与上述 9 个家族
  * 复用 claimImageCas**。租约时长由本类按媒体类型传入。
  * <p>
@@ -248,6 +250,14 @@ public class JobClaimService {
         return claimPollingAudioJob(jobIdLong, workerId, AudioMixContract.TAG, candidate, jobMapper::claimImageCas);
     }
 
+    /** audio_video_mux 仅选择 type/source 候选，领取生命周期与 media_extract 共用（IKIHPJ）。 */
+    public Optional<ClaimedMediaExtractJobDto> claimAudioVideoMux(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, AudioVideoMuxContract.TAG, List.of(AudioVideoMuxContract.SOURCE));
+        return claimPollingAudioJob(jobIdLong, workerId, AudioVideoMuxContract.TAG, candidate, jobMapper::claimImageCas);
+    }
+
     @FunctionalInterface
     private interface PollingAudioCas {
         int claim(Long jobId, String workerId, LocalDateTime leaseExpiresAt,
@@ -294,8 +304,8 @@ public class JobClaimService {
      * {@code ... AND source IN AND is_delete = false ...} 的坏 SQL，claim 恒失败、任务永久
      * 卡 queued。改为专属查询后空列表路径不再存在。
      * <p>
-     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 只含 id / fencing_token / status，
-     * 与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
+     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
+     * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
      * 分相判据与超限判定，media_extract 同款富投影）。
      * <p>
      * IKI89Q（ADR-0114）：retry job 额外投影 parentProviderTaskId（retry_of_job_id 非空时
@@ -345,8 +355,8 @@ public class JobClaimService {
      * 白名单**——audio_trim / media_extract 同形态：专属来源值不在白名单，套了漏真卡任务，
      * IKC9EJ 教训；专属查询是「不套白名单」在本仓的既有表达，IKHPK9）。
      * <p>
-     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 只含 id / fencing_token / status，
-     * 与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
+     * CAS 复用 {@code claimImageCas}（UPDATE WHERE 含 id / fencing_token / status 与
+     * 租约复核，与媒体类型无关）。投影带 providerTaskId / pollCount / progress（复用视频轮询骨架的
      * 分相判据与超限判定，media_extract / audio_trim 同款富投影）。
      */
     public Optional<com.bluewhale.worker.domain.dto.ClaimedAudioSpeedJobDto> claimAudioSpeed(

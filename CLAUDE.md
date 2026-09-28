@@ -12,12 +12,12 @@
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
 | 前端工作流（碰 `web/` 产品实现：页面、组件、API 客户端、TanStack Query） | `.claude/skills/frontend-delivery/SKILL.md`（缺陷走 `references/bugfix.md`；新服务端状态读写走 `references/request.md`） |
 | PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
-| 散文文档改动（`CONTEXT.md` / `docs` 散文；与代码同路） | `docs/agents/git-workflow.md`「Task Worktree」节 + `docs/adr/0025-doc-on-master-allowlist.md`（修正一：直提入口已废止） |
+| 当前发布线开工、换期和遗留分支清点 | `docs/agents/git-workflow.md` + [ADR-0115](docs/adr/0115-local-release-code-baseline.md) |
 | 产品文档/技能资产归位（docs/projects、docs/skills） | `docs/README.md`（渐进式，新建产品文档前读） |
 
 ## Gitee ID 兜底常量
 
-本仓固定 ID（长期稳定，模型可直接用；碰到 401 或疑似变更时以 `list` API 为准，校验走 `scripts/gitee-resolve-ids.sh`）：
+本仓日常可直接使用下表 ID。遇到 401 或疑似变更，先按 `docs/agents/issue-tracker.md`「ID 解析约定」核对 token，再用 `list` API 核对 ID；`scripts/gitee-resolve-ids.sh` 可识别 URL 路由 ID：
 
 | ID | 值 | 含义 | 动态查法 |
 | --- | --- | --- | --- |
@@ -34,9 +34,9 @@
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。
 2. **发布须用户授权** — 未经明确授权禁止 push/PR/merge/release。
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
-4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行**开工入口**（唯一入口）：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。散文文档（ADR-0025）无直改例外，与代码同路；唯一例外是本地个人配置（ADR-0010），见「写入前自检」末节。
-5. **master 只被已验证代码推进** — 多人各自上线 + 共享 staging：产品影响路径的 feature/fix PR target 当次 `release/*` 批次分支（提 PR 前 `manage-release-branch.sh list` 选批次或 `create` 开新批），批次部署 staging 测试通过后才合入 master + tag 上生产；没进批次的产品代码碰不到 master。工程面 docs/chore 改动与 hotfix 例外直进 master。**PR 审合前不合入 master，本地集成区同理不提前吃未审代码**——确认 commit 后直接推送+提 PR，本地 master 在服务端合并后由开工入口同步。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
-6. **Worktree 基于同步后的本地 master** — 开工入口负责同步（fetch 融合本地/远程、冲突自动 abort）并从同步后的精确 SHA 建中文任务分支；细则见 `docs/agents/git-workflow.md`。
+4. **代码相关任务先同步当前发布线** — 包括只读调查、调试与审查。先在当前本地 `release/*` 工作树运行 `scripts/sync-release-line.sh`，核对实际目录的代码索引，再读代码；失败时停止并报告。写入任务随后运行唯一开工入口 `scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`，进入独立任务 worktree。散文文档与 chore 同路。本地个人配置窄例外见「写入前自检」。
+5. **master 只代表生产版本** — 日常 feature/fix/docs/chore 从唯一活动发布线开工，PR target 为任务元数据记录的同一条 `release/*`。批次在 staging 验证后合入 master 并发布。紧急生产 hotfix 须负责人另行授权，不由日常入口自动选择 master。PR 审合前不把任务代码合入 master。细则见 `docs/agents/git-workflow.md`。
+6. **Worktree 基于同步后的本地 release** — 入口抓取同名远端 release，保留本地已提交历史；远端领先时快进，分叉无冲突时合并。冲突、远端不可达或未提交文件可能受影响时停止。入口从同步后的精确 SHA 建任务区，并记录目标分支与起点 SHA；验证、发布和清理均读取该记录。
 7. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 8. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
 9. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
@@ -63,16 +63,14 @@
 
 **摘要是约束声明，自检是执行机制。** 在调用 Edit、Write 或任何会改变 Git 状态的操作前，必须逐项完成以下检查：
 
-1. **确认当前分支** — 读取当前分支；可写任务必须位于由开工入口创建的结构化中文工单分支，不得在 `master` / `main` 执行（散文文档同样如此，见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）。
-2. **确认 Agent 任务区** — 确认已从主 checkout 通过开工入口创建并进入独立 task worktree。
-3. **确认目标路径** — 对每个写入目标确认其所属 Work Tree；目标路径不得指向用户本地集成区（master 主检出区）。
+1. **确认当前分支** — 读取当前分支；普通可写任务必须位于由当前发布线开工入口创建的结构化中文工单分支，不得在 `master` / `main` / `release/*` 直接写入。
+2. **确认 Agent 任务区** — 确认已从当前本地发布线通过开工入口创建并进入独立 task worktree。
+3. **确认目标路径** — 对每个写入目标确认其所属 Work Tree；目标路径不得指向 master 或 release 检出区。
 4. **确认 Git 写入区域** — 任何会改变 Git 状态的操作只在正确的 Agent 任务区及其工单分支执行。
 
-任一项不满足，尤其可写任务尚未进入工单分支或目标路径指向 master 主检出区，立即停止写入，先通过开工入口创建并进入任务 Work Tree。
+任一项不满足，立即停止写入，先同步发布线并通过开工入口进入任务 Work Tree。
 
-**散文文档（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md) 修正一）**：根 `CONTEXT.md` + `docs/**/*.md` 曾可在本地 master 直改并由 `scripts/commit-spec-on-master.sh` 落盘；该直提通道 **2026-09-10 已废止**（与「PR 审合前不合入 master」红线冲突，且未推送的 master 直提会被开工入口卷进后续任务分支）。散文文档现**与代码同路**，全程适用上述自检：`scripts/start-task-worktree.sh --type docs --no-issue --summary <6–15字中文简述>` → 工单分支内编辑后 `bash scripts/commit-task-for-review.sh -m "docs: <描述>"` → 用户授权后 `scripts/publish-review-package.sh --user-authorized --create-pr`（工程面 docs PR 目标为 master）。`docs/**/*.json` 契约、fixtures 一向如此。
-
-**本地个人配置例外（[ADR-0010](docs/adr/0010-local-master-is-user-integration-zone.md)）**：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时不适用上述 worktree 自检。Agent 必须保持文件未跟踪、不得输出其中凭证；路径不精确、未被忽略或属于其他本地文件时仍按普通写入任务处理。
+**本地个人配置例外**：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时可在本地 master 修改。Agent 必须保持文件未跟踪、不得输出其中凭证；其他路径，包括散文文档，仍走任务 worktree。
 
 ## Agent skills
 

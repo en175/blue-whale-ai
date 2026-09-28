@@ -437,9 +437,9 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
   };
 
   /** 缩略图 @ 按钮（IKFCKK）：与手动 @ 选择同一种素材标签 chip，走 insertRefAtPending
-   *  路径——有记忆光标原位插入、无记录追加末尾，插入后编辑器聚焦 */
+   *  路径——记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落，插入后编辑器聚焦 */
   const insertRefByKey = (assetId: string) => {
-    editorRef.current?.insertRefAtPending(refKeyOf(assetId));
+    editorRef.current?.insertRefAtPending(refKeyOf(assetId), true);
   };
 
   /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */

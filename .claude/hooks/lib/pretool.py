@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -629,6 +630,9 @@ def mode_task_acceptance_git(command: str) -> int:
             print("git commit")
             return 0
         if invocation.subcommand == "merge" and not has_ff_only(invocation.args):
+            if is_task_branch(invocation.cwd) and any(arg.startswith("origin/release/") for arg in invocation.args):
+                print("git merge origin/release")
+                return 0
             if "origin/master" in invocation.args and not is_task_branch(invocation.cwd):
                 continue
             print("git merge origin/master" if "origin/master" in invocation.args else "git merge")
@@ -637,6 +641,59 @@ def mode_task_acceptance_git(command: str) -> int:
             if not is_task_branch(invocation.cwd):
                 continue
             print("git pull")
+            return 0
+    return 1
+
+
+def mode_unmanaged_task_commit(command: str) -> int:
+    """Block Agent Git commits on task-named branches without valid task worktrees."""
+    changes_directory = any(
+        posixpath.basename(item.executable) in {"cd", "pushd"}
+        for item in command_invocations(command)
+    )
+    for invocation in git_invocations(command):
+        if invocation.subcommand != "commit":
+            continue
+        if changes_directory and invocation.cwd is None:
+            # The Git scanner cannot associate a shell cd with a later bare
+            # commit reliably. Require an explicit git -C or a task-worktree cwd.
+            print("目录切换后的提交目标无法核对")
+            return 0
+        cwd = invocation.cwd or os.getcwd()
+        branch = current_branch(cwd)
+        if not branch.startswith(WORK_BRANCH_PREFIXES):
+            continue
+
+        def git_value(*args: str) -> str:
+            result = subprocess.run(
+                [PRETOOL_GIT_BIN, "-C", cwd, *args], capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            return result.stdout.strip() if result.returncode == 0 else ""
+
+        root = git_value("rev-parse", "--show-toplevel")
+        git_dir = git_value("rev-parse", "--absolute-git-dir")
+        common = git_value("rev-parse", "--path-format=absolute", "--git-common-dir")
+        if not root or not git_dir or not common or os.path.normcase(os.path.realpath(git_dir)) == os.path.normcase(os.path.realpath(common)):
+            print(branch)
+            return 0
+        metadata = Path(root) / "scripts" / "lib" / "task_metadata.py"
+        checked = subprocess.run(
+            [sys.executable, str(metadata), "read", "--worktree", root,
+             "--field", "task_branch"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        if checked.returncode or checked.stdout.strip() != branch:
+            print(branch)
+            return 0
+    return 1
+
+
+def mode_release_direct_git(command: str) -> int:
+    for invocation in git_invocations(command):
+        if not current_branch(invocation.cwd).startswith("release/"):
+            continue
+        if invocation.subcommand in ("commit", "pull", "merge", "rebase", "cherry-pick"):
             return 0
     return 1
 
@@ -720,6 +777,10 @@ def main() -> int:
         return mode_force_lease_non_work(command)
     if mode == "task-acceptance-git":
         return mode_task_acceptance_git(command)
+    if mode == "unmanaged-task-commit":
+        return mode_unmanaged_task_commit(command)
+    if mode == "release-direct-git":
+        return mode_release_direct_git(command)
     if mode == "publish-review-mode":
         return mode_publish_review_mode(command)
     if mode == "dangerous-pattern":

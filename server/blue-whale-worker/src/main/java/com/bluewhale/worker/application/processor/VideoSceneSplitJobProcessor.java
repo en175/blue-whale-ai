@@ -6,11 +6,13 @@ import com.bluewhale.worker.domain.dto.ClaimedVideoSceneSplitJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoSceneSplitDto;
 import com.bluewhale.worker.domain.dto.UpdateVideoSceneSplitProgressDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoSceneSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoSceneSplitError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SceneSplitTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSegmentScenesClient.SegmentObservation;
@@ -40,7 +42,8 @@ import java.util.Set;
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（granularity 经契约
  *       SEGMENT_THRESHOLD 映射 segment_threshold，返 task_id）→ markProviderSubmitted（存
  *       provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1046）；processing →
  *       续排；failed → 分类终态；completed → **逐段下载切片转存自家 TOS（火山
  *       segment_video_url 仅 24h 有效；每段转存前心跳续租防长窗口租约过期）** → 单事务逐段
  *       建 Asset + 契约 result 回传 → 终态 succeeded</li>
@@ -148,9 +151,15 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "场景切分失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS4），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_scene_split] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -189,7 +198,8 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 单处映射）→ markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoSceneSplitJobDto claim, String providerToken) {
-        // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89T（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoSceneSplitContract.TAG, claim, providerToken,
@@ -229,6 +239,10 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（granularity 映射 / 高级参数不暴露在客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = segmentScenesClient.submit(providerToken, source.getUrl(), granularity);
         log.info("[video_scene_split] 上游已提交 jobId={} providerTaskId={} granularity={}",
                 claim.id(), taskId, granularity);
@@ -264,6 +278,27 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
             observation = segmentScenesClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoSceneSplitError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
+                if (claim.pollCount() >= MAX_SCENE_SPLIT_POLLS) {
+                    log.warn("[video_scene_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段（上游原因保留），无 cause 不写键。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "场景切分轮询超时（超过 " + MAX_SCENE_SPLIT_POLLS
+                            + " 次），上游持续错误: " + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failClaimed(claim, VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED,
+                            message, httpStatus);
+                    return;
+                }
                 log.warn("[video_scene_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(
@@ -324,10 +359,11 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
      * 悬挂）→ 单事务逐段建 Asset（type=video / source='generated'）
      * + 契约 result 回传（段序 / 起止秒 / 段资产引用 / 总时长）→ 终态 succeeded。
      * <p>
-     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存）、终态发布守卫未命中。poll 相
-     * 调用方忽略返回值（静默退出）；重试收割调用方据此回退正常重新提交——续租/发布/提交
-     * 三守卫 WHERE 同构，回退后 markProviderSubmitted 必同样未命中，无 DB 双写，代价为一份
-     * 无人轮询的孤儿上游任务。
+     * 返回 false 有两个来源：段转存心跳续租未命中（中止转存，含续租状态无法确认的 DB
+     * 异常）、终态发布守卫未命中。poll 相调用方忽略返回值（静默退出）；重试收割调用方
+     * 对两者均停止本次执行不回退提交（IKICD0：失租或已终态后回退只会在 markProviderSubmitted
+     * 守卫丢弃前白付一次上游 submit，产生无人轮询的孤儿上游任务；任务保持 processing，
+     * 由新 worker 重新领取后重新检查父任务继续收割）。
      */
     private boolean publishResult(ClaimedVideoSceneSplitJobDto claim,
                                   SceneSplitTaskObservation observation) {
@@ -510,9 +546,22 @@ public class VideoSceneSplitJobProcessor implements JobProcessor {
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  场景切分无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
     private void failClaimed(ClaimedVideoSceneSplitJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS4，对齐音频提取 IKIMS2 / 音频混合 IKIHGQ 样板）：
+     *  backend 换凭证判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS}
+     *  不依赖文案；非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。轮询预算耗尽
+     *  分支同样按 cause 透传（IKIN6X，父单 IKIN6H「有 cause 即透传」与迁移契约 §20 口径）：
+     *  瞬时错误耗尽预算且 cause 携带状态即写，无 cause（超时 / 连接失败）不写。 */
+    private void failClaimed(ClaimedVideoSceneSplitJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_scene_split job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }

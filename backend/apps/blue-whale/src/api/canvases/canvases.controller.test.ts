@@ -47,6 +47,43 @@ describe("CanvasesController.save 响应写出", () => {
     });
   });
 
+  it("空覆盖防护 → HTTP 422，信封原样写出（IKIIWN）", async () => {
+    const { controller, res } = makeController({
+      code: 422,
+      msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty",
+      data: null,
+    });
+
+    await controller.save(USER, "523", { nodes: "[]" }, '"3"', res);
+
+    expect(res.status).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json).toHaveBeenCalledWith({
+      code: 422,
+      msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty",
+      data: null,
+    });
+  });
+
+  // IKIMQJ：确认清空缺 If-Match 的 428 信封也走真实 HTTP 状态码（Precondition Required）。
+  it("确认清空缺 If-Match → HTTP 428，信封原样写出（IKIMQJ）", async () => {
+    const { controller, res } = makeController({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+
+    await controller.save(USER, "523", { nodes: "[]", confirmEmpty: true }, undefined, res);
+
+    expect(res.status).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(428);
+    expect(res.json).toHaveBeenCalledWith({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+  });
+
   it("保存成功 → HTTP 200，信封与 data.version 原样透传（与成功路径字段一致）", async () => {
     const { controller, res } = makeController({
       code: 200,
@@ -64,8 +101,8 @@ describe("CanvasesController.save 响应写出", () => {
     });
   });
 
-  // save() 现在只可能回「成功信封」或「412」——not-found 已改成抛 DomainError 走统一投影
-  // （见 canvas.service.ts），所以这条只剩防御性：非 412 的信封照原样按 200 写出。
+  // save() 现在可能回「成功信封」「412」或「422」——not-found 已改成抛 DomainError 走统一投影
+  // （见 canvas.service.ts）；422 是空覆盖防护（IKIIWN）。这条只剩防御性：其余信封照原样按 200 写出。
   it("非 412 的信封（防御分支）→ 原样 200 写出，不擅自改状态码", async () => {
     const { controller, res } = makeController({
       code: 100100,

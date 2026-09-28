@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,32 @@ class AudioMixJobProcessorTest {
     private ClaimedMediaExtractJobDto claim(String providerTaskId) {
         return new ClaimedMediaExtractJobDto("70", "5", "9", input(), providerTaskId,
                 "worker-1", 3L, 0, 0);
+    }
+
+    @Test
+    void cancellationBeforeSubmitStopsUpstreamWork() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L))).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verifyNoInteractions(gateway, relay, producer);
+        verify(stateMachine, never()).failMediaExtractJob(any());
+    }
+
+    @Test
+    void cancellationAfterSubmitStopsPolling() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L)))
+                .thenReturn(false, true);
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .thenReturn("provider-1");
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
@@ -181,6 +208,35 @@ class AudioMixJobProcessorTest {
     }
 
     @Test
+    void cancellationDuringLongTransferReachesCancelledBeforeTransferReturns() throws Exception {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        when(gateway.poll("sk-frozen", "provider-1"))
+                .thenReturn(new MixAudioTaskObservation("succeeded", "https://temporary/out.mp3", 12.5, null, null));
+        when(stateMachine.renewAudioMixLease(eq("70"), anyString(), eq(3L))).thenReturn(true);
+        CountDownLatch cancelled = new CountDownLatch(1);
+        AtomicInteger checks = new AtomicInteger();
+        when(stateMachine.cancelAudioMixIfRequested(eq("70"), anyString(), eq(3L))).thenAnswer(invocation -> {
+            if (checks.incrementAndGet() == 4) {
+                cancelled.countDown();
+                return true;
+            }
+            return false;
+        });
+        when(relay.persist("https://temporary/out.mp3", "9", "mp3")).thenAnswer(invocation -> {
+            assertThat(cancelled.await(2, TimeUnit.SECONDS)).isTrue();
+            return new TosAudioMediaRelay.StoredAudio("https://our-tos/out.mp3", "generated/9/out.mp3", "audio/mpeg", 100L, "md5");
+        });
+        var processor = new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer);
+        processor.leaseRenewIntervalMs = 20;
+
+        processor.handle("70");
+
+        verify(stateMachine, never()).publishAudioMixResult(any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     void submitPersistsProviderTaskIdAndSchedulesPoll() {
         when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
         when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
@@ -264,8 +320,56 @@ class AudioMixJobProcessorTest {
         new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
 
         verify(stateMachine).failMediaExtractJob(argThat(failure ->
-                failure.code().equals("audio_mix_failed") && failure.message().contains("TOS 转存失败")));
+                failure.code().equals("audio_mix_failed") && failure.message().contains("TOS 转存失败")
+                        && !failure.details().containsKey("http_status")));
         verify(stateMachine, never()).publishAudioMixResult(any());
+    }
+
+    @Test
+    void upstreamUnauthorizedSubmitPersistsHttpStatusDetail() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim(null)));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed",
+                "音频混合任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(gateway.submit("sk-frozen", List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .thenThrow(unauthorized);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(failure.capture());
+        assertThat(failure.getValue().code()).isEqualTo("audio_mix_failed");
+        // 生产文案剥离状态码字样（IKIMS6）：判定只依赖结构化 details.http_status，
+        // 上游原因与 request_id 原样保留
+        assertThat(failure.getValue().message()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(failure.getValue().details())
+                .containsEntry("raw", "音频混合任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    void upstreamUnauthorizedPollPersistsHttpStatusDetailWithoutRelyingOnMessageWording() {
+        when(stateMachine.claimAudioMix(eq("70"), anyString())).thenReturn(Optional.of(claim("provider-1")));
+        when(credentials.open("sk-frozen")).thenReturn("sk-frozen");
+        MediaExtractError unauthorized = new MediaExtractError("provider_failed",
+                "MediaKit 音频混合任务查询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}"
+                        + " request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(gateway.poll("sk-frozen", "provider-1")).thenThrow(unauthorized);
+        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+
+        new AudioMixJobProcessor(stateMachine, credentials, gateway, relay, producer).handle("70");
+
+        ArgumentCaptor<FailMediaExtractDto> failure = ArgumentCaptor.forClass(FailMediaExtractDto.class);
+        verify(stateMachine).failMediaExtractJob(failure.capture());
+        // 文案不含「401」字样：换凭证判定只依赖结构化 details.http_status，措辞变化不影响重试
+        assertThat(failure.getValue().message()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(failure.getValue().details())
+                .containsEntry("raw", "MediaKit 音频混合任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     @Test

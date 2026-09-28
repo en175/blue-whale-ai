@@ -7,11 +7,13 @@ import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto;
 import com.bluewhale.worker.domain.dto.PublishVocalSplitDto.PublishVocalSplitTrackDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VocalSplitContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VocalSplitError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitSeparateVoiceClient.SeparateVoiceTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -40,7 +42,8 @@ import java.util.Set;
  *       网关提交（scene 出站映射官方首字母大写枚举 + output_format 同名同值，**不是
  *       extract-audio 的 format**）→ markProviderSubmitted（存 provider_task_id + 释放租约 +
  *       next+5s + progress=1）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1047）；processing →
  *       续排（超限 1047）；failed → 分类终态；completed → **逐轨立即下载转存自家 TOS
  *       （火山各轨 URL 仅 24h 有效）** → 按 scene 轨序发布 2/3 条音频 Asset → 终态 succeeded
  *       （轨数组回填终态日志 payload，getStatus 投影见契约 VocalSplitTrackResult）</li>
@@ -142,9 +145,15 @@ public class VocalSplitJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "人声背景分离失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[vocal_split] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failVocalSplit(claim, code, message);
+            failVocalSplit(claim, code, message, httpStatus);
         }
     }
 
@@ -183,7 +192,8 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVocalSplitJobDto claim, String providerToken) {
-        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89R（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VocalSplitContract.TAG, claim, providerToken,
@@ -232,6 +242,10 @@ public class VocalSplitJobProcessor implements JobProcessor {
 
         // 3. 网关提交异步任务（scene 经契约 SCENE_UPSTREAM_MAP 换算官方首字母大写枚举，
         //    出站键是 scene + output_format，客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = separateVoiceClient.submit(
                 providerToken, source.getUrl(), sourceIsVideo, scene, outputFormat);
         log.info("[vocal_split] 上游已提交 jobId={} providerTaskId={} scene={} format={}",
@@ -275,6 +289,25 @@ public class VocalSplitJobProcessor implements JobProcessor {
             observation = separateVoiceClient.poll(providerToken, claim.providerTaskId());
         } catch (VocalSplitError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
+                if (claim.pollCount() >= MAX_VOCAL_SPLIT_POLLS) {
+                    log.warn("[vocal_split] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6W，IKIMN8 契约）：有状态
+                    // cause 即写 details.http_status 并剥「: HTTP <code>」片段；无 cause 不写键、文案不动
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "人声背景分离轮询超时（超过 " + MAX_VOCAL_SPLIT_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failVocalSplit(claim, VocalSplitContract.ERROR_VOCAL_SPLIT_FAILED, message, httpStatus);
+                    return;
+                }
                 log.warn("[vocal_split] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(
@@ -328,7 +361,8 @@ public class VocalSplitJobProcessor implements JobProcessor {
      * 缺任一轨 URL / 任一轨转存失败 → 整单失败（契约口径：无部分成功；已转存的 TOS 对象
      * 随失败留弃，与家族单轨转存失败的孤儿口径一致）。
      * <p>
-     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI89R：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedVocalSplitJobDto claim,
                                   SeparateVoiceTaskObservation observation) {
@@ -491,9 +525,20 @@ public class VocalSplitJobProcessor implements JobProcessor {
      *  轮询型任务语义完备；details.raw 透传原始原因——跨工具复用同款守卫，video_enhance
      *  复用 failVideoJob 同例）。 */
     private void failVocalSplit(ClaimedVocalSplitJobDto claim, String code, String message) {
+        failVocalSplit(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failVocalSplit(ClaimedVocalSplitJobDto claim, String code, String message,
+                                Integer httpStatus) {
         log.warn("vocal_split job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVocalSplitJob(new FailMediaExtractDto(
                 claim.id(),
                 claim.workerId(),

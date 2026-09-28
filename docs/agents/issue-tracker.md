@@ -6,26 +6,27 @@
 
 > 本节是**所有**企业版 MCP 调用（issue / PR / 仓库 / 标签……）的通用约定，不限于 issue 创建。
 
-**黄金法则：`enterprise_id` 与 `project_id` 永远动态查，永不从网页 URL 抄。** 本仓三个固定 ID 的兜底值（日常直接用、免查询）见 CLAUDE.md「Gitee ID 兜底常量」；疑似变更或 401 时按本节动态查。
+本仓日常直接使用 `CLAUDE.md`「Gitee ID 兜底常量」中的值；只向工具传其 schema 要求的 ID 参数。遇到 401 或疑似变更，先核对 token，再用对应的 `list` API 核对 ID。网页 URL 中的项目路由数字不能充当 `enterprise_id` 或 `project_id`。
 
 Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 | 标识符 | 出现在哪 | 能否直接用于 API |
 |---|---|---|
 | 网页路由 ID（如 URL `projects/883843` 的 `883843`） | 网页 URL | ❌ **绝不可**——既非 enterprise_id 也非 project_id |
-| `enterprise_id`（如 `16660949`） | 仅 `list_enterprises` 返回 | ✅ |
-| `project_id`（如 `48854568`） | 仅 `list_enterprise_repositories` 返回 | ✅ |
+| `enterprise_id` | `list_enterprises` 返回 | ✅ |
+| `project_id` | `list_enterprise_repositories` 返回 | ✅ |
 | PR 编号（URL `pulls/93` 的 `93`） | 网页 URL | ✅ URL 里**唯一**可直接抄的数字 |
 | issue ident（如 `IJZYUL`） | 网页 URL / 工单标题 | ✅ 字符串标识，非数字 ID |
 
-**误传 ID 的症状具有误导性**：把网页路由 ID 当 `enterprise_id` 传入，Gitee 返回 `401 企业未授权此应用进行访问`——这条信息**措辞误导**，实为「该 ID 指向的企业不存在」，与 OAuth 授权无关。遇到此 401，**先判 token 再判 ID**，不要先怀疑授权：
+**误传 ID 的症状具有误导性**：把网页路由 ID 当 `enterprise_id` 传入，Gitee 可能返回 `401 企业未授权此应用进行访问`。这是 ID 错误的已知症状；同一状态码也可能涉及 token 或权限，按以下顺序核对：
 
 ```
 步骤 1  调 get_user_info()
           ├─ 成功 → token 有效 → 进入步骤 2
-          └─ 401  → token 失效/类型不符（普通版 REST 报 "Access token is wrong type"）
-步骤 2  token 有效仍 401 = ID 错（最常见）
-          调 list_enterprises() 核对真实 enterprise_id
+          └─ 401  → 排查 token 失效或类型不符（普通版 REST 报 "Access token is wrong type"）
+步骤 2  用 list_enterprises() / list_enterprise_repositories() 核对请求中的 ID
+          ├─ 不一致 → 改用查询所得 ID
+          └─ 一致   → 继续核对目标资源和访问权限
 ```
 
 **一键解析**：`scripts/gitee-resolve-ids.sh resolve <PR/issue URL>` 输出企业 path、仓库 path、资源编号，并标注 URL 中哪个数字是陷阱、给出可直接执行的 MCP 查询模板。`check-id` 子命令校验单个 ID 值，`diagnose-401` 打印上面的决策树。新同事拿到一条 URL，第一步就跑它。
@@ -34,15 +35,16 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 企业版 MCP（`mcp__gitee-ent__*`）用以下 ID 定位，**非 owner/repo**：
 
-- **enterprise_id**：`list_enterprises` 查，按 `path == "hangzhou-xuanfu_1"` 取 `id`。
-- **project_id**（仓库 ID）：`list_enterprise_repositories` 查。创建 issue **必传**——不传则工单只进企业工作项、仓库 Issues 页不可见，PreToolUse hook `block-issue-without-repo.sh` 硬拦。
-- **program_id**（项目 ID）：`list_programs` 查（按 `name`/`search` 命中 Blue-Whale-AI 项目）。根 issue 创建**必传**且非 0——不传（=0）则工单游离于企业「项目管理」之外，同一 hook 硬拦。值不写死，对齐 ADR-0007 D5 动态查。
+- **enterprise_id**：需动态核对时用 `list_enterprises`，按 `path == "hangzhou-xuanfu_1"` 取 `id`。
+- **project_id**（仓库 ID）：需动态核对时用 `list_enterprise_repositories`。创建 issue **必传**——不传则工单只进企业工作项、仓库 Issues 页不可见，PreToolUse hook `block-issue-without-repo.sh` 硬拦。
+- **program_id**（项目 ID）：疑似变更时用 `list_programs` 查（按 `name`/`search` 命中 Blue-Whale-AI 项目）。根 issue 创建**必传**且非 0。不传（=0）会使工单游离于企业「项目管理」之外，同一 hook 会拦截。
 - **label 数字 ID**：`list_enterprise_labels` 查；`label_ids` 传逗号分隔的数字 ID（非名称）。标签长度 2–20、非特殊字符。
 
 ## 操作约定
 
-- **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0——缺任一则 hook 硬拦（见上「定位」）。标签不能在 create 落——企业私有仓库 `labels` 静默忽略，紧跟一次 `update_enterprise_issue(label_ids=...)` 补。**创建后必须 `get_enterprise_issue_detail` 回读确认 `description` 非空**——错名参数（如把描述传到 `body`）被静默忽略，已踩坑建成空描述工单（IK5THP）；回读验证是防静默忽略的通用要求，PR / Release 创建后同样适用；入参名以工具 schema 为准，不凭印象。
-- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**——子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`）——`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
+- **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0，缺任一则 hook 拦截（见上「定位」）。企业私有仓库会静默忽略 create 时传入的 `labels`，紧跟一次 `update_enterprise_issue(label_ids=...)` 补上。入参名以工具 schema 为准，不凭印象。
+- **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。
+- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**。子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`），`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再按「创建后核验」检查父子关系、归属和仓库可见性；查不到则不交 Agent。
   - **子任务，不是子需求**（2026-08-25 定规）：技术侧在产品建的需求工单下记录自己的工作时，只能建**任务**（`issue_type_id=1292680`），绝不能建「需求」型子项。需求（含技术维护母工单 IKAZIG 这类需求型父项）由产品/人关闭，Agent **只完成自己的子任务**，不得把父需求置为已完成/关闭。
   - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍以「端」为标题前缀（`【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。

@@ -729,10 +729,10 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     id: assetId,
   });
 
-  /** 缩略图 @ 按钮（IKFCKQ）：与手动 @ 选择同一插入机制（insertRefAtPending 记忆光标路径）——
-   *  有记忆光标原位插入、无记录追加末尾，插入后编辑器聚焦 */
+  /** 缩略图 @ 按钮（IKFCKQ）：与手动 @ 选择同一插入机制（insertRefAtPending）——
+   *  记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落，插入后编辑器聚焦 */
   const insertRefByKey = (assetId: string) => {
-    editorRef.current?.insertRefAtPending(refKeyOf(assetId));
+    editorRef.current?.insertRefAtPending(refKeyOf(assetId), true);
   };
 
   /** 新画布素材添加成功后，回到原 @ 位置插入标签。 */

@@ -11,6 +11,14 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
+/** 应用方案卡时能否复用已有素材卡：空地址、上传中、已标缺失都不能当源，必须新建。 */
+function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
+  if (item.type !== "mediaNode") return false;
+  if (item.data?.assetMissing === true) return false;
+  const src = typeof item.data?.src === "string" ? item.data.src : "";
+  return src.length > 0 && !src.startsWith("blob:");
+}
+
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
 function toQuoteView(row: ConversationQuoteRow) {
   const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
@@ -49,6 +57,11 @@ function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
 function canvasVersionConflict(version: number | null) {
   return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
+
+/** save() 可能返回的冲突信封码（412 版本冲突 / 422 空覆盖防护 IKIIWN / 428 确认清空缺
+ *  If-Match IKIMQJ）：canvases.controller 把命中本集合的信封按自身 code 透传 HTTP 状态码
+ *  而非回落 200，此处是「哪些信封码需透传」的单一权威源——save() 新增冲突信封时在此登记。 */
+export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([412, 422, 428]);
 
 @Injectable()
 export class CanvasService {
@@ -205,8 +218,12 @@ export class CanvasService {
         if (!asset) throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
         materialViews.push({ ...material, url: asset.url });
         if (existing) continue;
-        // 画布上已有同 assetId 的媒体节点则复用，否则新建；两种情况都建 textIndex 关系线
-        const existingMedia = nodes.find(item => item.type === "mediaNode" && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId);
+        // 画布上已有同 assetId 且可播放的媒体节点则复用；没有、或只剩「素材已被删除」空壳则新建
+        const existingMedia = nodes.find(item =>
+          item.type === "mediaNode"
+          && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId
+          && isReusableApplyMediaNode(item),
+        );
         const mediaNodeId = existingMedia?.id ?? `media-${randomUUID()}`;
         if (!existingMedia) additions.push({ id: mediaNodeId, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
           data: { assetId: material.assetId, mediaType: material.mediaType, src: asset.url, width: asset.width, height: asset.height } });
@@ -252,6 +269,8 @@ export class CanvasService {
       nodes?: unknown;
       edges?: unknown;
       expectedVersion?: number | null;
+      /** IKIIWN：非空画布 → 空文档的破坏性收缩须显式确认（契约 §9） */
+      confirmEmpty?: unknown;
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
@@ -323,6 +342,20 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
+    // IKIIWN（契约 §9）：非空画布被单次保存替换为空节点文档是破坏性收缩，仅显式确认放行；
+    // 读与写的竞态由下方 saveIfVersion 的版本条件闭环——本检查看到的行与被覆盖的行共用同一 expectedVersion 闸门。
+    if (previous.length > 0 && incoming.length === 0) {
+      if (body.confirmEmpty !== true) {
+        return { code: 422, msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty", data: null } as const;
+      }
+      // IKIMQJ（契约 §9 IKIMPQ）：破坏性清空只认明确的数值版本——确认了但缺 If-Match 一律 428，
+      // 不回落到下方「undefined 补 current.version」的宽松写；"missing" 哨兵与过期数字版本则交给
+      // saveIfVersion 条件闸门拦下（create 撞唯一键 / updateMany 不命中）回 412 + 当前版本，零写入。
+      // 必须放在 promptSource 分支之前：含方案卡的画布缺头会先撞 400，破坏性清空的 428 语义优先。
+      if (body.expectedVersion === undefined) {
+        return { code: 428, msg: "确认清空必须携带 If-Match 数值版本", data: null } as const;
+      }
+    }
     // IKFM3Q 正文媒体索引契约 §7：mediaMentions/mediaRefs 同现同缺、区间与覆盖有效；
     // 新增身份素材真实可及且与来源节点身份一致；存量身份展示元数据不可变（失效身份豁免正文编辑）
     for (const node of incoming) {

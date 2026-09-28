@@ -63,6 +63,7 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   createAudioMix: vi.fn(),
+  newIdempotencyKey: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   uploadAssetFile: vi.fn(),
@@ -117,6 +118,7 @@ vi.mock('@/api/jobs', () => ({
   createMediaExtraction: apiMocks.createMediaExtraction,
   createAudioTrim: apiMocks.createAudioTrim,
   createAudioMix: apiMocks.createAudioMix,
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
@@ -244,6 +246,8 @@ beforeEach(() => {
   sessionStorage.clear();
   seedDoc();
   apiMocks.createAudioMix.mockReset();
+  let keySequence = 0;
+  apiMocks.newIdempotencyKey.mockImplementation(() => `mix-key-${++keySequence}`);
   apiMocks.saveCanvasDoc.mockReset();
   apiMocks.saveCanvasDoc.mockResolvedValue({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' });
   apiMocks.fetchProjects.mockResolvedValue([{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
@@ -291,7 +295,7 @@ describe('IKI68W 画布双音频混合', () => {
       source_node_id: 'a1',
       inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
       output_format: 'mp3',
-    }, { silent: true });
+    }, { silent: true, idempotencyKey: expect.any(String) });
     const placeholder = nodeById('audio-mix-j1')!;
     expect(placeholder.data).toMatchObject({ fileName: '混合结果.mp3', genStatus: 'generating', src: '' });
     expect(placeholder.position.y).toBeGreaterThan(0);
@@ -311,6 +315,47 @@ describe('IKI68W 画布双音频混合', () => {
     expect(bodyBtn('audio-mix-send').disabled).toBe(false);
     expect(nodeById('audio-mix-j1')).toBeUndefined();
     expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('创建请求超时后重发复用幂等键，修改格式后换键', async () => {
+    apiMocks.createAudioMix.mockRejectedValue(new Error('请求超时'));
+    await renderPage();
+    await enterMix();
+    await click('audio-mix-add');
+    await click('audio-mix-candidate-a2');
+    await sendMix();
+    await sendMix();
+    await click('audio-mix-format-trigger');
+    await click('audio-mix-format-wav');
+    await sendMix();
+
+    expect(apiMocks.createAudioMix).toHaveBeenCalledTimes(3);
+    const attempts = apiMocks.createAudioMix.mock.calls as Array<[string, unknown, { idempotencyKey: string }]>;
+    expect(attempts[0]?.[2].idempotencyKey).toMatch(/^[!-~]{1,128}$/);
+    expect(attempts[1]?.[2].idempotencyKey).toBe(attempts[0]?.[2].idempotencyKey);
+    expect(attempts[2]?.[2].idempotencyKey).not.toBe(attempts[0]?.[2].idempotencyKey);
+    expect(nodeById('audio-mix-j1')).toBeUndefined();
+  });
+
+  it('上一次创建已受理后，相同选择可发起新的混合任务', async () => {
+    apiMocks.createAudioMix
+      .mockResolvedValueOnce({ job_id: 'j1', status: 'queued' })
+      .mockResolvedValueOnce({ job_id: 'j2', status: 'queued' });
+    apiMocks.fetchJobStatus.mockImplementation(async (jobId: string) => ({
+      job_id: jobId, status: 'processing', progress: 1, asset: null,
+    }));
+    await renderPage();
+    for (const _ of [1, 2]) {
+      await enterMix();
+      await click('audio-mix-add');
+      await click('audio-mix-candidate-a2');
+      await sendMix();
+    }
+    const attempts = apiMocks.createAudioMix.mock.calls as Array<[string, unknown, { idempotencyKey: string }]>;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.[2].idempotencyKey).not.toBe(attempts[0]?.[2].idempotencyKey);
+    expect(nodeById('audio-mix-j1')).toBeDefined();
+    expect(nodeById('audio-mix-j2')).toBeDefined();
   });
 
   it('创建请求及结果卡落盘期间禁止切换项目', async () => {
@@ -403,7 +448,7 @@ describe('IKI68W 画布双音频混合', () => {
     await act(async () => { resolveCreate({ job_id: 'j1', status: 'queued' }); });
     expect(apiMocks.createAudioMix).toHaveBeenCalledWith('p1', expect.objectContaining({
       inputs: [{ asset_id: '8', node_id: 'a1' }, { asset_id: '6', node_id: 'a2' }],
-    }), { silent: true });
+    }), { silent: true, idempotencyKey: expect.any(String) });
     expect(nodeById('audio-mix-j1')).toBeDefined();
     expect(flowProps.current.edges.filter((edge) => edge.target === 'audio-mix-j1').map((edge) => edge.source)).toEqual(['a1']);
   });

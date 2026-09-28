@@ -75,6 +75,7 @@ class VideoSceneSplitJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
         // 段转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true);
@@ -366,6 +367,22 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-race")));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset();
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("parent-reuse 查父任务异常（不存在/网络错）→ 按不存在处理，回退正常重新提交")
     void parentReusePollError_fallThrough() {
         when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
@@ -445,8 +462,8 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-guard")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -456,18 +473,20 @@ class VideoSceneSplitJobProcessorTest {
         when(mediaRelay.persist("https://volc/old-seg1.mp4", "9")).thenReturn(stored(1));
         when(stateMachine.publishVideoSceneSplitResult(any())).thenReturn(false);
         stubSourceAsset();
-        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：不提交、不自投、不落失败，
+        // 任务保持 processing 由新 worker 重新领取继续收割
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 回退正常重新提交，不落失败终态")
-    void parentReuseSegmentLeaseRenewMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布期段转存续租未命中（renew false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReuseSegmentLeaseRenewMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoSceneSplit(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("standard"), null, 0, "amk-parent-renew")));
         when(segmentScenesClient.poll("sk-frozen-token", "amk-parent-renew"))
@@ -480,13 +499,13 @@ class VideoSceneSplitJobProcessorTest {
         when(stateMachine.updateVideoSceneSplitProgress(any(UpdateVideoSceneSplitProgressDto.class)))
                 .thenReturn(true, false);
         stubSourceAsset();
-        when(segmentScenesClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(segmentScenesClient).submit("sk-frozen-token", "https://example.com/src.mp4", "standard");
+        // 逐段转存中续租未命中 = 失租（IKICD0）：与守卫未命中同一停止语义，不因共享
+        // 回退逻辑提交新上游任务；新 worker 领取后从头重新检查父任务并完成收割
+        verify(segmentScenesClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
         verify(mediaRelay, times(1)).persist(anyString(), anyString());
         verify(stateMachine, never()).publishVideoSceneSplitResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
@@ -545,6 +564,91 @@ class VideoSceneSplitJobProcessorTest {
     }
 
     @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("standard"), VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS - 1);
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 场景切分任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoSceneSplitJobProcessor.SCENE_SPLIT_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1046 轮询超时文案不变 + 不写 http_status（无 cause 不推断，IKIN6X）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("standard"), VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS);
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 场景切分任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
+                eq("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 场景切分任务查询超时"),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1046 + details.http_status=503，message 剥状态码字样（IKIN6X）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("standard"), VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS);
+        VideoSceneSplitError gatewayBusy = new VideoSceneSplitError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 场景切分任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
+        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("503")
+                .isEqualTo("场景切分轮询超时（超过 " + VideoSceneSplitJobProcessor.MAX_SCENE_SPLIT_POLLS
+                        + " 次），上游持续错误: MediaKit 场景切分任务查询失败:");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 503);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("standard"), 3);
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoSceneSplitError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 场景切分任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("poll 硬错误（HTTP 404 任务不存在）→ 1046 兜底")
     void pollHardError_fails() {
         stubPollClaim(input("standard"), 3);
@@ -585,6 +689,34 @@ class VideoSceneSplitJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(input("standard"), 3);
+        VideoSceneSplitError unauthorized = new VideoSceneSplitError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 场景切分任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(segmentScenesClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoSceneSplitContract.ERROR_VIDEO_SCENE_SPLIT_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 场景切分任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     // ========== poll 相：completed → 逐段转存 + 终态发布（链接 24h 有效） ==========

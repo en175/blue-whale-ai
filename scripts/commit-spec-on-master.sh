@@ -8,10 +8,9 @@
 # 文档改动的标准路径（与代码同路）：
 #   1) scripts/start-task-worktree.sh --type docs --no-issue --summary <6–15字中文简述>
 #   2) 工单分支内编辑后：bash scripts/commit-task-for-review.sh -m "docs: <描述>"
-#   3) 用户授权后：scripts/publish-review-package.sh --user-authorized --create-pr
-#      （工程面 docs/chore 直进 master；提 PR 目标 = 最近 release 批次 + master 交用户手选）
+#   3) 用户授权后：scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <当前release>
 #
-# 人类确需在本地 master 直提：自行标准 git commit（自担未推送提交被卷进任务分支的代价）。
+# 本地 master 只代表生产版本。散文文档按 ADR-0115 走当前发布线。
 
 cat >&2 <<EOF
 ❌ commit-spec-on-master: 该入口已废止——本地 master 不再经此通道落盘文档直提。

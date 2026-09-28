@@ -10,6 +10,8 @@
 -- ⚠️ 刻意不建「已退款」状态：退款功能先不做（产品决定）。一个没有出口的状态就是死状态。
 
 -- ── 订单状态：String 列，两个新值不需要 DDL，但要在这里把口径钉死 ──────────────
+SET NAMES utf8mb4;
+
 ALTER TABLE recharge_orders
   MODIFY COLUMN status VARCHAR(16) NOT NULL DEFAULT 'pending'
   COMMENT 'pending 待支付 | paid_pending 支付成功待到账 | paid 已到账 | failed 支付失败 | expired 已取消（用户取消或超时，沿用旧值不改名）| grant_failed 到账异常';

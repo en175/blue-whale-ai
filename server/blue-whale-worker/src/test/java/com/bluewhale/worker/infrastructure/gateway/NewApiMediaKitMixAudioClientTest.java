@@ -74,6 +74,20 @@ class NewApiMediaKitMixAudioClientTest {
     }
 
     @Test
+    void submitUnauthorizedCarriesHttpStatusAsCause() {
+        status.set(401);
+        response.set("{\"success\":false,\"request_id\":\"req-mix-401\",\"error\":{\"code\":\"InvalidToken\",\"message\":\"invalid token\"}}");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new NewApiMediaKitMixAudioClient(new UpstreamBaseUrl(baseUrl)).submit("sk-token",
+                        List.of("https://tos/a.mp3", "https://tos/b.mp3"), "mp3"))
+                .isInstanceOf(com.bluewhale.worker.domain.error.MediaExtractError.class)
+                .satisfies(error -> {
+                    assertThat(error.getCause()).isInstanceOf(NewApiVideoClient.HttpStatusException.class);
+                    assertThat(((NewApiVideoClient.HttpStatusException) error.getCause()).getStatus()).isEqualTo(401);
+                });
+    }
+
+    @Test
     void submitWithoutTaskIdStillRetainsRequestId() {
         response.set("{\"success\":false,\"task_id\":null,\"request_id\":\"req-mix-no-task\"}");
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->

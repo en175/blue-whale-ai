@@ -6,6 +6,7 @@ import {
   createGenerationJob,
   retryGenerationJob,
   createAudioMix,
+  createAudioVideoMux,
   retryAudioMix,
   createAudioTrim,
   createAudioSpeed,
@@ -72,9 +73,11 @@ describe('createAudioMix', () => {
       output_format: 'mp3' as const,
     };
 
-    await expect(createAudioMix('project/1', payload, { silent: true })).rejects.toThrow('混合任务创建失败');
+    await expect(createAudioMix('project/1', payload, { silent: true, idempotencyKey: 'mix-create-1' }))
+      .rejects.toThrow('混合任务创建失败');
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/audio-mixes');
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(payload);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Idempotency-Key')).toBe('mix-create-1');
     expect(toast.error).not.toHaveBeenCalled();
   });
 });
@@ -96,6 +99,32 @@ describe('retryAudioMix', () => {
     expect(init.method).toBe('POST');
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe('createAudioVideoMux', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('提交冻结双源并携带幂等键，服务端按同键重放原任务（IKILVF 契约确认）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { job_id: '79', status: 'queued', enqueue_required: true } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const payload = {
+      audio: { assetId: '8', nodeId: 'a1' },
+      video: { assetId: '5', nodeId: 'v1' },
+      is_audio_reserve: true,
+      sync: 'none' as const,
+    };
+
+    await expect(createAudioVideoMux('project/1', payload, { idempotencyKey: 'mux-create-1', silent: true }))
+      .resolves.toEqual({ job_id: '79', status: 'queued', enqueue_required: true });
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/audio-video-muxes');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('mux-create-1');
+    expect(JSON.parse(init.body as string)).toEqual(payload);
   });
 });
 

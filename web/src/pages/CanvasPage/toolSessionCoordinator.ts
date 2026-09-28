@@ -18,6 +18,10 @@
    IKHW5C 音频调速（audioSpeed，父单 IKHVYO，编辑态本体归 IKHW5S）按音频截取
    同档接入——互斥、选中规范化退出、Esc 公共链同家族口径；node-click 拦截不挂
    （无源卡切换语义，点其他卡走选中规范化退出）。
+   IKIHPK 音视频合成（audioVideoMux，父规格 IKIHMX / ADR-0115）为第 13 种会话，
+   按音频混合同档接入——互斥、选中规范化退出、Esc 公共链同家族口径；node-click
+   拦截不挂（拖线绑定是画布原生手势，点其他卡走选中规范化退出）。会话期模态照
+   HD/插帧面板口径：媒体卡悬浮工具条整条不渲染（editSessionActive 派生进 show 门）。
    IKI61O 会话纪元（session epoch）接入本 module：进/出会话与项目切换推进纪元、
    发送时捕获、迟到响应 settle 时比对——纪元不同即「当前会话已不是发起时的会话
    （或已关闭）」，只做任务收尾（建卡/连线/轮询等），不关闭用户当前会话、不复位其
@@ -28,25 +32,10 @@
    target 装配快照传入；纪元实例同样由页面以 ref 持有（createToolSessionEpoch 工厂
    每次新建），module 只提供机制。纯 in-process 依赖，无网络接口。 */
 
-/** 编辑会话身份 */
-export type ToolSessionKind =
-  | 'erase'
-  | 'cutout'
-  | 'crop'
-  | 'outpaint'
-  | 'subtitleErase'
-  | 'audioVideoSplit'
-  | 'audioTrim'
-  | 'audioMix'
-  | 'audioSpeed'
-  | 'sceneSplit'
-  | 'vocalSplit'
-  | 'smartMatting';
-
 /** 会话统一遍历顺序（互斥退出的固定顺序）。各 exit 只清各自 state、相互独立，
- *  顺序不影响结果，固定只为确定性。IKI8KZ 审查修订后导出：纪元机制单测的 ALL_KINDS
- *  自本数组派生——新增种类（或集合漏列）直接反映进测试遍历，不再手抄副本漏检。 */
-export const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
+ *  顺序不影响结果，固定只为确定性。编辑会话类型和纪元测试均从本数组派生，
+ *  新增工具时不会让类型联合与遍历集合分离。 */
+export const TOOL_SESSION_KINDS = [
   'erase',
   'cutout',
   'crop',
@@ -59,7 +48,11 @@ export const TOOL_SESSION_KINDS: readonly ToolSessionKind[] = [
   'sceneSplit',
   'vocalSplit',
   'smartMatting',
-];
+  'audioVideoMux',
+] as const;
+
+/** 编辑会话身份 */
+export type ToolSessionKind = (typeof TOOL_SESSION_KINDS)[number];
 
 /** 全会话活跃快照（IKH3ZH 收口时为八会话，IKHW5C 增至十一）：各会话 target node id
  *  （null=未进入）。由页面每次交互时从现有会话 state 装配最新值传入，module 不保存。 */
@@ -156,7 +149,7 @@ export function handleToolSessionNodeClick(
 }
 
 /** 选中规范化退出的工具包含音频混合与调速；抠图/扩图的选中变化走冻结。 */
-const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'sceneSplit', 'vocalSplit', 'smartMatting'];
+const SELECTION_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'crop', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'audioVideoMux', 'sceneSplit', 'vocalSplit', 'smartMatting'];
 
 /** 选中变化的会话处置：抠图/扩图活跃时冻结面板联动（返回 true，调用方应终止面板
  *  联动——会话内点其他卡的选中变化已由 node-click 拦截处置，程序化选中触发的变化
@@ -188,7 +181,7 @@ export function escDefersToToolSessionHandler(deps: ToolSessionDeps): boolean {
 }
 
 /** Esc 公共链按顺序退出首个活跃会话；抠图/扩图由专属 handler 处理。 */
-const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
+const ESC_EXIT_KINDS: readonly ToolSessionKind[] = ['erase', 'subtitleErase', 'audioVideoSplit', 'audioTrim', 'audioMix', 'audioSpeed', 'audioVideoMux', 'sceneSplit', 'vocalSplit', 'smartMatting', 'crop'];
 
 /** Esc 公共链后段的会话退出：按 ESC_EXIT_KINDS 顺序退出首个活跃会话并消费；无此
  *  六会话返回 false 交还调用方继续面板关闭链。 */
@@ -211,7 +204,7 @@ export function exitToolSessionOnEsc(deps: ToolSessionDeps): boolean {
  *  使用口径（全部异步发送型家族同规）：
  *  - 进入会话经 enter 推进——同工具换卡重进不触发出，靠本推进区分前后两次会话身份；
  *  - 退出会话（四路退出/互斥/绑定清理/发送成功 settle 共用的完整退出函数）经 exit 推进；
- *  - 项目切换经 advanceAll 推进——旧身份在新项目不再代表任何当前会话；
+ *  - 项目切换或进入任一新会话经 advanceAll 推进——旧身份不再代表当前会话；
  *  - 发送时 capture 捕获当前纪元；settle 时 isCurrent 比对——false 即迟到响应，
  *    只做任务收尾（建卡/连线/轮询/落盘），不退当前会话、不复位其提交锁、不弹旧错误。 */
 export interface ToolSessionEpoch {
@@ -219,7 +212,7 @@ export interface ToolSessionEpoch {
   enter(kind: ToolSessionKind): void;
   /** 退出会话：推进该会话纪元（在途响应随之失效） */
   exit(kind: ToolSessionKind): void;
-  /** 项目切换：推进全部会话纪元 */
+  /** 项目切换或进入任一新会话：推进全部会话纪元 */
   advanceAll(): void;
   /** 发送时捕获该会话当前纪元 */
   capture(kind: ToolSessionKind): number;

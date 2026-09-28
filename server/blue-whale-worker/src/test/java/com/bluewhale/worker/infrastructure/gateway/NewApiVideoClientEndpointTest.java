@@ -12,6 +12,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -185,6 +188,28 @@ class NewApiVideoClientEndpointTest {
                 .isEqualTo("https://tos.test/first.png");
         assertThat(content.get(1).get("role").asText()).isEqualTo("last_frame");
         assertThat(content.get(2).get("role").asText()).isEqualTo("reference_image");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", " \t "})
+    @DisplayName("IKIDEP: 成功响应的缺失或空白 URL 原样交给重试处理器判断")
+    void pollSucceededWithBlankUrl(String resultUrl) throws Exception {
+        server.createContext("/v1/video/generations/task-blank", exchange -> {
+            String urlField = resultUrl == null ? "" : "\"url\":" + JSON.writeValueAsString(resultUrl) + ",";
+            byte[] resp = ("{\"task_id\":\"task-blank\",\"status\":\"SUCCESS\"," + urlField
+                    + "\"progress\":100}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-blank");
+
+        assertThat(observation.status()).isEqualTo("succeeded");
+        assertThat(observation.url()).isEqualTo(resultUrl);
     }
 
     @Test

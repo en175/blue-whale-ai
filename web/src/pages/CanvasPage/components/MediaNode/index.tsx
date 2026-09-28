@@ -10,6 +10,7 @@ import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../mediaExtract';
 import { isAudioTrimNodeId } from '../../audioTrim';
 import { isAudioMixNodeId } from '../../audioMix';
+import type { AudioVideoMuxIdentity } from '../../audioVideoMux';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import type { ImageCutoutIdentity } from '../../imageCutout';
 import type { ImageCropIdentity } from '../../imageCrop';
@@ -136,6 +137,8 @@ export interface MediaNodeData {
   jobId?: number | string;
   /** 生成状态：见 MediaGenStatus */
   genStatus?: MediaGenStatus;
+  /** 音频混合结果卡删除后，等待任务取消终态。 */
+  audioMixCancelPending?: boolean;
   /** 草稿身份标记（IKDMQQ）：待生成/生成中/失败的草稿卡均为 true；成功后清除转为普通成品卡 */
   draft?: boolean;
   /** 草稿持久化参数（IKDMQQ）：面板编辑实时写回，随画布保存恢复 */
@@ -255,6 +258,10 @@ export interface MediaNodeData {
    *  格式）供失败重试原样重发创建接口；带此标记的失败占位卡才渲染重试钮（存量 ffmpeg 时代
    *  失败卡无身份不渲染，口径同家族身份分流先例） */
   mediaExtract?: MediaExtractIdentity;
+  /** 音视频合成草稿卡身份标记（IKIHPK，建卡时随 data 持久化）：固定音频源 + 参数 +
+   *  绑定视频，随卡持久化记住直到终态回填；草稿卡内容区据此区分未绑定/已就绪文案，
+   *  拖线落点按此身份分流为绑定动作（见 audioVideoMux.ts） */
+  audioVideoMux?: AudioVideoMuxIdentity;
   /** 裁切编辑态标记（IKGW1H，渲染期派生注入，不持久化）：本卡为裁切目标源图卡时由
    *  CanvasPage 注入——裁切框与面板（IKGW1N）、确认建卡（IKGW1S）据此接入 */
   cropEditing?: true;
@@ -298,6 +305,11 @@ export interface MediaNodeData {
    *  缺失/为 0 置灰，不照搬家族「数据缺失不拦」口径） */
   onTrimAudio?: (id: string) => void;
   onMixAudio?: (id: string) => void;
+  /** 音视频合成（IKIHPK，父规格 IKIHMX / ADR-0115）：音频卡工具条第四钮「音视频合成」
+   *  入口点亮派发（从源音频卡拉出合成草稿卡，草稿卡会话与拖线绑定归 IKIHPK，
+   *  提交回填归 IKIHP M；置灰门槛见 audioVideoMux.ts——已完成音频成品卡 + 仅源
+   *  音频 URL 缺失置灰） */
+  onComposeAudioVideo?: (id: string) => void;
   /** 音频调速（IKHW5C，父单 IKHVYO）：音频卡工具条第二钮「调速」入口点亮派发（进入
    *  调速编辑态骨架归本票，编辑态本体——滑杆/发送条/提交——归 IKHW5S；置灰门槛见
    *  audioSpeed.ts——音频 URL 或资产 ID 缺失即置灰，时长缺失不拦） */
@@ -662,13 +674,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
       // 视频 HD 高清草稿（IKH3VG）同款专属占位；面板由本票接入
       // 视频插帧草稿（IKHLKR）同款专属占位（父单指定文案）；面板由本票接入
+      // 音视频合成草稿卡（IKIHPK）：未绑定引导 / 已绑定就绪（面板由 AudioVideoMuxPanel 承担）
       const draftHint = isImageDraft && data.imageEnhance
         ? '配置参数生成高清图像'
         : isVideoDraft && data.videoEnhance
           ? '配置参数生成高清视频'
           : isVideoDraft && data.frameInterpolation
             ? '配置参数生成插帧视频'
-            : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
+            : isVideoDraft && data.audioVideoMux
+              ? (data.audioVideoMux.video ? '已就绪，点击发送生成' : '选择视频并配置参数')
+              : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
@@ -681,6 +696,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return (
         <div className={styles.genBox}>
           <div className={styles.genSpinner} />
+          {isAudioMixCard && data.audioMixCancelPending === true &&
+            <span className={styles.genText}>正在取消</span>}
           {generationOverlay.showProgress && (
             <>
               <span className={styles.genText}>

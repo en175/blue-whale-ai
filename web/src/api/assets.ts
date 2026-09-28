@@ -11,6 +11,8 @@ export type AssetType = 'image' | 'video' | 'audio' | 'character';
 export interface AssetRecord {
   /** 资产唯一标识，用于删除操作 */
   id: number | string;
+  /** 资产名称；旧列表响应可能缺失。 */
+  name?: string | null;
   /** 资产类型，决定预览渲染方式 */
   type: AssetType;
   /** 服务端入库状态；只有 normal 可作为音频混合输入。 */
@@ -230,6 +232,7 @@ export interface UploadCompleteParams {
   type: AssetType;
   mime: string;
   size: number;
+  name?: string;
   /** presign 返回的 storage_key */
   storage_key: string;
   /** 关联项目 ID，资产页上传不传 */
@@ -260,6 +263,10 @@ export interface UploadCompleteData {
   duration: number | null;
   mime: string;
   size: number;
+  /** 资产绑定的素材库 id；未绑定为 null。dedup / complete 恒带回。 */
+  material_id?: string | null;
+  /** 素材审核镜像：Active 表示已过 Seedance 校验；未绑定或无状态行为 null。 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
 }
 
 /** 上传第三步：确认上传完成，后端校验并创建资产记录。

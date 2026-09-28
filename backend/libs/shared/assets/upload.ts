@@ -24,6 +24,7 @@ export type PresignAssetInput = {
 export type CompleteAssetInput = PresignAssetInput & {
   project_id?: string;
   storage_key: string;
+  name?: string;
   width?: number;
   height?: number;
   duration?: number;
@@ -171,6 +172,22 @@ export interface UploadMaterialGate {
 }
 
 /**
+ * IKI65H：素材审核状态的**只读**口，与上面的闸并列（接线同样在控制器层）。
+ *
+ * **为什么不从闸上取**：闸只回「过 / 不过 + 一句文案」——`assertMaterialLinkable` 把状态值
+ * 当场扔掉了，而且闸不过时直接抛错、压根没有状态可给。响应要的是**库里那一行的原值**，
+ * 所以单开一个读口，不去动闸的契约（闸是生成门和上传口共用的判定，改它要两边一起看）。
+ *
+ * **实现方契约：`load` 不许抛。** 它取的是一个**回显字段**，不是门——读不到不该让一次
+ * 已经落库、已经绑好的上传回 500（客户端重试还会在同一条路上再撞一次）。实现见
+ * `MaterialService.materialStatusReader`：失败记 warn 回 null。
+ */
+export interface MaterialStatusReader {
+  /** 按素材库 id 查本地镜像状态；无对应行返回 null（存量素材可能从未建过行）。 */
+  load(userId: string, materialId: string): Promise<string | null>;
+}
+
+/**
  * 闸不过时的统一错误（ADR-0093 决策 3）。
  *
  * **一个码 + 两条 msg**：终局（素材未通过 / 上游已不存在）与暂时故障（上游不可达）共用
@@ -200,6 +217,8 @@ export async function handleDedupAsset(
     uploads: AssetService;
     /** IKGQWR：带 materialId 时的素材闸。必填——可选会让生产漏接线时静默无闸。 */
     materialGate: UploadMaterialGate;
+    /** IKI65H：响应里回显素材审核状态的只读口。同样必填——可选会让生产漏接线时静默回 null。 */
+    materialStatus: MaterialStatusReader;
   },
 ) {
   assertUploadInput(input);
@@ -208,6 +227,9 @@ export async function handleDedupAsset(
   // IKGQWR：带素材库 id 时**先过闸**。这是对既有「去重是 presign 前的 fast-path，绝不该阻断
   // 正常上传」的一处**有意例外**：那句话拦的是 md5 缺失/格式不标准这类本地小毛病，而素材状态
   // 是用户明确指名要关联的对象——放行等于让一张不可用的素材悄悄变成可用的本地资产。
+  //
+  // IKI65H：闸刚读过这张素材行，下面拼响应时还会再读一次。这一次重复是**有意的代价**——
+  // 闸只回「过 / 不过」，状态值它不给（见 `MaterialStatusReader` 的说明），而工单要求不动闸契约。
   const gate = materialId ? await deps.materialGate.check(userId, materialId) : null;
   if (gate !== null && !gate.ok) throw materialUnavailable(gate.message);
 
@@ -245,7 +267,16 @@ export async function handleDedupAsset(
       materialGroupId: gate.materialGroupId,
     });
   }
-  return ok({ dedup: true, asset: toAssetResponse(reusable) });
+  // IKI65H：`reusable` 是**绑定之前**读出来的行，它的 material_id 还是旧值，所以这里以
+  // 「刚刚写进去的那个」为准；没写就把行上的原值带出去。
+  return ok({
+    dedup: true,
+    asset: await toAssetResponse(reusable, {
+      userId,
+      materialStatus: deps.materialStatus,
+      boundMaterialId: materialId ?? reusable.material_id ?? null,
+    }),
+  });
 }
 
 /**
@@ -332,6 +363,8 @@ export async function handleCompleteAsset(
     storage: AssetUploadStorage | null;
     /** IKGQWR：带 materialId 时的素材闸。必填——可选会让生产漏接线时静默无闸。 */
     materialGate: UploadMaterialGate;
+    /** IKI65H：响应里回显素材审核状态的只读口。同样必填——可选会让生产漏接线时静默回 null。 */
+    materialStatus: MaterialStatusReader;
   },
 ) {
   assertUploadInput(input);
@@ -362,6 +395,9 @@ export async function handleCompleteAsset(
   );
   if (existing) {
     await deps.storage.makePublic(input.storage_key);
+    // IKI65H：这里**不重新过闸**（见上），所以行上可能挂着一个后来被判 Failed 的素材——
+    // 这正是响应要回显状态的原因。闸通过补写关联时才把 material_id 换成新的。
+    let boundMaterialId = existing.material_id;
     if (materialId) {
       const replayGate = await deps.materialGate.check(userId, materialId);
       if (replayGate.ok) {
@@ -371,9 +407,27 @@ export async function handleCompleteAsset(
           materialId,
           materialGroupId: replayGate.materialGroupId,
         });
+        boundMaterialId = materialId;
+      } else {
+        // 闸不过时它可能**顺手把这条资产上的关联清掉了**：`assertMaterialLinkable` 在
+        // 「本地行非终态 + 上游判 Failed」时会走 `handleUpstreamMaterialFailure`，那里面
+        // 就有一步 `clearMaterialLink`（ADR-0087 的统一处置）。而 `existing` 是**过闸之前**
+        // 读的行，照它回显会给出一个库里已经不存在的关联——同一资产在 `GET /api/assets`
+        // 那边已经是 `material_id: null` 了。所以这里回读一次，以库为准。
+        const fresh = await deps.uploads.findCommittedUpload(
+          userId,
+          input.storage_key,
+        );
+        boundMaterialId = fresh?.material_id ?? null;
       }
     }
-    return ok(toAssetResponse(existing));
+    return ok(
+      await toAssetResponse(existing, {
+        userId,
+        materialStatus: deps.materialStatus,
+        boundMaterialId: boundMaterialId ?? null,
+      }),
+    );
   }
 
   // IKGQWR（ADR-0093 决策 3/4）：过了幂等这一关，说明这个 key 还没有任何行指向它——
@@ -416,7 +470,14 @@ export async function handleCompleteAsset(
         materialId,
         materialGroupId: gate.materialGroupId,
       });
-      return ok(toAssetResponse(bound));
+      // IKI65H：`bound` 本来就是按这个素材 id 反查出来的，绑定后仍是它。
+      return ok(
+        await toAssetResponse(bound, {
+          userId,
+          materialStatus: deps.materialStatus,
+          boundMaterialId: materialId,
+        }),
+      );
     }
   }
   const object = await deps.storage.inspectObject(input.storage_key);
@@ -472,6 +533,9 @@ export async function handleCompleteAsset(
     mime: input.mime,
     size: input.size,
     storageKey: input.storage_key,
+    ...(typeof input.name === "string" && input.name.trim()
+      ? { name: Array.from(input.name.trim().split(/[\\/]/).pop() ?? "").slice(0, 255).join("") }
+      : {}),
     url: object.publicUrl,
     ...(input.width == null ? {} : { width: input.width }),
     ...(input.height == null ? {} : { height: input.height }),
@@ -485,19 +549,44 @@ export async function handleCompleteAsset(
     source,
   });
 
-  return ok(toAssetResponse(asset));
+  // IKI65H：`materialId` 给了就一定写进去了（闸不过走不到这里）；没给就是新行的 null。
+  return ok(
+    await toAssetResponse(asset, {
+      userId,
+      materialStatus: deps.materialStatus,
+      boundMaterialId: materialId ?? asset.material_id ?? null,
+    }),
+  );
 }
 
-function toAssetResponse(asset: {
-  id: string;
-  type: string;
-  url: string;
-  mime: string | null;
-  size: bigint | null;
-  width: number | null;
-  height: number | null;
-  duration: number | null;
-}) {
+/**
+ * 资产行 → 上传接口响应体（IKCNLS）。
+ *
+ * IKI65H：额外带上该资产绑定的素材 id 与它的审核状态。两个字段**恒在**，无绑定时为 `null`——
+ * 调用方不必写「有没有这个 key」的分支。
+ *
+ * `boundMaterialId` 是**此刻**该资产绑的素材 id，由调用点给出：刚写完 `bindMaterialId` 的传
+ * 写入值，没写的传行上的原值。不为此回头再查一次资产行——写进去什么，我们刚刚知道。
+ * 状态则必须查：`material_assets` 不在本域，而且它可能在上次写入之后被上游判定改过。
+ */
+async function toAssetResponse(
+  asset: {
+    id: string;
+    type: string;
+    url: string;
+    mime: string | null;
+    size: bigint | null;
+    width: number | null;
+    height: number | null;
+    duration: number | null;
+  },
+  ctx: {
+    userId: string;
+    materialStatus: MaterialStatusReader;
+    boundMaterialId: string | null;
+  },
+) {
+  const materialId = ctx.boundMaterialId;
   return {
     asset_id: asset.id,
     status: "ready" as const,
@@ -508,5 +597,10 @@ function toAssetResponse(asset: {
     duration: asset.duration,
     mime: asset.mime ?? "application/octet-stream",
     size: Number(asset.size ?? BigInt(0)),
+    material_id: materialId,
+    material_status:
+      materialId === null
+        ? null
+        : await ctx.materialStatus.load(ctx.userId, materialId),
   };
 }

@@ -566,3 +566,55 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     ).resolves.toBeNull();
   });
 });
+
+describe("MaterialService —— 上传口回显素材状态的读口（IKI65H）", () => {
+  /** 造一个只提供素材状态行的 prisma 替身；`failure` 用来模拟查库本身出错。 */
+  const makeStatusPrisma = (row: { status: string } | null, failure?: Error) => {
+    const findFirst = failure
+      ? vi.fn().mockRejectedValue(failure)
+      : vi.fn().mockResolvedValue(
+          row === null
+            ? null
+            : {
+                id: 1n,
+                material_id: "asset-a",
+                user_id: 9n,
+                material_group_id: "group-1",
+                status: row.status,
+                error_code: null,
+                error_message: null,
+                status_checked_at: null,
+              },
+        );
+    return { prisma: { client: { material_assets: { findFirst } } }, findFirst };
+  };
+
+  it("有状态行：原样回该行的 status（不推断、不归一）", async () => {
+    const { prisma, findFirst } = makeStatusPrisma({ status: "Failed" });
+    await expect(
+      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBe("Failed");
+    // 归属谓词必须带上——与仓库层其余读一致，纵深防御。
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { material_id: "asset-a", user_id: 9n },
+    });
+  });
+
+  it("无状态行：回 null（存量素材可能从未建过行）", async () => {
+    const { prisma } = makeStatusPrisma(null);
+    await expect(
+      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBeNull();
+  });
+
+  /**
+   * 这个读口取的是**回显字段**，不是门。让它抛出去，一次已经落库、已经绑好的上传就会回 500，
+   * 而客户端重试还会在同一条路上再撞一次。所以失败按「无状态行」处理，靠 warn 留痕。
+   */
+  it("查库失败：不抛，按无状态行回 null", async () => {
+    const { prisma } = makeStatusPrisma(null, new Error("db down"));
+    await expect(
+      new MaterialService(prisma as never).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBeNull();
+  });
+});

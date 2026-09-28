@@ -6,15 +6,20 @@
    三按钮：派生新卡唯一路径 = 拖线落空白类型菜单，原卡重跑唯一路径 = 点卡片开绑定面板。
    IKH3XZ 五画质工具横排常显：高清/扩图/裁切/擦除/抠图离开「高清 ▾」下拉直接排上工具条，
    「高清」图标换 ZoomIn，触发钮最近工具记忆与悬浮展开整套退役（ADR-0107）。
-   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改五功能钮（截取/调速/混合/
-   音视频合成/转码）+ 分隔线 + 下载，详情对音频退役。
+   IKH8Q3（ADR-0109）音频卡横矩形改版：音频分支改功能钮（截取/调速/混合/
+   音视频合成）+ 分隔线 + 下载，详情对音频退役；ADR-0109 原五钮中的「转码」已按需求撤除。
    IKHB6Y 首位「截取」点亮：门槛见 audioTrim.ts（音频 URL 缺失或时长缺失/为 0 置灰，
    悬停「音频时长缺失，无法截取」，不照搬家族「数据缺失不拦」口径），达标可点并
    派发 onTrimAudio（编辑态行为归 IKHB7A）。
    IKHW5C（父单 IKHVYO）第二钮「调速」点亮：自占位数组移出单独渲染（形态同「截取」
    先例），门槛见 audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，
    无法调速」；时长缺失不拦，无截取的时长门槛），达标可点派发 onAudioSpeed（编辑态
-   本体归 IKHW5S）；混合也已点亮，音视频合成/转码维持占位「即将上线」。
+   本体归 IKHW5S）。
+   IKIHPK（父规格 IKIHMX/ADR-0115）第四钮「音视频合成」点亮：自占位数组移出单独渲染
+   （形态同「截取」「调速」先例），门槛见 audioVideoMux.ts（已完成音频成品卡 + 仅源
+   音频 URL 缺失置灰，悬停唯一原因），达标可点派发 onComposeAudioVideo（草稿卡会话
+   与拖线绑定归 IKIHPK，提交回填归 IKIHP M）；音频分支四功能钮自此全部点亮，
+   占位项清空。
    IKHA2E：视频卡「音视频分离」自单按钮改「音视频分离 ▾」下拉触发钮（同构 SubtitleEraseMenu
    独立实例），第二项「人声背景分离」仅派发挂接点（编辑态本体归后续票）。
    IKH8BJ 视频卡追加「场景切分」单按钮：落「音视频分离」之后、分隔线之前，仅视频卡显示，
@@ -78,9 +83,9 @@ afterEach(async () => {
 });
 
 describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮后）', () => {
-  it('音频卡「截取」+四占位钮连排 + 分隔线 + 下载，详情退役、@ 隐藏（IKHB6Y/IKH8Q3）', async () => {
+  it('音频卡「截取」「调速」「混合」「音视频合成」四功能钮连排 + 分隔线 + 下载，详情退役、@ 隐藏（IKHB6Y/IKH8Q3）', async () => {
     await renderToolbar('audio');
-    expect(labels()).toEqual(['截取', '调速', '混合', '音视频合成', '转码', '下载']);
+    expect(labels()).toEqual(['截取', '调速', '混合', '音视频合成', '下载']);
   });
 
   it('图片卡全显（五画质工具横排 + 详情/下载/@，IKH3XZ）', async () => {
@@ -156,18 +161,19 @@ describe('MediaNodeToolbar 按钮构成与顺序（IKH3WE 撤除生成类按钮�
    （aria-disabled 置灰沿用画质横排先例，见 .toolBtn[aria-disabled='true']），门槛见
    audioSpeed.ts（音频 URL 或 assetId 缺失即置灰，悬停「音频不可用，无法调速」；
    时长缺失不拦），达标可点派发 onAudioSpeed（编辑态本体归 IKHW5S，本套只验收回调被
-   正确调用）。「混合」也已点亮；音视频合成、转码维持置灰占位：悬停提示「即将上线」，
-   不绑定任何点击行为；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
+   正确调用）。「混合」也已点亮；「音视频合成」已点亮（IKIHPK，见上文注释）；
+   ADR-0109 原五钮中的「转码」已按需求撤除（占位连同入口一并删除，
+   不渲染）；竖直分隔线后「下载」在最右且可正常下载；详情钮随改版对音频退役，
    不出现「替换」入口。 */
-describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮与两占位（IKHB6Y/IKHW5C/IKH8Q3）', () => {
+describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」「音视频合成」点亮（IKHB6Y/IKHW5C/IKH8Q3）', () => {
   const audioTool = (id: string) =>
     mountNode.querySelector<HTMLButtonElement>(`[data-testid="audio-tool-${id}"]`)!;
   const trimBtn = () => audioTool('trim');
-  const placeholderIds = ['compose', 'transcode'] as const;
-  const audioToolIds = ['trim', 'speed', 'mix', ...placeholderIds];
-  const audioToolLabels = ['截取', '调速', '混合', '音视频合成', '转码'];
+  const placeholderIds = [] as const;
+  const audioToolIds = ['trim', 'speed', 'mix', 'compose', ...placeholderIds];
+  const audioToolLabels = ['截取', '调速', '混合', '音视频合成'];
 
-  it('五钮顺序截取/调速/混合/音视频合成/转码（调速第二、DOM 渲染序一致），图标加文字横排（复用透明底 toolBtn）', async () => {
+  it('四钮顺序截取/调速/混合/音视频合成（调速第二、DOM 渲染序一致），图标加文字横排（复用透明底 toolBtn）', async () => {
     await renderToolbar('audio');
     const rendered = audioToolIds.map(audioTool);
     expect(rendered.map((b) => b.textContent)).toEqual(audioToolLabels);
@@ -176,7 +182,7 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮�
       expect(b.querySelector('span')).not.toBeNull();
       expect(b.classList.contains(styles.toolBtn)).toBe(true);
     });
-    // 「调速」已点亮单独渲染：data-testid 全序 = trim → speed → mix → compose → transcode
+    // 「截取」「调速」「混合」「音视频合成」全部点亮单独渲染：data-testid 全序 = trim → speed → mix → compose
     expect([...mountNode.querySelectorAll('[data-testid^="audio-tool-"]')]
       .map((b) => b.getAttribute('data-testid')))
       .toEqual(audioToolIds.map((id) => `audio-tool-${id}`));
@@ -240,7 +246,7 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮�
     expect(onTrimAudio).not.toHaveBeenCalled();
   });
 
-  it('两占位钮（音视频合成/转码）维持置灰占位：aria-disabled 且悬停「即将上线」', async () => {
+  it('占位钮维持置灰占位：aria-disabled 且悬停「即将上线」（当前占位项为空）', async () => {
     await renderToolbar('audio', { data: { duration: 12 } });
     placeholderIds.map(audioTool).forEach((b) => {
       expect(b.getAttribute('aria-disabled')).toBe('true');
@@ -248,7 +254,7 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮�
     });
   });
 
-  it('两占位钮不绑定任何点击行为：点击不派发音频回调', async () => {
+  it('占位钮不绑定任何点击行为：点击不派发音频回调', async () => {
     const onTrimAudio = vi.fn();
     const onAudioSpeed = vi.fn();
     const onShowDetails = vi.fn();
@@ -263,6 +269,67 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮�
     expect(onDownload).not.toHaveBeenCalled();
   });
 
+  /* IKIHPK（父规格 IKIHMX/ADR-0115）第四钮「音视频合成」点亮：门槛见 audioVideoMux.ts——
+     已完成音频成品卡 + 仅源音频 URL 缺失置灰（悬停唯一原因「音频不可用，无法合成」），
+     达标可点派发 onComposeAudioVideo（草稿卡会话与拖线绑定归 IKIHPK）。 */
+  it('达标态「音视频合成」可点：无 aria-disabled 且点击派发 onComposeAudioVideo（携带节点 id）', async () => {
+    const onComposeAudioVideo = vi.fn();
+    const onMixAudio = vi.fn();
+    await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', onComposeAudioVideo, onMixAudio } });
+    const btn = audioTool('compose');
+    expect(btn.getAttribute('aria-disabled')).toBeNull();
+    expect(btn.getAttribute('title')).toBeNull();
+    await act(async () => {
+      btn.click();
+    });
+    expect(onComposeAudioVideo).toHaveBeenCalledWith('audio-node');
+    expect(onMixAudio).not.toHaveBeenCalled();
+  });
+
+  it('门槛之 URL 缺失（undefined/null/空串/blob 上传中）：合成置灰、悬停唯一原因、点击不派发', async () => {
+    const onComposeAudioVideo = vi.fn();
+    const cases: Array<Record<string, unknown>> = [
+      { src: undefined },
+      { src: null },
+      { src: '' },
+      { src: 'blob:upload-preview' },
+    ];
+    for (const data of cases) {
+      await renderToolbar('audio', { id: 'gate-node', data: { onComposeAudioVideo, ...data } });
+      const btn = audioTool('compose');
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('音频不可用，无法合成');
+      await act(async () => {
+        btn.click();
+      });
+    }
+    expect(onComposeAudioVideo).not.toHaveBeenCalled();
+  });
+
+  /* IKIHMX 审查修复 1：源卡有在途合成任务（CanvasPage 渲染期注入 audioVideoMuxInFlight）
+     时「音视频合成」按钮保留高亮（toolBtnActive + aria-pressed，规格：发送后面板关闭、
+     工具条恢复且高亮保留）；无标记时为普通态。 */
+  it('在途合成（audioVideoMuxInFlight）按钮保留高亮：toolBtnActive + aria-pressed；无标记为普通态', async () => {
+    await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', audioVideoMuxInFlight: true } });
+    const active = audioTool('compose');
+    expect(active.classList.contains(styles.toolBtnActive)).toBe(true);
+    expect(active.getAttribute('aria-pressed')).toBe('true');
+    expect(active.getAttribute('aria-disabled')).toBeNull();
+
+    await renderToolbar('audio', { id: 'plain-node', data: { src: 'https://example.test/a.mp3' } });
+    const plain = audioTool('compose');
+    expect(plain.classList.contains(styles.toolBtnActive)).toBe(false);
+    expect(plain.getAttribute('aria-pressed')).toBeNull();
+  });
+
+  it('非成品卡（草稿/生成中/失败）：整条工具条不渲染（数据门先拦）；门槛函数级覆盖见 audioVideoMux.test.ts', async () => {
+    for (const genStatus of ['draft', 'generating', 'failed']) {
+      await renderToolbar('audio', { id: 'gate-node', genStatus: genStatus as never });
+      expect(audioTool('compose')).toBeNull();
+      expect(labels()).toEqual([]);
+    }
+  });
+
   it('混合仅在完成且有资产的音频卡上可点，缺时长不拦', async () => {
     const onMixAudio = vi.fn();
     await renderToolbar('audio', { data: { src: 'https://example.test/a.mp3', assetId: '8', duration: undefined, onMixAudio } });
@@ -275,7 +342,7 @@ describe('MediaNodeToolbar 音频卡「截取」「调速」「混合」点亮�
     expect(onMixAudio).toHaveBeenCalledTimes(1);
   });
 
-  it('竖直分隔线在「转码」之后、「下载」之前（分隔线后下载在最右）', async () => {
+  it('竖直分隔线在「音视频合成」之后、「下载」之前（分隔线后下载在最右）', async () => {
     await renderToolbar('audio');
     const toolbar = mountNode.querySelector(`.${styles.toolbar}`)!;
     const seq = [...toolbar.children].map((el) =>

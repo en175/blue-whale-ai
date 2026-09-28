@@ -8,6 +8,8 @@
 --   backend/prisma/migrations/20260915170000_ikfyhj_material_compliance/migration.sql
 --   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
 --   按上面命令全量再生成时，该表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
+-- 2026-09-24（IKI8AZ）手工追加 assets.name 列——取自
+--   backend/prisma/migrations/20260923153000_iki8az_asset_name/migration.sql。
 -- 2026-09-25（ADR-0114）：同批追加的**用户凭证表**已从本夹具删除——worker 侧不再按 userId 取
 --   上游凭证，本夹具只服务 worker 测试，没有 worker 代码访问的表不必留。该表在生产库仍由
 --   backend/prisma 持有，故全量再生成时它会照原样回来——回来也不必管，与 worker 无关。
@@ -21,6 +23,7 @@ CREATE TABLE `assets` (
     `project_id` BIGINT NOT NULL DEFAULT 0,
     `generation_job_id` BIGINT NULL,
     `type` VARCHAR(16) NOT NULL,
+    `name` VARCHAR(255) NULL,
     `storage_key` VARCHAR(512) NULL,
     `content_sha256` VARCHAR(64) NULL,
     `md5` VARCHAR(32) NULL,

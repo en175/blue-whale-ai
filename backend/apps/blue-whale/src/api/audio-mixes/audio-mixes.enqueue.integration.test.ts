@@ -7,10 +7,12 @@ import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js
 import { FAILURE_CODE } from "@lib/contracts";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AudioMixesService } from "@lib/shared/audio-mixes/audio-mixes.service.js";
+import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { enqueueAudioMixJob } from "@lib/shared/generation/generation-queue.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AudioMixesController } from "./audio-mixes.controller.js";
+import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJob: vi.fn() }));
 
@@ -40,9 +42,15 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     const assets = new AssetService(prisma, storage as never);
     const service = new AudioMixesService(prisma, projects, assets, storage as never);
     Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
+    Reflect.defineMetadata("design:paramtypes", [
+      ProjectService, GenerationCommandService, Object, Object, Object, Object, Object,
+    ], GenerationJobsController);
     class HarnessModule {}
-    Module({ controllers: [AudioMixesController], providers: [
+    Module({ controllers: [AudioMixesController, GenerationJobsController], providers: [
       { provide: AudioMixesService, useValue: service },
+      { provide: ProjectService, useValue: projects },
+      { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
+      { provide: Object, useValue: {} },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json());
@@ -76,6 +84,7 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     vi.unstubAllGlobals();
     await app?.close();
     if (prisma && projectId) {
+      await prisma.client.command_idempotency.deleteMany({ where: { project_id: projectId } });
       await prisma.client.generation_jobs.deleteMany({ where: { project_id: projectId, type: "audio_mix" } });
       await prisma.client.assets.deleteMany({ where: { id: { in: [sourceId, otherId] } } });
       await prisma.client.project.delete({ where: { id: projectId } });
@@ -100,5 +109,81 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     const jobs = await prisma.client.generation_jobs.findMany({ where: { project_id: projectId, type: "audio_mix" } });
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ status: "failed", error: { code: "enqueue_failed" } });
+  });
+
+  it("入队失败后同键重放恢复原任务并再次入队", async () => {
+    vi.mocked(enqueueAudioMixJob).mockReset();
+    vi.mocked(enqueueAudioMixJob).mockRejectedValueOnce(new Error("MQ unavailable"));
+    const send = () => fetch(`${baseUrl}/api/projects/${projectId}/audio-mixes`, {
+      method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": "enqueue-recover" },
+      body: JSON.stringify({ source_node_id: "source-node", inputs: [
+        { asset_id: String(sourceId), node_id: "source-node" }, { asset_id: String(otherId) },
+      ] }),
+    });
+    const failed = await send();
+    expect(failed.status).toBe(400);
+    const record = await prisma.client.command_idempotency.findUniqueOrThrow({
+      where: { project_id_operation_idempotency_key: {
+        project_id: projectId, operation: "audio_mix.create", idempotency_key: "enqueue-recover",
+      } },
+    });
+    const jobId = record.generation_job_id!;
+    expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jobId } })).status)
+      .toBe("failed");
+
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const recovered = await send();
+    expect(recovered.status).toBe(201);
+    const data = (await recovered.json()).data;
+    expect(data).toMatchObject({ job_id: jobId.toString(), status: "queued", replayed: true, enqueue_required: true });
+    expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[jobId.toString()], [jobId.toString()]]);
+    const job = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jobId } });
+    expect(job.status).toBe("queued");
+    expect(job.error).toBeNull();
+    expect(await prisma.client.generation_jobs.count({ where: { id: jobId } })).toBe(1);
+  });
+
+  it("同键并发创建仅产生一个任务，重放不重复入队，请求变化返回 409", async () => {
+    vi.mocked(enqueueAudioMixJob).mockReset();
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const url = `${baseUrl}/api/projects/${projectId}/audio-mixes`;
+    const body = { source_node_id: "source-node", inputs: [
+      { asset_id: String(sourceId), node_id: "source-node" }, { asset_id: String(otherId) },
+    ] };
+    const send = (payload: typeof body & { output_format?: string } = body) => fetch(url, {
+      method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": "one-create" },
+      body: JSON.stringify(payload),
+    });
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const data = await Promise.all(responses.map(async (response) => (await response.json()).data));
+    expect(data[0].job_id).toBe(data[1].job_id);
+    expect(data.map((item) => item.replayed).sort()).toEqual([false, true]);
+    expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[data[0].job_id]]);
+    expect(await prisma.client.generation_jobs.count({ where: { id: BigInt(data[0].job_id) } })).toBe(1);
+    const conflict = await send({ ...body, output_format: "flac" });
+    expect(conflict.status).toBe(409);
+  });
+
+  it("HTTP 软取消请求写入标记，供 worker 收敛为 cancelled", async () => {
+    vi.mocked(enqueueAudioMixJob).mockResolvedValue(undefined);
+    const created = await fetch(`${baseUrl}/api/projects/${projectId}/audio-mixes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": "cancel-card" },
+      body: JSON.stringify({ source_node_id: "source-node", inputs: [
+        { asset_id: String(sourceId), node_id: "source-node" },
+        { asset_id: String(otherId) },
+      ] }),
+    });
+    expect(created.status).toBe(201);
+    const jobId = (await created.json()).data.job_id as string;
+
+    const cancelled = await fetch(`${baseUrl}/api/projects/${projectId}/generation-jobs/${jobId}/cancel`, {
+      method: "POST",
+    });
+    expect(cancelled.status).toBe(201);
+    const job = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
+    expect(job.cancel_requested_at).toBeInstanceOf(Date);
+    expect(job.status).toBe("queued");
   });
 });

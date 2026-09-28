@@ -7,6 +7,7 @@ import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 
 export interface AssetView {
   id: string;
+  name: string | null;
   type: string;
   /** 资产入库状态；仅 normal 可作为音频混合输入。 */
   status: string | null;
@@ -98,6 +99,9 @@ export interface PendingUploadAsset {
   width: number | null;
   height: number | null;
   duration: number | null;
+  /** IKI65H：这一行绑的素材库素材 id（未绑为 null）。上传接口要在响应里回显它，
+   *  于是四条上传查询都把它选出来了。 */
+  material_id: string | null;
 }
 
 export interface AssetRepo {
@@ -183,6 +187,7 @@ export interface AssetRepo {
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
+    name?: string;
     type: "image" | "video" | "audio";
     mime: string;
     size: number;
@@ -226,6 +231,10 @@ const uploadAssetSelect = {
   width: true,
   height: true,
   duration_ms: true,
+  // IKI65H：上传接口要回显资产绑了哪个素材。四条上传查询（findCommittedUpload /
+  // findOwnedByMd5 / findOwnedByMaterialId / createUploadedAsset）共用这一份 select，
+  // 在这里加一次，四条路一起带上。
+  material_id: true,
 } as const;
 
 /** E 层合并后 assets 只剩 duration_ms（毫秒）一列：对外统一以秒暴露，缺省保持 null。 */
@@ -266,6 +275,7 @@ function toUploadAsset(row: {
   width: number | null;
   height: number | null;
   duration_ms: number | null;
+  material_id: string | null;
 }): PendingUploadAsset | null {
   if (!row.storage_key) return null;
   const { duration_ms: durationMs, ...asset } = row;
@@ -355,21 +365,25 @@ async function resolveAssetJobMeta(
 ): Promise<{
   modelByJobId: Map<string, string>;
   promptByJobId: Map<string, string>;
+  nameByJobId: Map<string, string>;
 }> {
   const modelByJobId = new Map<string, string>();
   const promptByJobId = new Map<string, string>();
+  const nameByJobId = new Map<string, string>();
   const jobIds = rows
     .map((a) => a.generation_job_id)
     .filter((id): id is bigint => id != null);
-  if (jobIds.length === 0) return { modelByJobId, promptByJobId };
+  if (jobIds.length === 0) return { modelByJobId, promptByJobId, nameByJobId };
 
   const jobs = await prisma.generation_jobs.findMany({
     where: { id: { in: jobIds } },
-    select: { id: true, input: true },
+    select: { id: true, type: true, input: true },
   });
   const modelIdByJob = new Map<string, string>();
   const modelIds = new Set<string>();
   for (const job of jobs) {
+    nameByJobId.set(job.id.toString(), job.type === "audio_mix"
+      ? `音频混合 ${job.id}` : `生成任务 ${job.id}`);
     const input = job.input as
       | { model_id?: string; parameters?: { model_id?: string }; prompt?: unknown }
       | null
@@ -383,7 +397,7 @@ async function resolveAssetJobMeta(
     const prompt = promptFromJobInput(input);
     if (prompt !== null) promptByJobId.set(job.id.toString(), prompt);
   }
-  if (modelIds.size === 0) return { modelByJobId, promptByJobId };
+  if (modelIds.size === 0) return { modelByJobId, promptByJobId, nameByJobId };
 
   const caps = await prisma.generation_model_capability.findMany({
     where: { model_id: { in: [...modelIds] }, enabled: true, is_delete: false },
@@ -396,7 +410,7 @@ async function resolveAssetJobMeta(
   for (const [jobId, modelId] of modelIdByJob) {
     modelByJobId.set(jobId, labelByModel.get(modelId) ?? modelId);
   }
-  return { modelByJobId, promptByJobId };
+  return { modelByJobId, promptByJobId, nameByJobId };
 }
 
 /** assets 行 → 对外视图（AssetView）。列表与单查共用的字段映射，行为必须一致。 */
@@ -404,6 +418,7 @@ function toAssetView(
   a: {
     id: bigint;
     type: string;
+    name?: string | null;
     status?: string | null;
     url: string;
     width: number | null;
@@ -419,10 +434,12 @@ function toAssetView(
     material_group_id?: string | null;
   },
   modelByJobId: Map<string, string>,
+  nameByJobId: Map<string, string>,
   statusByMaterialId: Map<string, { status: string; checkedAt: string | null }>,
 ): AssetView {
   return {
     id: a.id.toString(),
+    name: a.name ?? (a.generation_job_id == null ? null : nameByJobId.get(a.generation_job_id.toString()) ?? null),
     type: a.type,
     status: a.status ?? null,
     url: a.url,
@@ -460,11 +477,12 @@ function toAssetView(
 function toAssetDetailView(
   a: Parameters<typeof toAssetView>[0],
   modelByJobId: Map<string, string>,
+  nameByJobId: Map<string, string>,
   promptByJobId: Map<string, string>,
   statusByMaterialId: Map<string, { status: string; checkedAt: string | null }>,
 ): AssetDetailView {
   return {
-    ...toAssetView(a, modelByJobId, statusByMaterialId),
+    ...toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId),
     prompt:
       a.generation_job_id == null
         ? null
@@ -483,10 +501,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         },
       });
       if (!row) return null;
-      const { modelByJobId, promptByJobId } = await resolveAssetJobMeta(prisma, [row]);
+      const { modelByJobId, promptByJobId, nameByJobId } = await resolveAssetJobMeta(prisma, [row]);
       // 单条：未关联素材库时 resolveMaterialStatuses 直接返回空 Map，不发查询。
       const statusByMaterialId = await resolveMaterialStatuses(prisma, userId, [row]);
-      return toAssetDetailView(row, modelByJobId, promptByJobId, statusByMaterialId);
+      return toAssetDetailView(row, modelByJobId, nameByJobId, promptByJobId, statusByMaterialId);
     },
     async softDeleteOwned(assetId, userId) {
       // IKCNLP（方案C）：删除素材 = 软删 assets + 同步删 project_asset 关联，画布节点不动。
@@ -614,11 +632,11 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       // 生成模型溯源：按 generation_job_id 批量回查任务 input 的 model_id，再查能力表展示名。
       // 兜底顺序：展示名 → model_id → null（上传资产/任务无模型/查询失败均落到 null 或回退）。
       // IKFSSO：同一批查询顺带解析出的 promptByJobId 列表不用，刻意只取 modelByJobId。
-      const { modelByJobId } = await resolveAssetJobMeta(prisma, rows);
+      const { modelByJobId, nameByJobId } = await resolveAssetJobMeta(prisma, rows);
       // IKFYHJ：素材校验状态走同一个批量模式（只在有绑定时发一条 IN，不打上游）。
       const statusByMaterialId = await resolveMaterialStatuses(prisma, userId, rows);
       return {
-        records: rows.map((a) => toAssetView(a, modelByJobId, statusByMaterialId)),
+        records: rows.map((a) => toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId)),
         total,
         size: filter.size,
         current: filter.page,
@@ -697,17 +715,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           status: "uploading",
           is_delete: false,
         },
-        select: {
-          id: true,
-          type: true,
-          storage_key: true,
-          url: true,
-          mime: true,
-          size: true,
-          width: true,
-          height: true,
-          duration_ms: true,
-        },
+        // IKI65H：这一份与 `uploadAssetSelect` 逐列相同，直接复用——留着副本的话，下次往
+        // 共用 select 加列（本次加 `material_id` 时就得手改两处）必然漏掉这一处。
+        select: uploadAssetSelect,
       });
       if (!row?.storage_key) return null;
       return {
@@ -854,6 +864,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             user_id: BigInt(input.userId),
             project_id: BigInt(input.projectId),
             type: input.type,
+            ...(input.name ? { name: input.name } : {}),
             storage_key: input.storageKey,
             url: input.url,
             mime: input.mime,

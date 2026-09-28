@@ -32,9 +32,18 @@ const ASSET = {
   width: 854,
   height: 480,
   duration: null,
+  material_id: null,
 };
 
 const VALID_MD5 = "aabbccddeeff00112233445566778899";
+
+/**
+ * IKI65H：上传接口回显素材审核状态用的只读口。默认 `Active`——绝大多数用例不关心它，
+ * 关心状态的用例自己换返回值。
+ */
+const statusReader = (status: string | null = "Active") => ({
+  load: vi.fn().mockResolvedValue(status),
+});
 
 describe("handleDedupAsset（IKCNLS）", () => {
   it("命中：返回 dedup:true + 资产（形状同 complete），并建 project_asset 关联", async () => {
@@ -49,7 +58,7 @@ describe("handleDedupAsset（IKCNLS）", () => {
       size: 100,
       md5: VALID_MD5,
       project_id: "313",
-    }, { projects, uploads } as never);
+    }, { projects, uploads, materialStatus: statusReader() } as never);
 
     expect(result).toEqual({
       code: 200,
@@ -65,6 +74,9 @@ describe("handleDedupAsset（IKCNLS）", () => {
           duration: null,
           mime: "video/mp4",
           size: 100,
+          // IKI65H：两个字段恒在，这条资产没绑素材 → 都是 null。
+          material_id: null,
+          material_status: null,
         },
       },
       msg: null,
@@ -81,7 +93,7 @@ describe("handleDedupAsset（IKCNLS）", () => {
     const projects = { findOwnedById: vi.fn() };
     const result = await handleDedupAsset("9", {
       type: "image", mime: "image/png", size: 10, md5: VALID_MD5,
-    }, { projects, uploads } as never);
+    }, { projects, uploads, materialStatus: statusReader() } as never);
     expect(result).toEqual({ code: 200, data: { dedup: false }, msg: null });
     expect(uploads.linkAssetToProject).not.toHaveBeenCalled();
   });
@@ -92,7 +104,7 @@ describe("handleDedupAsset（IKCNLS）", () => {
     for (const badMd5 of ["", "not-a-md5", "aabb", "AABBCCDDEEFF00112233445566778899ZZ"]) {
       const result = await handleDedupAsset("9", {
         type: "image", mime: "image/png", size: 10, md5: badMd5,
-      }, { projects, uploads } as never);
+      }, { projects, uploads, materialStatus: statusReader() } as never);
       expect(result).toEqual({ code: 200, data: { dedup: false }, msg: null });
     }
     expect(uploads.findOwnedByMd5).not.toHaveBeenCalled();
@@ -103,7 +115,7 @@ describe("handleDedupAsset（IKCNLS）", () => {
     const projects = { findOwnedById: vi.fn() };
     const result = await handleDedupAsset("9", {
       type: "image", mime: "image/png", size: 100, md5: VALID_MD5,
-    }, { projects, uploads } as never);
+    }, { projects, uploads, materialStatus: statusReader() } as never);
     expect(result).toEqual({ code: 200, data: { dedup: false }, msg: null });
     expect(uploads.linkAssetToProject).not.toHaveBeenCalled();
   });
@@ -114,7 +126,7 @@ describe("handleDedupAsset（IKCNLS）", () => {
     await expectRejected(
       () => handleDedupAsset("9", {
         type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "404",
-      }, { projects, uploads } as never),
+      }, { projects, uploads, materialStatus: statusReader() } as never),
       { code: RESOURCE_NOT_FOUND_CODE, status: 404 },
     );
     expect(uploads.findOwnedByMd5).not.toHaveBeenCalled();
@@ -124,8 +136,8 @@ describe("handleDedupAsset（IKCNLS）", () => {
     const linkAssetToProject = vi.fn().mockResolvedValue(true);
     const uploads = { findOwnedByMd5: vi.fn().mockResolvedValue(ASSET), linkAssetToProject };
     const projects = { findOwnedById: vi.fn().mockResolvedValue({ id: 313n }) };
-    await handleDedupAsset("9", { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "313" }, { projects, uploads } as never);
-    await handleDedupAsset("9", { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "313" }, { projects, uploads } as never);
+    await handleDedupAsset("9", { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "313" }, { projects, uploads, materialStatus: statusReader() } as never);
+    await handleDedupAsset("9", { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "313" }, { projects, uploads, materialStatus: statusReader() } as never);
     expect(linkAssetToProject).toHaveBeenCalledTimes(2);
     expect(linkAssetToProject).toHaveBeenLastCalledWith({ userId: "9", assetId: "526", projectId: "313" });
   });
@@ -217,6 +229,7 @@ describe("complete 的文件头校验（IKE53U）", () => {
       prepareUpload: vi.fn(),
       deleteMultiObjects: vi.fn(),
     } as never,
+    materialStatus: statusReader(),
   });
 
   const complete = (deps: ReturnType<typeof completeDeps>) =>
@@ -263,6 +276,16 @@ describe("complete 的文件头校验（IKE53U）", () => {
   it("真的 JPEG 照常入库", async () => {
     const deps = completeDeps(head(0xff, 0xd8, 0xff, 0xe0));
     await expect(complete(deps)).resolves.toMatchObject({ code: 200 });
+  });
+
+  it("complete 将上传原文件名交给资产仓库", async () => {
+    const deps = completeDeps(head(0xff, 0xd8, 0xff, 0xe0));
+    await handleCompleteAsset("7", {
+      type: "image", mime: "image/jpeg", size: 524,
+      storage_key: "uploads/7/image/x.jpg", name: "海浪.jpg",
+    }, deps);
+    expect((deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> }).createUploadedAsset)
+      .toHaveBeenCalledWith(expect.objectContaining({ name: "海浪.jpg" }));
   });
 
   it("认出来但不是声明的那一类也拒——按字节说的算", async () => {
@@ -327,6 +350,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
       deleteMultiObjects: vi.fn(),
     } as never,
     materialGate,
+    materialStatus: statusReader(),
   });
 
   const COMPLETE_INPUT = {
@@ -350,6 +374,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
             projects: { findOwnedById: vi.fn() },
             uploads: { findOwnedByMd5 },
             materialGate: gate,
+            materialStatus: statusReader(),
           } as never,
         ),
       { code: 2013, status: 400 },
@@ -370,6 +395,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
             projects: { findOwnedById: vi.fn() },
             uploads: { findOwnedByMd5: vi.fn() },
             materialGate: deny(UNAVAILABLE),
+            materialStatus: statusReader(),
           } as never,
         ),
       { code: 2013, status: 400 },
@@ -392,6 +418,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
           bindMaterialId,
         },
         materialGate: gate,
+        materialStatus: statusReader(),
       } as never,
     );
     expect(bindMaterialId).toHaveBeenCalledWith({
@@ -416,6 +443,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
           bindMaterialId: vi.fn().mockResolvedValue(true),
         },
         materialGate: allow(),
+        materialStatus: statusReader(),
       } as never,
     );
     expect(findOwnedByMaterialId).toHaveBeenCalledWith("9", MATERIAL);
@@ -434,6 +462,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
           linkAssetToProject: vi.fn(),
         },
         materialGate: gate,
+        materialStatus: statusReader(),
       } as never,
     );
     expect(gate.check).not.toHaveBeenCalled();
@@ -527,6 +556,7 @@ describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表
       prepareUpload: vi.fn(),
       deleteMultiObjects: vi.fn(),
     } as never,
+    materialStatus: statusReader(),
   });
 
   const completeWithSource = (deps: ReturnType<typeof sourceDeps>, source?: string) =>
@@ -567,5 +597,238 @@ describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表
       (deps2.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
         .createUploadedAsset,
     ).toHaveBeenCalledWith(expect.objectContaining({ source: "uploaded" }));
+  });
+});
+
+/**
+ * IKI65H：上传接口回显这条资产绑的素材（`material_id`）与它的审核状态（`material_status`）。
+ *
+ * 动因是 ADR-0093 决策 6 末句那句「改由服务端返回值决定」——前端 `toLocalAssetRecord` 至今
+ * 硬编码 `material_status: 'Active'`，而服务端根本没返回过这个值。
+ */
+describe("上传接口回显素材关联与状态（IKI65H）", () => {
+  const MATERIAL = "asset-20260820153209-6c9z8";
+  const OLD_MATERIAL = "asset-20260701090000-oldoldoldold";
+  const GROUP = "group-20260827113901-cbkmf";
+  const NOT_APPROVED = "该素材未审核通过，不能用于视频生成";
+
+  /** 一条已绑素材的资产行。 */
+  const boundAsset = (materialId: string = MATERIAL) => ({
+    ...ASSET,
+    material_id: materialId,
+  });
+
+  type MaterialFields = { material_id: string | null; material_status: string | null };
+
+  /** dedup 响应的 data.asset。 */
+  const dedupAsset = (result: unknown) =>
+    (result as { data: { asset: MaterialFields } }).data.asset;
+
+  /** complete 响应的 data（它本身就是资产，不像 dedup 那样套一层）。 */
+  const completeData = (result: unknown) =>
+    (result as { data: MaterialFields }).data;
+
+  const dedupDeps = (
+    asset: unknown,
+    status: string | null = "Active",
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    projects: { findOwnedById: vi.fn().mockResolvedValue({ id: 313n }) },
+    uploads: {
+      findOwnedByMd5: vi.fn().mockResolvedValue(asset),
+      linkAssetToProject: vi.fn().mockResolvedValue(true),
+      bindMaterialId: vi.fn().mockResolvedValue(true),
+      ...overrides,
+    },
+    materialGate: {
+      check: vi.fn().mockResolvedValue({ ok: true, materialGroupId: GROUP }),
+    },
+    materialStatus: statusReader(status),
+  });
+
+  const DEDUP_INPUT = {
+    type: "video" as const,
+    mime: "video/mp4",
+    size: 100,
+    md5: VALID_MD5,
+  };
+
+  it("dedup 命中已绑素材的资产：两个字段照库里的给", async () => {
+    const deps = dedupDeps(boundAsset(), "Active");
+    const result = await handleDedupAsset("9", DEDUP_INPUT, deps as never);
+    expect(dedupAsset(result)).toMatchObject({
+      material_id: MATERIAL,
+      material_status: "Active",
+    });
+    expect(deps.materialStatus.load).toHaveBeenCalledWith("9", MATERIAL);
+  });
+
+  it("dedup 命中未绑素材的资产：两个字段都是 null，且不去查状态", async () => {
+    const deps = dedupDeps(ASSET);
+    const result = await handleDedupAsset("9", DEDUP_INPUT, deps as never);
+    expect(dedupAsset(result)).toMatchObject({
+      material_id: null,
+      material_status: null,
+    });
+    // 没绑素材就没有可查的 id——不该白发一次查询。
+    expect(deps.materialStatus.load).not.toHaveBeenCalled();
+  });
+
+  it("dedup 命中并当场改嫁：回显刚绑上的那个，不是行上的旧值", async () => {
+    // `reusable` 是 bindMaterialId **之前**读出来的行，它的 material_id 还是旧值。
+    // 照行上原值回显就会给出一个已经不成立的关联。
+    const deps = dedupDeps(boundAsset(OLD_MATERIAL));
+    const result = await handleDedupAsset(
+      "9",
+      { ...DEDUP_INPUT, materialId: MATERIAL },
+      deps as never,
+    );
+    expect(dedupAsset(result)).toMatchObject({
+      material_id: MATERIAL,
+      material_status: "Active",
+    });
+    expect(deps.materialStatus.load).toHaveBeenCalledWith("9", MATERIAL);
+  });
+
+  it("dedup 未命中：响应里没有 asset，也就没有这两个字段", async () => {
+    const deps = dedupDeps(null, "Active", { findOwnedByMd5: vi.fn().mockResolvedValue(null) });
+    const result = await handleDedupAsset("9", DEDUP_INPUT, deps as never);
+    // toEqual 而非 toMatchObject：多出任何字段都算破坏既有形状。
+    expect(result).toEqual({ code: 200, data: { dedup: false }, msg: null });
+    expect(deps.materialStatus.load).not.toHaveBeenCalled();
+  });
+
+  const completeDeps = (
+    status: string | null = "Active",
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "313" }) },
+    uploads: {
+      findCommittedUpload: vi.fn().mockResolvedValue(null),
+      findOwnedByMaterialId: vi.fn().mockResolvedValue(null),
+      createUploadedAsset: vi.fn().mockResolvedValue(boundAsset()),
+      bindMaterialId: vi.fn().mockResolvedValue(true),
+      linkAssetToProject: vi.fn().mockResolvedValue(true),
+      ...overrides,
+    },
+    storage: {
+      readHead: vi.fn().mockResolvedValue(null),
+      inspectObject: vi.fn().mockResolvedValue({
+        size: 100,
+        mime: "video/mp4",
+        publicUrl: "https://bucket.tos.test/uploads/9/video/x.mp4",
+      }),
+      makePublic: vi.fn(),
+      deleteMultiObjects: vi.fn(),
+    },
+    materialGate: {
+      check: vi.fn().mockResolvedValue({ ok: true, materialGroupId: GROUP }),
+    },
+    materialStatus: statusReader(status),
+  });
+
+  const COMPLETE_INPUT = {
+    type: "video" as const,
+    mime: "video/mp4",
+    size: 100,
+    storage_key: "uploads/9/video/x.mp4",
+    project_id: "313",
+    materialId: MATERIAL,
+  };
+
+  it("complete 新建行：带上刚写进去的素材与它的状态", async () => {
+    const deps = completeDeps("Active");
+    const result = await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect(completeData(result)).toMatchObject({
+      material_id: MATERIAL,
+      material_status: "Active",
+    });
+  });
+
+  it("complete 不带 materialId：两个字段都是 null，且不去查状态", async () => {
+    const deps = completeDeps("Active", {
+      createUploadedAsset: vi.fn().mockResolvedValue(ASSET),
+    });
+    const result = await handleCompleteAsset(
+      "9",
+      {
+        type: "video",
+        mime: "video/mp4",
+        size: 100,
+        storage_key: "uploads/9/video/x.mp4",
+        project_id: "313",
+      },
+      deps as never,
+    );
+    expect(completeData(result)).toMatchObject({
+      material_id: null,
+      material_status: null,
+    });
+    expect(deps.materialStatus.load).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 这条是这个字段真正值钱的地方。
+   *
+   * 幂等重放分支**不重新过闸**（理由见 upload.ts 里的注释：一次重放不该按此刻的素材状态改写
+   * 既有结果，何况重放命中时若因闸不过去删对象，删的正是既有资产行引用的那一份）。于是资产
+   * 可能挂着一个**后来**被判 Failed 的素材，而接口照回 200——除了读响应里的 `material_status`，
+   * 调用方没有别的办法知道这件事。
+   */
+  it("complete 幂等重放：行上绑着已 Failed 的素材、闸也不过 → 照实回 Failed", async () => {
+    const deps = completeDeps("Failed", {
+      findCommittedUpload: vi.fn().mockResolvedValue(boundAsset()),
+    });
+    deps.materialGate = {
+      check: vi.fn().mockResolvedValue({ ok: false, message: NOT_APPROVED }),
+    };
+    const result = await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect(completeData(result)).toMatchObject({
+      material_id: MATERIAL,
+      material_status: "Failed",
+    });
+    // 不被重放分支的闸结论影响：这里仍然成功返回，没有抛 2013。
+    expect(result).toMatchObject({ code: 200 });
+  });
+
+  it("complete 幂等重放且闸通过：补绑之后回显新素材", async () => {
+    const deps = completeDeps("Active", {
+      findCommittedUpload: vi.fn().mockResolvedValue(boundAsset(OLD_MATERIAL)),
+    });
+    const result = await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect(completeData(result)).toMatchObject({
+      material_id: MATERIAL,
+      material_status: "Active",
+    });
+    expect(
+      deps.uploads.bindMaterialId as unknown as ReturnType<typeof vi.fn>,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: "526", materialId: MATERIAL }),
+    );
+  });
+
+  /**
+   * 过闸这一步**带副作用**：`assertMaterialLinkable` 在「本地行非终态 + 上游判 Failed」时走
+   * `handleUpstreamMaterialFailure`，那里面有一步 `clearMaterialLink`，会把这条资产上的
+   * `material_id` 清成 NULL（ADR-0087 的统一处置）。而 `existing` 是**过闸之前**读的行——
+   * 照它回显，响应会给出一个库里已经不存在的关联，同一资产在 `GET /api/assets` 那边却是 null。
+   */
+  it("complete 幂等重放：闸不过且顺手清了关联 → 回读库，不撒谎", async () => {
+    const deps = completeDeps("Failed", {
+      findCommittedUpload: vi
+        .fn()
+        .mockResolvedValueOnce(boundAsset())
+        .mockResolvedValueOnce({ ...ASSET, material_id: null }),
+    });
+    deps.materialGate = {
+      check: vi.fn().mockResolvedValue({ ok: false, message: NOT_APPROVED }),
+    };
+    const result = await handleCompleteAsset("9", COMPLETE_INPUT, deps as never);
+    expect(completeData(result)).toMatchObject({
+      material_id: null,
+      material_status: null,
+    });
+    // 关联没了就不该再白查一次状态。
+    expect(deps.materialStatus.load).not.toHaveBeenCalled();
   });
 });

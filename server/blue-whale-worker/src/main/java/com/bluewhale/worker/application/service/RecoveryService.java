@@ -22,7 +22,9 @@ import java.util.List;
  * <p>
  * 扫描条件（mapper 内 SQL 逐字移植 claim-ops.ts:134-230）：
  * {@code is_delete=false} + 创建在 {@code RECOVERY_MAX_AGE_MINUTES}（默认 120 分钟）内
- * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。
+ * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。processing 的手动
+ * 重试 job 可在租约感知的额外接手期内捞回：接手期限 = max(创建后 maxAgeMinutes+10 分钟
+ * （默认 130）, 租约到期后 10 分钟)；其余任务仍按原窗口扫描。
  * <p>
  * 重投覆盖全部 tag（每类一个 recovery producer bean 无条件装配，ADR-0084 修正六），
  * 因此正常情况下每类的 {@code getIfAvailable()} 都拿得到生产者；{@code reenqueue} 仍保留
@@ -51,6 +53,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
     private final ObjectProvider<GenerationMessageProducer> audioTrimProducer;
     private final ObjectProvider<GenerationMessageProducer> audioMixProducer;
+    private final ObjectProvider<GenerationMessageProducer> audioVideoMuxProducer;
     private final ObjectProvider<GenerationMessageProducer> audioSpeedProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEraseProducer;
@@ -78,6 +81,8 @@ public class RecoveryService {
         ObjectProvider<GenerationMessageProducer> audioTrimProducer,
         @Qualifier("audioMixRecoveryProducer")
         ObjectProvider<GenerationMessageProducer> audioMixProducer,
+        @Qualifier("audioVideoMuxRecoveryProducer")
+        ObjectProvider<GenerationMessageProducer> audioVideoMuxProducer,
         @Qualifier("audioSpeedRecoveryProducer")
         ObjectProvider<GenerationMessageProducer> audioSpeedProducer,
             @Qualifier("imageEnhanceRecoveryProducer")
@@ -109,6 +114,7 @@ public class RecoveryService {
         this.mediaExtractProducer = mediaExtractProducer;
         this.audioTrimProducer = audioTrimProducer;
         this.audioMixProducer = audioMixProducer;
+        this.audioVideoMuxProducer = audioVideoMuxProducer;
         this.audioSpeedProducer = audioSpeedProducer;
         this.imageEnhanceProducer = imageEnhanceProducer;
         this.imageEraseProducer = imageEraseProducer;
@@ -146,6 +152,8 @@ public class RecoveryService {
                     jobMapper.listDueAudioTrimJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.AUDIO_MIX, audioMixProducer.getIfAvailable(),
                     jobMapper.listDueAudioMixJobIds(SCAN_LIMIT, 0));
+            reenqueue(GenerationMqRouteEnum.AUDIO_VIDEO_MUX, audioVideoMuxProducer.getIfAvailable(),
+                    jobMapper.listDueAudioVideoMuxJobIds(SCAN_LIMIT, 0));
             reenqueue(GenerationMqRouteEnum.AUDIO_SPEED, audioSpeedProducer.getIfAvailable(),
                     jobMapper.listDueAudioSpeedJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRouteEnum.AUDIO, audioProducer.getIfAvailable(),

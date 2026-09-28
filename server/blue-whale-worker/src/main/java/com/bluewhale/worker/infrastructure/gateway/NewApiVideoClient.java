@@ -463,10 +463,16 @@ public class NewApiVideoClient {
     /**
      * 提取 HTTP status 用于 isTransientPollError 判定。
      * VideoProviderError 携带 cause → runner 读 HttpStatusException.status。
+     * <p>
+     * 实现共享模块的 {@link NewApiHttpSupport.HttpStatusCarrier}：状态解析器
+     * {@code NewApiHttpSupport.upstreamHttpStatus} 随装配类上移到 blue-whale-common，
+     * 不能再 instanceof 本类（反向依赖编译不过），故以接口钉契约。
      */
-    public static class HttpStatusException extends Exception {
+    public static class HttpStatusException extends Exception
+            implements NewApiHttpSupport.HttpStatusCarrier {
         private final int status;
         public HttpStatusException(int status) { super("HTTP " + status); this.status = status; }
+        @Override
         public int getStatus() { return status; }
     }
 

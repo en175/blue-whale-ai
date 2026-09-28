@@ -4,11 +4,13 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
@@ -40,7 +42,8 @@ import java.util.regex.Pattern;
  *   <li>cancelRequested AND providerTaskId==null → cancelVideoBeforeDispatch</li>
  *   <li>providerTaskId==null → (a) parent-reuse 防双扣 → (b) buildSubmitRequest → submit →
  *       markProviderSubmitted → scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s);
+ *   <li>providerTaskId!=null → poll → transient → rescheduleProviderPoll(5s)（与
+ *       processing 共享 720 轮询预算，超限同归 provider_timeout）;
  *       pollCount>=720 → provider_timeout; succeeded+URL → relay → publishVideoResult;
  *       failed → failVideoJob</li>
  * </ol>
@@ -188,6 +191,7 @@ public class VideoJobProcessor implements JobProcessor {
     private final GenerationMessageProducer producer;
     private final String workerId;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VideoJobProcessor(
             JobStateMachineService stateMachine,
             AssetSourceService assetSource,
@@ -197,13 +201,26 @@ public class VideoJobProcessor implements JobProcessor {
             @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
+        this(stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-" + hostname() + "-" + ProcessHandle.current().pid());
+    }
+
+    VideoJobProcessor(
+            JobStateMachineService stateMachine,
+            AssetSourceService assetSource,
+            GenerationCredentialService credentialService,
+            NewApiVideoClient videoClient,
+            TosVideoMediaRelay mediaRelay,
+            GenerationMessageProducer producer,
+            String workerId
+    ) {
         this.stateMachine = stateMachine;
         this.assetSource = assetSource;
         this.credentialService = credentialService;
         this.videoClient = videoClient;
         this.mediaRelay = mediaRelay;
         this.producer = producer;
-        this.workerId = "video-" + hostname() + "-" + ProcessHandle.current().pid();
+        this.workerId = workerId;
     }
 
     @Override
@@ -272,8 +289,15 @@ public class VideoJobProcessor implements JobProcessor {
                 code = GenerationError.ERROR_PROVIDER_FAILED;
                 message = error.getMessage() != null ? error.getMessage() : "视频生成失败";
             }
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(error);
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS5），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body 等排查信息原样保留。结果下载
+                // 失败等纯排查文案无状态 cause（httpStatus=null），不受影响、永远保留字样
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("runVideoJobStep 异常 jobId={} code={}: {}", claim.id(), code, message, error);
-            failVideo(claim, code, message);
+            failVideo(claim, code, message, httpStatus);
         }
     }
 
@@ -284,10 +308,10 @@ public class VideoJobProcessor implements JobProcessor {
         if (claim.providerTaskId() == null) {
             // ========== submit 阶段（video-job-runner.ts:226-243）==========
 
-            // IKEA26：parent-reuse 防双扣（:232-235）
+            // IKEA26：parent-reuse 防双扣（:232-235）；true = 收割路径已终局（已发布或失租停止，IKICD3）
             if (claim.parentProviderTaskId() != null) {
-                boolean reused = tryReuseParentResult(claim, providerToken);
-                if (reused) return;
+                boolean settled = tryReuseParentResult(claim, providerToken);
+                if (settled) return;
             }
 
             // buildSubmitRequest（:236）
@@ -319,6 +343,28 @@ public class VideoJobProcessor implements JobProcessor {
         } catch (VideoProviderError pollError) {
             // isTransientPollError（video-job-runner.ts:386-413）
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
+                if (claim.pollCount() >= MAX_VIDEO_POLLS) {
+                    log.warn("[video] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // IKIN6Y：预算耗尽分支与顶层 catch（IKIMS5 / IKIMN8）同一透传口径——状态从
+                    // 当次瞬时错误的 cause 链解析（共享 NewApiHttpSupport.upstreamHttpStatus）：
+                    // 取到才写 details.http_status 并剥 message 的「: HTTP <code>」片段（body /
+                    // request_id 等排查信息原样保留）；取不到（超时 / 连接失败等无状态 cause）
+                    // 不写键、不推断状态，文案保持现状。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "视频生成轮询超时（超过 " + MAX_VIDEO_POLLS + " 次），上游持续错误: "
+                            + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failVideo(claim, GenerationError.ERROR_PROVIDER_TIMEOUT, message, httpStatus);
+                    return;
+                }
                 log.warn("[video] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(
@@ -379,10 +425,19 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * IKEA26：parent-reuse 防双扣（video-job-runner.ts:424-453 tryReuseParentResult）。
+     * IKEA26：parent-reuse 防双扣（video-job-runner.ts:424-453 tryReuseParentResult）；
+     * IKICD3：失租后停止重复提交。
      * <p>
      * 父 job 的 provider_task_id 对应的上游 task SUCCESS → 复用其结果 URL 走 publishVideoResult。
-     * FAILED / 不存在 / 查询失败 → 返回 false（走现有 submit 逻辑重新生成）。
+     * FAILED / 不存在 / 查询失败 / 结果 URL 为 null 或空白 / 转存或发布异常 → 返回 false（走现有 submit 逻辑重新生成）。
+     * <p>
+     * IKICD3 边界：已取得旧结果但发布守卫（publishVideoGuard CAS：status=processing +
+     * lease_owner + fencing_token）未命中，说明当前 Worker 已失去该 GenerationJob 的执行权
+     * （新 Worker 接管租约或 job 已终态），此时返回 true 终止本路径：不调用上游 submit、
+     * 不记录新 provider_task_id、不安排本轮询、不写迟到 Finalize；新 Worker 领取后沿同一路径
+     * 继续收割。回退重新提交只发生在「旧结果不可用」形态，与「失去执行权而停止」以日志区分。
+     * 与八家族共享骨架（ParentResultReuse）「守卫未命中回退提交」的定版口径刻意不同——
+     * 视频为计费家族，失租后重复提交产生无主上游费用，先行修正（ADR-0114）。
      */
     private boolean tryReuseParentResult(ClaimedVideoJobDto claim, String providerToken) {
         VideoTaskObservation observation;
@@ -395,16 +450,30 @@ public class VideoJobProcessor implements JobProcessor {
             return false;
         }
 
-        if (!"succeeded".equals(observation.status()) || observation.url() == null) {
+        if (!"succeeded".equals(observation.status())
+                || observation.url() == null || observation.url().isBlank()) {
+            log.info("[video] 重试收割未命中(旧结果不可用) jobId={} parentTask={} status={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId(), observation.status());
             return false;
         }
 
         // 复用结果 → publishVideo（:448-452）
-        boolean published = publishVideo(claim, observation);
-        if (!published) {
-            log.warn("video job 复用结果 publish 但状态未迁移 jobId={}（fencing 竞态？）", claim.id());
+        boolean published;
+        try {
+            published = publishVideo(claim, observation);
+        } catch (Exception error) {
+            // 转存/发布异常按「旧结果不可用」回退重新提交（对齐共享骨架
+            // ParentResultReuse「发布异常走回退分支兜底」口径），不把手动重试写成终态失败
+            log.warn("[video] 重试收割发布异常(旧结果不可用) jobId={} parentTask={} err={}，回退重新提交",
+                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
+            return false;
         }
-        return published;
+        if (!published) {
+            // IKICD3：守卫未命中 = 租约丢失或已终态，当前 Worker 不再代表该 job，停止而非回退提交
+            log.warn("[video] 重试收割失去执行权 jobId={} parentTask={}（发布守卫未命中：stale/租约失效/已终态），停止不再重新提交（IKICD3）",
+                    claim.id(), claim.parentProviderTaskId());
+        }
+        return true;
     }
 
     /**
@@ -456,12 +525,23 @@ public class VideoJobProcessor implements JobProcessor {
     }
 
     /**
-     * 失败处理（video-job-runner.ts:530-558 fail）。
+     * 失败处理（video-job-runner.ts:530-558 fail）。非 HTTP 失败路径统一走它，details 不含状态键。
      */
     private void failVideo(ClaimedVideoJobDto claim, String code, String message) {
+        failVideo(claim, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS5，音频提取 IKIMS2 同款）：判定读
+     *  {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；非 HTTP
+     *  失败（超时 / 连接失败 / 业务信封失败 / 结果下载失败）不写该键。submit 阶段网关
+     *  !2xx 不带 cause 是已知现状，缺键语义 = 无非 HTTP 状态可读。 */
+    private void failVideo(ClaimedVideoJobDto claim, String code, String message, Integer httpStatus) {
         log.warn("video job 失败 jobId={} code={} message={}", claim.id(), code, message);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         // 修正一：releaseNote 整体省略（video-job-runner.ts:545 releaseNote 参数删除）
         stateMachine.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
     }

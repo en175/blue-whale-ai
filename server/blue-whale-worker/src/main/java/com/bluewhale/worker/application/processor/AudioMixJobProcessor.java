@@ -3,6 +3,7 @@ package com.bluewhale.worker.application.processor;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.application.service.WorkerClock;
 import com.bluewhale.worker.domain.contract.AudioMixContract;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
@@ -10,6 +11,7 @@ import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient.MixAudioTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -85,7 +87,14 @@ public class AudioMixJobProcessor implements JobProcessor {
         } catch (Exception error) {
             String code = error instanceof MediaExtractError domain && PRESERVED_CODES.contains(domain.getCode())
                     ? domain.getCode() : AudioMixContract.ERROR_AUDIO_MIX_FAILED;
-            if (!fail(job, code, error.getMessage() != null ? error.getMessage() : "音频混合失败")) {
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(error);
+            String message = error.getMessage() != null ? error.getMessage() : "音频混合失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS6），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
+            if (!fail(job, code, message, httpStatus)) {
                 // 守卫未命中表示租约已释放或被其他执行者接管；由到点恢复扫描接续。
                 log.info("[audio_mix] 失败守卫未命中，交由恢复扫描 jobId={} token={}", job.id(), job.fencingToken());
             }
@@ -93,6 +102,7 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private void runStep(ClaimedMediaExtractJobDto job) {
+        if (cancelIfRequested(job)) return;
         Object credential = job.input().get("provider_credential");
         if (!(credential instanceof String frozen) || frozen.isBlank()) {
             fail(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING, "音频混合任务缺少供应商凭证");
@@ -122,6 +132,7 @@ public class AudioMixJobProcessor implements JobProcessor {
             return;
         }
         String taskId = gateway.submit(token, urls, format);
+        if (cancelIfRequested(job)) return;
         if (stateMachine.markProviderSubmitted(job.id(), job.workerId(), job.fencingToken(), taskId)) {
             producer.enqueue(job.id(), POLL_INTERVAL_MS);
         }
@@ -152,12 +163,14 @@ public class AudioMixJobProcessor implements JobProcessor {
         try {
             observed = gateway.poll(token, job.providerTaskId());
         } catch (MediaExtractError error) {
+            if (cancelIfRequested(job)) return;
             if (transientPollError(error) && !timedOut(job)) {
                 scheduleNext(job);
                 return;
             }
             throw error;
         }
+        if (cancelIfRequested(job)) return;
         if ("processing".equals(observed.status())) {
             if (timedOut(job)) {
                 fail(job, AudioMixContract.ERROR_AUDIO_MIX_FAILED, "音频混合查询超时");
@@ -185,11 +198,11 @@ public class AudioMixJobProcessor implements JobProcessor {
             return;
         }
         String format = (String) job.input().get(AudioMixContract.INPUT_KEY_OUTPUT_FORMAT);
-        if (!renewLease(job)) return;
+        if (cancelIfRequested(job) || !renewLease(job)) return;
         AtomicBoolean lostLease = new AtomicBoolean();
         ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
-                if (!renewLease(job)) lostLease.set(true);
+                if (!lostLease.get() && (cancelIfRequested(job) || !renewLease(job))) lostLease.set(true);
             } catch (Exception error) {
                 lostLease.set(true);
                 log.warn("[audio_mix] 结果转存续租异常 jobId={}", job.id(), error);
@@ -206,7 +219,7 @@ public class AudioMixJobProcessor implements JobProcessor {
         } finally {
             heartbeat.cancel(false);
         }
-        if (lostLease.get() || !renewLease(job)) return;
+        if (lostLease.get() || cancelIfRequested(job) || !renewLease(job)) return;
         boolean published = stateMachine.publishAudioMixResult(new PublishMediaExtractDto(
                 job.id(), job.projectId(), job.userId(), job.workerId(), job.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
@@ -219,10 +232,15 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private void scheduleNext(ClaimedMediaExtractJobDto job) {
+        if (cancelIfRequested(job)) return;
         long delayMs = pollDelayMs(job.pollCount());
         if (stateMachine.rescheduleProviderPoll(job.id(), job.workerId(), job.fencingToken(), job.progress(), delayMs)) {
             producer.enqueue(job.id(), delayMs);
         }
+    }
+
+    private boolean cancelIfRequested(ClaimedMediaExtractJobDto job) {
+        return stateMachine.cancelAudioMixIfRequested(job.id(), job.workerId(), job.fencingToken());
     }
 
     private static long pollDelayMs(int pollCount) {
@@ -261,8 +279,16 @@ public class AudioMixJobProcessor implements JobProcessor {
     }
 
     private boolean fail(ClaimedMediaExtractJobDto job, String code, String message) {
+        return fail(job, code, message, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIHGQ）：backend 401 换凭证判定读它，不依赖文案。 */
+    private boolean fail(ClaimedMediaExtractJobDto job, String code, String message, Integer httpStatus) {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         log.warn("[audio_mix] job 失败 jobId={} code={} message={}", job.id(), code, message);
         return stateMachine.failMediaExtractJob(new FailMediaExtractDto(
                 job.id(), job.workerId(), job.fencingToken(), code, message, details));

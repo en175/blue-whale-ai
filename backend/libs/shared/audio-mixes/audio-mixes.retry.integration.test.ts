@@ -186,4 +186,35 @@ describe.skipIf(!databaseUrl)("audio mix retry in an isolated MySQL database", (
     expect(replay.data).toMatchObject({ job_id: String(original.id), status: "failed", replayed: true });
     expect(replay.data?.enqueue_required).toBe(false);
   });
+
+  it("401 结构化状态命中后从当前 Authorization 更新凭证，重放保持首次重试快照", async () => {
+    const original = await failedJob();
+    await prisma.client.generation_jobs.update({ where: { id: original.id }, data: {
+      error: { code: "audio_mix_failed", message: "上游凭证被拒绝",
+        details: { raw: "上游凭证被拒绝", http_status: 401 } },
+    } });
+    const url = `${baseUrl}/api/projects/${projectId}/audio-mixes/${original.id}/retry`;
+    const send = (credential: string) => fetch(url, { method: "POST", headers: {
+      "Idempotency-Key": "refresh-credential", authorization: `Bearer ${credential}`,
+    } });
+    expect((await send("sk-current")).status).toBe(201);
+    expect((await send("sk-later")).status).toBe(201);
+    const row = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } });
+    expect(row.input).toEqual({ ...snapshot, provider_credential: "sk-current" });
+    expect(row.retry_count).toBe(1);
+  });
+
+  it("旧任务仅剩 401 文案（无结构化字段）时回退文案判定仍更新凭证", async () => {
+    const original = await failedJob();
+    await prisma.client.generation_jobs.update({ where: { id: original.id }, data: {
+      error: { code: "audio_mix_failed", message: "MediaKit 混音任务查询失败: HTTP 401 body=expired" },
+    } });
+    const url = `${baseUrl}/api/projects/${projectId}/audio-mixes/${original.id}/retry`;
+    const send = () => fetch(url, { method: "POST", headers: {
+      "Idempotency-Key": "legacy-message-401", authorization: "Bearer sk-legacy-refresh",
+    } });
+    expect((await send()).status).toBe(201);
+    const row = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: original.id } });
+    expect(row.input).toEqual({ ...snapshot, provider_credential: "sk-legacy-refresh" });
+  });
 });

@@ -10,9 +10,12 @@ const CANVAS_TOOL_IDENTITY_KEYS = [
   'vocalSplit',
   'sceneSplit',
   'audioTrim',
+  /** 音视频合成（IKIHPM）：占位卡是草稿卡原地转生成中，取消会把卡打回草稿并改写草稿名，
+   *  同族画布工具卡一律不开放取消（任务失败才保留卡与「重试」）。 */
+  'audioVideoMux',
 ] as const;
 
-/** 去字幕 / 高清 / 擦除 / 抠图 / 扩图 / 音视频分离等同族工具卡 */
+/** 去字幕 / 高清 / 擦除 / 抠图 / 扩图 / 音视频分离 / 音视频合成等同族工具卡 */
 export function isCanvasToolGeneration(data: Record<string, unknown>): boolean {
   return CANVAS_TOOL_IDENTITY_KEYS.some((key) => data[key] != null);
 }

@@ -5,11 +5,13 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.PublishVideoEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.VideoEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
+import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEnhanceVideoClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitEnhanceVideoClient.EnhanceVideoTaskObservation;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
@@ -34,7 +36,8 @@ import java.util.Set;
  *   <li>providerTaskId==null → 解析冻结 input + 源视频素材 → 网关提交（video_url +
  *       resolution + bitrate_level 恒 medium，fps 不传，返 task_id）→ markProviderSubmitted
  *       （存 provider_task_id + 释放租约 + next+5s）→ scheduleNext(5s)</li>
- *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排；processing →
+ *   <li>providerTaskId!=null → 查询任务 → 瞬时错误 rescheduleProviderPoll 续排（与
+ *       processing 共享 720 轮询预算，超限同归 1045）；processing →
  *       续排（超限 1045）；failed → 分类终态；completed → **立即下载转存（火山 video_url
  *       仅 24h 有效）** → 建 Asset（type=video / source='generated'）→ 终态 succeeded</li>
  * </ol>
@@ -135,9 +138,15 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
             runStep(claim);
         } catch (Exception e) {
             String code = resolveFailCode(e);
+            Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(e);
             String message = e.getMessage() != null ? e.getMessage() : "视频画质增强失败";
+            if (httpStatus != null) {
+                // 状态已结构化落 details（IKIMS3），message 不再重复携带状态码字样：只剥网关
+                // 文案的「: HTTP <code>」片段，上游原因 / body / request_id 等排查信息原样保留
+                message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+            }
             log.error("[video_enhance] 终态失败 jobId={} code={}: {}", claim.id(), code, message, e);
-            failClaimed(claim, code, message);
+            failClaimed(claim, code, message, httpStatus);
         }
     }
 
@@ -175,7 +184,8 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
      * 提交相：解析冻结 input + 源视频 → 网关提交 → markProviderSubmitted → 续排轮询。
      */
     private void submitPhase(ClaimedVideoEnhanceJobDto claim, String providerToken) {
-        // 0. IKI89S（ADR-0114）：重试收割——retry job 先查父任务上游，命中则不重新提交
+        // 0. IKI89S（ADR-0114）：重试收割——retry job 先查父任务上游，终局（已发布或
+        //    失租/守卫未命中停止执行，IKICD0）则不重新提交
         //    （IKI8GN：骨架收敛至 ParentResultReuse，家族差异=齐全判定/发布入口以参数表达）
         if (claim.parentProviderTaskId() != null) {
             if (ParentResultReuse.tryReuseParentResult(VideoEnhanceContract.TAG, claim, providerToken,
@@ -217,6 +227,10 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
         }
 
         // 3. 网关提交异步任务（bitrate_level 恒 medium / fps 不传在客户端单处定义）
+        if (claim.parentProviderTaskId() != null && !stateMachine.reserveParentReuseSubmit(
+                claim.id(), claim.workerId(), claim.fencingToken())) {
+            return;
+        }
         String taskId = enhanceVideoClient.submit(providerToken, source.getUrl(), resolution);
         log.info("[video_enhance] 上游已提交 jobId={} providerTaskId={} resolution={}",
                 claim.id(), taskId, resolution);
@@ -241,6 +255,27 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
             observation = enhanceVideoClient.poll(providerToken, claim.providerTaskId());
         } catch (VideoEnhanceError pollError) {
             if (isTransientPollError(pollError)) {
+                // 轮询上限对瞬时错误同样生效（IKI61M，对齐 IKI4M4 调速先例）：上游持续故障
+                // （超时 / 429 / 5xx）时每次瞬时错误都走续排，poll_count 由
+                // rescheduleProviderPoll 同一 SQL 累计（与 processing 分支共享预算）——
+                // 若此处不判上限，poll_count 涨到 720 也进不了失败终态，卡片永远停在
+                // 生成中。与 processing 分支同一判定、同一兜底码，文案附上游错误摘要（IKIHKR）。
+                if (claim.pollCount() >= MAX_VIDEO_ENHANCE_POLLS) {
+                    log.warn("[video_enhance] 轮询瞬时错误且已达轮询上限 jobId={} pollCount={} err={}，归失败终态",
+                            claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
+                    // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X / 父单 IKIN6H「有 cause
+                    // 即透传」）：当次错误 cause 链携带上游 HTTP 状态即写 details.http_status
+                    // 并剥文案「: HTTP <code>」片段（上游原因保留），无 cause 不写键。
+                    Integer httpStatus = NewApiHttpSupport.upstreamHttpStatus(pollError);
+                    String message = "画质增强轮询超时（超过 " + MAX_VIDEO_ENHANCE_POLLS
+                            + " 次），上游持续错误: " + pollError.getMessage();
+                    if (httpStatus != null) {
+                        message = message.replaceAll(": HTTP " + httpStatus + "\\b", ":");
+                    }
+                    failClaimed(claim, VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED,
+                            message, httpStatus);
+                    return;
+                }
                 log.warn("[video_enhance] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询",
                         claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleProviderPoll(
@@ -295,7 +330,8 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
      * 结果发布：立即下载转存（火山 video_url 仅 24h 有效，官方明确「请及时下载保存」）→
      * 建 Asset（type=video / source='generated' / generation_job_id）→ 终态 succeeded。
      * <p>
-     * 返回发布守卫结果（IKI89S：重试收割据此判定复用是否成立，false 回退正常重新提交）。
+     * 返回发布守卫结果（IKI89S：重试收割据此判定复用是否成立；false = 守卫未命中，
+     * 收割方停止执行不回退提交——IKICD0 统一失租与守卫未命中为停止终局）。
      */
     private boolean publishResult(ClaimedVideoEnhanceJobDto claim,
                                   EnhanceVideoTaskObservation observation) {
@@ -464,9 +500,20 @@ public class VideoEnhanceJobProcessor implements JobProcessor {
     /** 失败处理：走视频版 failVideoJob（轮询型任务守卫多清 next_poll_at，视频骨架语义对齐；
      *  HD 高清无输出槽位，槽位段天然空转；details.raw 透传原始原因）。 */
     private void failClaimed(ClaimedVideoEnhanceJobDto claim, String code, String msg) {
+        failClaimed(claim, code, msg, null);
+    }
+
+    /** details 落结构化上游 HTTP 状态（IKIMS3，音频提取 IKIMS2 同款）：backend 换凭证
+     *  判定读 {@link GenerationErrorDetailContract#ERROR_DETAIL_HTTP_STATUS} 不依赖文案；
+     *  非 HTTP 失败（超时 / 连接失败 / 业务信封失败）不写该键。 */
+    private void failClaimed(ClaimedVideoEnhanceJobDto claim, String code, String msg,
+                             Integer httpStatus) {
         log.warn("video_enhance job 失败 jobId={} code={} message={}", claim.id(), code, msg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", msg);
+        if (httpStatus != null) {
+            details.put(GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS, httpStatus);
+        }
         stateMachine.failVideoJob(claim.id(), code, msg, details,
                 claim.workerId(), claim.fencingToken());
     }

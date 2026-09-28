@@ -215,6 +215,15 @@ describe('MediaNode draft overlay (IKDMQQ)', () => {
 });
 
 describe('MediaNode generating overlay', () => {
+  it('音频混合卡等待删除取消终态时显示正在取消，不出现卡内取消钮', async () => {
+    await renderNode('audio', {
+      id: 'audio-mix-73', genStatus: 'generating', selected: false,
+      data: { src: '', jobId: '73', audioMix: { format: 'mp3' }, audioMixCancelPending: true },
+    });
+    expect(mountNode.textContent).toContain('正在取消');
+    expect(labels()).not.toContain('取消生成');
+  });
+
   it('hides fake progress copy and bar for image generation, keeps cancel', async () => {
     await renderNode('image', { genStatus: 'generating', progress: 0, selected: false });
     expect(mountNode.textContent).not.toContain('正在生成');
@@ -471,6 +480,21 @@ describe('MediaNode external title (image/video)', () => {
     expect(title).toContain('1920×1080');
     expect(title).toContain('12s');
     expect(title).not.toContain('MB');
+  });
+
+  it('shows the Seedance compliance icon above the image when compliancePassed', async () => {
+    await renderNode('image', {
+      selected: false,
+      data: { fileName: 'photo.png', compliancePassed: true },
+    });
+    const badge = titleRow().querySelector('img[src="/success.png"]');
+    expect(badge).toBeTruthy();
+    expect(titleRow().querySelector('[title="校验通过，可用于seedance视频生成"]')).toBeTruthy();
+  });
+
+  it('does not show the Seedance compliance icon when the node is not verified', async () => {
+    await renderNode('image', { selected: false, data: { fileName: 'photo.png' } });
+    expect(titleRow().querySelector('img[src="/success.png"]')).toBeNull();
   });
 
   it('leaves meta blank when real dims are missing', async () => {

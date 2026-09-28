@@ -11,7 +11,7 @@
 
 ## 编辑这些文档
 
-根 `CONTEXT.md` 与 `docs/**/*.md` 是散文规格文档，但与代码同路：编辑它们**同样要先开 task worktree**（`--type docs --no-issue`），落盘走 `scripts/commit-task-for-review.sh -m "docs: <描述>"`。原「AI 可在本地 master 直改散文文档」的 [ADR-0025](../adr/0025-doc-on-master-allowlist.md) 直提通道 **2026-09-10 已废止**（见该 ADR 修正一）。`docs/**/*.json` schema / 契约、fixtures 一如此路。
+根 `CONTEXT.md` 与 `docs/**/*.md` 的普通编辑也要从当前发布线建立 task worktree，并按任务目标 release 验证、提 PR。原直写 master 例外已由 [ADR-0115](../adr/0115-local-release-code-baseline.md) 替代。`docs/**/*.json` schema / 契约和 fixtures 同样走任务区，验证按影响面选择。
 
 ## 文件结构
 

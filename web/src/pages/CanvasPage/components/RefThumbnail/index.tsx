@@ -5,6 +5,8 @@
  * 图片/视频/音频/文本四类素材形态，面板接入时派生编号并接管删除/@ 回调。
  * IKFCX4：文本预览浮层可移入滚动阅读（鼠标离开图标与浮层后才关闭，关闭留 120ms 移入窗口）；
  * 媒体预览仍按 IKFCJG 规格穿透纯展示、移出立即消失，两类浮层行为不互相扩散。
+ * IKIQ89：拖拽排序开始（useRefStripDrag 的 dragstart 信号）立即取消打开计时并关闭预览；
+ * 参考栏滚动使缩略图离开指针下方时按命中判定关闭（滚动不重算 hover，浏览器不派发 mouseleave）。
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
@@ -31,7 +33,7 @@ export interface RefThumbnailProps {
   onLocate?: () => void;
   /** × 立即删除（走调用方「断开引用、保留来源」链路，无确认弹窗）；缺省不渲染 × */
   onRemove?: () => void;
-  /** @ 插入提示词（调用方复用 insertRefAtPending 记忆光标路径）；缺省不渲染 @ */
+  /** @ 插入提示词（调用方走 insertRefAtPending：记忆光标 → 当前选区（IKIQ88）→ 追加末尾三级回落）；缺省不渲染 @ */
   onInsertRef?: () => void;
   /** 音频预览时长（秒） */
   audioDuration?: number;
@@ -55,6 +57,12 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** 指针坐标是否落在元素边界矩形内（滚动关闭的命中判定，含边界） */
+function containsPoint(target: Element, pointer: { x: number; y: number }): boolean {
+  const rect = target.getBoundingClientRect();
+  return pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom;
 }
 
 /** 悬浮放大预览浮层：上方居中 + flip/shift 视口内收敛；仅打开时挂载（关闭即卸载媒体节点，视频随之停播）。
@@ -136,6 +144,8 @@ export function RefThumbnail({
   const [previewOpen, setPreviewOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 指针最后位置（enter/move 时刷新）：滚动关闭用它判定缩略图是否仍在指针下方
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
   // IKFCX4：文本预览可移入滚动阅读；媒体预览保持穿透即时关闭
   const interactivePreview = kind === 'text';
 
@@ -171,12 +181,18 @@ export function RefThumbnail({
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
   }, []);
 
-  const handleMouseEnter = () => {
+  const handleMouseEnter = (event: React.MouseEvent) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY };
     setHovered(true);
     // 回到图标即取消待执行的关闭（鼠标在图标与浮层间往返不打断阅读）
     clearCloseTimer();
     if (!previewable) return;
     timerRef.current = setTimeout(() => setPreviewOpen(true), PREVIEW_OPEN_DELAY);
+  };
+
+  // 滚动时指针不动、无 move 事件，进入后的小幅移动也要记录，保证滚动命中判定用的是最后位置
+  const handleMouseMove = (event: React.MouseEvent) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY };
   };
 
   const handleMouseLeave = () => {
@@ -191,6 +207,28 @@ export function RefThumbnail({
     }
   };
 
+  // IKIQ89：参考栏滚动使缩略图移出指针下方时，浏览器不重算 hover、不派发 mouseleave，
+  // 监听捕获阶段 scroll 按指针命中判定；文本浮层移入阅读（指针在浮层上）不误关（IKFCX4 不回退）。
+  // 打开计时（200ms）期间的滚动不在监听内，挂载时先补一次命中判定，避免浮层在已滚走的锚点上弹出；
+  // 关闭走 handleMouseLeave 同一路径：媒体立即关，文本保留延迟窗；闭包只依赖稳定 setter、ref 与挂载期恒定的 interactivePreview
+  useEffect(() => {
+    if (!previewOpen) return;
+    const handleScroll = () => {
+      const pointer = pointerRef.current;
+      // reference 恒为真实 DOM 节点（根 div），floating-ui 类型上保守含 VirtualElement，此处按 Element 收窄
+      const anchor = refs.reference.current;
+      if (!pointer || !(anchor instanceof Element)) return;
+      if (containsPoint(anchor, pointer)) return;
+      const floating = refs.floating.current;
+      if (interactivePreview && floating && containsPoint(floating, pointer)) return;
+      handleMouseLeave();
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewOpen]);
+
   // 文本浮层与图标组成连续可悬浮区域：两端移出都走同一延迟关闭，
   // 鼠标从浮层移回图标时由 handleMouseEnter 取消待执行关闭，往返不中断阅读
   const handleOverlayMouseLeave = () => {
@@ -198,6 +236,21 @@ export function RefThumbnail({
     clearCloseTimer();
     closeTimerRef.current = setTimeout(() => setPreviewOpen(false), TEXT_PREVIEW_CLOSE_DELAY);
   };
+
+  // IKIQ89：HTML5 拖拽开始后浏览器不再派发鼠标事件，dragstart（useRefStripDrag 生成）是唯一可靠信号，
+  // 等同移出处理：取消等待中的打开计时与关闭计时，立即关闭预览（不走文本浮层的延迟窗）
+  const composedDragProps = dragProps
+    ? {
+        ...dragProps,
+        onDragStart: (event: React.DragEvent<HTMLElement>) => {
+          dragProps.onDragStart(event);
+          clearOpenTimer();
+          clearCloseTimer();
+          setHovered(false);
+          setPreviewOpen(false);
+        },
+      }
+    : undefined;
 
   return (
     <div
@@ -208,8 +261,9 @@ export function RefThumbnail({
       data-locked={locked ? 'true' : undefined}
       title={locked ? `${name}（来自文本）` : name}
       onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      {...dragProps}
+      {...composedDragProps}
     >
       {/* draggable=false：图片/视频原生拖拽会劫持手势（拖出图片 ghost 而非缩略图项），统一由根节点承载 */}
       {kind === 'image' && url ? <img src={resolveMediaSrc(url)} crossOrigin={remoteImageCrossOrigin(url)} alt={name} draggable={false} /> : null}

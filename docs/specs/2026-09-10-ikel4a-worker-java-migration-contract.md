@@ -45,9 +45,13 @@
 
 ### 3.1 claim（两段式）
 1. 候选 findFirst：`status='queued' AND is_delete=false AND source IN 白名单 AND next_action_at<=now`（by-id 变体额外接受 `{status:'processing', lease_expires_at null 或 < now}` **孤儿接管**）。
-2. CAS updateMany：`WHERE id AND status=候选值 AND fencing_token=候选值`（by-id 精确路径再加 `user_id`）`SET status='processing', lease_owner=workerId, lease_expires_at=now+120s, last_polled_at=now, fencing_token+1, version+1`。
+2. CAS updateMany：`WHERE id AND status=候选值 AND fencing_token=候选值`（by-id 精确路径再加 `user_id`；**Java 侧另含第 5 条租约复核行**）`SET status='processing', lease_owner=workerId, lease_expires_at=now+120s, last_polled_at=now, fencing_token+1, version+1`。
 3. 返回投影用**增后**token（`candidate.fencing_token + 1n`）；0 行 / DB 异常（`.catch→{count:0}`）一律返回 null、零副作用。
 4. 后续一切写：`WHERE ... status='processing' AND lease_owner=workerId AND fencing_token=<持有值>`（`fenceWhere`，`settle-ops:13-19`）。**guard fail 一律静默返回 false，不上抛**——stale worker 效应被吞、留给租约过期 + recovery。此语义 Java 必须复刻（不许加异常日志之外的行为）。
+5. **租约复核行（2026-09-25 补记，IKIHBB 双端同步评审；行为已随 PR !855 落地）**：Java 领取 CAS 的 WHERE 末行另含 `AND (status = 'queued' OR lease_expires_at IS NULL OR lease_expires_at < NOW())`——queued 候选恒放行（无租约语义可拦），孤儿接管候选（`status='processing'`）要求租约为空或已过期。目的：第 1 步候选快照读取与第 2 步 CAS 之间，任务被**不动 fencing_token、不改 status、仅推远租约**的续租类写延长租约时，旧快照不得接管仍在租约内的任务（防双跑；真库金标用例 `mediaExtractStaleCandidateCannotTakeOverRenewedLease` 钉住该语义）。适用：`claimImageCas` 与 `claimMediaExtractCas`——前者的领取 CAS 同时服务 image / image_enhance / image_erase / image_cutout / image_outpaint / video_subtitle_erase / video_enhance / vocal_split / video_scene_split / audio_trim / audio_speed / audio_mix / video_matting / video_frame_interpolation（`JobClaimService` 复用路由）。**不适用**：`claimAudioCas`（仅领 `type='audio'`）、`claimVideoCas`（仅领 `type='video'`）。续租类写以 Java mapper 现状为准，本条清单即对账权威：`updateMediaExtractProgress` / `renewAudioMixLease` / `updateVideoSceneSplitProgress` / `updateVideoMattingProgress` / `reserveParentReuseSubmit`（收割回退提交前的原子续租，守卫含 `lease_expires_at > NOW()`，见第 8 条待决联动）——§3.2「真心跳仅 media_extract」是 2026-09-10 冻结时点的 TS 基线事实，不覆盖后续家族的 Java 续租写。
+6. **audio / video 不跟进复核（第 5 条评估结论，IKIHBB）**：`claimAudioCas` / `claimVideoCas` 的领取面内不存在续租类写——audio 无进度续租、无 worker 级重试（§6），租约只在 claim 时设置、终态清空；video 持租窗口仅 claim→提交上游，提交后即释放租约、下轮以孤儿接管再 claim（§3.2），轮询期无续租写。复核行在这两条路径无事件可拦，评审结论**维持现状不跟进**；后续若给这两个家族引入续租类写，须同步补复核行并回本节补记。
+7. **TS 侧对账结论：不跟进（IKIHBB）**。移植源 `backend/libs/shared/persistence/generation-worker-claim-ops.ts` 的 claim CAS（updateMany `WHERE id + fencing_token + status`）无复核行，租约条件仅在候选 findFirst 孤儿接管分支——维持原样。理由：TS worker 已退役（§1，`1312c474`，PR !636），claim 函数族无消费方，写入权威归 Java（修正二），PR !855 有意只收紧 Java。双端差异（TS 基线无复核行）作为移植对账历史保留，金标对账以第 5 条补记后语义为准；若未来复活 TS 消费须按第 5 条同步收紧，另立票。
+8. **待决联动（IKIHKH）**：收割转存期无续租修复若裁决采「reserve 对 owner+fence 未变但租约已过期放行」，将放宽收割 reserve（`reserveParentReuseSubmit`）的 `lease_expires_at > NOW()` 守卫，届时须回 §3 补记 reserve 语义；若采「收割 / 转存期续租」，新增续租写同样不动 fence，第 5 条复核行即接管防线（收割八家族（ADR-0114）的领取全部走 `claimImageCas` / `claimMediaExtractCas`，均已有复核）。两方案均不改变第 6 条结论。截至本补记 IKIHKH 仍 needs-triage 未裁决，其落地时回本节闭环。
 
 ### 3.2 租约与心跳
 - TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值（**image 例外：300s，见 §11 政策修订**）。
@@ -577,3 +581,94 @@ media_extract 是老类型（IKARDY，§1/§2/§6/§8/附录 A 既有冻结继�
 - Worker 以冻结顺序提交 `POST /v1/mediakit/mix-audio`：`{"model":"mediakit-mix-audio","audio_urls":["https://.../a.mp3","https://.../b.mp3"],"format":"mp3"}`。出站键恒为 **`format`**，不是 `output_format`。提交成功取 `task_id` 持久化，查询 `GET /v1/mediakit/tasks/{task_id}`；提交同步失败即使有 `request_id` 而无 `task_id` 也须将 `request_id` 留在错误中，不得进入轮询。
 - 查询 `status=completed` 时读取 `result.audio_url` 与 `result.duration`（秒）；结果 URL 先安全下载并转存我方 TOS、设置公开 ACL，再创建 Asset、以 `round(duration * 1000)` 写 `duration_ms`、发布终态。临时供应商 URL 不写成长期资产。验收须对 Asset URL 做实际 GET 并核验媒体字节；失败保留上游可读原因与 `request_id`。
 - 现有 1 GiB 内存式音频转存上限及 RecoveryService 全局 2 小时扫描窗口仍是上线前容量/长任务验收项，由 IKI696 制定扩容与超时/退避口径；本节不改全局策略。
+
+## 20. 冻结增量（2026-09-26，IKIMN8）：`error.details.http_status` 键名双端单源与适用家族
+
+生成任务失败详情键 `http_status` 由 audio_mix 专属（IKIHGQ / §19）提升为全族共享契约；本节冻结键名、单源落点、写入/读取方与缺省语义。适用家族的实际写入接入已由 IKIMN8 子卡（IKIMS2–IKIMS5）全部落地，IKIMS6 收口音频混合并记录双端对账结论（§20.5）。
+
+### 20.1 键名与单源落点
+
+- 键名冻结为 **`http_status`**（JSON 传输 snake_case），值 = 上游网关响应的数值 HTTP 状态码（整数），写入 `generation_jobs.error.details`。
+- **worker-java 唯一来源**：`worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationErrorDetailContract.ERROR_DETAIL_HTTP_STATUS`（全族共享契约类）；audio_mix 先行的 `AudioMixContract.ERROR_DETAIL_HTTP_STATUS` 定义已删除并改引用本类。
+- **backend 唯一来源**：`backend/libs/contracts/error-codes.ts` 的 `GENERATION_ERROR_DETAIL_HTTP_STATUS`（与生成域错误码同文件，经 `contracts/index.ts` re-export）；audio_mix 先行的 `audio-mix.ts` 定义已删除并改引用。双端禁止在别处发明 `"http_status"` 字面量。
+
+### 20.2 写入方 / 读取方 / 缺省语义
+
+- **写入方**：worker-java 各族 processor 失败路径——失败异常链带 `NewApiVideoClient.HttpStatusException` cause（上游非 2xx）时写入数值状态；**其余情况不写该键**（网络超时、连接失败、2xx 业务信封失败、上游任务 failed 观察分支均无 cause 可读）。11 族写入已全部落地（IKIHGQ 先行 audio_mix，IKIMS2–IKIMS5 补齐其余 10 族）；解析统一走共享函数 `NewApiHttpSupport.upstreamHttpStatus`（沿 cause 链取状态，audio_mix 的内联实现已收口删除）。写入结构化状态时生产文案同步净化：message 只剥网关文案的「`: HTTP <code>`」片段（上游原因 / body / request_id 等排查信息原样保留），状态码字样不再与新文案耦合。瞬时轮询错误且预算耗尽的内层失败分支（异步 MediaKit 九族 poll + 视频生成 poll 的「轮询超时，上游持续错误」终态）与常规失败路径**同一透传口径**——有 cause 即写键并净化文案对应片段，无 cause 不写键、文案不动；此前为审查遗漏，IKIN6H 修订补齐（§20.6）。
+- **读取方**：backend 重试换凭证判定（先例 `audio-mixes.service.ts` `isUpstreamUnauthorized`，当前唯一读取方）——`details.http_status` 为数值时以其为准（401 = 当前凭证失效，重试替换为请求头带来的新凭证）；无数值状态时回退 `error.message` 文案正则 `/\bHTTP 401\b/`（仅旧任务数据兼容）。
+- **缺省语义**：键不存在 = **没有可用的结构化 HTTP 状态**（非 HTTP 失败、链上无状态 cause 或旧数据），读取方不得把缺键解释为任何状态值，也不得据此跨家族判断上游是否发生 HTTP 失败——视频生成 submit 链（§20.3 冻结口径：HTTP 失败不挂 cause，同样缺键）与 §20.4 缺省 6 族的 HTTP 失败均属既定例外；音频混合对旧任务数据的 message 文案正则兜底行为不变。
+
+### 20.3 适用家族清单（11 族）
+
+音频混合 `audio_mix`、音频变速 `audio_speed`、音频裁剪 `audio_trim`、人声分离 `vocal_split`、音频提取 `media_extract`、画质增强 `video_enhance`、视频插帧 `video_frame_interpolation`、视频抠像 `video_matting`、场景分割 `video_scene_split`、字幕擦除 `video_subtitle_erase`，以及视频生成 `video`（11 族写入均已落地）。各族网关链（异步 MediaKit 模板 submit/poll、`NewApiVideoClient` poll）均带 `HttpStatusException` cause；唯视频生成 submit 链不带 cause（`NewApiVideoClient.submit` 非 2xx 只构造 message）——IKIMS5 已冻结口径：不为 submit 补挂 cause（网关异常形态不变），该路径缺键 = 无状态可读，透传覆盖 poll 链（401 换凭证判定的轮询重现场）。
+
+### 20.4 缺省家族清单（6 族，不透传）
+
+图片抠图 `image_cutout`、图片擦除 `image_erase`、图片扩图 `image_outpaint`、图片高清放大 `image_enhance`、图片生成 `image`、音频生成 `audio`。缺省原因 = 网关异常链不带 `HttpStatusException` cause（同步模板 `NewApiMediaKitSyncClient` 非 2xx 只构造 message 不挂 cause；`NewApiImageClient` / `NewApiAudioClient` 全链无 initCause）——worker 无状态可写，是契约口径而非遗漏，不为其补透传。
+
+### 20.5 双端对账结论（2026-09-26，IKIMS6 收口）
+
+- **worker 写入方**：11 族全部落地——audio_mix（IKIHGQ 先行，IKIMS6 收口文案净化与共享解析函数）+ IKIMS2（media_extract + `NewApiHttpSupport.upstreamHttpStatus` 共享函数）+ IKIMS3/4（异步 MediaKit 八族）+ IKIMS5（video，poll 链）。各族写入语义一致：有状态 cause → `details.http_status` 数值 + message 剥「`: HTTP <code>`」片段；无 cause → 不写键、文案不动。
+- **backend 读取方**：当前唯一读取方 = 音频混合重试换凭证判定（`audio-mixes.service.ts` `isUpstreamUnauthorized`，结构化优先）。其余 10 族 backend 暂无读取方——写入先行属预期，后续各族重试/换凭证能力接入时直接消费 §20.1 双端常量，不再新建键名。
+- **缺省 6 族**：零透传、实现零改动（`git diff cf3f61a20…HEAD` 核验 6 个 processor 路径无变更，见 IKIMS6 交付记录）；未来若同步网关补挂 cause，须先回本节修订清单再实施。
+
+### 20.6 冻结增量（2026-09-26，IKIN6H）：轮询预算耗尽分支透传与缺键定义校正
+
+- 10 族（异步 MediaKit 九族 poll + 视频生成 poll）「瞬时轮询错误且预算耗尽」内层失败分支纳入 §20.2 透传口径：有状态 cause 即写 `details.http_status` 并剥 message 的「`: HTTP <code>`」片段（与顶层 catch 同款），无 cause 不写键、文案不动——此前该分支直接写终态绕过状态解析，属审查遗漏（音频四族 IKIN6W 落地，视频五族与视频生成见同批子卡）。
+- §20.2 缺键定义校正为「没有可用的结构化 HTTP 状态」：不得据此跨家族判断上游是否发生 HTTP 失败；视频生成 submit 链与 §20.4 缺省 6 族的 HTTP 失败同样缺键属既定例外。
+
+## 21. 冻结增量（2026-09-24，IKIHPJ）：audio_video_mux（音视频合成）跨进程契约
+
+需求与用户交互依据为 `docs/specs/2026-09-24-audio-video-mux-mediakit.md`（父规格 IKIHMX）。本节是 NestJS、Java Worker 与后续画布接线的**唯一跨进程字段基准**。命名纪律（IKIHPJ 拍板）：冻结快照对象内为 `assetId`/`nodeId`（camel，规格 JSON 字面），顶层为 `is_audio_reserve`/`sync`；网关出站键另按供应商 snake_case（`video_url`/`audio_url`/…）——两套命名并存不混。常量分别落在 `backend/libs/contracts/audio-video-mux.ts`、`backend/libs/shared/generation/queue.constants.ts` 与 `worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioVideoMuxContract.java`，`audio-video-mux.test.ts`、`mq-route-parity.test.ts` 和 `StartupContractTest` 逐值对账。
+
+### 21.1 任务与队列
+
+| 字段 | 冻结值 / 规则 |
+|---|---|
+| `generation_jobs.type` / RocketMQ tag | `audio_video_mux`；topic `generation-task`，消息体恒 `{"jobId":"<十进制字符串>"}` |
+| `generation_jobs.source` / claim 白名单 | `dock`；领取与恢复扫描均仅匹配该值（audio_mix 同款） |
+| 消费者组 | `generation-audio-video-mux-worker` |
+| 状态与产出 | 初始 `queued`，单槽 `expected_output_count=1`；免费，无积分冻结、成本预留或余额拦截；成功写一份 `type=video`、`source=generated` 的长期 Asset 后置 `succeeded` |
+| 兜底失败码 | `audio_video_mux_failed` → 数值 `1053`；额度/内容政策信号沿用 §5 原码 |
+| 生命周期 | 超时预算 `max(1d, 4×estimated_duration_ms+6h)`、未知 `7d`、上限 `365d`（backend `audioVideoMuxDeadline`）；worker fallback 同公式；轮询退避 `min(60s, 5s<<min(4, pollCount/3))`，5 秒首查；恢复扫描 `maxAge=0`（不按龄期过滤，长任务由 `execution_deadline_at` 收敛）；并发档复用 `concurrency().mediaExtract()` |
+
+业务创建入口 `POST /projects/:projectId/audio-video-muxes` 接收 `{"audio":{"assetId":"11","nodeId":"node-audio"},"video":{"assetId":"12","nodeId":"node-video"},"is_audio_reserve":true,"sync":"none"}`。`audio` 为固定音频源（必有 `nodeId`）；`video` 画布拖线绑定有 `nodeId`、素材库输入没有；`is_audio_reserve` 省略时显式冻结 `true`，`sync` 省略时显式冻结 `"none"`。创建期权威复核项目/资产归属、媒体类型归位（音频归 `audio` 槽、视频归 `video` 槽）、URL 协议白名单（https/mediakit/vod/tos）、TOS storageKey 还原与公开可读探测（`inspectObject` + Range GET，15s 总 deadline）；拒绝时不留任务。成功信封 `{"code":200,"msg":null,"data":{"job_id":"…","status":"queued","enqueue_required":true}}`。
+
+### 21.2 `generation_jobs.input` 冻结快照
+
+| 键 | 类型 / 语义 |
+|---|---|
+| `audio` | `{assetId: string, nodeId: string, url: string}`：固定音频源身份（camel）+ 服务端解析的网关可公开读取地址 |
+| `video` | `{assetId: string, nodeId?: string, url: string}`：单视频输入身份（camel，素材库输入无 `nodeId`）+ 同上 `url` |
+| `is_audio_reserve` | boolean，恒显式；true=保留原声混音，false=替换原声 |
+| `sync` | `"none" \| "video" \| "audio"`，恒显式；三档时长对齐（全为裁剪语义） |
+| `estimated_duration_ms` | 源视频 Asset 时长毫秒值（非负有限数），未知为 `null`（→ 7d 超时预算）；成功时以供应商真实 `result.duration` 覆盖 |
+| `submit_attempt` | 整数提交尝试序号，创建时冻结 `1`；业务重试（failed→queued）递增并换新 `client_token`（重试票消费） |
+| `provider_credential` | 请求方凭证的服务端冻结值（有凭证时写入），仅 Worker 使用，不对浏览器回传 |
+
+重试与恢复读取原 `input`，不重新读取当前态或资产行 URL。`provider_task_id`、`poll_count`、`next_action_at` 属 `generation_jobs` 独立列，不混入 input；`fencing_token`/租约遵守附录 C 的单一参数化生命周期。
+
+### 21.3 网关出站与 sync 档映射
+
+- Worker 提交 `POST /v1/mediakit/mux-audio-video`（`AUDIO_VIDEO_MUX_SUBMIT_PATH`），查询沿用 `GET /v1/mediakit/tasks/{task_id}`（`POLL_PATH_PREFIX` 同 §19）。对客模型 `mediakit-mux-audio-video`（网关侧实现与零价配置为上线前置，照 IKGOKL 流程办理）。
+- 出站键（snake_case，恒不与冻结快照 camel 命名混用）：`model`、`video_url`、`audio_url`、`is_audio_reserve`（总是显式）、`client_token`（总是显式）；sync 档映射**钉死**：
+  - `sync="none"`：不传 `is_video_audio_sync`、`sync_mode`、`sync_method`；
+  - `sync="video"|"audio"`：传 `is_video_audio_sync=true`、`sync_mode=<值>`、`sync_method="trim"`（总是显式 trim，永不 `speed`）。
+- 不传 `media_output_destination`、`callback_url`、`callback_args`、`queue_id`（默认队列、轮询已足够）。
+- `client_token` 为供应商层幂等键：`"bwmux-<jobId>-<submit_attempt>"`（确定性派生、≤64 可打印 ASCII、随任务冻结的 `submit_attempt` 持久化）。崩溃重提同 token 被供应商去重；用户重试递增 `submit_attempt` 换新 token 不被去重。与 `command_idempotency`/`Idempotency-Key` 业务层双轨并存（业务层归重试票）。
+- 提交同步失败（`success=false`）即使有 `request_id` 而无 `task_id` 也须将 `request_id` 留在错误中并进失败态，不得进入轮询、不得假成功。
+
+### 21.4 结果、转存容量与命名
+
+- 查询 `status=completed` 时读取 `result.video_url`（24h 临时链接）、`result.duration`（秒）、`result.resolution`（如 `"1920x1080"`）。`video_url` 缺失/空 = 无有效视频结果 → 失败态（附 `request_id`）；`duration`/`resolution` 缺失不失败，回落源视频资产。
+- 结果 URL 先安全下载并转存我方 TOS、设置公开 ACL，再创建 `type=video` Asset、置 `succeeded`；临时供应商 URL 不写成长期资产。转存失败按任务失败呈现（可重试），不暴露临时 URL。
+- 转存容量：`AudioVideoMuxContract.MAX_RESULT_BYTES = 10 GiB`（对齐 IKI696 音频侧先例；VideoMattingContract 的 1 GiB 为私有旧口径不复用）；产物超限拒收并失败，杜绝「供应商成功而用户结果丢失」。
+- 秒→毫秒换算在发布收口处落：`duration_ms = round(result.duration × 1000)`；`width`/`height` 由 `result.resolution` 解析（`"WxH"`），解析失败回落源视频资产宽高。
+- 结果资产命名在转存发布处落：`assets.name = <源视频资产名去扩展名> + "(音视频合成).mp4"`（ASCII 圆括号；源名空白时基名回落 `视频`）；卡片回填取资产名（前端票消费）。
+
+### 21.5 注册触点与工单分工（附录 C 清单的 audio_video_mux 实例化）
+
+- TS：`backend/libs/contracts/audio-video-mux.ts`（常量 + zod）+ `index.ts` 导出 + `queue.constants.ts` 的 `AUDIO_VIDEO_MUX_TAG` + `generation-queue.ts` 的 `enqueueAudioVideoMuxJob` + `error-codes.ts` 三处登记（1053）。
+- Java：`AudioVideoMuxContract` + `JobTypeEnum.AUDIO_VIDEO_MUX` + `GenerationMqRouteEnum.AUDIO_VIDEO_MUX` + Consumer/Processor/Client + RocketMqConfig 三 bean + Recovery `maxAge=0` + Mapper 续租/取消/扫描登记。
+- 对账：`audio-video-mux.test.ts`（读 Java 源码逐值对账）、`mq-route-parity.test.ts`、`StartupContractTest`、`ConsumerRouteWiringTest`；跨运行时贯通 = `audio-video-muxes.cross-runtime.integration.test.ts` + `AudioVideoMuxCrossRuntimeMySqlIntegrationTest`（DbGuard 门禁）。
+- 工单分工：IKIHPJ 创建入口 + worker 执行链（本票）；IHPL 重试（`Idempotency-Key` + `command_idempotency` 双轨 + `submit_attempt` 递增）；IHPK/IHPM 前端草稿卡与提交回填。

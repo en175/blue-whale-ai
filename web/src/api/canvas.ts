@@ -217,7 +217,7 @@ export function readCanvasConflictVersion(error: unknown): number | null | undef
 
 function putCanvasDoc(
   projectId: string,
-  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
+  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },
   version: number | null,
 ): Promise<CanvasSaveData> {
   return apiRequest<CanvasSaveData>(`/api/canvases/${encodeURIComponent(projectId)}`, {
@@ -228,18 +228,24 @@ function putCanvasDoc(
       viewport: JSON.stringify(payload.viewport),
       nodes: serializeNodes(payload.nodes),
       edges: serializeEdges(payload.edges),
+      // IKIIWN（契约 §9）：非空画布 → 空文档的破坏性收缩须显式确认，仅 true 时携带
+      ...(payload.confirmEmpty ? { confirmEmpty: true } : {}),
     }),
   });
 }
 
 /**
  * 保存画布 PUT /api/canvases/:projectId
+ * @param payload.confirmEmpty 非空画布清空保存的显式确认（IKIIWN）；服务端已有非空节点而无标记时回 422 零写入
  * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
- * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）
+ * @throws ApiError status=412 表示版本冲突（已用信封 version 重试仍失败）；
+ *   IKILUE：confirmEmpty 保存不自动重试，首次 412 即原样抛出——冲突说明服务端已被其他会话
+ *   改写，用新版本号重发旧空文档会覆盖对方成果，由调用方引导刷新复核
+ * @throws ApiError status=422 表示空覆盖被拒（服务端非空而本次提交为空且未确认）
  */
 export async function saveCanvasDoc(
   projectId: string,
-  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
+  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[]; confirmEmpty?: boolean },
   version: number | null,
 ): Promise<CanvasSaveData> {
   let expected = version;
@@ -251,6 +257,8 @@ export async function saveCanvasDoc(
       lastError = error;
       const recovered = readCanvasConflictVersion(error);
       if (recovered === undefined) throw error;
+      // IKILUE：仅更新 If-Match 复用原文档重发不构成用户重新确认——清空命令撞上冲突即作废
+      if (payload.confirmEmpty) throw error;
       expected = recovered;
     }
   }

@@ -30,6 +30,9 @@ import org.mockito.quality.Strictness;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -48,8 +51,9 @@ import static org.mockito.Mockito.*;
  * <p>
  * parent-reuse 重试收割（IKI89Z / ADR-0114，IKI89P 定型形态平移）：重试 job submit 相
  * 查父任务上游，命中（succeeded 且 videoUrl+resolution 齐全）不提交直接发布；父失败/
- * 不存在/查询异常/发布失败回退重新提交；租约丢失形态（续租未命中/转存中止）静默退出
- * 不回退——已被接管或已终态，回退只会白付一次上游提交费。
+ * 不存在/查询异常/仍持有执行权的发布失败（下载转存异常）回退重新提交；失租形态（续租
+ * 未命中/转存中止/发布守卫未命中）停止执行不提交（IKICD0）——已被接管或已终态，回退
+ * 只会白付一次上游提交费。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -95,6 +99,8 @@ class VideoMattingJobProcessorTest {
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
         // 结果转存心跳续租默认放行（守卫命中）；中止路径由专项用例覆写
         when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenReturn(true);
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong()))
                 .thenReturn(true);
     }
 
@@ -529,8 +535,8 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交（IKI89P 定型口径）")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0，与心跳失租同一停止语义）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoMatting(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-guard")));
         when(matteVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -542,15 +548,19 @@ class VideoMattingJobProcessorTest {
                         "video/webm", 1L, null));
         when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
         stubSourceAsset(1920, 1080);
-        when(matteVideoClient.submit(anyString(), anyString(), anyString(), anyString(), any()))
-                .thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), eq("worker-1"), eq(5L), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(matteVideoClient).submit("sk-frozen-token", "https://example.com/src.mp4",
-                "portrait", "WEBM", null);
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：与心跳失租路径（续租未命中/转存中止
+        // 静默退出）同一停止语义，不提交、不自投、不落失败，任务由新 worker 重新领取收割
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+        // IKIN7Z：收割语境守卫未命中同样核实后清理本次上传对象（复用同一放弃路径）
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
     }
 
     @Test
@@ -601,6 +611,90 @@ class VideoMattingJobProcessorTest {
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @Timeout(10)
+    @DisplayName("parent-reuse 转存抛普通异常时心跳已失租，旧 worker 停止而不重新提交")
+    void parentReuseTransferFailureAfterHeartbeatLost_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-race")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        CountDownLatch leaseLost = new CountDownLatch(1);
+        AtomicInteger renewals = new AtomicInteger();
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenAnswer(invocation -> {
+                    if (renewals.incrementAndGet() == 1) return true;
+                    leaseLost.countDown();
+                    return false;
+                });
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(invocation -> {
+                    assertThat(leaseLost.await(3, TimeUnit.SECONDS)).isTrue();
+                    throw new RuntimeException("生成视频下载失败: HTTP 404");
+                });
+        processor.leaseRenewIntervalMs = 20;
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 转存异常后续租状态无法确认，旧 worker 停止而不重新提交")
+    void parentReuseTransferFailureThenLeaseUnknown_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-unknown")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-unknown"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        when(stateMachine.updateVideoMattingProgress(any(UpdateVideoMattingProgressDto.class)))
+                .thenReturn(true)
+                .thenThrow(new IllegalStateException("DB unavailable"));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 发布异常后提交前失租，旧 worker 不创建无人轮询的上游任务")
+    void parentReuseLeaseLostBeforeFallbackSubmit_stopsWithoutSubmit() {
+        when(stateMachine.claimVideoMatting(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(webmInput("portrait"), null, 0, "amk-parent-before-submit")));
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-parent-before-submit"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/old-out.webm", "1080p", 65.5, null, null));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenThrow(new RuntimeException("生成视频下载失败: HTTP 404"));
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(matteVideoClient, never()).submit(anyString(), anyString(), anyString(),
+                anyString(), any());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(),
+                anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========
@@ -657,7 +751,7 @@ class VideoMattingJobProcessorTest {
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（provider_timeout）+ 第 720 次 → 1050 轮询超时，文案不变不写 http_status（无 cause 不推断，IKIN6X）")
     void pollTransientErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
@@ -666,13 +760,20 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键；
+        // 本族预算耗尽文案不附上游摘要，与 processing 超限同文案
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
+                eq("智能抠像轮询超时（超过 " + VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS + " 次）"),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
-    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1050 轮询超时，不再续排（审查修复 P1）")
+    @DisplayName("poll 瞬时错误（HTTP 429）+ 第 720 次 → 1050 + details.http_status=429，文案与原文案完全一致（IKIN6X）")
     void pollTransientServerErrorAtLimit_fails() {
         stubPollClaim(webmInput("portrait"), VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS);
         VideoMattingError rateLimited = new VideoMattingError(
@@ -682,7 +783,19 @@ class VideoMattingJobProcessorTest {
 
         processor.handle("100");
 
-        assertFailCode(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED);
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：本族文案不附上游摘要——
+        // message 与原文案完全一致，仅 details 多出 http_status
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue())
+                .isEqualTo("智能抠像轮询超时（超过 " + VideoMattingJobProcessor.MAX_VIDEO_MATTING_POLLS + " 次）")
+                .doesNotContain("429");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 429);
         verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
@@ -746,6 +859,34 @@ class VideoMattingJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_QUOTA_EXHAUSTED);
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS4；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        stubPollClaim(webmInput("portrait"), 3);
+        VideoMattingError unauthorized = new VideoMattingError(
+                GenerationError.ERROR_PROVIDER_FAILED,
+                "MediaKit 智能抠像任务查询失败: HTTP 401"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoMattingContract.ERROR_VIDEO_MATTING_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message 不含状态码字样，上游 body / request_id 原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "MediaKit 智能抠像任务查询失败:"
+                        + " body={\"error\":{\"message\":\"Incorrect API key\"}} request_id=req-poll-3")
+                .containsEntry("http_status", 401);
     }
 
     // ========== poll 相：completed → 心跳续租 + 立即下载转存 + 终态发布（URL 24h 有效） ==========
@@ -934,6 +1075,35 @@ class VideoMattingJobProcessorTest {
         verify(stateMachine, never()).publishVideoMattingResult(any());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+        // IKIN7Z：转存返回前刚失租的静默终局同样清理本次上传对象（核实无 Asset 引用后删除）
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
+    }
+
+    @Test
+    @DisplayName("任务已取消（cancelled 终态 → 续租守卫 status='processing' 未命中）→ 经心跳 abort 同路到达清理入口：不发布、不落失败、核实后删除对象（IKIN7Z 取消路径）")
+    void cancelledJobReachesCleanupViaLeaseRenewalMiss() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        // 取消无独立检查点：任务落 cancelled 终态后，updateVideoMattingProgress 的
+        // status='processing' 守卫必然未命中（GenerationJobMapper SQL），心跳据此 abort——
+        // 与失租同路到达转存返回后的清理入口。本用例钉住该映射，防未来给取消加独立通道。
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenAnswer(inv -> {
+                    TosVideoMediaRelay.TransferAbortHandle handle = inv.getArgument(3);
+                    handle.abort("job cancelled: renewal guard miss (status left processing)");
+                    return new TosVideoMediaRelay.StoredVideo("https://tos/out.webm",
+                            "generated/9/video/a.webm", "video/webm", 1L, null);
+                });
+        processor.handle("100");
+        verify(stateMachine, never()).publishVideoMattingResult(any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/a.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/a.webm");
     }
 
     @Test
@@ -1001,6 +1171,53 @@ class VideoMattingJobProcessorTest {
 
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+        // IKIN7Z：守卫未命中核实无 Asset 引用后清理本次上传对象
+        verify(stateMachine).hasPublishedAsset("100", "generated/9/video/abc.webm");
+        verify(mediaRelay).deleteUnpublishedObject("generated/9/video/abc.webm");
+    }
+
+    @Test
+    @DisplayName("清理调用自身抛异常（删除链路异常直达 processor 的形态）→ 保守保留 + 结构化待处理记录，不转成任务失败（IKIN7Z，IKIN8Z 同型）")
+    void cleanupErrorLeavesPendingRecordWithoutFailing() {
+        stubPollClaim(webmInput("portrait"), 3);
+        stubSourceAsset(1920, 1080);
+        when(matteVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenReturn(new MatteVideoTaskObservation("succeeded",
+                        "https://volc/out.webm", "1080p", 65.5, null, null));
+        when(mediaRelay.persistStreaming(anyString(), eq("9"), anyLong(), any()))
+                .thenReturn(new TosVideoMediaRelay.StoredVideo(
+                        "https://tos/out.webm", "generated/9/video/abc.webm",
+                        "video/webm", 1L, null));
+        when(stateMachine.publishVideoMattingResult(any())).thenReturn(false);
+        when(stateMachine.hasPublishedAsset("100", "generated/9/video/abc.webm")).thenReturn(false);
+        // 真实 relay 的 deleteUnpublishedObject 内部吞错只记日志；本用例钉「删除异常一旦
+        // 到达 processor」的防御分支（IKIN8Z 结构化待处理记录同型）
+        doThrow(new RuntimeException("TOS 删除 5xx")).when(mediaRelay)
+                .deleteUnpublishedObject("generated/9/video/abc.webm");
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory
+                        .getLogger(VideoMattingJobProcessor.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            processor.handle("100");
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+        assertThat(appender.list.stream()
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("[pending-cleanup]")).toList())
+                .anySatisfy(message -> assertThat(message)
+                        .contains("jobId=100")
+                        .contains("storageKey=generated/9/video/abc.webm")
+                        .contains("TOS 删除 5xx")
+                        .contains("resolution=retain-pending"));
     }
 
     @Test

@@ -73,6 +73,7 @@ class VideoEnhanceJobProcessorTest {
         when(stateMachine.failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong())).thenReturn(true);
         when(credentialService.open("sk-frozen-token")).thenReturn("sk-frozen-token");
+        when(stateMachine.reserveParentReuseSubmit(anyString(), anyString(), anyLong())).thenReturn(true);
     }
 
     /** 源视频素材（横屏 1920x1080 / 65s：宽高供输出推导、时长供回落）。 */
@@ -279,6 +280,32 @@ class VideoEnhanceJobProcessorTest {
         verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS3；对齐音频提取 IKIMS2 样板） ==========
+
+    @Test
+    @DisplayName("submit 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void submitUnauthorized_persistsHttpStatusDetail() {
+        stubSubmitClaim(input("1080p"));
+        stubSourceAsset(1920, 1080);
+        VideoEnhanceError unauthorized = new VideoEnhanceError(GenerationError.ERROR_PROVIDER_FAILED,
+                "画质增强任务提交失败: HTTP 401 上游凭证被拒绝 request_id=req-sub-7");
+        unauthorized.initCause(new NewApiVideoClient.HttpStatusException(401));
+        when(enhanceVideoClient.submit(anyString(), anyString(), anyString())).thenThrow(unauthorized);
+
+        processor.handle("100");
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED), messageCaptor.capture(),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因与 request_id 保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("上游凭证被拒绝");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", "画质增强任务提交失败: 上游凭证被拒绝 request_id=req-sub-7")
+                .containsEntry("http_status", 401);
+    }
+
     // ========== parent-reuse 重试收割（IKI89S / ADR-0114；平移 VideoJobProcessorTest 先例）==========
 
     @Test
@@ -338,6 +365,22 @@ class VideoEnhanceJobProcessorTest {
                 eq("https://example.com/src.mp4"), eq("1080p"));
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("parent-reuse 查询失败后提交前失租，停止执行")
+    void parentReuseLeaseLostBeforeSubmit_stops() {
+        when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
+                .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-race")));
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-race"))
+                .thenThrow(new RuntimeException("HTTP 503"));
+        stubSourceAsset(1920, 1080);
+        when(stateMachine.reserveParentReuseSubmit("100", "worker-1", 5L)).thenReturn(false);
+
+        processor.handle("100");
+
+        verify(enhanceVideoClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
     }
 
     @Test
@@ -421,8 +464,8 @@ class VideoEnhanceJobProcessorTest {
     }
 
     @Test
-    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 回退正常重新提交")
-    void parentReusePublishGuardMissed_fallThrough() {
+    @DisplayName("parent-reuse 收割发布守卫未命中（publish 返回 false）→ 停止本次执行：不提交、不自投、不落失败终态（IKICD0）")
+    void parentReusePublishGuardMissed_stopWithoutSubmit() {
         when(stateMachine.claimVideoEnhance(eq("100"), anyString()))
                 .thenReturn(Optional.of(makeClaim(input("1080p"), null, 0, "amk-parent-guard")));
         when(enhanceVideoClient.poll("sk-frozen-token", "amk-parent-guard"))
@@ -434,14 +477,16 @@ class VideoEnhanceJobProcessorTest {
                         "https://tos/out.mp4", "generated/9/video/abc.mp4",
                         "video/mp4", 123_456L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishVideoEnhanceResult(any())).thenReturn(false);
-        when(enhanceVideoClient.submit(anyString(), anyString(), anyString())).thenReturn("amk-task-new");
-        when(stateMachine.markProviderSubmitted(eq("100"), anyString(), anyLong(), eq("amk-task-new")))
-                .thenReturn(true);
 
         processor.handle("100");
 
-        verify(enhanceVideoClient).submit(eq("sk-frozen-token"),
-                eq("https://example.com/src.mp4"), eq("1080p"));
+        // 失租/已终态守卫未命中 = 停止终局（IKICD0）：当前 worker 已无执行权，回退提交只会
+        // 先白付一次上游 submit 再被 markProviderSubmitted 守卫丢弃（孤儿上游任务）；任务
+        // 保持 processing，由新 worker 重新领取后重新检查父任务继续收割
+        verify(enhanceVideoClient, never()).submit(anyString(), anyString(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     // ========== poll 相：状态机 ==========
@@ -493,6 +538,91 @@ class VideoEnhanceJobProcessorTest {
 
         verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
         verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS - 1);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(true);
+
+        processor.handle("100");
+
+        verify(stateMachine).rescheduleProviderPoll("100", "worker-1", 5L, 0);
+        verify(producer).enqueue("100", VideoEnhanceJobProcessor.VIDEO_ENHANCE_POLL_INTERVAL_MS);
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
+                anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ 1045 轮询超时文案不变 + 不写 http_status（无 cause 不推断，IKIN6X）")
+    void pollTransientErrorAtLimit_fails() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+
+        processor.handle("100");
+
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
+                eq("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS
+                        + " 次），上游持续错误: MediaKit 画质增强任务查询超时"),
+                detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        // 反例（IKIN6X）：provider_timeout 无 HTTP cause → 不写 http_status 键、文案不变
+        assertThat(detailsCaptor.getValue()).doesNotContainKey("http_status");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 + pollCount=720）→ 1045 + details.http_status=503，message 剥状态码字样（IKIN6X）")
+    void pollTransientHttp503AtLimit_fails() {
+        stubPollClaim(input("1080p"), VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS);
+        VideoEnhanceError gatewayBusy = new VideoEnhanceError(
+                GenerationError.ERROR_PROVIDER_FAILED, "MediaKit 画质增强任务查询失败: HTTP 503");
+        gatewayBusy.initCause(new NewApiVideoClient.HttpStatusException(503));
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1")).thenThrow(gatewayBusy);
+
+        processor.handle("100");
+
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6X）：状态落 details，message 剥
+        // 「: HTTP 503」片段（冒号保留），上游可读原因保留
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.captor();
+        ArgumentCaptor<Map<String, Object>> detailsCaptor = ArgumentCaptor.captor();
+        verify(stateMachine).failVideoJob(eq("100"),
+                eq(VideoEnhanceContract.ERROR_VIDEO_ENHANCE_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("worker-1"), eq(5L));
+        assertThat(messageCaptor.getValue()).doesNotContain("503")
+                .isEqualTo("画质增强轮询超时（超过 " + VideoEnhanceJobProcessor.MAX_VIDEO_ENHANCE_POLLS
+                        + " 次），上游持续错误: MediaKit 画质增强任务查询失败:");
+        assertThat(detailsCaptor.getValue())
+                .containsEntry("raw", messageCaptor.getValue())
+                .containsEntry("http_status", 503);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        stubPollClaim(input("1080p"), 3);
+        when(enhanceVideoClient.poll("sk-frozen-token", "amk-task-1"))
+                .thenThrow(new VideoEnhanceError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                        "MediaKit 画质增强任务查询超时"));
+        when(stateMachine.rescheduleProviderPoll(eq("100"), eq("worker-1"), eq(5L), anyInt()))
+                .thenReturn(false);
+
+        processor.handle("100");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
         verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(),
                 anyString(), anyLong());
     }

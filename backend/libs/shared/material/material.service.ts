@@ -268,6 +268,45 @@ export class MaterialService {
     });
   }
 
+  /** IKI65H：上传接口回显素材审核状态的**只读**口（与 {@link uploadMaterialGate} 并列，
+   *  接线同样在控制器层）。
+   *
+   *  刻意写成内联的匿名结构类型、不 import 资产域的 `MaterialStatusReader`——与那边刻意不
+   *  import 本域是同一个理由，两边靠结构类型对上，素材库域不反向依赖资产域。
+   *
+   *  **不抛**（`MaterialStatusReader` 的契约）：它取的是一个回显字段，不是门。读失败时记一条
+   *  warn 回 null——否则一次已经落库、已经绑好的上传会因为「一个展示字段读不到」回 500，而
+   *  客户端重试还会在同一条路上再撞一次。代价是「读失败」与「无状态行」都呈现为 null，日志
+   *  是唯一的区分线索；这比把一个已完成的写回滚成错误划算。
+   *
+   *  读的是本地镜像那一行的原值（`Active` / `Processing` / `Failed`）；无对应行返回 null，
+   *  存量素材可能从未建过 `material_assets` 行。注意 `findByMaterialId` 内部走
+   *  `toStatus` 归一（白名单外一律 `Processing`），而资产列表的 `resolveMaterialStatuses`
+   *  直接读原值——两边仅在库里出现白名单外的值时才有差异，应用层写不进去（`mirrorStatus`
+   *  的入参类型就是 `MaterialAssetStatus`）。 */
+  materialStatusReader(): {
+    load(userId: string, materialId: string): Promise<string | null>;
+  } {
+    return {
+      load: async (userId, materialId) => {
+        try {
+          const row = await this.materialAssetRepo.findByMaterialId(
+            userId,
+            materialId,
+          );
+          return row?.status ?? null;
+        } catch (error) {
+          logger.warn(
+            `[upload] 回显素材状态失败，按无状态行处理 materialId=${materialId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return null;
+        }
+      },
+    };
+  }
+
   /** IKF YHJ：上游判定素材失败时的**统一处置**（无论哪条路径发现的，都走这一个口子）。
    *
    *  三件事，顺序有意：

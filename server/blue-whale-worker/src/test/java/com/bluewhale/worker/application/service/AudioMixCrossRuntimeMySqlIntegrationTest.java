@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** 只消费外层 Node 验收新建的隔离库；普通金标类始终使用自己持有的 Testcontainers。 */
@@ -103,6 +104,19 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
     @DisplayName("audio_mix 跨 Node/Java 贯通：消费真实业务 API 写入的同库任务")
     void audioMixCrossRuntimeBusinessApiToAsset() throws Exception {
         String jobId = target.jobId();
+        if ("cancel".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"))) {
+            assertThat(jdbc.queryForObject("SELECT cancel_requested_at FROM generation_jobs WHERE id=?",
+                    java.sql.Timestamp.class, Long.parseLong(jobId))).isNotNull();
+            var credentials = mock(GenerationCredentialService.class);
+            var gateway = mock(NewApiMediaKitMixAudioClient.class);
+            var relay = mock(TosAudioMediaRelay.class);
+            var producer = mock(GenerationMessageProducer.class);
+            new AudioMixJobProcessor(service, credentials, gateway, relay, producer).handle(jobId);
+            assertThat(readJob(Long.parseLong(jobId)).getStatus()).isEqualTo("cancelled");
+            assertThat(countAssets(Long.parseLong(jobId))).isZero();
+            verifyNoInteractions(credentials, gateway, relay, producer);
+            return;
+        }
         boolean failPhase = "fail".equals(System.getenv("IKI68N_CROSS_RUNTIME_PHASE"));
         String storageUploadUrl = target.storageUploadUrl();
         String storagePublicUrl = target.storagePublicUrl();

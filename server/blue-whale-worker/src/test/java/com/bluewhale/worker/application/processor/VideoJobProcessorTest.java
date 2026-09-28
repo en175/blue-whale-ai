@@ -22,6 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -281,6 +284,147 @@ class VideoJobProcessorTest {
         verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
     }
 
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", " \t "})
+    @DisplayName("IKIDEP: parent-reuse 成功但结果 URL 缺失时重新提交，不转存旧结果")
+    void parentReuseBlankUrl_fallThroughToSubmit(String resultUrl) {
+        ClaimedVideoJobDto claim = videoClaim("117", false, null, 0, 0, "parent-task-blank");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("117"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, resultUrl, null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-blank"));
+        doReturn(new SubmitResult("new-task-blank", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("117"), eq("video-worker"), eq(1L), eq("new-task-blank"));
+
+        processor.handle("117");
+
+        verify(mediaRelay, never()).persist(anyString(), anyString());
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+        verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
+        verify(stateMachine).markProviderSubmitted("117", "video-worker", 1L, "new-task-blank");
+        verify(producer).enqueue("117", 5000L);
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 查询异常 → 按不存在回退重新提交（D6 保持）")
+    void parentReusePollError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("116", false, null, 0, 0, "parent-task-err");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("116"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError("provider_failed", "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("parent-task-err"));
+        doReturn(new SubmitResult("new-task-err", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("116"), anyString(), eq(1L), eq("new-task-err"));
+
+        processor.handle("116");
+
+        verify(videoClient).submit(eq("token"), any(VideoSubmitInput.class));
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 转存/发布异常 → 按旧结果不可用回退重新提交（不写终态失败）")
+    void parentReusePublishError_fallThroughToSubmit() {
+        ClaimedVideoJobDto claim = videoClaim("118", false, null, 0, 0, "parent-task-expired");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("118"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-expired.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-expired"));
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频下载失败: HTTP 404"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new SubmitResult("new-task-expired", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("118"), anyString(), eq(1L), eq("new-task-expired"));
+
+        processor.handle("118");
+
+        verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
+        verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
+        verify(producer).enqueue(eq("118"), eq(5000L));
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKICD3: parent-reuse 发布守卫未命中 → 失去执行权停止：零 submit、零 providerTaskId、零轮询、零迟到 Finalize")
+    void parentReusePublishGuardMissed_stopWithoutResubmit() {
+        ClaimedVideoJobDto claim = videoClaim("114", false, null, 0, 0, "parent-task-stale");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("114"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-stale.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-stale"));
+        doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).when(stateMachine).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+
+        processor.handle("114");
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKICD3: 失租停止后新 Worker 接手 → 同一收割路径完成发布（不重新提交）")
+    void parentReuseGuardMissedThenNewWorkerCompletesHarvest() {
+        ClaimedVideoJobDto staleWorker = new ClaimedVideoJobDto(
+                "115", "1", "42", baseInput(), null, false,
+                "video-worker-old", 1L, 0, 0, "parent-task-tko");
+        ClaimedVideoJobDto newWorker = new ClaimedVideoJobDto(
+                "115", "1", "42", baseInput(), null, false,
+                "video-worker-new", 2L, 0, 0, "parent-task-tko");
+        VideoJobProcessor staleProcessor = new VideoJobProcessor(
+                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-worker-old");
+        VideoJobProcessor newProcessor = new VideoJobProcessor(
+                stateMachine, assetSource, credentialService, videoClient, mediaRelay, producer,
+                "video-worker-new");
+        doReturn(Optional.of(staleWorker)).when(stateMachine)
+                .claimVideoJobById("115", "video-worker-old");
+        doReturn(Optional.of(newWorker)).when(stateMachine)
+                .claimVideoJobById("115", "video-worker-new");
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-tko.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-tko"));
+        doReturn(new StoredVideo("http://tos/tko.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(false).doReturn(true).when(stateMachine)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+
+        staleProcessor.handle("115");   // 旧 Worker：守卫未命中 → 失去执行权，静默停止
+        newProcessor.handle("115");     // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
+
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
+        var publishOrder = inOrder(stateMachine);
+        publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-old");
+        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+                eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(),
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+        publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-new");
+        publishOrder.verify(stateMachine).publishVideoResult(eq("115"), eq("1"), eq("42"),
+                eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(),
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+        verify(stateMachine, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+    }
+
     // ========== poll 路径 ==========
 
     @Test
@@ -316,8 +460,150 @@ class VideoJobProcessorTest {
 
         processor.handle("107");
 
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
         verify(stateMachine).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
-                anyString(), any(), anyString(), eq(1L));
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // processing 达上限无 cause → 文案不变、不写 http_status 键（IKIN6Y 反例）
+        assertThat(messageCaptor.getValue())
+                .isEqualTo("视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS + " 次）");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限（pollCount=719）→ 仍按 5s 续排（次数由 SQL +1，IKI61M）")
+    void pollTransientErrorBelowLimit_reschedules() {
+        ClaimedVideoJobDto claim = videoClaim("109", false, "task-109",
+                VideoJobProcessor.MAX_VIDEO_POLLS - 1, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("109"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-109"));
+        doReturn(true).when(stateMachine)
+                .rescheduleProviderPoll(eq("109"), anyString(), eq(1L), eq(30));
+
+        processor.handle("109");
+
+        verify(stateMachine).rescheduleProviderPoll(eq("109"), anyString(), eq(1L), eq(30));
+        verify(producer).enqueue(eq("109"), eq(5000L));
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（pollCount=720）→ provider_timeout 轮询超时 + 不再续排（IKI61M：与 processing 共享预算）")
+    void pollTransientErrorAtLimit_fails() {
+        ClaimedVideoJobDto claim = videoClaim("110", false, "task-110",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("110"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-110"));
+        doReturn(true).when(stateMachine)
+                .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                        anyString(), any(), anyString(), eq(1L));
+
+        processor.handle("110");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // 超时形态（无状态 cause）达上限 → 文案保持现状、不写 http_status 键（IKIN6Y 反例）
+        assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
+                + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 查询超时");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误达上限（HTTP 503 瞬时形态）→ provider_timeout 且透传 http_status=503（瞬时错误各形态同受上限约束）")
+    void pollTransientHttp503AtLimit_fails() {
+        ClaimedVideoJobDto claim = videoClaim("111", false, "task-111",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("111"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "网关繁忙",
+                new NewApiVideoClient.HttpStatusException(503)))
+                .when(videoClient).poll(eq("token"), eq("task-111"));
+        doReturn(true).when(stateMachine)
+                .failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                        anyString(), any(), anyString(), eq(1L));
+
+        processor.handle("111");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        // 网关文案无「: HTTP <code>」字样 → 剥离无命中、文案原样；状态照写 details（IKIN6Y）
+        assertThat(messageCaptor.getValue()).isEqualTo("视频生成轮询超时（超过 "
+                + VideoJobProcessor.MAX_VIDEO_POLLS + " 次），上游持续错误: 网关繁忙");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        assertThat(details).containsEntry("http_status", 503);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKIN6Y: poll 瞬时错误达上限（429 cause 携带状态）→ details.http_status=429，message 剥状态码字样、保留排查信息")
+    void pollTransientHttp429AtLimit_persistsHttpStatusDetail() {
+        ClaimedVideoJobDto claim = videoClaim("121", false, "task-121",
+                VideoJobProcessor.MAX_VIDEO_POLLS, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("121"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频轮询失败: HTTP 429 body={\"error\":{\"message\":\"Requests too fast\"}} request_id=req-882",
+                new NewApiVideoClient.HttpStatusException(429)))
+                .when(videoClient).poll(eq("token"), eq("task-121"));
+
+        processor.handle("121");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("121"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 预算耗尽分支与顶层 catch 同一透传口径（IKIN6Y）：状态入 details，message/raw 不含
+        // 状态码字样，body / request_id 等排查信息原样保留；错误码保持 provider_timeout 不变
+        assertThat(messageCaptor.getValue()).doesNotContain("429")
+                .contains("Requests too fast").contains("request_id=req-882");
+        assertThat(details)
+                .containsEntry("raw", "视频生成轮询超时（超过 " + VideoJobProcessor.MAX_VIDEO_POLLS
+                        + " 次），上游持续错误: new-api 视频轮询失败: body={\"error\":{\"message\":\"Requests too fast\"}} request_id=req-882")
+                .containsEntry("http_status", 429);
+        verify(stateMachine, never()).rescheduleProviderPoll(anyString(), anyString(), anyLong(), anyInt());
+        verify(producer, never()).enqueue(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("poll 瞬时错误未超限但 reschedule 守卫未命中（stale worker / fencing 失配）→ 不自投下一步、不落终态")
+    void pollTransientErrorGuardMissed_noScheduleNext() {
+        ClaimedVideoJobDto claim = videoClaim("112", false, "task-112", 3, 30, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("112"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT, "查询超时"))
+                .when(videoClient).poll(eq("token"), eq("task-112"));
+        doReturn(false).when(stateMachine)
+                .rescheduleProviderPoll(eq("112"), anyString(), eq(1L), eq(30));
+
+        processor.handle("112");
+
+        verify(producer, never()).enqueue(anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     @Test
@@ -431,6 +717,64 @@ class VideoJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), anyString(), eq(1L));
+    }
+
+    // ========== 上游 HTTP 状态结构化透传（IKIMN8 / IKIMS5；对齐音频提取 IKIMS2 样板）==========
+
+    @Test
+    @DisplayName("IKIMS5: poll 上游 401（cause 携带状态）→ details.http_status=401，message 剥离状态码字样")
+    void pollUnauthorized_persistsHttpStatusDetail() {
+        ClaimedVideoJobDto claim = videoClaim("119", false, "task-119", 3, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("119"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        // 401 不在瞬时白名单（429/500/502/503/504）→ 非瞬时直进失败终态；submit !2xx 不带
+        // cause 是已知现状，故本族透传用例走 poll（poll !2xx 挂 HttpStatusException cause）
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "new-api 视频轮询失败: HTTP 401 body={\"error\":{\"message\":\"Incorrect API key\"}}",
+                new NewApiVideoClient.HttpStatusException(401)))
+                .when(videoClient).poll(eq("token"), eq("task-119"));
+
+        processor.handle("119");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("119"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 判定只依赖结构化字段：message/raw 不含状态码字样，上游原因原样保留
+        assertThat(messageCaptor.getValue()).doesNotContain("401").contains("Incorrect API key");
+        assertThat(details)
+                .containsEntry("raw", "new-api 视频轮询失败: body={\"error\":{\"message\":\"Incorrect API key\"}}")
+                .containsEntry("http_status", 401);
+    }
+
+    @Test
+    @DisplayName("IKIMS5: 结果下载失败（无状态 cause）→ 文案保留 HTTP 404 字样，details 不写 http_status 键")
+    void relayDownloadFailure_keepsHttpStatusTextInMessage() {
+        ClaimedVideoJobDto claim = videoClaim("120", false, "task-120", 5, 100, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("120"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("task-120"));
+        doThrow(new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                "生成视频下载失败: HTTP 404 body=not found"))
+                .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
+
+        processor.handle("120");
+
+        var messageCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        var detailsCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(stateMachine).failVideoJob(eq("120"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                messageCaptor.capture(), detailsCaptor.capture(), eq("video-worker"), eq(1L));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> details = detailsCaptor.getValue();
+        // 纯排查文案（TosVideoMediaRelay 下载失败不带状态 cause）：保留状态码字样、不写键
+        // ——该路径永远无判定读取，缺键 = 无非 HTTP 状态可读
+        assertThat(messageCaptor.getValue()).contains("HTTP 404");
+        assertThat(details).doesNotContainKey("http_status").containsKey("raw");
     }
 
     // ========== isTransientPollError ==========

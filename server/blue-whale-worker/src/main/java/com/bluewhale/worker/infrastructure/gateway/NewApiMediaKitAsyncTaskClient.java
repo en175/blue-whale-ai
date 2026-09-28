@@ -42,7 +42,8 @@ import static com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitJsonSupp
  * 家族口径（行为与收敛前逐字一致）：submit 超时 30s / poll 超时 10s；提交超时归终态
  * 不重试（宁可不重试也不双跑）；poll 网络超时 / 连接失败 / HTTP 429/5xx 抛错时以
  * cause 携带状态（{@link NewApiVideoClient.HttpStatusException} 复用），供 processor
- * 按 isTransientPollError 语义判定瞬时重排；status 中间态枚举官方未逐字冻结，
+ * 按 isTransientPollError 语义判定瞬时重排；submit 与 poll 的非 2xx 抛错均以 cause
+ * 携带 HTTP 状态（IKIHGQ：音频混合侧落结构化错误字段）；status 中间态枚举官方未逐字冻结，
  * 小写归一（completed→completed、failed→failed、其余由子类归 processing）。
  * 鉴权头复用 {@link NewApiHttpSupport}；baseUrl 与 OkHttp 实例由子类传入：地址的唯一读取点
  * 是 {@link UpstreamBaseUrl}（装配在 {@code NewApiUpstreamConfig}），OkHttp 实例经
@@ -129,7 +130,8 @@ abstract class NewApiMediaKitAsyncTaskClient {
 
             if (!response.isSuccessful()) {
                 // 官方同步错误结构 error{code,message,param,type}（success=false 任务不创建）——
-                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影
+                // 分类沿用 §5（content > quota > provider_failed），上游可读原因透传给前端投影；
+                // cause 携带 HTTP 状态（与 executePoll 同款），供 processor 落结构化错误字段（IKIHGQ）
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
                 String reason = extractUpstreamMessage(rawText);
                 String message = label + "任务提交失败: HTTP " + response.code();
@@ -139,7 +141,9 @@ abstract class NewApiMediaKitAsyncTaskClient {
                     message += " body=" + truncate(rawText);
                 }
                 message += requestIdSuffix(rawText);
-                throw error(code, message);
+                RuntimeException error = error(code, message);
+                error.initCause(new NewApiVideoClient.HttpStatusException(response.code()));
+                throw error;
             }
 
             JsonNode parsed = parseJsonOrThrow(rawText);

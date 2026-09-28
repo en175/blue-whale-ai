@@ -33,7 +33,7 @@ resolve 示例：
 
 check-id 示例：
   gitee-resolve-ids.sh check-id enterprise_id 883843
-  gitee-resolve-ids.sh check-id project_id 48854568
+  gitee-resolve-ids.sh check-id project_id 12345678
 EOF
 }
 
@@ -126,7 +126,7 @@ do_resolve() {
 # ─── check-id ─────────────────────────────────────────────────────────────
 # 离线校验一个 ID 值。脚本不发请求，所以【不能】判定一个值「正确」，只能识别
 # 「已知危险」（URL 路由 ID）。任何不在危险清单里的值都标「无法离线确认」，
-# 唯一权威来源始终是动态查询。这样避免对正确值误报，也避免对未知值打包票。
+# 本仓日常值见 CLAUDE.md；疑似变更时以动态查询核对。脚本不对未知值打包票。
 #
 # 已知 URL 路由 ID 清单：累积本仓踩过的陷阱值。新增陷阱时在此追加。
 KNOWN_URL_ROUTE_IDS=(
@@ -155,23 +155,23 @@ do_check_id() {
     echo "   → 用下面的动态查询换掉它。"
   else
     echo "ⓘ 无法离线确认 ${value} 是否为正确的 ${which}。"
-    echo "   脚本不发请求，唯一权威来源是下面的动态查询。请实查核对，勿依赖本结果下结论。"
+    echo "   日常值见 CLAUDE.md；疑似变更时用下面的动态查询核对。"
   fi
   echo ""
 
   # 2) 正确做法指引
   if [[ "$which" == "enterprise_id" ]]; then
-    echo "✔ 正确做法：list_enterprises() → 取 path==\"hangzhou-xuanfu_1\" 的 id。"
+    echo "需核对时：list_enterprises() → 取 path==\"hangzhou-xuanfu_1\" 的 id。"
     echo "  enterprise_id 不出现在任何网页 URL 中。"
   else
-    echo "✔ 正确做法：list_enterprise_repositories(enterprise_id, search=\"blue-whale-ai\")"
+    echo "需核对时：list_enterprise_repositories(enterprise_id, search=\"blue-whale-ai\")"
     echo "            → 取 path_with_namespace==\"hangzhou-xuanfu_1/blue-whale-ai\" 的 id。"
     echo "  project_id 不出现在任何网页 URL 中。"
   fi
   echo ""
   echo "  401 自检：调 get_user_info()"
-  echo "    - 成功 → token 有效；若用此 $value 调用仍 401，则值是错的 ID，非授权问题。"
-  echo "    - 401  → token/授权问题，与 ID 无关。"
+  echo "    - 成功 → token 有效；核对 ${which}，不一致时改用查询所得 ID。"
+  echo "    - 401  → 排查 token 失效或类型不符。"
 }
 
 # ─── diagnose-401 ─────────────────────────────────────────────────────────
@@ -183,25 +183,24 @@ do_diagnose_401() {
 
 Gitee 这条信息把三种性质不同的情况混为一谈，按下面顺序排查：
 
-步骤 1 —— 判 token 是否有效
+步骤 1：判 token 是否有效
   调 get_user_info()
     ├─ 成功返回用户 → token 有效，进入步骤 2
     └─ 401          → token 失效或类型不符，进入步骤 3
 
-步骤 2 —— token 有效仍 401 = ID 错（最常见，非授权问题！）
-  调 list_enterprises() → 看返回里 path=="hangzhou-xuanfu_1" 的真实 id。
-  你传的 enterprise_id 若与之不同，就是错的。
-  最典型成因：把网页 URL projects/ 后的数字（网页路由 ID）当成了 enterprise_id。
-  → 解法：用 list_enterprises / list_enterprise_repositories 动态查正确 ID，
-         或先跑 gitee-resolve-ids.sh resolve <URL> 得到查询指引。
+步骤 2：token 有效时核对 ID
+  调 list_enterprises() 核对 enterprise_id，调 list_enterprise_repositories() 核对 project_id。
+  若与请求值不同，改用查询所得 ID；常见错误是把网页 URL projects/ 后的数字当成 enterprise_id。
+  若 ID 一致，继续核对目标资源和访问权限。
+  gitee-resolve-ids.sh resolve <URL> 可给出查询指引。
 
-步骤 3 —— token 失效
+步骤 3：token 无效或类型不符
   - 普通版 REST（/api/v5）报「Access token is wrong type」
     → 该 token 是企业版 MCP 专用，不能调普通 API；用 MCP 工具而非 curl。
   - MCP 工具也 401
     → token 过期或被吊销，重新生成。
 
-黄金法则：enterprise_id / project_id 永远动态查，永不从网页 URL 抄。
+本仓日常 ID 见 CLAUDE.md；遇 401 或疑似变更时动态核对，不从网页 URL 抄 enterprise_id / project_id。
 EOF
 }
 

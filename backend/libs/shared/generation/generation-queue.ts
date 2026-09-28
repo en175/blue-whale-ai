@@ -9,6 +9,7 @@ import {
 import {
   AUDIO_GENERATION_TAG,
   AUDIO_MIX_TAG,
+  AUDIO_VIDEO_MUX_TAG,
   AUDIO_SPEED_TAG,
   AUDIO_TRIM_TAG,
   GENERATION_TASK_QUEUE,
@@ -105,6 +106,13 @@ export async function enqueueAudioMixJob(jobId: string): Promise<void> {
   const config = loadRocketMqConfig();
   const producer = await getStartedRocketMqProducer(config);
   await createRocketMqGenerationProducer(producer, AUDIO_MIX_TAG).enqueue(jobId);
+}
+
+/** 音视频合成任务入队（IKIHPJ，契约 = @lib/contracts/audio-video-mux）。 */
+export async function enqueueAudioVideoMuxJob(jobId: string): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqGenerationProducer(producer, AUDIO_VIDEO_MUX_TAG).enqueue(jobId);
 }
 
 /** 音频截取 job 入队（IKHB6N，契约 = @lib/contracts/audio-trim）：复用生成任务 topic/queue，
