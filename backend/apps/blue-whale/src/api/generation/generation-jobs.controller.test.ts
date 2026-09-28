@@ -46,10 +46,10 @@ function makeController() {
     {} as never, // project：handler 已 mock，不触达
     { repo: {} } as never, // command：同上（retry audio 入队失败兜底才会用 markFailed）
     {} as never, // models
-    {} as never, // cost
     {} as never, // canvas
     { materialStatusRepo: {} } as never, // material：门只接线不判定
     {} as never, // assets
+    {} as never, // identity
   );
 }
 

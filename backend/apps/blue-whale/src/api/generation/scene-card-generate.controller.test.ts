@@ -47,8 +47,6 @@ function makeController() {
   const controller = new SceneCardGenerateController(
     { repo: {} } as never, // sceneCard：handler 已 mock，repo 不触达
     { repo: {} } as never, // storyboard：同上
-    {} as never, // cost：estimator 缺省
-    {} as never, // account：不传 sk- token 则 quotaCheck 不接线
     { materialStatusRepo: {} } as never, // material：门只接线不判定
     {} as never, // assets
   );
