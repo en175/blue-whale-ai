@@ -171,6 +171,29 @@ model generation_jobs {
   canvas_card_state        String    @default("pending") @db.VarChar(16)
   input                    Json?
 
+  /// IKIZQ8（契约 video-sample-mode.ts §1/§4/§6）：两阶段视频的阶段身份。
+  /// NULL = 旧任务 / 普通视频（投影缺省 video）；'sample' = 样片（480p Draft）。
+  /// 'final'（成片）由后续 finalize 票写入——本票只落样片。
+  video_stage              String?   @db.VarChar(16)
+  /// 成片任务指向来源样片任务（仅 final 阶段非 null）。本票建列不写值；
+  /// 唯一约束（FINALIZE_SOURCE_UNIQUE_KEY）随 finalize 票落地。
+  source_sample_job_id     BigInt?
+  /// 样片任务指向其唯一成片任务（仅 sample 阶段可非 null）。本票建列不写值。
+  final_job_id             BigInt?
+  /// 可信上游 Draft created_at（epoch 毫秒，网关轮询回传——不是网关 SubmitTime
+  /// 也不是本地建行时间，IKIZKG）。NULL = 缺可信时间 → finalize_deadline_ms 同为
+  /// NULL → 成片禁用，但样片保留可预览下载。
+  upstream_created_at_ms   BigInt?
+  /// 实际转成片截止 = upstream_created_at_ms + 7 天 − 1 小时安全余量（契约同一公式，
+  /// TS/Java 金标对账 G06）。Worker 在样片成功终态写入；普通视频恒 NULL。
+  finalize_deadline_ms     BigInt?
+  /// 阶段费用状态（契约 CHARGE_STATES）：held=创建预扣（本票写入）；
+  /// settled=成功结算 / released=失败释放（Worker 终态守卫按 video_stage 条件写入）。
+  /// 旧任务与非两阶段任务 NULL。
+  charge_state             String?   @db.VarChar(16)
+  /// 成功按真实用量结算后的整数积分（billing 结算回填，异步）；结算前 NULL。
+  actual_credits           Int?
+
   @@index([project_id], map: "idx_project_id")
   @@index([provider_task_id], map: "idx_provider_task_id")
   @@index([status, next_poll_at], map: "idx_status_next_poll")

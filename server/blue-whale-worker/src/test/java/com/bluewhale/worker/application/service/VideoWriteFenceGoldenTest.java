@@ -135,7 +135,7 @@ class VideoWriteFenceGoldenTest {
         slot.setId(88L); slot.setSlotIndex(0);
         slot.setSceneCardGenerationRecordId(null); // 无 FK
 
-        when(jobMapper.publishVideoGuard(300L, "w1", 5L)).thenReturn(1);
+        when(jobMapper.publishVideoGuard(300L, "w1", 5L, null, null)).thenReturn(1);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot));
         when(jobMapper.selectById(300L)).thenReturn(job);
         // 模拟 MyBatis 自增回填（生产行为）：insert 时写回 asset.id

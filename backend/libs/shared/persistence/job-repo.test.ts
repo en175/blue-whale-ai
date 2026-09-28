@@ -563,3 +563,106 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
     expect(map.get("3")).toMatchObject({ prompt: null });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKIZQ8：两阶段视频的阶段投影（契约 videoStageJobProjectionSchema，金标 G11/G12）。
+// 样片行投影阶段/来源/截止/费用；缺列旧行按普通视频兜底（video=video、其余 null）。
+// ═══════════════════════════════════════════════════════════════
+describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
+  it("★ G11：样片任务详情投影 video_stage/截止/费用，截止折 RFC3339（金标 G06 值）", async () => {
+    // upstream created_at=2026-09-29T02:00:00Z（金标 G06 输入）→ deadline=2026-10-06T01:00:00Z。
+    const finalizeDeadlineMs = 1790647200000 + 7 * 24 * 3600 * 1000 - 3600 * 1000;
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 302n,
+          project_id: 7n,
+          type: "video",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [],
+          error: null,
+          video_stage: "sample",
+          source_sample_job_id: null,
+          final_job_id: 305n,
+          upstream_created_at_ms: 1790647200000n,
+          finalize_deadline_ms: BigInt(finalizeDeadlineMs),
+          charge_state: "settled",
+          actual_credits: 4,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("302", "9");
+
+    expect(view?.video_stage).toBe("sample");
+    expect(view?.source_sample_job_id).toBeNull();
+    expect(view?.final_job_id).toBe("305");
+    expect(view?.finalize_deadline_at).toBe("2026-10-06T01:00:00.000Z");
+    expect(view?.charge_state).toBe("settled");
+    expect(view?.actual_credits).toBe(4);
+  });
+
+  it("★ G12：旧任务缺阶段列 → video_stage 兜底 video、来源/截止/费用全 null", async () => {
+    const prisma = {
+      generation_jobs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5n,
+          project_id: 7n,
+          type: "video",
+          status: "succeeded",
+          progress: 100,
+          input: null,
+          output_asset_ids: [],
+          error: null,
+        }),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const view = await createJobRepo(prisma).findByIdForUser("5", "9");
+
+    expect(view?.video_stage).toBe("video");
+    expect(view?.source_sample_job_id).toBeNull();
+    expect(view?.final_job_id).toBeNull();
+    expect(view?.finalize_deadline_at).toBeNull();
+    expect(view?.charge_state).toBeNull();
+    expect(view?.actual_credits).toBeNull();
+  });
+
+  it("列表投影同样携带阶段字段（缺可信时间的样片 deadline=null，禁成片不禁交付）", async () => {
+    const prisma = {
+      generation_jobs: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 303n,
+            type: "video",
+            status: "succeeded",
+            progress: 100,
+            input: null,
+            output_asset_ids: [],
+            gmt_create: new Date("2026-09-29T00:00:00Z"),
+            error: null,
+            video_stage: "sample",
+            source_sample_job_id: null,
+            final_job_id: null,
+            upstream_created_at_ms: null,
+            finalize_deadline_ms: null,
+            charge_state: "held",
+            actual_credits: null,
+          },
+        ]),
+      },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never;
+
+    const page = await createJobRepo(prisma).listByUser("9", { page: 1, size: 10 });
+
+    expect(page.records[0]?.video_stage).toBe("sample");
+    expect(page.records[0]?.finalize_deadline_at).toBeNull();
+    expect(page.records[0]?.charge_state).toBe("held");
+  });
+});

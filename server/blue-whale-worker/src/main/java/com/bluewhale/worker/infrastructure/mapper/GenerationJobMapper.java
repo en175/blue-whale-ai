@@ -691,6 +691,10 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
      * <p>
      * <b>修正一</b>：actual_amount_fen 不在范围（settle 段整体省略）。
+     * <p>
+     * <b>IKIZQ8</b>：样片阶段列随守卫原子落库——① created_at/截止用 COALESCE（null 不
+     * 覆盖既有值，普通视频传 null 零影响）；② charge_state 只对两阶段任务
+     * （video_stage IS NOT NULL）置 'settled'，普通视频保持 NULL（按阶段结算语义）。
      */
     @Update("""
             UPDATE generation_jobs
@@ -700,6 +704,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
+                upstream_created_at_ms = COALESCE(#{upstreamCreatedAtMs}, upstream_created_at_ms),
+                finalize_deadline_ms = COALESCE(#{finalizeDeadlineMs}, finalize_deadline_ms),
+                charge_state = IF(video_stage IS NOT NULL, 'settled', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'
@@ -709,7 +716,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     int publishVideoGuard(
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
-            @Param("fencingToken") Long fencingToken
+            @Param("fencingToken") Long fencingToken,
+            @Param("upstreamCreatedAtMs") Long upstreamCreatedAtMs,
+            @Param("finalizeDeadlineMs") Long finalizeDeadlineMs
     );
 
     /**
@@ -723,6 +732,10 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * 失败视频作业 CAS 守卫（video-ops.ts:209-221 failVideoJob 独立 SQL）。
      * 与通用 failJobGuard 的差异（逐字核对后单独成条，评审修复）：
      * 视频版多 `next_poll_at = NULL`（:217）。release_note/预留段按修正一省略。
+     * <p>
+     * <b>IKIZQ8</b>：charge_state 只对两阶段任务（video_stage IS NOT NULL）置
+     * 'released'——确认失败退回**该阶段**冻结积分（结算事件由终态收口发 billing），
+     * 普通视频保持 NULL。
      */
     @Update("""
             UPDATE generation_jobs
@@ -732,6 +745,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
                 next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
+                charge_state = IF(video_stage IS NOT NULL, 'released', charge_state),
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'

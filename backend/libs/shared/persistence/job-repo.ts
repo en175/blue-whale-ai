@@ -23,6 +23,14 @@ export interface JobListItem {
   canvas_card_state?: string;
   /** Node handler projects this internal field into a public error envelope. */
   stored_error?: Record<string, unknown> | null;
+  /** IKIZQ8：两阶段视频投影增量（契约 videoStageJobProjectionSchema，金标 G11/G12）。
+   *  旧任务缺列时 video_stage 缺省 video、来源/费用/截止为 null。 */
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
 }
 
 export interface JobOutputAsset {
@@ -55,6 +63,45 @@ export interface JobStatusView {
    *  SCENE_TRACKS[scene]，与 output_asset_ids 写入顺序一致）；非 vocal_split / 未成功为 null。
    *  asset（首个产出）保持不动——既有单 asset 消费者不受影响。 */
   tracks: JobVocalSplitTrack[] | null;
+  /** IKIZQ8：两阶段视频投影增量（契约 videoStageJobProjectionSchema，金标 G11/G12）。 */
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
+}
+
+/** IKIZQ8：generation_jobs 行 → 契约阶段投影（详情/列表共用）。
+ *  缺列（旧任务/普通视频）按普通视频语义兜底：video_stage=video，其余 null。 */
+function videoStageProjection(row: {
+  video_stage: string | null;
+  source_sample_job_id: bigint | null;
+  final_job_id: bigint | null;
+  finalize_deadline_ms: bigint | null;
+  charge_state: string | null;
+  actual_credits: number | null;
+}): {
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
+} {
+  return {
+    video_stage: row.video_stage ?? "video",
+    source_sample_job_id:
+      row.source_sample_job_id != null ? row.source_sample_job_id.toString() : null,
+    final_job_id: row.final_job_id != null ? row.final_job_id.toString() : null,
+    // 契约：RFC3339 带时区字符串；存的是 epoch 毫秒（跨语言金标对账无时区漂移）。
+    finalize_deadline_at:
+      row.finalize_deadline_ms != null
+        ? new Date(Number(row.finalize_deadline_ms)).toISOString()
+        : null,
+    charge_state: row.charge_state ?? null,
+    actual_credits: row.actual_credits ?? null,
+  };
 }
 
 /** vocal_split 单轨投影（契约 VocalSplitTrackResult 逐字段：轨类型 + 资产 id + url + 时长秒）。 */
@@ -304,6 +351,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
           r.error && typeof r.error === "object" && !Array.isArray(r.error)
             ? (r.error as Record<string, unknown>)
             : null,
+        ...videoStageProjection(r),
       }));
 
       return { records, total, size: filter.size, current: filter.page };
@@ -513,6 +561,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
                 return typeof signature === "string" ? signature : null;
               })()
             : null,
+        ...videoStageProjection(row),
       };
     },
   };

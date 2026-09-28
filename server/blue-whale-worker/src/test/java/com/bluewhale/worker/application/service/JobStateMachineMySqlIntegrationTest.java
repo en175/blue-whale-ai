@@ -1431,10 +1431,10 @@ class JobStateMachineMySqlIntegrationTest {
         handoff.verify(spiedService).claimVideoJobById(retry, "video-worker-new");
         handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(), any(),
-                anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         handoff.verify(spiedFinalizer).publishVideoResult(eq(retry), eq("99"), eq("9"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(), any(),
-                anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
 
     @Test

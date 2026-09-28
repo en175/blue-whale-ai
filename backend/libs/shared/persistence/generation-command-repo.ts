@@ -43,6 +43,10 @@ export interface CreateJobInput {
   sceneCardGenerationRecordId?: string;
   /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
+  /** IKIZQ8：两阶段视频阶段（契约 video-sample-mode.ts）。'sample' = 样片任务——
+   *  落 video_stage 列并把 charge_state 置 'held'（创建即预扣）；缺省 = 普通视频，
+   *  两列均 NULL（旧任务/普通视频投影缺省 video、费用为 null）。 */
+  videoStage?: "sample";
 }
 
 /** createJob 的**调用参数**（区别于任务本身的数据）：事务复用与计费依赖。两者都是「每次
@@ -237,6 +241,10 @@ export async function createJobWithinTx(
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
+      // IKIZQ8：样片阶段身份与阶段费用初始态（held = 创建即预扣，见契约 §6）。
+      ...(input.videoStage !== undefined
+        ? { video_stage: input.videoStage, charge_state: "held" }
+        : {}),
     },
   });
   // ★ 预扣：job 行已插入（id 已拿到），但事务未提交 —— 失败整体回滚，不留垃圾 job。
@@ -517,6 +525,13 @@ export function createGenerationCommandRepo(
             execution_deadline_at: deadline,
             next_action_at: now,
             fencing_token: 0,
+            // IKIZQ8：样片重试继承阶段身份（input.sample_mode 已随快照复制，Worker 行为
+            // 按样片语义执行；阶段列不继承会让投影把样片重试显示成普通视频）。
+            // charge_state 不在此置 held：重试路径本就不接 Hold（既有口径，全类型一致），
+            // 终态守卫按 video_stage 条件写 settled/released。
+            ...(original.video_stage != null
+              ? { video_stage: original.video_stage }
+              : {}),
           },
         });
         // 为重试 job 补 cost_reservations 行：原 job 有行就逐列搬运（见 costReservationCreateData），

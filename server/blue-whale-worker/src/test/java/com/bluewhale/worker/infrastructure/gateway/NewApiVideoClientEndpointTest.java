@@ -467,4 +467,98 @@ class NewApiVideoClientEndpointTest {
                 // IKJ80P：cause 链是 processor 侧「疑似上游已建单孤儿」的唯一机器可读信号
                 .hasCauseInstanceOf(java.net.SocketTimeoutException.class);
     }
+
+    // ========== IKIZQ8：样片（Draft）提交与可信 created_at 提取 ==========
+
+    @Test
+    @DisplayName("IKIZQ8: draft=true → 提交体带顶层 draft:true（网关读它开启 480p Draft 语义）")
+    void draftSubmitCarriesTopLevelFlag() throws Exception {
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "480p", "16:9",
+                null, null, List.of(), null, true));
+        JsonNode draftBody = JSON.readTree(lastBody.get());
+        assertThat(draftBody.get("draft").asBoolean()).isTrue();
+        assertThat(draftBody.get("metadata").get("resolution").asText()).isEqualTo("480p");
+
+        // 普通视频（缺省形态）→ 字段缺席，零行为变化
+        new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "1080p", "16:9",
+                null, null, List.of(), null));
+        assertThat(JSON.readTree(lastBody.get()).has("draft")).isFalse();
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: 轮询响应内层上游任务回显 data.data.created_at（Unix 秒）→ 毫秒")
+    void pollExtractsUpstreamCreatedAtFromInnerEcho() throws Exception {
+        // 2026-09-29T02:00:00Z = 1790647200 秒（金标 G06 输入；token 用例同款双层信封）。
+        server.createContext("/v1/video/generations/task-created", exchange -> {
+            byte[] resp = ("{\"code\":\"success\",\"data\":{\"task_id\":\"task-created\","
+                    + "\"status\":\"SUCCESS\",\"result_url\":\"https://tos/v.mp4\","
+                    + "\"usage\":{\"total_tokens\":40594},"
+                    + "\"data\":{\"created_at\":1790647200,\"resolution\":\"480p\"}}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-created");
+
+        assertThat(observation.status()).isEqualTo("succeeded");
+        assertThat(observation.upstreamCreatedAtMs()).isEqualTo(1_790_647_200_000L);
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: 外层 created_at 优先；字符串毫秒/数值毫秒都认")
+    void pollCreatedAtOuterFirstAndMsForms() throws Exception {
+        server.createContext("/v1/video/generations/task-created-outer", exchange -> {
+            byte[] resp = ("{\"data\":{\"task_id\":\"task-created-outer\",\"status\":\"SUCCESS\","
+                    + "\"created_at\":1790647200,\"data\":{\"created_at\":9999999999}}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+        server.createContext("/v1/video/generations/task-created-ms", exchange -> {
+            // 毫秒级数值（≥10^12 不再放大）与字符串形态（上游 flexInt 序列化）都认。
+            byte[] resp = ("{\"data\":{\"task_id\":\"task-created-ms\",\"status\":\"SUCCESS\","
+                    + "\"created_at\":\"1790647200000\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        assertThat(client.poll("t", "task-created-outer").upstreamCreatedAtMs())
+                .isEqualTo(1_790_647_200_000L);
+        assertThat(client.poll("t", "task-created-ms").upstreamCreatedAtMs())
+                .isEqualTo(1_790_647_200_000L);
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: 缺可信 created_at → null（不是 0）：样片仍交付、成片禁用")
+    void pollMissingCreatedAtIsNull() throws Exception {
+        server.createContext("/v1/video/generations/task-no-created", exchange -> {
+            byte[] resp = ("{\"data\":{\"task_id\":\"no-created\",\"status\":\"SUCCESS\","
+                    + "\"result_url\":\"https://tos/v.mp4\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-no-created");
+
+        assertThat(observation.status()).isEqualTo("succeeded");
+        assertThat(observation.upstreamCreatedAtMs()).isNull();
+    }
 }

@@ -7,6 +7,7 @@ import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.contract.GenerationErrorDetailContract;
 import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
+import com.bluewhale.worker.domain.contract.VideoSampleContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -517,14 +518,27 @@ public class VideoJobProcessor implements JobProcessor {
      * relay.persist → videoDimensions → publishVideoResult。
      * <p>
      * 修正一：quota/actualAmountFen 偏差告警段整体省略。
+     * <p>
+     * IKIZQ8 样片差异（金标 G14/G06）：① 样片**禁用**「TOS 未配置则直存供应商 URL」的
+     * 普通视频降级——24 小时/100 次的临时链接不构成自有素材交付，转存不可用即按本阶段
+     * 失败处理（预扣随终态守卫释放）；② 样片成功终态附带可信上游 created_at 与按契约
+     * 公式算出的转成片截止，缺可信时间时截止为 null（样片仍交付，成片禁用）。
      */
     private boolean publishVideo(ClaimedVideoJobDto claim, VideoTaskObservation observation) {
+        boolean sample = Boolean.TRUE.equals(
+                claim.input().get(VideoSampleContract.INPUT_SAMPLE_MODE));
         // relay persist（:468）
         StoredVideo stored;
         if (mediaRelay != null) {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
+        } else if (sample) {
+            // G14：样片禁用供应商 URL 直存降级——转存失败不能以临时链接充当成功结果。
+            log.error("[video] 样片转存不可用（TOS 未配置），按本阶段失败处理（不保存供应商 URL）jobId={}",
+                    claim.id());
+            failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "样片结果转存不可用，已按失败处理");
+            return false;
         } else {
-            // TOS 未配置 → 降级直存 URL（与 image 同构）
+            // TOS 未配置 → 降级直存 URL（与 image 同构，普通视频既有语义不动）
             // IKGS73：这条路上我们**没有字节**（只有供应商 URL），所以 md5 传 null——
             // 这是本单显式接受的边界（工单「明确不做」里的 B 类）。要补它得把整段视频
             // 拉下来算哈希（上限 200MB），不在这单的取舍内。
@@ -542,6 +556,12 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:510）
         double duration = resolveDuration(claim.input());
 
+        // IKIZQ8：可信上游 created_at → 转成片截止（契约同一公式，金标 G06 跨语言对账）。
+        // 缺可信时间：两值都传 null——样片照常交付，deadline 列为 null（服务端据此禁成片）。
+        Long upstreamCreatedAtMs = sample ? observation.upstreamCreatedAtMs() : null;
+        Long finalizeDeadlineMs = sample && upstreamCreatedAtMs != null
+                ? VideoSampleContract.finalizeDeadlineMs(upstreamCreatedAtMs) : null;
+
         // publishVideoResult（:504-512）。
         // 上游真实 token 一并交给终态收口：它是**结算的权威用量**（按 token 计价的模型靠它），
         // 而这里正是**唯一**拿得到轮询结果的地方——终态事件由 finalizer 发出，晚了就没了。
@@ -549,10 +569,12 @@ public class VideoJobProcessor implements JobProcessor {
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
-                width, height, duration, observation.totalTokens());
+                width, height, duration, observation.totalTokens(),
+                upstreamCreatedAtMs, finalizeDeadlineMs);
         if (published) {
-            log.info("[video] 发布成功 jobId={} 上游token={}", claim.id(),
-                    observation.totalTokens() != null ? observation.totalTokens() : "未上报");
+            log.info("[video] 发布成功 jobId={} 上游token={} 样片截止={}", claim.id(),
+                    observation.totalTokens() != null ? observation.totalTokens() : "未上报",
+                    finalizeDeadlineMs != null ? finalizeDeadlineMs : "缺可信created_at(禁成片)");
         } else {
             log.warn("[video] 终态失败(publishVideoResult 守卫未命中) jobId={}", claim.id());
         }
@@ -618,6 +640,8 @@ public class VideoJobProcessor implements JobProcessor {
         Map<String, Object> input = claim.input();
         Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
                 ? castMap(p) : null;
+        // IKIZQ8：样片标记（接纳侧冻结进 input.sample_mode）——提交体带 draft:true 走 480p Draft。
+        boolean sample = Boolean.TRUE.equals(input.get(VideoSampleContract.INPUT_SAMPLE_MODE));
 
         // prompt（:571-586）
         String basePrompt = strOrEmpty(input, "prompt");
@@ -676,7 +700,7 @@ public class VideoJobProcessor implements JobProcessor {
             }
             return new VideoSubmitInput(model, prompt, duration,
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
-                    generateAudio);
+                    generateAudio, sample);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -838,12 +862,12 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged, generateAudio);
+                    null, null, merged, generateAudio, sample);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references, generateAudio
+                firstFrameImage, lastFrameImage, references, generateAudio, sample
         );
     }
 

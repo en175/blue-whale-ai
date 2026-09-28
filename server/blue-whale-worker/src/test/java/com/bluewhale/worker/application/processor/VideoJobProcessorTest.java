@@ -102,7 +102,7 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
         processor.handle("101");
 
@@ -343,13 +343,13 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
         processor.handle("104");
 
         verify(videoClient, never()).submit(anyString(), any());
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
 
     @Test
@@ -392,7 +392,7 @@ class VideoJobProcessorTest {
 
         verify(mediaRelay, never()).persist(anyString(), anyString());
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         verify(videoClient, times(1)).submit(eq("token"), any(VideoSubmitInput.class));
         verify(stateMachine).markProviderSubmitted("117", "video-worker", 1L, "new-task-blank");
         verify(producer).enqueue("117", 5000L);
@@ -439,7 +439,7 @@ class VideoJobProcessorTest {
         verify(stateMachine).markProviderSubmitted("118", "video-worker", 1L, "new-task-expired");
         verify(producer).enqueue(eq("118"), eq(5000L));
         verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
@@ -455,7 +455,7 @@ class VideoJobProcessorTest {
         doReturn(new StoredVideo("http://tos/stale.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(false).when(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
         processor.handle("114");
 
@@ -491,7 +491,7 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(anyString(), anyString());
         doReturn(false).doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
         staleProcessor.handle("115");   // 旧 Worker：守卫未命中 → 失去执行权，静默停止
         newProcessor.handle("115");     // 新 Worker：重新领取同一 GenerationJob → 收割发布成功
@@ -501,13 +501,13 @@ class VideoJobProcessorTest {
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-old");
         publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-old"), eq(1L), anyString(), anyString(), anyString(),
-                any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         publishOrder.verify(stateMachine).claimVideoJobById("115", "video-worker-new");
         publishOrder.verify(finalizer).publishVideoResult(eq("115"), eq("1"), eq("42"),
                 eq("video-worker-new"), eq(2L), anyString(), anyString(), anyString(),
-                any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         verify(finalizer, times(2)).publishVideoResult(anyString(), anyString(), anyString(),
-                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
         verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
         verify(producer, never()).enqueue(anyString(), anyLong());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
@@ -707,14 +707,14 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
-                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any());
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any(), any());
 
         processor.handle("108");
 
         verify(mediaRelay).persist(eq("http://video.mp4"), anyString());
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(),
                 anyString(), anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
-                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any());
+                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(), any(), any(), any());
     }
 
     @Test
@@ -732,14 +732,14 @@ class VideoJobProcessorTest {
                 .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(), anyString(), anyLong(),
-                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any());
+                        anyString(), anyString(), anyString(), any(), anyString(), isNull(), isNull(), anyDouble(), any(), any(), any());
 
         processor.handle("109a");
 
         // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
         verify(finalizer).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
                 anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L), eq("0123456789abcdef0123456789abcdef"),
-                isNull(), isNull(), anyDouble(), any());
+                isNull(), isNull(), anyDouble(), any(), any(), any());
         verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
                 any(), anyString(), anyLong());
     }
@@ -1784,6 +1784,140 @@ class VideoJobProcessorTest {
                 "audio_reference_max", 3,
                 "max_reference_duration_sec", 15));
         return input;
+    }
+
+    // ========== IKIZQ8：样片（Draft）提交 / 截止 / 转存无降级 ==========
+
+    /** 金标 G06 输入：上游 Draft created_at=2026-09-29T02:00:00Z（epoch 毫秒）。 */
+    private static final long G06_UPSTREAM_CREATED_AT_MS = 1_790_647_200_000L;
+    /** 金标 G06 期望：截止=2026-10-06T01:00:00Z（created_at+7天−1小时）。 */
+    private static final long G06_FINALIZE_DEADLINE_MS = 1_791_248_400_000L;
+
+    private Map<String, Object> sampleInput() {
+        Map<String, Object> input = baseInput();
+        input.put("sample_mode", true);
+        input.put("resolution", "480p");
+        return input;
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: input.sample_mode=true → 提交体带 draft 标记（网关转 480p Draft）")
+    void sampleSubmitCarriesDraftFlag() {
+        ClaimedVideoJobDto claim = videoClaim("130", false, null, 0, 0, null, sampleInput());
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("130"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-sample-1", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("130"), anyString(), eq(1L), eq("task-sample-1"));
+
+        processor.handle("130");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        assertThat(captor.getValue().draft()).isTrue();
+        assertThat(captor.getValue().resolution()).isEqualTo("480p");
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: 样片轮询成功且带可信 created_at → 发布附带截止（契约公式，金标 G06 值）")
+    void samplePublishesWithFinalizeDeadline() {
+        ClaimedVideoJobDto claim = videoClaim("131", false, "task-sample-2", 3, 100, null, sampleInput());
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("131"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null,
+                40_594L, G06_UPSTREAM_CREATED_AT_MS))
+                .when(videoClient).poll(eq("token"), eq("task-sample-2"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+
+        processor.handle("131");
+
+        // 可信 created_at 与截止（=created_at+7d−1h）随终态落列——与 TS 契约同一公式（G06）。
+        verify(finalizer).publishVideoResult(eq("131"), eq("1"), eq("42"),
+                anyString(), eq(1L), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"),
+                eq(1024L), eq("0123456789abcdef0123456789abcdef"), anyInt(), anyInt(), anyDouble(),
+                eq(40_594L), eq(G06_UPSTREAM_CREATED_AT_MS), eq(G06_FINALIZE_DEADLINE_MS));
+    }
+
+    @Test
+    @DisplayName("IKIZQ8: 缺可信 created_at → 样片仍交付但截止为 null（禁成片不禁交付）")
+    void sampleWithoutTrustedCreatedAtStillDeliversWithNullDeadline() {
+        ClaimedVideoJobDto claim = videoClaim("132", false, "task-sample-3", 3, 100, null, sampleInput());
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("132"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null,
+                40_594L, null))
+                .when(videoClient).poll(eq("token"), eq("task-sample-3"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+
+        processor.handle("132");
+
+        verify(finalizer).publishVideoResult(eq("132"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyInt(), anyInt(), anyDouble(), any(), isNull(), isNull());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKIZQ8 G14: 样片转存不可用（无 TOS）→ 按本阶段失败，不以供应商 URL 充当成功")
+    void sampleRelayUnavailableFailsInsteadOfStoringProviderUrl() {
+        VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
+                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
+        ClaimedVideoJobDto claim = videoClaim("133", false, "task-sample-4", 3, 100, null, sampleInput());
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("133"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null,
+                null, G06_UPSTREAM_CREATED_AT_MS))
+                .when(videoClient).poll(eq("token"), eq("task-sample-4"));
+
+        noRelayProcessor.handle("133");
+
+        verify(finalizer, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+        verify(finalizer).failVideoJob(eq("133"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                anyString(), any(), eq("video-worker"), eq(1L));
+    }
+
+    @Test
+    @DisplayName("IKIZQ8 G12 回归: 普通视频转存不可用 → 仍走既有 URL 直存降级（旧行为零变化）")
+    void normalVideoRelayUnavailableKeepsLegacyUrlFallback() {
+        VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
+                stateMachine, finalizer, assetSource, credentialService, videoClient, null, producer);
+        ClaimedVideoJobDto claim = videoClaim("134", false, "task-normal", 3, 100, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("134"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("task-normal"));
+        // 降级直存路径的 storageKey/mime/size/md5 均为 null——字符串槽用 any()（anyString() 不匹配 null）。
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), any(), any(), any(), any(),
+                        anyInt(), anyInt(), anyDouble(), any(), any(), any());
+
+        noRelayProcessor.handle("134");
+
+        verify(finalizer).publishVideoResult(eq("134"), anyString(), anyString(),
+                anyString(), anyLong(), eq("http://provider-temp.mp4"), isNull(), isNull(),
+                isNull(), isNull(), anyInt(), anyInt(), anyDouble(), any(), isNull(), isNull());
+        verify(finalizer, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
     }
 
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,

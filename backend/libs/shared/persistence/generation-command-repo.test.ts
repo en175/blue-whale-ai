@@ -1185,3 +1185,56 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     expect(h.committedJobIds).toHaveLength(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// IKIZQ8：样片阶段落库——videoStage='sample' 时行值带 video_stage + charge_state='held'
+// （创建即预扣，契约 §6）；普通视频（未传 videoStage）两列不写（NULL = 旧语义）。
+// ═══════════════════════════════════════════════════════════════
+describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
+  function plainTx(createJob: ReturnType<typeof vi.fn>) {
+    return {
+      canvas: { findFirst: vi.fn().mockResolvedValue(null) },
+      generation_jobs: { create: createJob },
+      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
+      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+      project_events: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
+    };
+  }
+
+  it("videoStage='sample' → 行值带 video_stage 与 charge_state='held'", async () => {
+    const createJob = vi.fn().mockResolvedValue({ id: 300n, version: 1 });
+    await createJobWithinTx(plainTx(createJob) as never, {
+      projectId: "55",
+      userId: "9",
+      type: "video",
+      expectedOutputCount: 1,
+      input: { prompt: "whale", sample_mode: true },
+      actionIdentity: "generate-300",
+      actionType: "generate_video",
+      videoStage: "sample",
+    });
+    expect(createJob).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        video_stage: "sample",
+        charge_state: "held",
+      }),
+    });
+  });
+
+  it("未传 videoStage（普通视频/图片/音频）→ 行值不含两列（旧行为零变化）", async () => {
+    const createJob = vi.fn().mockResolvedValue({ id: 301n, version: 1 });
+    await createJobWithinTx(plainTx(createJob) as never, {
+      projectId: "55",
+      userId: "9",
+      type: "video",
+      expectedOutputCount: 1,
+      input: { prompt: "whale" },
+      actionIdentity: "generate-301",
+      actionType: "generate_video",
+    });
+    const data = createJob.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(data.data.video_stage).toBeUndefined();
+    expect(data.data.charge_state).toBeUndefined();
+  });
+});

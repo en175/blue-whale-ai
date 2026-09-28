@@ -17,6 +17,7 @@ import {
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_QUOTE_STALE,
   VIDEO_SAMPLE_RESOLUTION,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -76,6 +77,8 @@ import {
 } from "@lib/shared/persistence/index.js";
 import type { BillingHold } from "@lib/shared/billing/billing-hold.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
+import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
+import { quoteRevisionOf } from "./handle-quote-generation-job.js";
 
 import {
   channelOf,
@@ -144,6 +147,11 @@ export interface CreateGenerationJobBody {
   prompt_doc?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
+  /** IKIZQ8：样片提交确认（契约 confirmedSubmitFieldsSchema 的增量，仅
+   *  parameters.sample_mode=true 时必填）：报价入口返回的整数积分与版本指纹。
+   *  未开样片的请求不读这两个字段——普通视频创建语义零变化。 */
+  expected_credits?: unknown;
+  quote_revision?: unknown;
 }
 
 /** IKDJNZ：单数组 references 元素（保序）。asset_id（本地）与 material_id（素材库）二选一。 */
@@ -1461,6 +1469,11 @@ interface GenerationDeps {
     hold: BillingHold;
     release: BillingRelease;
   };
+  /** IKIZQ8：样片提交确认的复算依赖（与报价入口同一个 createBillingQuote 装配——
+   *  同一套规格归一、同一个 resolveTier，否则「提交核对」与「用户看到的报价」会漂）。
+   *  只在 parameters.sample_mode=true 的样片分支读取；普通视频创建不碰它。
+   *  缺省（未接线）时样片提交按无报价拒绝（fail closed），普通路径零影响。 */
+  quote?: BillingQuote;
   /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
    *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
    *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
@@ -1634,6 +1647,61 @@ export async function handleCreateGenerationJob(
     return fail(errorCodeToNumeric(sampleRuling.code), sampleRuling.message, {
       code: sampleRuling.code,
     });
+  }
+  // IKIZQ8：样片提交确认（契约 §2，金标 G03/G04）——fail closed，位于建任务/预扣之前：
+  // 变价（quote_revision 失效）、算不出价、缺确认字段都零创建、零扣费。
+  //
+  // 复算走**报价入口同一套**：projectQuoteInput（原始 body，与 handleQuoteGenerationJob
+  // 同参）+ deps.quote（同一 createBillingQuote 装配）+ quoteRevisionOf（同一指纹函数）——
+  // 三处任何一处分叉，用户看到的报价与服务端核对的就会是两个数。
+  if (sampleRuling.kind === "sample") {
+    const credits = body.expected_credits;
+    const revision = body.quote_revision;
+    if (
+      typeof credits !== "number" || !Number.isInteger(credits) || credits <= 0 ||
+      typeof revision !== "string" || revision === ""
+    ) {
+      return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "样片提交须携带 expected_credits 与 quote_revision", {
+        code: ERROR_INVALID_INPUT,
+      });
+    }
+    const quoteDep = deps.quote;
+    if (quoteDep === undefined) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+        code: ERROR_QUOTE_STALE,
+      });
+    }
+    // 与报价入口同参（原始 body；effectiveBody 的画布合并不进定价规格）。
+    const quoteInput = projectQuoteInput(type, body, capability);
+    const ruleSnapshot = serializePricingRule(capability);
+    const quote =
+      quoteInput !== null
+        ? await quoteDep({
+            userId,
+            modelId: resolvedModelId,
+            taskType: type,
+            input: quoteInput,
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          })
+        : null;
+    const currentRevision =
+      quote !== null && quoteInput !== null
+        ? quoteRevisionOf({
+            catalogVersion: quote.catalogVersion,
+            capabilityVersion: capability?.version,
+            tier: quote.tier,
+            quoteInput,
+          })
+        : null;
+    if (
+      quote === null ||
+      Number(quote.credits) !== credits ||
+      currentRevision !== revision
+    ) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+        code: ERROR_QUOTE_STALE,
+      });
+    }
   }
   const imageReferenceMax =
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
@@ -1947,6 +2015,11 @@ export async function handleCreateGenerationJob(
     input.provider_credential = internal.providerCredential;
   }
   input.expected_output_count = expectedOutputCount;
+  // IKIZQ8：样片增量冻结进 input 快照（契约 §1）——Worker 读它走 Draft 提交、
+  // 禁用供应商 URL 直存降级并计算转成片截止；重试/恢复消费同一份快照。
+  if (sampleRuling.kind === "sample") {
+    input.sample_mode = true;
+  }
   // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，
   // 重试随 input 原样复用；无文本输入（inputs 为空）不写，目标无文本边时提示本就不显示。
   if (textIndexRefs.value.index.inputs.length > 0) {
@@ -2000,6 +2073,8 @@ export async function handleCreateGenerationJob(
     input,
     actionIdentity,
     actionType,
+    // IKIZQ8：样片阶段落库（video_stage='sample' + charge_state='held'）。
+    ...(sampleRuling.kind === "sample" ? { videoStage: "sample" as const } : {}),
   };
   // ★ 新计费：预扣 + 失败补偿一起交给 repo —— 它在**建 job 的事务内**（job 行插入后、
   //   提交前）调 hold，并在事务失败时调 release 把那笔冻结退掉（幂等键与等级的说明见

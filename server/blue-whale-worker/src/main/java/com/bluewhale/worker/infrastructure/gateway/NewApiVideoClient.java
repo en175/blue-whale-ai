@@ -150,6 +150,11 @@ public class NewApiVideoClient {
         body.put("prompt", input.prompt());
         body.put("duration", effectiveDuration);
         body.put("response_format", "url");
+        // IKIZQ8：样片（Draft）标记——网关读顶层 draft（或 metadata.draft）开启 480p
+        // Draft 语义并强制 resolution=480p（IKIZBR 网关研究：adaptor.go draft.go）。
+        if (input.draft()) {
+            body.put("draft", true);
+        }
         body.set("metadata", metadata);
 
         String bodyJson;
@@ -319,6 +324,12 @@ public class NewApiVideoClient {
             // 即**外层信封与内层任务结果各带一份**，取值以外层优先。
             Long totalTokens = extractTotalTokens(data);
 
+            // IKIZQ8：可信上游 Draft created_at（epoch 毫秒）——转成片截止的起算点
+            // （IKIZKG：网关 SubmitTime 晚于它，不能替代）。取不到 = null：样片仍交付，
+            // 但 finalize_deadline 为 null ⇒ 服务端禁用成片。候选位置与 totalTokens 同款：
+            // 外层信封 data.created_at 与内层上游任务回显 data.data.created_at，先外后内。
+            Long upstreamCreatedAtMs = extractUpstreamCreatedAtMs(data);
+
             // url / result_url（:316-321）
             String url = textOrNull(data, "url");
             if (url == null) url = textOrNull(data, "result_url");
@@ -327,7 +338,8 @@ public class NewApiVideoClient {
             String normalizedStatus = status.toLowerCase();
 
             if (SUCCESS_STATUSES.containsKey(normalizedStatus)) {
-                return new VideoTaskObservation("succeeded", 100, url, quota, null, totalTokens);
+                return new VideoTaskObservation("succeeded", 100, url, quota, null, totalTokens,
+                        upstreamCreatedAtMs);
             }
             if (FAILED_STATUSES.containsKey(normalizedStatus)) {
                 // 错误码分类（new-api-video-task-provider.ts:91-97）。
@@ -354,12 +366,13 @@ public class NewApiVideoClient {
                     code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;
                 }
                 return new VideoTaskObservation("failed", 100, null, quota,
-                        new TaskError(code, message), totalTokens);
+                        new TaskError(code, message), totalTokens, upstreamCreatedAtMs);
             }
 
             // queued / processing（:109-115）
             String obsStatus = "queued".equals(normalizedStatus) ? "queued" : "processing";
-            return new VideoTaskObservation(obsStatus, 0, null, quota, null, totalTokens);
+            return new VideoTaskObservation(obsStatus, 0, null, quota, null, totalTokens,
+                    upstreamCreatedAtMs);
         } catch (VideoProviderError e) {
             throw e;
         } catch (Exception e) {
@@ -420,6 +433,33 @@ public class NewApiVideoClient {
             if (parsed != null && parsed > 0) {
                 return parsed;
             }
+        }
+        return null;
+    }
+
+    /**
+     * IKIZQ8：从轮询响应取可信上游 Draft created_at（epoch 毫秒）。
+     *
+     * <p><b>取不到 = null，不是 0</b>：null 让样片以「缺可信时间」交付（deadline 为
+     * null、成片禁用），与 {@link #extractTotalTokens} 的「不报该维度」同口径。
+     *
+     * <p>候选位置（先外后内，与 token 提取同一信封假设）：
+     * <ol>
+     *   <li>外层信封 {@code data.created_at}（网关 DTO 若透传）</li>
+     *   <li>内层上游任务回显 {@code data.data.created_at}（Ark 任务对象，实测
+     *       {@code usage} 就住在这里）</li>
+     * </ol>
+     *
+     * <p>Ark 的 {@code created_at} 是 **Unix 秒**；兼容毫秒（13 位）与字符串形态
+     * （上游 flexInt 序列化）。秒/毫秒按数量级判别：&lt; 10^12 视为秒并放大。
+     */
+    private static Long extractUpstreamCreatedAtMs(JsonNode data) {
+        JsonNode inner = data.has("data") && data.get("data").isObject() ? data.get("data") : null;
+        for (JsonNode node : new JsonNode[]{data, inner}) {
+            if (node == null) continue;
+            Long raw = firstToken(node, "created_at", "created_at_ms");
+            if (raw == null || raw <= 0) continue;
+            return raw < 1_000_000_000_000L ? raw * 1000 : raw;
         }
         return null;
     }
@@ -496,6 +536,9 @@ public class NewApiVideoClient {
      *        {@code null} = 这次响应里没有可用 token —— 上报侧据此**不报**这个维度，
      *        结算退回按预扣额计价；**不要填 0**（0 是一笔免费生成，会静默少收）。
      *        取值与回退顺序见 {@link #extractTotalTokens}
+     * @param upstreamCreatedAtMs IKIZQ8：可信上游 Draft created_at（epoch 毫秒，样片
+     *        截止的起算点）。{@code null} = 响应里没有——样片仍交付但 finalize_deadline
+     *        为 null（成片禁用）。取值位置见 {@link #extractUpstreamCreatedAtMs}
      */
     public record VideoTaskObservation(
             String status,
@@ -503,8 +546,15 @@ public class NewApiVideoClient {
             String url,
             Double quota,
             TaskError error,
-            Long totalTokens
-    ) {}
+            Long totalTokens,
+            Long upstreamCreatedAtMs
+    ) {
+        /** 既有 6 参形态：无可信 created_at（普通视频 / 旧用例），created_at 缺省 null。 */
+        public VideoTaskObservation(
+                String status, int progress, String url, Double quota, TaskError error, Long totalTokens) {
+            this(status, progress, url, quota, error, totalTokens, null);
+        }
+    }
 
     /** 任务错误（new-api-generation-ops.ts:294-310）。 */
     public record TaskError(String code, String message) {}
@@ -512,6 +562,9 @@ public class NewApiVideoClient {
     /**
      * 视频提交输入（new-api-generation-ops.ts:176-240 body 字段）。
      * 由 VideoJobProcessor.buildSubmitRequest 组装。
+     *
+     * @param draft IKIZQ8：样片（480p Draft）标记——input 快照冻结的 sample_mode=true。
+     *        true 时提交体带顶层 {@code draft: true}，网关转 Draft 并强制 480p。
      */
     public record VideoSubmitInput(
             String model,
@@ -523,8 +576,18 @@ public class NewApiVideoClient {
             String lastFrameImage,
             List<VideoReference> references,
             /** IKG0LP：视频是否带音频。null = 不下发该字段（能力位不允许或旧快照），维持上游默认。 */
-            Boolean generateAudio
-    ) {}
+            Boolean generateAudio,
+            boolean draft
+    ) {
+        /** 普通视频（非样片）的既有 9 参形态：draft 缺省 false，旧调用点零改动。 */
+        public VideoSubmitInput(
+                String model, String prompt, double duration, String resolution, String ratio,
+                String firstFrameImage, String lastFrameImage,
+                List<VideoReference> references, Boolean generateAudio) {
+            this(model, prompt, duration, resolution, ratio, firstFrameImage, lastFrameImage,
+                    references, generateAudio, false);
+        }
+    }
 
     /**
      * 视频参考素材（video-job-runner.ts:81-87 VideoReference 逐字移植）。

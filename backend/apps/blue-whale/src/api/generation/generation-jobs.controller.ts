@@ -186,6 +186,10 @@ export class GenerationJobsController {
         materialGate: this.buildMaterialGate(user.userId, authorization),
         // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
         billing,
+        // IKIZQ8：样片提交确认的复算（与 /quote 端点同一装配——预览价、核对价、实扣价
+        // 三者必须同源）。只在 parameters.sample_mode=true 的样片分支被读；计费地址
+        // 缺失时上面的 billing() 已经先抛，这里不会成为新的失败面。
+        quote: this.billingQuote(),
       },
       internal,
     );
