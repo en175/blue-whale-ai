@@ -350,6 +350,14 @@ public class VideoJobProcessor implements JobProcessor {
                 if (settled) return;
             }
 
+            // IKIZQC：成片（video_stage='final'）提交相——不重建 Draft 输入，用样片保存的
+            // 网关公开 task ID 调 finalize（网关自行组装 draft_task 引用，私有上游 ID
+            // 不出网关）。返回的公开任务 ID 即成片轮询句柄，后续 pollPhase 与普通视频同构。
+            if ("final".equals(claim.videoStage())) {
+                submitFinalize(claim, providerToken);
+                return;
+            }
+
             // buildSubmitRequest（:236）
             VideoSubmitInput request = buildSubmitRequest(claim);
 
@@ -366,6 +374,30 @@ public class VideoJobProcessor implements JobProcessor {
         } else {
             // ========== poll 阶段（video-job-runner.ts:246-355）==========
             pollPhase(claim, providerToken);
+        }
+    }
+
+    /**
+     * IKIZQC：成片提交相（金标 G02/G14）。缺来源样片上游任务 ID = 数据异常（成片行
+     * 必然带 source_sample_job_id，样片成功终态必然带 provider_task_id），按本阶段失败
+     * 处理——不猜、不回退成普通 submit（那会凭空建一条无 Draft 引用的上游任务）。
+     * 失败路径由 failVideoGuard 置 charge_state='released' 并发该阶段返还事件（样片
+     * 阶段的结算不受影响，金标 G09）。
+     */
+    private void submitFinalize(ClaimedVideoJobDto claim, String providerToken) {
+        String sampleTaskId = claim.sourceSampleProviderTaskId();
+        if (sampleTaskId == null || sampleTaskId.isEmpty()) {
+            log.error("[video] 成片缺少来源样片上游任务 ID，按本阶段失败处理 jobId={}", claim.id());
+            failVideo(claim, GenerationError.ERROR_INVALID_INPUT, "成片缺少来源样片的上游任务 ID");
+            return;
+        }
+        SubmitResult submitted = videoClient.finalize(providerToken, sampleTaskId);
+        log.info("[video] 成片已提交 finalize jobId={} sampleTaskId={} providerTaskId={}",
+                claim.id(), sampleTaskId, submitted.taskId());
+        boolean updated = stateMachine.markProviderSubmitted(
+                claim.id(), claim.workerId(), claim.fencingToken(), submitted.taskId());
+        if (updated) {
+            scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
         }
     }
 
@@ -523,19 +555,23 @@ public class VideoJobProcessor implements JobProcessor {
      * 普通视频降级——24 小时/100 次的临时链接不构成自有素材交付，转存不可用即按本阶段
      * 失败处理（预扣随终态守卫释放）；② 样片成功终态附带可信上游 created_at 与按契约
      * 公式算出的转成片截止，缺可信时间时截止为 null（样片仍交付，成片禁用）。
+     * IKIZQC：G14 对**成片**同规（两阶段成功前必须转存自有 Asset）——禁降级判定从
+     * input.sample_mode 扩展为「样片或成片阶段」；成片独立转存、独立结算（本 job 的
+     * totalTokens 即成片阶段真实用量），来源样片不动。
      */
     private boolean publishVideo(ClaimedVideoJobDto claim, VideoTaskObservation observation) {
         boolean sample = Boolean.TRUE.equals(
                 claim.input().get(VideoSampleContract.INPUT_SAMPLE_MODE));
+        boolean twoPhase = sample || "final".equals(claim.videoStage());
         // relay persist（:468）
         StoredVideo stored;
         if (mediaRelay != null) {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
-        } else if (sample) {
-            // G14：样片禁用供应商 URL 直存降级——转存失败不能以临时链接充当成功结果。
-            log.error("[video] 样片转存不可用（TOS 未配置），按本阶段失败处理（不保存供应商 URL）jobId={}",
+        } else if (twoPhase) {
+            // G14：两阶段（样片/成片）禁用供应商 URL 直存降级——转存失败不能以临时链接充当成功结果。
+            log.error("[video] 两阶段结果转存不可用（TOS 未配置），按本阶段失败处理（不保存供应商 URL）jobId={}",
                     claim.id());
-            failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "样片结果转存不可用，已按失败处理");
+            failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "视频结果转存不可用，已按失败处理");
             return false;
         } else {
             // TOS 未配置 → 降级直存 URL（与 image 同构，普通视频既有语义不动）

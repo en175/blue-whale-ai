@@ -1971,6 +1971,132 @@ class VideoJobProcessorTest {
         assertThat(request.references().get(3).type()).isEqualTo("audio");
     }
 
+    // ========== IKIZQC：成片（finalize）提交 / 轮询 / 转存无降级 ==========
+
+    /** 成片 claim：video_stage='final' + 来源样片公开任务 ID（13 参形态）。 */
+    private ClaimedVideoJobDto finalClaim(String id, String providerTaskId,
+                                          String sourceSampleProviderTaskId) {
+        Map<String, Object> input = baseInput();
+        input.put("resolution", "1080p");
+        return new ClaimedVideoJobDto(
+                id, "1", "42", input,
+                providerTaskId, false,
+                "video-worker", 1L,
+                0, 0, null, "final", sourceSampleProviderTaskId);
+    }
+
+    @Test
+    @DisplayName("IKIZQC: final 提交相 → 用样片公开 task ID 调 finalize，不重建 Draft 输入")
+    void finalSubmitPhaseCallsGatewayFinalizeWithSampleTaskId() {
+        ClaimedVideoJobDto claim = finalClaim("140", null, "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("140"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-final-77", "queued")).when(videoClient)
+                .finalize(eq("token"), eq("task-sample-9"));
+        doReturn(true).when(stateMachine)
+                .markProviderSubmitted(eq("140"), anyString(), eq(1L), eq("task-final-77"));
+
+        processor.handle("140");
+
+        // ★ 不走普通 submit：成片不重放提示词/参考/时长（金标 G02），上游输入由网关从
+        //   Draft 派生；本仓只携带样片保存的网关公开任务 ID。
+        verify(videoClient, never()).submit(anyString(), any());
+        verify(videoClient).finalize(eq("token"), eq("task-sample-9"));
+        verify(stateMachine).markProviderSubmitted(eq("140"), anyString(), eq(1L), eq("task-final-77"));
+        verify(producer).enqueue(eq("140"), eq(VideoJobProcessor.VIDEO_POLL_INTERVAL_MS));
+    }
+
+    @Test
+    @DisplayName("IKIZQC: final 缺来源样片上游任务 ID → 按本阶段失败，不凭空提交新上游任务")
+    void finalSubmitWithoutSourceTaskIdFailsStage() {
+        ClaimedVideoJobDto claim = finalClaim("141", null, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("141"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+
+        processor.handle("141");
+
+        verify(videoClient, never()).finalize(anyString(), anyString());
+        verify(videoClient, never()).submit(anyString(), any());
+        verify(stateMachine).failVideoJob(eq("141"), eq(GenerationError.ERROR_INVALID_INPUT),
+                anyString(), any(), eq("video-worker"), eq(1L));
+        verify(stateMachine, never()).markProviderSubmitted(anyString(), anyString(), anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("IKIZQC G09/G14: final 轮询成功 → 转存自有 Asset 后发布，结算带成片阶段真实 token；截止列不动")
+    void finalPollSuccessRelaysAndPublishesWithStageTokens() {
+        ClaimedVideoJobDto claim = finalClaim("142", "task-final-77", "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("142"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-final.mp4", null, null,
+                118_000L, null))
+                .when(videoClient).poll(eq("token"), eq("task-final-77"));
+        doReturn(new StoredVideo("https://tos/final.mp4", "storage/final.mp4", "video/mp4", 5L, "md5f"))
+                .when(mediaRelay).persist(eq("http://provider-final.mp4"), eq("42"));
+        doReturn(true).when(stateMachine)
+                .publishVideoResult(eq("142"), anyString(), anyString(), anyString(), anyLong(),
+                        eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
+                        eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
+                        eq(118_000L), isNull(), isNull());
+
+        processor.handle("142");
+
+        // ★ 成功终态：totalTokens=118000（成片阶段真实用量，Settle 权威输入）；
+        //   upstream_created_at/finalize_deadline 传 null——那是样片阶段的语义，
+        //   COALESCE 不覆盖样片已落的截止（两阶段费用与任务关系互不回滚，金标 G09）。
+        verify(stateMachine).publishVideoResult(eq("142"), anyString(), anyString(), anyString(),
+                anyLong(), eq("https://tos/final.mp4"), eq("storage/final.mp4"), eq("video/mp4"),
+                eq(5L), eq("md5f"), anyInt(), anyInt(), anyDouble(),
+                eq(118_000L), isNull(), isNull());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("IKIZQC G14: 成片转存不可用（无 TOS）→ 按本阶段失败，不以供应商 URL 充当成功")
+    void finalRelayUnavailableFailsInsteadOfStoringProviderUrl() {
+        VideoJobProcessor noRelayProcessor = new VideoJobProcessor(
+                stateMachine, assetSource, credentialService, videoClient, null, producer);
+        ClaimedVideoJobDto claim = finalClaim("143", "task-final-8", "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("143"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://provider-temp.mp4", null, null,
+                null, null))
+                .when(videoClient).poll(eq("token"), eq("task-final-8"));
+
+        noRelayProcessor.handle("143");
+
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+        verify(stateMachine).failVideoJob(eq("143"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                anyString(), any(), eq("video-worker"), eq(1L));
+    }
+
+    @Test
+    @DisplayName("IKIZQC G08/G09: final 轮询失败 → failVideoJob（守卫置 released、返还该阶段预扣，样片不动）")
+    void finalPollFailureFailsStageOnly() {
+        ClaimedVideoJobDto claim = finalClaim("144", "task-final-9", "task-sample-9");
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("144"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("failed", 100, null, null,
+                new TaskError("InternalServiceError", "上游成片失败"), null, null))
+                .when(videoClient).poll(eq("token"), eq("task-final-9"));
+
+        processor.handle("144");
+
+        verify(stateMachine).failVideoJob(eq("144"), eq("InternalServiceError"),
+                anyString(), any(), eq("video-worker"), eq(1L));
+        verify(stateMachine, never()).publishVideoResult(anyString(), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyInt(), anyInt(), anyDouble(), any(), any(), any());
+    }
+
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
                                            String providerTaskId, int pollCount,
                                            int progress, String parentProviderTaskId) {

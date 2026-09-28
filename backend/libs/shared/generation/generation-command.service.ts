@@ -2,21 +2,32 @@ import { Injectable } from "@nestjs/common";
 import {
   createGenerationCommandRepo,
   createAssetOwnershipOps,
+  createFinalizeCommandRepo,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createGenerationCommandRepo>;
+type FinalizeRepo = ReturnType<typeof createFinalizeCommandRepo>;
 
 /** Generation 命令 repo 封装（create/cancel/retry）。 */
 @Injectable()
 export class GenerationCommandService {
   private repoInstance?: Repo;
+  private finalizeInstance?: FinalizeRepo;
 
   get repo(): Repo {
     if (!this.repoInstance) {
       this.repoInstance = createGenerationCommandRepo(this.prisma.client);
     }
     return this.repoInstance;
+  }
+
+  /** IKIZQC：成片（finalize）命令面——来源样片读取 / 成片任务创建 / 幂等重放查询。 */
+  get finalize(): FinalizeRepo {
+    if (!this.finalizeInstance) {
+      this.finalizeInstance = createFinalizeCommandRepo(this.prisma.client);
+    }
+    return this.finalizeInstance;
   }
 
   /** IKE7JP：提交时复用 worker 资产归属查询（resolveInputAssets），校验参考素材存在性/类型。

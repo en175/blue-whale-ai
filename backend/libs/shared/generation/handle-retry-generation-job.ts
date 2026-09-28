@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  ERROR_FINALIZE_ALREADY_ATTEMPTED,
   ERROR_INVALID_REFERENCE,
   ERROR_JOB_ALREADY_RETRIED,
   ERROR_JOB_NOT_RETRYABLE_STATUS,
@@ -60,6 +61,15 @@ export async function handleRetryGenerationJob(
   if (!retry) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if ("generation_job_id" in retry) {
     return ok(retry);
+  }
+  if (retry.kind === "finalize_retry_closed") {
+    // IKIZQC（G08）：首版关闭同 Draft ID 成片重试——失败成片保留占位，继续创作走
+    // 「重新生成样片」。与来源唯一约束共用 1057 码（同一产品语义：该样片已有成片尝试）。
+    return fail(
+      errorCodeToNumeric(ERROR_FINALIZE_ALREADY_ATTEMPTED),
+      "成片失败后暂不支持同任务重试，请重新生成样片",
+      { code: ERROR_FINALIZE_ALREADY_ATTEMPTED },
+    );
   }
   if (retry.kind === "material_blocked") {
     return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), retry.reason, {

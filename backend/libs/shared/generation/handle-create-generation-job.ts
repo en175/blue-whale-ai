@@ -1506,7 +1506,7 @@ function videoRefItemsOf(v: unknown): VideoRefItem[] {
 /** Idempotency-Key 长度上限，对齐 `command_idempotency.idempotency_key` 的列宽 VarChar(128)：
  *  超长在这里明确拒（400），而不是拖到落库那一刻以 MySQL 截断/报错的形式变成 500。
  *  截断尤其不能接受——它会把两把不同的钥匙并成一把。 */
-const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
 
 /** 摘要用的规范化 JSON：对象**按键名排序**递归展开。
  *

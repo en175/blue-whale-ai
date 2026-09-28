@@ -561,4 +561,61 @@ class NewApiVideoClientEndpointTest {
         assertThat(observation.status()).isEqualTo("succeeded");
         assertThat(observation.upstreamCreatedAtMs()).isNull();
     }
+
+    // ========== IKIZQC：成片（finalize）提交出站协议钉桩 ==========
+
+    @Test
+    @DisplayName("IKIZQC: finalize → POST /v1/videos/{样片公开任务ID}/finalize，体仅 resolution=1080p")
+    void finalizePostsToVideoFinalizePathWithResolutionOnly() throws Exception {
+        SubmitResult result =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).finalize("t", "task-sample-9");
+
+        assertThat(result.taskId()).isEqualTo("task-1");
+        assertThat(result.status()).isEqualTo("queued");
+        assertThat(lastPath.get()).isEqualTo("/v1/videos/task-sample-9/finalize");
+
+        // 出站体只有显式分辨率（金标 G02：Draft 输入字段一律不重放——网关自行组装 draft_task）。
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body).hasSize(1);
+        assertThat(body.get("resolution").asText()).isEqualTo("1080p");
+    }
+
+    @Test
+    @DisplayName("IKIZQC: finalize 网关 data 信封响应 → 公开任务 ID 取出（轮询句柄）")
+    void finalizeParsesGatewayEnvelope() throws Exception {
+        server.createContext("/v1/videos/task-env/finalize", exchange -> {
+            byte[] resp = ("{\"code\":\"success\",\"data\":{\"task_id\":\"task-final-77\","
+                    + "\"status\":\"queued\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        SubmitResult result =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).finalize("t", "task-env");
+
+        assertThat(result.taskId()).isEqualTo("task-final-77");
+        assertThat(result.status()).isEqualTo("queued");
+    }
+
+    @Test
+    @DisplayName("IKIZQC: finalize 网关非 200（样片过期/非 Draft 等）→ VideoProviderError 分类码透出")
+    void finalizeNon2xxSurfacesClassifiedError() {
+        server.createContext("/v1/videos/task-expired/finalize", exchange -> {
+            byte[] resp = ("{\"error\":{\"message\":\"draft task expired\",\"type\":\"new_api_error\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        NewApiVideoClient client = new NewApiVideoClient(new UpstreamBaseUrl(baseUrl));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.finalize("t", "task-expired"))
+                .isInstanceOf(com.bluewhale.worker.domain.error.VideoProviderError.class)
+                .hasMessageContaining("HTTP 400");
+    }
 }

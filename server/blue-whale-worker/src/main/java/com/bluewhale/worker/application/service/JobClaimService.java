@@ -239,6 +239,8 @@ public class JobClaimService {
     /**
      * 领取视频作业（claim-ops.ts:261-330 claimVideoJobById）。
      * IKEA26：parentProviderTaskId = retry_of_job_id 关联父 job 的 provider_task_id。
+     * IKIZQC：video_stage 一并投影；'final'（成片）时取来源样片保存的网关公开 task ID
+     * ——Worker 用它调 finalize，不接触上游 Draft ID（IKIZBR），也不重建 Draft 输入。
      */
     public Optional<ClaimedVideoJobDto> claimVideoJobById(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
@@ -266,6 +268,11 @@ public class JobClaimService {
             parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
         }
 
+        String sourceSampleProviderTaskId = null;
+        if ("final".equals(candidate.getVideoStage()) && candidate.getSourceSampleJobId() != null) {
+            sourceSampleProviderTaskId = jobMapper.findProviderTaskId(candidate.getSourceSampleJobId());
+        }
+
         return Optional.of(new ClaimedVideoJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
@@ -277,7 +284,9 @@ public class JobClaimService {
                 postIncrementToken,
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
-                parentProviderTaskId));
+                parentProviderTaskId,
+                candidate.getVideoStage(),
+                sourceSampleProviderTaskId));
     }
 
     /**

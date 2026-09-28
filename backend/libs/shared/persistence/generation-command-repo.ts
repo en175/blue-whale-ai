@@ -125,6 +125,7 @@ export interface GenerationCommandRepo {
     | { kind: "material_blocked"; reason: string }
     | { kind: "not_retryable_status" }
     | { kind: "already_retried" }
+    | { kind: "finalize_retry_closed" }
     | null
   >;
   appendLog(
@@ -399,6 +400,13 @@ export function createGenerationCommandRepo(
           },
         });
         if (!original) return null;
+        // IKIZQC（G08）：成片任务不做同输入重试——首版不复用同一 Draft ID（IKIZPO 未证实），
+        // 失败的成片行保留占位（来源唯一约束已锁住该样片的尝试），继续创作走「重新生成样片」。
+        // 不拦的话会建出 video_stage='final' 却没有 source_sample_job_id 的孤儿行（Worker
+        // 无从取得样片上游任务），且重试路径不接 Hold、终态结算会对无预留的 job 发事件。
+        if (original.video_stage === "final") {
+          return { kind: "finalize_retry_closed" } as const;
+        }
         if (
           original.status !== "failed" &&
           original.status !== "partially_succeeded"

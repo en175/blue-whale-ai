@@ -206,27 +206,106 @@ public class NewApiVideoClient {
                         "new-api 视频提交响应非 JSON");
             }
 
-            // data 解包（new-api-generation-ops.ts:250-253）
-            JsonNode data = parsed.has("data") && parsed.get("data").isObject()
-                    ? parsed.get("data") : parsed;
-
-            // task_id 或 id（:254）
-            String taskId = textOrNull(data, "task_id");
-            if (taskId == null) taskId = textOrNull(data, "id");
-            if (taskId == null || taskId.isEmpty()) {
-                // invalid_video_response（:256-262）
-                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "new-api 视频提交响应缺少 task_id");
-            }
-
-            String status = textOrNull(data, "status");
-            return new SubmitResult(taskId, status != null ? status : "queued");
+            return parseSubmitResult(parsed);
         } catch (VideoProviderError e) {
             throw e;
         } catch (Exception e) {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 视频提交解析失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * IKIZQC：提交成片（finalize）任务——POST /v1/videos/{样片公开任务ID}/finalize。
+     *
+     * <p>网关（IKIZBR 固定提交研究）按**当前用户的公开样片任务 ID** 取原样片、锁定原渠道、
+     * 校验 Draft/成功/7 天窗口，再从私有字段取上游 Draft ID 组装
+     * {@code content:[{type:"draft_task",draft_task:{id:…}}]}——**提示词、素材、时长、
+     * 比例、音频设置一律不能由这一步改写**，本仓也不持有上游 Draft ID。请求体只显式声明
+     * 分辨率 1080p（网关校验显式分辨率只能取该值；空体同样合法，显式写出便于钉桩对账）。
+     *
+     * <p>响应形状与 submit 同构（网关把上游 id 改写为公开 task_xxx 放在 id/task_id），
+     * 复用 {@link #parseSubmitResult}。返回的公开任务 ID 即成片轮询句柄（poll 复用）。
+     *
+     * @param sampleTaskId 来源样片的**网关公开**任务 ID（generation_jobs.provider_task_id）
+     */
+    public SubmitResult finalize(String token, String sampleTaskId) {
+        String traceId = UUID.randomUUID().toString();
+
+        ObjectNode body = JSON.createObjectNode();
+        body.put("resolution", "1080p");
+
+        String bodyJson;
+        try {
+            bodyJson = JSON.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "请求序列化失败");
+        }
+
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(baseUrl + "/v1/videos/" + encodePath(sampleTaskId) + "/finalize")
+                .post(RequestBody.create(bodyJson, JSON_TYPE))
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
+
+        Response response;
+        try {
+            response = submitClient.newCall(request).execute();
+        } catch (SocketTimeoutException e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 成片提交超时");
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 成片提交失败: " + e.getMessage());
+        }
+
+        try (response) {
+            ResponseBody respBody = response.body();
+            String rawText = respBody != null ? respBody.string() : "";
+
+            if (!response.isSuccessful()) {
+                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
+                throw new VideoProviderError(code,
+                        "new-api 成片提交失败: HTTP " + response.code() + " body=" + truncated);
+            }
+
+            JsonNode parsed;
+            try {
+                parsed = JSON.readTree(rawText);
+            } catch (Exception e) {
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "new-api 成片提交响应非 JSON");
+            }
+
+            return parseSubmitResult(parsed);
+        } catch (VideoProviderError e) {
+            throw e;
+        } catch (Exception e) {
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 成片提交解析失败: " + e.getMessage());
+        }
+    }
+
+    /** submit / finalize 共用的提交响应解析：data 解包 → task_id∨id → status（缺省 queued）。 */
+    private static SubmitResult parseSubmitResult(JsonNode parsed) {
+        // data 解包（new-api-generation-ops.ts:250-253）
+        JsonNode data = parsed.has("data") && parsed.get("data").isObject()
+                ? parsed.get("data") : parsed;
+
+        // task_id 或 id（:254）
+        String taskId = textOrNull(data, "task_id");
+        if (taskId == null) taskId = textOrNull(data, "id");
+        if (taskId == null || taskId.isEmpty()) {
+            // invalid_video_response（:256-262）
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "new-api 视频提交响应缺少 task_id");
+        }
+
+        String status = textOrNull(data, "status");
+        return new SubmitResult(taskId, status != null ? status : "queued");
     }
 
     /**
