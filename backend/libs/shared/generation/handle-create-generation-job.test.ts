@@ -1218,13 +1218,13 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       parameters: { ...VIDEO_BODY.parameters, aspect_ratio: aspect },
     });
 
-    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 400，文案带可用值", async () => {
+    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 登记码 1002，文案带可用值", async () => {
       const { deps, createJob } = buildVideoDeps({
         supported_aspect_ratios: ["16:9", "adaptive"],
         features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
       });
       const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
-      expect(result.code).toBe(400);
+      expect(result.code).toBe(1002);
       expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
       expect(createJob).not.toHaveBeenCalled();
     });
@@ -1266,7 +1266,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         null,
         deps,
       );
-      expect(both.code).toBe(400);
+      expect(both.code).toBe(1002);
       expect(both.msg).toContain("first_last_frame");
       expect(createJob).not.toHaveBeenCalled();
 
@@ -1287,7 +1287,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         null,
         deps,
       );
-      expect(result.code).toBe(400);
+      expect(result.code).toBe(1002);
       expect(result.msg).toBe("aspect_ratio 无效");
       expect(createJob).not.toHaveBeenCalled();
     });
@@ -2766,7 +2766,7 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
     expect(createJob).toHaveBeenCalled();
   });
 
-  it("Idempotency-Key 超过列宽（128）→ 400，不是拖到落库那一刻以截断/500 收场", async () => {
+  it("Idempotency-Key 超过列宽（128）→ 参数登记码（100000），不是拖到落库那一刻以截断/500 收场", async () => {
     const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
 
     const result = await handleCreateGenerationJob(
@@ -2777,7 +2777,7 @@ describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
       deps,
     );
 
-    expect(result.code).toBe(400);
+    expect(result.code).toBe(100000);
     expect(lookupCreateIdempotency).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
   });

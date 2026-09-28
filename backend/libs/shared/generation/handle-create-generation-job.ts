@@ -16,6 +16,7 @@ import {
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
+  PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
   checkGenerationParamLimit,
@@ -1514,7 +1515,7 @@ export async function handleCreateGenerationJob(
   // 每次提交都是新任务，不强制要求这个头（老客户端不受影响）。
   const normalizedKey = (idempotencyKey ?? "").trim();
   if (normalizedKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
-    return fail(400, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
+    return fail(PARAM_MISSING_CODE, `Idempotency-Key 过长（上限 ${IDEMPOTENCY_KEY_MAX_LENGTH} 字符）`);
   }
   const idempotency: CreateJobIdempotency | null =
     normalizedKey === ""
