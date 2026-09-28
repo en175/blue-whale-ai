@@ -306,6 +306,7 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
           // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
           // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
           "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
         let workerOutput = "";
         worker.stdout.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });
