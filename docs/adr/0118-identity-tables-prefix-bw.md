@@ -2,7 +2,9 @@
 
 - 状态：已采纳
 - 日期：2026-09-28
+- 决策者：lixq（会话中拍板）
 - 取代：[ADR-0117](0117-table-naming-and-module-prefix.md) §2 的 `identity_` 前缀
+- 关联：[ADR-0114](0114-new-api-as-upstream-identity-and-billing-services.md)、[ADR-0084](0084-generation-worker-java-runtime.md)（改名须联动检查 worker-java mapper 的既有约束）
 
 ## 背景
 
@@ -32,6 +34,6 @@ ADR-0117 §2 定了「前缀 = 限界上下文 = 未来库名」，前缀空间�
 ## 后果
 
 - **正向**：库表清单、慢查询日志、临时排查一眼看出归属；与 `bw_billing` / `bw_readonly` / `bw_session` 同一套命名。
-- **成本**：一次迁移（6 张表 + 9 个索引）；21 个 TS 文件的机械替换。迁移前已核实 `worker-java` 不碰这六张表、billing 走 gRPC 不读本库，Java 侧零改动。
+- **成本**：一次迁移（6 张表 + 9 个索引）；26 个 TS 文件的机械替换（21 个非测试 + 5 个 parity 测试）。迁移前已核实 `worker-java` 不碰这六张表、billing 走 gRPC 不读本库，Java 侧零改动。
 - **风险**：`RENAME INDEX` 没有 `IF EXISTS`，目标库若与核对过的两库不同形会失败。迁移内附 pre-flight 查询，多出或少一行时**先停下查清，别直接跑**。
 - **遗留**：核对时发现测试站 `identity_users` 上另有 `idx_users_username` / `username` / `username_2` 三个同列冗余索引（本地库没有，`users` 时代遗留、走的是另一条建库路径）。本次不动它们——删索引是独立决策，不搭这次改名的车。

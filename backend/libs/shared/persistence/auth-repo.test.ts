@@ -40,7 +40,7 @@ function fakePrisma(create?: CreateImpl) {
   };
 }
 
-describe("auth-repo 表名（identity_ 前缀）", () => {
+describe("auth-repo 表名（bw_ 前缀）", () => {
   it("验证码读写走 bw_verification_codes", async () => {
     const { prisma, codeCreate, codeUpdate } = fakePrisma();
     const repo = createAuthRepo(prisma);

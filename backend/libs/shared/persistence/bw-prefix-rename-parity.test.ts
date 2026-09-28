@@ -35,21 +35,21 @@ const TABLE_RENAMES: Array<[string, string]> = [
   ["identity_login_logs", "bw_login_logs"],
 ];
 
-/** 索引改名：[新表名, 旧索引名, 新索引名]。 */
+/** 索引改名：[旧表名, 旧索引名, 新索引名]。索引改在表改名**之前**，故此处是旧表名。 */
 const INDEX_RENAMES: Array<[string, string, string]> = [
-  ["bw_users", "uk_identity_users__username", "uk_bw_users__username"],
-  ["bw_users", "uk_identity_users__email", "uk_bw_users__email"],
-  ["bw_memberships", "uk_identity_memberships__grant_key", "uk_bw_memberships__grant_key"],
+  ["identity_users", "uk_identity_users__username", "uk_bw_users__username"],
+  ["identity_users", "uk_identity_users__email", "uk_bw_users__email"],
+  ["identity_memberships", "uk_identity_memberships__grant_key", "uk_bw_memberships__grant_key"],
   [
-    "bw_memberships",
+    "identity_memberships",
     "idx_identity_memberships__user_status_expiry",
     "idx_bw_memberships__user_status_expiry",
   ],
-  ["bw_roles", "uk_identity_roles__code", "uk_bw_roles__code"],
-  ["bw_user_roles", "uk_identity_user_roles__grant_key", "uk_bw_user_roles__grant_key"],
-  ["bw_user_roles", "idx_identity_user_roles__user", "idx_bw_user_roles__user"],
-  ["bw_login_logs", "idx_identity_login_logs__user_time", "idx_bw_login_logs__user_time"],
-  ["bw_login_logs", "idx_identity_login_logs__ip_time", "idx_bw_login_logs__ip_time"],
+  ["identity_roles", "uk_identity_roles__code", "uk_bw_roles__code"],
+  ["identity_user_roles", "uk_identity_user_roles__grant_key", "uk_bw_user_roles__grant_key"],
+  ["identity_user_roles", "idx_identity_user_roles__user", "idx_bw_user_roles__user"],
+  ["identity_login_logs", "idx_identity_login_logs__user_time", "idx_bw_login_logs__user_time"],
+  ["identity_login_logs", "idx_identity_login_logs__ip_time", "idx_bw_login_logs__ip_time"],
 ];
 
 /** 从 baseline 带进来的索引名，不含 identity_ 前缀，**不在**本次收敛范围。 */
@@ -84,24 +84,33 @@ describe("identity_* → bw_* 三轨迁移", () => {
     }
   });
 
-  it("表改名是一条原子 RENAME TABLE（允许半途而废的写法不接受）", () => {
+  it("表改名是一条原子 RENAME TABLE，且目标恰好六张", () => {
     // 拆成多条会停在「前几张改了、后几张没改」，而 RENAME 不可重入、重跑直接失败。
-    expect(sqlOnly.match(/RENAME TABLE/g) ?? []).toHaveLength(1);
+    const occurrences = [...sqlOnly.matchAll(/RENAME TABLE/g)];
+    expect(occurrences).toHaveLength(1);
+    // 只钉 from→to 对是不够的：往同一条语句里再塞一对，上面每条 toContain 都还是绿的。
+    const start = occurrences[0].index ?? -1;
+    const statement = sqlOnly.slice(start, sqlOnly.indexOf(";", start));
+    expect(statement.match(/TO `bw_/g) ?? []).toHaveLength(TABLE_RENAMES.length);
   });
 
-  it("九个索引名跟着表名走，且都挂在**新**表名上", () => {
+  it("九个索引名都改到位，且挂在**本次执行时**的表名上", () => {
+    // 索引改名排在表改名之前，所以这几条 ALTER 用的是旧表名——RENAME INDEX 的目标名
+    // 只是字符串，不要求与表名一致。
     for (const [table, from, to] of INDEX_RENAMES) {
       expect(normalizedSql).toContain(`ALTER TABLE \`${table}\``);
       expect(normalizedSql).toContain(`RENAME INDEX \`${from}\` TO \`${to}\``);
     }
   });
 
-  it("表改名排在索引改名之前（索引那条 ALTER 用的是新表名）", () => {
-    // 顺序反了会整片报「表不存在」。
+  it("索引改名排在表改名之前（有失败风险的那一步放最前）", () => {
+    // 反过来的话，任何一条 RENAME INDEX 失败都会停在「表已改名、索引没跟上」：
+    // 旧代码当场读不到表，而 RENAME TABLE 不可重入、重跑第一步就报「表不存在」。
+    // 现在的顺序半途失败时表仍是原名，线上代码照常跑。
     const tableRename = sqlOnly.indexOf("RENAME TABLE");
     const firstIndexRename = sqlOnly.indexOf("RENAME INDEX");
-    expect(tableRename).toBeGreaterThan(-1);
-    expect(firstIndexRename).toBeGreaterThan(tableRename);
+    expect(firstIndexRename).toBeGreaterThan(-1);
+    expect(tableRename).toBeGreaterThan(firstIndexRename);
   });
 
   it("索引改名正好九条，且不碰 baseline 带进来的名字", () => {
@@ -122,6 +131,9 @@ describe("identity_* → bw_* 三轨迁移", () => {
       // 只改 map 名而库里不动（或反过来）都会让 `migrate` 反复改 schema。
       expect(schemaPrisma).not.toContain(`map: "${from}"`);
     }
+    // 整个改名策略建立在「模型名 == 表名」上（本仓零 @@map）。若给 model bw_users 补一句
+    // @@map("identity_users")，上面所有断言仍然全绿，而 Prisma 会指回一张不存在的表。
+    expect(schemaPrisma).not.toContain("@@map");
   });
 
   it("backend 全量 TS 里没有 prisma.identity_* 的漏改 call site", () => {
