@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -84,7 +83,6 @@ public class ImageEraseJobProcessor implements JobProcessor {
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(ImageEraseContract.SOURCE);
 
-    private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
@@ -96,7 +94,6 @@ public class ImageEraseJobProcessor implements JobProcessor {
     private final HttpClient fetchClient;
 
     public ImageEraseJobProcessor(
-            JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
@@ -105,7 +102,6 @@ public class ImageEraseJobProcessor implements JobProcessor {
             NewApiMediaKitEraseClient mediaKitEraseClient,
             TosMediaStorage tosService
     ) {
-        this.stateMachine = stateMachine;
         this.claimService = claimService;
         this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(

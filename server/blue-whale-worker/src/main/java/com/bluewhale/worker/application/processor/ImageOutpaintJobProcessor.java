@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -74,7 +73,6 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(ImageOutpaintContract.SOURCE);
 
-    private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
@@ -86,7 +84,6 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
     private final HttpClient fetchClient;
 
     public ImageOutpaintJobProcessor(
-            JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
@@ -95,7 +92,6 @@ public class ImageOutpaintJobProcessor implements JobProcessor {
             NewApiMediaKitOutpaintClient mediaKitClient,
             TosMediaStorage tosService
     ) {
-        this.stateMachine = stateMachine;
         this.claimService = claimService;
         this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(

@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -72,7 +71,6 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     private static final int LEASE_SECONDS = 420;
     private static final List<String> CLAIM_SOURCES = List.of(ImageEnhanceContract.SOURCE);
 
-    private final JobStateMachineService stateMachine;
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
     private final ClaimSpec claimSpec;
@@ -84,7 +82,6 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
     private final HttpClient fetchClient;
 
     public ImageEnhanceJobProcessor(
-            JobStateMachineService stateMachine,
             JobClaimService claimService,
             GenerationJobMapper jobMapper,
             JobFinalizer finalizer,
@@ -93,7 +90,6 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             NewApiMediaKitClient mediaKitClient,
             TosMediaStorage tosService
     ) {
-        this.stateMachine = stateMachine;
         this.claimService = claimService;
         this.finalizer = finalizer;
         this.claimSpec = ClaimSpec.bySources(

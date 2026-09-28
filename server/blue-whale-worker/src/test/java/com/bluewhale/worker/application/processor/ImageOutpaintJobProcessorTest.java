@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.claim.ClaimSpec;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
-import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
 import com.bluewhale.worker.domain.dto.PublishImageOutpaintDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
@@ -56,7 +55,6 @@ class ImageOutpaintJobProcessorTest {
     private static final byte[] PNG_1X1 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
-    @Mock private JobStateMachineService stateMachine;
     @Mock private JobClaimService claimService;
     @Mock private GenerationJobMapper jobMapper;
     @Mock private JobFinalizer finalizer;
@@ -72,7 +70,7 @@ class ImageOutpaintJobProcessorTest {
     @BeforeEach
     void setUp() throws Exception {
         processor = new ImageOutpaintJobProcessor(
-                stateMachine, claimService, jobMapper, finalizer,
+                claimService, jobMapper, finalizer,
                 new AssetSourceService(assetMapper),
                 credentialService, mediaKitClient, tosService);
         when(finalizer.failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong()))
@@ -270,7 +268,6 @@ class ImageOutpaintJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(GenerationError.ERROR_CONTENT_REJECTED);
-        verify(stateMachine, never()).requeueImageJobForRetry(anyString(), any());
     }
 
     @Test
@@ -301,7 +298,6 @@ class ImageOutpaintJobProcessorTest {
         processor.handle("100");
 
         assertFailCode(ImageOutpaintContract.ERROR_IMAGE_OUTPAINT_FAILED);
-        verify(stateMachine, never()).requeueImageJobForRetry(anyString(), any());
     }
 
     @Test
