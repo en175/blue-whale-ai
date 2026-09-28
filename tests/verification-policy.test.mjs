@@ -1132,6 +1132,12 @@ test("target advance invalidates a receipt and synced target files leave the tas
     assert.equal(stale.status, 4, stale.stderr);
     assert.equal(JSON.parse(stale.stdout).reason, "PR target changed after verification");
 
+    const unsynced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(unsynced.status, 2);
+    assert.match(unsynced.stderr, /PR_TARGET_NOT_SYNCED/);
+
     git(repository, "rebase", "release/prod");
     const synced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
       cwd: repository, encoding: "utf8", env: childEnvironment(),

@@ -8,7 +8,7 @@
 2. 通过 `scripts/commit-task-for-review.sh` 形成干净 HEAD；运行 `node scripts/verify-change-scope.mjs plan` 检查自动分层。
 3. 运行 `node scripts/verify-change-scope.mjs run`（默认收口阶段）；代码失败则修复并 amend，基础设施或已知 flaky 才对同一 HEAD 显式重试。
 4. 报告完成前运行 `node scripts/verify-change-scope.mjs check --json`；`VERIFIED` 才算完成。
-5. 创建或更新 PR 前运行 `node scripts/verify-change-scope.mjs run --stage pr`；发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
+5. 创建或更新 PR 前先运行 `scripts/sync-task-from-origin.sh sync --json`，再运行 `node scripts/verify-change-scope.mjs run --stage pr`；`plan/run --stage pr` 对尚未包含远端目标提交的 HEAD 返回 `PR_TARGET_NOT_SYNCED`，避免按旧任务起点误选大范围验证。发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
 
 完成标准：凭证状态为 `passed`，且 HEAD、合并基线、changed-files 哈希、输入指纹、验证层级、计划和通过结果均与当前状态一致。
 
