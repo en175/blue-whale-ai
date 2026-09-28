@@ -135,6 +135,17 @@ export const ERROR_JOB_NOT_RETRYABLE_STATUS = "job_not_retryable_status";
 /** IKIPWU：重试接口无可补失败槽——失败项已全部由历史重试补成功，再点重试没有可补的对象。 */
 export const ERROR_JOB_ALREADY_RETRIED = "job_already_retried";
 
+// ── IKIZQ5：Seedance 2.5 样片/成片契约专用（父规格 IKIZPZ「报价与计费」「持久关系」「截止规则」）──
+/** 提交携带的 `quote_revision` 已失效（目录/能力/等级变化导致价格变动）——不能按未知或
+ *  未确认的金额提交；前端刷新可见报价后由用户重新点击。 */
+export const ERROR_QUOTE_STALE = "quote_stale";
+/** 来源样片已有成片尝试（同键重放/双击/两页并发命中 source_sample_job_id 唯一约束）；
+ *  首版一张样片至多一条已发往上游的成片尝试，不复用同一 Draft ID 重试。 */
+export const ERROR_FINALIZE_ALREADY_ATTEMPTED = "finalize_already_attempted";
+/** 已过实际截止时间（finalize_deadline_at）或缺少可信上游 created_at——过期只停止转成片，
+ *  不删样片；重新取得可用期限须走「重新生成样片」。 */
+export const ERROR_FINALIZE_DEADLINE_EXCEEDED = "finalize_deadline_exceeded";
+
 /** 任务失败 error.details 的上游 HTTP 状态键（IKIHGQ 起源于 audio_mix，IKIMN8 全族收口）：
  *  worker 在上游非 2xx（失败异常链带 HttpStatusException cause）时写入数值状态，非 HTTP 失败
  *  不写该键；重试换凭证判定读它（401 = 当前凭证失效，重试替换为请求头带来的新凭证），
@@ -232,8 +243,12 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   // 重试接口「任务存在但不可重试」两类真实原因专用码取下一空号 1054/1055。
   [ERROR_JOB_NOT_RETRYABLE_STATUS]: 1054,
   [ERROR_JOB_ALREADY_RETRIED]: 1055,
+  // IKIZQ5 注：落码前全仓 grep 1056/1057/1058 零命中（无并行分支撞号），样片/成片契约三码取下一组空号。
+  [ERROR_QUOTE_STALE]: 1056,
+  [ERROR_FINALIZE_ALREADY_ATTEMPTED]: 1057,
+  [ERROR_FINALIZE_DEADLINE_EXCEEDED]: 1058,
   // IKJ8J8 注：ADR-0119 钦定数值码 1059（落码前全仓 grep 1059 零命中，无并行分支撞号；
-  // 1056-1058 为空号未用——本码不按顺延取号，系规格指定）。
+  // 本码不按顺延取号，系规格指定）。
   [ERROR_CONTENT_REJECTED_AUDIO]: 1059,
 };
 
@@ -529,6 +544,9 @@ export const ERROR_CODES: Record<number, string> = {
   1053: "音视频合成失败，请重试", // audio_video_mux_failed（火山 MediaKit mux-audio-video）
   1054: "当前状态不允许重试，仅失败或部分成功的任务可重试", // job_not_retryable_status（IKIPWU 重试接口专用）
   1055: "该任务的失败项已全部重试，无需再次重试", // job_already_retried（IKIPWU 重试接口专用）
+  1056: "价格已更新，请刷新后重新确认提交", // quote_stale（IKIZQ5 样片/成片报价版本）
+  1057: "该样片已有成片任务，请查看其成片结果", // finalize_already_attempted（IKIZQ5 来源唯一约束）
+  1058: "已超过样片转成片的截止时间，可重新生成样片后再试", // finalize_deadline_exceeded（IKIZQ5 实际截止时间）
   1059: "生成的音频可能涉及版权限制，请调整提示词后重试", // content_rejected_audio（IKJ8J8 输出侧音频版权精确码）
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",

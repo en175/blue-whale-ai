@@ -1,0 +1,100 @@
+[
+ {
+  "case_id": "G01",
+  "contract_ref": "§1 阶段身份 / §2 样片创建增量",
+  "title_zh": "样片创建 = 现有视频创建 + parameters.sample_mode=true 且分辨率 480p",
+  "given": "Seedance 2.5 样片模式已放行的用户提交视频创建：type=video，请求仍为单输出、既有 references 与 parameters 结构，仅在 parameters 增加 sample_mode=true 并锁定 resolution=480p",
+  "expect": "服务端把该请求受理为 video_stage=sample 的独立 GenerationJob；未传或 sample_mode=false 时沿用普通视频语义（video_stage=video）；resolution 非 480p 或 sample_mode 非 字面 true 一律拒绝，不降级、不静默改写"
+ },
+ {
+  "case_id": "G02",
+  "contract_ref": "§3 成片请求 / IKIZPZ 成片契约",
+  "title_zh": "浏览器成片请求不携带提示词、参考、时长、比例、音频设置与上游 Draft ID",
+  "given": "用户在样片卡标题行点击「生成 1080P 成片」发起 finalize 提交，请求体仅含 expected_credits 与 quote_revision，Idempotency-Key 走请求头，路径参数为本仓样片任务 ID（十进制字符串）",
+  "expect": "请求 schema strict 校验：任何 prompt/references/duration/ratio/generate_audio/draft_task_id/source_draft_id 类字段直接 422 拒绝；上游输入由服务端从样片冻结输入派生，同模型 1080p；网关私有上游 Draft ID 不出现在任何浏览器契约字段中"
+ },
+ {
+  "case_id": "G03",
+  "contract_ref": "§2 报价版本与提交确认",
+  "title_zh": "三类提交入口（样片创建 / 成片 / 重新生成）必须带 expected_credits 与 quote_revision",
+  "given": "报价入口返回 credits=19、quote_revision=catalog-12:cap-345:tier-free，用户随后提交",
+  "expect": "提交携带的 expected_credits=19 且 quote_revision 原样带回；缺任一字段、金额为 0 或负数均拒绝；服务端按冻结输入、能力规则、用户等级及目录版本复算，一致才受理并进入 Hold"
+ },
+ {
+  "case_id": "G04",
+  "contract_ref": "§2 报价版本与提交确认",
+  "title_zh": "报价变动（quote_revision 失效）不能按未确认金额提交",
+  "given": "用户看到的报价是 credits=19、quote_revision=r1；提交前目录或能力行变化，服务端复算得 credits=21 且当前有效版本为 r2",
+  "expect": "提交被 quote_stale 拒绝且未建任务、未预扣；前端刷新可见报价后由用户重新点击；算不出价格时报价返回 credits=null 且 quote_revision=null（双 null，禁用该阶段提交），不存在只有版本没有价格的形态"
+ },
+ {
+  "case_id": "G05",
+  "contract_ref": "§3 来源唯一约束",
+  "title_zh": "同键重放、双击、两页并发至多一条成片任务与一笔预扣",
+  "given": "同一用户对同一张样片（source_sample_job_id=302）同时发出两次 finalize 提交（双击或两页并发，Idempotency-Key 不同）",
+  "expect": "数据库对 source_sample_job_id 的原子唯一约束使至多一条成片任务落库、至多一笔预扣；后到请求收 finalize_already_attempted；样片任务投影 final_job_id 只指向那条唯一成片任务"
+ },
+ {
+  "case_id": "G06",
+  "contract_ref": "§4 可信截止时间",
+  "title_zh": "实际截止 = 网关可信上游 Draft created_at + 7 天 − 安全余量；缺可信时间禁用成片",
+  "given": "网关回传样片上游 Draft created_at=2026-09-29T02:00:00Z；FINALIZE_WINDOW_DAYS=7、FINALIZE_SAFETY_MARGIN_MS=1 小时",
+  "expect": "finalize_deadline_at=2026-10-06T01:00:00Z（RFC3339 带时区），严格早于 created_at+7 天；本仓与网关按同一值拒绝临界或过期请求；网关给不出可信 created_at 时 finalize_deadline_at=null，样片保留可预览下载但成片入口禁用，不以 SubmitTime 或本地建行时间替代"
+ },
+ {
+  "case_id": "G07",
+  "contract_ref": "§6 提交结果不明",
+  "title_zh": "提交结果不明进入 checking 锁定：不重发、不自动退款",
+  "given": "Worker 已持久标记提交中后调用网关 finalize 超时或响应丢失，provider_task_id 为空",
+  "expect": "任务 status=checking：不按空 provider_task_id 重新提交、不自动退款、再次提交被拒（submission_unknown）；先核对本仓、网关、上游与账单——明确成功恢复原任务，明确失败释放该阶段预扣，仍不明保持锁定交人工"
+ },
+ {
+  "case_id": "G08",
+  "contract_ref": "§6 阶段费用状态",
+  "title_zh": "仅本地前置校验失败不占上游尝试；已发往上游的失败保留占位",
+  "given": "A 提交在服务端本地校验即拒绝（如样片未转存完成），未发出网关请求；B 提交已发往网关后失败",
+  "expect": "A 不产生成片任务行、不占用该样片的上游成片尝试（唯一约束不登记）；B 的成片任务行保留为失败终态并占用尝试，charge_state=released，首版不复用同一 Draft ID 重试，只能重新生成样片"
+ },
+ {
+  "case_id": "G09",
+  "contract_ref": "§6 阶段费用状态",
+  "title_zh": "确认失败的阶段退回该阶段冻结积分，另一已成功阶段费用不变",
+  "given": "样片已成功并结算（charge_state=settled、actual_credits=4），其成片确认失败",
+  "expect": "成片任务 charge_state=released 且预扣退回；样片任务 charge_state 保持 settled、actual_credits 不变；两阶段费用互不回滚，账单与交付对应"
+ },
+ {
+  "case_id": "G10",
+  "contract_ref": "§7 重新生成样片",
+  "title_zh": "重新生成样片 = 新任务新卡，不继承旧报价、截止与 Draft ID",
+  "given": "样片过期或成片失败后，用户点击「重新生成样片」，请求体仅 expected_credits 与 quote_revision，路径参数为原样片任务 ID",
+  "expect": "服务端从原样片冻结输入新建 GenerationJob 与新结果卡（两阶段重新编辑新建卡例外）；重新校验素材与现价、报价独立；新样片有自己的上游任务、可信 created_at 与 finalize_deadline_at，不继承任何旧 Draft ID 或旧截止；旧卡与来源关系不被覆盖"
+ },
+ {
+  "case_id": "G11",
+  "contract_ref": "§7 浏览器投影",
+  "title_zh": "任务与资产投影携带阶段、来源、截止与费用字段，ID 全为字符串",
+  "given": "一张成功样片（job 302）与其成功成片（job 305，source_sample_job_id=302）的详情、列表与资产投影",
+  "expect": "两任务投影均含 video_stage（sample/final）、source_sample_job_id、final_job_id、finalize_deadline_at、charge_state、actual_credits 及可见错误；样片 302 的 final_job_id=305、成片 305 的 source_sample_job_id=302；资产列表与详情投影 video_stage 与来源身份；所有 ID 字段为十进制字符串，actual_credits 为整数积分"
+ },
+ {
+  "case_id": "G12",
+  "contract_ref": "§7 浏览器投影",
+  "title_zh": "旧任务缺阶段字段按普通视频处理",
+  "given": "历史普通 1080p/480p 视频任务与其他模型任务（无任何两阶段字段）经现有任务列表与详情投影",
+  "expect": "按 video_stage=video 处理，source_sample_job_id/final_job_id/finalize_deadline_at/charge_state/actual_credits 投影为 null 或缺省；普通视频的报价降级、重试、取消、重新编辑及资产删除语义不变"
+ },
+ {
+  "case_id": "G13",
+  "contract_ref": "§6 阶段费用状态（计费口径）",
+  "title_zh": "成片计价的输入视频维度取原样片参考素材，不把样片视频算入",
+  "given": "原样片的冻结输入含 3 秒参考视频；用户对其发起成片（1080p）",
+  "expect": "成片报价与结算按「含输入视频」档位计量原参考素材时长（3 秒），不把 480p 样片视频本体算作输入时长；实际结算依据冻结规则快照与 Worker 上报的真实用量（usage.completion_tokens 口径），网关 quota 仅用于对账"
+ },
+ {
+  "case_id": "G14",
+  "contract_ref": "§1 阶段身份（结果交付）",
+  "title_zh": "两阶段成功前必须转存为自有 Asset，禁用供应商 URL 直存降级",
+  "given": "样片或成片上游成功，供应商视频 URL 为 24 小时 / 100 次下载临时链接",
+  "expect": "转存为可播放自有 Asset 后才置成功终态（结果处理中不算交付）；转存暂时失败恢复同一产物、不新建供应商任务；最终不能交付按该阶段失败及返积分处理；供应商 URL 期限不决定自有素材留存，样片到期不自动删除"
+ }
+]
