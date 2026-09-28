@@ -190,4 +190,3 @@ describe("customDeniedHint — 无权限提示", () => {
 // 有效期换算（原 `customCreditsExpireAt`）已抽到 `recharge/credits-validity.ts`：
 // 档位单与自定义单共用同一份（起算点是支付成功时刻，见那里的文件头），
 // 用例随之搬到 `recharge/credits-validity.test.ts`。
-

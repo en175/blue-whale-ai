@@ -71,7 +71,7 @@ async function renderDialog(props: MountProps = {}) {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      
+
         createElement(
           QueryClientProvider,
           { client: new QueryClient() },
@@ -174,7 +174,7 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     await renderDialog();
     await act(async () => {
       root.render(
-        
+
           createElement(
             QueryClientProvider,
             { client: new QueryClient() },
@@ -204,7 +204,7 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     root = createRoot(container);
     await act(async () => {
       root.render(
-        
+
           createElement(
             QueryClientProvider,
             { client: new QueryClient() },
