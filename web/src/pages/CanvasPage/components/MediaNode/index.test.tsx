@@ -1744,3 +1744,45 @@ describe('MediaNode 视频卡选中态悬停播放（IKJ7S1：尾播特权与手
     expect(rebuilt.volume).toBe(1);
   });
 });
+
+describe('MediaNode 样片卡徽标（IKIZQB）', () => {
+  it('videoStage=sample 的生成中卡：右上角标「样片 480P」，无截止时间时不拼时间段', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 10, data: { videoStage: 'sample' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toBe('样片 480P');
+    expect(badge!.className).not.toContain('sampleBadgeExpired');
+  });
+
+  it('成功样片卡：徽标合并显示实际截止时间（服务端 finalize_deadline_at 投影回填）', async () => {
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: future, src: 'http://vid/s.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toContain('样片 480P · 截止 ');
+    // 本地时区 yyyy-MM-dd HH:mm（分钟精度）
+    expect(badge!.textContent).toMatch(/截止 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(badge!.className).not.toContain('sampleBadgeExpired');
+    // 样片素材照常渲染（可预览下载由既有视频卡承载——过期不删除已交付样片）
+    expect(mountNode.querySelector('[data-testid="media-content"]')).toBeTruthy();
+  });
+
+  it('过期样片卡：徽标改警告色，卡片与素材保留（不删除）', async () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: past, src: 'http://vid/s.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.className).toContain('sampleBadgeExpired');
+    expect(badge!.getAttribute('title')).toContain('期限已过');
+  });
+
+  it('普通视频卡与缺截止样片卡：普通卡不渲染徽标；缺截止（null）只标样片不标时间', async () => {
+    await renderNode('video', { data: { src: 'http://vid/n.mp4' } });
+    expect(mountNode.querySelector('[data-testid="video-sample-badge"]')).toBeNull();
+    await renderNode('video', { data: { videoStage: 'sample', finalizeDeadlineAt: null, src: 'http://vid/s2.mp4' } });
+    const badge = mountNode.querySelector('[data-testid="video-sample-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toBe('样片 480P');
+    expect(badge!.className).not.toContain('sampleBadgeExpired');
+  });
+});

@@ -149,6 +149,8 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
       mode: 'prompt',
       // IKG0LP：是否带音频（缺省 true）
       generateAudio: true,
+      // IKIZQB：样片开关（缺省关闭，普通视频提交语义）
+      sampleMode: false,
     }, null);
   });
 

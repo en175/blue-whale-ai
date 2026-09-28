@@ -5129,6 +5129,9 @@ export default function CanvasPage() {
         mode: preset?.mode ?? (typeof d.draftMode === 'string' ? d.draftMode : undefined),
         // IKG0LP：音频选择持久化在草稿 data，重开时恢复
         generateAudio: preset?.generateAudio ?? (typeof d.draftGenerateAudio === 'boolean' ? d.draftGenerateAudio : undefined),
+        // IKIZQB：样片开关恢复——草稿记忆 draftSampleMode；样片成品卡重新编辑默认开启
+        // （父规格用户故事 7；成片卡 final 阶段与普通视频卡默认关闭）
+        sampleMode: preset?.sampleMode ?? (typeof d.draftSampleMode === 'boolean' ? d.draftSampleMode : d.videoStage === 'sample' ? true : undefined),
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
@@ -5563,7 +5566,7 @@ export default function CanvasPage() {
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleVideoDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string; generateAudio?: boolean },
+    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string; generateAudio?: boolean; sampleMode?: boolean },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
@@ -5574,6 +5577,8 @@ export default function CanvasPage() {
     if (patch.mode !== undefined) data.draftMode = patch.mode;
     // IKG0LP：是否带音频随草稿持久化，重开面板时恢复用户上次的选择
     if (patch.generateAudio !== undefined) data.draftGenerateAudio = patch.generateAudio;
+    // IKIZQB：样片开关随草稿持久化（父规格用户故事 6：未提交草稿记住已选开关）
+    if (patch.sampleMode !== undefined) data.draftSampleMode = patch.sampleMode;
     if (patch.ratio !== undefined) {
       data.draftRatio = patch.ratio;
       data.targetRatio = patch.ratio;
@@ -7025,6 +7030,10 @@ export default function CanvasPage() {
         draft: undefined,
         ...(wasFrameInterpolation ? { frameInterpolation: undefined } : {}),
         ...(muxIdentity ? { audioVideoMux: undefined } : {}),
+        // IKIZQB：阶段身份以服务端持久投影为准（父规格「投影与兼容」）——样片成功回填实际
+        // 截止时间（finalize_deadline_at，缺可信时间时 null 但样片仍保留）；普通成功清样片标记。
+        videoStage: detail.video_stage === 'sample' ? 'sample' : undefined,
+        finalizeDeadlineAt: detail.video_stage === 'sample' ? (detail.finalize_deadline_at ?? null) : undefined,
       });
       // IKFM3S §4：成功任务把快照冻结的文本输入签名回写目标（刷新持久、提示按签名派生清除）；
       // 乱序保护（nextUsedInputState）：仅更新的 jobId 覆盖——旧任务成功不清除更晚编辑的提示。
@@ -7057,6 +7066,9 @@ export default function CanvasPage() {
             : audioVideoMuxIdentityOf(node)
               ? audioVideoMuxErrorText(detail.error)
               : readJobFailText(detail.error),
+        // IKIZQB：失败卡同样按服务端投影标注阶段（样片失败卡标样片；普通失败清标记）
+        videoStage: detail.video_stage === 'sample' ? 'sample' : undefined,
+        finalizeDeadlineAt: undefined,
       });
       return 'terminal';
     }
@@ -7176,6 +7188,10 @@ export default function CanvasPage() {
         role: VideoRefRole;
         materialId?: string;
       }>;
+      /** IKIZQB：样片提交确认两字段（契约 confirmedSubmitFields）——parameters.sample_mode=true
+       *  时随请求顶层携带，服务端按报价同一规则复算，变价即拒（quote_stale）。 */
+      expectedCredits?: number;
+      quoteRevision?: string;
     },
     /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
     promptDoc?: PromptDoc | null,
@@ -7184,6 +7200,8 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return false;
     }
+    /** IKIZQB：样片任务（parameters.sample_mode=true）——卡身份与提交确认字段按此分流 */
+    const isSampleJob = (parameters as VideoJobParameters).sample_mode === true;
     if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return false;
     if (blockIfCreditsInsufficient()) return false;
     // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变
@@ -7209,12 +7227,14 @@ export default function CanvasPage() {
         ...(isDraftTarget && !customNamed
           ? {
               fileName:
-                type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
+                type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
             }
           : {}),
         prompt: parameters.prompt,
         targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         ...(fallbackDraftMode != null ? { draftMode: fallbackDraftMode } : {}),
+        // IKIZQB：卡身份跟随本次提交阶段（样片卡生成中即标样片；普通提交清除旧样片标记）
+        videoStage: isSampleJob ? 'sample' : undefined,
       });
     }
     const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
@@ -7250,12 +7270,14 @@ export default function CanvasPage() {
         genStatus: 'generating',
         progress: 0,
         mediaType: type,
-        fileName: type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
+        fileName: type === 'video' ? (isSampleJob ? '样片生成中' : '视频生成中') : type === 'audio' ? '音频生成中' : '图片生成中',
         prompt: parameters.prompt,
         draftModelId: parameters.model_id,
         draftRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         draftSize: 'size' in parameters ? parameters.size : 'resolution' in parameters ? parameters.resolution : undefined,
         draftDuration: 'duration' in parameters ? parameters.duration : undefined,
+        // IKIZQB：样片任务卡身份（生成中/成功卡据此渲染「样片 480P」徽标）
+        videoStage: isSampleJob ? 'sample' : undefined,
         // IKIPSX：initialDraft.mode 缺失时不得写入 undefined——JSON.stringify 会丢键，
         // 导致新建生成卡 draftMode 缺失；改成条件展开保证只在有值时落键。
         ...(initialDraft?.mode != null ? { draftMode: initialDraft.mode } : {}),
@@ -7317,6 +7339,11 @@ export default function CanvasPage() {
                   : undefined,
               }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
+        // IKIZQB：样片提交确认两字段（请求顶层，契约 confirmedSubmitFieldsSchema）——
+        // 面板已按报价就绪门控；缺失时服务端 fail closed 拒绝（不建任务不扣费）。
+        ...(isSampleJob && initialDraft?.expectedCredits != null && initialDraft?.quoteRevision
+          ? { expected_credits: initialDraft.expectedCredits, quote_revision: initialDraft.quoteRevision }
+          : {}),
       };
       /** 幂等键：本次提交的**当前速度**取一把，双击/401 续跑/失败后原样重发都拿到它；
        *  载荷一改（用户改了参数再点）就是新意图，换新钥匙——复用会撞服务端同键异载荷 409。 */
@@ -11418,6 +11445,8 @@ export default function CanvasPage() {
       duration: opts.duration,
       // IKG0LP：用户选的「是否带音频」。能力位不允许时后端会忽略，不下发给上游。
       generate_audio: opts.generateAudio,
+      // IKIZQB：样片模式增量参数（契约 video-sample-mode.ts §1）——resolution 已由面板锁 480p。
+      ...(opts.sampleMode ? { sample_mode: true as const } : {}),
     };
     // 草稿绑定模式按连线+material+文本带入合并推导（IKFM3W §10）；自由模式（工具栏入口无草稿卡）读本地暂存参考
     const freeMode = !videoDraftId;
@@ -11483,7 +11512,14 @@ export default function CanvasPage() {
           targetNodeId,
           // IKIPSX：把当前面板选中模式（含未手动切换时的默认显示）随提交带给 startGenerationJob，
           // 草稿已保存模式缺失时由它兜底写入 draftMode。
-          { mode: opts.mode, references: [] },
+          // IKIZQB：样片提交确认两字段（面板已按报价就绪门控，此处必为有效值）。
+          {
+            mode: opts.mode,
+            references: [],
+            ...(opts.sampleMode && opts.expectedCredits != null && opts.quoteRevision
+              ? { expectedCredits: opts.expectedCredits, quoteRevision: opts.quoteRevision }
+              : {}),
+          },
           promptDoc ?? undefined,
         );
         finishSend(submitted);

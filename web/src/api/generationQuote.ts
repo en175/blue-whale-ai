@@ -10,6 +10,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiRequest, silentInit } from './http';
 import type { GenerationJobType, GenerationRefItem } from './jobs';
+import type { StageQuoteView } from '@lib/contracts/video-sample-mode';
 
 /** 任务类型（image/video/audio）的定义在 jobs.ts —— 这里只把它转出去，
  *  免得调用方为了一个类型再 import 一次那个模块（纯类型，编译期即擦除）。 */
@@ -33,6 +34,9 @@ export interface QuoteJobParameters {
   duration?: number;
   /** IKG0LP：视频是否带音频 */
   generate_audio?: boolean;
+  /** IKIZQB：样片模式（仅放行模型 + 480p 有意义；契约 sampleModeParametersSchema）。
+   *  开启时报价按样片规格计价并返回 quote_revision（提交确认用）；未传沿用普通视频语义。 */
+  sample_mode?: true;
 }
 
 /** 报价请求体：与创建任务**同形**的定价部分（同一个 model、同一份规格、同一份参考、同一个输出数）。 */
@@ -56,10 +60,11 @@ export interface QuoteJobPayload {
   references?: GenerationRefItem[];
 }
 
-/** 报价结果：`credits` 是**整数积分**；null = 算不出价（**不要当 0 渲染**，0 会被读成免费）。 */
-export interface GenerationQuote {
-  credits: number | null;
-}
+/** 报价结果 —— IKIZQB 起即契约 StageQuoteView（video-sample-mode.ts §2）：
+ *  `credits` 是**整数积分**，null = 算不出价（**不要当 0 渲染**，0 会被读成免费，且禁提交）；
+ *  `quote_revision` 是报价版本指纹 —— 样片提交须原样带回（expected_credits + quote_revision），
+ *  服务端复算不一致即 quote_stale。无报价时两字段同时为 null（契约 superRefine）。 */
+export type GenerationQuote = StageQuoteView;
 
 /**
  * 价格预览 POST /api/projects/:id/generation-jobs/quote —— **只算不扣**。

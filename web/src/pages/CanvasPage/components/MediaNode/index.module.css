@@ -323,6 +323,23 @@
   pointer-events: none;
 }
 
+/* ---- IKIZQB：样片卡徽标（标题行右侧；过期改警告色，不删除样片） ---- */
+.sampleBadge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background-color: rgba(52, 100, 217, 0.16);
+  color: #3464d9;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.sampleBadgeExpired {
+  background-color: rgba(200, 98, 32, 0.16);
+  color: #c86220;
+}
+
 /* ============================================
  * 音频播放器（IKH8PU 横矩形改版：480×240，深槽波形区占主区 +
  * 底部「左时间 / 居中播放钮」控制行，视觉对齐 audio-card-landscape 原型）

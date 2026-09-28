@@ -107,6 +107,9 @@ export interface VideoJobParameters {
    *  仅当模型能力位 features.audio 为 true 时前端才提供该选择；
    *  契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
   generate_audio?: boolean;
+  /** IKIZQB：样片模式（契约 video-sample-mode.ts §1——仅参数增量）。true 时 resolution
+   *  锁 480p、单输出，配套请求顶层携带 expected_credits + quote_revision（提交确认）。 */
+  sample_mode?: true;
 }
 
 /** 音频生成参数 */
@@ -143,6 +146,10 @@ export interface CreateJobPayload {
   references?: GenerationRefItem[];
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
+  /** IKIZQB：样片提交确认两字段（契约 confirmedSubmitFieldsSchema，parameters.sample_mode=true
+   *  时必带）。取报价响应原样：服务端按同一规则复算，价格变化先刷新可见报价再由用户点击。 */
+  expected_credits?: number;
+  quote_revision?: string;
 }
 
 /** 生成任务参考项（图/视频/音频 references 契约） */
@@ -282,6 +289,11 @@ export interface JobDetail {
   result?: JobSceneSplitResult | null;
   /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
   text_input_signature?: string | null;
+  /** IKIZQB：两阶段视频投影增量（契约 videoStageJobProjectionSchema）。旧任务/普通视频
+   *  缺省按普通视频处理（video_stage=video、来源与截止 null）。 */
+  video_stage?: 'video' | 'sample' | 'final';
+  /** 样片的实际转成片截止时间（RFC3339）；null = 缺可信上游 created_at（禁用成片，样片保留）。 */
+  finalize_deadline_at?: string | null;
   error?: JobError | null;
 }
 
@@ -296,6 +308,9 @@ export interface JobRecord {
   output_assets: JobAsset[];
   error?: JobError | null;
   canvas_card_state?: 'pending' | 'present' | 'removed';
+  /** IKIZQB：两阶段视频投影增量（同 JobDetail；列表投影契约同一 schema）。 */
+  video_stage?: 'video' | 'sample' | 'final';
+  finalize_deadline_at?: string | null;
 }
 
 /** GET /api/jobs 返回 */

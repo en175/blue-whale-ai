@@ -92,3 +92,31 @@ describe('quoteGenerationJob', () => {
     });
   });
 });
+
+/* IKIZQB：报价响应即契约 StageQuoteView（credits + quote_revision 同出同缺），
+   sample_mode 是定价输入之一（键随开关变化，不互吃缓存）。 */
+describe('样片报价（IKIZQB）', () => {
+  it('响应透传 quote_revision（提交确认字段的来源）', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ code: 200, msg: null, data: { credits: 60, quote_revision: 'rev-1' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await quoteGenerationJob('p1', payload({ type: 'video' }));
+
+    expect(data).toEqual({ credits: 60, quote_revision: 'rev-1' });
+  });
+
+  it('sample_mode 进定价输入 → 查询键不同（样片价与普通价不互吃缓存）', () => {
+    const base = { type: 'video' as const, parameters: { model_id: 'seedance-25', resolution: '1080p' } };
+    const normal = payload(base);
+    const sample = payload({
+      ...base,
+      parameters: { model_id: 'seedance-25', resolution: '480p', sample_mode: true },
+    });
+
+    expect(keyHash('p1', sample)).not.toBe(keyHash('p1', normal));
+  });
+});

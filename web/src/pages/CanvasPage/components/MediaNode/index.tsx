@@ -65,6 +65,22 @@ const durationLabel = (duration?: number) =>
 /** 正在等首帧 seeked 的 video，避免 loadedmetadata / loadeddata / effect 叠监听 */
 const pendingFirstFrameSeek = new WeakSet<HTMLVideoElement>();
 
+/** IKIZQB：样片截止时间显示（本地时区，分钟精度）；无效/缺失返回空串。 */
+function sampleDeadlineLabel(at?: string | null): string {
+  if (!at) return '';
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** IKIZQB：样片转成片是否已过期（按实际截止时间；无效时间不判过期）。 */
+function sampleDeadlineExpired(at?: string | null): boolean {
+  if (!at) return false;
+  const d = new Date(at);
+  return !Number.isNaN(d.getTime()) && Date.now() > d.getTime();
+}
+
 /** 生成 MP4 常把 moov 放在文件尾，preload=metadata 只拿到时长，画面停在黑底。
  *  暂停时微调 currentTime 逼解码器吐出一帧；解码完成（seeked）再回调回填宽高。 */
 function paintVideoFirstFrame(
@@ -147,6 +163,12 @@ export interface MediaNodeData {
   draftModelId?: string;
   draftSize?: string;
   draftRatio?: string;
+  /** IKIZQB：视频阶段身份（契约 videoStageSchema 投影）。sample = 样片卡（生成中/成功/
+   *  失败均标注「样片 480P」徽标，成功卡另显实际转成片截止时间）；final 归 IKIZQE 成片票。 */
+  videoStage?: 'sample' | 'final';
+  /** 样片的实际转成片截止时间（RFC3339，服务端 finalize_deadline_at 投影回填）；
+   *  null = 缺可信上游 created_at（禁用成片，样片仍保留）。过期只改警告色，不删除样片。 */
+  finalizeDeadlineAt?: string | null;
   /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
   imageEnhance?: ImageEnhanceIdentity;
   /** 视频 HD 高清身份标记（IKH3VG）：本卡由视频卡工具条「HD」入口创建；点卡与「重新编辑」
@@ -1126,6 +1148,23 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             </span>
           ) : null}
         </div>
+        {/* IKIZQB：样片卡徽标（父规格「交互」：右上角合并显示「样片 480P」和实际截止时间，
+            过期改警告色；过期只停止转成片资格，样片保留可预览下载——不删除已交付样片） */}
+        {data.videoStage === 'sample' && (() => {
+          const expired = sampleDeadlineExpired(data.finalizeDeadlineAt);
+          const label = sampleDeadlineLabel(data.finalizeDeadlineAt);
+          return (
+            <span
+              className={`${styles.sampleBadge} ${expired ? styles.sampleBadgeExpired : ''}`}
+              data-testid="video-sample-badge"
+              title={expired
+                ? '转成片期限已过，样片仍可预览、下载'
+                : label ? `转成片截止 ${label}；成片另行计费` : '样片 480P'}
+            >
+              样片 480P{label ? ` · 截止 ${label}` : ''}
+            </span>
+          );
+        })()}
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
       {/* 「输入已更新」徽标：点击在下方弹出操作，默认「更新生成」原位重跑最新输入。
