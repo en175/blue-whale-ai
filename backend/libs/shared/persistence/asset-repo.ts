@@ -31,6 +31,14 @@ export interface AssetView {
    *  以生成接口为准（那里实时查上游）。`material_status_checked_at` 供判断镜像有多旧。 */
   material_status: string | null;
   material_status_checked_at: string | null;
+  /** IKIZQH：两阶段资产投影增量（契约 videoStageAssetProjectionSchema，金标 G11 资产侧）。
+   *  阶段身份按 `generation_job_id` 从生成任务行派生（assets 表无阶段列，任务行是权威）；
+   *  上传资产 / 旧任务缺阶段列 → video_stage 缺省 video、来源为 null（G12 兼容）。
+   *  双向来源查询链路：样片资产的 final_job_id → GET /jobs/:id（详情带 output_assets
+   *  = 成片资产）；成片资产反向走 source_sample_job_id，同一任务详情端点。 */
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
 }
 
 /** 详情路径视图（IKFSSO）：列表字段 + 生成提示词。
@@ -40,6 +48,14 @@ export interface AssetDetailView extends AssetView {
   /** AI 生成素材的原始提示词。上传素材、提取音频（`media_extract`）、
    *  以及合法空串 prompt（IKDLQF：带 target_node_id 时允许空 prompt）均为 null。 */
   prompt: string | null;
+}
+
+/** IKIZQH：资产的阶段与来源身份（契约 §7 videoStageAssetProjectionSchema——金标 G11
+ *  资产侧三字段）。由生成任务行派生，assets 表本身不落阶段列。 */
+export interface VideoStageAssetIdentity {
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
 }
 
 export interface AssetPage {
@@ -366,24 +382,33 @@ async function resolveAssetJobMeta(
   modelByJobId: Map<string, string>;
   promptByJobId: Map<string, string>;
   nameByJobId: Map<string, string>;
+  stageByJobId: Map<string, VideoStageAssetIdentity>;
 }> {
   const modelByJobId = new Map<string, string>();
   const promptByJobId = new Map<string, string>();
   const nameByJobId = new Map<string, string>();
+  const stageByJobId = new Map<string, VideoStageAssetIdentity>();
   const jobIds = rows
     .map((a) => a.generation_job_id)
     .filter((id): id is bigint => id != null);
-  if (jobIds.length === 0) return { modelByJobId, promptByJobId, nameByJobId };
+  if (jobIds.length === 0) return { modelByJobId, promptByJobId, nameByJobId, stageByJobId };
 
   const jobs = await prisma.generation_jobs.findMany({
     where: { id: { in: jobIds } },
-    select: { id: true, type: true, input: true },
+    select: { id: true, type: true, input: true, video_stage: true, source_sample_job_id: true, final_job_id: true },
   });
   const modelIdByJob = new Map<string, string>();
   const modelIds = new Set<string>();
   for (const job of jobs) {
     nameByJobId.set(job.id.toString(), job.type === "audio_mix"
       ? `音频混合 ${job.id}` : `生成任务 ${job.id}`);
+    // IKIZQH：阶段与来源身份同批带回（零额外查询）；缺列按普通视频兜底（金标 G12）。
+    stageByJobId.set(job.id.toString(), {
+      video_stage: job.video_stage ?? "video",
+      source_sample_job_id:
+        job.source_sample_job_id != null ? job.source_sample_job_id.toString() : null,
+      final_job_id: job.final_job_id != null ? job.final_job_id.toString() : null,
+    });
     const input = job.input as
       | { model_id?: string; parameters?: { model_id?: string }; prompt?: unknown }
       | null
@@ -397,7 +422,7 @@ async function resolveAssetJobMeta(
     const prompt = promptFromJobInput(input);
     if (prompt !== null) promptByJobId.set(job.id.toString(), prompt);
   }
-  if (modelIds.size === 0) return { modelByJobId, promptByJobId, nameByJobId };
+  if (modelIds.size === 0) return { modelByJobId, promptByJobId, nameByJobId, stageByJobId };
 
   const caps = await prisma.generation_model_capability.findMany({
     where: { model_id: { in: [...modelIds] }, enabled: true, is_delete: false },
@@ -410,7 +435,7 @@ async function resolveAssetJobMeta(
   for (const [jobId, modelId] of modelIdByJob) {
     modelByJobId.set(jobId, labelByModel.get(modelId) ?? modelId);
   }
-  return { modelByJobId, promptByJobId, nameByJobId };
+  return { modelByJobId, promptByJobId, nameByJobId, stageByJobId };
 }
 
 /** assets 行 → 对外视图（AssetView）。列表与单查共用的字段映射，行为必须一致。 */
@@ -436,7 +461,13 @@ function toAssetView(
   modelByJobId: Map<string, string>,
   nameByJobId: Map<string, string>,
   statusByMaterialId: Map<string, { status: string; checkedAt: string | null }>,
+  stageByJobId: Map<string, VideoStageAssetIdentity>,
 ): AssetView {
+  // IKIZQH：阶段身份按生成任务派生；无任务（上传）或任务行缺列 → 普通视频缺省（G12）。
+  const stage =
+    a.generation_job_id == null
+      ? null
+      : (stageByJobId.get(a.generation_job_id.toString()) ?? null);
   return {
     id: a.id.toString(),
     name: a.name ?? (a.generation_job_id == null ? null : nameByJobId.get(a.generation_job_id.toString()) ?? null),
@@ -468,6 +499,9 @@ function toAssetView(
       a.material_id == null
         ? null
         : (statusByMaterialId.get(a.material_id)?.checkedAt ?? null),
+    video_stage: stage?.video_stage ?? "video",
+    source_sample_job_id: stage?.source_sample_job_id ?? null,
+    final_job_id: stage?.final_job_id ?? null,
   };
 }
 
@@ -480,9 +514,10 @@ function toAssetDetailView(
   nameByJobId: Map<string, string>,
   promptByJobId: Map<string, string>,
   statusByMaterialId: Map<string, { status: string; checkedAt: string | null }>,
+  stageByJobId: Map<string, VideoStageAssetIdentity>,
 ): AssetDetailView {
   return {
-    ...toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId),
+    ...toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId, stageByJobId),
     prompt:
       a.generation_job_id == null
         ? null
@@ -501,10 +536,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         },
       });
       if (!row) return null;
-      const { modelByJobId, promptByJobId, nameByJobId } = await resolveAssetJobMeta(prisma, [row]);
+      const { modelByJobId, promptByJobId, nameByJobId, stageByJobId } = await resolveAssetJobMeta(prisma, [row]);
       // 单条：未关联素材库时 resolveMaterialStatuses 直接返回空 Map，不发查询。
       const statusByMaterialId = await resolveMaterialStatuses(prisma, userId, [row]);
-      return toAssetDetailView(row, modelByJobId, nameByJobId, promptByJobId, statusByMaterialId);
+      return toAssetDetailView(row, modelByJobId, nameByJobId, promptByJobId, statusByMaterialId, stageByJobId);
     },
     async softDeleteOwned(assetId, userId) {
       // IKCNLP（方案C）：删除素材 = 软删 assets + 同步删 project_asset 关联，画布节点不动。
@@ -632,11 +667,11 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       // 生成模型溯源：按 generation_job_id 批量回查任务 input 的 model_id，再查能力表展示名。
       // 兜底顺序：展示名 → model_id → null（上传资产/任务无模型/查询失败均落到 null 或回退）。
       // IKFSSO：同一批查询顺带解析出的 promptByJobId 列表不用，刻意只取 modelByJobId。
-      const { modelByJobId, nameByJobId } = await resolveAssetJobMeta(prisma, rows);
+      const { modelByJobId, nameByJobId, stageByJobId } = await resolveAssetJobMeta(prisma, rows);
       // IKFYHJ：素材校验状态走同一个批量模式（只在有绑定时发一条 IN，不打上游）。
       const statusByMaterialId = await resolveMaterialStatuses(prisma, userId, rows);
       return {
-        records: rows.map((a) => toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId)),
+        records: rows.map((a) => toAssetView(a, modelByJobId, nameByJobId, statusByMaterialId, stageByJobId)),
         total,
         size: filter.size,
         current: filter.page,

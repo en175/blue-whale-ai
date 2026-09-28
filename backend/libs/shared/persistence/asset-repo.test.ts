@@ -920,3 +920,133 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
     });
   });
 });
+
+describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标 G11 资产侧）", () => {
+  const videoAssetRow = (id: bigint, jobId: bigint | null) => ({
+    id,
+    type: "video",
+    name: null,
+    url: `https://tos.test/${id}.mp4`,
+    width: 1920,
+    height: 1080,
+    duration_ms: 5000,
+    source: "generated",
+    gmt_create: new Date("2026-09-29T00:00:00Z"),
+    size: 1024n,
+    generation_job_id: jobId,
+    project_id: 55n,
+    mime: "video/mp4",
+  });
+
+  it("成片资产投影 video_stage=final + source_sample_job_id 指回样片任务（列表路径）", async () => {
+    const prisma = {
+      assets: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([videoAssetRow(88n, 305n)]),
+      },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 305n,
+            type: "video",
+            input: { model_id: "seedance-2.5" },
+            video_stage: "final",
+            source_sample_job_id: 302n,
+            final_job_id: null,
+          },
+        ]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });
+
+    expect(page.records[0]).toMatchObject({
+      id: "88",
+      video_stage: "final",
+      source_sample_job_id: "302",
+      final_job_id: null,
+    });
+  });
+
+  it("样片资产投影 video_stage=sample + final_job_id 指向唯一成片任务（详情路径）", async () => {
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(videoAssetRow(61n, 302n)) },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 302n,
+            type: "video",
+            input: { model_id: "seedance-2.5" },
+            video_stage: "sample",
+            source_sample_job_id: null,
+            final_job_id: 305n,
+          },
+        ]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const asset = await createAssetRepo(prisma as never).findOwnedById("61", "9");
+
+    expect(asset).toMatchObject({
+      id: "61",
+      video_stage: "sample",
+      source_sample_job_id: null,
+      final_job_id: "305",
+    });
+  });
+
+  it("旧任务资产缺阶段列（G12）与上传资产 → video_stage 兜底 video、来源 null", async () => {
+    const legacyRow = videoAssetRow(5n, 7n);
+    const uploadedRow = { ...videoAssetRow(6n, null), type: "image" };
+    const prisma = {
+      assets: {
+        count: vi.fn().mockResolvedValue(2),
+        findMany: vi.fn().mockResolvedValue([legacyRow, uploadedRow]),
+      },
+      generation_jobs: {
+        // 旧任务行没有 video_stage / 来源列（历史数据）。
+        findMany: vi.fn().mockResolvedValue([{ id: 7n, type: "video", input: {} }]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const page = await createAssetRepo(prisma as never).listByUser("9", { page: 1, size: 24 });
+
+    expect(page.records[0]).toMatchObject({
+      video_stage: "video",
+      source_sample_job_id: null,
+      final_job_id: null,
+    });
+    expect(page.records[1]).toMatchObject({
+      type: "image",
+      video_stage: "video",
+      source_sample_job_id: null,
+      final_job_id: null,
+    });
+  });
+
+  it("资产主动删除不级联另一阶段：事务只软删目标 assets 行 + project_asset 关联，不触碰任务与其余资产", async () => {
+    const assetsUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const paUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const generationJobs = { updateMany: vi.fn(), update: vi.fn(), findFirst: vi.fn() };
+    const tx = {
+      assets: { updateMany: assetsUpdate },
+      project_asset: { updateMany: paUpdate },
+      generation_jobs: generationJobs,
+    };
+    const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
+
+    // 删样片资产 61（其成片资产 88 与两阶段任务行都必须原地不动）。
+    const ok = await createAssetRepo(prisma as never).softDeleteOwned("61", "9");
+
+    expect(ok).toBe(true);
+    expect(assetsUpdate).toHaveBeenCalledWith({
+      where: { id: 61n, user_id: 9n, is_delete: false },
+      data: expect.objectContaining({ is_delete: true }),
+    });
+    expect(generationJobs.updateMany).not.toHaveBeenCalled();
+    expect(generationJobs.update).not.toHaveBeenCalled();
+  });
+});

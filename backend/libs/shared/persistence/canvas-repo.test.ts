@@ -69,6 +69,32 @@ describe("canvas optimistic save", () => {
     expect(jobUpdate).not.toHaveBeenCalled();
   });
 
+  it("IKIZQH：删画布卡（保存无卡节点集）不删任务或资产——任务只改 canvas_card_state 标记，assets 无写调用", async () => {
+    const jobFind = vi.fn().mockResolvedValue({ id: 73n });
+    const jobUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const assetsWrite = vi.fn();
+    const tx = {
+      canvas: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
+      },
+      generation_jobs: { findFirst: jobFind, updateMany: jobUpdate },
+      generation_output_slots: { updateMany: vi.fn() },
+      assets: { updateMany: assetsWrite, update: assetsWrite, deleteMany: assetsWrite },
+      project_asset: { upsert: vi.fn() },
+    };
+    const repo = createCanvasRepo({ $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as never);
+
+    // 节点集里已没有 audio-mix-73 卡（用户在画布上删除了结果卡）。
+    await repo.saveIfVersion("55", 3, null, "[]", null, { ownerId: "9", items: [] });
+
+    // 任务行仅收到 canvas_card_state 标记（软状态，is_delete 不动）；资产行零写调用。
+    expect(jobUpdate).toHaveBeenCalledTimes(1);
+    expect(Object.keys(jobUpdate.mock.calls[0][0].data)).toEqual(["canvas_card_state"]);
+    expect(jobUpdate.mock.calls[0][0].data).not.toHaveProperty("is_delete");
+    expect(assetsWrite).not.toHaveBeenCalled();
+  });
+
   it("returns a conflict without overwriting newer canvas data", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn();
