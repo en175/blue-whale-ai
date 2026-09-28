@@ -102,11 +102,17 @@ def merge(root: Path, child: Path) -> dict[str, object]:
         raise MergeError("子任务提交已进入集成分支。")
     inherited_sha = child_metadata.get("inherited_sha")
     if inherited_sha:
-        parents = output(root, "show", "-s", "--format=%P", str(inherited_sha)).split()
-        if (len(parents) != 2 or parents[0] != child_metadata["start_sha"]
-                or output(root, "rev-list", "--first-parent", "--merges",
-                          f"{child_metadata['start_sha']}..{child_sha}").splitlines() != [inherited_sha]
-                or output(root, "rev-list", "--merges", f"{inherited_sha}..{child_sha}")):
+        if inherited_sha == child_metadata["start_sha"]:
+            valid_inheritance = git(root, "merge-base", "--is-ancestor", str(inherited_sha),
+                                    child_sha, check=False).returncode == 0
+        else:
+            parents = output(root, "show", "-s", "--format=%P", str(inherited_sha)).split()
+            valid_inheritance = (len(parents) == 2 and parents[0] == child_metadata["start_sha"]
+                                 and output(root, "rev-list", "--first-parent", "--merges",
+                                            f"{child_metadata['start_sha']}..{child_sha}").splitlines()
+                                 == [inherited_sha])
+        if not valid_inheritance or output(root, "rev-list", "--merges",
+                                           f"{inherited_sha}..{child_sha}"):
             raise MergeError("子任务继承历史不符或含其他 merge commit，拒绝受控 rebase。")
         if git(root, "merge-base", "--is-ancestor", str(child_metadata["start_sha"]),
                integration_sha, check=False).returncode:
@@ -118,6 +124,19 @@ def merge(root: Path, child: Path) -> dict[str, object]:
         replay_base = base
 
     expected = git(root, "merge-tree", "--write-tree", integration_sha, child_sha, check=False)
+    if expected.returncode and inherited_sha and inherited_sha != child_metadata["start_sha"]:
+        old_integration_sha = parents[1]
+        inherited_tree = git(root, "merge-tree", "--write-tree",
+                             str(child_metadata["start_sha"]), old_integration_sha,
+                             check=False)
+        inherited_tree_lines = inherited_tree.stdout.splitlines()
+        first_parent_trees = output(root, "log", "--first-parent", "--format=%T",
+                                    f"{child_metadata['start_sha']}..{integration_sha}").splitlines()
+        if (inherited_tree.returncode == 0 and inherited_tree_lines
+                and inherited_tree_lines[0] in first_parent_trees):
+            expected = git(root, "merge-tree", "--write-tree",
+                           f"--merge-base={old_integration_sha}", integration_sha, child_sha,
+                           check=False)
     if expected.returncode:
         raise MergeError("子任务与当前集成提交存在合并冲突，未改写分支：" + expected.stdout.strip())
     expected_tree = expected.stdout.splitlines()[0]

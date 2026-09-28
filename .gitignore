@@ -23,7 +23,6 @@ AGENTS.local.md
 .codex/hooks/*
 !.codex/hooks/run-claude-pretool.sh
 .codex/config.toml
-.agents/skills/
 
 # Graphify 本地产物，整个不入库（各 worktree / clone 各自生成或共享）
 graphify-out/

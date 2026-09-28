@@ -109,16 +109,9 @@ test("frontend-delivery routes explicit feat work to its reference", () => {
   assert.match(workflow, /Without an explicit human pass, do not claim completion/);
 });
 
-test("tracked skill mirrors match their authoritative sources", () => {
-  assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
-
-  for (const skill of [
-    "receiving-code-review/SKILL.md",
-    "requesting-code-review/SKILL.md",
-  ]) {
-    const authority = read(`.superpowers/skills/${skill}`);
-    assert.equal(read(`.claude/skills/${skill}`), authority, skill);
-    assert.equal(read(`.zcode/skills/${skill}`), authority, skill);
+test("Claude and Agent skill paths read the same package", () => {
+  for (const skill of ["implement/SKILL.md", "receiving-code-review/SKILL.md", "requesting-code-review/SKILL.md"]) {
+    assert.equal(read(`.claude/skills/${skill}`), read(`.agents/skills/${skill}`), skill);
   }
 });
 
@@ -132,10 +125,10 @@ test("PR template requests the readable verification receipt summary", () => {
 
 test("pr skill keeps its template scaffolding in Chinese while guidance stays upstream English", () => {
   const skill = read(".claude/skills/pr/SKILL.md");
-  const mirror = read(".zcode/skills/pr/SKILL.md");
+  const authority = read(".agents/skills/pr/SKILL.md");
   const workflow = read("docs/agents/git-workflow.md");
 
-  assert.equal(mirror, skill);
+  assert.equal(authority, skill);
 
   // 模板代码块骨架：结构性标签必须中文（指导段 ### 小节头是上游原文，允许英文）。
   for (const heading of ["## 概要", "## 验证证据", "## 合并风险", "**变更前：**", "**变更后：**", "**可逆性：**", "**影响半径：**"]) {

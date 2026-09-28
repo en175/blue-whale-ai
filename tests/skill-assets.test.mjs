@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const config = require("../.zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs");
+const config = require("../.agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs");
 
 function rejects(ruleName, from, to) {
   const rule = config.forbidden.find((item) => item.name === ruleName);

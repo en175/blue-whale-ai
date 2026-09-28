@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +37,19 @@ def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProce
 
 
 class SyncTaskFromOriginTest(unittest.TestCase):
+    def test_conflict_scope_accepts_git_sha_directory_alias(self) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        try:
+            conflict_covers = runpy.run_path(str(REPO_ROOT / "scripts/sync-task-from-origin.py"))[
+                "conflict_covers"
+            ]
+        finally:
+            sys.path.pop(0)
+        alias = ".claude/skills~" + "a" * 40
+        self.assertTrue(conflict_covers(".claude/skills", [alias]))
+        self.assertTrue(conflict_covers(".claude/skills/start-local-services/SKILL.md", [alias]))
+        self.assertFalse(conflict_covers("scripts/verification-policy.mjs", [alias]))
+
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
@@ -268,6 +283,55 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertTrue(Path(str(payload["recovery_file"])).exists())
 
+    def test_sync_keeps_conflict_for_review_and_verifies_resolved_tree(self) -> None:
+        (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.git("commit", "-m", "fix: task edits shared line")
+        original = self.git("rev-parse", "HEAD")
+        self.advance_release("shared.txt", "upstream side\n")
+
+        conflicted = self.invoke("sync", "--keep-conflicts", "--json")
+        self.assertEqual(conflicted.returncode, 3, conflicted.stderr)
+        self.assertEqual(self.response(conflicted)["status"], "REBASE_CONFLICT_ACTIVE")
+        self.assertTrue(Path(self.git("rev-parse", "--git-path", "rebase-merge")).exists())
+        (self.worktree / "shared.txt").write_text("upstream side\ntask side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        continued = run("git", "-c", "core.editor=true", "rebase", "--continue",
+                        cwd=self.worktree)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+
+        completed = self.invoke("complete-resolved", "--json")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.response(completed)["status"], "SYNCED_RESOLVED")
+        self.assertEqual((self.worktree / "shared.txt").read_text(encoding="utf-8"),
+                         "upstream side\ntask side\n")
+        recovery = json.loads((Path(self.git("rev-parse", "--absolute-git-dir")) /
+                               "agent-sync-recovery.json").read_text(encoding="utf-8"))
+        self.assertEqual(recovery["rebase_input_head"], original)
+        self.assertEqual(recovery["rebase_resolved_files"], ["shared.txt"])
+        again = self.invoke("sync", "--json")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(self.response(again)["status"], "UP_TO_DATE")
+
+    def test_resolved_sync_rejects_changes_outside_conflict(self) -> None:
+        (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.git("commit", "-m", "fix: task edits shared line")
+        self.advance_release("shared.txt", "upstream side\n")
+        self.assertEqual(self.invoke("sync", "--keep-conflicts", "--json").returncode, 3)
+        (self.worktree / "shared.txt").write_text("upstream side\ntask side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.assertEqual(run("git", "-c", "core.editor=true", "rebase", "--continue",
+                             cwd=self.worktree).returncode, 0)
+        (self.worktree / "unrelated.txt").write_text("unexpected\n", encoding="utf-8")
+        self.git("add", "unrelated.txt")
+        self.git("commit", "-m", "chore: unrelated change")
+
+        blocked = self.invoke("complete-resolved", "--json")
+        self.assertEqual(blocked.returncode, 4)
+        self.assertEqual(self.response(blocked)["status"], "VERIFICATION_FAILED")
+        self.assertIn("unrelated.txt", self.response(blocked)["resolved_files"])
+
     def test_rollback_restores_original_head_and_removes_recovery_point(self) -> None:
         original_head = self.commit_task_change()
         self.advance_release()
@@ -471,6 +535,122 @@ class SyncTaskFromOriginTest(unittest.TestCase):
 
         self.assertEqual(rollback.returncode, 0, rollback.stderr)
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+
+    def test_sync_accepts_linear_commits_after_pending_rebase(self) -> None:
+        child_head = self.commit_task_change()
+        child = self.root / "blue-whale-worktrees" / "child"
+        self.git("worktree", "add", "-b", "feature/child", str(child), child_head)
+        child_git_dir = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child))
+        child_metadata = child_git_dir / "blue-whale" / "task-base.json"
+        child_metadata.parent.mkdir(parents=True)
+        child_metadata.write_text(json.dumps({
+            "version": 1, "task_branch": "feature/child",
+            "target_branch": "release/prod", "start_sha": child_head,
+        }), encoding="utf-8")
+        (self.worktree / "integration.txt").write_text("integration\n", encoding="utf-8")
+        self.git("add", "integration.txt")
+        self.git("commit", "-m", "fix: integration followup")
+        original_head = self.git("rev-parse", "HEAD")
+        self.advance_release("upstream-one.txt", "one\n")
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_synced = self.git("rev-parse", "HEAD")
+
+        (self.worktree / "review.txt").write_text("review\n", encoding="utf-8")
+        self.git("add", "review.txt")
+        self.git("commit", "-m", "fix: review change")
+        review_head = self.git("rev-parse", "HEAD")
+        up_to_date = self.invoke("sync", "--json")
+        self.assertEqual(up_to_date.returncode, 0, up_to_date.stderr)
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        self.assertEqual(json.loads(marker.read_text(encoding="utf-8"))["synced_head"], review_head)
+        self.assertNotEqual(self.invoke("rollback", "--json").returncode, 0)
+
+        self.advance_release("upstream-two.txt", "two\n")
+        second = self.invoke("sync", "--json")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery["original_head"], original_head)
+        self.assertEqual(recovery["rebase_proofs"][0]["synced_head"], first_synced)
+        self.assertEqual(recovery["rebase_proofs"][0]["original_head"], original_head)
+        self.assertEqual(recovery["rebase_input_head"], review_head)
+        self.assertEqual((self.worktree / "review.txt").read_text(encoding="utf-8"), "review\n")
+
+        second_head = self.git("rev-parse", "HEAD")
+        self.advance_release("upstream-three.txt", "three\n")
+        third = self.invoke("sync", "--json")
+        self.assertEqual(third.returncode, 0, third.stderr)
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(len(recovery["rebase_proofs"]), 2)
+        self.assertEqual(recovery["rebase_proofs"][1]["original_head"], review_head)
+        self.assertEqual(recovery["rebase_input_head"], second_head)
+
+    def test_sync_rejects_merge_commit_after_pending_rebase(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        before = marker.read_bytes()
+
+        self.git("switch", "-c", "fix/side")
+        (self.worktree / "side.txt").write_text("side\n", encoding="utf-8")
+        self.git("add", "side.txt")
+        self.git("commit", "-m", "fix: side")
+        self.git("switch", "feature/测试已有PR更新流程")
+        self.git("merge", "--no-ff", "fix/side", "-m", "merge: side")
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("merge commit", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+    def test_sync_rejects_remote_source_change_after_pending_rebase(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        before = marker.read_bytes()
+        self.git("push", "origin", "HEAD:refs/heads/feature/测试已有PR更新流程")
+        self.advance_release("upstream-two.txt", "two\n")
+
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("远端源分支变化", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+    def test_linearized_pr_rejects_rename_outside_frozen_diff(self) -> None:
+        self.advance_release("a", "same\n")
+        self.advance_release("x", "same\n")
+        self.git("merge", "--ff-only", "release/prod")
+        (self.worktree / "a").unlink()
+        self.git("add", "a")
+        self.git("commit", "-m", "fix: delete a")
+        self.advance_release("upstream.txt", "upstream\n")
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        recovery.update(linearized_pr=123, frozen_files=["a"])
+        marker.write_text(json.dumps(recovery), encoding="utf-8")
+        synced_head = self.git("rev-parse", "HEAD")
+
+        self.git("mv", "x", "a")
+        self.git("commit", "-m", "fix: rename x to a")
+        self.assertEqual(self.git("diff", "--name-only", f"{synced_head}..HEAD"), "a")
+        self.assertEqual(self.git("diff", "--name-only", "origin/release/prod...HEAD"), "x")
+        before = marker.read_bytes()
+
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("冻结文件范围", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+        self.advance_release("upstream-two.txt", "two\n")
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("冻结文件范围", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
 
 
 if __name__ == "__main__":
