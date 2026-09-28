@@ -7,7 +7,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/api/assets', () => ({ fetchAllAssets: vi.fn(async () => []) }));
+vi.mock('@/api/assets', () => ({ fetchAssetDetail: vi.fn(async () => { throw new Error('asset not found'); }) }));
 
 const { Markdown } = await import('./index');
 const { rememberAssetUrl } = await import('./MessageAssetPreview');

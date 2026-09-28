@@ -8,8 +8,8 @@ import styles from './index.module.css';
  * 助手正文里的素材胶囊（IKDLW3）。与用户消息里的是同一个组件（ImageMentionChip / VideoMentionChip），
  * 所以缩略图、悬浮预览长得一样。
  *
- * URL 不随消息来：`asset_ref` 只带身份。上传当轮本地缓存里有；刷新后要按 id 反查一次素材库
- * （与 MessageAssetPreview 共用同一份缓存和同一次请求）。反查回来之前先画一颗只有名字的胶囊，
+ * URL 不随消息来：`asset_ref` 只带身份。上传当轮本地缓存里有；刷新后要按 id 拉详情
+ * （与 MessageAssetPreview 共用同一份缓存）。反查回来之前先画一颗只有名字的胶囊，
  * 位置不变、不闪。
  */
 export function AssetMentionChip({
@@ -29,7 +29,7 @@ export function AssetMentionChip({
   useAssetUrlCache();
   const resolved = url || lookupAssetUrl(assetId);
   useEffect(() => {
-    if (!resolved) void ensureAssetUrls();
+    if (!resolved && assetId) void ensureAssetUrls([assetId]);
   }, [resolved, assetId]);
   if (!resolved) {
     return (
