@@ -268,6 +268,55 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertTrue(Path(str(payload["recovery_file"])).exists())
 
+    def test_sync_keeps_conflict_for_review_and_verifies_resolved_tree(self) -> None:
+        (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.git("commit", "-m", "fix: task edits shared line")
+        original = self.git("rev-parse", "HEAD")
+        self.advance_release("shared.txt", "upstream side\n")
+
+        conflicted = self.invoke("sync", "--keep-conflicts", "--json")
+        self.assertEqual(conflicted.returncode, 3, conflicted.stderr)
+        self.assertEqual(self.response(conflicted)["status"], "REBASE_CONFLICT_ACTIVE")
+        self.assertTrue(Path(self.git("rev-parse", "--git-path", "rebase-merge")).exists())
+        (self.worktree / "shared.txt").write_text("upstream side\ntask side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        continued = run("git", "-c", "core.editor=true", "rebase", "--continue",
+                        cwd=self.worktree)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+
+        completed = self.invoke("complete-resolved", "--json")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.response(completed)["status"], "SYNCED_RESOLVED")
+        self.assertEqual((self.worktree / "shared.txt").read_text(encoding="utf-8"),
+                         "upstream side\ntask side\n")
+        recovery = json.loads((Path(self.git("rev-parse", "--absolute-git-dir")) /
+                               "agent-sync-recovery.json").read_text(encoding="utf-8"))
+        self.assertEqual(recovery["rebase_input_head"], original)
+        self.assertEqual(recovery["rebase_resolved_files"], ["shared.txt"])
+        again = self.invoke("sync", "--json")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(self.response(again)["status"], "UP_TO_DATE")
+
+    def test_resolved_sync_rejects_changes_outside_conflict(self) -> None:
+        (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.git("commit", "-m", "fix: task edits shared line")
+        self.advance_release("shared.txt", "upstream side\n")
+        self.assertEqual(self.invoke("sync", "--keep-conflicts", "--json").returncode, 3)
+        (self.worktree / "shared.txt").write_text("upstream side\ntask side\n", encoding="utf-8")
+        self.git("add", "shared.txt")
+        self.assertEqual(run("git", "-c", "core.editor=true", "rebase", "--continue",
+                             cwd=self.worktree).returncode, 0)
+        (self.worktree / "unrelated.txt").write_text("unexpected\n", encoding="utf-8")
+        self.git("add", "unrelated.txt")
+        self.git("commit", "-m", "chore: unrelated change")
+
+        blocked = self.invoke("complete-resolved", "--json")
+        self.assertEqual(blocked.returncode, 4)
+        self.assertEqual(self.response(blocked)["status"], "VERIFICATION_FAILED")
+        self.assertIn("unrelated.txt", self.response(blocked)["resolved_files"])
+
     def test_rollback_restores_original_head_and_removes_recovery_point(self) -> None:
         original_head = self.commit_task_change()
         self.advance_release()

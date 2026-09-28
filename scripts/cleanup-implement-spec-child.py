@@ -85,11 +85,27 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                 continue
             ref = f"refs/agent-implement-spec-rebase-lineage/{slug}/{synced}"
             retained = git(root, "rev-parse", "--verify", ref, check=False)
-            expected = git(root, "merge-tree", "--write-tree",
+            expected = git(root, "merge-tree", "--write-tree", "--name-only",
                            str(record.get("upstream_sha", "")), original, check=False)
+            lines = expected.stdout.splitlines()
+            auto_tree = lines[0] if lines else ""
+            end = lines.index("") if "" in lines else len(lines)
+            conflicts = lines[1:end]
+            resolved = record.get("resolved_files")
+            if resolved is None:
+                tree_valid = expected.returncode == 0 and auto_tree == record.get("merged_tree")
+            else:
+                changed = output(root, "diff", "--name-only", auto_tree,
+                                 str(record.get("merged_tree", ""))).splitlines()
+                scopes = [name.removesuffix("~HEAD") for name in conflicts]
+                tree_valid = (isinstance(resolved, list) and expected.returncode != 0
+                              and record.get("auto_tree") == auto_tree
+                              and record.get("conflict_files") == conflicts
+                              and resolved == changed
+                              and all(any(path == scope or path.startswith(scope + "/")
+                                          for scope in scopes) for path in changed))
             if (path.stem != synced or retained.returncode or retained.stdout.strip() != original
-                    or expected.returncode or not expected.stdout.splitlines()
-                    or expected.stdout.splitlines()[0] != record.get("merged_tree")
+                    or not tree_valid
                     or output(root, "rev-parse", f"{synced}^{{tree}}") != record.get("merged_tree")
                     or git(root, "merge-base", "--is-ancestor", synced,
                            verified, check=False).returncode):

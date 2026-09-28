@@ -104,29 +104,61 @@ def rebase_lineage_paths(root: Path, branch: str, synced_head: str) -> tuple[Pat
             f"refs/agent-implement-spec-rebase-lineage/{slug}/{synced_head}")
 
 
-def current_rebase_proof(recovery: dict[str, object]) -> dict[str, str] | None:
+def current_rebase_proof(recovery: dict[str, object]) -> dict[str, object] | None:
     if not recovery.get("rebase_tree"):
         return None
-    return {
+    proof = {
         "original_head": str(recovery.get("rebase_input_head", recovery["original_head"])),
         "upstream_sha": str(recovery.get("rebase_upstream_sha", recovery["upstream_sha"])),
         "synced_head": str(recovery.get("rebase_synced_head", recovery["synced_head"])),
         "merged_tree": str(recovery["rebase_tree"]),
         "input_ref": str(recovery.get("rebase_input_ref", "")),
     }
+    if recovery.get("rebase_auto_tree"):
+        proof["auto_tree"] = str(recovery["rebase_auto_tree"])
+        proof["conflict_files"] = recovery["rebase_conflict_files"]
+        proof["resolved_files"] = recovery["rebase_resolved_files"]
+    return proof
 
 
-def verify_rebase_proof(root: Path, proof: dict[str, str], continuation: str) -> None:
-    original = proof["original_head"]
-    upstream = proof["upstream_sha"]
-    synced = proof["synced_head"]
-    tree = proof["merged_tree"]
-    retained = proof.get("input_ref", "")
-    expected = git(root, "merge-tree", "--write-tree", upstream, original, check=False)
+def merge_tree_evidence(root: Path, upstream: str, original: str) -> tuple[str, list[str], int]:
+    result = git(root, "merge-tree", "--write-tree", "--name-only", upstream, original,
+                 check=False)
+    lines = result.stdout.splitlines()
+    if not lines or not re.fullmatch(r"[0-9a-f]{40}", lines[0]):
+        raise WorkflowError("无法取得同步输入的合并文件树。")
+    end = lines.index("") if "" in lines else len(lines)
+    return lines[0], lines[1:end], result.returncode
+
+
+def conflict_covers(path: str, conflicts: list[str]) -> bool:
+    for conflict in conflicts:
+        scope = conflict.removesuffix("~HEAD")
+        if path == conflict or path == scope or path.startswith(scope + "/"):
+            return True
+    return False
+
+
+def verify_rebase_proof(root: Path, proof: dict[str, object], continuation: str) -> None:
+    original = str(proof["original_head"])
+    upstream = str(proof["upstream_sha"])
+    synced = str(proof["synced_head"])
+    tree = str(proof["merged_tree"])
+    retained = str(proof.get("input_ref", ""))
+    auto_tree, conflicts, merge_status = merge_tree_evidence(root, upstream, original)
+    resolved = proof.get("resolved_files")
+    if resolved is not None:
+        actual_changes = git_output(root, "diff", "--name-only", auto_tree, tree).splitlines()
+        tree_valid = (isinstance(resolved, list) and merge_status != 0
+                      and proof.get("auto_tree") == auto_tree
+                      and proof.get("conflict_files") == conflicts
+                      and resolved == actual_changes
+                      and all(conflict_covers(path, conflicts) for path in actual_changes))
+    else:
+        tree_valid = merge_status == 0 and auto_tree == tree
     if (not all(re.fullmatch(r"[0-9a-f]{40}", value)
                 for value in (original, upstream, synced, tree))
-            or expected.returncode or not expected.stdout.splitlines()
-            or expected.stdout.splitlines()[0] != tree
+            or not tree_valid
             or git_output(root, "rev-parse", f"{synced}^{{tree}}") != tree
             or (retained and git_output(root, "rev-parse", retained) != original)
             or git(root, "merge-base", "--is-ancestor", synced,
@@ -212,6 +244,8 @@ def pending_recovery(root: Path, marker: Path, branch: str, target_branch: str,
         raise WorkflowError("上一轮同步结果已进入推送阶段；完成远端核验并 finalize 后才能继续。")
     if recovery.get("rebase_tree_failed"):
         raise WorkflowError("上一轮同步的文件树核对失败；保留恢复点，禁止覆盖失败证据。")
+    if recovery.get("manual_rebase"):
+        raise WorkflowError("冲突 rebase 尚未完成核验；先完成 rebase，再运行 complete-resolved。")
     if recovery.get("synced_head"):
         retained = git(root, "rev-parse", "--verify", str(recovery.get("backup_ref", backup_ref)),
                        check=False)
@@ -260,7 +294,8 @@ def emit(as_json: bool, status: str, **details: object) -> None:
         print("{}: {}".format(status, json.dumps(details, ensure_ascii=False, sort_keys=True)))
 
 
-def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
+def synchronize(root: Path, as_json: bool, target_branch: str | None,
+                keep_conflicts: bool = False) -> int:
     git_dir, branch = worktree_context(root)
     metadata = read_task_metadata(root, target_branch)
     if metadata.get("inherited_sha"):
@@ -307,7 +342,8 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         current_proof = current_rebase_proof(recovery)
         if current_proof:
             recovery["rebase_proofs"] = [*proofs, current_proof]
-        for field in ("rebase_tree", "rebase_synced_head", "rebase_upstream_sha"):
+        for field in ("rebase_tree", "rebase_synced_head", "rebase_upstream_sha",
+                      "rebase_auto_tree", "rebase_conflict_files", "rebase_resolved_files"):
             recovery.pop(field, None)
         recovery.setdefault("rollback_safe", recovery.get("rebase_input_head")
                             == recovery["original_head"])
@@ -349,6 +385,15 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         conflicts = git_output(root, "diff", "--name-only", "--diff-filter=U").splitlines()
         rebase_head_probe = git(root, "rev-parse", "--verify", "REBASE_HEAD", check=False)
         rebase_head = rebase_head_probe.stdout.strip() if rebase_head_probe.returncode == 0 else ""
+        if keep_conflicts and conflicts:
+            recovery["manual_rebase"] = True
+            recovery["rollback_safe"] = False
+            write_recovery(marker, recovery)
+            emit(as_json, "REBASE_CONFLICT_ACTIVE", branch=branch,
+                 original_head=original_head, upstream_sha=upstream_sha,
+                 replaying_commit=rebase_head, conflict_files=conflicts,
+                 recovery_file=str(marker), backup_ref=backup_ref)
+            return 3
         abort = git(root, "rebase", "--abort", check=False)
         restored_head = git_output(root, "rev-parse", "HEAD")
         if abort.returncode != 0 or restored_head != original_head:
@@ -418,6 +463,53 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         recovery_file=str(marker),
         backup_ref=backup_ref,
     )
+    return 0
+
+
+def complete_resolved(root: Path, as_json: bool) -> int:
+    git_dir, branch = worktree_context(root)
+    metadata = read_task_metadata(root)
+    if metadata.get("inherited_sha"):
+        raise WorkflowError("整包子票不能独立完成同步。")
+    ensure_clean(root)
+    ensure_no_git_operation(git_dir)
+    marker, backup_ref = recovery_paths(git_dir, branch)
+    recovery = read_recovery(marker, branch)
+    if not recovery.get("manual_rebase"):
+        raise WorkflowError("没有待核验的冲突 rebase。")
+    original = str(recovery["rebase_input_head"])
+    upstream = str(recovery["upstream_sha"])
+    retained = str(recovery["rebase_input_ref"])
+    current = git_output(root, "rev-parse", "HEAD")
+    if (git_output(root, "rev-parse", retained) != original
+            or git_output(root, "rev-parse", str(recovery.get("backup_ref", backup_ref)))
+            != recovery["original_head"]
+            or remote_branch_sha(root, branch) != recovery.get("remote_branch_sha", "")
+            or git(root, "merge-base", "--is-ancestor", upstream, current,
+                   check=False).returncode
+            or git_output(root, "rev-list", "--merges", f"{upstream}..{current}")):
+        raise WorkflowError("冲突 rebase 的输入引用、远端源、目标祖先或线性历史核对失败。")
+    auto_tree, conflicts, merge_status = merge_tree_evidence(root, upstream, original)
+    actual_tree = git_output(root, "rev-parse", "HEAD^{tree}")
+    resolved = git_output(root, "diff", "--name-only", auto_tree, actual_tree).splitlines()
+    if (merge_status == 0 or not conflicts or not resolved
+            or any(not conflict_covers(path, conflicts) for path in resolved)):
+        emit(as_json, "VERIFICATION_FAILED", branch=branch, head=current,
+             conflict_files=conflicts, resolved_files=resolved,
+             detail="冲突解决改动超出原始合并冲突范围，保留恢复点供修正。")
+        return 4
+    recovery["synced_head"] = current
+    recovery["rebase_synced_head"] = current
+    recovery["rebase_upstream_sha"] = upstream
+    recovery["rebase_tree"] = actual_tree
+    recovery["rebase_auto_tree"] = auto_tree
+    recovery["rebase_conflict_files"] = conflicts
+    recovery["rebase_resolved_files"] = resolved
+    recovery.pop("manual_rebase")
+    write_recovery(marker, recovery)
+    emit(as_json, "SYNCED_RESOLVED", branch=branch, head=current,
+         upstream_sha=upstream, conflict_files=conflicts,
+         resolved_files=resolved, recovery_file=str(marker))
     return 0
 
 
@@ -613,6 +705,8 @@ def finalize(root: Path, as_json: bool) -> int:
     ensure_no_git_operation(git_dir)
     marker, backup_ref = recovery_paths(git_dir, branch)
     recovery = read_recovery(marker, branch)
+    if recovery.get("manual_rebase"):
+        raise WorkflowError("冲突 rebase 尚未完成核验，禁止 finalize。")
     if recovery.get("rebase_tree_failed"):
         raise WorkflowError("同步后的文件树核对失败，禁止 finalize。")
     current_head = git_output(root, "rev-parse", "HEAD")
@@ -683,6 +777,10 @@ def finalize(root: Path, as_json: bool) -> int:
             "merged_tree": proof["merged_tree"],
             "child_heads": recovery["child_heads"],
         }
+        if proof.get("auto_tree"):
+            lineage["auto_tree"] = proof["auto_tree"]
+            lineage["conflict_files"] = proof["conflict_files"]
+            lineage["resolved_files"] = proof["resolved_files"]
         if lineage_file.exists():
             if load_recovery(lineage_file) != lineage or git_output(root, "rev-parse", lineage_ref) != original_head:
                 raise WorkflowError("已有不同的 implement-spec 同步证明，禁止覆盖。")
@@ -701,13 +799,14 @@ def finalize(root: Path, as_json: bool) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("sync", "linearize", "rollback", "finalize"))
+    parser.add_argument("action", choices=("sync", "complete-resolved", "linearize", "rollback", "finalize"))
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--target-branch")
     parser.add_argument("--user-authorized", action="store_true")
     parser.add_argument("--update-pr", type=int)
     parser.add_argument("--pr-snapshot", type=Path)
     parser.add_argument("--child-branch", action="append", default=[])
+    parser.add_argument("--keep-conflicts", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -723,7 +822,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         root = repository_root()
         if args.action == "sync":
-            return synchronize(root, args.as_json, args.target_branch)
+            return synchronize(root, args.as_json, args.target_branch, args.keep_conflicts)
+        if args.keep_conflicts:
+            raise WorkflowError("--keep-conflicts 仅适用于 sync。")
+        if args.action == "complete-resolved":
+            return complete_resolved(root, args.as_json)
         if args.action == "linearize":
             if args.target_branch is not None:
                 raise WorkflowError("线性化目标分支由任务元数据和 PR 快照决定，请勿传 --target-branch。")
