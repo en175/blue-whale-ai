@@ -35,8 +35,9 @@ export type GenerationJobType = 'image' | 'video' | 'audio';
  *  音频截取任务（IKGM9O / IKGOT8 / IKGOR6 / IKGXLS / IKGZ83 / IKHB7A）。 */
 export type JobType = GenerationJobType | 'media_extract' | 'image_enhance' | 'image_erase' | 'image_outpaint' | 'image_cutout' | 'video_subtitle_erase' | 'audio_trim' | 'audio_mix' | 'audio_video_mux' | 'video_frame_interpolation';
 
-/** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
-export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
+/** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态；
+ *  checking = 提交结果不明时的锁定态（契约 JOB_STATUS_CHECKING，IKIZQ5——不重提、不退款，先核对）。 */
+export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled' | 'checking';
 
 /** 任务产物 */
 export interface JobAsset {
@@ -292,8 +293,17 @@ export interface JobDetail {
   /** IKIZQB：两阶段视频投影增量（契约 videoStageJobProjectionSchema）。旧任务/普通视频
    *  缺省按普通视频处理（video_stage=video、来源与截止 null）。 */
   video_stage?: 'video' | 'sample' | 'final';
+  /** 成片任务指向来源样片任务（仅 final 阶段非 null；IKIZQ8/QH 投影）。 */
+  source_sample_job_id?: string | null;
+  /** 样片任务指向其唯一成片任务（仅 sample 阶段可非 null；IKIZQ8/QH 投影）。 */
+  final_job_id?: string | null;
   /** 样片的实际转成片截止时间（RFC3339）；null = 缺可信上游 created_at（禁用成片，样片保留）。 */
   finalize_deadline_at?: string | null;
+  /** 阶段费用状态（契约 chargeStateSchema）：held 已预扣 / settled 已结算 / released 已释放；
+   *  旧任务/普通视频为 null。 */
+  charge_state?: 'held' | 'settled' | 'released' | null;
+  /** 按真实用量结算的实际积分（settled 后非 null）；旧任务/普通视频为 null。 */
+  actual_credits?: number | null;
   error?: JobError | null;
 }
 
@@ -308,9 +318,14 @@ export interface JobRecord {
   output_assets: JobAsset[];
   error?: JobError | null;
   canvas_card_state?: 'pending' | 'present' | 'removed';
-  /** IKIZQB：两阶段视频投影增量（同 JobDetail；列表投影契约同一 schema）。 */
+  /** IKIZQB：两阶段视频投影增量（同 JobDetail；列表投影契约同一 schema，IKIZQ8/QH 补齐
+   *  来源/费用字段——历史页据此显示阶段、来源与各阶段费用）。 */
   video_stage?: 'video' | 'sample' | 'final';
+  source_sample_job_id?: string | null;
+  final_job_id?: string | null;
   finalize_deadline_at?: string | null;
+  charge_state?: 'held' | 'settled' | 'released' | null;
+  actual_credits?: number | null;
 }
 
 /** GET /api/jobs 返回 */

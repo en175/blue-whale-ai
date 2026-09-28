@@ -325,6 +325,13 @@ export function AssetCard({
           </div>
         )}
         <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        {/* IKIZQI：两阶段视频资产标注样片/成片（契约 videoStageAssetProjectionSchema；
+            video 或缺省 = 旧普通视频，不渲染徽标）。 */}
+        {asset.type === 'video' && asset.video_stage && asset.video_stage !== 'video' && (
+          <span className={styles.stageBadge}>
+            {asset.video_stage === 'sample' ? '样片 480P' : '成片 1080P'}
+          </span>
+        )}
         {asset.material_status === 'Active' && (
           <span className={styles.complianceBadge} title="校验通过">
             <img src="/success.png" alt="" />

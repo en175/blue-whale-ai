@@ -45,6 +45,13 @@ export interface AssetRecord {
   material_id?: string | null;
   /** 素材库校验镜像：Active 为已通过合规 */
   material_status?: 'Active' | 'Processing' | 'Failed' | null;
+  /** IKIZQH：两阶段资产投影增量（契约 videoStageAssetProjectionSchema）。由生成任务行派生：
+   *  sample = 样片（480p 自有素材）、final = 成片（1080p）；上传资产/旧任务缺省 video。
+   *  双向来源：样片 final_job_id → GET /api/jobs/:id 的 output_assets 即成片素材，
+   *  成片反向走 source_sample_job_id（同一详情端点）。 */
+  video_stage?: 'video' | 'sample' | 'final';
+  source_sample_job_id?: string | null;
+  final_job_id?: string | null;
 }
 
 /** 分页包络 */

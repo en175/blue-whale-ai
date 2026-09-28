@@ -11,7 +11,7 @@ export default function MainLayout() {
   const location = useLocation();
   useDocumentTitle();
   const isCanvasPage = location.pathname === '/canvas';
-  const hasGlassBackground = ['/', '/projects', '/library'].includes(location.pathname);
+  const hasGlassBackground = ['/', '/projects', '/library', '/history'].includes(location.pathname);
 
   return (
     <div className={styles.layout}>

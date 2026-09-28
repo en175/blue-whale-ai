@@ -462,6 +462,25 @@
   z-index: 4;
 }
 
+/* 两阶段视频阶段徽标（IKIZQI）：样片/成片，紧挨类型标签右侧 */
+.stageBadge {
+  position: absolute;
+  top: var(--spacing-sm);
+  left: calc(var(--spacing-sm) + 44px);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.25;
+  color: #93c5fd;
+  background-color: rgba(30, 58, 138, 0.72);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  isolation: isolate;
+  z-index: 4;
+}
+
 /* ---- 多选模式勾选角标（画布资产库选择弹窗）---- */
 .selectBadge {
   position: absolute;
