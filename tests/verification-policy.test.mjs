@@ -856,7 +856,13 @@ test("full verification reports each existing stage without changing the command
   try {
     const fakeBin = join(directory, "bin");
     const stageLog = join(directory, "stages.jsonl");
+    // 契约产物 backend/libs/contracts/gen/ 不入库，脚本在缺失时已改为提前指路退出；
+    // 该用例必须在自带产物目录的受控 cwd 里跑，不依赖本机是否恰好生成过契约。
+    const worktree = join(directory, "worktree");
     mkdirSync(fakeBin);
+    mkdirSync(join(worktree, "backend", "libs", "contracts", "gen", "billing"), {
+      recursive: true,
+    });
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(
       fakePnpm,
@@ -872,7 +878,7 @@ test("full verification reports each existing stage without changing the command
     chmodSync(fakePnpm, 0o755);
 
     const result = spawnSync("bash", [FULL_VERIFY], {
-      cwd: ROOT,
+      cwd: worktree,
       encoding: "utf8",
       env: {
         ...childEnvironment(),
