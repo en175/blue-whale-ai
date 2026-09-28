@@ -19,6 +19,11 @@
 # 前端镜像改为仓库根 context 后，必须放行 web/（否则 COPY web/... 是空的）。
 !web/
 !web/**
+# 后端镜像构建期要跑 buf generate（生成物不入仓，见 .gitignore「跨进程契约生成物」）。
+# contracts/ 不在任何已放行子树内，不在这里放行的话 COPY contracts 拿到的是空目录，
+# 随后 buf generate 会因找不到 buf.yaml 失败。
+!contracts/
+!contracts/**
 # IK7ERQ：builder 阶段 pnpm test:ci 需跨端契约的 JSON Schema 与夹具进 build context。
 # 只放行 docs/specs 下的 .json（schema）与 fixtures 子树（约 104K），散文 .md 仍排除。
 !docs/
