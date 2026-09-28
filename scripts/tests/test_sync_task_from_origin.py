@@ -472,6 +472,76 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(rollback.returncode, 0, rollback.stderr)
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
 
+    def test_sync_accepts_linear_commits_after_pending_rebase(self) -> None:
+        original_head = self.commit_task_change()
+        child = self.root / "blue-whale-worktrees" / "child"
+        self.git("worktree", "add", "-b", "feature/child", str(child), original_head)
+        child_git_dir = Path(self.git("rev-parse", "--absolute-git-dir", cwd=child))
+        child_metadata = child_git_dir / "blue-whale" / "task-base.json"
+        child_metadata.parent.mkdir(parents=True)
+        child_metadata.write_text(json.dumps({
+            "version": 1, "task_branch": "feature/child",
+            "target_branch": "release/prod", "start_sha": original_head,
+        }), encoding="utf-8")
+        self.advance_release("upstream-one.txt", "one\n")
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_synced = self.git("rev-parse", "HEAD")
+
+        (self.worktree / "review.txt").write_text("review\n", encoding="utf-8")
+        self.git("add", "review.txt")
+        self.git("commit", "-m", "fix: review change")
+        review_head = self.git("rev-parse", "HEAD")
+        up_to_date = self.invoke("sync", "--json")
+        self.assertEqual(up_to_date.returncode, 0, up_to_date.stderr)
+        marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
+        self.assertEqual(json.loads(marker.read_text(encoding="utf-8"))["synced_head"], review_head)
+        self.assertNotEqual(self.invoke("rollback", "--json").returncode, 0)
+
+        self.advance_release("upstream-two.txt", "two\n")
+        second = self.invoke("sync", "--json")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        recovery = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery["original_head"], original_head)
+        self.assertEqual(recovery["rebase_proofs"][0]["synced_head"], first_synced)
+        self.assertEqual(recovery["rebase_proofs"][0]["original_head"], original_head)
+        self.assertEqual(recovery["rebase_input_head"], review_head)
+        self.assertEqual((self.worktree / "review.txt").read_text(encoding="utf-8"), "review\n")
+
+    def test_sync_rejects_merge_commit_after_pending_rebase(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        before = marker.read_bytes()
+
+        self.git("switch", "-c", "fix/side")
+        (self.worktree / "side.txt").write_text("side\n", encoding="utf-8")
+        self.git("add", "side.txt")
+        self.git("commit", "-m", "fix: side")
+        self.git("switch", "feature/测试已有PR更新流程")
+        self.git("merge", "--no-ff", "fix/side", "-m", "merge: side")
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("merge commit", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
+    def test_sync_rejects_remote_source_change_after_pending_rebase(self) -> None:
+        self.commit_task_change()
+        self.advance_release()
+        first = self.invoke("sync", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = Path(str(self.response(first)["recovery_file"]))
+        before = marker.read_bytes()
+        self.git("push", "origin", "HEAD:refs/heads/feature/测试已有PR更新流程")
+        self.advance_release("upstream-two.txt", "two\n")
+
+        result = self.invoke("sync", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("远端源分支变化", str(self.response(result)["detail"]))
+        self.assertEqual(marker.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

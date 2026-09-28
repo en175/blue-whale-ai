@@ -12,7 +12,7 @@ scripts/sync-task-from-origin.sh sync --target-branch <recorded-release> --json
 
 Record the resulting HEAD and fixed diff baseline for step 7. After review fixes, commit through `scripts/commit-task-for-review.sh`. Run the testing strategy's completion verification and check its receipt against the current HEAD.
 
-If review fixes add commits to a pending synchronization transaction, an existing-PR update requires its recorded `synced_head` to match the new HEAD. Re-run the sync entrypoint and check that binding; `UP_TO_DATE` alone does not prove it refreshed the record. Ordinary rebase transactions can retain the old HEAD or reject another sync after the release advances. On mismatch or rejection, preserve recovery references and report the blocker; do not rewrite transaction metadata to proceed.
+If review fixes add commits to a pending synchronization transaction, re-run the sync entrypoint and check that the recorded `synced_head` matches the new HEAD. The entrypoint accepts a clean linear continuation only after checking the backup reference, merge-tree lineage when present, remote source SHA, and frozen PR file scope when applicable. It disables automatic rollback after new commits. On rejection, preserve recovery references and report the failed proof; do not rewrite transaction metadata to proceed.
 
 Before publication, run and check PR-stage verification:
 

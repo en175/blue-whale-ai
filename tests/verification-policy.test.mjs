@@ -1660,6 +1660,19 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
   assert.ok(classification.areas.includes("skill-assets"));
 });
 
+test("legacy skill Dockerfile migration stays scoped at PR stage", () => {
+  const files = [
+    ".zcode/skills/deploy-blue-whale-api/docker/Dockerfile",
+    ".agents/skills/deploy-blue-whale-api/docker/Dockerfile",
+  ];
+  for (const stage of ["completion", "pr"]) {
+    const classification = classifyChanges(files, { stage });
+    assert.equal(classification.tier, "scoped");
+    assert.deepEqual(classification.areas, ["operations"]);
+  }
+  assert.equal(classifyChanges([...files, "backend/Dockerfile"], { stage: "pr" }).tier, "full");
+});
+
 test('CBM client adapters select control-plane verification', () => {
   const result = classifyChanges(['.qoder/settings.json', '.kimi-code/hooks.toml', '.claude/settings.json', '.codex/hooks.json']);
   assert.equal(result.tier, 'scoped');

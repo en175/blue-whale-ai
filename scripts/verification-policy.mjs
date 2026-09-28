@@ -46,6 +46,7 @@ const CONTRACTS_SOURCE = /^contracts\//;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const SKILL_SCRIPT_FILE = /^\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
 const SKILL_PACKAGE_FILE = /^\.agents\/skills\/[^/]+\/.+/;
+const SKILL_DOCKERFILE = /^\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/(?:.*\/)?Dockerfile[^/]*$/;
 const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
 
 // 精确登记技能资产；旧路径保留删除态分类，实际验证只运行权威目录。
@@ -73,7 +74,7 @@ function isTestFile(file) {
 }
 
 function hasProductImpact(file, documentationOnlyFiles) {
-  return PRODUCT_IMPACT_FILE.test(file) && !SKILL_PACKAGE_FILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
+  return PRODUCT_IMPACT_FILE.test(file) && !SKILL_PACKAGE_FILE.test(file) && !SKILL_DOCKERFILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
 }
 
 function sourceArea(file) {
@@ -87,6 +88,7 @@ function sourceArea(file) {
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
+  if (SKILL_DOCKERFILE.test(file)) return "operations";
   if (SKILL_PACKAGE_FILE.test(file) && !EXECUTABLE_FILE.test(file)) return "operations";
   return null;
 }

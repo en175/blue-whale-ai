@@ -203,6 +203,50 @@ def remove_recovery(root: Path, marker: Path, backup_ref: str) -> None:
     marker.unlink(missing_ok=True)
 
 
+def pending_recovery(root: Path, marker: Path, branch: str, target_branch: str,
+                     current_head: str, backup_ref: str) -> dict[str, object]:
+    recovery = read_recovery(marker, branch)
+    if recovery.get("target_branch", "master") != target_branch:
+        raise WorkflowError("已有同步事务绑定其他 PR 目标分支，拒绝切换基线。")
+    if recovery.get("pushed_head") or recovery.get("push_state"):
+        raise WorkflowError("上一轮同步结果已进入推送阶段；完成远端核验并 finalize 后才能继续。")
+    if recovery.get("rebase_tree_failed"):
+        raise WorkflowError("上一轮同步的文件树核对失败；保留恢复点，禁止覆盖失败证据。")
+    if recovery.get("synced_head"):
+        retained = git(root, "rev-parse", "--verify", str(recovery.get("backup_ref", backup_ref)),
+                       check=False)
+        if retained.returncode or retained.stdout.strip() != recovery["original_head"]:
+            raise WorkflowError("同步 backup ref 与原始提交不符，拒绝覆盖恢复点。")
+    expected_head = str(recovery.get("synced_head", recovery["original_head"]))
+    if current_head != expected_head:
+        if git(root, "merge-base", "--is-ancestor", expected_head, current_head,
+               check=False).returncode:
+            raise WorkflowError("当前 HEAD 已离开已有同步事务，拒绝覆盖恢复点。")
+        if git_output(root, "rev-list", "--merges", f"{expected_head}..{current_head}"):
+            raise WorkflowError("同步后的修订含 merge commit，拒绝更新恢复点。")
+        if recovery.get("linearized_pr"):
+            changed = set(git_output(root, "diff", "--name-only",
+                                     f"{expected_head}..{current_head}").splitlines())
+            if changed - set(recovery["frozen_files"]):
+                raise WorkflowError("线性化后的修订超出 PR 冻结文件范围，拒绝更新恢复点。")
+    if remote_branch_sha(root, branch) != recovery.get("remote_branch_sha", ""):
+        raise WorkflowError("远端源分支变化，拒绝更新同步恢复点。")
+    proofs = recovery.get("rebase_proofs", [])
+    if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
+        raise WorkflowError("多轮同步证明格式错误，拒绝覆盖恢复点。")
+    proofs = list(proofs)
+    current_proof = current_rebase_proof(recovery)
+    if current_proof:
+        proofs.append(current_proof)
+    for index, proof in enumerate(proofs):
+        continuation = str(proofs[index + 1]["original_head"]) if index + 1 < len(proofs) else current_head
+        verify_rebase_proof(root, proof, continuation)
+    if current_head != expected_head:
+        recovery["synced_head"] = current_head
+        recovery["rollback_safe"] = False
+    return recovery
+
+
 def emit(as_json: bool, status: str, **details: object) -> None:
     payload = {"status": status, **details}
     if as_json:
@@ -234,25 +278,11 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         raise WorkflowError("origin/{} 尚未包含任务起点 {}；待共享基线提交：\n{}".format(target_branch, start_sha, pending))
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
+    recovery = (pending_recovery(root, marker, branch, target_branch, original_head, backup_ref)
+                if marker.exists() else None)
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode == 0:
-        if marker.exists():
-            recovery = read_recovery(marker, branch)
-            if recovery.get("linearized_pr") and recovery.get("synced_head") != original_head:
-                prior_head = str(recovery["synced_head"])
-                if recovery.get("push_state") or recovery.get("pushed_head"):
-                    raise WorkflowError("线性化结果已进入推送阶段，不能更新恢复点。")
-                if git(root, "merge-base", "--is-ancestor", prior_head, original_head,
-                       check=False).returncode:
-                    raise WorkflowError("当前 HEAD 不是线性化提交的后续修订，拒绝更新恢复点。")
-                if git_output(root, "rev-list", "--merges", f"{prior_head}..HEAD"):
-                    raise WorkflowError("线性化后的修订含 merge commit，拒绝更新恢复点。")
-                changed = set(git_output(root, "diff", "--name-only", f"{upstream_ref}...HEAD").splitlines())
-                if changed - set(recovery["frozen_files"]):
-                    raise WorkflowError("线性化后的修订超出 PR 冻结文件范围，拒绝更新恢复点。")
-                if remote_branch_sha(root, branch) != recovery["remote_branch_sha"]:
-                    raise WorkflowError("线性化后远端源分支变化，拒绝更新恢复点。")
-                recovery["synced_head"] = original_head
-                write_recovery(marker, recovery)
+        if recovery and recovery.get("synced_head") == original_head:
+            write_recovery(marker, recovery)
         emit(
             as_json,
             "UP_TO_DATE",
@@ -265,27 +295,12 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None) -> int:
         return 0
 
     rebase_input_head = original_head
-    if marker.exists():
-        recovery = read_recovery(marker, branch)
-        if recovery.get("target_branch", "master") != target_branch:
-            raise WorkflowError("已有同步事务绑定其他 PR 目标分支，拒绝切换基线。")
-        if recovery.get("pushed_head"):
-            raise WorkflowError("上一轮同步结果已经推送；完成远端核验并 finalize 后才能开启新事务。")
-        if recovery.get("rebase_tree_failed"):
-            raise WorkflowError("上一轮同步的文件树核对失败；保留恢复点，禁止用新一轮同步覆盖失败证据。")
+    if recovery:
         expected_head = str(recovery.get("synced_head", recovery["original_head"]))
-        if original_head != expected_head:
-            raise WorkflowError("当前 HEAD 已离开已有同步事务，拒绝覆盖恢复点。")
         proofs = recovery.get("rebase_proofs", [])
-        if not isinstance(proofs, list) or any(not isinstance(item, dict) for item in proofs):
-            raise WorkflowError("多轮同步证明格式错误，拒绝覆盖恢复点。")
         current_proof = current_rebase_proof(recovery)
         if current_proof:
-            proofs.append(current_proof)
-        for index, proof in enumerate(proofs):
-            continuation = str(proofs[index + 1]["original_head"]) if index + 1 < len(proofs) else original_head
-            verify_rebase_proof(root, proof, continuation)
-        recovery["rebase_proofs"] = proofs
+            recovery["rebase_proofs"] = [*proofs, current_proof]
         for field in ("rebase_tree", "rebase_synced_head", "rebase_upstream_sha"):
             recovery.pop(field, None)
         recovery.setdefault("rollback_safe", recovery.get("rebase_input_head")
