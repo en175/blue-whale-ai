@@ -62,8 +62,8 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       };
 
       const [total, rows] = await Promise.all([
-        prisma.identity_users.count({ where }),
-        prisma.identity_users.findMany({
+        prisma.bw_users.count({ where }),
+        prisma.bw_users.findMany({
           where,
           orderBy: { id: "asc" },
           skip: (page - 1) * pageSize,
@@ -82,13 +82,13 @@ export function createAdminUserQuery(prisma: PrismaClient): AdminUserQuery {
       // 角色一次查完（按用户批量取），避免每行一次查询
       const ids = rows.map((r) => r.id);
       const grants = ids.length
-        ? await prisma.identity_user_roles.findMany({
+        ? await prisma.bw_user_roles.findMany({
             where: { user_id: { in: ids }, is_delete: false },
             select: { user_id: true, role_id: true },
           })
         : [];
       const roleIdToCode = new Map(
-        (await prisma.identity_roles.findMany({
+        (await prisma.bw_roles.findMany({
           where: { is_delete: false },
           select: { id: true, code: true },
         })).map((r) => [r.id.toString(), r.code]),

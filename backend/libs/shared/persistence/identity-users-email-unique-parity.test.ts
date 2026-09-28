@@ -48,7 +48,7 @@ describe("identity_users.email 唯一索引三轨迁移", () => {
 
   it("Prisma 模型与迁移同源", () => {
     // Prisma 侧漏了 @unique 会让下一次 migrate 试图把索引 DROP 掉
-    expect(schemaPrisma).toMatch(/email\s+String\?\s+@unique\(map: "uk_identity_users__email"\)/);
+    expect(schemaPrisma).toMatch(/email\s+String\?\s+@unique\(map: "uk_bw_users__email"\)/);
   });
 
   it("★ 登录查询必须覆盖 username 与 email 两条路径", () => {

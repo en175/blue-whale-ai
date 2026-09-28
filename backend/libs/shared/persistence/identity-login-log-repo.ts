@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 /**
- * 登录日志（`identity_login_logs`）。
+ * 登录日志（`bw_login_logs`）。
  *
  * <p>两个用途，都是事后才用得上、事后又补不回来的：
  * <ul>
@@ -28,7 +28,7 @@ export interface IdentityLoginLogRepo {
 export function createIdentityLoginLogRepo(prisma: PrismaClient): IdentityLoginLogRepo {
   return {
     async record(entry) {
-      await prisma.identity_login_logs.create({
+      await prisma.bw_login_logs.create({
         data: {
           user_id: entry.userId == null ? null : BigInt(entry.userId),
           username: entry.username,

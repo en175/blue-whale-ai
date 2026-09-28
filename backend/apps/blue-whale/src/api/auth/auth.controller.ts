@@ -159,7 +159,7 @@ export class AuthController {
       );
     }
     try {
-      // ★ 口令校验在**我们自己的库**（identity_users.password，bcrypt）。
+      // ★ 口令校验在**我们自己的库**（bw_users.password，bcrypt）。
       //   登录结果里没有上游凭证——new-api 已经不是我们的用户体系了。
       const result = await this.identity.login({ username, password });
       // 凭证已被接受（IKDR4J）：清零失败计数与锁定，会话签发失败不回退。
@@ -243,7 +243,7 @@ export class AuthController {
     }
     try {
       // ★ 注册也落我们自己的库。只切登录不切注册的话，新用户注册进 new-api、
-      //   而登录查 identity_users——**注册完立刻登不上**。
+      //   而登录查 bw_users——**注册完立刻登不上**。
       const result = await this.identity.register({
         username,
         password,
@@ -283,7 +283,7 @@ export class AuthController {
   @Get("capabilities")
   async capabilities() {
     // ★ 本地常量，不再探测 new-api 的 /api/status 开关。
-    //   口令登录与口令注册现在都由我们自己的库承载（identity_users + bcrypt），
+    //   口令登录与口令注册现在都由我们自己的库承载（bw_users + bcrypt），
     //   能力不该再取决于上游配置：上游挂了也不该让登录入口从页面上消失。
     //   email_verification（邮箱验证码注册）我们尚未实现，恒为 false。
     return ok({

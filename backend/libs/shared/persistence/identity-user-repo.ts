@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 /**
- * 账号主体的持久化（`identity_users`）。
+ * 账号主体的持久化（`bw_users`）。
  *
  * <p>这张表是从老的 `users` 改名而来（migration 20260924180000/230000），
  * 所以它同时装着两类行：**我们本地注册的**（有 password）与
@@ -25,7 +25,7 @@ export interface IdentityUserRow {
 }
 
 /**
- * `identity_users.status` 的写入取值。
+ * `bw_users.status` 的写入取值。
  *
  * <p>写成字面量联合而不是 `string`：冻结/解冻是**权限开关**，写错一个字母
  * （比如 `"DISABLE"`）在库里会变成第三种状态，而判定处既不认它是启用、
@@ -111,7 +111,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
 
   return {
     async findByLoginName(loginName) {
-      const row = await prisma.identity_users.findFirst({
+      const row = await prisma.bw_users.findFirst({
         where: {
           is_delete: false,
           OR: [{ username: loginName }, { email: loginName }],
@@ -122,7 +122,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     },
 
     async findById(id) {
-      const row = await prisma.identity_users.findFirst({
+      const row = await prisma.bw_users.findFirst({
         where: { id: BigInt(id), is_delete: false },
         select: SELECT,
       });
@@ -131,7 +131,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
 
     async create(input) {
       try {
-        const row = await prisma.identity_users.create({
+        const row = await prisma.bw_users.create({
           data: {
             username: input.username,
             password: input.passwordHash,
@@ -150,7 +150,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     },
 
     async updatePassword(id, passwordHash) {
-      await prisma.identity_users.update({
+      await prisma.bw_users.update({
         where: { id: BigInt(id) },
         data: { password: passwordHash, gmt_modified: new Date() },
       });
@@ -158,7 +158,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
 
     async updateStatus(id, status) {
       try {
-        await prisma.identity_users.update({
+        await prisma.bw_users.update({
           where: { id: BigInt(id) },
           data: { status, gmt_modified: new Date() },
         });

@@ -28,7 +28,7 @@ export const TIERS: readonly Tier[] = ["free", "basic", "pro", "max"];
 
 /**
  * 等级强弱。**只用于「多个周期取哪个」的比较**，不是权限模型——
- * 权限走 identity_roles，不要把它当 role 用。
+ * 权限走 bw_roles，不要把它当 role 用。
  */
 const RANK: Record<Tier, number> = { free: 0, basic: 1, pro: 2, max: 3 };
 
@@ -42,7 +42,7 @@ export function parseTier(raw: string): Tier | null {
   return (TIERS as readonly string[]).includes(raw) ? (raw as Tier) : null;
 }
 
-/** 一个会员周期。字段名与 `identity_memberships` 对齐（snake_case 已在 repo 层转换）。 */
+/** 一个会员周期。字段名与 `bw_memberships` 对齐（snake_case 已在 repo 层转换）。 */
 export interface MembershipPeriod {
   tier: string;
   /** active | expired | cancelled */

@@ -6,6 +6,7 @@
 - **取代**：[ADR-0062](0062-new-api-account-center-and-quota-billing.md) 中「new-api 是我们的账户中心」的全部条款（new-api 不再是用户体系提供方，也不再是计费权威）。ADR-0062 关于**凭证分层**（HttpOnly 会话 cookie + BFF 回注，浏览器不碰上游 key）的条款继续有效。
 - **修订**：[CLAUDE.md](../../CLAUDE.md) 红线 #10「产品实现技术栈」——为 billing-svc 增加 Java 例外（见决策 6）
 - **修订（2026-09-25）**：决策 3 里「定价规则住在定价目录」那一半，由**决策 9** 修正 —— 定价与像素表搬进模型能力行，结算改认预留行的规则快照。目录退化为全局配置容器。
+- **修订（2026-09-28）**：正文提到的 `identity_*` 表已由 [ADR-0118](0118-identity-tables-prefix-bw.md) 改名为 `bw_*`（`identity_users` → `bw_users`、`identity_roles`/`identity_user_roles` → `bw_roles`/`bw_user_roles` 等）；正文保留原貌，按新名阅读。
 - **关联**：[ADR-0021](0021-unified-rmb-billing.md)、[ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md)、[ADR-0084](0084-generation-worker-java-runtime.md)（Java 运行时先例与治理形态）
 
 ## 背景

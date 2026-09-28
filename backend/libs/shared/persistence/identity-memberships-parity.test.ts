@@ -52,8 +52,10 @@ describe("identity_memberships 三轨迁移", () => {
   it("Prisma 模型与建表语句同源（表名、唯一索引、普通索引三处对齐）", () => {
     // Prisma 认不出唯一/普通索引的 map 名时，`prisma migrate dev` 会想再改一次 schema——
     // 那意味着数据库在两套描述之间来回漂移。这里把三处名字钉死。
-    expect(schemaPrisma).toContain("model identity_memberships {");
-    expect(schemaPrisma).toContain('map: "uk_identity_memberships__grant_key"');
-    expect(schemaPrisma).toContain('map: "idx_identity_memberships__user_status_expiry"');
+    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
+    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
+    expect(schemaPrisma).toContain("model bw_memberships {");
+    expect(schemaPrisma).toContain('map: "uk_bw_memberships__grant_key"');
+    expect(schemaPrisma).toContain('map: "idx_bw_memberships__user_status_expiry"');
   });
 });

@@ -3,11 +3,11 @@ import type { PrismaClient } from "@prisma/client";
 import { resolveTier, type MembershipPeriod, type TierResolution } from "@lib/core/identity/tier.js";
 
 /**
- * 会员周期的持久化（`identity_memberships`）。
+ * 会员周期的持久化（`bw_memberships`）。
  *
  * <p>本文件只做两件事：**按索引粗筛** + 把行交给 {@link resolveTier} 判定。
  * 「什么算有效会员」的权威定义在 core 侧那个纯函数里，不在这里——
- * 这里的 WHERE 条件是为了走 `idx_identity_memberships__user_status_expiry`，
+ * 这里的 WHERE 条件是为了走 `idx_bw_memberships__user_status_expiry`，
  * 是性能手段；两处条件若漂移，以纯函数为准。
  */
 export interface IdentityMembershipRepo {
@@ -23,7 +23,7 @@ export interface IdentityMembershipRepo {
 export function createIdentityMembershipRepo(prisma: PrismaClient): IdentityMembershipRepo {
   return {
     async resolveTier(userId, now) {
-      const rows = await prisma.identity_memberships.findMany({
+      const rows = await prisma.bw_memberships.findMany({
         where: {
           user_id: BigInt(userId),
           status: "active",

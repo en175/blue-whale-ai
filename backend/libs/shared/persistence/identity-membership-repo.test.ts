@@ -9,7 +9,7 @@ const FUTURE = new Date("2026-10-24T12:00:00+08:00");
 function fakePrisma(rows: Array<{ tier: string; status: string; expires_at: Date | null }>) {
   const findMany = vi.fn().mockResolvedValue(rows);
   return {
-    prisma: { identity_memberships: { findMany } } as unknown as Parameters<
+    prisma: { bw_memberships: { findMany } } as unknown as Parameters<
       typeof createIdentityMembershipRepo
     >[0],
     findMany,

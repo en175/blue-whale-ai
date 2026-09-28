@@ -57,11 +57,13 @@ describe("identity_roles 三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源", () => {
-    for (const model of ["identity_roles", "identity_user_roles", "identity_login_logs"]) {
+    // 模型名与索引名都是**当前态**（被 20260928100000 收敛过前缀）；
+    // 本文件只钉住该迁移的冻结内容，当前态以 bw-prefix-rename-parity.test.ts 为准。
+    for (const model of ["bw_roles", "bw_user_roles", "bw_login_logs"]) {
       expect(schemaPrisma).toContain(`model ${model} {`);
     }
-    expect(schemaPrisma).toContain('map: "uk_identity_roles__code"');
-    expect(schemaPrisma).toContain('map: "uk_identity_user_roles__grant_key"');
+    expect(schemaPrisma).toContain('map: "uk_bw_roles__code"');
+    expect(schemaPrisma).toContain('map: "uk_bw_user_roles__grant_key"');
     // user_id 可空：漏了 `?` 会让下一次 migrate 试图把列改回 NOT NULL
     expect(schemaPrisma).toMatch(/^  user_id\s+BigInt\?$/m);
   });

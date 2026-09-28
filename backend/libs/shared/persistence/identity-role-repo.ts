@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { isAdmin } from "@lib/core/identity/roles.js";
 
 /**
- * 角色与用户角色的持久化（`identity_roles` / `identity_user_roles`）。
+ * 角色与用户角色的持久化（`bw_roles` / `bw_user_roles`）。
  *
  * <p>读法是**两个查询**：先取该用户的 role_id 列表，再按 id 取 code。
  * 不做 Prisma relation 是因为整个 schema 都没有用 relation（`user_id` 都是裸 BigInt），
@@ -25,7 +25,7 @@ export interface IdentityRoleRepo {
   countHolders(code: string): Promise<number>;
 }
 
-/** 角色 code 在 `identity_roles` 里不存在（或已被软删）。 */
+/** 角色 code 在 `bw_roles` 里不存在（或已被软删）。 */
 export class UnknownRoleError extends Error {
   constructor(readonly code: string) {
     super(`未知的角色：${code}`);
@@ -41,7 +41,7 @@ export function createIdentityRoleRepo(prisma: PrismaClient): IdentityRoleRepo {
    * （授权时是 400，计数时是 0）。
    */
   async function roleIdOf(code: string): Promise<bigint | null> {
-    const role = await prisma.identity_roles.findFirst({
+    const role = await prisma.bw_roles.findFirst({
       where: { code, is_delete: false },
       select: { id: true },
     });
@@ -54,13 +54,13 @@ export function createIdentityRoleRepo(prisma: PrismaClient): IdentityRoleRepo {
   }
 
   async function listRoleCodes(userId: string): Promise<string[]> {
-    const grants = await prisma.identity_user_roles.findMany({
+    const grants = await prisma.bw_user_roles.findMany({
       where: { user_id: BigInt(userId), is_delete: false },
       select: { role_id: true },
     });
     if (grants.length === 0) return [];
 
-    const roles = await prisma.identity_roles.findMany({
+    const roles = await prisma.bw_roles.findMany({
       where: {
         id: { in: grants.map((g) => g.role_id) },
         is_delete: false,
@@ -82,7 +82,7 @@ export function createIdentityRoleRepo(prisma: PrismaClient): IdentityRoleRepo {
 
       // upsert 而不是「先查后插」：撤销是软删（is_delete=1），重新授予要**复用同一行**。
       // 先查后插有两个毛病——有 TOCTOU 窗口，且会把软删的行当成「已持有」而跳过。
-      await prisma.identity_user_roles.upsert({
+      await prisma.bw_user_roles.upsert({
         where: { grant_key: grantKey(userId, code) },
         create: {
           user_id: BigInt(userId),
@@ -99,7 +99,7 @@ export function createIdentityRoleRepo(prisma: PrismaClient): IdentityRoleRepo {
       const roleId = await roleIdOf(code);
       if (roleId === null) throw new UnknownRoleError(code);
 
-      const { count } = await prisma.identity_user_roles.updateMany({
+      const { count } = await prisma.bw_user_roles.updateMany({
         where: {
           user_id: BigInt(userId),
           role_id: roleId,
@@ -114,7 +114,7 @@ export function createIdentityRoleRepo(prisma: PrismaClient): IdentityRoleRepo {
       const roleId = await roleIdOf(code);
       if (roleId === null) return 0;
       // grant_key 的 (用户, 角色) 唯一性保证了一人一行，所以行数就是人数
-      return prisma.identity_user_roles.count({
+      return prisma.bw_user_roles.count({
         where: { role_id: roleId, is_delete: false },
       });
     },

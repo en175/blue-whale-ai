@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** 用户信息 repo（Prisma-backed），读 identity_users 表。
+/** 用户信息 repo（Prisma-backed），读 bw_users 表。
  *  对齐 Java UserController.me：{userId, username, phone, hasPassword}。 */
 
 export interface UserInfoView {
@@ -17,7 +17,7 @@ export interface UserRepo {
 export function createUserRepo(prisma: PrismaClient): UserRepo {
   return {
     async findInfoById(userId) {
-      const u = await prisma.identity_users.findFirst({
+      const u = await prisma.bw_users.findFirst({
         where: { id: BigInt(userId) },
         select: { id: true, username: true, phone: true, password: true },
       });
