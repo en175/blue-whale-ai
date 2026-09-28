@@ -34,6 +34,13 @@ COPY backend/prisma backend/prisma
 COPY backend/prisma.config.ts backend/
 COPY backend backend
 
+# 跨进程契约（ADR-0113 决策 8）：生成物**不入仓**（.gitignore「跨进程契约生成物」），
+# 只能在构建时生成——backend/libs 里 billing-client 等直接 import ../../contracts/gen/**，
+# 缺了它 tsc -b 直接 TS2307，整个后端镜像构建失败（2026-09-28 流水线首现）。
+# buf 版本与本地开发对齐（brew buf 1.73.0），保证「同一份 .proto 两端产出一致」。
+COPY contracts contracts
+RUN npm i -g @bufbuild/buf@1.73.0 && cd contracts && buf generate
+
 # Prisma client + backend 全量构建（含主 API app）
 RUN pnpm --filter @blue-whale/backend exec prisma generate
 RUN pnpm --dir backend build
