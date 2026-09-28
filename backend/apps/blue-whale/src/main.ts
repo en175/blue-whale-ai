@@ -6,6 +6,7 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import cookieParser from "cookie-parser";
 import { NewApiError } from "@lib/core";
 import { closeDefaultTlsLogWriter } from "@lib/core/logging";
+import { missingBillingConfig } from "@lib/shared/billing/billing-client.js";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
@@ -85,6 +86,32 @@ async function bootstrap(): Promise<void> {
   // `app.close()`。而下面本来就有一对自己的处理器做同样的事——两份监听器在同一个信号上并发
   // 跑，Nest 那份会立刻开始 `callDestroyHook()` 关掉 Redis，把我们刚开始的排空连同进程一起
   // 掀翻（IKHCJ2，见下面 shutdown 的说明）。生命周期钩子由 `app.close()` 照常触发，不受影响。
+
+  // ⚠️ **计费依赖齐备性：不齐就别起来。**
+  //
+  // 缺 BILLING_GRPC_URL 的后果不是「某个功能不好用」，而是**静默地不扣钱**：
+  // 提交生成拿不到计费服务，冻结不了预扣。new-api 从「替我们扣费」变成「上游供应商」
+  // 之后，我们**不再有第二个扣费方**，于是任何一条「配置缺失就跳过」的路径都等于一条
+  // 免费通道。放在 listen 之前拦，是因为一个扣不了钱的进程不该开始接受请求——等到第一个
+  // 用户提交才发现，那段时间里已经在白跑了。
+  //
+  // ⚠️ **上游 key 不再守在这道门里**（它曾经是「缺了登录签发不出会话」）。原因有两条，
+  //    都不是「不那么重要了」：
+  //       1. 它已经**不是环境变量**——配在 `system_settings`，管理端维护，改完即生效。
+  //          拿它去查 `process.env` 只会永远查不到，门禁就变成一句恒真的废话。
+  //       2. 「**数据还没填**」与「**部署配错**」是两回事，前者不该拒启。配置要在管理端填，
+  //          管理端要先登得进来——在这里拒启，新部署永远起不来，没人能进去把它配上。
+  //    它的 fail-closed 落在真正打上游的地方：下游 `parseBearerToken` 拿到 null 即 401，
+  //    调用点抛 `UpstreamCredentialMissingError`（503 + 指名道姓的文案）。没有哪条路径
+  //    会把空串发给上游。
+  const missingBilling = missingBillingConfig();
+  if (missingBilling.length > 0) {
+    logger.error(
+      `启动中止：计费依赖未配置（缺 ${missingBilling.join(" / ")}）。` +
+        `new-api 已切断，缺它会让生成不扣费。`,
+    );
+    process.exit(1);
+  }
 
   await app.listen(port);
   logger.info(`backend listening on :${port}`);

@@ -326,7 +326,11 @@ describe('操作条（唯一选中、非编辑）', () => {
     const menu = document.querySelector('[data-testid="media-chip-menu"]');
     expect(menu).toBeTruthy();
     const labels = [...menu!.querySelectorAll('button')].map(b => b.textContent);
-    expect(labels).toEqual(['定位来源', '替换来源', '删除标签']);
+    // ⚠️ 这两项在 `db34e668c`（「剪线后重绑定同一来源补线，并阻止标签菜单穿透到添加到对话」）
+    //    里被合并成了「重新绑定」——同一个提交的 `mentionTrigger.test.tsx` 已经在用新标签，
+    //    只有这一条断言漏改，于是它成了 release 那条线上唯一一条常红用例。
+    //    这里补上：断言的是**实际发版的行为**，不是我以为它该有的样子。
+    expect(labels).toEqual(['重新绑定', '删除标签']);
   });
 
   it('「添加到对话」携带节点 id 回调', async () => {

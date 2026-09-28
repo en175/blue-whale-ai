@@ -6,12 +6,16 @@ import { TransformInterceptor } from "@lib/infra/interceptors/transform.intercep
 import { AccountModule } from "@lib/shared/account/account.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
+import { DashboardModule } from "@lib/shared/dashboard/index.js";
 import { GenerationModule } from "@lib/shared/generation/generation.module.js";
 import { HomepageHeroModule } from "@lib/shared/homepage-hero/homepage-hero.module.js";
 import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
 import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
+import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
+import { RechargeCustomLibModule } from "@lib/shared/recharge-custom/recharge-custom.module.js";
+import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
@@ -60,6 +64,7 @@ import { VideoSceneSplitsApiModule } from "./api/video-scene-splits/video-scene-
 import { VideoMattingsApiModule } from "./api/video-mattings/video-mattings.module.js";
 import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
+import { IdentityModule } from "@lib/shared/identity/index.js";
 
 @Module({
   imports: [
@@ -74,6 +79,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     ProjectModule,
     JobsModule,
     CanvasModule,
+    DashboardModule,
     GenerationModule,
     SkillModule,
     SceneCardModule,
@@ -87,7 +93,10 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AgentAssetsModule,
     AgentSkillsModule,
     GenerationApiModule,
+    RechargeLibModule,
+    RechargeCustomLibModule,
     RechargeModule,
+    SystemSettingsModule,
     UsageModule,
     AdminModule,
     JobsApiModule,
@@ -119,6 +128,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AgentV1Module,
     CostSettlementModule,
     HealthModule,
+    IdentityModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

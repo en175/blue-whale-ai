@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
@@ -117,21 +118,25 @@ async function renderDialog({ mediaRefs, status, mode }: RenderOptions = {}) {
   root = createRoot(mountNode);
   await act(async () => {
     root.render(
-      createElement(BottomDialog, {
-        onClose: vi.fn(),
-        initialParams: { mode },
-        onSend: handlers.onSend,
-        onPickFromCanvas: handlers.onPickFromCanvas,
-        onPickFromAssets: handlers.onPickFromAssets,
-        onRemoveVideoRef: handlers.onRemoveVideoRef,
-        onRemoveMaterialRef: handlers.onRemoveMaterialRef,
-        onToast: handlers.onToast,
-        videoMediaRefs: mediaRefs ?? { reference: [] },
-        videoDraftBinding: {
-          status,
-          onParamsChange: vi.fn(),
-        },
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(BottomDialog, {
+          onClose: vi.fn(),
+          initialParams: { mode },
+          onSend: handlers.onSend,
+          onPickFromCanvas: handlers.onPickFromCanvas,
+          onPickFromAssets: handlers.onPickFromAssets,
+          onRemoveVideoRef: handlers.onRemoveVideoRef,
+          onRemoveMaterialRef: handlers.onRemoveMaterialRef,
+          onToast: handlers.onToast,
+          videoMediaRefs: mediaRefs ?? { reference: [] },
+          videoDraftBinding: {
+            status,
+            onParamsChange: vi.fn(),
+          },
+        })
+      ),
     );
   });
   await act(async () => {

@@ -1,15 +1,24 @@
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
+import { createBillingHold, type BillingHold } from "@lib/shared/billing/billing-hold.js";
+import {
+  createBillingRelease,
+  publishBillingJobFailed,
+  type BillingRelease,
+} from "@lib/shared/billing/billing-release.js";
+import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
+import { IdentityService } from "@lib/shared/identity/index.js";
+import { Body, Controller, Headers, HttpCode, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
-import { DomainError } from "@lib/contracts";
+import { DomainError, ok } from "@lib/contracts";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import {
   handleCreateGenerationJob,
   type CreateGenerationJobBody,
 } from "@lib/shared/generation/handle-create-generation-job.js";
+import { handleQuoteGenerationJob } from "@lib/shared/generation/handle-quote-generation-job.js";
 import { handleCancelGenerationJob } from "@lib/shared/generation/handle-cancel-generation-job.js";
 import { handleRetryGenerationJob } from "@lib/shared/generation/handle-retry-generation-job.js";
 import {
@@ -35,11 +44,63 @@ export class GenerationJobsController {
     private readonly project: ProjectService,
     private readonly command: GenerationCommandService,
     private readonly models: ModelCapabilityReadService,
-    private readonly cost: GenerationCostEstimatorService,
     private readonly canvas: CanvasService,
     private readonly material: MaterialService,
     private readonly assets: AssetService,
+    private readonly identity: IdentityService,
   ) {}
+
+  /**
+   * 预扣 + 失败补偿（懒建一次）。
+   *
+   * <p>⚠️ **必接，没有「不接线」的分支**。曾经有两种情况会跳过接线：`BILLING_GRPC_URL`
+   * 未配置、或 `BILLING_ENFORCE_HOLD` 未开——那都是 new-api 还在替我们扣钱时期的产物。
+   * new-api 已被切断，跳过接线就等于**白送一次生成**，而且没有任何报错。
+   *
+   * <p>地址缺失由 {@link sharedBillingClient} 内的 `billingEndpoint` 当场抛
+   * （并已在启动期拦过一道），所以这里不需要判空。
+   *
+   * <p>release 与 hold **成对**（见 {@link createBillingRelease}）：预扣成功之后事务才失败时，
+   * 只有它能把那笔冻结退掉，否则会留下一笔没有对应任务的预留。
+   */
+  private billingDep?: { hold: BillingHold; release: BillingRelease };
+
+  private billing() {
+    if (this.billingDep === undefined) {
+      this.billingDep = {
+        hold: createBillingHold({
+          client: sharedBillingClient(),
+          resolveTier: (userId) => this.identity.resolveTier(userId),
+          logger,
+        }),
+        release: createBillingRelease({
+          publish: publishBillingJobFailed,
+          logger,
+        }),
+      };
+    }
+    return this.billingDep;
+  }
+
+  /**
+   * 报价依赖（懒建一次）。与 {@link billing} 同一个客户端、同一个 `resolveTier`
+   * —— 预览价与实扣价必须出自同一套规格归一与同一个等级解析。
+   *
+   * <p>与预扣不同的一点：这里**允许降级**。`sharedBillingClient()` 在地址缺失时会抛，
+   * 而报价不该因此把「看看多少钱」变成一个 500 —— 见 {@link quote} 的 catch。
+   */
+  private billingQuoteDep?: BillingQuote;
+
+  private billingQuote(): BillingQuote {
+    if (this.billingQuoteDep === undefined) {
+      this.billingQuoteDep = createBillingQuote({
+        client: sharedBillingClient(),
+        resolveTier: (userId) => this.identity.resolveTier(userId),
+        logger,
+      });
+    }
+    return this.billingQuoteDep;
+  }
 
   /** IKF YHJ：造素材校验状态门（ADR-0087）。生产判定逻辑在 `material-gate-wiring.ts`，
    *  这里只把本请求的依赖（用户、凭证、仓库面、失败处置）接上去——抽出去是为了可测：
@@ -101,6 +162,15 @@ export class GenerationJobsController {
     @Headers("authorization") authorization?: string,
   ) {
     const internal = sealProviderCredential(authorization);
+    const billing = this.billing();
+    // 建任务幂等：`result.data` 也可能是**幂等重放**的首次结果（同一个 generation_job_id）。
+    // 这条路径下面照旧把它入队一次，是**刻意**的：
+    //   · 对已领走/已终态的任务，worker 侧 claim 是 CAS 的（候选要求 queued，或 processing
+    //     且租约过期），落不进去就是一次干净的 no-op，不会重复执行；
+    //   · RocketMQ 本身是 at-least-once，消费端**本来就必须**容忍同一 job 的重复消息；
+    //   · 反过来，第一次「建行成功但入队失败/进程崩了」的任务正靠这次重放捞回来
+    //     （否则它只能等恢复扫描）。
+    // 所以这里不按「是不是重放」分流。
     const result = await handleCreateGenerationJob(
       user.userId,
       projectId,
@@ -113,7 +183,8 @@ export class GenerationJobsController {
         canvas: this.canvas,
         assets: this.command.assets,
         materialGate: this.buildMaterialGate(user.userId, authorization),
-        ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
+        // 预扣与补偿必然成对（见 billing 的说明），不再做条件展开
+        billing,
       },
       internal,
     );
@@ -163,6 +234,43 @@ export class GenerationJobsController {
       }
     }
     return result;
+  }
+
+  /** POST /api/projects/:projectId/generation-jobs/quote
+   *  价格预览（只读）：算得出回一个整数积分，算不出回 `credits: null`（前端不显示价格）。
+   *  **不冻结、不写库、不阻断任何操作**。
+   *
+   *  <p>入参与创建任务同形 —— 同一个 `parameters` 走建任务那一个规格投影，否则预览与实扣会漂。
+   *
+   *  <p>用 POST 而不是 GET：定价规格是一整个生成参数对象，塞查询串会与创建入参分叉（那正是
+   *  要避免的漂移）。@HttpCode(200) 明确压掉 Nest 对 POST 的默认 201 —— 这次什么都没创建，
+   *  「已受理」的状态行会让只看状态码的客户端误读。 */
+  @Post("quote")
+  @HttpCode(200)
+  async quote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: CreateGenerationJobBody,
+  ) {
+    let quote: BillingQuote;
+    try {
+      quote = this.billingQuote();
+    } catch (error) {
+      // 计费地址缺失（未接线的本地/测试环境）。这与预扣**刻意不同**：预扣缺配置必须硬失败
+      // （否则是一条静默的免费通道），而这里只是「这次没显示价格」——一分钱不动，
+      // 不该把一次看价请求变成 500，更不该挡住用户点生成。
+      logger.warn(
+        `[generation] 报价不可用，本次不显示价格：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return ok({ credits: null });
+    }
+    return handleQuoteGenerationJob(user.userId, projectId, body, {
+      projects: this.project,
+      models: this.models,
+      quote,
+    });
   }
 
   @Post(":jobId/cancel")

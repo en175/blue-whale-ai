@@ -1,5 +1,5 @@
 /* ============================================
- * admin 子路由表：后台 9 页，页面按需懒加载
+ * admin 子路由表：后台页面，按需懒加载
  * ============================================ */
 import { lazy, Suspense } from 'react';
 import { Navigate } from 'react-router-dom';
@@ -8,11 +8,16 @@ import AdminLayout from './layouts/AdminLayout';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const RechargePlans = lazy(() => import('./pages/RechargePlans'));
+const RechargeCustomConfig = lazy(() => import('./pages/RechargeCustomConfig'));
+const Promotions = lazy(() => import('./pages/Promotions'));
+const MemberDiscounts = lazy(() => import('./pages/MemberDiscounts'));
+const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
+const ConsumptionRecords = lazy(() => import('./pages/ConsumptionRecords'));
+const JobRecords = lazy(() => import('./pages/JobRecords'));
 const TemplateManage = lazy(() => import('./pages/TemplateManage'));
 const SkillManage = lazy(() => import('./pages/SkillManage'));
 const ModelList = lazy(() => import('./pages/ModelList'));
 const UserManage = lazy(() => import('./pages/UserManage'));
-const OrderManage = lazy(() => import('./pages/OrderManage'));
 const OperationLog = lazy(() => import('./pages/OperationLog'));
 const SystemConfig = lazy(() => import('./pages/SystemConfig'));
 const SiteConfig = lazy(() => import('./pages/SiteConfig'));
@@ -33,11 +38,16 @@ export const adminRoutes = {
   children: [
     { index: true, element: <L><Dashboard /></L> },
     { path: 'recharge-plans', element: <L><RechargePlans /></L> },
+    { path: 'recharge-custom-config', element: <L><RechargeCustomConfig /></L> },
+    { path: 'billing-promotions', element: <L><Promotions /></L> },
+    { path: 'billing-member-discounts', element: <L><MemberDiscounts /></L> },
+    { path: 'recharge-records', element: <L><RechargeRecords /></L> },
+    { path: 'consumption-records', element: <L><ConsumptionRecords /></L> },
+    { path: 'job-records', element: <L><JobRecords /></L> },
     { path: 'templates', element: <L><TemplateManage /></L> },
     { path: 'skills', element: <L><SkillManage /></L> },
     { path: 'models', element: <L><ModelList /></L> },
     { path: 'users', element: <L><UserManage /></L> },
-    { path: 'orders', element: <L><OrderManage /></L> },
     { path: 'logs', element: <L><OperationLog /></L> },
     { path: 'site-config', element: <L><SiteConfig /></L> },
     { path: 'settings', element: <L><SystemConfig /></L> },

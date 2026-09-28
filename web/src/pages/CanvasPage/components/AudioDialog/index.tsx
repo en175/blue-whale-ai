@@ -29,6 +29,7 @@ import {
   promptCharCountLabel,
   promptMaxLengthOf,
 } from '@/lib/prompt-max-length';
+import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import styles from './index.module.css';
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
@@ -61,6 +62,9 @@ export interface CanvasPickItem {
 
 export interface AudioDialogProps extends RefStripOrderProps {
   onClose: () => void;
+  /** 所属项目（价格预览按项目归属校验，与创建任务同路径）。
+   *  缺省 = 没有项目上下文（面板单测等），此时不显示价格。 */
+  projectId?: string;
   /** 发送：提示词 + 模型ID */
   onSend: (text: string, modelId: string, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => void | Promise<void>;
   /** 初始文字描述（草稿打开时带入已保存 prompt） */
@@ -122,6 +126,7 @@ export interface AudioDialogProps extends RefStripOrderProps {
 }
 
 export default function AudioDialog({
+  projectId,
   onClose,
   onSend,
   initialText,
@@ -626,6 +631,15 @@ export default function AudioDialog({
         </div>
 
         <div className={styles.barRight}>
+          {/* 价格预览（只算不扣）：音频的定价维度只有模型（参数就 prompt + model_id）。
+              没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
+          {projectId ? (
+            <GenerationQuoteBadge
+              projectId={projectId}
+              type="audio"
+              parameters={{ model_id: modelId }}
+            />
+          ) : null}
           {readOnly && (
             <span className={styles.readOnlyHint}>{readOnlyReason}</span>
           )}

@@ -21,7 +21,7 @@ import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "./agent-service-env.js";
+import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "@lib/shared/agent/agent-service-env.js";
 
 /** 查账时间窗在 Run 起止两端各放宽的秒数。窗口只用于收敛翻页，放宽不影响归属判定。 */
 const WINDOW_SLACK_SECONDS = 300;

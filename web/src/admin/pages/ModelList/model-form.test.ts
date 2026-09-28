@@ -4,6 +4,9 @@ import {
   buildCreateParams,
   buildTaskTypes,
   camelFeatureKey,
+  channelFromModel,
+  channelOf,
+  channelsForMedia,
   diffUpdateParams,
   durationsFromModel,
   featureValueTypeOk,
@@ -39,8 +42,8 @@ function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
     defaultDuration: '',
     enabled: true,
     features: {},
-    parser: 'gpt',
-    originalParser: 'gpt',
+    channel: 'gpt-image',
+    originalChannel: 'gpt-image',
     originalHadRequestMapping: true,
     gptMatrix: {
       '1K': { '1:1': '1024x1024', '16:9': '', '9:16': '' },
@@ -69,7 +72,7 @@ const modelRow = (overrides: Partial<AdminModel> = {}): AdminModel => ({
   default_aspect_ratio: '1:1',
   default_duration: null,
   features: {},
-  channel_parser: 'seedream',
+  channel: 'seedream-image',
   request_mapping: { matrix: { '1K': { '1:1': '1024x1024' } } },
   enabled: true,
   sort_order: 1,
@@ -85,7 +88,7 @@ describe('buildCreateParams', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.provider_id).toBe(DEFAULT_PROVIDER_ID);
-    expect(result.value.channel_parser).toBe('gpt');
+    expect(result.value.channel).toBe('gpt-image');
   });
 
   it('文本模型不提交尺寸/比例/时长', () => {
@@ -94,7 +97,7 @@ describe('buildCreateParams', () => {
         type: 'text',
         modelId: 'MiniMax-M3',
         label: 'MiniMax',
-        parser: 'seedream',
+        channel: 'seedream-text',
       }),
     );
     expect(result.ok).toBe(true);
@@ -102,7 +105,7 @@ describe('buildCreateParams', () => {
     expect(result.value.supported_sizes).toEqual([]);
     expect(result.value.supported_aspect_ratios).toEqual([]);
     expect(result.value.supported_durations).toBeNull();
-    expect(result.value.channel_parser).toBeUndefined();
+    expect(result.value.channel).toBeUndefined();
     expect(result.value.default_duration).toBeNull();
   });
 
@@ -112,7 +115,7 @@ describe('buildCreateParams', () => {
         type: 'audio',
         modelId: 'seed-audio-1.0',
         label: '豆包 Seed Audio 1.0',
-        parser: 'seedream',
+        channel: 'seedream-audio',
         durationMin: '1',
         durationMax: '120',
         formats: ['mp3'],
@@ -128,7 +131,7 @@ describe('buildCreateParams', () => {
     expect(result.value.supported_durations).toBeNull();
     expect(result.value.supported_formats).toEqual(['mp3']);
     expect(result.value.supported_sizes).toEqual([]);
-    expect(result.value.channel_parser).toBeUndefined();
+    expect(result.value.channel).toBeUndefined();
   });
 });
 
@@ -143,7 +146,7 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
       type: 'audio',
       modelId: 'seed-audio-1.0',
       label: '豆包 Seed Audio 1.0',
-      parser: 'seedream',
+      channel: 'seedream-audio',
       sizes: [],
       ratios: [],
     });
@@ -281,7 +284,7 @@ describe('gpt / banana mapping', () => {
   it('banana 是两列一维映射，不是像素交叉格', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'banana',
+        channel: 'banana-image',
         bananaQuality: { '1K': '1k', '2K': '2k' },
         bananaSize: { '1:1': '1x1', '16:9': '16x9' },
       }),
@@ -298,8 +301,8 @@ describe('gpt / banana mapping', () => {
   it('seedream 且本来就是 seedream 的行：矩阵按原样提交，diff 层不产生变更', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         seedreamMatrix: { '1K': { '1:1': '1024x1024' } },
       }),
     );
@@ -310,7 +313,7 @@ describe('gpt / banana mapping', () => {
 
   it('seedream 且矩阵编辑器为空、库里本来也没有矩阵：不提交该字段', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'seedream', originalHadRequestMapping: false }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'seedream-image', originalHadRequestMapping: false }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -322,8 +325,8 @@ describe('gpt / banana mapping', () => {
   it('seedream：矩阵编辑器改动后按新矩阵提交', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         seedreamMatrix: { '1K': { '1:1': '2048x2048', '16:9': '' } },
       }),
     );
@@ -338,8 +341,8 @@ describe('gpt / banana mapping', () => {
     // 靠 worker 的大小写兜底才不出事——隐性不变式被悄悄写坏。无 api_value 的档位回落用 id。
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         sizes: [
           { id: '1k', label: '1K', apiValue: '1K' },
           { id: '1.5k', label: '1.5K' },
@@ -356,7 +359,7 @@ describe('gpt / banana mapping', () => {
 
   it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'gpt', seedreamMatrix: {} }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'gpt-image', seedreamMatrix: {} }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -368,8 +371,8 @@ describe('gpt / banana mapping', () => {
   it('seedream：矩阵整张被清空（原本有矩阵）→ 拦下而不是静默保留 / 清空', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         originalHadRequestMapping: true,
         seedreamMatrix: {},
       }),
@@ -381,7 +384,7 @@ describe('gpt / banana mapping', () => {
 
   it('seedream：矩阵格必须是像素尺寸', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'seedream', seedreamMatrix: { '1K': { '1:1': '1k' } } }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'seedream-image', seedreamMatrix: { '1K': { '1:1': '1k' } } }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -393,8 +396,8 @@ describe('gpt / banana mapping', () => {
     const sizes = sizesFromModel(initial.supported_sizes);
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         originalHadRequestMapping: true,
         sizes,
         ratios: initial.supported_aspect_ratios,
@@ -408,14 +411,14 @@ describe('gpt / banana mapping', () => {
   });
 
   it('gpt → seedream 切换：diff 里带 null，把旧矩阵清掉', () => {
-    const initial = modelRow({ channel_parser: 'gpt' });
+    const initial = modelRow({ capability_type: 'image', channel: 'gpt-image' });
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'gpt', seedreamMatrix: {} }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'gpt-image', seedreamMatrix: {} }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const changes = diffUpdateParams(initial, result.value);
-    expect(changes.channel_parser).toBe('seedream');
+    expect(changes.channel).toBe('seedream-image');
     expect(changes.request_mapping).toBeNull();
   });
 });
@@ -491,13 +494,65 @@ describe('时长区间解析（IKHBDO）', () => {
   });
 });
 
+// 渠道（能力行 `channel` 列）是「这个模型走哪家、请求怎么解析、出站用哪种线协议」的**一个**字段，
+// 取代了原先「`channel_parser` 列 × `features.image_protocol`」两个字段——那两个说的是一件事的
+// 两半，却住在两个地方、两种形态。下面是 IKF4LI / 本次迁移在库里留下的几种真实行。
+describe('渠道：读侧归一', () => {
+  const row = (channel: string | null, capability_type: AdminModel['capability_type'] = 'image') =>
+    modelRow({ channel, capability_type });
+
+  it('★ gpt-image 与 gpt-image-openai 是两个不同渠道（同一解析器两种协议，换协议 = 新渠道）', () => {
+    expect(channelFromModel(row('gpt-image'))).toBe('gpt-image');
+    expect(channelFromModel(row('gpt-image-openai'))).toBe('gpt-image-openai');
+  });
+
+  it('★ 大小写 / 空白归一后认得出（读侧宽容，归一只用于比对）', () => {
+    expect(channelFromModel(row('  GPT-Image  '))).toBe('gpt-image');
+  });
+
+  it('★ 认不出的取值 / NULL 按**行的媒介**回落，不静默落到别的媒介的渠道', () => {
+    expect(channelFromModel(row('随便写的'))).toBe('seedream-image');
+    expect(channelFromModel(row('随便写的', 'video'))).toBe('seedream-video');
+    expect(channelFromModel(row(null, 'audio'))).toBe('seedream-audio');
+    expect(channelFromModel(row(null, 'text'))).toBe('seedream-text');
+  });
+
+  it('新建行（没有库里的行）= 该媒介的缺省渠道', () => {
+    expect(channelFromModel(undefined)).toBe('seedream-image');
+  });
+
+  it('渠道 → 解析器与协议：两个 gpt 渠道共用交叉格，协议各不相同；非图片渠道两项皆无', () => {
+    expect(channelOf('seedream-image')).toMatchObject({ media: 'image', parser: 'seedream', protocol: 'inline-image' });
+    expect(channelOf('gpt-image')).toMatchObject({ media: 'image', parser: 'gpt', protocol: 'inline-image' });
+    expect(channelOf('gpt-image-openai')).toMatchObject({ media: 'image', parser: 'gpt', protocol: 'openai-images' });
+    expect(channelOf('banana-image')).toMatchObject({ media: 'image', parser: 'banana', protocol: 'inline-image' });
+    for (const id of ['seedream-video', 'seedream-audio', 'seedream-text'] as const) {
+      expect(channelOf(id)).toMatchObject({ parser: null, protocol: null });
+    }
+  });
+
+  it('下拉只列该媒介自己的渠道（跨媒介的渠道过不了后端媒体闸门）', () => {
+    expect(channelsForMedia('image').map((c) => c.id)).toEqual([
+      'seedream-image',
+      'gpt-image',
+      'gpt-image-openai',
+      'banana-image',
+    ]);
+    expect(channelsForMedia('video').map((c) => c.id)).toEqual(['seedream-video']);
+  });
+});
+
+// 「渠道 → features.image_protocol 的兼容双写」那一段已随该键退役**整段删除**：
+// 出站协议现在只由渠道决定，键本身被迁移清掉了，没有任何读方，也就没有可写的回写语义。
+// 渠道 → 协议的展开仍在上面那条 `channelOf(...)` 断言里。
+
 describe('features 键形与类型（IKHBDO）', () => {
   it('读侧回落 camelCase（后端 toFeatures 优先认 camel）', () => {
     expect(readFeature({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(4);
     expect(readFeature({ image_reference_max: 6 }, 'image_reference_max')).toBe(6);
     expect(readFeature({ sequentialImageGeneration: true }, 'sequential_image_generation')).toBe(true);
     expect(hasFeatureKey({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(true);
-    expect(camelFeatureKey('image_protocol')).toBe('imageProtocol');
+    expect(camelFeatureKey('max_prompt_length')).toBe('maxPromptLength');
   });
 
   it('类型不符的脏值不归结构化控件管（会留在高级 JSON 里回写，而不是被删掉）', () => {
@@ -505,7 +560,9 @@ describe('features 键形与类型（IKHBDO）', () => {
     expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);
     expect(featureValueTypeOk('tools', 'yes')).toBe(false);
-    expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(true);
+    // ⚠️ `image_protocol` 曾是这张表里的字符串键，已随渠道列落地**整键退役**
+    //     （见 `FEATURE_STRING_KEYS` 的注释）——它现在是未知键，不再由结构化控件管。
+    expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(false);
   });
 });
 
@@ -610,8 +667,8 @@ describe('音频 / 文本行（IKHBDO）', () => {
         type: 'audio',
         modelId: 'seed-audio-1.0',
         label: '音频',
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-audio',
+        originalChannel: 'seedream-audio',
         // 表单不再渲染音频的时长范围控件；即便快照里带了值也不落库（IKG4UR 不变式）
         durationMin: '1',
         durationMax: '120',

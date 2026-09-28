@@ -76,7 +76,7 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
       execFileSync(ffmpegPath, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
         "-codec:a", "libmp3lame", "-q:a", "9", join(temp, "result.mp3")]);
       expectedOutput = readFileSync(join(temp, "result.mp3"));
-      const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+      const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
       mysqlId = execFileSync("docker", ["run", "-d", "--rm", "-e", "MYSQL_ROOT_PASSWORD=root",
         "-e", `MYSQL_DATABASE=${databaseName}`, "-e", "MYSQL_USER=test", "-e", "MYSQL_PASSWORD=test",
         "-p", "127.0.0.1::3306", "-v", `${schema}:/docker-entrypoint-initdb.d/init.sql:ro`, "mysql:8.0"],
@@ -301,9 +301,12 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
           "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${jobId}`,
           "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${(mediaServer.address() as { port: number }).port}/stored/out.mp3`,
           "-e", `IKI68N_STORAGE_PUBLIC_URL=${mediaBase}/stored/out.mp3`,
-          "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
+          "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${temp}:/fixture:ro`, "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
+          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
+          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
+          "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"], { cwd: repo });
         let workerOutput = "";
         worker.stdout.on("data", (chunk: Buffer) => { workerOutput += chunk.toString(); });

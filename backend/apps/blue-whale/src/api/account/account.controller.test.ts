@@ -1,108 +1,123 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AccountService } from "@lib/shared/account/account.service.js";
+// 只替换 client 的来源，`toBillingError` 用真实现——错误映射是这条端点对外的一部分，
+// 换成假的就等于把「billing 挂了会回什么」这条断言删掉了。
+const { listTransactions, sharedBillingClient } = vi.hoisted(() => {
+  const listTransactions = vi.fn();
+  return { listTransactions, sharedBillingClient: () => ({ listTransactions }) };
+});
+
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return { ...actual, sharedBillingClient };
+});
+
+import { BillingConfigError } from "@lib/shared/billing/billing-client.js";
 import { AccountController } from "./account.controller.js";
 
-// IKGCWU：这个 controller 此前没有测试，而本单最要紧的那条不变量——非法 type 必须 400，
-// 绝不能落进上游「不加过滤」哨兵（那会把充值/登录/管理行混进用户账单）——只靠 records.ts
-// 的单测证不了：还得证明校验发生在 try 之外，没被 toUpstreamError 重包装成 502，
-// 而且根本没往下游发请求。
+const USER = { userId: "42", username: "alice" } as never;
+const controller = new AccountController();
 
-interface ConsumeCall {
-  token: string;
-  options: { page?: number; pageSize?: number; type?: number | readonly number[] };
+function page(items: unknown[] = [], nextPageToken = "") {
+  return { items, nextPageToken };
 }
 
-function makeController(result?: {
-  items: Array<Record<string, unknown>>;
-  total: number;
-}) {
-  const calls: ConsumeCall[] = [];
-  const service = {
-    listUserConsumeLogs: (token: string, options: ConsumeCall["options"]) => {
-      calls.push({ token, options });
-      return Promise.resolve(result ?? { items: [], total: 0 });
-    },
-  } as unknown as AccountService;
-  return { controller: new AccountController(service), calls };
-}
-
-const AUTH = "Bearer sk-user-token";
-
-describe("AccountController.consumptions（IKGCWU）", () => {
-  it("缺省查消耗 + 退款两类", async () => {
-    const { controller, calls } = makeController();
-
-    await controller.consumptions(AUTH, {});
-
-    expect(calls[0]?.options.type).toEqual([2, 6]);
-    expect(calls[0]?.token).toBe("sk-user-token");
+describe("AccountController.consumptions（billing 账本）", () => {
+  beforeEach(() => {
+    listTransactions.mockReset();
   });
 
-  it("显式 type=6 收窄到退款", async () => {
-    const { controller, calls } = makeController();
+  it("缺省不带类型过滤 —— 契约里空 = 全部流水", async () => {
+    listTransactions.mockResolvedValue(page());
 
-    await controller.consumptions(AUTH, { type: "6" });
+    await controller.consumptions(USER, {});
 
-    expect(calls[0]?.options.type).toEqual([6]);
-  });
-
-  it("非法 type 抛 400，且不往下游发请求", async () => {
-    const { controller, calls } = makeController();
-
-    await expect(controller.consumptions(AUTH, { type: "0" })).rejects.toMatchObject({
-      status: 400,
-      code: "invalid_log_type",
+    // 没有 typeFilter 这个键（不是 typeFilter: undefined）：exactOptionalPropertyTypes 下
+    // 传 undefined 与「不传」在契约上是两回事。
+    expect(listTransactions).toHaveBeenCalledWith({
+      userId: 42,
+      pageSize: 20,
+      pageToken: "",
     });
-    // 校验在 try 之外：既没打上游，也没被 toUpstreamError 改写成 502。
-    expect(calls).toHaveLength(0);
   });
 
-  it("unset 掉 type 之外的错误仍走上游映射（这里用 502 兜底）", async () => {
-    const service = {
-      listUserConsumeLogs: () => Promise.reject(new Error("boom")),
-    } as unknown as AccountService;
-    const controller = new AccountController(service);
+  it("type 收窄到单个类型，page_token 原样回传", async () => {
+    listTransactions.mockResolvedValue(page());
 
-    await expect(controller.consumptions(AUTH, {})).rejects.toMatchObject({ status: 502 });
-  });
-
-  it("无令牌 401，且不往下游发请求", async () => {
-    const { controller, calls } = makeController();
-
-    await expect(controller.consumptions(undefined, {})).rejects.toMatchObject({
-      status: 401,
-    });
-    expect(calls).toHaveLength(0);
-  });
-
-  it("把上游日志映射成带 kind 的账单项", async () => {
-    const { controller } = makeController({
-      items: [
-        {
-          id: 7,
-          type: 2,
-          quota: 300_000,
-          model_name: "doubao-seedance-2-0-260128",
-          created_at: 1_700_000_100,
-        },
-        {
-          id: 8,
-          type: 6,
-          quota: 300_000,
-          model_name: "doubao-seedance-2-0-260128",
-          created_at: 1_700_000_200,
-        },
-      ],
-      total: 2,
+    await controller.consumptions(USER, {
+      type: "refund",
+      page_size: "5",
+      page_token: "cursor-1",
     });
 
-    const response = await controller.consumptions(AUTH, {});
+    expect(listTransactions).toHaveBeenCalledWith({
+      userId: 42,
+      typeFilter: "refund",
+      pageSize: 5,
+      pageToken: "cursor-1",
+    });
+  });
 
-    expect(response.data.total).toBe(2);
-    expect(response.data.items.map((item) => item.kind)).toEqual(["consume", "refund"]);
-    // 退款也是正的变动幅度，方向只由 kind 表达。
-    expect(response.data.items[1]?.credits).toBeGreaterThan(0);
-    expect(response.data.items[1]?.summary).toBe("退款（生成视频）");
+  it("page_size 非法或超上限时回落到缺省 / 上限", async () => {
+    listTransactions.mockResolvedValue(page());
+
+    await controller.consumptions(USER, { page_size: "abc" });
+    expect(listTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageSize: 20 }),
+    );
+
+    await controller.consumptions(USER, { page_size: "9999" });
+    expect(listTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageSize: 100 }),
+    );
+  });
+
+  it("把账本行投影成前端字段（金额是整数积分，id 是带前缀的字符串）", async () => {
+    listTransactions.mockResolvedValue(
+      page(
+        [
+          {
+            id: "res:7",
+            type: "consume",
+            direction: "out",
+            title: "视频生成 · seedance-2.5 1080p 5s",
+            credits: 30,
+            status: "done",
+            createdAt: "2026-09-25T10:00:00+08:00",
+            settledAt: "2026-09-25T10:01:00+08:00",
+          },
+        ],
+        "cursor-next",
+      ),
+    );
+
+    const response = await controller.consumptions(USER, {});
+
+    expect(response.data.next_page_token).toBe("cursor-next");
+    expect(response.data.items[0]).toEqual({
+      id: "res:7",
+      type: "consume",
+      direction: "out",
+      title: "视频生成 · seedance-2.5 1080p 5s",
+      credits: 30,
+      status: "done",
+      created_at: "2026-09-25T10:00:00+08:00",
+      settled_at: "2026-09-25T10:01:00+08:00",
+    });
+  });
+
+  it("billing 未配置 → 503，billing 报错 → 502（都不是静默空列表）", async () => {
+    listTransactions.mockRejectedValue(new BillingConfigError("计费服务地址未配置"));
+    await expect(controller.consumptions(USER, {})).rejects.toMatchObject({
+      status: 503,
+      code: "billing_unconfigured",
+    });
+
+    listTransactions.mockRejectedValue(new Error("boom"));
+    await expect(controller.consumptions(USER, {})).rejects.toMatchObject({
+      status: 502,
+      code: "billing_error",
+    });
   });
 });

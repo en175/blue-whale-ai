@@ -42,6 +42,46 @@
   color: #ccc;
 }
 
+/* ---- 购买方式切换（固定积分卡 / 自定义充值）---- */
+/* 分段控件：底槽 + 选中项高亮。不用下划线——深色底上那条线的分辨率太差 */
+.modeTabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 4px;
+  margin: 16px 0 0;
+  padding: 4px;
+  background-color: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+}
+
+.modeTab {
+  padding: 8px 18px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: #aaa;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.modeTab:hover:not(:disabled) {
+  color: #fff;
+}
+
+.modeTab:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.modeTabActive {
+  background-color: #1e2a4a;
+  color: #fff;
+  box-shadow: 0 0 0 1px #3e63c4 inset;
+}
+
 /* ---- 套餐卡片 ---- */
 .planRow {
   display: grid;
@@ -131,7 +171,7 @@
   border-radius: 6px;
 }
 
-/* 充值计价说明（标题下） */
+/* 充值计价说明（标题下）。换算率由后端定价目录给，文案不写死常量 */
 .unitHint {
   font-size: var(--font-size-sm);
   color: #888;
@@ -163,14 +203,19 @@
   text-decoration: line-through;
 }
 
+/* 这一档的有效期（PRD §6.2「适用说明」）。值从接口来，按档位各不相同，
+   所以它必须在**卡片上**、与其它档位共有的那组权益分开。 */
+.planValidity {
+  font-size: var(--font-size-sm);
+  color: #9aa7bd;
+}
+
 .perkList {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-top: 8px;
-}
-
-.perkItem {
+}.perkItem {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -181,6 +226,25 @@
 .perkCheck {
   color: #3e8efc;
   flex-shrink: 0;
+}
+
+/* 无购买权限（后台把这一档限到了白名单，当前用户不在名单里）：整卡置灰、不可点。
+   与自定义充值面板的 `denied` 同一条做法 —— 两条购买路径的体验要对齐。 */
+.planDisabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.planDisabled:hover {
+  border-color: #2a2a2a;
+}
+
+/* 无权限的提示文案（后台可配）。用与 CustomRecharge 一致的警示色，
+   不写死「暂不可购买」这类字：那是服务端给的文案 */
+.planDeniedHint {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+  line-height: 1.5;
 }
 
 /* ---- 底部结算栏 ---- */
@@ -257,40 +321,6 @@
   gap: 12px;
 }
 
-/* 支付方式分段 */
-.paySegment {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background-color: #262626;
-  border: 1px solid #333;
-  border-radius: 10px;
-}
-
-.payOption {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: #999;
-  font-size: var(--font-size-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.payOption:hover {
-  color: #ddd;
-}
-
-.payOptionActive {
-  background-color: #1e1e1e;
-  color: #fff;
-  box-shadow: inset 0 0 0 1px #3a3a3a;
-}
-
 /* 确认支付 */
 .confirmBtn {
   height: 44px;
@@ -310,17 +340,7 @@
   background-color: #4a70d8;
 }
 
-.confirmBtnPaying {
-  background-color: #2a2a2a;
-  color: #777;
-  cursor: not-allowed;
-}
-
-.confirmBtnPaying:hover {
-  background-color: #2a2a2a;
-}
-
-/* 未选套餐/支付中：禁用态（与支付中同视觉，可区分于可用态） */
+/* 未选套餐 / 支付中 / 已支付：禁用态 */
 .confirmBtnDisabled {
   background-color: #2a2a2a;
   color: #777;
@@ -358,7 +378,7 @@
   justify-content: center;
 }
 
-/* 二维码不可用/创建中的占位文案 */
+/* 二维码不可用时的占位文案 */
 .qrPlaceholder {
   font-size: var(--font-size-sm);
   color: #777;
@@ -420,26 +440,19 @@
   color: #888;
 }
 
-.cancelPaymentButton {
-  margin-top: 10px;
-  padding: 8px 18px;
-  border: 1px solid #4a4a4a;
-  border-radius: 8px;
-  background: transparent;
-  color: #ccc;
-  cursor: pointer;
+/* 到账异常（`grant_failed`）：与「发放中」不同色 —— 后者会自己好，这个要人来处理。
+   用与后台警示一致的暖色，不写死任何年数/期限 */
+.waitingBad {
   font-size: var(--font-size-sm);
+  color: #d8a33a;
 }
 
-.cancelPaymentButton:hover:not(:disabled) {
-  border-color: #6a6a6a;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.cancelPaymentButton:disabled {
-  cursor: not-allowed;
-  color: #777;
+/* 下单回来的金额与页面上原显示的价不一致（运营刚改过价）：提示在二维码上方，
+   与 `qrAmount` 相邻 —— 用户先读到「价变了」，再看到那个新数字 */
+.qrPriceChanged {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+  text-align: center;
 }
 
 /* 支付结果态（成功/过期/失败） */

@@ -2,13 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ERROR_MODEL_UNAVAILABLE } from "@lib/contracts";
 
-import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
+import {
+  generationCreateRequestHash,
+  handleCreateGenerationJob,
+} from "./handle-create-generation-job.js";
 
 // IK9ILQ：音频生成接入 —— 校验分支单测。
 // 通过公开入口 handleCreateGenerationJob 打私有 validate()（对齐 Java CreateGenerationJobRequest 约束）：
 // 音频任务无 aspect_ratio 校验、prompt≤3000、单输出、一期不支持参考素材、model_id 白名单。
 
 type HandlerDeps = Parameters<typeof handleCreateGenerationJob>[4];
+
+/** 建任务幂等查询（command 端口）。缺省「无行」——没带 Idempotency-Key 的用例走的就是
+ *  与加幂等表之前完全相同的路径（这个函数根本不会被调用）。 */
+function idempotencyLookup(result: unknown = null) {
+  return vi.fn().mockResolvedValue(result);
+}
 
 function buildDeps() {
   const findOwnedById = vi.fn().mockResolvedValue({
@@ -37,7 +46,7 @@ function buildDeps() {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
   return { deps, findOwnedById, listEnabledByType, createJob };
@@ -62,7 +71,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "audio",
         expectedOutputCount: 1,
@@ -142,7 +151,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "audio",
         input: expect.objectContaining({
@@ -170,7 +179,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           references: [{ role: "reference", asset_id: "42", type: "image" }],
@@ -381,7 +390,7 @@ function buildImageDeps(imageReferenceMax?: number) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets },
   } as unknown as HandlerDeps;
   return { deps, createJob, resolveInputAssets };
@@ -413,7 +422,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         type: "image",
         input: expect.objectContaining({
@@ -472,7 +481,7 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
       okDeps,
     );
     expect(ok.code).toBe(200);
-    expect(okCreate).toHaveBeenCalledWith(
+    expect(okCreate.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           input_asset_ids: expect.any(Array),
@@ -711,7 +720,7 @@ function buildVideoDeps(modelRow: Record<string, unknown> = {}) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
     assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
   } as unknown as HandlerDeps;
@@ -1003,7 +1012,7 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       deps,
     );
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           reference_materials: [
@@ -1136,6 +1145,154 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  // 视频输出像素：能力行的像素表按 (resolution, aspect_ratio) 查一次，冻成两个**标量**。
+  // 它是 billing 估 token 的输入（经 specs 随 Hold 过去），也是 `video_dimensions` 那条
+  // 字段裁决表登记的「配置赢」证明。
+  describe("输出像素按能力行冻结（video_dimensions）", () => {
+    const DIMENSIONS = {
+      "resolution=720p|aspect_ratio=16:9": "1280x720",
+      "resolution=720p|aspect_ratio=adaptive": "1280x720",
+    };
+
+    it("配了像素表 → job.input 冻出 output_width / output_height", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.output_width).toBe(1280);
+      expect(cmdArg.input.output_height).toBe(720);
+    });
+
+    it("adaptiver 比例走显式键（配了就有）", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...VIDEO_BODY, parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "adaptive" } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.output_width).toBe(1280);
+    });
+
+    it("能力行没配像素表 → **不写**这两个键（不写 0）", async () => {
+      const { deps, createJob } = buildVideoDeps();
+      const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input).not.toHaveProperty("output_width");
+      expect(cmdArg.input).not.toHaveProperty("output_height");
+    });
+
+    it("配了表但这一格没配 → 也不写（billing 回落目录那份）", async () => {
+      const { deps, createJob } = buildVideoDeps({ features: { video_dimensions: DIMENSIONS } });
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...VIDEO_BODY, parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "9:16" } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input).not.toHaveProperty("output_width");
+    });
+  });
+
+  // 首帧/首尾帧的比例闸：**按模型读能力行**，不再写死「有首帧就必须 adaptive」。
+  //
+  // 官方《创建视频生成任务》「不同模型的取值限制和 adaptive 适配规则」：
+  //   首帧或首尾帧生视频 · Seedance 2.5     = 默认且仅支持 adaptive
+  //   首帧或首尾帧生视频 · Seedance 2.0 系列 = 支持 adaptive 或指定宽高比
+  //
+  // 所以**同一条请求**（首帧 + 16:9）在一个模型上必须 400、在另一个上必须放行，
+  // 而差别**只来自能力行配置**——下面两个用例的能力行只差 `features.task_types` 一项，
+  // 代码里没有任何模型名/前缀判断。
+  describe("首帧/首尾帧比例按能力行判定（不写死）", () => {
+    const FRAME_REF = [{ role: "first_frame", asset_id: "11", type: "image" }];
+    const FRAME_BODY = (aspect: string) => ({
+      ...VIDEO_BODY,
+      references: FRAME_REF,
+      parameters: { ...VIDEO_BODY.parameters, aspect_ratio: aspect },
+    });
+
+    it("能力行锁了 adaptive（2.5 形态）+ 16:9 → 400，文案带可用值", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(result.code).toBe(400);
+      expect(result.msg).toBe("当前任务类型（first_frame）不支持 比例 16:9，可用：adaptive");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("同一能力行 + adaptive → 200", async () => {
+      const { deps } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("adaptive"), null, deps);
+      expect(result.code).toBe(200);
+    });
+
+    it("能力行**没有** task_types（2.0 形态）+ 16:9 → 200（修复前这里会被硬规则拒掉）", async () => {
+      const { deps } = buildVideoDeps({ supported_aspect_ratios: ["16:9", "adaptive"] });
+      const result = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(result.code).toBe(200);
+    });
+
+    it("首尾帧两帧查的是 first_last_frame 那一格，不是 first_frame", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: {
+          // 只锁首尾帧；first_frame 未配 → 单帧那条请求应放行
+          task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+        },
+      });
+      const both = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...VIDEO_BODY,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "last_frame", asset_id: "12", type: "image" },
+          ],
+          parameters: { ...VIDEO_BODY.parameters, aspect_ratio: "16:9" },
+        },
+        null,
+        deps,
+      );
+      expect(both.code).toBe(400);
+      expect(both.msg).toContain("first_last_frame");
+      expect(createJob).not.toHaveBeenCalled();
+
+      const single = await handleCreateGenerationJob("u1", "p1", FRAME_BODY("16:9"), null, deps);
+      expect(single.code).toBe(200);
+    });
+
+    it("未指定比例由 validateCommon 拦（本闸不重复兜底，故不写不可达分支）", async () => {
+      const { deps, createJob } = buildVideoDeps({
+        supported_aspect_ratios: ["16:9", "adaptive"],
+        features: { task_types: { first_frame: { allowed_ratios: ["adaptive"] } } },
+      });
+      const body = FRAME_BODY("16:9");
+      const result = await handleCreateGenerationJob(
+        "u1",
+        "p1",
+        { ...body, parameters: { ...body.parameters, aspect_ratio: undefined } },
+        null,
+        deps,
+      );
+      expect(result.code).toBe(400);
+      expect(result.msg).toBe("aspect_ratio 无效");
+      expect(createJob).not.toHaveBeenCalled();
+    });
+  });
+
   it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(
@@ -1224,7 +1381,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       deps,
     );
     expect(result.code).toBe(200);
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createJob.mock.calls.at(-1)?.[0]).toMatchObject(
       expect.objectContaining({
         input: expect.objectContaining({
           references: [
@@ -1282,7 +1439,7 @@ function buildTargetDeps(canvasView: { nodes: string | null; edges: string | nul
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     canvas: { getByProject },
     assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
@@ -1727,7 +1884,7 @@ function buildCapabilityDeps(capabilityRows: Array<Record<string, unknown>>) {
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
-    command: { createJob },
+    command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
     assets: { resolveInputAssets },
   } as unknown as HandlerDeps;
   return { deps, createJob, resolveInputAssets };
@@ -1741,7 +1898,7 @@ const VIDEO_CAPABILITY_ROW = {
   ],
   supported_aspect_ratios: ["16:9", "9:16"],
   supported_durations: { min: 5, max: 10, step: 5 },
-  channel_parser: "seedream",
+  channel: "seedream-image",
   request_mapping: null,
   default_size: "2k",
   default_aspect_ratio: "16:9",
@@ -1923,7 +2080,7 @@ const GPT_IMAGE_CAPABILITY = {
   supported_sizes: [{ id: "1k", api_value: "1024x1024" }],
   supported_aspect_ratios: ["1:1", "16:9"],
   supported_durations: null,
-  channel_parser: "gpt",
+  channel: "gpt-image",
   request_mapping: {
     matrix: { "1k": { "1:1": "1024x1024" } }, // 16:9 交叉格未填
   },
@@ -2268,7 +2425,7 @@ describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () 
           },
         ]),
       },
-      command: { createJob },
+      command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
       assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
     } as unknown as HandlerDeps;
     return { deps, createJob };
@@ -2422,7 +2579,7 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
           })),
         ),
       },
-      command: { createJob },
+      command: { createJob, lookupCreateIdempotency: idempotencyLookup() },
       assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
     } as unknown as HandlerDeps;
     return { deps, createJob };
@@ -2442,5 +2599,339 @@ describe('handleCreateGenerationJob 模型 id 不再被别名改写（IKHBDO）'
     expect(result.msg).toBe('model_id 不在可用模型白名单或已停用');
     expect(result.data?.code).toBe(ERROR_MODEL_UNAVAILABLE);
     expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// ★ 计费接线（IK 计费切换）：预扣与补偿必须**成对**下传给 repo —— 少了 release，
+//   事务回滚后那笔冻结没人退，就是一笔永远冻着、没有对应任务的预留。
+describe("handleCreateGenerationJob 计费接线", () => {
+  it("hold 与 release 一起交给 repo；release 带上本次 userId 与失败原因", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const hold = vi.fn(async () => {});
+    const release = vi.fn(async () => {});
+    const withBilling = {
+      ...deps,
+      billing: { hold, release },
+    } as unknown as HandlerDeps;
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      withBilling,
+    );
+    expect(result.code).toBe(200);
+
+    // 计费依赖是**第二个参数**（行为不进数据），不在任务入参上
+    const [jobInput, options] = createJob.mock.calls.at(-1)!;
+    expect(jobInput).not.toHaveProperty("billing");
+    expect(jobInput).not.toHaveProperty("billingHold");
+
+    const billing = (options as {
+      billing: {
+        hold: (jobId: number) => Promise<void>;
+        release: (jobId: number, reason: string) => Promise<void>;
+      };
+    }).billing;
+    await billing.hold(501);
+    await billing.release(501, "写库失败");
+
+    expect(hold).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u1", jobId: 501, taskType: "video" }),
+    );
+    expect(release).toHaveBeenCalledWith({
+      userId: "u1",
+      jobId: 501,
+      reason: "写库失败",
+    });
+  });
+});
+
+// ★ 建任务幂等（command_idempotency，operation=generation.create）：带 Idempotency-Key 的
+//   重复提交返回**第一次的结果**，而不是再建一个 job。
+describe("handleCreateGenerationJob 幂等（Idempotency-Key）", () => {
+  const REPLAY = { generation_job_id: "777", cursor: 42 };
+
+  function buildIdempotentDeps(lookup: unknown) {
+    const findOwnedById = vi.fn().mockResolvedValue({
+      id: "1",
+      name: "项目",
+      thumb: null,
+      created_at: "2026-08-18T00:00:00.000Z",
+    });
+    const createJob = vi.fn().mockResolvedValue({
+      generation_job_id: "888",
+      cursor: 7,
+    });
+    const lookupCreateIdempotency = idempotencyLookup(lookup);
+    const deps = {
+      projects: { findOwnedById },
+      models: { listEnabledByType: vi.fn().mockResolvedValue([VIDEO_CAPABILITY_ROW]) },
+      command: { createJob, lookupCreateIdempotency },
+      assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob, lookupCreateIdempotency };
+  }
+
+  it("★ 同一 key 命中重放 → 返回首次结果（含 generation_job_id），不再建 job", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    // 响应体就是第一次那次的形状与数值——客户端拿到的 generation_job_id 没变
+    expect(result.data).toEqual(REPLAY);
+    expect(lookupCreateIdempotency).toHaveBeenCalledWith("p1", {
+      key: "key-1",
+      requestHash: expect.any(String),
+    });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("★ 重放先于状态校验：模型此刻已不在白名单，命中重放仍返回首次结果", async () => {
+    // 「同一个请求被重试」的答案在第一次提交时就定了，不该被此刻的模型目录改写
+    // （白名单、素材门、画布快照都在幂等查询**之后**）。
+    const { deps, createJob } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, model_id: "早就停用的模型" },
+      },
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual(REPLAY);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("同键异载荷 → 100409 冲突，不建 job（同键同载荷才重放）", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps({
+      kind: "idempotency_conflict",
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "key-1",
+      deps,
+    );
+
+    expect(result.code).toBe(100409);
+    expect(lookupCreateIdempotency).toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("没带 Idempotency-Key → 完全不接幂等（不查、照常建 job），行为与加幂等表之前一致", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("Idempotency-Key 只发空白 → 与没带同口径，不接幂等", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "   ",
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("Idempotency-Key 超过列宽（128）→ 400，不是拖到落库那一刻以截断/500 收场", async () => {
+    const { deps, createJob, lookupCreateIdempotency } = buildIdempotentDeps(REPLAY);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      "k".repeat(129),
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(lookupCreateIdempotency).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("摘要只取决于请求语义：键序不同的同一份载荷摘要相同", async () => {
+    const body = {
+      type: "video",
+      expected_output_count: 1,
+      parameters: { prompt: "人物走过街角", model_id: "m", aspect_ratio: "16:9" },
+    };
+    const reordered = {
+      parameters: { aspect_ratio: "16:9", model_id: "m", prompt: "人物走过街角" },
+      expected_output_count: 1,
+      type: "video",
+    };
+
+    expect(generationCreateRequestHash("p1", reordered)).toBe(
+      generationCreateRequestHash("p1", body),
+    );
+    // 载荷真的不同则摘要必须不同（否则「同键异载荷」永远判不出来）
+    expect(
+      generationCreateRequestHash("p1", {
+        ...body,
+        parameters: { ...body.parameters, prompt: "换一句" },
+      }),
+    ).not.toBe(generationCreateRequestHash("p1", body));
+    // 定长 64 hex：正好落进 request_hash 的 VarChar(64)
+    expect(generationCreateRequestHash("p1", body)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// 视频按 token 计费：含视频输入时官方公式要把**输入时长**算进 token，
+// 而时长只能从参考素材上拿 —— 本地素材查 assets.duration，其余靠调用方带。
+describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）", () => {
+  it("本地视频参考：时长取自 assets.duration 并冻结进 input.references", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: 7.5,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12", duration: 7.5 },
+    ]);
+  });
+
+  it("调用方已带的时长不被资产值覆盖（素材库引用只能靠它）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: 99,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video", duration: 5 }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12", duration: 5 },
+    ]);
+  });
+
+  it("资产拿不到时长 → 不写这个字段（宁可让 billing 拒绝，也不按 0 估）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        type: "video",
+        url: "https://tos.test/v.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 720,
+        duration: null,
+        material_id: null,
+      })),
+    );
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "video", asset_id: "12" },
+    ]);
+  });
+
+  it("图片参考不写时长（它不进 token 公式的输入时长那一项）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.references).toEqual([
+      { role: "reference", type: "image", asset_id: "12" },
+    ]);
   });
 });

@@ -16,7 +16,6 @@ INSERT INTO generation_model_capability (
   features,
   enabled,
   sort_order,
-  channel_parser,
   request_mapping
 ) VALUES
   (
@@ -47,7 +46,6 @@ INSERT INTO generation_model_capability (
     ),
     TRUE,
     10,
-    'seedream',
     NULL
   ),
   (
@@ -99,7 +97,6 @@ INSERT INTO generation_model_capability (
     ),
     TRUE,
     20,
-    'seedream',
     NULL
   ),
   (
@@ -148,7 +145,6 @@ INSERT INTO generation_model_capability (
     -- 同口径）：排最前即视频面板默认选中；2.0 保持 20。
     TRUE,
     10,
-    'seedream',
     NULL
   ),
   (
@@ -167,7 +163,6 @@ INSERT INTO generation_model_capability (
     JSON_OBJECT(),
     TRUE,
     100,
-    'seedream',
     NULL
   ),
   (
@@ -190,7 +185,6 @@ INSERT INTO generation_model_capability (
     JSON_OBJECT('watermark', TRUE),
     TRUE,
     30,
-    'seedream',
     NULL
   ),
   (
@@ -221,7 +215,6 @@ INSERT INTO generation_model_capability (
     ),
     TRUE,
     40,
-    'gpt',
     JSON_OBJECT(
       'matrix', JSON_OBJECT(
         '1k', JSON_OBJECT(
@@ -268,7 +261,6 @@ INSERT INTO generation_model_capability (
     JSON_OBJECT('quantity_max', 1),
     TRUE,
     41,
-    'gpt',
     JSON_OBJECT(
       'matrix', JSON_OBJECT(
         '1k', JSON_OBJECT(
@@ -315,7 +307,6 @@ INSERT INTO generation_model_capability (
     JSON_OBJECT('quantity_max', 1),
     TRUE,
     42,
-    'banana',
     JSON_OBJECT(
       'quality', JSON_OBJECT('1k', '1k', '2k', '2k', '4k', '4k'),
       'size', JSON_OBJECT(

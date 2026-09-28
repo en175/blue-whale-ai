@@ -1,19 +1,27 @@
 import { Injectable } from "@nestjs/common";
-import {
-  createNewApiClient,
-  NewApiError,
-  type NewApiAccountCapabilities,
-  type NewApiAccountIdentity,
-  type NewApiChangePasswordInput,
-  type NewApiLoginInput,
-  type NewApiLoginResult,
-  type NewApiRegisterInput,
-  type NewApiUsage,
-} from "@lib/core";
+import { createNewApiClient, NewApiError } from "@lib/core";
 
 type NewApiClient = ReturnType<typeof createNewApiClient>;
 
-/** new-api 账户/充值出站 client 封装（懒加载，未配置 NEW_API_BASE_URL 时首次调用才抛）。 */
+/**
+ * new-api 出站 client 封装（懒加载，未配置 NEW_API_BASE_URL 时首次调用才抛）。
+ *
+ * <p>⚠️ 这里**只剩 Agent 会话消费汇总**，其余全部已摘除：
+ *
+ * <ul>
+ *   <li>用户身份（登录/注册/改密/角色/账号状态）→ 我们自己的库（`IdentityService`）</li>
+ *   <li>余额与消费流水 → billing 账本（`billing-client.ts` 的 QueryBalance / ListTransactions）</li>
+ *   <li>充值协议、下单、查单、充值记录 → **整条删除**（new-api 不再代我们收款，本仓也没有支付通道）</li>
+ *   <li>管理端用户/订单/日志统计 → 我们自己的库</li>
+ * </ul>
+ *
+ * <p>new-api 现在是「带一把统一 key 的上游供应商」，它那边不再有我们的用户。任何以
+ * 「这把 key 的属主」为前提的读写，在统一 key 下都只会得到同一个人的答案——所以那些
+ * 调用不是「暂时不准」，而是**结构上不可能对**。
+ *
+ * <p>`sumAgentRunQuota` 留着是因为它按 **Agent Run 号**归属（不是按 key 属主），
+ * 归属口径仍然成立；Agent 面另有决定，暂不在此单处置。
+ */
 @Injectable()
 export class AccountService {
   private clientInstance?: NewApiClient;
@@ -33,74 +41,6 @@ export class AccountService {
     return this.clientInstance;
   }
 
-  // —— 账户/鉴权 ——
-
-  login(input: NewApiLoginInput): Promise<NewApiLoginResult> {
-    return this.client.login(input);
-  }
-
-  register(input: NewApiRegisterInput): Promise<NewApiLoginResult> {
-    return this.client.register(input);
-  }
-
-  resolveTokenIdentity(token: string): Promise<NewApiAccountIdentity> {
-    return this.client.resolveTokenIdentity(token);
-  }
-
-  getAccountCapabilities(): Promise<NewApiAccountCapabilities> {
-    return this.client.getAccountCapabilities();
-  }
-
-  getTokenUsage(token: string): Promise<NewApiUsage> {
-    return this.client.getTokenUsage(token);
-  }
-
-  /** 修改密码（IKBRCK）：校验原密码后写入新密码，透传网关 PUT /api/user/self。 */
-  changePassword(input: NewApiChangePasswordInput, token: string): Promise<void> {
-    return this.client.changePassword(input, token);
-  }
-
-  // —— 充值/消费记录 ——
-
-  getRechargeAgreement() {
-    return this.client.getRechargeAgreement();
-  }
-
-  requestTopUpAmount(token: string, amount: number) {
-    return this.client.requestTopUpAmount(token, amount);
-  }
-
-  createBlueWhalePayTopUp(token: string, amount: number, wayCode: string) {
-    return this.client.createBlueWhalePayTopUp(token, amount, wayCode);
-  }
-
-  createCollectTopUp(
-    input: Parameters<NewApiClient["createCollectTopUp"]>[0],
-  ) {
-    return this.client.createCollectTopUp(input);
-  }
-
-  listUserTopUps(token: string, options: { page?: number; pageSize?: number }) {
-    return this.client.listUserTopUps(token, options);
-  }
-
-  getTopUpByTradeNo(token: string, tradeNo: string) {
-    return this.client.getTopUpByTradeNo(token, tradeNo);
-  }
-
-  /** 分页拉消费流水；`type` 必传，可给数组取并集（IKGCWU：`[2, 6]` = 消耗 + 退款）。
-   *  不给缺省是刻意的——见 `packages/core` 同名的说明。 */
-  listUserConsumeLogs(
-    token: string,
-    options: {
-      page?: number;
-      pageSize?: number;
-      type: number | readonly number[];
-    },
-  ) {
-    return this.client.listUserConsumeLogs(token, options);
-  }
-
   /** IKAFPC / IKCGE7：按 Agent Run 号汇总实际消费，用于「本会话累计消耗积分」。 */
   sumAgentRunQuota(
     token: string,
@@ -108,62 +48,5 @@ export class AccountService {
     window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number },
   ) {
     return this.client.sumAgentRunQuota(token, agentRunIds, window);
-  }
-
-  // —— 管理端 new-api admin ops ——
-
-  listAdminUsers(
-    token: string,
-    userId: number,
-    options?: {
-      keyword?: string;
-      status?: number;
-      role?: number;
-      page?: number;
-      pageSize?: number;
-    },
-  ) {
-    return this.client.listAdminUsers(token, userId, options);
-  }
-
-  listAdminTopUps(
-    token: string,
-    userId: number,
-    options?: { keyword?: string; page?: number; pageSize?: number },
-  ) {
-    return this.client.listAdminTopUps(token, userId, options);
-  }
-
-  getAdminLogStat(
-    token: string,
-    userId: number,
-    input: { type: number; startTimestamp: number; endTimestamp: number },
-  ) {
-    return this.client.getAdminLogStat(token, userId, input);
-  }
-
-  listAdminLogs(
-    token: string,
-    userId: number,
-    options?: { page?: number; pageSize?: number },
-  ) {
-    return this.client.listAdminLogs(token, userId, options);
-  }
-
-  completeAdminTopUp(token: string, userId: number, tradeNo: string) {
-    return this.client.completeAdminTopUp(token, userId, tradeNo);
-  }
-
-  manageAdminUser(
-    token: string,
-    userId: number,
-    input: {
-      id: number;
-      action: "disable" | "enable" | "add_quota";
-      value?: number;
-      mode?: "add" | "subtract";
-    },
-  ) {
-    return this.client.manageAdminUser(token, userId, input);
   }
 }

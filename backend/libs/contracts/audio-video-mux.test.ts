@@ -15,10 +15,10 @@ import {
   audioVideoMuxCreateSchema,
 } from "./audio-video-mux.js";
 
-const javaContract = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/AudioVideoMuxContract.java", import.meta.url), "utf8");
-const javaRoute = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java", import.meta.url), "utf8");
-const javaClient = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/infrastructure/gateway/NewApiMediaKitMuxAudioVideoClient.java", import.meta.url), "utf8");
-const javaFinalizer = readFileSync(new URL("../../../worker-java/src/main/java/com/bluewhale/worker/application/service/JobFinalizer.java", import.meta.url), "utf8");
+const javaContract = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/AudioVideoMuxContract.java", import.meta.url), "utf8");
+const javaRoute = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java", import.meta.url), "utf8");
+const javaClient = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/infrastructure/gateway/NewApiMediaKitMuxAudioVideoClient.java", import.meta.url), "utf8");
+const javaFinalizer = readFileSync(new URL("../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/service/JobFinalizer.java", import.meta.url), "utf8");
 
 describe("audio_video_mux 跨进程契约（IKIHPJ，迁移契约 §21）", () => {
   it("keeps task type, queue tag, routes and gateway endpoints aligned with Java", () => {

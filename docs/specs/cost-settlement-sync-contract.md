@@ -98,5 +98,7 @@ Authorization: Bearer <shared-token>
 # 用户端与 internal 目录外的路由不得引用该通道
 rg "cost-settlements|cost_adjustments" web/src backend/apps/blue-whale/src/api --glob '!**/internal/**'
 # 消费端不持有任何管理凭证/改余额调用
-rg "NEW_API_ROOT_ACCESS_TOKEN|/api/user/manage" backend/libs/shared/cost-reconciliation
+# （原前半段还 grep 过一个 root access token 变量；该凭证 2026-09-25 已整条退役，
+#  全项目只剩 NEW_API_UPSTREAM_KEY 一把上游凭证，故这里只留改余额这一条）
+rg "/api/user/manage" backend/libs/shared/cost-reconciliation
 ```

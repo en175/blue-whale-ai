@@ -1,0 +1,53 @@
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--admin-radius-surface);
+  font-size: var(--admin-font-sm);
+  line-height: 1.6;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+/* 文案可能很长（上游把整段报错原文透传回来），必须能换行而不是把布局撑破 */
+.text {
+  word-break: break-word;
+}
+
+.action {
+  flex-shrink: 0;
+}
+
+.info {
+  background: var(--admin-accent-soft);
+  border-color: var(--admin-accent-border);
+  color: var(--admin-accent);
+}
+
+.success {
+  background: var(--admin-success-soft);
+  border-color: #a7f3d0;
+  color: var(--admin-success);
+}
+
+.warning {
+  background: var(--admin-warning-soft);
+  border-color: #fde68a;
+  color: var(--admin-warning);
+}
+
+.danger {
+  background: var(--admin-danger-soft);
+  border-color: #fecaca;
+  color: var(--admin-danger);
+}

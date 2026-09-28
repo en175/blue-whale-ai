@@ -2,6 +2,7 @@
 /* IKFA1P：ImageDialog 文本附件正文标签——@ 菜单文本索引/插入/失效恢复/附件区编号/发送携带 prompt_doc */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { composeImageSendPrompt, type ImageTextAttachment } from './index';
 import type { PromptDoc } from '@/lib/prompt-doc';
@@ -50,13 +51,17 @@ async function renderDialog(props: {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend,
-        initialDoc: props.initialDoc ?? null,
-        attachments: props.attachments,
-        draftBinding: { onParamsChange },
-      } as Parameters<typeof ImageDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend,
+          initialDoc: props.initialDoc ?? null,
+          attachments: props.attachments,
+          draftBinding: { onParamsChange },
+        } as Parameters<typeof ImageDialog>[0])
+      ),
     );
   });
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -66,12 +71,16 @@ async function renderDialog(props: {
 async function rerender(attachments: ImageTextAttachment[]) {
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend: vi.fn(),
-        attachments,
-        draftBinding: { onParamsChange: vi.fn() },
-      } as Parameters<typeof ImageDialog>[0]),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend: vi.fn(),
+          attachments,
+          draftBinding: { onParamsChange: vi.fn() },
+        } as Parameters<typeof ImageDialog>[0])
+      ),
     );
   });
 }

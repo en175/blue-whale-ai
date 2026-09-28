@@ -1,11 +1,8 @@
 // IK74V8：从 new-api-client.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
-// 传输层：错误类型、响应信封解析、分页归一化与带超时/追踪头的请求器。
+// 传输层：错误类型、响应信封解析与带超时/追踪头的请求器。
 import { createLogger, type Logger } from "./logger.js";
 import { generateTraceId, getCurrentTraceId } from "./trace.js";
-import type {
-  NewApiClientOptions,
-  NewApiPageInfo,
-} from "./new-api-types.js";
+import type { NewApiClientOptions } from "./new-api-types.js";
 
 /** new-api 出站失败日志（IKDZGM）：失败可定位——status/request_id/原始 body/堆栈一次带全。
  *  传输层是所有出站调用的汇聚点，此处打日志覆盖视频/音频/图片/素材库/计费/账号所有调用方。 */
@@ -113,20 +110,6 @@ export function codeFrom(payload: NewApiEnvelope | null): string | number | unde
 
 export function isBusinessFailure(payload: NewApiEnvelope | null): boolean {
   return payload?.success === false || payload?.code === false;
-}
-
-/** 归一化 new-api 分页信封（PageInfo），缺字段兜底，防脏数据抛错。 */
-export function normalizePage<T>(
-  data: unknown,
-  pageSize: number,
-): NewApiPageInfo<T> {
-  const page = (data ?? {}) as Partial<NewApiPageInfo<T>>;
-  return {
-    items: Array.isArray(page.items) ? page.items : [],
-    total: typeof page.total === "number" ? page.total : 0,
-    page: typeof page.page === "number" ? page.page : 1,
-    page_size: typeof page.page_size === "number" ? page.page_size : pageSize,
-  };
 }
 
 export function positiveInteger(value: unknown): number | null {

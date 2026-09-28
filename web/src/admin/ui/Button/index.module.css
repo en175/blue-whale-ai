@@ -1,0 +1,82 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-surface);
+  color: #374151;
+  font-size: var(--admin-font-sm);
+  font-family: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--admin-shadow-card);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--admin-surface-sunken);
+  border-color: var(--admin-border-strong);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.btn:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 小号：表格行内操作用它，避免行高被按钮撑开 */
+.sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--admin-font-xs);
+  box-shadow: none;
+}
+
+.primary {
+  background: var(--admin-accent);
+  border-color: var(--admin-accent);
+  color: #fff;
+  box-shadow: none;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--admin-accent-hover);
+  border-color: var(--admin-accent-hover);
+}
+
+.danger {
+  color: var(--admin-danger);
+  border-color: color-mix(in srgb, var(--admin-danger) 35%, var(--admin-border));
+  box-shadow: none;
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--admin-danger-soft);
+  border-color: color-mix(in srgb, var(--admin-danger) 55%, var(--admin-border));
+}
+
+.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--admin-text-muted);
+  box-shadow: none;
+}
+
+.ghost:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: transparent;
+  color: var(--admin-text);
+}

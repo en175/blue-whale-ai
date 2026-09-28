@@ -108,7 +108,7 @@ export default function PasswordModal({ open, onClose, onSuccess }: PasswordModa
           {showNew ? '隐藏' : '显示'}
         </button>
       </div>
-      {passwordRuleError && <p className={styles.error}>密码长度需为 8-20 个字符</p>}
+      {passwordRuleError && <p className={styles.error}>密码至少 8 位（最长 72 字节，一个汉字算 3 字节）</p>}
 
       <div className={styles.label}>确认新密码</div>
       <div className={styles.inputWrap}>

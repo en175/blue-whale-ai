@@ -188,6 +188,9 @@ model generation_jobs {
   @@index([status, next_poll_at], map: "idx_status_next_poll")
   @@index([user_id], map: "idx_user_id")
   @@index([next_action_at], map: "idx_generation_next_action")
+  /// 仪表盘区间统计：WHERE is_delete = 0 AND gmt_create ∈ [from, to)。
+  /// `is_delete` 在前做等值前缀、`gmt_create` 走区间 —— 反过来放会让等值条件退化成过滤。
+  @@index([is_delete, gmt_create], map: "idx_generation_jobs__is_delete_gmt_create")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -207,8 +210,19 @@ model generation_model_capability {
   default_aspect_ratio    String   @db.VarChar(16)
   default_duration        Int?
   features                Json
-  channel_parser          String   @default("seedream") @db.VarChar(32)
+  /// 渠道（`<家族>-<媒介>[-<协议>]`，**封闭枚举**）：这个模型走哪个渠道 ——
+  /// 决定请求怎么解析、出站用哪种线协议。**本行解析与出站行为的唯一来源**。
+  /// 取代了 `channel_parser`（列）与 `features.image_protocol`（JSON 键）—— 那两个已被
+  /// 040 迁移删掉/清空，代码里也没有读方了。
+  channel                 String   @db.VarChar(32)
   request_mapping         Json?
+  /// 该模型该能力的计价规则，JSON 形态与定价目录 `document.models.<model_id>.<capability_type>`
+  /// 那条逐字相同（baseUnit / basePrice{kind,value?,by?,table?} / unitDenominator / minCredits /
+  /// maxCredits? / rounding? / dims? / multipliers? / tokenEstimate?）。
+  /// 原住 billing 的 `billing_pricing_catalogs.document`，因「它本质上是模型的属性」而搬来；
+  /// billing 生成任务时随 Hold 请求带走并存进自己的预留行，结算用预留行快照，故不反查本库。
+  /// 过渡期可为 NULL = 尚未搬迁，billing 侧回落定价目录。
+  pricing                 Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
   is_default              Boolean  @default(false)
@@ -555,9 +569,17 @@ model creative_skill_version {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model users {
+/// 账号主体（自建用户体系）。改到 identity_ 前缀、username 唯一、phone 可空，
+/// 理由与 pre-flight 见 migration 20260924180000。
+/// ⚠️ `username` 是**登录凭据**；`phone` 只是「多一种登录方式」，存量用户没有它。
+model identity_users {
   id           BigInt   @id @default(autoincrement())
-  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
+  /// 邮箱。设计 §6.2 要求；与 username 一样是登录方式之一（email + password）。
+  /// ⚠️ 唯一：登录按 `username = ? OR email = ?` 一次查出主体，邮箱不唯一时会命中
+  /// **任意一行**——等于能用别人的邮箱登进来。NULL 可多行，空串不可
+  /// （MySQL 唯一索引对 NULL 互不相等，对空串不是）。见 migration 20260925120000。
+  email        String?  @unique(map: "uk_identity_users__email") @db.VarChar(50)
   username     String   @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
@@ -565,10 +587,16 @@ model users {
   version      Int      @default(1)
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
+  /// bcrypt 哈希（cost 10，与 new-api 一致）。**可空**：手机号注册、以及刚从
+  /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
+  /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
+
+  @@unique([username], map: "uk_identity_users__username")
 }
 
-model verification_codes {
+/// 短信验证码。手机号登录是**后续**能力（发码已通、登录未接，`loginWithCode` 零调用者）。
+model identity_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
   code       String   @db.VarChar(6)
@@ -583,6 +611,10 @@ model verification_codes {
 }
 
 // ===== 充值档位（blue_whale 侧 CRUD，支付执行走 Go new-api） =====
+//
+// ⚠️ 列序 = 迁移里的物理列序（新列一律 `ALTER TABLE … ADD COLUMN` 追加在末尾，
+// 所以模型里也写在末尾）。**重排这里的顺序不是无害的排版**：下一次
+// `prisma migrate` 会把它识别成一次列重排，生成一串没人读得懂的 MODIFY。
 
 model topup_tiers {
   id             BigInt    @id @default(autoincrement())
@@ -592,7 +624,10 @@ model topup_tiers {
   discount       Decimal   @default(1) @db.Decimal(5, 4)
   price          Decimal   @db.Decimal(10, 2)
   is_recommended Boolean   @default(false)
-  status         String    @default("active") @db.VarChar(16)
+  /// 三态（PRD §10.5）：draft 草稿 | active 上架 | inactive 下架。
+  /// ⚠️ **默认 draft** —— 新建卡片默认草稿，不展示给用户，运营配齐再上架。
+  /// 存量行不动（它们已经是上架/下架，没有理由回退成草稿）。
+  status         String    @default("draft") @db.VarChar(16)
   start_time     DateTime? @db.DateTime(0)
   end_time       DateTime? @db.DateTime(0)
   sort_order     Int       @default(0)
@@ -601,7 +636,162 @@ model topup_tiers {
   version        Int       @default(0)
   is_delete      Int       @default(0) @db.TinyInt
 
+  // ── 卡片展示与首购活动（PRD §10.2；2026-09-26 由迁移 047 追加，故排在末尾）──
+  description              String  @default("") @db.VarChar(255)
+  bonus_credits            BigInt  @default(0)
+  activity_tag             String  @default("") @db.VarChar(64)
+  button_text              String  @default("立享加赠") @db.VarChar(32)
+  first_purchase_eligible  Int     @default(0) @db.TinyInt
+  /// 到账积分有效期，单位**月**（默认 2 年 = 24 个月）。口径钉死为月，年表达不了 6/18 个月
+  credits_valid_months     Int     @default(24)
+  /// all 全部登录用户 | user_group 指定用户群 | member_tier 指定会员等级（阶段 2 生效，先占位）
+  permission               String  @default("all") @db.VarChar(16)
+  /// JSON 数组，元素是 userId 的十进制字符串（BigInt 超 JS 安全整数，存串不丢精度）
+  permission_allowlist     Json?
+  permission_denied_hint   String  @default("") @db.VarChar(255)
+
+  // ── 基础积分：**配置值**（2026-09-27 由迁移 048 追加，故排在末尾）──
+  /// 用户下单到账的基础积分（整数积分）。**配置值，不是派生值**（推翻迁移 047 的派生决定）：
+  /// 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事 —— 充值常有折扣。
+  /// `original_price`/`discount` 只为展示划线价，与积分**再无数学关系**：
+  /// ¥499 给 7,500 积分（499×15=7,485 只是巧合），看到「不是原价的整数倍」不要去修。
+  /// 0 = 还没配过基础积分，下单会被拒（宁可下不了单，也不发 0 积分）。
+  base_credits             BigInt  @default(0)
+
   @@index([status, sort_order], map: "idx_tier_status_sort")
+}
+
+// ===== 充值订单（blue_whale 侧；支付执行在 blue-whale-pay 的杭州银行聚合主扫渠道） =====
+//
+// 到账积分在下单时刻冻结（credits/credits_per_yuan）：换算率是定价目录的配置项、可改，
+// 用户按「N 积分」付了钱之后改口径不能反悔。
+//
+// ⚠️ **`status=paid` 不再是「积分已发放」的唯一判据**（2026-09-26 起）。状态机从 4 态扩到 6 态：
+//   pending 待支付 | paid_pending 支付成功待到账 | paid 已到账 | failed 支付失败
+//   | expired 已取消（用户取消或超时；沿用旧值不改名）| grant_failed 到账异常
+// 拆出 `paid_pending` 是为了让「**钱到了但积分没发成功**」第一次可表达 ——
+// 在此之前那种单停在 `pending`，与「用户还没付钱」长得一模一样，客服分不出来。
+// 判据要写「>= 待到账」，不要写 `= paid`。
+//
+// ⚠️ 刻意**没有**「已退款」状态：退款功能先不做。一个没有出口的状态就是死状态。
+model recharge_orders {
+  id               BigInt    @id @default(autoincrement())
+  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  /// 银行统一收银台链接（下单应答的 payData，内嵌银行令牌）。落库是为了**复用未支付订单**：
+  /// 网关按 (mch_no, mch_order_no) 唯一，同一单号重下会被拒，链接事后要不回来。
+  /// ⚠️ 判「有没有拿到过链接」看 pay_order_id（两者同一次更新写入，同真同假）
+  cashier_url      String?   @db.VarChar(512)
+  user_id          BigInt
+  /// 档位 ID。**可空**：NULL = 这不是档位商品（自定义充值，`product_type = 'custom'`）。
+  /// 自定义充值没有档位，编一个 0/1 出来会被后续按 tier_id 聚合的对账当成真档位。
+  /// 判「是不是档位商品」一律看 product_type，不看这一列。
+  tier_id          BigInt?
+  amount_fen       BigInt
+  credits          BigInt
+  credits_per_yuan Int
+  status           String    @default("pending") @db.VarChar(16)
+
+  // ── 快照（PRD §9.3）：下单时刻的商品与活动，后台之后改配置不影响已创建订单 ──
+  product_type            String    @default("tier") @db.VarChar(16)
+  product_name            String    @default("") @db.VarChar(100)
+  /// 本单应发的赠送积分（首购加赠），没有则 0。与 credits 分开记：退款只退本金，
+  /// 且两者将来的有效期策略可能不同
+  bonus_credits           BigInt    @default(0)
+  /// 本单积分的到期时刻（**真实发给 billing 的那个时刻**），由发放那一步按
+  /// `paid_pending_at + credits_valid_months` 算出并写上；下单时先写 NULL。
+  /// NULL = 还没发放（或本列上线前的存量单，那种单按 billing 的来源策略发）
+  credits_expire_at       DateTime? @db.DateTime(0)
+  /// 到账积分有效期快照，单位**月**（来自档位 / 自定义充值配置）。
+  /// ⚠️ 存月数不存时刻：起算点是**支付成功时刻**（PRD §9.5），下单那一刻还不知道它。
+  /// NULL = 本列上线前的存量单（发放时由 billing 按来源策略决定有效期）
+  credits_valid_months    Int?
+  /// 下单时服务端判定的首购状态：unknown 未判定（功能未上线）| first | repeat
+  first_purchase_state    String    @default("unknown") @db.VarChar(16)
+  /// 该商品是否参与首购加赠（配置快照）。与 state 分开：一个说人，一个说商品
+  first_purchase_eligible Int       @default(0) @db.TinyInt
+  permission_result       String    @default("allowed") @db.VarChar(32)
+  /// 档位配置版本快照（下单时刻 topup_tiers.version）。回答「这单是改价前还是改价后」
+  config_version          Int       @default(0)
+
+  paid_at          DateTime? @db.DateTime(0)
+  grant_lot_id     BigInt?
+  /// **首次**进入 paid_pending（钱到了、积分还没发）的时刻；主动对账据此算持有分钟数。
+  /// ⚠️ 不能用 gmt_modified 顶替（回调到达与查单名额都会改它）。
+  /// NULL = 本列上线前进入该状态的存量单
+  paid_pending_at  DateTime? @db.DateTime(0)
+  last_query_at    DateTime? @db.DateTime(0)
+  notify_count     Int       @default(0)
+  gmt_create       DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified     DateTime  @default(now()) @db.DateTime(0)
+  version          Int       @default(0)
+  is_delete        Int       @default(0) @db.TinyInt
+
+  /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
+  /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
+  /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
+  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
+  /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
+  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+}
+
+// ===== 自定义充值配置（模块 B，PRD §7 / §10.3）。**单行表**，id 恒为 1 =====
+//
+// ⚠️ 刻意**不塞进 `system_settings`**：那张表存凭证（AES 密文、is_secret 标记、换密钥要
+// 重写全部密文行的轮换语义），而这里存的是商品配置（明文、要按字段查询与校验、
+// 随运营调价高频变更）。混在一张表里，迟早有人给商品配置也套上加密，
+// 或者把凭证当成一份普通 JSON 去解析。
+//
+// 单行（主键钉住）而不是「一个字段一行」：PRD §10.3 的九个字段是一份**完整口径**，
+// 分开存会出现「下限改了、上限还是旧的」那种中间态被读到。
+//
+// ⚠️ `credits_per_yuan` 是**本表自己的**换算率（PRD §7.1 默认 1 元 = 15 积分），
+// 与定价目录里那条**消费锚点**（生成任务扣分用）不是一回事。自定义充值是**唯一**
+// 真的拿这条比例算价格的地方：`价格(分) = round(积分数 × 100 ÷ 每元积分数)`。
+// 档位的到账积分与此无关（读 `topup_tiers.base_credits`，配置值）。
+model recharge_custom_config {
+  /// 恒为 1：单行表，主键把「只有一份配置」钉在 schema 上
+  id                     Int      @id
+  /// 最低充值积分（PRD §7.1 默认 600 = ¥40）
+  min_credits            BigInt   @default(600)
+  /// 最高充值积分（PRD §7.1 默认 499,995）。保存时校验能被 credits_per_yuan 整除
+  max_credits            BigInt   @default(499995)
+  /// 默认选中积分（PRD §7.1 默认 600）
+  default_credits        BigInt   @default(600)
+  /// 每元积分数（PRD §7.1 默认 15）。**价格算法的输入**，不是消费锚点，见上方说明
+  credits_per_yuan       Int      @default(15)
+  /// 积分步长（PRD §10.3）。滑杆步进与手输修正用。
+  /// 约束（服务端校验）：max-min 与 default-min 都必须是它的整数倍，否则滑杆推不到两端
+  step_credits           BigInt   @default(15)
+  /// 是否启用（PRD §10.3）。0 = 用户侧不展示自定义充值，下单被拒
+  enabled                Int      @default(1) @db.TinyInt
+  /// 购买权限（PRD §10.3「与固定积分卡一致」，枚举与 topup_tiers.permission 同一套）：
+  /// all 全部登录用户 | user_group 指定用户群 | member_tier 指定会员等级（阶段 2 生效）
+  permission             String   @default("all") @db.VarChar(16)
+  /// JSON 数组，元素是 userId 的十进制字符串（BigInt 超 JS 安全整数，存串不丢精度）
+  permission_allowlist   Json?
+  /// 无权限提示（PRD §10.3 选填）。空串 = 用前端默认文案
+  permission_denied_hint String   @default("") @db.VarChar(255)
+  /// 到账积分有效期，单位**月**（PRD §10.3 默认 2 年 = 24 个月），与档位同口径
+  credits_valid_months   Int      @default(24)
+  /// 配置版本：**每保存一次 +1**。下单时快照进 recharge_orders.config_version
+  version                Int      @default(0)
+  gmt_create             DateTime @default(now()) @db.DateTime(0)
+  gmt_modified           DateTime @default(now()) @db.DateTime(0)
+}
+
+// ===== 系统设置（管理端可配；按模块整行存一份快照） =====
+//
+// is_secret=1 的行必须是密文（AES-256-GCM），密钥只在进程环境变量里——
+// 库与密钥分开存放，只拿到库也读不出凭证。
+model system_settings {
+  setting_key   String   @id @db.VarChar(64)
+  setting_value String   @db.Text
+  is_secret     Boolean  @default(false)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
 }
 
 // ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
@@ -836,4 +1026,77 @@ model legacy_card_history {
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, node_id], map: "uk_legacy_card_history")
+}
+
+/// 会员周期（identity_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
+/// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
+/// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。
+model identity_memberships {
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  tier         String    @db.VarChar(16)
+  status       String    @default("active") @db.VarChar(16)
+  started_at   DateTime  @db.DateTime(0)
+  expires_at   DateTime? @db.DateTime(0)
+  source       String    @db.VarChar(24)
+  biz_id       String    @db.VarChar(128)
+  grant_key    String    @db.VarChar(190)
+  gmt_create   DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified DateTime  @default(now()) @db.DateTime(0)
+  version      Int       @default(0)
+  is_delete    Boolean   @default(false)
+
+  @@unique([grant_key], map: "uk_identity_memberships__grant_key")
+  @@index([user_id, status, expires_at], map: "idx_identity_memberships__user_status_expiry")
+}
+
+/// 角色（identity_roles）。替代 `auth.guard.ts` 里 `role >= 10` 的魔数——
+/// 判断管理员是「持不持有 admin 类角色」的**集合成员**问题，不是数值比较问题。
+/// 内置三行由 migration 20260924200000 播种。
+model identity_roles {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @db.VarChar(32)
+  name         String   @db.VarChar(64)
+  description  String   @default("") @db.VarChar(255)
+  is_builtin   Boolean  @default(false)
+  sort_order   Int      @default(0)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([code], map: "uk_identity_roles__code")
+}
+
+/// 用户 ↔ 角色（identity_user_roles）。存 role_id 而非 code：角色改名只改一行，
+/// 不散落成几十条待更新的关联行。
+model identity_user_roles {
+  id           BigInt   @id @default(autoincrement())
+  user_id      BigInt
+  role_id      BigInt
+  granted_by   String   @default("system") @db.VarChar(64)
+  grant_key    String   @db.VarChar(190)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([grant_key], map: "uk_identity_user_roles__grant_key")
+  @@index([user_id, is_delete], map: "idx_identity_user_roles__user")
+}
+
+/// 登录日志（identity_login_logs）。`user_id` 可空——登录失败时用户可能压根不存在，
+/// 而这些恰恰是最需要留痕的尝试。
+model identity_login_logs {
+  id         BigInt   @id @default(autoincrement())
+  user_id    BigInt?
+  username   String   @db.VarChar(50)
+  ip         String   @db.VarChar(50)
+  user_agent String   @default("") @db.VarChar(255)
+  success    Boolean
+  reason     String   @default("") @db.VarChar(64)
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@index([user_id, gmt_create], map: "idx_identity_login_logs__user_time")
+  @@index([ip, gmt_create], map: "idx_identity_login_logs__ip_time")
 }

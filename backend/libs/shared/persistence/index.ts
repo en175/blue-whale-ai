@@ -40,6 +40,9 @@ export {
   type JobStatusView,
   type JobPage,
   type JobListFilter,
+  type AdminJobListItem,
+  type AdminJobPage,
+  type AdminJobListFilter,
 } from "./job-repo.js";
 export {
   createSnapshotRepo,
@@ -83,6 +86,7 @@ export {
   type UpdateModelCapabilityInput,
   type CreateModelCapabilityResult,
 } from "./model-capability-admin-repo.js";
+export { invalidateModelCapabilityCache } from "./model-capability-cache.js";
 export {
   createAssetRepo,
   assetDurationSeconds,
@@ -169,8 +173,20 @@ export {
   createGenerationCommandRepo,
   type GenerationCommandRepo,
   type CreateJobInput,
+  type CreateJobOptions,
   type CreatedJob,
 } from "./generation-command-repo.js";
+// 建任务幂等（command_idempotency，operation=generation.create）：读/写/并发回读都在这里，
+// repo 只负责在正确的时点调用它。
+export {
+  CREATE_GENERATION_JOB_OPERATION,
+  readCreateIdempotency,
+  type CreateJobIdempotency,
+  type CreateJobResult,
+} from "./generation-job-idempotency.js";
+// 建 job 的计费依赖（预扣 + 失败补偿）：装配层（handler/controller）经这里取端口类型；
+// 补偿的执行与纯数据闸只在 persistence 内部用（generation-command-repo 直接相对导入）。
+export type { JobBilling } from "./job-billing.js";
 export {
   aggregateSlotStatus,
   resolveLogicalSlots,
@@ -215,6 +231,8 @@ export {
   createTopupTierRepo,
   type TopupTierRepo,
   type TopupTierView,
+  type TopupTierStatus,
+  type TopupTierPermission,
   type CreateTopupTierInput,
   type UpdateTopupTierInput,
 } from "./topup-tier-repo.js";
@@ -231,3 +249,29 @@ export {
   type CostAdjustmentItemInput,
   type CostAdjustmentBatchInput,
 } from "./cost-adjustment-repo.js";
+export {
+  createRechargeOrderRepo,
+  RECHARGE_ORDER_STATUS,
+  RECHARGE_ORDER_STATUSES,
+  PAID_REACHED_STATUSES,
+  RECHARGE_ORDER_SNAPSHOT_DEFAULTS,
+  type RechargeOrderRepo,
+  type RechargeOrderView,
+  type RechargeOrderStatus,
+  type CreateRechargeOrderInput,
+  type RechargeOrderListFilter,
+  type RechargeOrderPage,
+  type AbandonedGrants,
+} from "./recharge-order-repo.js";
+export {
+  createRechargeCustomConfigRepo,
+  CUSTOM_CONFIG_ROW_ID,
+  type RechargeCustomConfigRepo,
+  type RechargeCustomConfigView,
+  type SaveRechargeCustomConfigInput,
+} from "./recharge-custom-config-repo.js";
+export {
+  createSystemSettingRepo,
+  type SystemSettingRepo,
+  type SystemSettingRow,
+} from "./system-setting-repo.js";

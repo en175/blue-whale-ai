@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  用户可见流水的投影（一个业务动作一行，契约见 contracts/proto/billing/v1/billing.proto）。
+
+  ── 为什么不直接用账本分录 ────────────────────────────────────────────────
+
+  账本是**复式**的：一个业务动作有好几腿（预扣 = 借 wallet + 贷 frozen；
+  结算 = 解冻 + 消耗 + 退差额）。直接暴露分录，用户会看到「同一个操作扣了两次」，
+  而且「这一行到底是收入还是支出」得先读懂借贷方向才能判断。
+  所以这里按**业务动作**（一张凭证）折成一行。
+
+  ── 三类来源，各自由自己的权威表出 ──────────────────────────────────────
+
+  ① 发放 / 充值（in）      ← billing_credit_lots
+     每个批次恰好对应一次发放（uk_lots__grant_key 唯一），金额就是发放量。
+     展示类型来自批次上的 source —— 这是**唯一**记录「这 500 分是怎么来的」的地方，
+     所以这一族不能从账本出（账本分录只有 biz_type='grant'，看不出 daily 还是 invite）。
+
+  ② 消费（out）            ← billing_cost_reservations
+     每个 job 恰好一条预留（uk_reservation__job 唯一）。状态与两个金额都在这里：
+     held → pending（金额 = 预扣额，即用户提交时看到的「预计消耗」），
+     settled → done（金额 = actual_credits，结算定下的**最终值**）。
+     ⚠️ 预扣额另出一列 `reserved_credits`（**管理面独用**）：结算后金额换成实际值，
+        「当初冻了多少」就只剩这一列能答——详见下面 ② 分支的注释。
+
+  ③ 其余资金动作（in/out） ← billing_ledger_entries，一凭证一行
+     过期核销、人工调账这类「不是发放也不是消费」的动作用它。
+     白名单（expire / adjust）而不是黑名单：黑名单（NOT IN）会让将来新加的业务类型
+     静默漏进用户流水，而它多半还没有对应的展示类型。
+
+  ── 为什么这样合并不漏也不重 ────────────────────────────────────────────
+
+  · 不漏：一次业务动作必然留下批次行、预留行或账本凭证三者之一——
+    钱只可能从批次表进来（余额的唯一权威），消费只可能经预留冻结（Hold 是唯一出口），
+    其余动作按 Voucher 记进账本。三类都查了，就没有第四处。
+  · 不重：每个动作只从**它自己那一处**取，没有任何一个动作被两处同时取到——
+      · hold 凭证不出现在 ③（它不改用户总资产：wallet 减、frozen 等量增，净变化 0；
+        它对应的是 ② 里那条 pending 行）
+      · settle 凭证不出现在 ③（它的用户可见形态就是 ② 里那条转为 done 的行——
+        同一 job 出两行才是真正的重复）
+      · grant / recharge 凭证不出现在 ③（它们在 ① 里，且带着 ③ 拿不到的来源）
+    一句话：三类按「动作类型」互斥分工，合起来恰好覆盖全部动作。
+
+  ── 排序键 ──────────────────────────────────────────────────────────────
+
+  ORDER BY created_at DESC, kind ASC, src_id DESC —— 三级全用不可变量：
+  created_at 是行的产生时刻（批次与凭证 append-only，预留也只有 gmt_create 不变），
+  kind + src_id 是同一个 action 的稳定身份。因为稳定，才能用「严格小于游标」
+  表达「下一页从哪开始」：新发生的行只会插在游标**之前**（时间更新），
+  翻页时不会漏掉旧行、也不会重复（common/v1/types.proto 的 PageRequest 注释说的就是这件事）。
+  次级键不是可选项：DATETIME 只到秒，同一秒内多行是常态（一次 hold 与一次 grant
+  常常落在同一秒），只按时间翻页会在秒边界丢行或重复行。
+-->
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.TransactionMapper">
+
+  <!--
+    ⚠️ `userId` 可空：**非空 = 用户面**（只看自己那份，游标分页，gRPC ListTransactions），
+    **为 null = 管理面**（全站流水，billing 的 /admin/transactions）。
+    两种调用共用这条语句，所以三个分支各自用 <if> 决定要不要过滤 user_id ——
+    **过滤条件写在分支内部**（而不是提到 UNION 外面包一层），这样「给 userId」时
+    生成的 SQL 与加管理面之前逐字相同，用户面走的是同一条执行计划，不受这次改动影响。
+
+    ⚠️ `user_id` 进投影是为了管理面能回答「这行是谁的」；用户面不读它。
+  -->
+  <select id="selectPage" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.TransactionRow">
+    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
+           t.status, t.created_at, t.settled_at, t.kind, t.src_id
+    FROM (
+
+      <!-- ① 发放 / 充值：批次表。金额是发放量，方向恒为 in，落地即完成。 -->
+      SELECT CONCAT('lot:', l.id) AS tx_id,
+
+             <!-- 类型与文案都由 source 决定：用户关心的是「什么名义给的」。
+                  ⚠️ 未列出的来源落到 ELSE。新增 CreditSource 时这里必须表态——
+                  TransactionsIntegrationTest 逐条断言每个来源的展示类型，漏配会红。
+                  register（注册赠送）在契约的类型枚举里没有对应值，归入 gift。 -->
+             CASE l.source
+               WHEN 'purchased'    THEN 'recharge'
+               WHEN 'compensation' THEN 'compensation'
+               WHEN 'bonus'        THEN 'bonus'
+               WHEN 'daily'        THEN 'daily'
+               WHEN 'invite'       THEN 'invite'
+               WHEN 'redeem'       THEN 'redeem'
+               WHEN 'subscription' THEN 'subscription'
+               WHEN 'gift'         THEN 'gift'
+               WHEN 'register'     THEN 'gift'
+               ELSE 'gift'
+             END AS type,
+             'in' AS direction,
+             CASE l.source
+               WHEN 'purchased'    THEN '充值到账'
+               WHEN 'compensation' THEN '事故补偿'
+               WHEN 'bonus'        THEN '充值赠送'
+               WHEN 'daily'        THEN '每日登录赠送'
+               WHEN 'invite'       THEN '邀请奖励'
+               WHEN 'redeem'       THEN '兑换码兑换'
+               WHEN 'subscription' THEN '会员赠送'
+               WHEN 'gift'         THEN '运营赠送'
+               WHEN 'register'     THEN '注册赠送'
+               ELSE '积分发放'
+             END AS title,
+             l.amount     AS amount,
+             <!-- 发放没有「预扣」这回事：钱是直接进来的，不存在先冻后结算。
+                  用 NULL 而不是 0 —— 0 是「冻了 0 分」，与「没有这个概念」是两回事，
+                  界面上后者不该显示任何预扣文案。 -->
+             NULL         AS reserved_credits,
+             'done'       AS status,
+             l.gmt_create AS created_at,
+             l.gmt_create AS settled_at,
+             'grant'      AS kind,
+             l.id         AS src_id,
+             l.user_id    AS user_id
+      FROM billing_credit_lots l
+      <where>
+        <if test="userId != null">l.user_id = #{userId}</if>
+      </where>
+
+      UNION ALL
+
+      <!--
+        ② 消费：预留表。
+
+        amount 随 status 取不同的列，是「一个金额」这条硬规则在 SQL 里的落点：
+          held    → reserved_credits（预计消耗，用户提交时看到的那个数）
+          settled → actual_credits  （最终值）
+        两个值不会同时出现——它们先后占同一列，所以界面上永远只有一个金额。
+
+        reserved_credits 另出一列（**管理面独用**）：settled 之后 amount 已经换成实际值，
+        「当初冻了多少」就再也无处可读了 —— 而用户余额先降后回的差额恰恰要靠它解释
+        （实测：某任务冻 12、实扣 1，用户在流水里只看到 -1，那 11 的来回无人交代）。
+        一行的两列都在同一张表上，**不需要 join**：这一行的身份就是那条预留。
+        ⚠️ 用户面（gRPC ListTransactions）**不投影**这一列，见 BillingGrpcService
+           与 {@code TransactionView} 的说明——「用户界面永远只出现一个金额」不受影响。
+        held 行的这两个数是同一个值（amount 就是预扣额），由调用方决定要不要重复展示。
+
+        released（任务失败全额返）刻意**不出行**：那次动作对用户资产的净变化是 0
+        （借 frozen / 贷 wallet，钱原样回到可用），用户不该看到一行「消费 0」或
+        「退还 40」——他从未被扣过。撤销的是一笔从未发生的消费，不是一笔收入。
+      -->
+      SELECT CONCAT('res:', r.id) AS tx_id,
+             'consume' AS type,
+             'out' AS direction,
+             <!-- 提交方没给文案时兜一个通用词；空标题在下拉列表里是「一行空白」 -->
+             CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END AS title,
+             CASE WHEN r.status = 'settled' THEN r.actual_credits ELSE r.reserved_credits END AS amount,
+             r.reserved_credits AS reserved_credits,
+             CASE WHEN r.status = 'settled' THEN 'done' ELSE 'pending' END AS status,
+             r.gmt_create AS created_at,
+             CASE WHEN r.status = 'settled' THEN r.gmt_modified END AS settled_at,
+             'consume' AS kind,
+             r.id AS src_id,
+             r.user_id AS user_id
+      FROM billing_cost_reservations r
+      WHERE r.status != 'released'
+        <if test="userId != null">AND r.user_id = #{userId}</if>
+
+      UNION ALL
+
+      <!--
+        ③ 其余资金动作：账本凭证，**一凭证一行**。
+
+        分组键是凭证基础键（voucher base）——它由分录的幂等键去掉末尾的
+        ":<科目>" 得到，而科目就在同一行上（idempotency_key LIKE '%:account' 保证
+        末尾确实是它）。这是 Voucher.legKey 的逆运算，不是猜格式：
+        改成按位置切割（如 SUBSTRING_INDEX）会在 key 里本身带冒号时切错
+        （grantKey 形如 daily:9:2026-09-25，自带两个冒号），那样切出来的「一行」
+        会既漏又重，而且不报错。
+
+        金额 = 该凭证对**用户资产**（wallet + frozen）的净变化：
+          · wallet 与 frozen 都是贷方为正的科目（Account.normalDebit 均为 false），
+            所以贷方 +amount、借方 -amount（见 LedgerRepository 的 balance_delta 口径）
+          · 平台侧科目（revenue / cost / receivable）不参与——它们不是用户的钱
+        net 为 0 的凭证被 HAVING 丢掉：那种动作只把钱在用户的两个口袋之间挪了一下，
+        不构成流水（hold 与 refund 正是如此，见文件头的「不重」说明）。
+
+        ⚠️ 'wallet' / 'frozen' 与 'credit' 是 Account / LedgerEntry.Direction 的落库字面值，
+           改名时必须同步这里；TransactionsIntegrationTest 会经真实凭证路径把这条钉住。
+           白名单与下面两个 CASE 必须同步：白名单里有、CASE 里没有的类型会得到 NULL 类型。
+      -->
+      SELECT CONCAT('led:', LEFT(e.idempotency_key,
+                                 CHAR_LENGTH(e.idempotency_key) - CHAR_LENGTH(e.account) - 1)) AS tx_id,
+             CASE e.biz_type WHEN 'expire' THEN 'expire' ELSE 'compensation' END AS type,
+             CASE WHEN SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) >= 0
+                  THEN 'in' ELSE 'out' END AS direction,
+             CASE e.biz_type WHEN 'expire' THEN '积分过期' ELSE '人工调账' END AS title,
+             ABS(SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END)) AS amount,
+             <!-- 账本动作（过期核销 / 人工调账）不经预留，同样没有预扣 -->
+             NULL AS reserved_credits,
+             'done' AS status,
+             MIN(e.gmt_create) AS created_at,
+             MIN(e.gmt_create) AS settled_at,
+             'ledger' AS kind,
+             MIN(e.id) AS src_id,
+             <!-- 一个凭证只属于一个用户，MIN 只是为了让它在 GROUP BY 下合法 -->
+             MIN(e.user_id) AS user_id
+      FROM billing_ledger_entries e
+      WHERE e.account IN ('wallet', 'frozen')
+        AND e.idempotency_key LIKE CONCAT('%:', e.account)
+        AND e.biz_type IN ('expire', 'adjust')
+        <if test="userId != null">AND e.user_id = #{userId}</if>
+      GROUP BY tx_id, e.biz_type
+      HAVING SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) != 0
+
+    ) t
+
+    <where>
+      <!-- 游标：严格排在 (created_at, kind, src_id) 之后的行。三段的比较方向必须与
+           下面的 ORDER BY 逐项对应，否则翻页会跳行。 -->
+      <if test="cursorTime != null">
+        (t.created_at &lt; #{cursorTime}
+          OR (t.created_at = #{cursorTime}
+              AND (t.kind &gt; #{cursorKind}
+                   OR (t.kind = #{cursorKind} AND t.src_id &lt; #{cursorId}))))
+      </if>
+      <!-- 类型过滤：null = 全部。在 LIMIT 之前生效，所以每一页都是「该类型的第 N 页」。 -->
+      <if test="typeFilter != null">
+        AND t.type = #{typeFilter}
+      </if>
+    </where>
+
+    ORDER BY t.created_at DESC, t.kind ASC, t.src_id DESC
+    LIMIT #{limit}
+  </select>
+
+</mapper>

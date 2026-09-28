@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import styles from './index.module.css';
 import { getCurrentUser, subscribe, isAdmin, setSession } from '@/utils/auth';
-import { logout, fetchQuota, quotaToPoints } from '@/api/auth';
+import { logout, fetchCredits } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
 import { useRechargeUiStore } from '@/stores/recharge';
 import AccountModal from './AccountModal';
@@ -38,29 +38,29 @@ export default function UserDropdown() {
   const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
   const [showLogin, setShowLogin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const quota = useAuthStore((s) => s.quota);
-  const setQuota = useAuthStore((s) => s.setQuota);
+  const credits = useAuthStore((s) => s.credits);
+  const setCredits = useAuthStore((s) => s.setCredits);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // 登录后拉取积分配额写入全局存储（下拉余额/账号弹窗/画布顶栏共用）
+  // 登录后拉取可用余额写入全局存储（下拉余额/账号弹窗/画布顶栏共用）
   useEffect(() => {
     if (!user) {
-      setQuota(null);
+      setCredits(null);
       return;
     }
     let alive = true;
-    fetchQuota()
+    fetchCredits()
       .then((d) => {
-        if (alive) setQuota(d.quota);
+        if (alive) setCredits(d.credits);
       })
       .catch(() => {
-        if (alive) setQuota(null);
+        if (alive) setCredits(null);
       });
     return () => {
       alive = false;
     };
-  }, [user, setQuota]);
+  }, [user, setCredits]);
 
   // 点击外部关闭
   useEffect(() => {
@@ -130,7 +130,7 @@ export default function UserDropdown() {
               <span className={styles.pointsLabel}>积分余额</span>
             </div>
             <span className={styles.pointsValue}>
-              {quota === null ? '--' : quotaToPoints(quota)}
+              {credits === null ? '--' : credits.toLocaleString()}
             </span>
           </div>
 
@@ -185,7 +185,7 @@ export default function UserDropdown() {
         <AccountModal
           userId={user.userId}
           nickname={user.username}
-          balance={quota === null ? null : quota / 50000}
+          balance={credits}
           onClose={() => setShowAccount(false)}
           onOpenRecharge={openRecharge}
         />

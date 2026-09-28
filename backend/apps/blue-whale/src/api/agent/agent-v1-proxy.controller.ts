@@ -15,7 +15,7 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "./agent-service-env.js";
+import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "@lib/shared/agent/agent-service-env.js";
 
 /**
  * 建连超时：只约束「拿到上游响应头」这一段。

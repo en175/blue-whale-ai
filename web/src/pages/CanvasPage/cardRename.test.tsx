@@ -57,7 +57,7 @@ const apiMocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(async (
@@ -151,7 +151,7 @@ vi.mock('@/api/projects', () => ({
 
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 
@@ -590,8 +590,8 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await act(async () => {
       (mediaNode('fail-custom').data.onRetryJob as (id: string) => void)('fail-custom');
     });
-    // 重试沿用失败任务快照发起：旧 jobId 作为重试入参
-    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-fail'));
+    // 重试沿用失败任务快照发起：旧 jobId 作为重试入参，并带调用方持有的幂等键
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-fail', expect.any(String)));
     // 重试进入生成中：名称保持
     await vi.waitFor(() => expect(mediaNode('fail-custom').data.genStatus).toBe('generating'));
     expect(mediaNode('fail-custom').data.fileName).toBe('我的草稿');
@@ -680,7 +680,8 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await act(async () => {
       (mediaNode('d1').data.onRetryJob as (id: string) => void)('d1');
     });
-    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-new'));
+    // 第三参 = 每次用户意图一把的幂等键（建任务幂等），与同文件其它重试断言同口径。
+    await vi.waitFor(() => expect(apiMocks.retryGenerationJob).toHaveBeenCalledWith('p1', 'j-new', expect.any(String)));
     await vi.waitFor(() => expect(mediaNode('d1').data.genStatus).toBe('generating'));
     expect(mediaNode('d1').data.fileName).toBe('生成中起的名');
 

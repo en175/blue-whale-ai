@@ -54,7 +54,7 @@ export const apiMocks = {
   touchProjectLastOpened: vi.fn(async () => undefined),
   pinProject: vi.fn(async () => undefined),
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   /** 参数签名供测试断言 calls 元组（IKIIWN confirmEmpty 在 payload 上） */
@@ -89,7 +89,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 /** 素材库分页记录（IKIHPK 音视频合成素材库浮层等新消费方）：默认空列表，用例按需注入
@@ -132,12 +132,14 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: e.data }))),
   ),
 }));
+vi.mock('@/api/idempotencyKey', () => ({
+  newIdempotencyKey: apiMocks.newIdempotencyKey,
+}));
 vi.mock('@/api/jobs', () => ({
   createGenerationJob: vi.fn(),
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   retryAudioMix: apiMocks.retryAudioMix,
-  newIdempotencyKey: apiMocks.newIdempotencyKey,
   fetchJobStatus: apiMocks.fetchJobStatus,
   createVideoEnhancement: vi.fn(),
   createFrameInterpolation: apiMocks.createFrameInterpolation,

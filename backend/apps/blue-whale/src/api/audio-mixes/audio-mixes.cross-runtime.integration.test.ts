@@ -27,7 +27,7 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioMixJo
 describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runtime acceptance", () => {
   it("freezes inputs through HTTP, survives worker failure/restart and double-click retry, then publishes durable audio", async () => {
     const repo = resolve(import.meta.dirname, "../../../../../..");
-    const schema = join(repo, "worker-java/src/test/resources/db/bluewhale-schema.sql");
+    const schema = join(repo, "server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql");
     const databaseName = `iki68n_test_${randomBytes(6).toString("hex")}`;
     const guardToken = randomBytes(16).toString("hex");
     const temp = mkdtempSync(join(tmpdir(), "iki68n-cross-runtime-"));
@@ -160,9 +160,12 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
           "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${created.data.job_id}`,
           "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${outputPort}/stored/out.mp3`,
           "-e", `IKI68N_STORAGE_PUBLIC_URL=http://127.0.0.1:${outputPort}/stored/out.mp3`,
-          "-v", `${repo}:/workspace`, "-w", "/workspace/worker-java",
+          "-v", `${repo}:/workspace`, "-w", "/workspace/server",
           "-v", `${process.env.HOME}/.m2:/root/.m2`,
           "maven:3.9-eclipse-temurin-21", "mvn", "-q",
+          // 从聚合根跑并带 -pl/-am：worker 依赖同 reactor 的 server/blue-whale-common，
+          // 直接进模块目录 `mvn test` 解析不到该依赖（verification-policy 同款约束）。
+          "-pl", "blue-whale-worker", "-am", "-DfailIfNoSpecifiedTests=false",
           "-Dtest=AudioMixCrossRuntimeMySqlIntegrationTest", "test"],
         { cwd: repo });
         let output = "";

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import RatioIcon from '@/components/RatioIcon';
+import GenerationQuoteBadge from '../GenerationQuoteBadge';
+import { buildVideoJobReferences } from '../../videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   docHasAnyRef,
@@ -120,6 +122,9 @@ export interface VideoDraftParamsPatch {
 
 interface BottomDialogProps extends RefStripOrderProps {
   onClose: () => void;
+  /** 所属项目（价格预览按项目归属校验，与创建任务同路径）。
+   *  缺省 = 没有项目上下文（面板单测等），此时不显示价格。 */
+  projectId?: string;
   /** 发送：提示词（拍平镜像）+ 参数 + 结构化正文（含素材标签时携带，IKFA1O） */
   onSend: (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => void | Promise<void>;
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
@@ -205,7 +210,7 @@ export interface VideoGenSeedParams {
   generateAudio?: boolean;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ projectId, onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -273,6 +278,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const durationRange = currentModel?.supported_durations ?? null;
   const currentSizeLabel =
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;
+  /** 报价用的分辨率取值：与发送时**同一个**（`api_value ?? id`，见 handleSend）——
+   *  两处取不同的值就是「预览一个价、实扣另一个价」。 */
+  const quoteResolution = (() => {
+    const size = currentModel?.supported_sizes.find((s) => s.id === selectedSize);
+    return size ? (size.api_value ?? size.id) : undefined;
+  })();
 
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
@@ -370,6 +381,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 附件栏空态派生（IKGB1X）：普通参考模式下无普通参考且无文本附件时整条不渲染，不引入新的持久状态；
    *  首尾帧模式槽位常显不吃空态规则（契约 §1/§4） */
   const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
+
+  /** 报价用的参考（与提交同源）：就是面板拿到的这份 `videoMediaRefs` —— 父级提交时用的是
+   *  `buildVideoJobReferences` 对同一份推导（草稿=连线合并、自由=暂存参考），这里不另立一套「选了什么」。
+   *  参考视频的**时长**也是定价输入（token 公式在含视频输入时算进输入时长），所以整项带过去，
+   *  不能只带个数（个数由后端按这份列表自己数）。 */
+  const quoteReferences = useMemo(() => buildVideoJobReferences(videoMediaRefs), [videoMediaRefs]);
 
   const mixedStrip = useMixedRefStrip(
     isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
@@ -1230,6 +1247,22 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
 
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
+          {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 分辨率 + 比例 + 时长 + 带音频 + 参考。
+              没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
+          {projectId ? (
+            <GenerationQuoteBadge
+              projectId={projectId}
+              type="video"
+              parameters={{
+                model_id: currentModel?.model_id ?? '',
+                ...(quoteResolution ? { resolution: quoteResolution } : {}),
+                ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
+                ...(duration ? { duration } : {}),
+                generate_audio: generateAudio,
+              }}
+              references={quoteReferences}
+            />
+          ) : null}
           {/* 字数统计 */}
           <div className={`${styles.charCount} ${maxInput != null && flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
             {promptCharCountLabel(flatValue.length, maxInput)}

@@ -1,6 +1,9 @@
 /* ============================================
- * 后台管理 API：会话身份校验 + 仪表盘统计
+ * 后台管理 API：会话身份校验 + 充值档位 / 模板 / 技能等管理端读写
  * 包络为后台侧 {success:true, data}，http 层已兼容
+ *
+ * ⚠️ 仪表盘统计**不在这里**，见 `adminDashboard.ts`：它按查询区间取数，
+ *    与这里这些「一次拿全量」的读写不同类。
  * ============================================ */
 import { http, apiRequest, apiRequestWithMeta } from './http';
 import { useAuthStore } from '@/stores/auth';
@@ -18,70 +21,21 @@ export function fetchAdminSession() {
   return http.get<AdminSessionData>('/api/admin/session', { silent: true });
 }
 
-/** 最近充值记录（最近 5 笔） */
-export interface RechargeRecord {
-  /** 订单号 */
-  tradeNo: string;
-  userId: number;
-  /** 用户昵称（列表场景留空，前端展示 #userId） */
-  nickname: string;
-  phone: string;
-  /** 充值档位名称 */
-  tierName: string;
-  /** 充值积分数量 */
-  amount: number;
-  /** 支付金额（元） */
-  price: number;
-  /** 到账积分 */
-  points: number;
-  /** 赠送积分 */
-  bonus: number;
-  /** 订单状态：pending 待支付 / success 已到账 / expired 已过期 / failed 支付失败 */
-  status: string;
-  paymentMethod: string;
-  platformRefNo: string;
-  ip: string;
-  /** 创建时间（ISO） */
-  createdAt: string;
-  /** 支付时间（ISO），未支付时为 null */
-  paidAt: string | null;
-  /** 到账时间（ISO），未到账时为 null */
-  arrivedAt: string | null;
-}
+/**
+ * 上架状态三态（PRD §10.5）。
+ *
+ * ⚠️ `draft` 是**新建的默认值**：新建卡片落在草稿、不展示给用户，
+ * 运营把字段配齐再显式上架。存量档位已经是上架/下架，不会被回退成草稿。
+ */
+export type TopupTierStatus = 'draft' | 'active' | 'inactive';
 
-/** 最近消费记录（最近 5 笔） */
-export interface ConsumeRecord {
-  userId: number;
-  /** 消费的模型名称 */
-  model: string;
-  /** 消费积分数量 */
-  points: number;
-  /** 消费时间（ISO） */
-  createdAt: string;
-}
-
-/** GET /api/admin/dashboard 返回：仪表盘运行概览 */
-export interface DashboardData {
-  /** 总用户数 */
-  totalUsers: number;
-  /** 今日充值积分总额 */
-  todayRecharge: number;
-  /** 今日充值笔数 */
-  todayRechargeCount: number;
-  /** 今日消费积分总额 */
-  todaySpend: number;
-  /** 待处理订单数 */
-  pendingOrders: number;
-  /** 最近 5 笔充值记录 */
-  recentRecharges: RechargeRecord[];
-  /** 最近 5 笔消费记录 */
-  recentConsumes: ConsumeRecord[];
-}
-
-/** 获取仪表盘运行概览统计 */
-export function fetchAdminDashboard() {
-  return http.get<DashboardData>('/api/admin/dashboard');
-}
+/**
+ * 购买权限（PRD §10.4）。
+ *
+ * ⚠️ `member_tier`（指定会员等级）是**阶段 2** 的事，本阶段只在枚举里占位、
+ * 不做判断。本阶段真正生效的是 `all` 与 `user_group`。
+ */
+export type TopupTierPermission = 'all' | 'user_group' | 'member_tier';
 
 /** 充值档位记录 */
 export interface TopupTier {
@@ -89,9 +43,15 @@ export interface TopupTier {
   id: string;
   /** 档位名称 */
   name: string;
-  /** 到账积分数（服务端派生：原价 × 500000） */
-  amount: number;
-  /** 原价（元），正整数，主输入字段 */
+  /**
+   * 基础积分：用户下单到账的积分（整数）。**运营配置的值，不是派生值**
+   * （2026-09-27 起；充值常有折扣，¥499 的档给 7,500 而不是 499×15=7,485）。
+   *
+   * ⚠️ `originalPrice` / `discount` 只为展示划线价，**与积分再无数学关系** ——
+   * 别拿积分去除原价、也别用「原价 × 换算率」在地推它。
+   */
+  baseCredits: number;
+  /** 原价（元），正整数。与折扣一起构成划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 (0, 1]，1 表示无折扣 */
   discount: number;
@@ -99,8 +59,8 @@ export interface TopupTier {
   price: number;
   /** 是否推荐档位 */
   isRecommended: boolean;
-  /** 状态：active 启用 / inactive 停用 */
-  status: 'active' | 'inactive';
+  /** 上架状态：draft 草稿（新建默认）/ active 上架 / inactive 下架 */
+  status: TopupTierStatus;
   /** 生效时间（ISO），null 表示不限 */
   startTime: string | null;
   /** 失效时间（ISO），null 表示不限 */
@@ -109,37 +69,97 @@ export interface TopupTier {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /* ── PRD §10.2 卡片展示与首购活动 ── */
+  /** 卡片说明；'' = 未填 */
+  description: string;
+  /** 首购/活动赠送积分；0 = 不赠送 */
+  bonusCredits: number;
+  /** 活动标签（如「首购加赠 50%」）；'' = 无标签。已首购用户在用户侧隐藏 */
+  activityTag: string;
+  /** 购买按钮文案，默认「立享加赠」 */
+  buttonText: string;
+  /** 是否参与首购加赠 */
+  firstPurchaseEligible: boolean;
+  /** 到账积分有效期，单位**月**（默认 24 = 2 年） */
+  creditsValidMonths: number;
+  /** 购买权限 */
+  permission: TopupTierPermission;
+  /**
+   * 权限白名单（userId 列表）。
+   *
+   * ⚠️ 元素是**十进制字符串**而不是 number：userId 是 BigInt，超过 JS 安全整数范围后
+   * number 会静默改值，而白名单错一位就是放进来一个陌生人。服务端读到 NULL 时归一成 `[]`。
+   */
+  permissionAllowlist: string[];
+  /** 无权限提示；'' = 用默认文案 */
+  permissionDeniedHint: string;
+}
+
+/** `GET /api/admin/topup-tiers` 的回包。 */
+export interface TopupTierList {
+  tiers: TopupTier[];
+  // ⚠️ 这里**曾经**回 `creditsPerYuan`，唯一的用途是让表单「边输价格边显示会到账多少积分」。
+  //    2026-09-27 起积分是配置值（`baseCredits`），那条派生关系废掉了，字段随之删除——
+  //    留着它只会诱导下一个人在表单里重新乘一遍（而充值有折扣时乘出来就是错的）。
 }
 
 /** 获取全部充值档位列表（含停用），按 sortOrder 排序展示 */
 export function fetchTopupTiers() {
-  return http.get<TopupTier[]>('/api/admin/topup-tiers');
+  return http.get<TopupTierList>('/api/admin/topup-tiers');
 }
 
-/** POST /api/admin/topup-tiers 新建参数（amount 服务端派生，客户端传入会被忽略） */
+/** POST /api/admin/topup-tiers 新建参数 */
 export interface CreateTopupTierParams {
-  /** 原价（元），须为正整数，同一原价只能有一个档位 */
+  /** 原价（元），须为正整数，同一原价只能有一个档位。只用于展示划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 (0, 1] */
   discount: number;
+  /**
+   * 基础积分（用户下单到账的积分，整数 >= 1）。**必填**：服务端不替运营猜
+   * （猜「原价 × 换算率」在充值有折扣时就是错的数）。0 积分的档位无法下单。
+   */
+  baseCredits: number;
   name?: string;
   isRecommended?: boolean;
-  status?: 'active' | 'inactive';
+  /** 不传 = draft（PRD §10.5：新建卡片默认草稿，不展示给用户） */
+  status?: TopupTierStatus;
   /** 生效时间（ISO），留空表示永久有效 */
   startTime?: string;
   /** 失效时间（ISO），留空表示永久有效 */
   endTime?: string;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  /** 积分有效期，单位月；1–1200 */
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  /** null = 清空；[] = 名单为空 */
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 /** PUT /api/admin/topup-tiers/:id 部分更新参数（startTime/endTime 传空字符串清空） */
 export interface UpdateTopupTierParams {
   originalPrice?: number;
   discount?: number;
+  /** 基础积分（配置值）：传了才改；改原价**不会**连带改积分 */
+  baseCredits?: number;
   name?: string;
   isRecommended?: boolean;
-  status?: 'active' | 'inactive';
+  status?: TopupTierStatus;
   startTime?: string;
   endTime?: string;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 /** 新建档位（包络可能携带 Go 折扣同步警告） */
@@ -177,10 +197,10 @@ export interface SortTopupTierItem {
 export interface SortTopupTierResult {
   id: string;
   sortOrder: number;
-  amount: number;
+  baseCredits: number;
   originalPrice: number;
   price: number;
-  status: 'active' | 'inactive';
+  status: TopupTierStatus;
 }
 
 /** 提交全量排序数组（本地交换后调用） */
@@ -194,9 +214,9 @@ export function sortTopupTiers(items: SortTopupTierItem[]) {
 /** 用户端预览档位（已上架且未失效，服务端过滤） */
 export interface TopupTierPreview {
   id: string;
-  /** 到账积分数 */
-  amount: number;
-  /** 原价（元） */
+  /** 到账积分数 = 档位配的基础积分（配置值，不是派生） */
+  baseCredits: number;
+  /** 原价（元）：与折扣一起构成划线价，不参与积分计算 */
   originalPrice: number;
   /** 折扣比例 */
   discount: number;
@@ -204,7 +224,7 @@ export interface TopupTierPreview {
   price: number;
   /** 是否推荐，前端显示推荐标签 */
   isRecommended: boolean;
-  status: 'active' | 'inactive';
+  status: TopupTierStatus;
 }
 
 /** 获取用户端充值页预览列表 */
@@ -428,7 +448,14 @@ export function moveTemplateImage(id: string, direction: 'up' | 'down') {
   });
 }
 
-/** 模型分辨率档位 */
+/** 模型分辨率档位。
+ *
+ *  ⚠️ 这只是**读侧最保守**的形态：wire 上的元素还带出站值（`api_value`）与像素宽高
+ *  （库里 `generation_model_capability.supported_sizes` 就是 `{id,label,api_value,width,height}`）。
+ *  读它们的消费方按 `unknown` 收（`sizeCandidates.ts` 的 `toCapabilitySize`、
+ *  `model-form.ts` 的 `sizesFromModel`，两者都两种键形都认），**刻意不在这里声明成可选字段**
+ *  ——`width` 在这两处是字符串、在 wire 上是数字，声明进来会让 ModelList 表单的 `SizeForm`
+ *  与这里打架，而收益只是少一次断言。 */
 export interface ModelSize {
   id: string;
   label?: string;
@@ -477,10 +504,20 @@ export interface AdminModel {
   default_duration: number | null;
   /** 特性开关 JSON 对象 */
   features: Record<string, unknown>;
-  /** 图片渠道解析器：seedream / gpt / banana */
-  channel_parser?: string | null;
+  /** 渠道（`channel` 列，封闭枚举 `<家族>-<媒介>[-<协议>]`）：决定请求怎么解析、出站用哪种线协议。
+   *  取值与标签见 `admin/pages/ModelList/model-form.ts` 的 `CHANNELS`。
+   *  空值按行的 `capability_type` 回落（防御脏数据，正常行恒有值）。 */
+  channel?: string | null;
   /** 图片请求映射（gpt 交叉格 / banana 一维表）；seedream 为 null */
   request_mapping?: unknown;
+  /**
+   * 该模型该能力的**计价规则**（`generation_model_capability.pricing` 列）。
+   *
+   * 形态与定价目录里 `document.models.<model_id>.<capability_type>` 那条**逐字相同**
+   * （解析/换算见 `admin/lib/billing-catalog/catalogDraft.ts` 的 `CatalogRuleView`）。
+   * `null` = 还没搬到能力行上，billing 侧回落到定价目录那份。
+   */
+  pricing?: unknown;
   /** 是否启用：true 在 dock 展示 / false 隐藏 */
   enabled: boolean;
   /** 排序序号，同类型内越小越靠前 */
@@ -514,8 +551,12 @@ export interface CreateAdminModelParams {
   default_aspect_ratio?: string | null;
   default_duration?: number | null;
   features?: Record<string, unknown>;
-  channel_parser?: string | null;
+  /** 渠道（封闭枚举，见 {@link AdminModel.channel}）。解析与出站的唯一来源。 */
+  channel?: string | null;
+  /** 图片请求映射（gpt 交叉格 / banana 一维表）；seedream 为 null */
   request_mapping?: unknown;
+  /** 计价规则（形态见 {@link AdminModel.pricing}）；`undefined` = 不改，`null` = 清空 */
+  pricing?: unknown;
   enabled?: boolean;
   /** 排序序号（编辑部分更新时可调序） */
   sort_order?: number;
@@ -681,79 +722,22 @@ export function createOperationLog(params: CreateOperationLogParams) {
   });
 }
 
-/** 充值订单记录（topups） */
-export interface AdminOrderRow {
-  /** 交易号，唯一标识 */
-  tradeNo: string;
-  userId: number;
-  nickname: string;
-  phone: string;
-  /** 充值档位名称 */
-  tierName: string;
-  /** 充值积分数（档位原始 amount） */
-  amount: number;
-  /** 支付金额（元） */
-  price: number;
-  /** 到账积分 */
-  points: number;
-  /** 赠送积分 */
-  bonus: number;
-  /** 订单状态：pending 待支付 / success 已到账 / expired 已过期 / failed 支付失败 */
-  status: 'pending' | 'success' | 'expired' | 'failed';
-  /** 支付方式：wechat 微信 / alipay 支付宝 */
-  paymentMethod: string;
-  /** 支付平台流水号，未支付时为 null */
-  platformRefNo: string | null;
-  /** 支付IP */
-  ip: string;
-  /** 创建时间（ISO） */
-  createdAt: string;
-  /** 支付时间（ISO），未支付时为 null */
-  paidAt: string | null;
-  /** 到账时间（ISO），未到账时为 null */
-  arrivedAt: string | null;
-}
-
-export interface AdminOrderListData {
-  list: AdminOrderRow[];
-  /** 总记录数（new-api 原始 total，未扣除 status 过滤） */
-  total: number;
-}
-
-/** GET /api/admin/orders 充值订单列表（keyword 匹配交易号/昵称/手机号；status 为 BFF 层过滤；pageSize 最大 100）；请求头 New-Api-User 携带当前管理员 userId */
-export function fetchAdminOrders(
-  params: { keyword?: string; status?: string; page?: number; pageSize?: number } = {}
-) {
-  const qs = new URLSearchParams();
-  if (params.keyword) qs.set('keyword', params.keyword);
-  if (params.status) qs.set('status', params.status);
-  qs.set('page', String(params.page ?? 1));
-  qs.set('pageSize', String(params.pageSize ?? 20));
-  const adminUserId = useAuthStore.getState().user?.userId;
-  return apiRequest<AdminOrderListData>(`/api/admin/orders?${qs.toString()}`, {
-    method: 'GET',
-    headers: adminUserId !== undefined ? { 'New-Api-User': String(adminUserId) } : {},
-  });
-}
-
-/** POST /api/admin/orders/:tradeNo/complete 手动补单确认（仅 pending 可确认，确认后积分立即到账；reason 必填），服务端自动写审计日志 */
-export function completeAdminOrder(tradeNo: string, reason: string) {
-  return apiRequest<null>(`/api/admin/orders/${tradeNo}/complete`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  });
-}
-
-/** 支付凭证（GET 回显为脱敏值） */
+/** 支付凭证（GET 回显：secret 字段为脱敏值） */
 export interface SystemCredentials {
-  /** 微信商户号 */
-  wechat_mch_id: string;
-  /** 微信 API Key */
-  wechat_api_key: string;
-  /** 支付宝 App ID */
-  alipay_app_id: string;
-  /** 支付宝私钥 */
-  alipay_private_key: string;
+  /** 杭州银行商户号（支付网关侧的商户编号） */
+  hccb_mch_no: string;
+  /** 商户应用 ID（支付网关侧 appId） */
+  hccb_app_id: string;
+  /** 商户密钥 appSecret（**密**，回显脱敏） */
+  hccb_app_secret: string;
+  /** 异步通知地址（支付网关回调我们，须公网可达） */
+  hccb_notify_url: string;
+}
+
+/** 上游（new-api）凭证（GET 回显：secret 字段为脱敏值） */
+export interface SystemUpstream {
+  /** new-api 项目统一 key（**密**，回显脱敏）——全项目共用这一把 */
+  new_api_key: string;
 }
 
 /** 充值政策文案 */
@@ -780,21 +764,24 @@ export interface SystemRateLimit {
 export interface SystemSettings {
   /** 支付凭证（脱敏回显） */
   credentials: SystemCredentials;
+  /** 上游 new-api 凭证（脱敏回显） */
+  upstream: SystemUpstream;
   /** 充值政策文案 */
   policy: SystemPolicy;
   /** 限流配置 */
   rateLimit: SystemRateLimit;
 }
 
-/** GET /api/admin/settings 获取全部系统配置（支付凭证脱敏回显）——规划接口，后端暂未实现 */
+/** GET /api/admin/settings 获取全部系统配置（凭证类字段脱敏回显） */
 export function fetchAdminSettings() {
   return apiRequest<SystemSettings>('/api/admin/settings');
 }
 
-/** PUT /api/admin/settings 按模块部分更新（支持按 key 增量更新）——规划接口，后端暂未实现 */
+/** PUT /api/admin/settings 按模块部分更新（支持按 key 增量更新） */
 export function updateAdminSettings(
   params: Partial<{
     credentials: Partial<SystemCredentials>;
+    upstream: Partial<SystemUpstream>;
     policy: Partial<SystemPolicy>;
     rateLimit: Partial<SystemRateLimit>;
   }>

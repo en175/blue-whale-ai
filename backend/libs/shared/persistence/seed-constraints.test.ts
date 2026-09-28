@@ -91,7 +91,6 @@ const COLUMN_NAMES = [
   "features",
   "enabled",
   "sort_order",
-  "channel_parser",
   "request_mapping",
 ];
 

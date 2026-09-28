@@ -70,7 +70,7 @@ const projectMocks = vi.hoisted(() => ({
 }));
 const authMocks = vi.hoisted(() => ({
   fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
 }));
 const canvasMocks = vi.hoisted(() => ({
@@ -88,7 +88,7 @@ vi.mock('@/api/projects', () => ({
 }));
 vi.mock('@/api/auth', () => ({
   fetchMe: authMocks.fetchMe,
-  fetchQuota: authMocks.fetchQuota,
+  fetchCredits: authMocks.fetchCredits,
   toSessionUser: authMocks.toSessionUser,
 }));
 vi.mock('@/api/assets', () => ({
@@ -129,6 +129,9 @@ const jobMocks = vi.hoisted(() => ({
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
 }));
+vi.mock('@/api/idempotencyKey', () => ({
+  newIdempotencyKey: jobMocks.newIdempotencyKey,
+}));
 vi.mock('@/api/jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/jobs')>();
   return {
@@ -136,7 +139,6 @@ vi.mock('@/api/jobs', async (importOriginal) => {
     // 页面水合/轮询/幂等键走 mock，避免真实 fetch 干扰受控用例
     fetchJobs: jobMocks.fetchJobs,
     fetchJobStatus: jobMocks.fetchJobStatus,
-    newIdempotencyKey: jobMocks.newIdempotencyKey,
     cancelGenerationJob: jobMocks.cancelGenerationJob,
     createGenerationJob: vi.fn(),
     retryGenerationJob: vi.fn(),
@@ -336,7 +338,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   useAuthPromptStore.getState().reset();
-  useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+  useAuthStore.setState({ user: null, isNewUser: false, credits: null });
 });
 
 describe('IKI8L4 截取（真实 API/HTTP 链）：错误提示归属发送时会话', () => {

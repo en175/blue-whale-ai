@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+// identity-svc 的同步 RPC 面。
+//
+// ⚠️ 调用方是**应用层的 Guard**（business-api 与 billing-svc 各自的 Guard），
+//    **不是网关** —— nginx 只做 TLS / 路由 / limit_req，不碰认证（《架构设计》§5）。
+package identity.v1;
+
+option java_package = "com.bluewhale.contracts.identity.v1";
+option java_multiple_files = true;
+
+service IdentityService {
+
+  // 验证会话，返回身份上下文。
+  //
+  // 会话令牌是**不透明的**（不是 JWT）—— 校验靠 identity-svc 自己查 Redis。
+  // 应用层 Guard 每请求调一次；高频，须走连接池 + 短超时。
+  rpc VerifySession(VerifySessionRequest) returns (VerifySessionResponse);
+}
+
+message VerifySessionRequest {
+  string session_token = 1; // 浏览器 cookie（bw_session）里的不透明令牌
+}
+
+message VerifySessionResponse {
+  int64  user_id  = 1;
+  // ★ **billing 算折扣要用** —— 放进契约是为了避免每次 Hold 多一跳 RPC。
+  //    取值：free | basic | pro | max
+  string tier     = 2;
+  bool   is_admin = 3;
+  string username = 4; // 操作日志的 operator 展示用
+  // 权限点（RBAC），见《架构设计》§12.1。
+  // 例：["pricing:publish", "billing:credit:grant"]
+  repeated string permissions = 5;
+}

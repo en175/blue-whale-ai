@@ -1482,7 +1482,7 @@ _Avoid_: 用户 JWT、root、能力券、把铸券令牌拿来下充值单
 ### 技术栈边界
 
 **产品实现**:
-直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 `worker-java` 执行服务（契约 IKEL4A 修正二：TS 只发任务、Java 做任务，交互面 = 数据库 + MQ），领域规则权威仍在 TypeScript 侧。
+直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS。**两处 Java 例外**：generation-worker 生成执行按 ADR-0084 为独立 `server/blue-whale-worker/`（契约 IKEL4A 修正二：TS 只发任务、Java 做任务，交互面 = 数据库 + MQ）；计费服务按 ADR-0114 决策 6 为独立 `server/blue-whale-billing/`（账本是钱路径，必须能被逐行 review）。两者的计价/领域规则权威都**不在 Java 里**——生成规则来自 TS 侧，计价规则来自定价目录配置，Java 只实现「怎么算」不实现「算什么」。
 _Avoid_: TypeScript 运行时、把浏览器代码描述成运行在 Node.js、把仓库内所有可执行文件都算作产品实现
 
 **工程协作控制面**:

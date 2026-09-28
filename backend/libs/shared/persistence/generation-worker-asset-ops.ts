@@ -4,6 +4,9 @@ import type {PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
 import {DEFAULT_IMAGE_REFERENCE_MAX} from "./model-capability-repo.js";
+// 渠道归一与读侧同源（`parseStoredChannel`）——快照里的渠道必须是**归一后**的取值，
+// 否则 NULL 的存量行在快照里恒为 null，消费方还得自己再判一次。
+import {parseStoredChannel} from "../generation/image-channel-parser.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
 /** IKDD4Z：查当前项目显式关联的素材 id（project_asset 跨项目复用，is_delete=0）。
@@ -140,10 +143,8 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           features.imageReferenceMax ??
           features.image_reference_max ??
           DEFAULT_IMAGE_REFERENCE_MAX,
-        channel_parser:
-          typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
-            ? cap.channel_parser
-            : "seedream",
+        // 渠道是解析与出站的唯一来源；落库为 NULL 的存量行按**行的媒介**归一（同读侧口径）。
+        channel: parseStoredChannel(cap.channel, cap.capability_type),
         request_mapping: cap.request_mapping ?? null,
         default_size: cap.default_size,
         default_aspect_ratio: cap.default_aspect_ratio,

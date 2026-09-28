@@ -165,6 +165,8 @@ const apiMocks = vi.hoisted(() => ({
   deleteProject: vi.fn(),
   fetchMe: vi.fn(async () => null),
   fetchQuota: vi.fn(async () => ({})),
+  // 画布页顶栏读余额（积分卡商品化）：本文件渲染真实 CanvasPage，故 auth 打桩必须带上。
+  fetchCredits: vi.fn(async () => ({ credits: 0 })),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
@@ -195,6 +197,7 @@ vi.mock('@/api/projects', () => ({
 vi.mock('@/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
   fetchQuota: apiMocks.fetchQuota,
+  fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 

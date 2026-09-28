@@ -25,6 +25,9 @@
       ],
       "@lib/core/readiness": [
         "libs/core/readiness.ts"
+      ],
+      "@lib/core/identity/*": [
+        "libs/core/identity/*"
       ]
     }
   },

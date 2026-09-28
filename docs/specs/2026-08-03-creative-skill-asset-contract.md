@@ -379,8 +379,8 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
   普通用户不可见、不可修改；规则与草稿分别作为 system / user 消息发给受控 AI 接口。
 - **受控 AI 接口**：服务端经 new-api（OpenAI 兼容 relay）`/v1/chat/completions`，
   baseUrl / token / model 全部来自服务端 env（`NEW_API_BASE_URL` /
-  `NEW_API_ROOT_ACCESS_TOKEN` / `SKILL_FORMAT_MODEL`），浏览器不可见；调用带超时，
-  超时按失败处理。
+  `NEW_API_UPSTREAM_KEY` / `SKILL_FORMAT_MODEL`），浏览器不可见；调用带超时，
+  超时按失败处理。token 就是**项目唯一那把上游凭证**，格式化没有、也不该有专属凭证。
 - **成功** → `{ code: 200, data: { content } }`：`content` 为完整替换文本，前端整段
   替换编辑器草稿，用户可继续编辑。
 - **失败**（§7 `100104`）：env 未配置、AI 抛错/超时，或返回内容不是合法 SKILL.md
@@ -416,7 +416,7 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
 - 总结管道产出即该 Run 的 assistant 消息正文，经既有 `commitSuccess` 缝落库并广播
   `conversation.message_completed`；Run 状态机不变。
 - 受控 AI 接口同 §14：new-api（OpenAI 兼容 relay）`/v1/chat/completions`，baseUrl /
-  token 复用 `NEW_API_BASE_URL` / `NEW_API_ROOT_ACCESS_TOKEN`，模型来自服务端 env
+  token 复用 `NEW_API_BASE_URL` / `NEW_API_UPSTREAM_KEY`，模型来自服务端 env
   `SKILL_SUMMARIZE_MODEL`（未配置按 §15.3 失败分支处理，同 §14 `SKILL_FORMAT_MODEL`
   先例）；固定规则有内置默认常量，`SKILL_SUMMARIZE_RULES` 可覆盖，
   浏览器与普通用户不可见、不可修改；调用带超时。

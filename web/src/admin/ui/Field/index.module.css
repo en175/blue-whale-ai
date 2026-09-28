@@ -1,0 +1,25 @@
+/* Field：标签 + 控件 + 说明 的纵向排布。
+   只有间距与文字层级，没有任何颜色/边框 —— 控件长什么样由控件自己决定。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--admin-font-sm);
+  color: var(--admin-text);
+}
+
+/* 字段级微文案：一行灰字。**两行以内**是它的设计边界——更长的说明请用 `info`（`?`）。
+   ⚠️ 用 `muted` 而不是更浅的 `faint`：它是**要读的**（单位、范围、留空语义），
+      实测 faint 在白底上只有 2.6:1，低于 WCAG AA。 */
+.hint {
+  font-size: var(--admin-font-xs);
+  line-height: 1.5;
+  color: var(--admin-text-muted);
+}

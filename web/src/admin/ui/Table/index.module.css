@@ -1,0 +1,57 @@
+/* 外壳：白卡片 + 圆角 + 裁剪。表格宽于容器时横向滚动，而不是把页面撑破。 */
+.wrap {
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-surface);
+  box-shadow: var(--admin-shadow-card);
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--admin-font-sm);
+}
+
+/* 表头比正文**更淡**：它是标注，不是内容 */
+.table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: var(--admin-font-xs);
+  font-weight: 500;
+  color: var(--admin-text-muted);
+  background: var(--admin-surface-sunken);
+  border-bottom: 1px solid var(--admin-border);
+  white-space: nowrap;
+}
+
+/* 固定列宽：宽度以 <th> 上写的为准，内容超了在列内折行（见 Table 的 `fixed` 说明） */
+.fixed {
+  table-layout: fixed;
+}
+
+.table td {
+  padding: 10px 12px;
+  color: var(--admin-text);
+  /* 表内分隔线比卡片外框更淡，避免整屏都是网格 */
+  border-bottom: 1px solid var(--admin-divider);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.table tbody tr:hover td {
+  background: var(--admin-row-hover);
+}
+
+/* 数值列：等宽数字。金额/积分/时间对不齐是「不专业」最直观的来源。
+   用法：<td className={styles.num}> 或给 th/td 加同名类。 */
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

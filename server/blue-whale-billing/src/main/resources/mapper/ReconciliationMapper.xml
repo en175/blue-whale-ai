@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  跨表对账语句（《计费逻辑详细设计》§9 层次①）。
+
+  恒等式：
+
+      Σ lots.remaining  ==  ledger(wallet) + ledger(frozen)
+
+  左边是余额的**唯一权威**（批次表），右边是复式账本。两边只要有一次对不上，
+  就说明某条业务路径改了其中一边却没改另一边——而钱的问题**宁可吵醒人，也不能静默**。
+-->
+<mapper namespace="com.bluewhale.billing.adapter.outbound.persistence.mapper.ReconciliationMapper">
+
+  <!--
+    「每个 (用户, 科目) 的最近一笔分录」——下面两条查询共用的取数口径。
+
+    为什么是 MAX(id) 而不是 MAX(gmt_create)：同一秒内可以落多笔（DATETIME 只到秒），
+    而 id 是自增的、严格单调 —— 它才是「谁在后」的唯一判据。
+    与 LedgerEntryMapper.latestBalance（ORDER BY id DESC LIMIT 1）口径逐字一致：
+    两处若各挑一列，余额展示与对账结果会互相打架，且都「看着有理」。
+  -->
+  <sql id="latestLedgerBalance">
+    SELECT e.user_id, e.account, MAX(e.id) AS max_id
+    FROM billing_ledger_entries e
+    WHERE e.account IN ('wallet', 'frozen')
+    GROUP BY e.user_id, e.account
+  </sql>
+
+  <!--
+    Σ 全部批次的 remaining。
+
+    ⚠️ 仍然**不加 expires_at 条件**，但理由已经变了，别照旧注释办事：
+      · 2026-09 之前：过期只被查询条件排除，批次 untouched、账本也没动——
+        加了条件等于把「核销未落地」伪装成「账不平」，那是最容易被忽略的假警报。
+      · 现在：过期核销已经落地（CreditExpirySweeper → CreditService.expireLot），
+        它**同时**扣 remaining 与记 `借 wallet / 贷 cost` 分录，两侧等量减少。
+        所以 Σ remaining 与账本余额**依然逐分相等**，只是等式两边都变小了。
+        此时若加上 expires_at 条件，反而会把已核销的批次再多排除一次——
+        凭空造出一个差额（等于核销额），把一个好账报成不平。
+
+    一句话：核销是**两侧同时减**，因此本语句与账本侧的取数口径都不需要、也不该有
+    expires_at 条件。真正的口径写在 Account.FROZEN 的恒等式注释里。
+  -->
+  <select id="sumLotsRemaining" resultType="long">
+    SELECT COALESCE(SUM(remaining), 0)
+    FROM billing_credit_lots
+  </select>
+
+  <!--
+    Σ 全部用户 (wallet + frozen) 的最近余额快照。
+
+    JOIN 子查询而不是相关子查询：后者的形态是「对账本每一行再查一次 MAX(id)」，
+    在有 idx_ledger__user_account (user_id, account, id) 的情况下也要按行下潜，
+    而这里是「先算出每组的最新 id，再回表取一行」——一次聚合 + 一次等值回表。
+    这条查询不在扣费路径上，但它是**每日全表扫**，省下的不是几毫秒而是几秒。
+  -->
+  <select id="sumLedgerBalance" resultType="long">
+    SELECT COALESCE(SUM(e.balance_after), 0)
+    FROM billing_ledger_entries e
+    JOIN (<include refid="latestLedgerBalance"/>) latest ON e.id = latest.max_id
+  </select>
+
+  <!--
+    按用户找出不平的那些人，差额大的在前。
+
+    两个 UNION ALL 分支是**并集而不是 JOIN**：只有批次行（某人只剩批次）或
+    只有账本行（批次被删干净）都要报出来——用 JOIN 的话，后一种情况会被悄悄漏掉，
+    而那恰恰是最需要人看的一种（「批次是余额唯一权威」被破坏的样子）。
+
+    ⚠️ HAVING 用的是 SELECT 的别名，MySQL 允许；但**别名必须在两个分支里同形**，
+       否则 UNION 的列名取第一个分支，第二支的别名会被忽略。
+
+    ⚠️ ORDER BY 用 ABS(差) 而不是 差：差 -100 万与 +100 万同样值得先看，
+       按有符号值排会把「批次少了一百万」压到列表末尾。
+
+    ⚠️ ORDER BY 里写完整的 SUM(...) 而不是复用 select 的别名：别名只有在**独占一项**时
+       才会被替换（HAVING 那边就是这个形态，所以它可以直接用别名），
+       一旦嵌进 ABS(...) 这样的表达式，MySQL 会把它解析成派生表的列
+       combo.lots_remaining —— 而它没被 GROUP BY 覆盖，于是撞上 ONLY_FULL_GROUP_BY
+       （MySQL 8 的默认 sql_mode）。这条 SQL 是每天跑一次的，但那种报错只在运行期出现，
+       所以把「为什么这里写得啰嗦」记在这。
+
+    ⚠️ LIMIT 只截**报告**，不截判定：调用方以「返回条数 == limit」识别截断并明说，
+       而不是让人以为「就这几个」。全量判定由 sumLotsRemaining / sumLedgerBalance 给出。
+  -->
+  <select id="imbalancedUsers" resultType="com.bluewhale.billing.adapter.outbound.persistence.row.UserImbalanceRow">
+    SELECT combo.user_id            AS user_id,
+           SUM(combo.lots_remaining) AS lots_remaining,
+           SUM(combo.ledger_total)   AS ledger_total
+    FROM (
+        SELECT l.user_id      AS user_id,
+               SUM(l.remaining) AS lots_remaining,
+               0                AS ledger_total
+        FROM billing_credit_lots l
+        GROUP BY l.user_id
+
+        UNION ALL
+
+        SELECT e.user_id             AS user_id,
+               0                      AS lots_remaining,
+               SUM(e.balance_after)   AS ledger_total
+        FROM billing_ledger_entries e
+        JOIN (<include refid="latestLedgerBalance"/>) latest ON e.id = latest.max_id
+        GROUP BY e.user_id
+    ) combo
+    GROUP BY combo.user_id
+    HAVING lots_remaining &lt;&gt; ledger_total
+    ORDER BY ABS(SUM(combo.lots_remaining) - SUM(combo.ledger_total)) DESC, combo.user_id ASC
+    LIMIT #{limit}
+  </select>
+
+</mapper>

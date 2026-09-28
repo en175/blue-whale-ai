@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { ApiError } from './http';
 import {
+  createGenerationJob,
+  retryGenerationJob,
   createAudioMix,
   createAudioVideoMux,
   retryAudioMix,
@@ -614,5 +616,52 @@ describe('IKI8L4 工具会话创建 silent 透传', () => {
     await expect(createAudioTrim('p1', { source_asset_id: '3985', output_format: 'mp3' })).rejects.toThrow('服务繁忙，请稍后重试');
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('服务繁忙，请稍后重试');
+  });
+});
+
+describe('建任务/重试的幂等头由调用方持有', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // 每次调用返回**新的** Response：响应体只能消费一次，复用同一个实例会让第二次请求解析失败
+  const okCreated = () =>
+    vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+      JSON.stringify({ code: 200, msg: 'ok', data: { generation_job_id: '9', cursor: 1 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+  const createdPayload = {
+    type: 'image' as const,
+    expected_output_count: 1,
+    parameters: { prompt: '一只蓝鲸', model_id: 'm', aspect_ratio: '1:1', size: '2k' },
+  };
+
+  it('createGenerationJob 把调用方给的钥匙原样放进 Idempotency-Key（不在请求函数里现造）', async () => {
+    const fetchMock = okCreated();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createGenerationJob('project/1', createdPayload, 'submit-key-1'))
+      .resolves.toEqual({ generation_job_id: '9', cursor: 1 });
+    await createGenerationJob('project/1', createdPayload, 'submit-key-1');
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/generation-jobs');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual(createdPayload);
+    // 调用方复用同一把钥匙 → 两次请求同一个头，服务端据此重放首次结果而不是再建一个 job
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('submit-key-1');
+    expect(new Headers((fetchMock.mock.calls[1]![1] as RequestInit).headers).get('Idempotency-Key')).toBe('submit-key-1');
+  });
+
+  it('retryGenerationJob 同样提交调用方持有的钥匙（无 body，身份全在路径与头里）', async () => {
+    const fetchMock = okCreated();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(retryGenerationJob('project/1', '73', 'retry-key-73'))
+      .resolves.toEqual({ generation_job_id: '9', cursor: 1 });
+
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/projects/project%2F1/generation-jobs/73/retry');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('retry-key-73');
+    expect(init.body).toBeUndefined();
   });
 });

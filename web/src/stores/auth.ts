@@ -34,16 +34,16 @@ interface AuthState {
   isNewUser: boolean;
   /** 当前登录用户（未登录为 null） */
   user: SessionUser | null;
-  /** 用户剩余配额（new-api 原生单位，展示积分 = quota / 50000；未拉取为 null） */
-  quota: number | null;
+  /** 用户可用余额（**整数积分**，来自 billing 账本；未拉取为 null） */
+  credits: number | null;
   /** 登录成功后写入用户信息 */
   applyLogin: (login: LoginPayload, user: SessionUser) => void;
   /** 直接设置用户（http 层/兜底场景） */
   setSession: (user: SessionUser | null) => void;
   /** 清空会话（退出登录/401 失效） */
   clearSession: () => void;
-  /** 写入 /api/usage/token 配额 */
-  setQuota: (quota: number | null) => void;
+  /** 写入 /api/usage/token 的余额 */
+  setCredits: (credits: number | null) => void;
   /** 局部更新用户信息（如修改昵称后回写） */
   updateUser: (patch: Partial<SessionUser>) => void;
 }
@@ -53,7 +53,7 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       isNewUser: false,
       user: null,
-      quota: null,
+      credits: null,
 
       applyLogin: (login, user) =>
         set({
@@ -64,9 +64,9 @@ export const useAuthStore = create<AuthState>()(
       setSession: (user) => set({ user }),
 
       clearSession: () =>
-        set({ isNewUser: false, user: null, quota: null }),
+        set({ isNewUser: false, user: null, credits: null }),
 
-      setQuota: (quota) => set({ quota }),
+      setCredits: (credits) => set({ credits }),
 
       updateUser: (patch) =>
         set((s) => (s.user ? { user: { ...s.user, ...patch } } : s)),

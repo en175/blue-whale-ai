@@ -88,6 +88,18 @@ export interface ModelFeatures {
    *  读侧分支暂留未删（待 `-1` 接入时一并处置），但**不要再往数据里配它**。见 ADR-0086 修订段。
    *  当前只有 `allowed_ratios` 在用。 */
   task_types: Record<string, unknown> | null;
+  /** 视频的输出像素表：`"resolution=480p|aspect_ratio=16:9" → "864x496"`；未配为 null。
+   *
+   *  **为什么在能力行而不是定价目录**：这张表只在**预扣**用（估 token），而预扣是 backend 发起的，
+   *  它可以按规格查表、把宽高冻成两个标量随 Hold 带过去。对照组是单价——单价在**结算**用，
+   *  那一刻只有 billing 在场（`JobEventConsumer → settlement.settle`，backend 不在链路里），
+   *  所以单价必须住 billing 自己的库。像素是按**用它的时刻**决定归属的。
+   *
+   *  口径与图片的 `request_mapping.matrix` 同构（图片：像素在能力行、单价在目录）。
+   *
+   *  ⚠️ 键格式与目录里原先那张 `tokenEstimate.dimensions` **逐字相同**，搬迁是逐字搬；
+   *     `adaptive` 也照样是一个显式键，不在代码里做「取该档位的 16:9 格」这种推断。 */
+  video_dimensions: Record<string, string> | null;
 }
 
 export interface ModelCapabilityView {
@@ -104,8 +116,12 @@ export interface ModelCapabilityView {
   default_aspect_ratio: string;
   default_duration: number | null;
   features: ModelFeatures;
-  /** 生成渠道解析器（seedream / gpt / banana）。消费端列表会剥掉。 */
-  channel_parser: string;
+  /** 计价规则（能力行的 `pricing` 列）：形态与定价目录里 `models.<id>.<type>` 那条逐字相同。
+   *  接纳侧在 Hold 时把它序列化后随请求送给 billing；NULL = 还没搬，billing 回落目录。 */
+  pricing: unknown;
+  /** 生成渠道（`<家族>-<媒介>[-<协议>]`，封闭枚举）。**本行解析与出站的唯一来源**；
+   *  落库为 NULL 的存量行由 `parseStoredChannel(raw, capability_type)` 按媒介回落。 */
+  channel: string | null;
   /** GPT 交叉格 / banana 一维映射。消费端列表会剥掉。 */
   request_mapping: unknown;
   /** 该 capability_type 的显式默认模型（IKE0VX）。
@@ -168,6 +184,8 @@ type FeaturesJson = {
   max_reference_duration_sec?: unknown;
   taskTypes?: unknown;
   task_types?: unknown;
+  videoDimensions?: unknown;
+  video_dimensions?: unknown;
 };
 
 type DurationRangeJson = {
@@ -212,6 +230,20 @@ function pickTaskTypes(v: unknown): Record<string, unknown> | null {
   return typeof v === "object" && v !== null && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : null;
+}
+
+/** 读侧：像素表为「非空串 → 非空串」的扁平 JSON 对象（宽容降级 null = 未配）。
+ *  形态是否合法（键必须是 `resolution=X|aspect_ratio=Y`、值必须是 `WxH`）由**写侧闸门**判定，
+ *  与 `task_types` 同一条分工；读侧只保证「是个字符串映射」，脏值留给消费方按「查不到」处理。 */
+function pickDimensions(v: unknown): Record<string, string> | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (k.length === 0) continue;
+    if (typeof val !== "string" || val.length === 0) continue;
+    out[k] = val;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** 能力行 features JSON → 归一化的 {@link ModelFeatures}。
@@ -261,6 +293,7 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
       f.maxReferenceDurationSec ?? f.max_reference_duration_sec,
     ),
     task_types: pickTaskTypes(f.taskTypes ?? f.task_types),
+    video_dimensions: pickDimensions(f.videoDimensions ?? f.video_dimensions),
   };
 }
 
@@ -322,11 +355,12 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         default_aspect_ratio: cap.default_aspect_ratio,
         default_duration: cap.default_duration,
         features: toFeatures(cap.features, capabilityType),
-        channel_parser:
-          typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
-            ? cap.channel_parser
-            : "seedream",
+        channel:
+          typeof cap.channel === "string" && cap.channel.length > 0
+            ? cap.channel
+            : null,
         request_mapping: cap.request_mapping ?? null,
+        pricing: cap.pricing ?? null,
         is_default: cap.is_default === true,
         version: cap.version,
         digest: capabilityDigestFromModelCapability(cap),

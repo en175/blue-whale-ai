@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
-import { ERROR_INVALID_REFERENCE, RESOURCE_NOT_FOUND_CODE, fail, ok } from "@lib/contracts";
+import {
+  ERROR_INVALID_REFERENCE,
+  IDEMPOTENCY_CONFLICT_CODE,
+  RESOURCE_NOT_FOUND_CODE,
+  fail,
+  ok,
+} from "@lib/contracts";
 import type {
   GenerationCommandRepo,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
-
-const IDEMPOTENCY_CONFLICT_CODE = 100409;
 
 /** POST /api/projects/{projectId}/generation-jobs/{jobId}/retry（IK67HE/T14）：
  *  仅终态 failed/partially_succeeded 的 job 可重试；只补 failed/missing 槽，不覆盖成功输出。

@@ -3,7 +3,7 @@
  * 删除为 HTTP 204 无响应体，走原生 fetch（不经 apiRequest JSON 解析）
  * ============================================ */
 import { apiRequest } from './http';
-import { newIdempotencyKey } from './jobs';
+import { newIdempotencyKey } from './idempotencyKey';
 
 /** 场景卡信息 */
 export interface SceneCardInfo {

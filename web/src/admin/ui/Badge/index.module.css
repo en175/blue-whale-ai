@@ -1,0 +1,44 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: var(--admin-radius-control);
+  font-size: var(--admin-font-xs);
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+/* 色点继承当前文字色，所以不用为每个调子各写一条 */
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--admin-radius-pill);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.neutral {
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
+}
+
+.accent {
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+}
+
+.success {
+  background: var(--admin-success-soft);
+  color: var(--admin-success);
+}
+
+.warning {
+  background: var(--admin-warning-soft);
+  color: var(--admin-warning);
+}
+
+.danger {
+  background: var(--admin-danger-soft);
+  color: var(--admin-danger);
+}

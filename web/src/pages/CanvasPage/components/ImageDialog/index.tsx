@@ -20,6 +20,8 @@ import {
   promptMaxLengthOf,
 } from '@/lib/prompt-max-length';
 import RatioIcon from '@/components/RatioIcon';
+import GenerationQuoteBadge from '../GenerationQuoteBadge';
+import { buildImageJobReferences } from '../../videoJobReferences';
 import {
   PROMPT_DOC_VERSION,
   docHasAnyRef,
@@ -90,6 +92,9 @@ export interface ImageTextAttachment {
 
 interface ImageDialogProps extends RefStripOrderProps {
   onClose: () => void;
+  /** 所属项目（价格预览按项目归属校验，与创建任务同路径）。
+   *  缺省 = 没有项目上下文（面板单测等），此时不显示价格。 */
+  projectId?: string;
   /** 发送：提示词（拍平镜像）+ 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表 + 结构化正文（含素材标签时携带，IKFA1M）（异步：上传完成后 resolve） */
   onSend: (text: string, modelId: string, size: string, ratio: string, files: UploadedFile[], promptDoc?: PromptDoc | null) => Promise<void> | void;
   /** 初始提示词（节点「重新编辑」带入原生成提示词） */
@@ -167,7 +172,7 @@ export interface ImageGenSeedParams {
   size?: string;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onLocateTextSource, textIndexError, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ projectId, onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onLocateTextSource, textIndexError, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -297,6 +302,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     return out;
   }, [edgeRefs, files, mixedStrip.order]);
   const orderedAssetIds = useMemo(() => orderedImageRefs.map((r) => r.assetId), [orderedImageRefs]);
+  /** 报价用的参考（与提交同源）：就是上面 `orderedAssetIds` —— 提交时 `collectImageInputAssetIds`
+   *  在连线模式读同一份 `mergedImageRefsOf` 推导（父级传入的 mediaRefs 即它），本地模式读面板 `files`。
+   *  **参考图是定价维度**（Seedream 5.0 Pro 首张免费、第 2 张起按张加价），漏了它预览价就少算。
+   *  ⚠️ 本地模式下还没上传（无 assetId）的文件不计入——它的 assetId 要等提交时才产生，
+   *     预览期不可能知道（不为报价去传一次文件）。 */
+  const quoteReferences = useMemo(() => buildImageJobReferences(orderedAssetIds), [orderedAssetIds]);
   /** IKFA1P：文本附件标签映射（唯一口径）——附件顺序 = 画布连入边序（与服务端 text_attachments 同源） */
   const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
   const refsLabels = useMemo(
@@ -870,6 +881,20 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
+            {/* 价格预览（只算不扣）：与提交同源的定价维度 —— 模型 + 档位 + 比例 + 参考图。
+                没有项目上下文就不挂（徽标自己也不在无项目时挂内层）。 */}
+            {projectId ? (
+              <GenerationQuoteBadge
+                projectId={projectId}
+                type="image"
+                parameters={{
+                  model_id: selectedModel,
+                  ...(selectedResolution ? { size: selectedResolution } : {}),
+                  ...(selectedRatio ? { aspect_ratio: selectedRatio } : {}),
+                }}
+                references={quoteReferences}
+              />
+            ) : null}
             {/* 字数统计 */}
             <div className={`${styles.charCount} ${maxInput != null && flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
               {promptCharCountLabel(flatValue.length, maxInput)}

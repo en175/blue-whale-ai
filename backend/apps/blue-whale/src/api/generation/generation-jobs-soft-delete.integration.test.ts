@@ -10,7 +10,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -69,7 +68,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           ProjectService,
           GenerationCommandService,
           ModelCapabilityReadService,
-          GenerationCostEstimatorService,
           CanvasService,
           MaterialService,
           AssetService,
@@ -89,10 +87,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           {
             provide: ModelCapabilityReadService,
             useValue: new ModelCapabilityReadService(prisma),
-          },
-          {
-            provide: GenerationCostEstimatorService,
-            useValue: new GenerationCostEstimatorService(),
           },
           {
             provide: CanvasService,

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
 import thumbStyles from '../RefThumbnail/index.module.css';
@@ -48,13 +49,17 @@ async function renderDialog(props: {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      createElement(ImageDialog, {
-        onClose: vi.fn(),
-        onSend,
-        initialFiles: props.initialFiles,
-        attachments: props.attachments,
-        onRemoveAttachment: props.onRemoveAttachment,
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ImageDialog, {
+          onClose: vi.fn(),
+          onSend,
+          initialFiles: props.initialFiles,
+          attachments: props.attachments,
+          onRemoveAttachment: props.onRemoveAttachment,
+        })
+      ),
     );
   });
   // 等模型能力加载完成（发送门依赖 currentGen）

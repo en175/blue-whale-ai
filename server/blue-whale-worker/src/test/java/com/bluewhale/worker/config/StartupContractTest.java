@@ -1,0 +1,375 @@
+package com.bluewhale.worker.config;
+
+import com.bluewhale.worker.application.consumer.VideoConsumer;
+import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
+import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
+import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
+import com.bluewhale.worker.application.processor.ImageJobProcessor;
+import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
+import com.bluewhale.worker.application.processor.VideoJobProcessor;
+import com.bluewhale.worker.application.service.AssetSourceService;
+import com.bluewhale.worker.application.service.JobStateMachineService;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.config.NewApiUpstreamConfig.UpstreamCredential;
+import com.bluewhale.worker.domain.contract.GenerationMqRouteEnum;
+import com.bluewhale.worker.domain.contract.JobTypeEnum;
+import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mapper.SystemSettingMapper;
+import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.mock.env.MockEnvironment;
+
+import javax.sql.DataSource;
+import java.lang.reflect.RecordComponent;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+
+/**
+ * 启动契约测试（ADR-0084 修正六：缺配置即启动失败）。
+ * <p>
+ * 修正六把启动语义从「空 tags → 静默只起 /ready」翻转为「缺配置 → bean 装配期响亮失败」。
+ * 本测试逐条钉住翻转后的行为：
+ * <ul>
+ *   <li>缺 {@code ROCKETMQ_ENDPOINTS} → 启动中止且失败信息点名该变量；</li>
+ *   <li>缺 {@code DATABASE_URL} → 启动中止且失败信息点名该变量；</li>
+ *   <li>缺 {@code NEW_API_BASE_URL} → 装配期失败且失败信息点名该变量；</li>
+ *   <li>缺 {@code SYSTEM_SETTINGS_SECRET}（读上游凭证主密钥）→ 装配期失败且失败信息点名该变量；</li>
+ *   <li>视频 tag 在「消费侧订阅值 / 处理器声明值 / 路由表」三处一致；</li>
+ *   <li>{@link GenerationMqRouteEnum} 六个入口的 topic / tag 与契约 §1 冻结值一致（可执行定义）；</li>
+ *   <li>退役的 {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 残留属性被忽略（不报错、不生效）。</li>
+ * </ul>
+ */
+class StartupContractTest {
+
+    /**
+     * 装配 RocketMqConfig 所需的全部 processor 假体。
+     * 本测试只关心配置校验路径，processor 行为无关。
+     * <p>
+     * 本 runner 的上下文里只有 {@link RocketMqConfig} 与 {@link NewApiUpstreamConfig}：
+     * 其余网关客户端是 {@code @Component}，不在此 runner 中扫描；它们需要的地址由
+     * {@link NewApiUpstreamConfig#newApiBaseUrl} 这一个 bean 提供，故 {@code NEW_API_BASE_URL}
+     * 置哑值只为让它先装配成功，使 MQ 校验成为唯一失败点。
+     * 往本 runner 添新客户端时须同步补它的启动期依赖，否则失败点会前移。
+     */
+    private final ApplicationContextRunner mqRunner = new ApplicationContextRunner()
+            .withUserConfiguration(RocketMqConfig.class, NewApiUpstreamConfig.class)
+            .withBean(MediaExtractJobProcessor.class, () -> mock(MediaExtractJobProcessor.class))
+            .withBean(AudioJobProcessor.class, () -> mock(AudioJobProcessor.class))
+            .withBean(ImageJobProcessor.class, () -> mock(ImageJobProcessor.class))
+            .withBean(ImageEnhanceJobProcessor.class, () -> mock(ImageEnhanceJobProcessor.class))
+            .withBean(ImageEraseJobProcessor.class, () -> mock(ImageEraseJobProcessor.class))
+            .withBean(ImageCutoutJobProcessor.class, () -> mock(ImageCutoutJobProcessor.class))
+            .withBean(VideoJobProcessor.class, () -> mock(VideoJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoSubtitleEraseJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoEnhanceJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoSceneSplitJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoMattingJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoMattingJobProcessor.class))
+            .withBean(com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor.class,
+                    () -> mock(com.bluewhale.worker.application.processor.VideoFrameInterpolationJobProcessor.class))
+            .withBean(WorkerProperties.class, () -> new WorkerProperties(null))
+            .withPropertyValues("NEW_API_BASE_URL=http://new-api.invalid");
+
+    @Test
+    @DisplayName("ROCKETMQ_ENDPOINTS 缺失 → 启动中止，失败信息点名 ROCKETMQ_ENDPOINTS")
+    void missingRocketMqEndpointsAbortsStartup() {
+        // rocketmq.endpoints 会从环境变量 ROCKETMQ_ENDPOINTS 解析——本仓 runbook 恰恰要求运维导出它，
+        // 显式置空后才与跑测试的 shell 无关（runner 的 MapPropertySource 优先级高于 systemEnvironment），
+        // 失败才保证来自 ROCKETMQ_ENDPOINTS 守卫本身。
+        mqRunner.withPropertyValues("rocketmq.endpoints=").run(ctx -> {
+            Throwable failure = ctx.getStartupFailure();
+            assertThat(failure).as("缺 ROCKETMQ_ENDPOINTS 必须中止启动").isNotNull();
+            assertThat(chainContains(failure, "ROCKETMQ_ENDPOINTS"))
+                    .as("失败信息必须点名 ROCKETMQ_ENDPOINTS（缺配置即失败契约），实际：%s", failure)
+                    .isTrue();
+        });
+    }
+
+    /** DATABASE_URL 经 {@code System.getenv} 读取，只有未设置时才能复现缺失路径。 */
+    @Test
+    @DisplayName("DATABASE_URL 缺失 → 启动中止，失败信息为 DATABASE_URL environment variable is required")
+    void missingDatabaseUrlAbortsStartup() {
+        String databaseUrl = System.getenv("DATABASE_URL");
+        Assumptions.assumeTrue(databaseUrl == null || databaseUrl.isBlank(),
+                "本机已设 DATABASE_URL，缺失路径不可复现");
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(DataSourceConfig.class)
+                .run(ctx -> {
+                    Throwable failure = ctx.getStartupFailure();
+                    assertThat(failure).as("缺 DATABASE_URL 必须中止启动").isNotNull();
+                    assertThat(chainContains(failure, "DATABASE_URL environment variable is required"))
+                            .as("失败信息必须为既定的 DATABASE_URL 缺失文案，实际：%s", failure)
+                            .isTrue();
+                });
+    }
+
+    /**
+     * 读上游凭证要用的**主密钥**（{@code SYSTEM_SETTINGS_SECRET}）必须在装配期就位。
+     * <p>
+     * 它取代了原来守 {@code NEW_API_UPSTREAM_KEY} 的那条用例。取代的理由不是「新变量一样重要」，
+     * 而是**两者性质不同**：
+     * <ul>
+     *   <li>统一 key 现在是 {@code system_settings} 里的**数据**，由运营在管理端补填。
+     *       拿它拒启会让 worker 在「还没配」的窗口里 crash-loop，而那个窗口的生产者恰恰是管理端，
+     *       不是这里。它的 fail-closed 改落在读点上：{@code requireKey()} 未配即抛、
+     *       一轮一次日志跳过，绝不以 {@code Bearer } 打上游收那个来路不明的 401。</li>
+     *   <li>主密钥是**部署配置**，缺了连信封都打不开，且没有任何界面能补——正属于
+     *       ADR-0084 决策 2「缺配置即启动失败」那一类。</li>
+     * </ul>
+     * <p>
+     * 直调 bean 方法并注入空的 {@code MockEnvironment}：走属性源，缺失路径**确定性**可复现，
+     * 不像 {@code System.getenv} 那样依赖「本机恰好没设这个变量」。
+     */
+    @Test
+    @DisplayName("SYSTEM_SETTINGS_SECRET 缺失 → 装配期抛 IllegalStateException 且点名该变量")
+    void missingSystemSettingsSecretAbortsStartup() {
+        SystemSettingMapper mapper = mock(SystemSettingMapper.class);
+
+        assertThatThrownBy(() -> new NewApiUpstreamConfig()
+                .newApiUpstreamCredential(mapper, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(SystemSettingEnvelope.SECRET_ENV);
+
+        assertThatThrownBy(() -> new NewApiUpstreamConfig()
+                .newApiUpstreamCredential(mapper, new MockEnvironment()
+                        .withProperty(SystemSettingEnvelope.SECRET_ENV, "   ")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(SystemSettingEnvelope.SECRET_ENV);
+    }
+
+    /**
+     * 主密钥到位即可装配——**不要求此刻已经配好 key**（那是运行期数据，见上一条用例）。
+     */
+    @Test
+    @DisplayName("SYSTEM_SETTINGS_SECRET 到位 → 凭证读点装配成功（key 本身可以还没填）")
+    void upstreamCredentialAssemblesWithoutConfiguredKey() {
+        SystemSettingMapper mapper = mock(SystemSettingMapper.class);
+        // 库里还没有 upstream 行
+        org.mockito.Mockito.when(mapper.selectValue(UpstreamCredential.SETTING_KEY))
+                .thenReturn(null);
+
+        UpstreamCredential credential = new NewApiUpstreamConfig().newApiUpstreamCredential(
+                mapper,
+                new MockEnvironment().withProperty(
+                        SystemSettingEnvelope.SECRET_ENV,
+                        SystemSettingEnvelopeVectors.FAKE_SECRET_HEX));
+
+        assertThat(credential).isNotNull();
+        // 装配成功但读不到 key：读点明确拒绝，不是空串
+        assertThatThrownBy(credential::requireKey)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("未配置");
+    }
+
+    /**
+     * 上游地址的非空守卫：**类型自己的不变式**（{@link UpstreamBaseUrl} 构造器），不靠装配处自觉。
+     * <p>
+     * 为什么必须在装配期就失败：地址是这个进程唯一的上游入口（ADR-0114 决策 7），拿空串继续跑
+     * 只会让每次调用拼出 {@code /v1/...} 这样没有 host 的 URL——报错点离原因很远。
+     * 与 MQ / DB / 主密钥同属硬门槛（ADR-0084 决策 2 四套配置齐备才允许启动）。
+     * <p>
+     * 直调 bean 方法而非起 runner：装配顺序会让失败点漂到别的守卫上；这里用属性源替身
+     * 把地址守卫单独钉死。
+     */
+    @Test
+    @DisplayName("NEW_API_BASE_URL 缺失/空白 → 装配期抛 IllegalStateException 且点名该变量")
+    void missingBaseUrlAbortsStartup() {
+        // 不变式在载体上：任何路径拿到地址都过这道关（含直接构造，不经装配）
+        assertThatThrownBy(() -> new UpstreamBaseUrl(null))
+                .as("空值必须被拒")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(NewApiUpstreamConfig.ENV_BASE_URL);
+        assertThatThrownBy(() -> new UpstreamBaseUrl("   "))
+                .as("纯空白同样必须被拒")
+                .isInstanceOf(IllegalStateException.class);
+
+        // 装配路径：属性源里是空串 / 空白 → bean 装配期即失败（进而不启动）
+        assertThatThrownBy(() -> new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("")))
+                .as("空串必须被拒（不返回空串继续跑）")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(NewApiUpstreamConfig.ENV_BASE_URL);
+        assertThatThrownBy(() -> new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("   ")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("NEW_API_BASE_URL 齐备 → 地址 bean 装配成功，拼路径前去尾斜杠（口径不变）")
+    void baseUrlPresentAssemblesBean() {
+        assertThat(new NewApiUpstreamConfig().newApiBaseUrl(baseUrlEnv("http://new-api.invalid/"))
+                .normalized())
+                .as("尾斜杠必须剥掉，否则拼出 //v1")
+                .isEqualTo("http://new-api.invalid");
+    }
+
+    /** 地址 bean 的属性源替身（MapPropertySource 优先级高于 systemEnvironment，与跑测试的 shell 无关）。 */
+    private static StandardEnvironment baseUrlEnv(String baseUrl) {
+        StandardEnvironment env = new StandardEnvironment();
+        env.getPropertySources().addFirst(new MapPropertySource("test",
+                Map.of(NewApiUpstreamConfig.ENV_BASE_URL, baseUrl)));
+        return env;
+    }
+
+    @Test
+    @DisplayName("DATABASE_URL 齐备 → 数据源正常装配（缺失分支的反面）")
+    void databaseUrlPresentAssemblesDataSource() {
+        String databaseUrl = System.getenv("DATABASE_URL");
+        Assumptions.assumeTrue(databaseUrl != null && !databaseUrl.isBlank(),
+                "本机未设 DATABASE_URL，齐备路径不可复现");
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(DataSourceConfig.class)
+                .run(ctx -> {
+                    assertThat(ctx.getStartupFailure()).isNull();
+                    assertThat(ctx).hasSingleBean(DataSource.class);
+                });
+    }
+
+    /**
+     * 视频 tag 的三处声明必须同值：消费侧订阅（{@link VideoConsumer#TAG}）、
+     * 处理器声明（{@link VideoJobProcessor#tag()}）、路由表（{@link GenerationMqRouteEnum#VIDEO}）。
+     * 三处错配不会报错，只会让视频消息无人消费——所以在此钉死。
+     */
+    @Test
+    @DisplayName("视频 tag 跨三处一致：VideoConsumer.TAG = VideoJobProcessor.tag() = GenerationMqRoute.VIDEO.tag()")
+    void videoTagPinnedAcrossConsumerProcessorAndRoute() {
+        VideoJobProcessor processor = new VideoJobProcessor(
+                mock(JobStateMachineService.class),
+                mock(AssetSourceService.class),
+                mock(GenerationCredentialService.class),
+                mock(NewApiVideoClient.class),
+                mock(TosVideoMediaRelay.class),
+                mock(GenerationMessageProducer.class));
+
+        assertThat(VideoConsumer.TAG).isEqualTo("video");
+        assertThat(processor.tag()).isEqualTo(VideoConsumer.TAG);
+        assertThat(GenerationMqRouteEnum.VIDEO.tag()).isEqualTo(VideoConsumer.TAG);
+    }
+
+    /**
+     * topic / tag 是契约 §1 的冻结值，{@link GenerationMqRouteEnum} 是其可执行定义：
+     * 任何一侧要动都必须在这里显式改，不允许在别处发明字面量。
+     */
+    @Test
+    @DisplayName("GenerationMqRoute 十八个入口的 topic / tag 与契约 §1 冻结值一致")
+    void mqRouteTopicAndTagPinnedToContractValues() {
+        // Map.of 最多 10 对；18 个入口使用 Map.ofEntries。
+        Map<GenerationMqRouteEnum, String> expectedTags = Map.ofEntries(
+                Map.entry(GenerationMqRouteEnum.VIDEO, "video"),
+                Map.entry(GenerationMqRouteEnum.IMAGE, "image"),
+                Map.entry(GenerationMqRouteEnum.AUDIO, "audio"),
+                Map.entry(GenerationMqRouteEnum.MEDIA_EXTRACT, "media_extract"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_MIX, "audio_mix"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_VIDEO_MUX, "audio_video_mux"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_TRIM, "audio_trim"),
+                Map.entry(GenerationMqRouteEnum.AUDIO_SPEED, "audio_speed"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_ENHANCE, "image_enhance"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_ERASE, "image_erase"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_CUTOUT, "image_cutout"),
+                Map.entry(GenerationMqRouteEnum.IMAGE_OUTPAINT, "image_outpaint"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE, "video_subtitle_erase"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_ENHANCE, "video_enhance"),
+                Map.entry(GenerationMqRouteEnum.VOCAL_SPLIT, "vocal_split"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT, "video_scene_split"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_MATTING, "video_matting"),
+                Map.entry(GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION, "video_frame_interpolation"));
+
+        assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
+        for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
+            assertThat(route.topic()).as("%s 的 topic", route).isEqualTo("generation-task");
+            assertThat(route.tag()).as("%s 的 tag", route).isEqualTo(expectedTags.get(route));
+        }
+    }
+
+    /** 枚举的 tag 必须与 {@code generation_jobs.type} 同名（JobType.value()），否则 recovery 会重投到无人订阅的 tag。 */
+    @Test
+    @DisplayName("GenerationMqRoute.tag() 与 JobType.value() 逐项同值")
+    void mqRouteTagsMatchJobTypeValues() {
+        assertThat(GenerationMqRouteEnum.VIDEO.tag()).isEqualTo(JobTypeEnum.VIDEO.value());
+        assertThat(GenerationMqRouteEnum.IMAGE.tag()).isEqualTo(JobTypeEnum.IMAGE.value());
+        assertThat(GenerationMqRouteEnum.AUDIO.tag()).isEqualTo(JobTypeEnum.AUDIO.value());
+        assertThat(GenerationMqRouteEnum.MEDIA_EXTRACT.tag()).isEqualTo(JobTypeEnum.MEDIA_EXTRACT.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_MIX.tag()).isEqualTo(JobTypeEnum.AUDIO_MIX.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_VIDEO_MUX.tag()).isEqualTo(JobTypeEnum.AUDIO_VIDEO_MUX.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_TRIM.tag()).isEqualTo(JobTypeEnum.AUDIO_TRIM.value());
+        assertThat(GenerationMqRouteEnum.AUDIO_SPEED.tag()).isEqualTo(JobTypeEnum.AUDIO_SPEED.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_ENHANCE.tag()).isEqualTo(JobTypeEnum.IMAGE_ENHANCE.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_ERASE.tag()).isEqualTo(JobTypeEnum.IMAGE_ERASE.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_CUTOUT.tag()).isEqualTo(JobTypeEnum.IMAGE_CUTOUT.value());
+        assertThat(GenerationMqRouteEnum.IMAGE_OUTPAINT.tag()).isEqualTo(JobTypeEnum.IMAGE_OUTPAINT.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_SUBTITLE_ERASE.tag()).isEqualTo(JobTypeEnum.VIDEO_SUBTITLE_ERASE.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_ENHANCE.tag()).isEqualTo(JobTypeEnum.VIDEO_ENHANCE.value());
+        assertThat(GenerationMqRouteEnum.VOCAL_SPLIT.tag()).isEqualTo(JobTypeEnum.VOCAL_SPLIT.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_SCENE_SPLIT.tag()).isEqualTo(JobTypeEnum.VIDEO_SCENE_SPLIT.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_MATTING.tag()).isEqualTo(JobTypeEnum.VIDEO_MATTING.value());
+        assertThat(GenerationMqRouteEnum.VIDEO_FRAME_INTERPOLATION.tag()).isEqualTo(JobTypeEnum.VIDEO_FRAME_INTERPOLATION.value());
+    }
+
+    /**
+     * 退役 {@code rocketmq.topic} / {@code rocketmq.tag} 的后果：部署环境里残留的
+     * {@code ROCKETMQ_TOPIC} / {@code ROCKETMQ_TAG} 不再有绑定目标——Spring 的宽松绑定忽略未知属性，
+     * 既不报错也不生效（路由值只来自 {@link GenerationMqRouteEnum}）。
+     * <p>
+     * 本用例钉住「属性层」这一半：绑定值只有连接参数，且记录形状里**没有** topic / tag 分量——
+     * 谁把它们加回 {@link RocketMqConfig.RocketMqProperties}，这里立刻红。
+     * 「不生效」那一半（残留值改不了消费者订阅的 topic / tag）在
+     * {@code com.bluewhale.worker.application.consumer.ConsumerRouteWiringTest}：那里能读到
+     * package-private 的订阅访问器，且不需要 broker——本类的 runner 一旦真起消费者就会去连
+     * {@code rocketmq.endpoints}，无 broker 的机器上必然失败。
+     */
+    @Test
+    @DisplayName("退役的 ROCKETMQ_TOPIC / ROCKETMQ_TAG 残留属性被忽略（不报错、不生效）")
+    void retiredTopicAndTagPropertiesAreIgnored() {
+        RocketMqConfig.RocketMqProperties props = bindMqProps(Map.of(
+                "rocketmq.endpoints", "127.0.0.1:8081",
+                "rocketmq.topic", "generation-video",
+                "rocketmq.tag", "step"));
+
+        assertThat(props.endpoints()).isEqualTo("127.0.0.1:8081");
+        assertThat(props.accessKey()).isEmpty();
+        assertThat(props.secretKey()).isEmpty();
+        assertThat(props.sslEnabled()).isFalse();
+        // 记录形状即契约：只有连接参数，没有 topic / tag。
+        assertThat(RocketMqConfig.RocketMqProperties.class.getRecordComponents())
+                .extracting(RecordComponent::getName)
+                .containsExactly("endpoints", "accessKey", "secretKey", "sslEnabled");
+    }
+
+    /**
+     * 走真实 Binder 绑定路径（宽松绑定的未知属性行为只有真绑定才测得准）。
+     * 无任何 {@code rocketmq.*} 属性时 Binder 返回空 Optional，此处按 RocketMqConfig 的同构兜底取全空构造。
+     */
+    private static RocketMqConfig.RocketMqProperties bindMqProps(Map<String, Object> props) {
+        ConfigurableEnvironment env = new StandardEnvironment();
+        env.getPropertySources().addFirst(new MapPropertySource("test", props));
+        return Binder.get(env)
+                .bind("rocketmq", RocketMqConfig.RocketMqProperties.class)
+                .orElseGet(() -> new RocketMqConfig.RocketMqProperties("", "", "", false));
+    }
+
+    private static boolean chainContains(Throwable t, String needle) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (String.valueOf(c.getMessage()).contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

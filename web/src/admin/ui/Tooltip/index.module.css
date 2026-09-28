@@ -1,0 +1,103 @@
+/* ============================================
+ * Tooltip —— 「?」图标 + 悬停/聚焦才显示的说明面板
+ *
+ * 为什么要有这个基元：管理端的解释此前一律铺成整块蓝色 Alert，一屏下来解释比控件还占地方，
+ * 真正要填的东西被顶到折叠线以下。说明该在**需要时**出现。
+ *
+ * ⚠️ 面板经 `createPortal` 挂到 `document.body`（弹窗主体是 `overflow: auto` 的，
+ *    就地绝对定位会被裁掉）。因此：
+ *    · `.panel` 的**颜色只能来自门户根** `.portal`，不能靠 body 继承——body 是产品前台的
+ *      深色主题（白字），而面板是浅色的。见 `Modal/index.module.css` 里同一处坑的完整说明。
+ *    · z-index 要高于弹窗（Modal 的 `.overlay` 是 200，下拉是 300 —— 取 400）。
+ * ============================================ */
+
+/* 图标视觉上 18px，**命中区 24px**（无障碍最小触控尺寸）。用负 margin 抵消多出来的
+   6px，否则图标会把所在的那一行标签撑高——「看着没变大、但点得到」是这里的全部目的。 */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -3px 0 -3px 1px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--admin-radius-pill);
+  background: transparent;
+  color: var(--admin-text-faint);
+  cursor: help;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.trigger:hover,
+.trigger:focus-visible {
+  color: var(--admin-accent);
+  background: var(--admin-accent-soft);
+  outline: none;
+}
+
+/* 展开态：图标落在它自己打开的面板旁边时要看得出「就是它」。 */
+.trigger[aria-expanded='true'] {
+  color: var(--admin-accent);
+  background: var(--admin-accent-soft);
+}
+
+.portal {
+  position: fixed;
+  z-index: 400;
+  /* ⚠️ 门户根必须声明前景色：面板里的文字都靠它，不能等 body 继承 */
+  color: var(--admin-text);
+}
+
+.panel {
+  box-sizing: border-box;
+  max-width: 380px;
+  /* 长说明**封顶并内部滚动**，不让它变成一堵盖住半个屏幕的墙，也不能顶出视口 */
+  max-height: min(60vh, 420px);
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-pop);
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-pop);
+  font-size: var(--admin-font-xs);
+  line-height: 1.65;
+  /* 说明里常带 <b> 与换行语义，正文按块排 */
+  white-space: normal;
+  animation: fade-in 120ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 标题行：和正文分开一点，别读成一整坨 */
+.title {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--admin-text);
+}
+
+.body {
+  color: var(--admin-text-muted);
+}
+
+/* 正文里的强调跟着标题走，避免同一种「重要」在一小块里出现两种颜色 */
+.body strong,
+.body b {
+  color: var(--admin-text);
+  font-weight: 600;
+}
+
+/* 正文里的次级段落（`<div>` 包一层）：拉开行距，读得出这是两件事 */
+.body > div + div,
+.body > p + p {
+  margin-top: 6px;
+}

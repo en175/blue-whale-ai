@@ -3,7 +3,7 @@ import type { GenerationRefItem } from '@/api/jobs';
 import type { VideoMediaRef, VideoMediaRefs, VideoRefRole } from './videoMediaRefs';
 
 function toJobRef(
-  item: Pick<VideoMediaRef, 'assetId' | 'mediaType' | 'materialId'>,
+  item: Pick<VideoMediaRef, 'assetId' | 'mediaType' | 'materialId' | 'duration'>,
   role: GenerationRefItem['role'],
 ): GenerationRefItem {
   const isMaterial = typeof item.materialId === 'string' && /^asset-/i.test(item.materialId);
@@ -11,6 +11,16 @@ function toJobRef(
     role,
     type: item.mediaType,
     ...(isMaterial ? { material_id: item.materialId } : { asset_id: item.assetId }),
+    // ⚠️ 视频参考的时长要带上：视频按 token 计费，火山公式在「含视频输入」时把输入时长
+    //    也算进 token（(输入时长 + 输出时长) × 宽 × 高 × 帧率 ÷ 1024），而时长是参考项的标量属性。
+    //    本地素材服务端还能自己查资产兜底，**素材库引用（material_id）只能靠这里带**。
+    //    图片/音频参考不带（它们不进那条公式），与「只统计 type == video」的服务端口径一致。
+    ...(item.mediaType === 'video' &&
+    typeof item.duration === 'number' &&
+    Number.isFinite(item.duration) &&
+    item.duration > 0
+      ? { duration: item.duration }
+      : {}),
   };
 }
 

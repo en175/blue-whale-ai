@@ -44,12 +44,16 @@
 
 ### 怎么用（写完怎么落盘）
 
-1. `docs/**/*.md` 是**散文文档**（ADR-0025 例外区）：可在 master 直接编辑
+1. `docs/**/*.md` 是**散文文档**，但与代码同路：**不得在本地 master 直改**（原 ADR-0025 直提通道 2026-09-10 已废止，见该 ADR 修正一）
 2. 落盘命令（在仓库根目录）：
    ```bash
-   scripts/commit-spec-on-master.sh -m "<中文描述>"
+   scripts/start-task-worktree.sh --type docs --no-issue --summary <6–15字中文简述>
+   # 在工单分支内编辑后
+   bash scripts/commit-task-for-review.sh -m "docs: <中文描述>"
+   # 用户授权后
+   scripts/publish-review-package.sh --user-authorized --create-pr
    ```
-   自动提交到本地 master，**不 push、不开 PR**
+   工程面 docs 改动 PR 直进 master，不经 release 批次
 3. 素材类（png/json/schema）**不是散文**：随功能 PR 提交，或请工程同事走 worktree 流程
 4. 写完后在工单评论里附文档路径，供评审
 
