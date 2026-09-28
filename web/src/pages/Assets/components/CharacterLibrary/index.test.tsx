@@ -396,3 +396,42 @@ describe('AigcFlatView 分页拉全（IKGC0K）', () => {
     }
   });
 });
+
+function expectImgWithoutCrossOrigin(img: Element | null): asserts img is HTMLImageElement {
+  if (!(img instanceof HTMLImageElement)) throw new Error('preview img missing');
+  expect(img.getAttribute('crossorigin')).toBeNull();
+}
+
+describe('人像库图片预览不加 crossOrigin', () => {
+  it('虚拟人像库缩略图与详情大图都不带 crossorigin', async () => {
+    await renderLibrary();
+
+    expectImgWithoutCrossOrigin(mountNode.querySelector('img[alt="人像图片"]'));
+
+    await act(async () => { assetCardOf('img[alt="人像图片"]').click(); });
+
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expectImgWithoutCrossOrigin(dialog?.querySelector('img'));
+  });
+
+  it('真人人像库分组内缩略图与详情大图都不带 crossorigin', async () => {
+    listAssetGroups.mockResolvedValue({
+      Items: [{ Id: 'lg-1', Name: '真人A', GroupType: 'LivenessFace' }],
+    });
+    listAssets.mockResolvedValue({
+      Items: [
+        { Id: 'live-1', Name: '真人图片', URL: 'https://example.test/live.jpg', GroupId: 'lg-1', AssetType: 'Image', Status: 'Active' },
+      ],
+    });
+    await renderLibrary({ groupType: 'LivenessFace' });
+
+    await act(async () => { mountNode.querySelector<HTMLElement>(`.${styles.groupCard}`)!.click(); });
+
+    expectImgWithoutCrossOrigin(mountNode.querySelector('img[alt="真人图片"]'));
+
+    await act(async () => { assetCardOf('img[alt="真人图片"]').click(); });
+
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expectImgWithoutCrossOrigin(dialog?.querySelector('img'));
+  });
+});
