@@ -13,7 +13,6 @@ allowBuilds:
   sharp: true
   tos-crc64-js: false
   unrs-resolver: true
-  ffmpeg-static: true
 
 # ⚠️ 注册必须留在根 manifest：pnpm 只读根 pnpm-workspace.yaml 的 patchedDependencies，
 #    写进 backend/package.json 会被**静默忽略**（不报错、不告警、lockfile 无条目）。

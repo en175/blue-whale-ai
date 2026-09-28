@@ -16,9 +16,6 @@ RUN npm install --global pnpm@11.17.0 --registry=https://registry.npmmirror.com
 # 只认 pnpm_config_* 前缀（同上游 IK6GLP 对 blue_whale_web/Dockerfile 的修法）。
 ENV pnpm_config_registry=https://registry.npmmirror.com
 
-# ffmpeg-static postinstall 默认从 GitHub 下二进制，国内构建超时（backend/Dockerfile 同款处置）。
-ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
-
 WORKDIR /workspace
 COPY . .
 
