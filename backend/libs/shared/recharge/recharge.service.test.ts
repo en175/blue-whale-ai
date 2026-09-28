@@ -22,7 +22,7 @@ import {
 } from "./recharge.testlib.js";
 import { creditsExpireAt } from "./credits-validity.js";
 import { GRANT_RETRY_WINDOW_MS } from "./recharge-grant-sweeper.js";
-import { deriveCredits, RechargeService } from "./recharge.service.js";
+import { RechargeService } from "./recharge.service.js";
 /* ============================================
  * 充值到账的账实一致：这是钱路径，测的是「会不会多发一次」「会不会按错的数发」。
  *
@@ -117,7 +117,9 @@ describe("RechargeService — 下单", () => {
     expect(row?.bonus_credits).toBe(0n);
     expect(row?.first_purchase_state).toBe("unknown");
     expect(row?.first_purchase_eligible).toBe(0);
-    // 权限结果是**判出来的**（不是写死的常量）：这一列要能回答「当时到底判没判」
+    // 权限结果落库**只可能是 allowed**（被拒的用户在下单路径上已经吃了 403，建不了单），
+    // 所以写入侧写的是常量、不是一个走不到三元 —— 这一列现在的意义是
+    // 「记下判定发生在哪」：判定确实在下单路径上发生过，结果随单落库
     expect(row?.permission_result).toBe("allowed");
     expect(row?.config_version).toBe(3);
     // ⚠️ 有效期快照的是**月数**（运营在后台配的那个数），不是算好的时刻：
@@ -595,6 +597,43 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
     expect(state.status).toBe("paid");
   });
 
+  it("★ 标成 `grant_failed` 的单，用户轮询也**补发**（两条自愈路径行为一致）", async () => {
+    // ⚠️ 这条守的是「单子坏了时，两条自愈路径不该不一样」：`grant_failed` 与
+    //    `paid_pending` 说的是同一件事（钱到了、积分没发出去），只是失败次数多到被标了出来。
+    //    此前只有 `paid_pending` 走补发，于是用户**守着页面也推不动**一笔异常单 ——
+    //    只有扫描器能推，而扫描器超窗（默认 2 小时）就停了。
+    //
+    //    窗口与限流 `retryFulfill` 内部已有（下面两条用例各自钉住），这里钉的是**分派**：
+    //    `grant_failed` 必须进得了那条分支。
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    orders.get(created.tradeNo)!.status = "grant_failed";
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+
+    expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
+    expect(state.status).toBe("paid");
+  });
+
+  it("★ `grant_failed` 的超窗单：同样只回状态、不再打 billing（补发规则对它一并生效）", async () => {
+    const http = makeHttp(2);
+    grpcActiveCatalog();
+    const { service, orders } = await makeService();
+    const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
+    const row = orders.get(created.tradeNo)!;
+    row.status = "grant_failed";
+    row.paid_pending_at = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+    const state = await service.getOrderStatus({ userId: 9001, tradeNo: created.tradeNo });
+
+    expect(http.grantBodies).toHaveLength(0);
+    // 如实回原状态（不是替人改成 paid、也不是退回 paid_pending）
+    expect(state.status).toBe("grant_failed");
+    expect(orders.get(created.tradeNo)?.status).toBe("grant_failed");
+  });
+
   it("★ 补发走限流：30 秒内用户轮询多次，只打一次 billing", async () => {
     // 这段守的是「billing 挂掉时被打爆」：前端每 3 秒轮一次，每次补发都是一次真实的
     // billing 调用 —— 不限流的话一个开着弹窗的用户每天就是 2.8 万次注定失败的调用
@@ -661,21 +700,6 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
     await expect(
       service.getOrderStatus({ userId: 1234, tradeNo: created.tradeNo }),
     ).rejects.toThrow(/订单不存在/);
-  });
-});
-
-describe("deriveCredits — 保留给自定义充值的反算（档位路径已不再用它）", () => {
-  it("按原价折算并取整（账本只有整数积分）", () => {
-    // ⚠️ 2026-09-27 起**没有任何档位路径调用它**：档位到账积分读 `topup_tiers.base_credits`
-    //    （配置值）—— 充值常有折扣，¥499 的档给 7,500 而不是 7,485。
-    //    它留着是给自定义充值（模块 B，未做）做反算：用户要「500 积分」时折回该付多少钱。
-    //    谁要是把它接回档位路径，上面那条 TIER.baseCredits ≠ 原价×换算率 的断言就会红。
-    expect(deriveCredits(100, 15)).toBe(1500);
-    expect(deriveCredits(99, 15)).toBe(1485);
-    expect(deriveCredits(1, 1)).toBe(1);
-    // 改口径 = 改目录，不改代码
-    expect(deriveCredits(100, 20)).toBe(2000);
-    expect(deriveCredits(100, 7)).toBe(700);
   });
 });
 

@@ -164,9 +164,20 @@ export class DashboardService {
         //    行为与改前**逐字相同**，但注释、提交信息、以及一条只断言「查询形状」的 mock 测试
         //    都宣称它修好了 —— 一条绿着的假修复，而它管的是收入报表。
         //
-        //    所以：`paid_at` 为空时退回 `paid_pending_at`（`markPaidPending` 写的那一列，
-        //    见 `recharge-order-repo` 里「不能用 gmt_modified 顶替」的论证）。
-        OR: [{ paid_at: window }, { paid_at: null, paid_pending_at: window }],
+        //    所以「钱到的时刻」是**一个**表达式：`paid_at`，为空时退回 `paid_pending_at`
+        //    （`markPaidPending` 写的那一列，见 `recharge-order-repo` 里「不能用 gmt_modified
+        //    顶替」的论证），再为空时退回下单时刻 `gmt_create` —— 三段必须一起落在同一个
+        //    时刻表达式上，与扫描器（`listGrantsToRetry`）的写法同宗。
+        //
+        //    ⚠️ **第三段不是保险，是必须的**：`paid_pending_at` 是迁移 051 才加的列，
+        //    051 之前进入 `paid_pending` 的存量单那一列是 NULL —— 少了它，那些单会
+        //    **同时**被第一段（`paid_at` 为 NULL）与第二段（`paid_pending_at` 为 NULL）
+        //    过滤掉，正好掉进两段口径中间的缝里，实收金额照样低报。
+        OR: [
+          { paid_at: window },
+          { paid_at: null, paid_pending_at: window },
+          { paid_at: null, paid_pending_at: null, gmt_create: window },
+        ],
       },
       _sum: { credits: true, amount_fen: true },
     });

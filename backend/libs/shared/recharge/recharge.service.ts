@@ -263,11 +263,15 @@ export interface OrderSpec {
   /**
    * 下单时服务端判定的权限结果快照。
    *
-   * <p>⚠️ 它**必须由真实判定算出来**，不能是个写死的常量：这一列要回答的是
-   * 「这单当时到底判过权限没有」。写死 `allowed` 会让一笔本应被拒的单也记「权限通过」，
-   * 事后对账/客服拿这一列去查，查到的是一句假话。
-   * （当前实现里被拒的用户根本建不了单，所以落库的值只可能是 `allowed`；
-   * 但它是**判定出来的** allowed，不是常量——将来加入别的判定分支时这一列自动正确。）
+   * <p>⚠️ **落库只可能是 `allowed`**：判定为假时下单路径上已经抛了 403，
+   * 被拒的用户**根本建不了单**，这一列不存在第二个取值。
+   *
+   * <p>所以写入侧写的是**常量**，不是 `allowed ? "allowed" : "denied"` 那样的三元 ——
+   * 那个 `denied` 分支不可达，留着它只会让下一个人以为这一列真的有两种取值。
+   *
+   * <p>这一列现在的意义是「**记下判定发生在哪**」：判定确实在下单路径上发生过
+   * （不是别处补写的），结果随这一单一起落库。将来真的出现可落库的第二种结果时，
+   * 要改的是这里与 `buildTierOrderSpec` 那一处，而不是把三元加回来。
    */
   permissionResult?: string;
   /** 网关订单标题 / 内容 */
@@ -289,24 +293,15 @@ export interface RechargeGrantRetryResult {
   status: RechargeOrderStatus;
 }
 
-/**
-
-/**
- * 到账积分 = 原价（元）× 换算率，四舍五入到整数积分。
- *
- * <p>⚠️ **现役代码里没有调用方，而且模块 B 落地后仍然没有**（2026-09-27）：
- *   · 档位到账积分读 `topup_tiers.base_credits` 这个**配置值**（充值常有折扣：
- *     ¥499 → 7,500 而不是 7,485）；
- *   · 自定义充值要的是**反算** —— 用户输入「我要 500 积分」折回该付多少钱。
- *     那是 **除**（`customPriceFen` = `credits × 100 ÷ creditsPerYuan`），
- *     不是这个乘。所以它没有被接进模块 B，**这不是漏了**。
- *
- * <p>保留它是因为删除一个已导出的符号是独立决策（要连着它的单测一起动），
- * 而它现在**没有任何生产调用方** —— 谁要清理死代码，从这里开始，别再给它找活干。
- */
-export function deriveCredits(originalPrice: number, creditsPerYuan: number): number {
-  return Math.round(originalPrice * creditsPerYuan);
-}
+// ⚠️ 这里曾经有一个 `deriveCredits(原价, 换算率)`（到账积分 = 原价 × 换算率）。
+//    它在 2026-09-27 被删掉，因为**两条路都不用它**、而且它的注释在骗人：
+//      · 档位到账积分读 `topup_tiers.base_credits` 这个**配置值**（充值常有折扣：
+//        ¥499 → 7,500 而不是 499 × 15 = 7,485），不派生；
+//      · 自定义充值要的是**反算**（用户输入「我要 500 积分」折回该付多少钱），
+//        那是 **除** —— 见 `customPriceFen` = `credits × 100 ÷ creditsPerYuan`。
+//    它的注释却写着「留给自定义充值反算」，与模块 B 的实际实现相反，会诱导下一个人
+//    真把它接回档位路径（那就把「积分是配置值」这条又推翻一次）。
+//    所以删掉它和它的单测：一个没有调用方、注释还反着说的导出符号，留着只有害处。
 
 @Injectable()
 export class RechargeService {
@@ -493,9 +488,12 @@ export class RechargeService {
       // 有效期快照的是**月数**（运营在后台配的那个数），到期时刻发放那一刻按
       // 支付成功时间折出来 —— 起算点见 `credits-validity.ts`
       creditsValidMonths: tier.creditsValidMonths,
-      // 真实判定结果落快照（上面刚判过；被拒的单根本到不了这里）。
-      // 写成常量 `allowed` 的话，这一列就回答不了「当时到底判没判」
-      permissionResult: allowed ? "allowed" : "denied",
+      // ⚠️ **常量 `allowed`，不是三元**：上面判为假时已经抛了 403，被拒的用户
+      //    根本到不了这里 —— `denied` 分支是**不可达**的，留着一个走不到的三元
+      //    只会让下一个人以为这一列真的有两种取值。
+      //    这一列现在的意义是「**记下判定发生在哪**」：判定（上面那次 canPurchaseTier）
+      //    确实发生在这个下单路径上，结果随单落库，不是别处补写的。
+      permissionResult: "allowed",
       subject: tier.name || "积分充值",
       body: tier.name || `积分充值 ${credits} 积分`,
     };
@@ -610,13 +608,21 @@ export class RechargeService {
     tradeNo: string;
   }): Promise<RechargeOrderStateView> {
     const order = await this.loadOwnOrder(input.userId, input.tradeNo);
-    // ⚠️ 两条自愈路径，都由**用户轮询**触发，但做的事不同：
+    // ⚠️ 三条自愈路径，都由**用户轮询**触发，但做的事不同：
     //   · `pending`      —— 还不知道钱到没到，要**问网关**（reconcile）
     //   · `paid_pending` —— 钱已确认收到、只是积分没发成功，**不必再问网关**，直接补发
+    //   · `grant_failed` —— 同上，只是发放反复失败、被对账任务标了出来（见下）
     //
     // ⚠️ 第二支不能省。网关重投窗口只有约 15 分钟，过了就没人补发；而用户只要还开着页面
     //    就会一直轮询 —— 少了它，一次发放失败会让用户**永远**停在「发放中」，
     //    比拆状态之前的旧行为还差（那时单留在 `pending`，轮询会经 reconcile 补发）。
+    //
+    // ⚠️ **第三支（`grant_failed`）是 2026-09-27 补的**，理由与第二支同源：
+    //    它同样是「钱到了、积分没发出去」，只是失败次数多到被标成了异常。
+    //    不接这一支的话，用户守着页面也**推不动**一笔异常单 —— 只有扫描器能推，
+    //    而扫描器超窗（默认 2 小时）就停了。这与本仓「单子坏了时，两条自愈路径
+    //    的行为不该不一样」那条纪律冲突：同一笔单，用户在不在看页面不该决定它能不能被救。
+    //    窗口与限流 `retryFulfill` 内部已经有了（超窗就只是如实回状态），不必在这里再判一次。
     //
     //    补发本身幂等：`fulfill` 先 `markPaidPending`（条件更新，已达则不动作），
     //    发放走 billing 的 `purchased:{tradeNo}` 幂等键，重复调用不会重复发积分。
@@ -626,7 +632,8 @@ export class RechargeService {
     const current =
       order.status === RECHARGE_ORDER_STATUS.pending
         ? await this.reconcile(order)
-        : order.status === RECHARGE_ORDER_STATUS.paidPending
+        : order.status === RECHARGE_ORDER_STATUS.paidPending ||
+            order.status === RECHARGE_ORDER_STATUS.grantFailed
           ? await this.retryFulfill(order)
           : order;
 
@@ -829,8 +836,8 @@ export class RechargeService {
    *     billing 抖动延迟半小时才重试（而用户正盯着「等待支付结果…」）；
    *   · **窗口**用扫描器同一个**可配**值（`grantRetryWindowMs`，默认 2 小时），起点同样是
    *     「钱到的时刻」（`paid_pending_at`）。超窗就不再打 billing，只把**如实的状态**回给前端
-   *     （订单仍是 `paid_pending`，等主动对账/人工处理），让界面能说「发放异常」，
-   *     而不是永远转圈、也不是我们编一个「已到账」。
+   *     （订单仍停在它原来那个状态 —— `paid_pending` 或 `grant_failed`，等主动对账/人工处理），
+   *     让界面能说「发放异常」，而不是永远转圈、也不是我们编一个「已到账」。
    *
    * <p>⚠️ 窗口**两条路必须同一个数**（2026-09-27 评审修正）。它此前在这里是硬编码的
    * `GRANT_RETRY_WINDOW_MS`，而扫描器用的是 `readRetryWindowMs(env)` 读出来的可配值 ——
@@ -861,7 +868,7 @@ export class RechargeService {
         this.logger.warn(
           `补发已超出 ${Math.round(this.grantRetryWindowMs / 60_000)} 分钟重试窗口，不再打 billing：`
             + `tradeNo=${order.tradeNo} 已等=${Math.round(held / 60_000)} 分钟`
-            + `（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，等主动对账或人工处理）`,
+            + `（订单停在 ${order.status}，等主动对账或人工处理）`,
           { event: "recharge.grant_retry_window_exceeded", trade_no: order.tradeNo },
         );
       }
@@ -873,7 +880,7 @@ export class RechargeService {
       await this.fulfill(order);
     } catch (error) {
       this.logger.warn(
-        `补发失败 tradeNo=${order.tradeNo}（订单停在 ${RECHARGE_ORDER_STATUS.paidPending}，`
+        `补发失败 tradeNo=${order.tradeNo}（订单停在 ${order.status}，`
           + `用户轮询会继续重试）：${error instanceof Error ? error.message : String(error)}`,
       );
     }
