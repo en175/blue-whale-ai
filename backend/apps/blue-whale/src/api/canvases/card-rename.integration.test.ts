@@ -66,8 +66,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
-        // channel 自 040 迁移起为必填封闭枚举（取代 channel_parser/features.image_protocol）；
-        // 取默认渠道 seedream-image，与迁移前默认解析口径一致
+        // channel 为必填封闭枚举，取迁移的默认渠道 seedream-image
         channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },

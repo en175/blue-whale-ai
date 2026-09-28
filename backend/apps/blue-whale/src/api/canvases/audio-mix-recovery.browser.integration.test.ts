@@ -28,6 +28,8 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueAudioMixJob: vi.fn(async () => {}),
@@ -35,6 +37,21 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   createRocketMqGenerationProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
   closeGenerationQueue: vi.fn(async () => {}),
 }));
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 /** 浏览器→Nest→隔离 MySQL→Java Worker→本地 MediaKit/存储替身→浏览器播放。 */
 describe.skipIf(process.env.IKI697_BROWSER !== "1")(
@@ -134,7 +151,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
       Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
       Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService,
-        CanvasService, MaterialService, AssetService], GenerationJobsController);
+        CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
       class HarnessModule {}
       Module({ controllers: [CanvasesController, ProjectsController, JobsController, AudioMixesController,
         AssetsController, ProjectAssetsController, GenerationModelsController, GenerationJobsController], providers: [
@@ -149,8 +166,10 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
         { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
         { provide: MaterialService, useValue: {} },
+        { provide: IdentityService, useValue: new IdentityService(prisma) },
       ] })(HarnessModule);
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+      app.useGlobalFilters(new AllExceptionsFilter());
       app.use(json({ limit: "16mb" }));
       app.setGlobalPrefix("api");
       app.use((request: { user: unknown; headers: Record<string, string> }, _response: unknown, next: () => void) => {

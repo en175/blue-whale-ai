@@ -15,6 +15,26 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+
+// 计费基线起建任务必接 billing Hold（fail closed、无开关），控制器第 7 参也新增 IdentityService。
+// 本套件被测对象不是计费：进程内假客户端放行 hold/quote。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      hold: async () => ({ reservedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, frozenCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], nextPageToken: "" }),
+    }),
+  };
+});
 
 // IKDMQV「失败重试与修改后重新生成」公开接口集成（契约沿用 IKDMQQ/QR/QS/QT）：
 // 直接重试沿用失败任务冻结快照（来源正文变化不隐式替换原输入、历史任务不被改写）；
@@ -45,6 +65,8 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
+        // channel 为必填封闭枚举，取默认渠道 seedream-image
+        channel: "seedream-image",
       },
       update: { features: {} },
     });
@@ -63,6 +85,8 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_duration: 5,
         supported_durations: { min: 4, max: 12, step: 1 },
         features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true },
+        // channel 为必填封闭枚举；video 行的渠道就是媒介本身
+        channel: "seedream-video",
       },
       update: { features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true } },
     });
@@ -79,12 +103,14 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_size: "mp3",
         default_aspect_ratio: "1:1",
         features: {},
+        // channel 为必填封闭枚举；audio 行的渠道就是媒介本身
+        channel: "seedream-audio",
       },
       update: { features: {} },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -97,8 +123,13 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
+      // 造素材校验门（IKFYHJ / ADR-0087）自 MaterialService 取仓库面、自 AssetService 解析本地素材绑定。
+      { provide: MaterialService, useValue: new MaterialService(prisma) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -381,7 +412,8 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     const retryRow = await readJob(retried.data.generation_job_id as string);
     expect(retryRow!.input.prompt).toBe("轻快的海浪声");
     expect(retryRow!.input.model_id).toBe(AUDIO_MODEL);
-    expect(retryRow!.input.text_attachments).toBeUndefined();
+    // IKFCXE 起音频与图片/视频同源推导文本附件，无附件时冻结为空数组（不再是缺字段）
+    expect(retryRow!.input.text_attachments).toEqual([]);
   });
 
   // 浏览器段（工单「范围与测试约定」）：真实浏览器 + 真实 Canvas/生成业务 API + 隔离 MySQL。

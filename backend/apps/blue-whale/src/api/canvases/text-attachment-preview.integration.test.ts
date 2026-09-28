@@ -40,6 +40,8 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
+        // channel 为必填封闭枚举；取本行 capability_type 对应的默认渠道
+        channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
     });
