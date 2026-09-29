@@ -205,6 +205,13 @@
   white-space: nowrap;
 }
 
+/* IKJ794：全能参考被动提示行（Seedance 2.5 + 全能参考 + 已挂参考视频时显示；与画布 BottomDialog 同文案） */
+.followHint {
+  font-size: var(--font-size-xs);
+  color: var(--chat-fg-muted);
+  line-height: 1.4;
+}
+
 /* ---- Skill 按钮 ---- */
 .skillBtn {
   display: flex;
