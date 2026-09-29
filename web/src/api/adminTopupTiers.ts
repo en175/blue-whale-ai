@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { http, apiRequestWithMeta } from './http';
 
 /**
@@ -229,5 +230,36 @@ export interface SyncTiersData {
 export function syncTopupTiersToGo() {
   return apiRequestWithMeta<SyncTiersData>('/api/admin/topup-tiers/sync', {
     method: 'PUT',
+  });
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+export const topupTierKeys = {
+  all: ['admin-topup-tiers'] as const,
+  list: () => [...topupTierKeys.all, 'list'] as const,
+};
+
+export function topupTiersOptions() {
+  return queryOptions({
+    queryKey: topupTierKeys.list(),
+    queryFn: () => fetchTopupTiers(),
+  });
+}
+
+export const topupTierPreviewKeys = {
+  all: ['admin-topup-tier-preview'] as const,
+};
+
+/**
+ * 用户端充值页效果预览。
+ *
+ * <p>服务端只给**已上架且未失效**的档位（草稿与下架进不来），所以运营在这里看到的顺序
+ * 就是用户在充值页看到的顺序 —— 这一份和档位列表**不是同一份数据**，各自成 key。
+ */
+export function topupTierPreviewOptions() {
+  return queryOptions({
+    queryKey: topupTierPreviewKeys.all,
+    queryFn: () => fetchTopupTierPreview(),
   });
 }

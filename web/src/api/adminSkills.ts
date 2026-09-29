@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { http, apiRequest } from './http';
 
 /** 官方技能（管理视图） */
@@ -61,4 +62,30 @@ export function deleteAdminSkillCategory(name: string) {
     `/api/admin/skills/categories/${encodeURIComponent(name)}`,
     { method: 'DELETE' },
   );
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+export const adminSkillKeys = {
+  all: ['admin-skills'] as const,
+  list: () => [...adminSkillKeys.all, 'list'] as const,
+};
+
+export function adminSkillsOptions() {
+  return queryOptions({
+    queryKey: adminSkillKeys.list(),
+    queryFn: () => fetchAdminSkills(),
+  });
+}
+
+export const adminSkillCategoryKeys = {
+  all: ['admin-skill-categories'] as const,
+  list: () => [...adminSkillCategoryKeys.all, 'list'] as const,
+};
+
+export function adminSkillCategoriesOptions() {
+  return queryOptions({
+    queryKey: adminSkillCategoryKeys.list(),
+    queryFn: () => fetchAdminSkillCategories(),
+  });
 }

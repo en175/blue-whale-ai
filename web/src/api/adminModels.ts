@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { http, apiRequest } from './http';
 
 /** 模型分辨率档位。
@@ -156,5 +157,19 @@ export function setAdminModelDefault(id: string) {
 export function deleteAdminModel(id: string) {
   return apiRequest<unknown>(`/api/admin/models/${id}`, {
     method: 'DELETE',
+  });
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+export const adminModelKeys = {
+  all: ['admin-models'] as const,
+  list: () => [...adminModelKeys.all, 'list'] as const,
+};
+
+export function adminModelsOptions() {
+  return queryOptions({
+    queryKey: adminModelKeys.list(),
+    queryFn: () => fetchAdminModels(),
   });
 }

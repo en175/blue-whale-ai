@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 
 /** 审计日志记录 */
@@ -64,5 +65,21 @@ export function createOperationLog(params: CreateOperationLogParams) {
   return apiRequest<OperationLog>('/api/admin/operation-logs', {
     method: 'POST',
     body: JSON.stringify(params),
+  });
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+/** ⚠️ `params` 整份进 key：它是服务端筛选（分类 / 关键词 / 时间范围），不是本地过滤。 */
+export const operationLogKeys = {
+  all: ['admin-operation-logs'] as const,
+  list: (params: Parameters<typeof fetchOperationLogs>[0]) =>
+    [...operationLogKeys.all, 'list', params ?? {}] as const,
+};
+
+export function operationLogsOptions(params: Parameters<typeof fetchOperationLogs>[0] = {}) {
+  return queryOptions({
+    queryKey: operationLogKeys.list(params),
+    queryFn: () => fetchOperationLogs(params),
   });
 }

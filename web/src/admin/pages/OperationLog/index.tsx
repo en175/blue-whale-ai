@@ -4,10 +4,17 @@
  *
  * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**——
  * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
+ *
+ * 取数走 TanStack Query（IKJ058）：`queryOptions` 工厂在 `@/api/adminOperationLogs`，
+ * 页面不再手写 `loading / loadError / finally` 那套三态样板。
  * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { fetchOperationLogs, type OperationLog } from '@/api/admin';
+import {
+  operationLogsOptions,
+  type OperationLog as OperationLogRow,
+} from '@/api/adminOperationLogs';
 import { isApiError } from '@/api/http';
 import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
 
@@ -86,9 +93,6 @@ export default function OperationLog() {
   const [to, setTo] = useState('');
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
 
   /** 搜索输入 300ms 防抖，避免每次按键都请求 */
   useEffect(() => {
@@ -96,28 +100,26 @@ export default function OperationLog() {
     return () => clearTimeout(t);
   }, [search]);
 
-  /** 拉取日志（筛选变化时重新请求，服务端时间倒序） */
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const list = await fetchOperationLogs({
-        category: category === 'all' ? undefined : category,
-        dateFrom: from ? dayToIso(from) : undefined,
-        dateTo: to ? dayToIso(to) : undefined,
-        searchText: searchDebounced || undefined,
-      });
-      setLogs(list);
-    } catch (e) {
-      setLoadError(isApiError(e) ? e.message : '日志加载失败，请稍后重试');
-    } finally {
-      setLoading(false);
-    }
-  }, [category, from, to, searchDebounced]);
-
-  useEffect(() => {
-    void loadLogs();
-  }, [loadLogs]);
+  /**
+   * 拉取日志（筛选变化时重新请求，服务端时间倒序）。
+   *
+   * <p>筛选条件是**服务端参数**，所以它们整份进 queryKey —— 换一个日期范围就是另一份数据，
+   * 不是对同一份的本地过滤。缓存的命中与失效都由此决定。
+   */
+  const list = useQuery(
+    operationLogsOptions({
+      category: category === 'all' ? undefined : category,
+      dateFrom: from ? dayToIso(from) : undefined,
+      dateTo: to ? dayToIso(to) : undefined,
+      searchText: searchDebounced || undefined,
+    })
+  );
+  const logs: OperationLogRow[] = list.data ?? [];
+  const loadError = list.isError
+    ? isApiError(list.error)
+      ? list.error.message
+      : '日志加载失败，请稍后重试'
+    : '';
 
   return (
     <Page>
@@ -161,20 +163,20 @@ export default function OperationLog() {
         </thead>
         <tbody>
           {/* 三态统一走 Empty：加载中 / 加载失败（可重试）/ 空数据 */}
-          {loading && (
+          {list.isPending && (
             <tr>
               <td colSpan={6}>
                 <Empty message="加载中…" />
               </td>
             </tr>
           )}
-          {!loading && loadError && (
+          {!list.isPending && list.isError && (
             <tr>
               <td colSpan={6}>
                 <Empty
                   message={loadError}
                   extra={
-                    <Button size="sm" onClick={() => void loadLogs()}>
+                    <Button size="sm" onClick={() => void list.refetch()}>
                       重试
                     </Button>
                   }
@@ -182,15 +184,15 @@ export default function OperationLog() {
               </td>
             </tr>
           )}
-          {!loading && !loadError && logs.length === 0 && (
+          {!list.isPending && !list.isError && logs.length === 0 && (
             <tr>
               <td colSpan={6}>
                 <Empty message="暂无日志" />
               </td>
             </tr>
           )}
-          {!loading &&
-            !loadError &&
+          {!list.isPending &&
+            !list.isError &&
             logs.map((l) => {
               const detailText = formatDetail(l.detail);
               return (

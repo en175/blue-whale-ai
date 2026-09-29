@@ -6,17 +6,18 @@ import type { ReactNode } from 'react';
  * 呈现层全部走 ../../ui 的组件，**本页没有自己的样式文件**——
  * 与 SkillManage 同一条纪律：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Eye, EyeOff } from 'lucide-react';
 import {
-  fetchAdminSettings,
+  adminSettingsOptions,
   updateAdminSettings,
   type SystemCredentials,
   type SystemPolicy,
   type SystemRateLimit,
   type SystemSettings,
   type SystemUpstream,
-} from '@/api/admin';
+} from '@/api/adminSettings';
 import { isApiError } from '@/api/http';
 import {
   Hint,
@@ -54,26 +55,21 @@ const tabBodyStyle = {
 
 export default function SystemConfig() {
   const [tab, setTab] = useState<TabKey>('upstream');
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）。
-   *  失败提示由 http 层默认 toast 承担，这里只负责收掉 loading，避免卡在「加载中…」。 */
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchAdminSettings();
-      setSettings(data);
-    } catch {
-      /* 已 toast，收掉 loading 露出「未配置」即可 */
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  /**
+   * 设置走 Query（IKJ058）。
+   *
+   * <p>⚠️ 这个读**不显示错误态**：失败提示由 http 层默认 toast 承担，页面收掉 loading、
+   * 露出「未配置」即可 —— 与改前同一条口径，不额外加一处错误文案。
+   */
+  const list = useQuery(adminSettingsOptions());
+  const settings: SystemSettings | null = list.data ?? null;
+  const loading = list.isPending;
 
-  useEffect(() => {
-    void loadSettings();
-  }, [loadSettings]);
+  /** 保存成功后重拉（凭证回显服务端脱敏值）。 */
+  const loadSettings = async () => {
+    await list.refetch();
+  };
 
   /** 凭证按 key 增量更新 */
   const saveCredential = async (key: keyof SystemCredentials, value: string) => {

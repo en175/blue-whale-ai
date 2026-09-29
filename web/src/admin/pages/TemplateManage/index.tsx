@@ -5,23 +5,25 @@
  * 呈现层全部走 @/admin/ui 的组件，**本页没有自己的样式文件**（原 index.module.css 已删）——
  * 这是「统一组件风格」的判据：页面只描述结构，样式一处定义在套件里。
  * ============================================ */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
 import {
-  fetchTemplateCards,
   createTemplateCard,
   updateTemplateCard,
   deleteTemplateCard,
   moveTemplateCard,
-  fetchAdminTemplateTags,
   renameAdminTemplateTag,
   setTemplateTagVisibility,
   presignTemplateMedia,
   completeTemplateMedia,
+  templateCardsOptions,
+  templateTagKeys,
+  templateTagsOptions,
   type TemplateCard,
   type TemplateCardPayload,
   type AdminTemplateTag,
-} from '@/api/admin';
+} from '@/api/adminTemplateCards';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import {
@@ -53,10 +55,6 @@ const LAYOUTS: { code: string; label: string }[] = [
 const layoutLabel = (code: string) => LAYOUTS.find((l) => l.code === code)?.label ?? code;
 
 export default function TemplateManage() {
-  const [tags, setTags] = useState<AdminTemplateTag[]>([]);
-  const [templates, setTemplates] = useState<TemplateCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
   const [renameCode, setRenameCode] = useState<string | null>(null);
   const [form, setForm] = useState<{ id?: string } | null>(null);
@@ -66,23 +64,43 @@ export default function TemplateManage() {
 
   const tagName = (code: string) => tags.find((t) => t.tag_code === code)?.label ?? code;
 
-  /** 刷新列表：页面加载 / 切换 tag 筛选 / 操作后 */
-  const load = useCallback((tab: string) => {
-    setLoading(true);
-    setLoadError('');
-    fetchTemplateCards(tab === 'all' ? undefined : tab)
-      .then((list) => setTemplates([...list].sort((a, b) => a.sort_order - b.sort_order)))
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取模板列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
+  // 标签 tabs（后台标签接口）与卡片列表各自成一个 Query（IKJ058）。
+  const queryClient = useQueryClient();
+  const tagsQuery = useQuery(templateTagsOptions());
+  const cardsQuery = useQuery(
+    templateCardsOptions(activeTab === 'all' ? undefined : activeTab),
+  );
+  const tags: AdminTemplateTag[] = tagsQuery.data ?? [];
+  const templates: TemplateCard[] = useMemo(
+    () => [...(cardsQuery.data ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    [cardsQuery.data],
+  );
+  const loading = cardsQuery.isPending;
+  const loadError = cardsQuery.isError
+    ? isApiError(cardsQuery.error)
+      ? cardsQuery.error.message
+      : '获取模板列表失败'
+    : '';
 
-  // 标签 tabs（后台标签接口）
-  useEffect(() => {
-    fetchAdminTemplateTags().then(setTags).catch(() => undefined);
-  }, []);
+  /**
+   * 操作之后刷新卡片列表。
+   *
+   * <p>⚠️ `tab` 参数保留**只是为了不改既有调用点**：换 tab 是换 queryKey 的一件事
+   * （不同的 key = 另一份数据），不是对同一份重新过滤 —— 所以这里只管 refetch。
+   */
+  const load = useCallback(
+    (_tab: string) => {
+      void cardsQuery.refetch();
+    },
+    [cardsQuery],
+  );
 
-  // 页面加载 / 切换 tab 刷新卡片列表
-  useEffect(() => load(activeTab), [activeTab, load]);
+  /** 标签的本地同步：缓存里存的就是那一份，写它比再拉一次快，也和改前的本地更新等价。 */
+  const writeTags = (updater: (prev: AdminTemplateTag[]) => AdminTemplateTag[]): void => {
+    queryClient.setQueryData<AdminTemplateTag[]>(templateTagKeys.list(), (prev) =>
+      prev === undefined ? prev : updater(prev),
+    );
+  };
 
   /** 排序：POST /:id/move（同 tag 内上移/下移，边缘后端返回 409），成功后刷新 */
   const move = async (id: string, dir: -1 | 1) => {
@@ -98,7 +116,7 @@ export default function TemplateManage() {
   /** 标签改名：PUT /api/admin/template-tags，成功后本地同步展示名 */
   const handleRename = async (code: string, label: string) => {
     await renameAdminTemplateTag(code, label);
-    setTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, label } : t)));
+    writeTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, label } : t)));
     setRenameCode(null);
   };
 
@@ -107,7 +125,7 @@ export default function TemplateManage() {
     setActionError('');
     try {
       await setTemplateTagVisibility(code, next);
-      setTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, visible: next } : t)));
+      writeTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, visible: next } : t)));
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '切换失败，请稍后重试');
     }

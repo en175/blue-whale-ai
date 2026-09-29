@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { http, apiRequest } from './http';
 
 /** 模板卡片图片 */
@@ -147,5 +148,32 @@ export function moveTemplateImage(id: string, direction: 'up' | 'down') {
   return apiRequest<{ id: string }>(`/api/admin/template-images/${id}/move`, {
     method: 'POST',
     body: JSON.stringify({ direction }),
+  });
+}
+
+// ---------- TanStack Query 工厂（IKJ058 第二步：页面不再各自拼 key） ----------
+
+export const templateCardKeys = {
+  all: ['admin-template-cards'] as const,
+  list: (tagCode?: string) => [...templateCardKeys.all, 'list', tagCode ?? ''] as const,
+};
+
+/** 模板卡列表。`tagCode` 参与 key —— 换标签是不同的一份数据，不是同一份的过滤。 */
+export function templateCardsOptions(tagCode?: string) {
+  return queryOptions({
+    queryKey: templateCardKeys.list(tagCode),
+    queryFn: () => fetchTemplateCards(tagCode),
+  });
+}
+
+export const templateTagKeys = {
+  all: ['admin-template-tags'] as const,
+  list: () => [...templateTagKeys.all, 'list'] as const,
+};
+
+export function templateTagsOptions() {
+  return queryOptions({
+    queryKey: templateTagKeys.list(),
+    queryFn: () => fetchAdminTemplateTags(),
   });
 }

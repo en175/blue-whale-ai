@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 
 /** 支付凭证（GET 回显：secret 字段为脱敏值） */
@@ -73,5 +74,18 @@ export function updateAdminSettings(
   return apiRequest<null>('/api/admin/settings', {
     method: 'PUT',
     body: JSON.stringify(params),
+  });
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+export const adminSettingsKeys = {
+  all: ['admin-settings'] as const,
+};
+
+export function adminSettingsOptions() {
+  return queryOptions({
+    queryKey: adminSettingsKeys.all,
+    queryFn: () => fetchAdminSettings(),
   });
 }

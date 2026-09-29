@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import UserManage from './index';
 
@@ -10,7 +11,33 @@ const adminApi = vi.hoisted(() => ({
   fetchOperationLogs: vi.fn(),
 }));
 
-vi.mock('@/api/admin', () => adminApi);
+// 页面走 Query（IKJ058）：mock 目标换成域模块，且**工厂本身也要桩** ——
+// `vi.mock` 换的是模块导出的绑定，而 `adminUsersOptions` 内部引用的仍是模块自己的
+// `fetchAdminUsers`，只桩 fetch 不生效。
+vi.mock('@/api/adminUsers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/adminUsers')>();
+  return {
+    ...actual,
+    ...adminApi,
+    adminUsersOptions: (params: Parameters<typeof actual.fetchAdminUsers>[0]) => ({
+      queryKey: actual.adminUserKeys.list(params),
+      queryFn: () => adminApi.fetchAdminUsers(params),
+    }),
+  };
+});
+
+// 详情弹窗的审计日志也走 Query（IKJ058）—— 一并桩掉，
+// 否则单测会**真的往外发请求**（页面从 `@/api/adminOperationLogs` 取它）。
+vi.mock('@/api/adminOperationLogs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/adminOperationLogs')>();
+  return {
+    ...actual,
+    operationLogsOptions: (params: Parameters<typeof actual.fetchOperationLogs>[0]) => ({
+      queryKey: actual.operationLogKeys.list(params),
+      queryFn: () => Promise.resolve([]),
+    }),
+  };
+});
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -20,7 +47,17 @@ async function renderPage() {
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(UserManage));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        {
+          client: new QueryClient({
+            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+          }),
+        },
+        createElement(UserManage),
+      ),
+    );
   });
   await act(async () => {
     await Promise.resolve();
@@ -28,6 +65,8 @@ async function renderPage() {
 }
 
 beforeEach(() => {
+  // 页面走 Query（IKJ058）：让 Query 的更新同步落地，否则读完一次 Promise 列表还是空的
+  notifyManager.setScheduler((cb) => cb());
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   adminApi.fetchAdminUsers.mockResolvedValue({
     list: [
@@ -50,6 +89,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  notifyManager.setScheduler((cb) => {
+    setTimeout(cb, 0);
+  });
   vi.clearAllMocks();
   if (root) await act(async () => root.unmount());
   mountNode?.remove();

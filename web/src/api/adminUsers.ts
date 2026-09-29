@@ -4,6 +4,7 @@
  * 从 admin.ts 拆出来的域模块（IKJ058）：一个文件一个领域，
  * 读接口自带 `queryOptions` 工厂，页面不必再各自拼 key。
  * ============================================ */
+import { queryOptions } from '@tanstack/react-query';
 import { apiRequest } from './http';
 import { useAuthStore } from '@/stores/auth';
 
@@ -64,5 +65,26 @@ export function manageAdminUser(
   return apiRequest<null>(`/api/admin/users/${userId}/manage`, {
     method: 'POST',
     body: JSON.stringify(params),
+  });
+}
+
+// ---------- TanStack Query 工厂 ----------
+
+/**
+ * 用户列表。
+ *
+ * <p>⚠️ `params` **整份进 key**（含分页与关键词）：它是服务端筛选的入参，
+ * 不是本地对同一份数据的过滤 —— 放不进 key 就会出现「换了关键词但命中缓存旧结果」。
+ */
+export const adminUserKeys = {
+  all: ['admin-users'] as const,
+  list: (params: Parameters<typeof fetchAdminUsers>[0]) =>
+    [...adminUserKeys.all, 'list', params ?? {}] as const,
+};
+
+export function adminUsersOptions(params: Parameters<typeof fetchAdminUsers>[0] = {}) {
+  return queryOptions({
+    queryKey: adminUserKeys.list(params),
+    queryFn: () => fetchAdminUsers(params),
   });
 }

@@ -6,8 +6,14 @@
  *
  * 两个弹窗各自独立成文件（PlanFormModal / PreviewModal），数据映射与文案在 plan.ts：
  * 本文件撞过 max-lines 上限，拆的是**版面**，不是把规则挪走。
+ *
+ * 取数走 TanStack Query（IKJ058）。⚠️ 这一页与另两页不同：它展示的是 `toPlan()` 映射过的
+ * **`Plan[]` 视图**，而缓存里存的是**原始 `{tiers}`** —— 两者没有反向映射。所以每一处写操作
+ * 都要把「服务端返回的原始记录」写回缓存（见 `setTiers`），而不是像旧代码那样在视图空间里改。
+ * 这样做是为了**保住乐观更新**：上下移点下去要立刻动。
  * ============================================ */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   Eye,
@@ -18,14 +24,18 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import {
-  fetchTopupTiers,
+  topupTierKeys,
+  topupTierPreviewKeys,
+  topupTiersOptions,
   createTopupTier,
   updateTopupTier,
   deleteTopupTier,
   sortTopupTiers,
   syncTopupTiersToGo,
+  type TopupTier,
+  type TopupTierList,
   type TopupTierStatus,
-} from '@/api/admin';
+} from '@/api/adminTopupTiers';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Alert, Badge, Button, Empty, Page, PageHeader, Select, Table } from '../../ui';
@@ -55,9 +65,48 @@ const filterOptions: { key: FilterKey; label: string }[] = [
 ];
 
 export default function RechargePlans() {
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const queryClient = useQueryClient();
+  const list = useQuery(topupTiersOptions());
+
+  /** 刷新全部档位（含停用），按 sortOrder 排序展示。 */
+  const plans: Plan[] = useMemo(
+    () =>
+      [...(list.data?.tiers ?? [])].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan),
+    [list.data],
+  );
+
+  /**
+   * 把原始档位记录写回缓存。
+   *
+   * <p>⚠️ 页面用 `Plan[]`、缓存存原始 `TopupTier[]`，**两者没有反向映射** ——
+   * 所以每一处写操作都拿**原始记录**来更新（服务端返回的那条，或本地改好 `sortOrder` 的那份），
+   * 而不是像旧代码那样在视图空间里替换。
+   */
+  const setTiers = (updater: (prev: TopupTier[]) => TopupTier[]): void => {
+    queryClient.setQueryData<TopupTierList>(topupTierKeys.list(), (prev) =>
+      prev === undefined ? prev : { ...prev, tiers: updater(prev.tiers) },
+    );
+  };
+
+  /**
+   * 档位改完之后让**用户端预览**那一份也失效。
+   *
+   * <p>⚠️ 预览是**另一个 key**（`topupTierPreviewKeys`），而全站 `staleTime` 是 30s ——
+   * 不显式失效的话，运营改完上架/改价后点「用户端预览」，看到的会是**改动前**的档位，
+   * 且界面上没有任何地方提示它是旧的。改前每次打开都无条件重拉，所以这是 Query 化
+   * 带进来的新风险，必须在这里堵住。
+   */
+  const invalidatePreview = (): void => {
+    void queryClient.invalidateQueries({ queryKey: topupTierPreviewKeys.all });
+  };
+
+  /** 按 `id → sortOrder` 覆盖顺序（乐观写与失败回滚共用）。 */
+  const applyOrder = (orderById: Map<string, number>): void => {
+    setTiers((tiers) =>
+      tiers.map((t) => ({ ...t, sortOrder: orderById.get(t.id) ?? t.sortOrder })),
+    );
+  };
+
   const [filter, setFilter] = useState<FilterKey>('all');
   const [form, setForm] = useState<{ id?: string } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -70,20 +119,12 @@ export default function RechargePlans() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
-  /** 刷新全部档位（含停用），按 sortOrder 排序展示；页面加载与加载失败重试都走它 */
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    fetchTopupTiers()
-      .then((data) => {
-        setPlans([...data.tiers].sort((a, b) => a.sortOrder - b.sortOrder).map(toPlan));
-      })
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取档位列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  // 页面加载获取全部档位
-  useEffect(() => load(), [load]);
+  const loading = list.isPending;
+  const loadError = list.isError
+    ? isApiError(list.error)
+      ? list.error.message
+      : '获取档位列表失败'
+    : '';
 
   const filtered = useMemo(
     () => plans.filter((p) => (filter === 'all' ? true : p.status === filter)),
@@ -93,24 +134,25 @@ export default function RechargePlans() {
   /** 排序：本地交换后提交全量排序数组，失败回滚 */
   const move = async (id: string, dir: -1 | 1) => {
     if (sorting) return;
-    const prev = plans;
-    const sorted = [...prev].sort((a, b) => a.sort - b.sort);
+    const prevOrder = new Map(plans.map((p) => [p.id, p.sort]));
+    const sorted = [...plans].sort((a, b) => a.sort - b.sort);
     const i = sorted.findIndex((p) => p.id === id);
     const j = i + dir;
     if (i < 0 || j < 0 || j >= sorted.length) return;
     [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
     // 全量重编号 1..n，乐观更新
     const next = sorted.map((p, idx) => ({ ...p, sort: idx + 1 }));
-    setPlans(next);
+    applyOrder(new Map(next.map((p) => [p.id, p.sort])));
     setSorting(true);
     setActionError('');
     try {
       const { warning: warn } = await sortTopupTiers(
         next.map((p) => ({ id: p.id, sortOrder: p.sort }))
       );
+      invalidatePreview();
       if (warn) setWarning(warn);
     } catch (e) {
-      setPlans(prev); // 回滚交换前顺序
+      applyOrder(prevOrder); // 回滚交换前顺序
       setActionError(isApiError(e) ? e.message : '排序失败，请稍后重试');
     } finally {
       setSorting(false);
@@ -139,7 +181,7 @@ export default function RechargePlans() {
     }
   };
 
-  /** 新建/编辑提交：POST/PUT /api/admin/topup-tiers，以服务端返回记录更新列表 */
+  /** 新建/编辑提交：POST/PUT /api/admin/topup-tiers，以服务端返回记录更新缓存 */
   const handleSubmit = async (data: PlanFormValues, id?: string) => {
     setWarning('');
     // ⚠️ 实付价格**仍不在参数里**（它由服务端 `原价 × 折扣` 派生，收下它就等于允许
@@ -169,9 +211,7 @@ export default function RechargePlans() {
         endTime: data.end ? new Date(data.end).toISOString() : '',
         ...card,
       });
-      setPlans((prev) =>
-        prev.map((p) => (p.id === id ? toPlan(tier) : p)).sort((a, b) => a.sort - b.sort)
-      );
+      setTiers((tiers) => tiers.map((t) => (t.id === id ? tier : t)));
       if (warn) setWarning(warn);
     } else {
       const { data: tier, warning: warn } = await createTopupTier({
@@ -184,9 +224,10 @@ export default function RechargePlans() {
         ...(data.end ? { endTime: new Date(data.end).toISOString() } : {}),
         ...card,
       });
-      setPlans((prev) => [...prev, toPlan(tier)].sort((a, b) => a.sort - b.sort));
+      setTiers((tiers) => [...tiers, tier]);
       if (warn) setWarning(warn);
     }
+    invalidatePreview();
     setForm(null);
   };
 
@@ -198,7 +239,9 @@ export default function RechargePlans() {
     setWarning('');
     try {
       const { warning: warn } = await deleteTopupTier(deleteId);
-      setPlans((prev) => prev.filter((p) => p.id !== deleteId));
+      const removed = deleteId;
+      setTiers((tiers) => tiers.filter((t) => t.id !== removed));
+      invalidatePreview();
       if (warn) setWarning(warn);
       setDeleteId(null);
     } catch (e) {
@@ -279,7 +322,10 @@ export default function RechargePlans() {
           {!loading && loadError && (
             <tr>
               <td colSpan={COLUMN_COUNT}>
-                <Empty message={loadError} extra={<Button onClick={load}>重试</Button>} />
+                <Empty
+                  message={loadError}
+                  extra={<Button onClick={() => void list.refetch()}>重试</Button>}
+                />
               </td>
             </tr>
           )}
