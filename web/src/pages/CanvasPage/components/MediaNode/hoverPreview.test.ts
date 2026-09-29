@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { HOVER_PREVIEW_DELAY_MS, isMultiNodeSelection, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 
 /** 未选中成品视频卡基准样本：满足起播门的全部条件 */
 const eligibleBase = {
   mediaType: 'video' as const,
   src: 'https://x/main.mp4',
   toolMode: 'select' as const,
-  selected: false,
 };
 
 describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS 建，IKJ7S1 翻转）', () => {
@@ -14,15 +14,9 @@ describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS 建，IK
     expect(HOVER_PREVIEW_DELAY_MS).toBe(100);
   });
 
-  it('成品视频卡 + 选择工具 + 未选中：可起播、无排除态', () => {
+  it('成品视频卡 + 选择工具：可起播、无排除态', () => {
     expect(videoHoverPreviewEligible(eligibleBase)).toBe(true);
     expect(videoHoverPreviewBlocked(eligibleBase)).toBe(false);
-  });
-
-  it('选中卡同样过起播门（IKJ7S1 翻转：选中卡悬停自动开播），且选中翻转不算会话排除态（点选过渡续播不被停）', () => {
-    const input = { ...eligibleBase, selected: true };
-    expect(videoHoverPreviewEligible(input)).toBe(true);
-    expect(videoHoverPreviewBlocked(input)).toBe(false);
   });
 
   it.each([
@@ -49,7 +43,7 @@ describe('videoHoverPreviewEligible / videoHoverPreviewBlocked（IKJ7RS 建，IK
   });
 });
 
-describe('isMultiNodeSelection（IKJ7S1，useSoloNodeSelected 同款计数）', () => {
+describe('isMultiNodeSelection（useSoloNodeSelected 导出计数，MediaNode useStore 选择器复用）', () => {
   it('无选中 / 单选中：非多选', () => {
     expect(isMultiNodeSelection([])).toBe(false);
     expect(isMultiNodeSelection([{ selected: false }, { selected: false }])).toBe(false);

@@ -5,6 +5,8 @@
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
+// jsdom 环境的全局 URL 会把 file: base 解析回 http:（jsdom 页面源），须用 node:url 的 URL 按文件定位
+import { fileURLToPath, URL as NodeURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import MediaNode, { videoSourceList, type MediaGenStatus } from './index';
@@ -147,13 +149,21 @@ function offscreenHostVideo(): HTMLVideoElement {
 }
 
 /** jsdom 无 PointerEvent 构造器：MouseEvent 带指针类型触发 React 合成指针事件
- *  （EnterLeaveEventPlugin 由 pointerover/pointerout 派生 enter/leave，仓库先例做法） */
-function pointerOn(target: Element, type: 'pointerover' | 'pointerout', relatedTarget: EventTarget | null = null) {
-  target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, relatedTarget }));
+ *  （EnterLeaveEventPlugin 由 pointerover/pointerout 派生 enter/leave，仓库先例做法）。
+ *  pointerType 定义到实例上（MouseEventInit 无此字段），悬停起播按其分流鼠标/触屏（故事 29） */
+function pointerOn(
+  target: Element,
+  type: 'pointerover' | 'pointerout',
+  relatedTarget: EventTarget | null = null,
+  pointerType: string = 'mouse',
+) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, relatedTarget });
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  target.dispatchEvent(event);
 }
 
-async function hoverInto(target: Element) {
-  await act(async () => { pointerOn(target, 'pointerover'); });
+async function hoverInto(target: Element, pointerType: 'mouse' | 'touch' | 'pen' = 'mouse') {
+  await act(async () => { pointerOn(target, 'pointerover', null, pointerType); });
 }
 
 async function hoverOutOf(target: Element) {
@@ -1261,37 +1271,124 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(mountNode.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('点击正在悬停播放的卡：同一视频元素续播、声画不中断；ended 后才交回选中布防', async () => {
+  it('点选过渡控件布防（故事16）：播放中点选 80ms 后原生控件开在同一元素上，声画不中断', async () => {
     const { playSpy, pauseSpy } = stubHoverMedia();
     await renderHoverableVideo();
     const decoder = offscreenHostVideo();
     await hoverInto(contentCard());
     await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
     expect(hoverPreviewVideo()).toBe(decoder);
-    // 点击选中（rerender selected=true 模拟 ReactFlow 选中流转）
+    // 点击选中（rerender selected=true 模拟 ReactFlow 选中流转）：收养悬停会话
     await rerenderNode('video', {
       selected: true,
       data: { src: 'https://x/main.mp4', toolMode: 'select' },
     });
-    const playing = hoverPreviewVideo();
-    expect(playing).toBe(decoder);
-    expect(playing!.isConnected).toBe(true);
-    expect(playing!.muted).toBe(false);
+    // 同一元素续播：不暂停、不重启、不重建树内控件 video
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.isConnected).toBe(true);
+    expect(decoder.muted).toBe(false);
     expect(playSpy).toHaveBeenCalledTimes(1);
     expect(pauseSpy).not.toHaveBeenCalled();
-    // 布防延后：树内无控件 video，续播不被抢
     expect(mountNode.querySelector('video[controls]')).toBeNull();
-    await act(async () => { vi.advanceTimersByTime(200); });
-    expect(mountNode.querySelector('video[controls]')).toBeNull();
-    expect(hoverPreviewVideo()).toBe(decoder);
-    // ended 后放行布防：控件 video 挂载，旧元素随播放层卸载（选中卡规则归 IKJ7S1）
-    await act(async () => { decoder.dispatchEvent(new Event('ended')); });
-    await act(async () => { vi.advanceTimersByTime(200); });
-    const armed = mountNode.querySelector('video[controls]');
-    expect(armed).toBeTruthy();
-    expect(armed).not.toBe(decoder);
-    expect(decoder.isConnected).toBe(false);
+    // 80ms 布防语义：控件出现在悬停会话元素上（不是新建树内元素）
+    await act(async () => { vi.advanceTimersByTime(79); });
+    expect(decoder.controls).toBe(false);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(decoder.controls).toBe(true);
+    expect(mountNode.querySelector('video[controls]')).toBe(decoder);
+    expect(playSpy).toHaveBeenCalledTimes(1);
     expect(pauseSpy).not.toHaveBeenCalled();
+  });
+
+  it('过渡定格保持挂载（决策8）：收养会话播完 ended 元素停末帧不重建；再次进入重播仍同元素从头', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 播到本轮结束：定格末帧——元素保持挂载、currentTime 不归零、无第二次 play
+    decoder.currentTime = 7.7;
+    await act(async () => { decoder.dispatchEvent(new Event('ended')); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.isConnected).toBe(true);
+    expect(decoder.currentTime).toBe(7.7);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 布防不因 ended 翻转：等过布防窗口也没有新树内 video 重建（旧元素不被卸载回首帧）
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(mountNode.querySelectorAll('video')).toHaveLength(1);
+    expect(mountNode.querySelector('video')).toBe(decoder);
+    // 再次进入：定格帧保持（keepFrame 收尾）到重播清层，重播轮就地再收养从头播
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+    expect(decoder.controls).toBe(true);
+  });
+
+  it('过渡后手动暂停再移开：暂停帧保持挂载（keepFrame 占屏），不触发树内布防重建', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 用户点原生控件暂停（收养会话补挂的让位监听）→ 手动让位
+    decoder.currentTime = 3.3;
+    await act(async () => { decoder.dispatchEvent(new Event('pause')); });
+    // 移开：不再开播、暂停帧保持挂载（元素留播放层、不归零）
+    await hoverOutOf(contentCard());
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(3.3);
+    expect(decoder.isConnected).toBe(true);
+    // 占屏阻断布防：等过布防窗口也没有树内重建
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(mountNode.querySelectorAll('video')).toHaveLength(1);
+    // 再次进入：重播语义从头（同元素、控件保持）
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+  });
+
+  it('触屏 pointerenter 不起播：悬停起播限定鼠标指针，触屏维持点选+控件现状（故事29）', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    // 触屏长按/点按进入内容区：不布防不开播
+    await hoverInto(contentCard(), 'touch');
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    // 鼠标进入照常起播（对照）：同一离屏解码元素移入播放层
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(hoverPreviewVideo()).toBe(decoder);
+  });
+
+  it('会话归位离屏宿主即复位悬停期状态：muted 回 true（离屏解码器默认静音，决策9）', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    expect(decoder.muted).toBe(true);
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    // 悬停期有声开播
+    expect(decoder.muted).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 移开收尾归位：muted 复位回默认静音
+    await hoverOutOf(contentCard());
+    expect(offscreenHostVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+    expect(decoder.muted).toBe(true);
   });
 
   it('进入后 100ms 内点选（布防未满即选中）：不起播，布防计时取消', async () => {
@@ -1403,8 +1500,9 @@ describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基
     expect(layer.childElementCount).toBe(0);
     // 层垫在海报画布之上（fragment 顺序：canvas → 播放层）
     expect(layer.previousElementSibling?.tagName).toBe('CANVAS');
-    // CSS 合同：指针穿透 + 不打会合成层化的 transform（fs 直读源文件，绕过 CSS modules 桩）
-    const css = readFileSync('src/pages/CanvasPage/components/MediaNode/index.module.css', 'utf8');
+    // CSS 合同：指针穿透 + 不打会合成层化的 transform（fs 直读源文件，绕过 CSS modules 桩；
+    // 按测试文件定位，不依赖 cwd=web/ 的调用姿势）
+    const css = readFileSync(fileURLToPath(new NodeURL('./index.module.css', import.meta.url)), 'utf8');
     const layerRule = css.match(/\.mediaHoverPreviewLayer\s*\{[^}]*\}/)?.[0] ?? '';
     expect(layerRule).toContain('pointer-events: none');
     expect(layerRule).not.toContain('transform');

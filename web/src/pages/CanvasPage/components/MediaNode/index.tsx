@@ -28,7 +28,8 @@ import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
-import { HOVER_PREVIEW_DELAY_MS, isMultiNodeSelection, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
+import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
@@ -351,7 +352,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const staleMenuRef = useRef<HTMLDivElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
-  /** 画布多选判定（IKJ7S1，useSoloNodeSelected 同款 useStore 计数）：框选 / Ctrl 加选 /
+  /** 画布多选判定（IKJ7S1，复用 useSoloNodeSelected 的导出计数）：框选 / Ctrl 加选 /
    *  Ctrl+A 期间任何卡都不触发悬停自动播放（选中与否无关），并即时停掉进行中的会话 */
   const multiNodeSelection = useStore((state) => isMultiNodeSelection(state.nodes));
   const isSelect = data.toolMode === 'select';
@@ -363,9 +364,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
    *  Chromium 视频 GPU 层会把工具栏/小地图的点击偷走：节点被选中且直接开播。 */
   const videoInteractive = Boolean(selected) && isSelect && !subtitleEraseLocked;
   const [videoControlsArmed, setVideoControlsArmed] = useState(false);
-  /** 悬停预览会话进行中（IKJ7RS）：起播置 true，ended/停止翻回。真值期布防延后——
+  /** 悬停预览会话占屏中（IKJ7RS）：起播置 true，停止翻回；真值期树内布防延后——
    *  点选过渡（点击正在悬停播放的卡）靠它保住同一视频元素续播、声画不中断（IKJ7S1 落地：
-   *  未布防选中卡过渡后仍走离屏会话路，已布防选中卡会话直接在树内控件视频上进行）。 */
+   *  未布防选中卡过渡后仍走离屏会话路，已布防选中卡会话直接在树内控件视频上进行）。
+   *  IKJ7OS 评审收口（故事 16/决策 8）：收养（adopted）会话定格/让位后保持 true——
+   *  占屏语义持续阻断树内布防，不重建元素，末帧定格保持挂载。 */
   const [hoverPlaying, setHoverPlaying] = useState(false);
   /** 悬停预览播放层宿主：空层零视觉零命中；开播时把离屏解码 video 命令式移入本层 */
   const hoverPreviewHostRef = useRef<HTMLDivElement | null>(null);
@@ -381,6 +384,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     inTree: boolean;
     /** 手动让位：用户经原生控件暂停过（play/seeked 重新接管即清除） */
     yielded: boolean;
+    /** 点选过渡收养（IKJ7OS 故事 16）：控件布防到本会话元素——收尾保持画面
+     *  （定格末帧/让位暂停帧留播放层），不归位不清层不重建（决策 8） */
+    adopted?: boolean;
     /** 原生控件监听（仅 inTree 会话挂载）：pause=手动让位、play=重新接管、seeked=拖动续播 */
     onPause?: () => void;
     onPlay?: () => void;
@@ -395,8 +401,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       if (!hoverPlaying) videoRef.current?.pause();
       return;
     }
-    // 点选过渡（IKJ7RS）：悬停播放中的卡被点选，布防（树内控件 video 挂载）延后到
-    // ended 之后（hoverPlaying 翻回时本 effect 重跑），保证同一元素声画不中断
+    // 点选过渡（IKJ7RS 建；IKJ7OS 改收养布防）：悬停播放中的卡被点选，树内布防被会话占屏
+    // （hoverPlaying）阻断——控件由收养 effect 80ms 后开在同一会话元素上（故事 16），
+    // 不重建树内元素，声画不中断、定格保持挂载（决策 8）
     if (hoverPlaying) return;
     const timer = window.setTimeout(() => setVideoControlsArmed(true), 80);
     return () => window.clearTimeout(timer);
@@ -550,7 +557,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   /** 悬停预览排除态与起播门（IKJ7RS 建链；IKJ7S1 翻转起播门）：blocked=会话排除态
    *  （会话中出现即停，含多选抑制），eligible=起播门（选中卡与未选中卡同门——选中已布防卡
-   *  在树内控件视频上就地开播；「选中」本身不是排除态，点选过渡续播不被停）。 */
+   *  在树内控件视频上就地开播）。入参不含「选中」：选中本身不是排除态，点选过渡续播不被停，
+   *  过渡后控件布防由组件内收养逻辑承担（IKJ7OS 故事 16）。 */
   const hoverPreviewInput = {
     mediaType: data.mediaType,
     src: data.src,
@@ -563,19 +571,25 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     subtitleEraseLocked,
     splitEditing: data.splitEditing === true,
     multiSelected: multiNodeSelection,
-    selected,
   };
   const hoverPreviewBlocked = videoHoverPreviewBlocked(hoverPreviewInput);
   const hoverPreviewEligible = videoHoverPreviewEligible(hoverPreviewInput);
 
-  /** 结束悬停预览会话（IKJ7RS 建；IKJ7S1 扩树内路）：停播、卸监听；未选中卡路归零回首帧、
-   *  元素移出播放层（首帧海报画布随显），选中卡树内路不动画面——末帧/手动暂停帧由原生
-   *  元素状态保持（尾播定格与让位帧都不清）。幂等：无会话/空层时安全 no-op。 */
-  const endHoverPlayback = useCallback(() => {
+  /** 结束悬停预览会话（IKJ7RS 建；IKJ7S1 扩树内路；IKJ7OS 评审收口加收养会话收尾模式）：
+   *  默认收尾：停播、卸监听；未选中卡路归零回首帧、元素移出播放层并复位悬停期状态
+   *  （muted 回 true，离屏解码器默认静音——归位即回默认），首帧海报画布随显；选中卡树内路
+   *  不动画面——末帧/手动暂停帧由原生元素状态保持（尾播定格与让位帧都不清）。
+   *  keepFrame（IKJ7OS 收养会话收尾，故事 12/决策 8）：画面与会话都保持——定格末帧/
+   *  让位暂停帧留播放层、监听保留供重入就地重播（videoRef 可能已随重渲染换新，收养元素
+   *  是画面与解码缓存的唯一持有者），hoverPlaying 不翻回（占屏持续阻断树内布防重建）。
+   *  幂等：无会话/空层时安全 no-op。 */
+  const endHoverPlayback = useCallback((options: { keepFrame?: boolean } = {}) => {
+    const { keepFrame = false } = options;
     if (hoverTimerRef.current != null) {
       window.clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = null;
     }
+    if (keepFrame) return;
     const session = hoverSessionRef.current;
     hoverSessionRef.current = null;
     if (session) {
@@ -593,12 +607,55 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         // 原址移回离屏宿主（解码缓存与挂载状态保持 hover 前原样）；点选过渡布防翻转
         // 会拆宿主，届时 isConnected 为 false 跳过——元素随播放层卸载即停
         if (session.homeHost?.isConnected) session.homeHost.appendChild(session.video);
+        // 展示期结束即复位悬停期状态（IKJ7OS 决策 9）：有声开播改写的 muted 回离屏默认静音
+        session.video.muted = true;
       }
     }
     const host = hoverPreviewHostRef.current;
     while (host && host.firstChild) host.removeChild(host.firstChild);
     setHoverPlaying(false);
   }, []);
+
+  /** 原生控件让位/接管监听（IKJ7S1 树内会话建；IKJ7OS 收养会话补挂同款）：
+   *  pause=手动让位（本次悬停不再自动续播、移开不尾播）、play=重新接管、
+   *  seeked=拖动即接管从拖动点续播。返回 handlers 供会话记录、收尾时卸载。 */
+  const attachControlListeners = useCallback((video: HTMLVideoElement) => {
+    const onPause = () => {
+      // 手动让位：用户点原生控件暂停（播完到头的自然 pause 在 ended 置位后不算）
+      if (video.ended) return;
+      const session = hoverSessionRef.current;
+      if (session?.video === video) session.yielded = true;
+    };
+    const onPlay = () => {
+      // 重新接管：手动恢复播放或播完重播，让位解除（原生控件行为优先）
+      const session = hoverSessionRef.current;
+      if (session?.video === video) session.yielded = false;
+    };
+    const onSeeked = () => {
+      // 拖动进度即接管前进：从拖动点续播（暂停中拖动也续播），让位解除
+      const session = hoverSessionRef.current;
+      if (session?.video !== video) return;
+      session.yielded = false;
+      if (video.paused) video.play().catch(() => {});
+    };
+    video.addEventListener('pause', onPause);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('seeked', onSeeked);
+    return { onPause, onPlay, onSeeked };
+  }, []);
+
+  /** 收养离屏悬停会话为选中卡控件会话（IKJ7OS 故事 16/决策 8）：按 80ms 布防语义把
+   *  原生控件开在会话元素上（不重建树内元素，声画不中断），补挂让位/接管监听（树内
+   *  会话同款，手动暂停/拖进度的让位规则同样生效）。收养会话收尾保持画面（定格末帧/
+   *  让位暂停帧留播放层），重入经离屏路重播收养，全程不重建元素。两个入口：点选过渡
+   *  （选中翻转 effect）与选中态离屏开播（startHoverPlayback，重播轮）。 */
+  const adoptHoverSession = useCallback((session: { video: HTMLVideoElement; adopted?: boolean; onPause?: () => void; onPlay?: () => void; onSeeked?: () => void }) => {
+    session.adopted = true;
+    Object.assign(session, attachControlListeners(session.video));
+    window.setTimeout(() => {
+      if (hoverSessionRef.current === session) session.video.controls = true;
+    }, 80);
+  }, [attachControlListeners]);
 
   /** 开播（IKJ7RS 建；IKJ7S1 分双路）。未选中卡：把离屏解码元素移入内容区播放层，同一元素
    *  从头、有声开播。选中已布防卡：树内控件视频就地从头开播（原生控件保留，muted/volume
@@ -616,29 +673,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         // 本轮播完定格末帧（树内元素原位停住）；hoverPlaying 翻回不影响已完成的布防
         setHoverPlaying(false);
       };
-      const onPause = () => {
-        // 手动让位：用户点原生控件暂停（播完到头的自然 pause 在 ended 置位后不算）
-        if (video.ended) return;
-        const session = hoverSessionRef.current;
-        if (session?.video === video) session.yielded = true;
-      };
-      const onPlay = () => {
-        // 重新接管：手动恢复播放或播完重播，让位解除（原生控件行为优先）
-        const session = hoverSessionRef.current;
-        if (session?.video === video) session.yielded = false;
-      };
-      const onSeeked = () => {
-        // 拖动进度即接管前进：从拖动点续播（暂停中拖动也续播），让位解除
-        const session = hoverSessionRef.current;
-        if (session?.video !== video) return;
-        session.yielded = false;
-        if (video.paused) video.play().catch(() => {});
-      };
+      const { onPause, onPlay, onSeeked } = attachControlListeners(video);
       hoverSessionRef.current = { video, onEnded, homeHost: null, inTree: true, yielded: false, onPause, onPlay, onSeeked };
       video.addEventListener('ended', onEnded);
-      video.addEventListener('pause', onPause);
-      video.addEventListener('play', onPlay);
-      video.addEventListener('seeked', onSeeked);
       video.loop = false;
       try {
         video.currentTime = 0;
@@ -656,13 +693,18 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       return;
     }
     const onEnded = () => {
-      // 播完一轮定格末帧不循环（元素留在播放层）；hoverPlaying 翻回放行点选过渡布防
-      setHoverPlaying(false);
+      // 播完一轮定格末帧不循环（元素留在播放层）。收养会话（点选过渡后）保持占屏：
+      // hoverPlaying 不翻回、元素保持挂载（决策 8：定格=暂停在结尾，不重建回首帧）；
+      // 未选中卡翻回放行后续流程（移开收尾/重播收尾）
+      if (!hoverSessionRef.current?.adopted) setHoverPlaying(false);
     };
     hoverSessionRef.current = { video, onEnded, homeHost: video.parentNode, inTree: false, yielded: false };
     video.addEventListener('ended', onEnded);
     while (host.firstChild) host.removeChild(host.firstChild);
     host.appendChild(video);
+    // 开播即纯展示（!832 合同）：收养会话曾把 controls 开在本元素上，取消选中归位后
+    // 再次悬停开播须复位为无控件（收养布防的对称操作）
+    video.controls = false;
     try {
       video.currentTime = 0;
     } catch {
@@ -678,15 +720,37 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         // 静音仍被拒的极端环境：维持首帧海报静默
       });
     });
-  }, []);
+  }, [attachControlListeners]);
 
-  /** 进入内容区（IKJ7RS 建；IKJ7S1 扩选中卡）：满 100ms 才开播，计时内划过不播。
-   *  选中卡尾播完成后（指针在外播完定格）会话残留：先就地收尾再布防新一轮从头重播；
-   *  本轮仍在播（含尾播中重入）不打断不重播。 */
-  const handleContentPointerEnter = useCallback(() => {
+  /** 进入内容区（IKJ7RS 建；IKJ7S1 扩选中卡；IKJ7OS 评审收口限定鼠标）：满 100ms 才开播，
+   *  计时内划过不播；触屏 pointerenter（长按/点按）不起播——触屏维持点选+控件现状（故事 29）。
+   *  收养会话重入（IKJ7OS）：定格末帧/让位暂停帧就地从头重播——不收尾不清层不换元素
+   *  （videoRef 可能已随重渲染换新，收养元素是画面与解码缓存的唯一持有者，决策 8）；
+   *  非收养会话残留先默认收尾再布防新一轮。本轮仍在播（含尾播中重入）不打断不重播。 */
+  const handleContentPointerEnter = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
     if (!hoverPreviewEligible) return;
     const session = hoverSessionRef.current;
     if (session && !session.video.paused && !session.video.ended) return;
+    if (session && session.adopted) {
+      if (hoverTimerRef.current != null) return;
+      hoverTimerRef.current = window.setTimeout(() => {
+        hoverTimerRef.current = null;
+        const adopted = hoverSessionRef.current;
+        if (!adopted || adopted !== session) return;
+        try {
+          adopted.video.currentTime = 0;
+        } catch {
+          // 元数据未就绪时个别实现拒绝赋值：无碍，play 从当前位置起
+        }
+        if (adopted.video.paused) {
+          adopted.video.play().catch(() => {
+            // 重播被拒（罕见：本轮已有声播放过，手势已解锁）：静默维持定格/暂停帧
+          });
+        }
+      }, HOVER_PREVIEW_DELAY_MS);
+      return;
+    }
     if (session) endHoverPlayback();
     if (hoverSessionRef.current || hoverTimerRef.current != null) return;
     hoverTimerRef.current = window.setTimeout(() => {
@@ -695,9 +759,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     }, HOVER_PREVIEW_DELAY_MS);
   }, [hoverPreviewEligible, startHoverPlayback, endHoverPlayback]);
 
-  /** 移出内容区（IKJ7RS 建；IKJ7S1 扩尾播特权）：计时内移开不播。未选中卡播放中移开立即停
-   *  并回首帧海报；选中卡本轮播放中移开不停止（尾播），继续播到 ended 定格末帧；让位后
-   *  （原生控件暂停）或已播完则收尾——让位保持暂停帧，播完定格即清会话。 */
+  /** 移出内容区（IKJ7RS 建；IKJ7S1 扩尾播特权；IKJ7OS 评审收口扩收养会话）：计时内移开不播。
+   *  未选中卡播放中移开立即停并回首帧海报；选中卡本轮播放中移开不停止（尾播），继续播到
+   *  ended 定格末帧；让位后（原生控件暂停）或已播完则收尾——让位保持暂停帧，播完定格即清
+   *  会话；收养会话（点选过渡后）keepFrame：暂停帧/定格末帧保持挂载不回首帧（决策 8）。 */
   const handleContentPointerLeave = useCallback(() => {
     if (hoverTimerRef.current != null) {
       window.clearTimeout(hoverTimerRef.current);
@@ -706,7 +771,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (selected) {
       const session = hoverSessionRef.current;
       if (!session) return;
-      if (session.yielded || session.video.ended) endHoverPlayback();
+      if (session.yielded || session.video.ended) {
+        endHoverPlayback(session.adopted ? { keepFrame: true } : {});
+      }
       return;
     }
     endHoverPlayback();
@@ -726,10 +793,27 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     hoverTimerRef.current = null;
   }, [selected]);
 
-  /** 点选过渡后取消选中：回到未选中规则立即停播（IKJ7RS） */
+  /** 点选过渡收养（IKJ7OS 故事 16）：点击正在悬停播放的未布防卡，收养悬停会话——控件
+   *  80ms 后开在同一元素上、让位监听补挂。即刻收养而非计时后：点选后 80ms 内播完的
+   *  竞态同样保持定格挂载（决策 8：定格=暂停在结尾、保持挂载，不重建树内元素回首帧）。 */
   useEffect(() => {
-    if (!selected && hoverSessionRef.current != null) endHoverPlayback();
-  }, [selected, endHoverPlayback]);
+    if (!selected || !hoverPlaying) return;
+    const session = hoverSessionRef.current;
+    if (!session || session.inTree) return;
+    adoptHoverSession(session);
+  }, [selected, hoverPlaying, adoptHoverSession]);
+
+  /** 点选过渡后取消选中：回到未选中规则立即停播回首帧海报（IKJ7RS）。
+   *  只在「选中→未选中」翻转时清理（prevSelected 门）：hoverPlaying 在依赖里是为了
+   *  收养会话收尾后（定格/暂停帧占屏、session 已清）取消选中仍能清层复原海报，
+   *  不能让未选中卡的悬停开播（hoverPlaying 翻 true）误触发清理（IKJ7OS）。 */
+  const prevSelectedRef = useRef(selected);
+  useEffect(() => {
+    const wasSelected = prevSelectedRef.current;
+    prevSelectedRef.current = selected;
+    if (!(wasSelected && !selected)) return;
+    if (hoverSessionRef.current != null || hoverPlaying) endHoverPlayback();
+  }, [selected, hoverPlaying, endHoverPlayback]);
 
   /** 卸载清理（IKJ7RS）：停播 + 移出播放层，防元素与监听泄漏 */
   useEffect(endHoverPlayback, [endHoverPlayback]);

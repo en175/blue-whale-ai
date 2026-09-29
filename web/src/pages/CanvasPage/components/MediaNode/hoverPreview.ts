@@ -11,7 +11,6 @@ export interface VideoHoverPreviewInput {
   mediaType?: 'image' | 'video' | 'audio';
   src?: string;
   toolMode?: 'drag' | 'select';
-  selected?: boolean;
   /** 视频加载失败兜底态（MediaNode 内即 videoError != null） */
   hasVideoError?: boolean;
   /** 生成状态：draft/generating/failed/cancelled 任一有值即生成流程卡（含重生成中成品卡） */
@@ -28,18 +27,6 @@ export interface VideoHoverPreviewInput {
   splitEditing?: boolean;
   /** 画布处于多节点选中（框选 / Ctrl 加选 / Ctrl+A）：多选期间任何卡不自动播放（IKJ7S1） */
   multiSelected?: boolean;
-}
-
-/** 画布多选判定（useSoloNodeSelected 同款计数）：选中节点数 >1 即多选。
- *  独立副本落在纯函数模块（不反向依赖 hooks 文件），MediaNode 以 useStore 选择器消费。 */
-export function isMultiNodeSelection(nodes: { selected?: boolean }[]): boolean {
-  let selectedCount = 0;
-  for (const node of nodes) {
-    if (!node.selected) continue;
-    selectedCount += 1;
-    if (selectedCount > 1) return true;
-  }
-  return false;
 }
 
 /** 会话排除态：编辑会话锁定、生成流程卡、素材缺失、空壳、加载失败、抓手（拖动）工具模式、

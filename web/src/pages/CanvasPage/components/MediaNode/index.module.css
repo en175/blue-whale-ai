@@ -280,6 +280,12 @@
   background-color: #000;
 }
 
+/* 点选过渡收养控件（IKJ7OS 故事 16）：控件布防开在悬停会话元素上（不重建树内元素），
+   带 controls 属性即恢复指针命中让控件可点——层穿透合同（!832）只对无控件纯展示期生效 */
+.mediaHoverPreviewLayer video[controls] {
+  pointer-events: auto;
+}
+
 /* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
 .complianceBadge {
   flex-shrink: 0;
