@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
 import { baseCreditsFormError, tierCardFormError, tierFormError } from './tierForm';
 import { ApiError } from '@/api/http';
+import { topupTierPreviewKeys, type TopupTier } from '@/api/adminTopupTiers';
 
 const adminApi = vi.hoisted(() => ({
   fetchTopupTiers: vi.fn(),
@@ -65,6 +66,12 @@ async function renderPage() {
   await act(async () => {
     await Promise.resolve();
   });
+  // 再等一个宏任务：Query 拿到数据后还要走几跳内部调度才会把行渲染出来，
+  // 只冲一个微任务的话，紧接着断言表格内容的用例会看到空表。
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return client;
 }
 
 async function openCreateModal() {
@@ -123,6 +130,68 @@ async function selectOption(ariaLabel: string, optionText: string) {
 /** 当前创建请求的入参。 */
 function createPayload() {
   return adminApi.createTopupTier.mock.calls[0][0] as Record<string, unknown>;
+}
+
+/** 一条原始档位记录 —— 缓存里存的就是这个形状，不是页面用的 `Plan`。 */
+function tier(id: string, sortOrder: number, name = ''): TopupTier {
+  return {
+    id,
+    name,
+    baseCredits: 1000,
+    originalPrice: 10,
+    discount: 1,
+    price: 10,
+    isRecommended: false,
+    status: 'active',
+    startTime: null,
+    endTime: null,
+    sortOrder,
+    createdAt: '2026-08-29T00:00:00.000Z',
+    updatedAt: '2026-08-29T00:00:00.000Z',
+    description: '',
+    bonusCredits: 0,
+    activityTag: '',
+    buttonText: '立享加赠',
+    firstPurchaseEligible: false,
+    creditsValidMonths: 24,
+    permission: 'all',
+    permissionAllowlist: [],
+    permissionDeniedHint: '',
+  };
+}
+
+/** 数据行 —— 跳过加载/空态那种只有一个 td 的整行。 */
+function dataRows(): HTMLTableRowElement[] {
+  return [...document.body.querySelectorAll<HTMLTableRowElement>('tbody tr')].filter(
+    (tr) => tr.querySelectorAll('td').length > 1
+  );
+}
+
+/** 表格当前的行顺序（第一格是档位 ID）。 */
+function rowIds(): string[] {
+  return dataRows().map((tr) => tr.querySelector('td')?.textContent?.trim() ?? '');
+}
+
+/** 点某一行里的操作按钮（上移 / 下移 / 编辑 / 删除）。 */
+async function clickRowButton(rowIndex: number, label: string) {
+  const button = dataRows()[rowIndex]?.querySelector<HTMLButtonElement>(
+    `button[aria-label="${label}"]`
+  );
+  if (!button) throw new Error(`第 ${rowIndex} 行没有「${label}」按钮`);
+  await act(async () => {
+    button.click();
+  });
+}
+
+/** 按文案点按钮（弹窗里的「保存」「确认删除」）。 */
+async function clickButtonByText(text: string) {
+  const button = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === text
+  );
+  if (!button) throw new Error(`没有文案为「${text}」的按钮`);
+  await act(async () => {
+    button.click();
+  });
 }
 
 beforeEach(() => {
@@ -449,5 +518,117 @@ describe('RechargePlans 卡片字段（PRD §10.2 / §10.4 / §10.5）', () => {
     await fillAndSave('100', '1');
 
     expect(createPayload().bonusCredits).toBe(0);
+  });
+});
+
+/**
+ * IKJ69L：给「写操作 → 原始缓存」这层翻译补护栏。
+ *
+ * <p>本页展示的是 `toPlan()` 映射过的 `Plan[]` 视图，而缓存里存的是**原始 `{tiers}`**，
+ * 两者**没有反向映射** —— 所以每处写操作都得拿原始记录去更新缓存（页面里的 `setTiers`）。
+ * 这是 IKJ058 整个 diff 里唯一的非机械代码，此前一条用例都没有：
+ * 谁哪天顺手把它改回「在视图空间里替换」，页面看起来照样能跑，只是数据会悄悄错位。
+ */
+describe('RechargePlans 写操作 → 原始缓存（IKJ69L）', () => {
+  it('★ 下移：请求还没回来界面就已重排（乐观），提交全量重编号，成功后失效用户端预览', async () => {
+    adminApi.fetchTopupTiers.mockResolvedValue({
+      tiers: [tier('1', 1, 'A'), tier('2', 2, 'B'), tier('3', 3, 'C')],
+    });
+    let settle!: (value: unknown) => void;
+    adminApi.sortTopupTiers.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      })
+    );
+
+    const client = await renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    expect(rowIds()).toEqual(['1', '2', '3']);
+
+    await clickRowButton(0, '下移');
+
+    // 请求还挂着，顺序已经变了 —— 「上下移点下去要立刻动」就是这一条。
+    // 断言的是**立即**生效：上面那次 act 没有等排序请求，它也永远不会自己 resolve。
+    expect(rowIds()).toEqual(['2', '1', '3']);
+    expect(adminApi.sortTopupTiers).toHaveBeenCalledWith([
+      { id: '2', sortOrder: 1 },
+      { id: '1', sortOrder: 2 },
+      { id: '3', sortOrder: 3 },
+    ]);
+    // 还没成功，预览缓存不该被动
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      settle({ data: [] });
+      await Promise.resolve();
+    });
+    expect(rowIds()).toEqual(['2', '1', '3']);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: topupTierPreviewKeys.all });
+  });
+
+  it('★ 排序失败：顺序回滚到交换前，错误原文显示出来，且不动预览缓存', async () => {
+    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [tier('1', 1), tier('2', 2)] });
+    let fail!: (reason: unknown) => void;
+    adminApi.sortTopupTiers.mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      })
+    );
+
+    const client = await renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    await clickRowButton(0, '下移');
+    expect(rowIds()).toEqual(['2', '1']);
+
+    await act(async () => {
+      fail(new ApiError(500, '排序炸了', 500));
+      await Promise.resolve();
+    });
+
+    expect(rowIds()).toEqual(['1', '2']);
+    expect(document.body.textContent).toContain('排序炸了');
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('★ 新建成功：服务端返回的原始记录进缓存，表格照它渲染出新的一行', async () => {
+    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [tier('1', 1, '老档')] });
+    adminApi.createTopupTier.mockResolvedValue({ data: tier('9', 2, '新档') });
+
+    await renderPage();
+    await openCreateModal();
+    await fillInput('基础积分', '7500');
+    await fillAndSave('10', '1');
+
+    // 追加而不是替换；顺序按 sortOrder 排，所以新的那条排在后面
+    expect(rowIds()).toEqual(['1', '9']);
+    expect(document.body.textContent).toContain('新档');
+  });
+
+  it('★ 编辑成功：服务端返回的原始记录**替换**缓存里那条，而不是追加', async () => {
+    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [tier('1', 1, '老档')] });
+    adminApi.updateTopupTier.mockResolvedValue({ data: tier('1', 1, '改过的档') });
+
+    await renderPage();
+    await clickRowButton(0, '编辑');
+    await clickButtonByText('保存');
+
+    expect(adminApi.updateTopupTier).toHaveBeenCalled();
+    expect(rowIds()).toEqual(['1']);
+    expect(document.body.textContent).toContain('改过的档');
+  });
+
+  it('★ 删除成功：该行从缓存移除，并失效用户端预览', async () => {
+    adminApi.fetchTopupTiers.mockResolvedValue({ tiers: [tier('1', 1), tier('2', 2)] });
+    adminApi.deleteTopupTier.mockResolvedValue({ data: null });
+
+    const client = await renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    await clickRowButton(0, '删除');
+    await clickButtonByText('确认删除');
+
+    expect(rowIds()).toEqual(['2']);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: topupTierPreviewKeys.all });
   });
 });

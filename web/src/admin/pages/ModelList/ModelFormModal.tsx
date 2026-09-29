@@ -38,7 +38,7 @@
  * ============================================ */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { AdminModel, CreateAdminModelParams } from '@/api/admin';
+import type { AdminModel, CreateAdminModelParams } from '@/api/adminModels';
 import { billingCatalogOptions } from '@/api/adminBillingCatalog';
 import { isApiError } from '@/api/http';
 import {

@@ -18,7 +18,7 @@ import {
   sizesFromModel,
   type FormSnapshot,
 } from './model-form';
-import type { AdminModel } from '@/api/admin';
+import type { AdminModel } from '@/api/adminModels';
 
 function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
   return {

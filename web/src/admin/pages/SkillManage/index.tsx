@@ -59,7 +59,8 @@ export default function SkillManage() {
   // 两个读各自成一个 Query：旧代码用 Promise.all 把它们绑成一次加载 + 一套三态。
   const skillsQuery = useQuery(adminSkillsOptions());
   const catsQuery = useQuery(adminSkillCategoriesOptions());
-  const skills: AdminSkill[] = skillsQuery.data ?? [];
+  /** ⚠️ 必须记忆：`skillsQuery.data ?? []` 每次渲染都是新数组，下游两个 useMemo 会因此每渲染都重算（IKJ69L）。 */
+  const skills: AdminSkill[] = useMemo(() => skillsQuery.data ?? [], [skillsQuery.data]);
   const cats = catsQuery.data ?? [];
   const loading = skillsQuery.isPending || catsQuery.isPending;
   // 两份是并发读的，任意一份失败都算这次加载失败；报先出错那一份的原文。

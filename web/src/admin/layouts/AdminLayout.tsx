@@ -24,7 +24,7 @@ import {
   BadgePercent,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
-import { fetchAdminSession } from '@/api/admin';
+import { fetchAdminSession } from '@/api/adminSession';
 import { useDocumentTitle } from '@/seo/useDocumentTitle';
 import '../styles/admin.css';
 import styles from './index.module.css';

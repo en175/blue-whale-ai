@@ -1,4 +1,4 @@
-import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/api/admin';
+import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/api/adminModels';
 
 export type ModelType = 'image' | 'video' | 'text' | 'audio';
 

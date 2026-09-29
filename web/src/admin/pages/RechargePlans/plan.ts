@@ -5,7 +5,7 @@
  * 三态与权限的中文名、金额/积分的格式化，都是「围绕数据的」而不是「围绕版面的」。
  * 页面与两个弹窗共用同一份，避免同一句话在几处各写一份、某天只改了一处。
  * ============================================ */
-import type { TopupTier, TopupTierPermission, TopupTierStatus } from '@/api/admin';
+import type { TopupTier, TopupTierPermission, TopupTierStatus } from '@/api/adminTopupTiers';
 import { DEFAULT_BUTTON_TEXT, DEFAULT_CREDITS_VALID_MONTHS } from './tierForm';
 
 /** 档位数据（列表源 GET /api/admin/topup-tiers） */

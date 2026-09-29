@@ -1,4 +1,4 @@
-import type { AdminUserRow } from '@/api/admin';
+import type { AdminUserRow } from '@/api/adminUsers';
 
 /** 去掉前后空白和前导 #，避免列表曾展示 #ID 时把井号一并搜进去 */
 export function normalizeAdminUserKeyword(keyword: string): string {
