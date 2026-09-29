@@ -2,11 +2,16 @@
 /* 选中态悬浮工具条用例已随实现迁出（IKGYYD）：工具条 DOM 迁出节点卡后由
    NodeFollowToolbar 钉屏幕容器承载，行为覆盖见 ./Toolbar.test.tsx 与
    ../NodeFollowToolbar/index.test.tsx（按钮构成/顺序/回调/置灰门槛/显隐时机不变）。 */
-import { act, createElement } from 'react';
+import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+// jsdom 环境的全局 URL 会把 file: base 解析回 http:（jsdom 页面源），须用 node:url 的 URL 按文件定位
+import { fileURLToPath, URL as NodeURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import MediaNode, { videoSourceList, type MediaGenStatus } from './index';
+import styles from './index.module.css';
+import { HOVER_PREVIEW_DELAY_MS } from './hoverPreview';
 
 /** IKHIT1：只替换手柄重测钩子以断言调用时机，其余导出（Provider/Handle/useStore）
     保持官方实现；jsdom 不起真实 ReactFlow 测量。 */
@@ -31,13 +36,34 @@ interface RenderExtra {
   progress?: number;
   errorText?: string;
   data?: Record<string, unknown>;
+  /** IKJ7S1 多选抑制用：向 ReactFlow store 注入画布节点（MediaNode 经 useStore 计数读多选） */
+  storeNodes?: Array<{ id: string; selected?: boolean }>;
+}
+
+/** 把画布节点写入 ReactFlow 内部 store（Provider 模式）：MediaNode 的
+    useStore((state) => isMultiNodeSelection(state.nodes)) 据此感知框选 / Ctrl+A 多选 */
+function StoreNodesSync({ nodes }: { nodes: Array<{ id: string; selected?: boolean }> }) {
+  const store = useStoreApi();
+  useEffect(() => {
+    store.setState({
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        selected: node.selected === true,
+        data: {},
+        position: { x: 0, y: 0 },
+      })),
+    });
+  }, [store, nodes]);
+  return null;
 }
 
 function nodeElement(
   mediaType: 'image' | 'video' | 'audio',
   extra?: RenderExtra,
 ) {
-  return createElement(ReactFlowProvider, null, createElement(MediaNode, {
+  return createElement(ReactFlowProvider, null,
+    extra?.storeNodes && createElement(StoreNodesSync, { nodes: extra.storeNodes }),
+    createElement(MediaNode, {
     id: extra?.id ?? `${mediaType}-node`,
     data: {
       mediaType,
@@ -106,6 +132,50 @@ function contentCard(): HTMLElement {
 
 function titleRow(): HTMLElement {
   return mountNode.querySelector('[data-testid="media-title"]') as HTMLElement;
+}
+
+/** 悬停预览播放层（IKJ7RS）：内容区内命令式承载离屏解码 video 的可见层 */
+function hoverPreviewLayer(): HTMLElement | null {
+  return mountNode.querySelector<HTMLElement>('[data-testid="video-hover-preview"]');
+}
+
+function hoverPreviewVideo(): HTMLVideoElement | null {
+  return hoverPreviewLayer()?.querySelector('video') ?? null;
+}
+
+/** 未选中卡 body 离屏宿主内的解码 video：直接子级定位，不会误取悬停层内已移入的元素 */
+function offscreenHostVideo(): HTMLVideoElement {
+  return document.body.querySelector<HTMLVideoElement>('body > div[aria-hidden="true"] > video')!;
+}
+
+/** jsdom 无 PointerEvent 构造器：MouseEvent 带指针类型触发 React 合成指针事件
+ *  （EnterLeaveEventPlugin 由 pointerover/pointerout 派生 enter/leave，仓库先例做法）。
+ *  pointerType 定义到实例上（MouseEventInit 无此字段），悬停起播按其分流鼠标/触屏（故事 29） */
+function pointerOn(
+  target: Element,
+  type: 'pointerover' | 'pointerout',
+  relatedTarget: EventTarget | null = null,
+  pointerType: string = 'mouse',
+) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, relatedTarget });
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  target.dispatchEvent(event);
+}
+
+async function hoverInto(target: Element, pointerType: 'mouse' | 'touch' | 'pen' = 'mouse') {
+  await act(async () => { pointerOn(target, 'pointerover', null, pointerType); });
+}
+
+async function hoverOutOf(target: Element) {
+  await act(async () => { pointerOn(target, 'pointerout', document.body); });
+}
+
+/** IKJ7RS 悬停预览用媒体打桩：jsdom 不实现 HTMLMediaElement play/pause */
+function stubHoverMedia() {
+  return {
+    playSpy: vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve()),
+    pauseSpy: vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {}),
+  };
 }
 
 beforeEach(() => {
@@ -1045,5 +1115,632 @@ describe('MediaNode 手柄显隐翻转重测（IKHIT1）', () => {
     await rerenderNode('image', { genStatus: 'generating', progress: 0 });
     expect(updateNodeInternalsMock).toHaveBeenCalledTimes(1);
     expect(updateNodeInternalsMock).toHaveBeenCalledWith('image-node');
+  });
+});
+
+describe('MediaNode 视频卡悬停自动播放预览（IKJ7RS，未选中卡基础链路）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const boxEditing = {
+    boxes: [],
+    liveBox: null,
+    onBoxStart: () => {},
+    onBoxMove: () => {},
+    onBoxEnd: () => {},
+  };
+
+  const hoverExclusionCases: Array<[string, RenderExtra]> = [
+    ['去字幕会话锁定（智能模式停帧标记）', { data: { subtitleErasePaused: true } }],
+    ['去字幕会话锁定（框选模式框层注入）', { data: { subtitleEraseEditing: boxEditing } }],
+    ['音视频分离/场景切分/人声背景/抠像会话锁定', { data: { splitEditing: true } }],
+    ['重生成中的成品卡', { genStatus: 'generating', progress: 30 }],
+    ['失败成品卡（旧素材兜底）', { genStatus: 'failed' }],
+    ['已取消成品卡', { genStatus: 'cancelled' }],
+    ['待生成草稿', { genStatus: 'draft', data: { src: '', draft: true } }],
+    ['素材缺失', { data: { assetMissing: true } }],
+    ['空壳占位', { data: { emptyShell: true } }],
+    ['抓手（拖动）工具模式', { data: { toolMode: 'drag' } }],
+    ['blob 上传预览 src', { data: { src: 'blob:upload-preview' } }],
+  ];
+
+  /** 成品视频未选中卡基准渲染：真实 http src + 选择工具 */
+  async function renderHoverableVideo(extraData: Record<string, unknown> = {}) {
+    await renderNode('video', {
+      selected: false,
+      data: { src: 'https://x/main.mp4', toolMode: 'select', ...extraData },
+    });
+  }
+
+  it('进入内容区满 100ms：离屏解码元素移入播放层，有声、从头开播（currentTime=0）且无控件', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    expect(hoverPreviewLayer()).toBeTruthy();
+    expect(hoverPreviewVideo()).toBeNull();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    // 计时未满不播
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 1); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    // 满 100ms 开播：同一离屏解码元素、有声、从头
+    await act(async () => { vi.advanceTimersByTime(1); });
+    const playing = hoverPreviewVideo();
+    expect(playing).toBe(decoder);
+    expect(playing!.isConnected).toBe(true);
+    expect(playing!.hasAttribute('controls')).toBe(false);
+    expect(playing!.muted).toBe(false);
+    expect(playing!.currentTime).toBe(0);
+    expect(playing!.loop).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).not.toHaveBeenCalled();
+    // 海报画布仍在层下（移开即回首帧海报）
+    expect(mountNode.querySelector('canvas')).toBeTruthy();
+  });
+
+  it('进入后 100ms 内移开：不播，video 仍留离屏宿主，首帧海报画布无任何视觉变化', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 1); });
+    await hoverOutOf(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    expect(offscreenHostVideo()).toBe(decoder);
+    expect(mountNode.querySelector('canvas')).toBeTruthy();
+  });
+
+  it('标题行悬停不触发播放；随后双击改名照常进入编辑（合规角标同层不受影响）', async () => {
+    const { playSpy } = stubHoverMedia();
+    const onTitleChange = vi.fn();
+    await renderHoverableVideo({ fileName: '成片.mp4', onTitleChange });
+    await hoverInto(titleRow());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    await act(async () => {
+      titleRow().querySelector('span')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    });
+    expect(titleRow().querySelector('input')).toBeTruthy();
+  });
+
+  it('播放中移开立即停止并回首帧海报；移开后再次进入满 100ms 从头重播', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    // 播放中移开：立即停、归零回首帧、元素原址移回离屏宿主（解码缓存不丢）
+    await hoverOutOf(contentCard());
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    expect(decoder.currentTime).toBe(0);
+    expect(offscreenHostVideo()).toBe(decoder);
+    // 再次进入满 100ms：同一元素从头重播（有声）
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+    expect(decoder.muted).toBe(false);
+  });
+
+  it('悬停不动播完一轮：定格末帧（currentTime 不归零）不循环，元素留在播放层；移开才回首帧海报', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    const playing = hoverPreviewVideo()!;
+    playing.currentTime = 5.2;
+    await act(async () => { playing.dispatchEvent(new Event('ended')); });
+    // 定格末帧：元素不移出、currentTime 不归零、不循环、不重播
+    expect(hoverPreviewVideo()).toBe(playing);
+    expect(playing.currentTime).toBe(5.2);
+    expect(playing.loop).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 移开后才回到首帧海报
+    await hoverOutOf(contentCard());
+    expect(hoverPreviewVideo()).toBeNull();
+    expect(mountNode.querySelector('canvas')).toBeTruthy();
+  });
+
+  it('play() 被自动播放策略拒绝：静默降级静音重试开播，无任何提示', async () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play')
+      .mockRejectedValueOnce(new Error('NotAllowedError: play() failed'))
+      .mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    await renderHoverableVideo();
+    await hoverInto(contentCard());
+    // 同步观测点：开播瞬间有声（拒播 promise 尚未兑现，microtask 未排空）
+    let playing: HTMLVideoElement | null = null;
+    act(() => {
+      vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS);
+      playing = hoverPreviewVideo();
+      expect(playSpy).toHaveBeenCalledTimes(1);
+      expect(playing!.muted).toBe(false);
+    });
+    // 拒播 promise 兑现后降级静音重试
+    await act(async () => {});
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(playing!.muted).toBe(true);
+    // 无任何提示：不出错误占位、不出告警
+    expect(mountNode.querySelector('[data-testid="video-error-box"]')).toBeNull();
+    expect(mountNode.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('点选过渡控件布防（故事16）：播放中点选 80ms 后原生控件开在同一元素上，声画不中断', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    // 点击选中（rerender selected=true 模拟 ReactFlow 选中流转）：收养悬停会话
+    await rerenderNode('video', {
+      selected: true,
+      data: { src: 'https://x/main.mp4', toolMode: 'select' },
+    });
+    // 同一元素续播：不暂停、不重启、不重建树内控件 video
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.isConnected).toBe(true);
+    expect(decoder.muted).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(mountNode.querySelector('video[controls]')).toBeNull();
+    // 80ms 布防语义：控件出现在悬停会话元素上（不是新建树内元素）
+    await act(async () => { vi.advanceTimersByTime(79); });
+    expect(decoder.controls).toBe(false);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(decoder.controls).toBe(true);
+    expect(mountNode.querySelector('video[controls]')).toBe(decoder);
+    // 收养控件合同（IKJ7OS 评审收口）：元素自创建即带 nodrag/nopan——在控件上拖进度/音量
+    // 不连动节点拖动（React Flow 沿祖先链找 .nodrag 放行）；controlslist 同树内口径禁下载/倍速
+    expect(decoder.classList.contains('nodrag')).toBe(true);
+    expect(decoder.classList.contains('nopan')).toBe(true);
+    expect(decoder.getAttribute('controlslist')).toBe('nodownload noplaybackrate noremoteplayback nopictureinpicture');
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).not.toHaveBeenCalled();
+  });
+
+  it('过渡定格保持挂载（决策8）：收养会话播完 ended 元素停末帧不重建；再次进入重播仍同元素从头', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 播到本轮结束：定格末帧——元素保持挂载、currentTime 不归零、无第二次 play
+    decoder.currentTime = 7.7;
+    await act(async () => { decoder.dispatchEvent(new Event('ended')); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.isConnected).toBe(true);
+    expect(decoder.currentTime).toBe(7.7);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 布防不因 ended 翻转：等过布防窗口也没有新树内 video 重建（旧元素不被卸载回首帧）
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(mountNode.querySelectorAll('video')).toHaveLength(1);
+    expect(mountNode.querySelector('video')).toBe(decoder);
+    // 再次进入：定格帧保持（keepFrame 收尾）到重播清层，重播轮就地再收养从头播
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+    expect(decoder.controls).toBe(true);
+  });
+
+  it('过渡后手动暂停再移开：暂停帧保持挂载（keepFrame 占屏），不触发树内布防重建', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 用户点原生控件暂停（收养会话补挂的让位监听）→ 手动让位
+    decoder.currentTime = 3.3;
+    await act(async () => { decoder.dispatchEvent(new Event('pause')); });
+    // 移开：不再开播、暂停帧保持挂载（元素留播放层、不归零）
+    await hoverOutOf(contentCard());
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(3.3);
+    expect(decoder.isConnected).toBe(true);
+    // 占屏阻断布防：等过布防窗口也没有树内重建
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(mountNode.querySelectorAll('video')).toHaveLength(1);
+    // 再次进入：重播语义从头（同元素、控件保持）
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(hoverPreviewVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+  });
+
+  it('收养会话拖进度（故事14/15 收养路）：seeked 即接管从拖动点续播、让位解除，不归零不打回开头', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(80); });
+    expect(decoder.controls).toBe(true);
+    // 先手动暂停让位，再拖进度：seeked 解除让位、从拖动点续播（jsdom 恒 paused，play 必调）
+    await act(async () => { decoder.dispatchEvent(new Event('pause')); });
+    decoder.currentTime = 4.4;
+    await act(async () => { decoder.dispatchEvent(new Event('seeked')); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(decoder.currentTime).toBe(4.4);
+    expect(pauseSpy).not.toHaveBeenCalled();
+  });
+
+  it('触屏 pointerenter 不起播：悬停起播限定鼠标指针，触屏维持点选+控件现状（故事29）', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    // 触屏长按/点按进入内容区：不布防不开播
+    await hoverInto(contentCard(), 'touch');
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    // 鼠标进入照常起播（对照）：同一离屏解码元素移入播放层
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(hoverPreviewVideo()).toBe(decoder);
+  });
+
+  it('会话归位离屏宿主即复位悬停期状态：muted 回 true（离屏解码器默认静音，决策9）', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    expect(decoder.muted).toBe(true);
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    // 悬停期有声开播
+    expect(decoder.muted).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 移开收尾归位：muted 复位回默认静音
+    await hoverOutOf(contentCard());
+    expect(offscreenHostVideo()).toBe(decoder);
+    expect(decoder.currentTime).toBe(0);
+    expect(decoder.muted).toBe(true);
+  });
+
+  it('进入后 100ms 内点选（布防未满即选中）：不起播，布防计时取消', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 50); });
+    await rerenderNode('video', {
+      selected: true,
+      data: { src: 'https://x/main.mp4', toolMode: 'select' },
+    });
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+  });
+
+  it('点选过渡后取消选中：回到未选中规则立即停播回首帧海报', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await rerenderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    await rerenderNode('video', { selected: false, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+    expect(mountNode.querySelector('canvas')).toBeTruthy();
+  });
+
+  it('播放中注入会话锁定（splitEditing）：立即停播回首帧海报，锁定层照常渲染', async () => {
+    const { pauseSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(hoverPreviewVideo()).toBe(decoder);
+    await rerenderNode('video', {
+      selected: false,
+      data: { src: 'https://x/main.mp4', toolMode: 'select', splitEditing: true },
+    });
+    expect(hoverPreviewVideo()).toBeNull();
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(decoder.currentTime).toBe(0);
+    expect(mountNode.querySelector('[data-testid="split-lock-layer"]')).toBeTruthy();
+  });
+
+  it('加载失败兜底卡不播：error 后内容区为错误占位，悬停无反应', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const decoder = offscreenHostVideo();
+    Object.defineProperty(decoder, 'error', { value: { code: 4 }, configurable: true });
+    await act(async () => { decoder.dispatchEvent(new Event('error')); });
+    expect(mountNode.querySelector('[data-testid="video-error-box"]')).toBeTruthy();
+    expect(hoverPreviewLayer()).toBeNull();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(hoverExclusionCases)('排除态不播：%s', async (_name, extra) => {
+    const { playSpy } = stubHoverMedia();
+    await renderNode('video', {
+      selected: false,
+      ...extra,
+      data: { src: 'https://x/main.mp4', toolMode: 'select', ...extra.data },
+    });
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(hoverPreviewVideo()).toBeNull();
+  });
+
+  it('选中卡悬停同样自动开播（IKJ7S1 翻转起播门）：已布防卡在树内控件视频上就地起播', async () => {
+    const { playSpy } = stubHoverMedia();
+    // selected 默认 true：80ms 布防后树内控件 video 挂载，悬停满 100ms 在其上自动开播
+    await renderNode('video', { data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(200); });
+    const armed = mountNode.querySelector('video')!;
+    expect(armed.hasAttribute('controls')).toBe(true);
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 1); });
+    expect(playSpy).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(mountNode.querySelector('video')).toBe(armed);
+    expect(armed.isConnected).toBe(true);
+  });
+
+  it('图片卡、音频卡行为完全不变：悬停不播、无悬停播放层', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderNode('image', { selected: false, data: { src: 'https://x/a.png', toolMode: 'select' } });
+    expect(hoverPreviewLayer()).toBeNull();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    await renderNode('audio', { selected: false, data: { src: 'https://x/a.mp3', toolMode: 'select' } });
+    expect(hoverPreviewLayer()).toBeNull();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  it('播放层合同：pointer-events:none、不打 transform、空层零视觉、无控件、aria-hidden（!832 回归面）', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderHoverableVideo();
+    const layer = hoverPreviewLayer()!;
+    expect(layer.getAttribute('aria-hidden')).toBe('true');
+    expect(layer.classList.contains(styles.mediaHoverPreviewLayer)).toBe(true);
+    expect(layer.childElementCount).toBe(0);
+    // 层垫在海报画布之上（fragment 顺序：canvas → 播放层）
+    expect(layer.previousElementSibling?.tagName).toBe('CANVAS');
+    // CSS 合同：指针穿透 + 不打会合成层化的 transform（fs 直读源文件，绕过 CSS modules 桩；
+    // 按测试文件定位，不依赖 cwd=web/ 的调用姿势）
+    const css = readFileSync(fileURLToPath(new NodeURL('./index.module.css', import.meta.url)), 'utf8');
+    const layerRule = css.match(/\.mediaHoverPreviewLayer\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(layerRule).toContain('pointer-events: none');
+    expect(layerRule).not.toContain('transform');
+    const videoRule = css.match(/\.mediaHoverPreviewLayer video\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(videoRule).toContain('object-fit: contain');
+    expect(videoRule).not.toContain('transform');
+    // 开播后的元素依旧无控件、纯展示
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(hoverPreviewVideo()!.hasAttribute('controls')).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MediaNode 视频卡选中态悬停播放（IKJ7S1：尾播特权与手动控制让位）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** 选中成品视频卡基准渲染：真实 http src + 选择工具 + 80ms 布防完成（树内控件 video 在位） */
+  async function renderSelectedArmedVideo(extraData: Record<string, unknown> = {}, extra?: RenderExtra) {
+    await renderNode('video', {
+      selected: true,
+      ...extra,
+      data: { src: 'https://x/main.mp4', toolMode: 'select', ...extraData },
+    });
+    // 80ms 布防 + 余量（fake timers 下 waitForVideoArm 的真实 sleep 不会走）
+    await act(async () => { vi.advanceTimersByTime(200); });
+  }
+
+  function armedVideo(): HTMLVideoElement {
+    return mountNode.querySelector('video')!;
+  }
+
+  it('选中卡悬停自动开播：树内控件视频就地起播，原生控件与禁画中画/下载/倍速配置保留', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    expect(armed.hasAttribute('controls')).toBe(true);
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    // 就地开播：同一元素、不迁移进播放层（布防卡无播放层）、有声从头
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(armedVideo()).toBe(armed);
+    expect(hoverPreviewLayer()).toBeNull();
+    expect(armed.muted).toBe(false);
+    expect(armed.currentTime).toBe(0);
+    expect(armed.loop).toBe(false);
+    // 原生控件与控件配置在播放中保持：controls、禁下载/倍速列表、禁画中画
+    expect(armed.hasAttribute('controls')).toBe(true);
+    expect(armed.outerHTML).toContain('nodownload noplaybackrate');
+    expect(armed.outerHTML).toContain('disablepictureinpicture');
+  });
+
+  it('尾播特权：播放中移开不停止，继续播到本轮 ended 定格末帧（不归零、不移出）', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 播放中移开：不暂停、不重启、元素原位（树内）保留
+    await hoverOutOf(contentCard());
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(armed.isConnected).toBe(true);
+    // 播到本轮结束：定格末帧（currentTime 不归零、不循环），元素原位停住
+    armed.currentTime = 7.7;
+    await act(async () => { armed.dispatchEvent(new Event('ended')); });
+    expect(armed.isConnected).toBe(true);
+    expect(armed.currentTime).toBe(7.7);
+    expect(armed.loop).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('尾播完成后（指针在外定格）再次进入：残留会话就地收尾，满 100ms 从头重播', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    await hoverOutOf(contentCard());
+    armed.currentTime = 7.7;
+    await act(async () => { armed.dispatchEvent(new Event('ended')); });
+    // 再次进入：清掉定格残留会话并重新布防，从头播（currentTime 归零、第二次 play）
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS - 1); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(armed.currentTime).toBe(0);
+    expect(armedVideo()).toBe(armed);
+  });
+
+  it('手动暂停让位：本次悬停不自动续播；移开不尾播保持暂停帧；再次进入从头重播', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 用户点原生控件暂停（pause 事件）→ 手动让位
+    armed.currentTime = 3.3;
+    await act(async () => { armed.dispatchEvent(new Event('pause')); });
+    // 移开：不尾播（不再次开播）、不归零——保持暂停帧
+    await hoverOutOf(contentCard());
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(armed.currentTime).toBe(3.3);
+    expect(armed.isConnected).toBe(true);
+    // 再次进入：重播语义，从头播
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    expect(armed.currentTime).toBe(0);
+  });
+
+  it('手动恢复播放解除让位：暂停后点播放再移开，按播放中尾播处理（不停止不重启）', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    armed.currentTime = 2;
+    await act(async () => { armed.dispatchEvent(new Event('pause')); });
+    await act(async () => { armed.dispatchEvent(new Event('play')); });
+    await hoverOutOf(contentCard());
+    // 用户已手动接管播放：移开不停止也不重新起播（原生控件行为优先）
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(armed.currentTime).toBe(2);
+    expect(armed.isConnected).toBe(true);
+  });
+
+  it('手动拖进度从拖动点续播：暂停让位后 seeked 恢复播放；移开从拖动点尾播到结尾定格（不打回开头）', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // 手动暂停（让位）→ 拖动进度到 0.5：让位解除并从拖动点续播
+    await act(async () => { armed.dispatchEvent(new Event('pause')); });
+    armed.currentTime = 0.5;
+    await act(async () => { armed.dispatchEvent(new Event('seeked')); });
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    // 移开：从拖动点继续播到结尾（不重置 currentTime），ended 定格末帧
+    await hoverOutOf(contentCard());
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(armed.currentTime).toBe(0.5);
+    expect(playSpy).toHaveBeenCalledTimes(2);
+    await act(async () => { armed.dispatchEvent(new Event('ended')); });
+    expect(armed.isConnected).toBe(true);
+    expect(armed.currentTime).toBe(0.5);
+    expect(playSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('多选（框选/Ctrl+A）抑制：多选期间选中卡悬停不自动开播，恢复唯一选中后照常', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo({}, {
+      storeNodes: [{ id: 'a', selected: true }, { id: 'video-node', selected: true }],
+    });
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 100); });
+    expect(playSpy).not.toHaveBeenCalled();
+    // 恢复唯一选中：悬停照常自动开播
+    await rerenderNode('video', {
+      selected: true,
+      storeNodes: [{ id: 'video-node', selected: true }],
+      data: { src: 'https://x/main.mp4', toolMode: 'select' },
+    });
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('播放中进入多选：立即停播（会话排除态同口径），树内画面停在当前帧不清回开头', async () => {
+    const { playSpy, pauseSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const armed = armedVideo();
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    armed.currentTime = 2.2;
+    await rerenderNode('video', {
+      selected: true,
+      storeNodes: [{ id: 'a', selected: true }, { id: 'video-node', selected: true }],
+      data: { src: 'https://x/main.mp4', toolMode: 'select' },
+    });
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(armed.isConnected).toBe(true);
+    expect(armed.currentTime).toBe(2.2);
+    // 多选期不再自动开播
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS + 200); });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('音量调节不记忆：悬停开播尊重控件静音；元素卸载重建后 muted/volume 回默认', async () => {
+    const { playSpy } = stubHoverMedia();
+    await renderSelectedArmedVideo();
+    const first = armedVideo();
+    // 用户经原生控件静音 + 调低音量（元素存活期内有效）
+    first.muted = true;
+    first.volume = 0.3;
+    await hoverInto(contentCard());
+    await act(async () => { vi.advanceTimersByTime(HOVER_PREVIEW_DELAY_MS); });
+    // 悬停开播不覆盖用户控件状态：仍静音、音量不变
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(first.muted).toBe(true);
+    expect(first.volume).toBe(0.3);
+    // 卸载重建（重新布防的新元素）：无任何记忆，回浏览器默认
+    await renderNode('video', { selected: true, data: { src: 'https://x/main.mp4', toolMode: 'select' } });
+    await act(async () => { vi.advanceTimersByTime(200); });
+    const rebuilt = armedVideo();
+    expect(rebuilt).not.toBe(first);
+    expect(rebuilt.muted).toBe(false);
+    expect(rebuilt.volume).toBe(1);
   });
 });
