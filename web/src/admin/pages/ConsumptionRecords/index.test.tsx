@@ -126,14 +126,12 @@ describe('ConsumptionRecords 积分记录（游标分页）', () => {
     expect(api.fetchAdminConsumptionRecords.mock.calls[0]?.[0]).not.toHaveProperty('userId');
   });
 
-  it('渲染归属用户、任务与带方向的金额', async () => {
+  it('渲染归属用户、任务类别与带方向的金额', async () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('9001');
-    // 任务列显示的是**任务类型的中文名 + 模型的展示名**（不是账本自带的 title：
-    // 那条文案线上恒为空串，见 task 列的注释）
+    // 任务列只放**类别**（模型名与提示词都收在明细面板里，见下面那个 describe）
     expect(document.body.textContent).toContain('视频');
-    expect(document.body.textContent).toContain('Seedance 2.5');
     expect(document.body.textContent).toContain('-30');
   });
 
@@ -299,7 +297,7 @@ describe('ConsumptionRecords — 哨兵口径', () => {
   });
 });
 
-describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
+describe('ConsumptionRecords — 任务列与明细面板', () => {
   /** 账本侧的真形状：这些行的文案由 billing 给，任务的三个字段一个都没有。 */
   function ledgerRow(overrides: Record<string, unknown> = {}) {
     return {
@@ -321,6 +319,17 @@ describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
     return [...document.body.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
   }
 
+  /** 悬停任务格的触发器（面板是 portal 到 body 的，悬停后 `document.body` 里才出现）。 */
+  async function hoverTaskDetail() {
+    const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="任务明细"]');
+    if (!trigger) throw new Error('没有找到任务明细触发器');
+    await act(async () => {
+      // React 的 onMouseEnter 走 mouseover/mouseout 合成，直接派 mouseover 即可触发
+      trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await settle();
+  }
+
   it('列头是「任务」——原来那一列叫「说明」', async () => {
     await renderPage();
 
@@ -328,20 +337,46 @@ describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
     expect(headers()).not.toContain('说明');
   });
 
-  it('任务格由类型与模型组成，且落在**同一个单元格**里（不是各占一列）', async () => {
-    // 与预扣额那条同款：只断言「页面上有这几个字」的话，拆成两列照样全绿，
-    // 而那是被明确否掉的形态（类型与模型是同一件事的两半，中间隔着别的列就得重新对）。
+  it('格子里**只有类别**：模型名与提示词都不进表格', async () => {
+    // 这一条守的是「收起」本身。全铺出来会把表撑散，而一行挂一个按钮就是 20 个描边方块
+    // 比数据还抢眼 —— 所以模型名与提示词**必须**在收起态不可见。
     await renderPage();
 
     const cells = [...document.querySelectorAll('tbody tr td')].filter((td) =>
-      td.textContent?.includes('Seedance 2.5'),
+      td.textContent?.includes('视频'),
     );
     expect(cells).toHaveLength(1);
-    expect(cells[0]?.textContent).toContain('视频');
+    expect(cells[0]?.textContent).not.toContain('Seedance 2.5');
+    expect(document.body.textContent).not.toContain('一只猫在草地上跑');
   });
 
-  it('没有任务的行（发放 / 账本 / 查不到任务）→ 回落账本自带的 title', async () => {
-    // 回落不是兜底摆设：老后端 + 新前端时 title 是这一列**唯一**有的信息
+  it('悬停触发器 → 明细面板里能看到模型与提示词全文', async () => {
+    await renderPage();
+
+    await hoverTaskDetail();
+
+    const body = document.body.textContent ?? '';
+    expect(body).toContain('Seedance 2.5');
+    expect(body).toContain('一只猫在草地上跑');
+  });
+
+  it('提示词为空时面板里显示「—」而不是空白格子', async () => {
+    // 空白读起来像「还在加载」，而这是查询已经答完的结论
+    api.fetchAdminConsumptionRecords.mockResolvedValue({
+      items: [{ ...ITEM, prompt: null }],
+      next_page_token: '',
+    });
+    await renderPage();
+
+    await hoverTaskDetail();
+
+    expect(document.body.textContent).toContain('Seedance 2.5');
+    expect(document.body.textContent).toContain('—');
+  });
+
+  it('没有任务的行（发放 / 账本 / 查不到任务）→ 回落账本自带的 title，且**没有**明细触发器', async () => {
+    // 回落不是兜底摆设：老后端 + 新前端时 title 是这一列**唯一**有的信息。
+    // 这类行没有明细可看，挂一个空面板的图标是骗点击。
     api.fetchAdminConsumptionRecords.mockResolvedValue({
       items: [
         ledgerRow({ task_type: null, model_id: null, model_label: null, prompt: null }),
@@ -352,6 +387,7 @@ describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
     await renderPage();
 
     expect(document.body.textContent).toContain('充值到账');
+    expect(document.body.querySelector('button[aria-label="任务明细"]')).toBeNull();
   });
 
   it('后端比前端旧、**整个键都不回**时回落 title，不崩', async () => {
@@ -365,43 +401,5 @@ describe('ConsumptionRecords — 任务列与提示词弹窗', () => {
 
     expect(document.body.textContent).toContain('充值到账');
     expect(document.body.textContent).not.toContain('Unexpected Application Error');
-  });
-
-  it('提示词**不进表格**，点「提示词」在弹窗里看全文', async () => {
-    await renderPage();
-
-    // 一列几百字的提示词会把表撑散，所以列表里根本不出现它
-    expect(document.body.textContent).not.toContain('一只猫在草地上跑');
-
-    await click('提示词');
-
-    expect(document.body.textContent).toContain('一只猫在草地上跑');
-  });
-
-  it('没有提示词的行不出现「提示词」按钮（点开只会是空弹窗）', async () => {
-    api.fetchAdminConsumptionRecords.mockResolvedValue({
-      items: [{ ...ITEM, prompt: null }],
-      next_page_token: '',
-    });
-
-    await renderPage();
-
-    const labels = [...document.body.querySelectorAll('button')].map((b) =>
-      b.textContent?.trim(),
-    );
-    expect(labels).not.toContain('提示词');
-  });
-
-  it('免费工具族没有模型 → 模型那一格显示「—」，类型照常显示', async () => {
-    api.fetchAdminConsumptionRecords.mockResolvedValue({
-      items: [{ ...ITEM, task_type: 'image_cutout', model_id: null, model_label: null }],
-      next_page_token: '',
-    });
-
-    await renderPage();
-
-    // 未收录的类型原样显示 key（不好看，但比空白能排查）
-    expect(document.body.textContent).toContain('图片抠图');
-    expect(document.body.textContent).toContain('—');
   });
 });
